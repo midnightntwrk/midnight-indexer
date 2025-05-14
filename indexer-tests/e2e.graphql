@@ -1,0 +1,308 @@
+query BlockQuery($block_offset: BlockOffset) {
+    block(offset: $block_offset) {
+        hash
+        height
+        protocolVersion
+        timestamp
+        author
+        parent {
+            hash
+            height
+        }
+        transactions {
+            hash
+            protocolVersion
+            applyStage
+            identifiers
+            block {
+                hash
+            }
+            contractActions {
+                __typename
+                ... on ContractDeploy {
+                    address
+                    transaction {
+                        hash
+                        identifiers
+                        block {
+                            hash
+                            height
+                        }
+                    }
+                }
+                __typename
+                ... on ContractCall {
+                    address
+                    transaction {
+                        hash
+                        identifiers
+                        block {
+                            hash
+                            height
+                        }
+                    }
+                    deploy {
+                        address
+                    }
+                }
+                __typename
+                ... on ContractUpdate {
+                    address
+                    transaction {
+                        hash
+                        identifiers
+                        block {
+                            hash
+                            height
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+query TransactionsQuery($transaction_offset: TransactionOffset!) {
+    transactions(offset: $transaction_offset) {
+        hash
+        protocolVersion
+        applyStage
+        identifiers
+        block {
+            hash
+        }
+        contractActions {
+            __typename
+            ... on ContractDeploy {
+                address
+                transaction {
+                    hash
+                    identifiers
+                    block {
+                        hash
+                        height
+                    }
+                }
+            }
+            __typename
+            ... on ContractCall {
+                address
+                transaction {
+                    hash
+                    identifiers
+                    block {
+                        hash
+                        height
+                    }
+                }
+                deploy {
+                    address
+                }
+            }
+            __typename
+            ... on ContractUpdate {
+                address
+                transaction {
+                    hash
+                    identifiers
+                    block {
+                        hash
+                        height
+                    }
+                }
+            }
+        }
+    }
+}
+
+query ContractActionQuery($address: HexEncoded!, $contract_action_offset: ContractActionOffset) {
+    contractAction(address: $address, offset: $contract_action_offset) {
+        __typename
+        ... on ContractDeploy {
+            address
+            transaction {
+                hash
+                identifiers
+                block {
+                    hash
+                    height
+                }
+            }
+        }
+        __typename
+        ... on ContractCall {
+            address
+            transaction {
+                hash
+                identifiers
+                block {
+                    hash
+                    height
+                }
+            }
+            deploy {
+                address
+            }
+        }
+        __typename
+        ... on ContractUpdate {
+            address
+            transaction {
+                hash
+                identifiers
+                block {
+                    hash
+                    height
+                }
+            }
+        }
+    }
+}
+
+mutation ConnectMutation($viewingKey: ViewingKey!) {
+    connect(viewingKey: $viewingKey)
+}
+
+mutation DisconnectMutation($sessionId: HexEncoded!) {
+    disconnect(sessionId: $sessionId)
+}
+
+subscription BlockSubscription($block_offset: BlockOffset) {
+    blocks(offset: $block_offset) {
+        hash
+        height
+        protocolVersion
+        timestamp
+        author
+        parent {
+            hash
+            height
+        }
+        transactions {
+            hash
+            protocolVersion
+            applyStage
+            identifiers
+            block {
+                hash
+            }
+            contractActions {
+                __typename
+                ... on ContractDeploy {
+                    address
+                    transaction {
+                        hash
+                        identifiers
+                        block {
+                            hash
+                            height
+                        }
+                    }
+                }
+                __typename
+                ... on ContractCall {
+                    address
+                    transaction {
+                        hash
+                        identifiers
+                        block {
+                            hash
+                            height
+                        }
+                    }
+                    deploy {
+                        address
+                    }
+                }
+                __typename
+                ... on ContractUpdate {
+                    address
+                    transaction {
+                        hash
+                        identifiers
+                        block {
+                            hash
+                            height
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+subscription ContractActionSubscription(
+    $address: HexEncoded!, 
+    $contract_action_subscription_offset: BlockOffset
+) {
+    contractActions(address: $address, offset: $contract_action_subscription_offset) {
+        __typename
+        ... on ContractDeploy {
+            address
+            transaction {
+                hash
+                identifiers
+                block {
+                    hash
+                    height
+                }
+            }
+        }
+        __typename
+        ... on ContractCall {
+            address
+            transaction {
+                hash
+                identifiers
+                block {
+                    hash
+                    height
+                }
+            }
+            deploy {
+                address
+            }
+        }
+        __typename
+        ... on ContractUpdate {
+            address
+            transaction {
+                hash
+                identifiers
+                block {
+                    hash
+                    height
+                }
+            }
+        }
+    }
+}
+
+subscription WalletSubscription(
+    $sessionId: HexEncoded!
+) {
+    wallet(sessionId: $sessionId) {
+        __typename
+        ... on ViewingUpdate {
+            index
+            update {
+                __typename
+                ... on MerkleTreeCollapsedUpdate {
+                    start
+                    end
+                }
+                __typename
+                ... on RelevantTransaction {
+                    start
+                    end
+                }
+            }
+        }
+        __typename
+        ... on ProgressUpdate {
+            highestIndex
+            highestRelevantIndex
+            highestRelevantWalletIndex
+        }
+    }
+}

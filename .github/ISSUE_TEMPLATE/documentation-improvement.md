@@ -2,7 +2,7 @@
 name: Documentation improvement
 about: Report a problem with the documentation
 title: ""
-labels: midnight-indexer-new, public, documentation
+labels: midnight-indexer, public, documentation
 assignees: ""
 ---
 

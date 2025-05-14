@@ -2,7 +2,7 @@
 name: Bug report
 about: Submit a bug report
 title: ""
-labels: midnight-indexer-new, public
+labels: midnight-indexer, public
 assignees: ""
 ---
 

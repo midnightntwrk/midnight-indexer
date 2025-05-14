@@ -1,0 +1,66 @@
+// This file is part of midnight-indexer.
+// Copyright (C) 2025 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use crate::domain::Api;
+use anyhow::Context as AnyhowContext;
+use futures::{TryStreamExt, future::ok};
+use indexer_common::{
+    domain::{BlockIndexed, Subscriber},
+    error::StdErrorExt,
+};
+use log::error;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use tokio::{select, task};
+
+pub async fn run(api: impl Api, subscriber: impl Subscriber) -> anyhow::Result<()> {
+    let caught_up = Arc::new(AtomicBool::new(false));
+
+    let block_indexed_task = task::spawn({
+        let subscriber = subscriber.clone();
+        let caught_up = caught_up.clone();
+
+        async move {
+            let block_indexed_stream =
+                subscriber
+                    .subscribe::<BlockIndexed>()
+                    .await
+                    .inspect_err(|error| {
+                        error!(
+                            error:% = error.as_chain();
+                            "cannot subscribe to BlockIndexed events"
+                        )
+                    })?;
+
+            block_indexed_stream
+                .try_for_each(|block_indexed| {
+                    caught_up.store(block_indexed.caught_up, Ordering::Release);
+                    ok(())
+                })
+                .await
+                .context("cannot get next BlockIndexed event")?;
+
+            Ok::<(), anyhow::Error>(())
+        }
+    });
+
+    let serve_api_task =
+        { task::spawn(async move { api.serve(caught_up).await.context("serving API") }) };
+
+    select! {
+        result = block_indexed_task => result,
+        result = serve_api_task => result,
+    }?
+}

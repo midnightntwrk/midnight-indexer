@@ -1,7 +1,73 @@
-# Midnight Template Repository
+# Midnight Indexer
 
-This GitHub repository should be used as a template when creating a new Midnight GitHub repository.
-The template is configured with default repository settings and a set of default files that are expected to exist in all Midnight GitHub repositories.
+The Midnight Indexer (midnight-indexer) is a set of components designed to optimize the flow of blockchain data from a Midnight node to end-user applications. It retrieves the history of blocks, processes them, stores indexed data efficiently, and provides a GraphQL API for queries and subscriptions. This Rust-based implementation is the next-generation iteration of the previous Scala-based indexer, offering improved performance, modularity, and ease of deployment.
+```
+                                ┌─────────────────┐
+                                │                 │
+                                │                 │
+                                │      Node       │
+                                │                 │
+                                │                 │
+                                └─────────────────┘
+                                         │
+┌────────────────────────────────────────┼────────────────────────────────────────┐
+│                                        │                                        │
+│                                        │ fetch                                  │
+│                                        │ blocks                                 │
+│                                        ▼                                        │
+│                               ┌─────────────────┐                               │
+│                               │                 │                               │
+│                               │                 │                               │
+│                               │      Chain      │                               │
+│             ┌─────────────────│     Indexer     │                               │
+│             │                 │                 │                               │
+│             │                 │                 │                               │
+│             │                 └─────────────────┘                               │
+│             │                          │                                        │
+│             │                          │ save blocks                            │
+│             │                          │ and transactions                       │
+│             │    save relevant         ▼                                        │
+│             │     transactions   .───────────.                                  │
+│      notify │        ┌─────────▶(     DB      )───────────────────┐             │
+│ transaction │        │           `───────────'                    │             │
+│     indexed │        │                                            │ read data   │
+│             ▼        │                                            ▼             │
+│    ┌─────────────────┐                                   ┌─────────────────┐    │
+│    │                 │                                   │                 │    │
+│    │                 │                                   │                 │    │
+│    │     Wallet      │                                   │     Indexer     │    │
+│    │     Indexer     │◀──────────────────────────────────│       API       │    │
+│    │                 │  notify                           │                 │    │
+│    │                 │  wallet                           │                 │    │
+│    └─────────────────┘  connected                        └─────────────────┘    │
+│                                                                   ▲             │
+│                                                           connect │             │
+│                                                                   │             │
+└───────────────────────────────────────────────────────────────────┼─────────────┘
+                                                                    │
+                                 ┌─────────────────┐                │
+                                 │                 │                │
+                                 │                 │                │
+                                 │     Wallet      │────────────────┘
+                                 │                 │
+                                 │                 │
+                                 └─────────────────┘
+```
+
+### Components
+
+- [Chain Indexer](chain-indexer/README.md): Connects to the Midnight node, fetches blocks and transactions, and stores indexed data.
+- [Wallet Indexer](wallet-indexer/README.md): Associates connected wallets with relevant transactions, enabling personalized queries and subscriptions.
+- [Indexer API](indexer-api/README.md): Exposes a GraphQL API for queries, mutations, and subscriptions.
+
+### Features
+
+- Fetch and query blocks, transactions and contract actions at specific block hashes, heights, transaction identifiers or contract addresses.
+- Real-time subscriptions to new blocks, contract actions and wallet-related events through WebSocket connections.
+- Secure wallet sessions enabling clients to track only their relevant transactions.
+- Configurable for both cloud (microservices) and standalone (single binary) deployments.
+- Supports both PostgreSQL (cloud) and SQLite (standalone) storage backends.
+- Extensively tested with integration tests and end-to-end scenarios.
 
 ### LICENSE
 
@@ -33,9 +99,7 @@ Provides a template for a pull request.
 
 ### CLA Assistant
 
-The Midnight Foundation appreciates contributions, and like many other open source projects asks contributors to sign a contributor
-License Agreement before accepting contributions. We use CLA assistant (https://github.com/cla-assistant/cla-assistant) to streamline the CLA
-signing process, enabling contributors to sign our CLAs directly within a GitHub pull request.
+The Midnight Foundation appreciates contributions, and like many other open source projects asks contributors to sign a contributor License Agreement before accepting contributions. We use CLA assistant (https://github.com/cla-assistant/cla-assistant) to streamline the CLA signing process, enabling contributors to sign our CLAs directly within a GitHub pull request.
 
 ### Dependabot
 
@@ -43,30 +107,8 @@ The Midnight Foundation uses GitHub Dependabot feature to keep our projects depe
 
 ### Checkmarx
 
-The Midnight Foundation uses Checkmarx for application security (AppSec) to identify and fix security vulnerabilities.
-All repositories are scanned with Checkmarx's suite of tools including: Static Application Security Testing (SAST), Infrastructure as Code (IaC), Software Composition Analysis (SCA), API Security, Container Security and Supply Chain Scans (SCS).
+The Midnight Foundation uses Checkmarx for application security (AppSec) to identify and fix security vulnerabilities. All repositories are scanned with Checkmarx's suite of tools including: Static Application Security Testing (SAST), Infrastructure as Code (IaC), Software Composition Analysis (SCA), API Security, Container Security and Supply Chain Scans (SCS).
 
 ### Unito
 
 Facilitates two-way data synchronization, automated workflows and streamline processes between: Jira, GitHub issues and Github project Kanban board. 
-
-# TODO - New Repo Owner
-
-### Software Package Data Exchange (SPDX)
-Include the following Software Package Data Exchange (SPDX) short-form identifier in a comment at the top headers of each source code file.
-
-
- <I>// This file is part of <B>REPLACE WITH REPO-NAME</B>.<BR>
- // Copyright (C) 2025 Midnight Foundation<BR>
- // SPDX-License-Identifier: Apache-2.0<BR>
- // Licensed under the Apache License, Version 2.0 (the "License");<BR>
- // You may not use this file except in compliance with the License.<BR>
- // You may obtain a copy of the License at<BR>
- //<BR>
- //	http://www.apache.org/licenses/LICENSE-2.0<BR>
- //<BR>
- // Unless required by applicable law or agreed to in writing, software<BR>
- // distributed under the License is distributed on an "AS IS" BASIS,<BR>
- // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.<BR>
- // See the License for the specific language governing permissions and<BR>
- // limitations under the License.</I>

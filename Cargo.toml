@@ -1,0 +1,78 @@
+[workspace]
+resolver = "2"
+members = [
+    "indexer-common",
+    "chain-indexer",
+    "wallet-indexer",
+    "indexer-api",
+    "indexer-standalone",
+    "indexer-tests",
+]
+
+[workspace.package]
+version       = "2.2.0"
+edition       = "2024"
+license       = "Apache-2.0"
+readme        = "README.md"
+homepage      = "https://github.com/midnightntwrk/midnight-indexer"
+repository    = "https://github.com/midnightntwrk/midnight-indexer"
+documentation = "https://github.com/midnightntwrk/midnight-indexer"
+publish       = false
+
+[workspace.dependencies]
+anyhow                      = { version = "1.0" }
+assert_matches              = { version = "1.5" }
+async-graphql               = { version = "7.0" }
+async-graphql-axum          = { version = "7.0" }
+async-nats                  = { version = "0.40" }
+async-stream                = { version = "0.3" }
+axum                        = { version = "0.8" }
+bech32                      = { version = "0.11" }
+byte-unit                   = { version = "5.1" }
+byte-unit-serde             = { version = "0.1" }
+chacha20poly1305            = { version = "0.10" }
+clap                        = { version = "4.5" }
+const-hex                   = { version = "1.14" }
+derive_more                 = { version = "2.0" }
+fake                        = { version = "2.10" }
+fastrace                    = { version = "0.7" }
+fastrace-axum               = { version = "0.1" }
+fastrace-opentelemetry      = { version = "0.10" }
+figment                     = { version = "0.10" }
+fs_extra                    = { version = "1.3" }
+futures                     = { version = "0.3" }
+graphql_client              = { version = "0.14" }
+humantime-serde             = { version = "1.1" }
+indoc                       = { version = "2.0" }
+itertools                   = { version = "0.14" }
+log                         = { version = "0.4" }
+logforth                    = { version = "0.24" }
+metrics                     = { version = "0.24" }
+metrics-exporter-prometheus = { version = "0.17", default-features = false }
+midnight-ledger             = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-4.0.0" }
+opentelemetry               = { version = "0.29" }
+opentelemetry_sdk           = { version = "0.29" }
+opentelemetry-otlp          = { version = "0.29" }
+parity-scale-codec          = { version = "3.7" }
+parking_lot                 = { version = "0.12" }
+paste                       = { version = "1.0" }
+reqwest                     = { version = "0.12" }
+secrecy                     = { version = "0.10" }
+serde                       = { version = "1.0" }
+serde_json                  = { version = "1.0" }
+serde_with                  = { version = "3.12" }
+sha2                        = { version = "0.10" }
+sqlx                        = { version = "0.8" }
+subxt                       = { version = "0.41" }
+tempfile                    = { version = "3.19" }
+testcontainers              = { version = "0.23" }
+testcontainers-modules      = { version = "0.11" }
+thiserror                   = { version = "2.0" }
+tokio                       = { version = "1" }
+tokio-stream                = { version = "0.1" }
+tokio-tungstenite           = { version = "0.26" }
+tokio-util                  = { version = "0.7" }
+tower                       = { version = "0.5" }
+tower-http                  = { version = "0.6" }
+trait-variant               = { version = "0.1" }
+uuid                        = { version = "1.16" }

@@ -39,7 +39,7 @@ Ensure the title is a clear summary of the requirement and provides enough conte
 * **License:** All contributions must be compatible with the project's license. Where possible all files should have this license header:
 
 ```
-// This file is part of <REPLACE WITH REPOSITORY NAME>.
+// This file is part of midnight-indexer.
 // Copyright (C) 2025 Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");

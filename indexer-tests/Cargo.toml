@@ -1,0 +1,53 @@
+[package]
+name          = "indexer-tests"
+version       = "0.1.0"
+description   = "Tests for the Midnight Indexer"
+edition       = { workspace = true }
+license       = { workspace = true }
+readme        = { workspace = true }
+homepage      = { workspace = true }
+repository    = { workspace = true }
+documentation = { workspace = true }
+publish       = { workspace = true }
+
+[dependencies]
+anyhow            = { workspace = true }
+assert_matches    = { workspace = true }
+chacha20poly1305  = { workspace = true }
+chain-indexer     = { path = "../chain-indexer" }
+const-hex         = { workspace = true }
+derive_more       = { workspace = true, features = [ "display" ] }
+fake              = { workspace = true }
+futures           = { workspace = true }
+graphql_client    = { workspace = true, features = [ "reqwest" ] }
+indexer-api       = { path = "../indexer-api" }
+indexer-common    = { path = "../indexer-common" }
+itertools         = { workspace = true }
+midnight-ledger   = { workspace = true, features = [ "fake", "proving", "transaction-construction" ] }
+reqwest           = { workspace = true, features = [ "json" ] }
+serde             = { workspace = true, features = [ "derive" ] }
+serde_json        = { workspace = true }
+subxt             = { workspace = true }
+tokio             = { workspace = true, features = [ "process", "rt-multi-thread" ] }
+tokio-tungstenite = { workspace = true, features = [ "rustls-tls-native-roots" ] }
+
+[dev-dependencies]
+bech32                 = { workspace = true }
+const-hex              = { workspace = true }
+fake                   = { workspace = true }
+fs_extra               = { workspace = true }
+sqlx                   = { workspace = true, features = [ "postgres" ] }
+tempfile               = { workspace = true }
+testcontainers         = { workspace = true }
+testcontainers-modules = { workspace = true, features = [ "postgres" ] }
+
+[features]
+cloud = [
+    "chain-indexer/cloud",
+    "indexer-api/cloud",
+    "testcontainers-modules/postgres",
+]
+standalone = [
+    "chain-indexer/standalone",
+    "indexer-api/standalone",
+]

@@ -1,0 +1,35 @@
+run_migrations: true
+
+infra:
+  storage:
+    host: "localhost"
+    port: 5432
+    dbname: "indexer"
+    user: "indexer"
+    sslmode: "prefer"
+
+  zswap_state_storage:
+    url: "localhost:4222"
+    username: "indexer"
+
+  pub_sub:
+    url: "localhost:4222"
+    username: "indexer"
+
+  api:
+    address: "0.0.0.0"
+    port: 8088
+    request_body_limit: "1MiB"
+    max_complexity: 200
+    max_depth: 15
+    network_id: "Undeployed"
+
+telemetry:
+  tracing:
+    enabled: false
+    service_name: "indexer-api"
+    otlp_exporter_endpoint: "http://localhost:4317"
+  metrics:
+    enabled: false
+    address: "0.0.0.0"
+    port: 9000

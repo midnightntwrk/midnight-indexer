@@ -1,0 +1,121 @@
+// This file is part of midnight-indexer.
+// Copyright (C) 2025 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#[cfg(feature = "cloud")]
+#[tokio::main]
+async fn main() {
+    use indexer_common::telemetry;
+    use log::error;
+    use std::panic;
+
+    // Initialize logging.
+    telemetry::init_logging();
+
+    // Replace the default panic hook with one that uses structured logging at ERROR level.
+    panic::set_hook(Box::new(|panic| error!(panic:%; "process panicked")));
+
+    // Run and log any error.
+    if let Err(error) = run().await {
+        let backtrace = error.backtrace();
+        let error = format!("{error:#}");
+        error!(error, backtrace:%; "process exited with ERROR")
+    }
+}
+
+#[cfg(feature = "cloud")]
+async fn run() -> anyhow::Result<()> {
+    use anyhow::Context;
+    use chain_indexer::{
+        application,
+        config::Config,
+        infra::{self, node::SubxtNode},
+    };
+    use indexer_common::{
+        config::ConfigExt,
+        infra::{migrations, pool, pub_sub, zswap_state_storage},
+        telemetry,
+    };
+    use log::{error, info};
+
+    // Load configuration.
+    let Config {
+        run_migrations,
+        application_config,
+        infra_config,
+        telemetry_config:
+            telemetry::Config {
+                tracing_config,
+                metrics_config,
+            },
+    } = Config::load().context("load configuration")?;
+
+    // Initialize tracing and metrics.
+    telemetry::init_tracing(tracing_config);
+    telemetry::init_metrics(metrics_config);
+
+    info!(
+        run_migrations,
+        application_config:?,
+        infra_config:?;
+        "starting"
+    );
+
+    let infra::Config {
+        node_config,
+        zswap_state_storage_config,
+        storage_config,
+        pub_sub_config,
+    } = infra_config;
+
+    let node = SubxtNode::new(node_config)
+        .await
+        .context("create SubxtNode")?;
+
+    let pool = pool::postgres::PostgresPool::new(storage_config)
+        .await
+        .context("create DB pool for Postgres")?;
+    if run_migrations {
+        migrations::postgres::run(&pool)
+            .await
+            .context("run Postgres migrations")?;
+    }
+    let storage = infra::storage::postgres::PostgresStorage::new(pool);
+
+    let zswap_state_storage =
+        zswap_state_storage::nats::NatsZswapStateStorage::new(zswap_state_storage_config)
+            .await
+            .context("create NatsZswapStateStorage")?;
+
+    let publisher = pub_sub::nats::publisher::NatsPublisher::new(pub_sub_config)
+        .await
+        .context("create NatsPublisher")?;
+
+    application::run(
+        application_config,
+        node,
+        storage,
+        zswap_state_storage,
+        publisher,
+    )
+    .await
+    .context("run application")?;
+
+    error!("chain-indexer terminated");
+
+    Ok(())
+}
+
+#[cfg(not(feature = "cloud"))]
+fn main() {
+    unimplemented!()
+}

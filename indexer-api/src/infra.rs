@@ -1,0 +1,38 @@
+// This file is part of midnight-indexer.
+// Copyright (C) 2025 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+pub mod api;
+pub mod storage;
+
+#[cfg(feature = "cloud")]
+use indexer_common::infra::pool;
+#[cfg(feature = "cloud")]
+use indexer_common::infra::{pub_sub, zswap_state_storage};
+
+#[cfg(feature = "cloud")]
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct Config {
+    pub secret: secrecy::SecretString,
+
+    #[serde(rename = "api")]
+    pub api_config: api::Config,
+
+    #[serde(rename = "storage")]
+    pub storage_config: pool::postgres::Config,
+
+    #[serde(rename = "zswap_state_storage")]
+    pub zswap_state_storage_config: zswap_state_storage::nats::Config,
+
+    #[serde(rename = "pub_sub")]
+    pub pub_sub_config: pub_sub::nats::Config,
+}
