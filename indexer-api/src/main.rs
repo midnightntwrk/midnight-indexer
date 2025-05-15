@@ -91,7 +91,12 @@ async fn run() -> anyhow::Result<()> {
 
     let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config).await?;
 
-    let api = AxumApi::new(api_config, storage, zswap_state_storage, subscriber.clone());
+    let api = AxumApi::new(
+        api_config,
+        storage.clone(),
+        zswap_state_storage,
+        subscriber.clone(),
+    );
 
     application::run(api, subscriber)
         .await

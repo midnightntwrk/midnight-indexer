@@ -57,6 +57,13 @@ where
         identifier: &Identifier,
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
+    /// Get a stream of all transactions starting at the given id.
+    fn get_transactions(
+        &self,
+        id: u64,
+        batch_size: NonZeroU32,
+    ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send;
+
     /// Get the contract deploy for the given address.
     async fn get_contract_deploy_by_address(
         &self,
@@ -200,6 +207,15 @@ impl Storage for NoopStorage {
         identifier: &Identifier,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
         unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    fn get_transactions(
+        &self,
+        id: u64,
+        batch_size: NonZeroU32,
+    ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send {
+        stream::empty()
     }
 
     #[cfg_attr(coverage, coverage(off))]

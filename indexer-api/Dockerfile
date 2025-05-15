@@ -9,6 +9,8 @@ WORKDIR /build
 
 RUN git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
 
+RUN apt-get update && apt-get install -y protobuf-compiler
+
 COPY ./Cargo.toml ./Cargo.lock ./rust-toolchain.toml ./
 COPY ./.cargo/ ./.cargo/
 COPY ./indexer-common/Cargo.toml ./indexer-common/

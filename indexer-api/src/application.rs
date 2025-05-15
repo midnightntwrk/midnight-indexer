@@ -57,7 +57,7 @@ pub async fn run(api: impl Api, subscriber: impl Subscriber) -> anyhow::Result<(
     });
 
     let serve_api_task =
-        { task::spawn(async move { api.serve(caught_up).await.context("serving API") }) };
+        task::spawn(async move { api.serve(caught_up).await.context("serving API") });
 
     select! {
         result = block_indexed_task => result,

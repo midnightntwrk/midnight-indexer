@@ -25,12 +25,14 @@ indexer-api       = { path = "../indexer-api" }
 indexer-common    = { path = "../indexer-common" }
 itertools         = { workspace = true }
 midnight-ledger   = { workspace = true, features = [ "fake", "proving", "transaction-construction" ] }
+prost             = { workspace = true }
 reqwest           = { workspace = true, features = [ "json", "rustls-tls" ] }
 serde             = { workspace = true, features = [ "derive" ] }
 serde_json        = { workspace = true }
 subxt             = { workspace = true }
 tokio             = { workspace = true, features = [ "process", "rt-multi-thread" ] }
 tokio-tungstenite = { workspace = true, features = [ "rustls-tls-webpki-roots" ] }
+tonic             = { workspace = true }
 
 [dev-dependencies]
 const-hex              = { workspace = true }
@@ -40,6 +42,11 @@ sqlx                   = { workspace = true, features = [ "postgres" ] }
 tempfile               = { workspace = true }
 testcontainers         = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }
+
+[build-dependencies]
+anyhow      = { workspace = true }
+tonic-build = { workspace = true }
+walkdir     = { workspace = true }
 
 [features]
 cloud = [

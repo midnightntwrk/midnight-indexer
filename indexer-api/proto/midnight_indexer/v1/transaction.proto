@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package midnight_indexer.v1;
+
+service TransactionService {
+  rpc Transactions(TransactionsRequest) returns (stream TransactionsResponse);
+}
+
+message TransactionsRequest {
+  uint64 id = 1;
+}
+
+message TransactionsResponse {
+  uint64 id = 1;
+  bytes hash = 2;
+  uint32 protocol_version = 3;
+  uint32 apply_stage = 4;
+  bytes raw = 5;
+  uint64 start_index = 6;
+  uint64 end_index = 7;
+}

@@ -13,6 +13,8 @@
 
 pub mod v1;
 
+mod grpc;
+
 use crate::domain::{Api, Storage, ZswapStateCache};
 use anyhow::Context as _;
 use async_graphql::Context;
@@ -103,7 +105,7 @@ where
         let listener = TcpListener::bind((address, port))
             .await
             .map_err(AxumApiError::Bind)?;
-        info!(address:?, port; "listening to TCP connections");
+        info!(address:?, port; "API server started");
 
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal())
@@ -153,18 +155,20 @@ where
     let v1_app = v1::make_app(
         network_id,
         zswap_state_cache,
-        storage,
+        storage.clone(),
         zswap_state_storage,
         subscriber,
         max_complexity,
         max_depth,
     );
 
+    let grpc = grpc::routes(storage);
+
     Router::new()
         .route("/ready", get(ready))
-        .route("/health", get(health))
         .nest("/api/v1", v1_app)
         .with_state(caught_up)
+        .merge(grpc)
         .layer(
             ServiceBuilder::new().layer(
                 ServiceBuilder::new()
@@ -185,18 +189,6 @@ async fn ready(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
             .into_response()
     } else {
         StatusCode::OK.into_response()
-    }
-}
-
-// TODO: Remove once clients no longer use it!
-async fn health(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
-    if !caught_up.load(Ordering::Acquire) {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "indexer has not yet caught up with the node; deprecated: use ../ready instead",
-        )
-    } else {
-        (StatusCode::OK, "OK, deprecated: use ../ready instead")
     }
 }
 

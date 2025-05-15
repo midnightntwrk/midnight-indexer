@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use derive_more::From;
+use derive_more::{From, Into};
 use parity_scale_codec::Decode;
 use std::{
     fmt::{self, Display},
@@ -22,7 +22,7 @@ use thiserror::Error;
 pub const PROTOCOL_VERSION_000_012_000: ProtocolVersion = ProtocolVersion(12_000);
 
 /// The runtime specification version of the chain; defaults to 1, i.e. 0.0.1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, From)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, From, Into)]
 pub struct ProtocolVersion(pub u32);
 
 impl ProtocolVersion {

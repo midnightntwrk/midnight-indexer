@@ -14,6 +14,7 @@
 mod api;
 mod block;
 mod contract_action;
+mod grpc;
 mod storage;
 mod transaction;
 mod viewing_key;
@@ -22,6 +23,7 @@ mod zswap;
 pub use api::*;
 pub use block::*;
 pub use contract_action::*;
+pub use grpc::*;
 pub use storage::*;
 pub use transaction::*;
 pub use viewing_key::*;
