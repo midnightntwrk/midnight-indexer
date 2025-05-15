@@ -27,6 +27,7 @@ use derive_more::Display;
 use midnight_ledger::serialize::NetworkId as LedgerNetworkId;
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
+use std::str::FromStr;
 use thiserror::Error;
 
 pub type BlockAuthor = ByteArray<32>;
@@ -86,6 +87,14 @@ impl From<NetworkId> for LedgerNetworkId {
             NetworkId::TestNet => LedgerNetworkId::TestNet,
             NetworkId::MainNet => LedgerNetworkId::MainNet,
         }
+    }
+}
+
+impl FromStr for NetworkId {
+    type Err = UnknownNetworkIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.try_into()
     }
 }
 

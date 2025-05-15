@@ -3083,6 +3083,7 @@ dependencies = [
  "bech32",
  "chacha20poly1305",
  "chain-indexer",
+ "clap",
  "const-hex",
  "derive_more 2.0.1",
  "fake",

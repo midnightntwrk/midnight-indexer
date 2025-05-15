@@ -60,6 +60,8 @@ struct NodeHandle {
 #[cfg(feature = "cloud")]
 async fn main() -> anyhow::Result<()> {
     // Start PostgreSQL and NATS.
+
+    use indexer_common::domain::NetworkId;
     let (_postgres_container, postgres_port) = start_postgres().await.context("start postgres")?;
     let (_nats_container, nats_url) = start_nats().await.context("start nats")?;
     // Give PostgreSQL and NATS some headstart.
@@ -90,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
         .context("wait for indexer-api to become ready")?;
 
     // Run the tests.
-    let result = e2e::run("localhost", api_port, false).await;
+    let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
 
     // It is best practice to kill the processes even when spawned with `kill_on_drop`.
     let _ = chain_indexer.kill().await;

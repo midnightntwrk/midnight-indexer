@@ -22,14 +22,20 @@ use crate::{
     graphql_ws_client,
 };
 use anyhow::{Context, Ok, bail};
+use bech32::{Bech32m, Hrp};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::{
     domain::{AsBytesExt, HexEncoded, ViewingKey},
     infra::api::v1::{ApplyStage, Unit},
 };
+use indexer_common::domain::NetworkId;
 use itertools::Itertools;
-use midnight_ledger::zswap::keys::{SecretKeys, Seed};
+use midnight_ledger::{
+    serialize::Serializable,
+    transient_crypto::encryption::SecretKey,
+    zswap::keys::{SecretKeys, Seed},
+};
 use reqwest::Client;
 use serde::Serialize;
 use std::time::{Duration, Instant};
@@ -39,7 +45,9 @@ const MAX_HEIGHT: usize = 30;
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
 /// (http and ws) at the given host and port.
-pub async fn run(host: &str, port: u16, secure: bool) -> anyhow::Result<()> {
+pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> anyhow::Result<()> {
+    println!("### starting e2e testing");
+
     let (api_url, ws_api_url) = {
         let core = format!("{host}:{port}/api/v1/graphql");
 
@@ -52,24 +60,24 @@ pub async fn run(host: &str, port: u16, secure: bool) -> anyhow::Result<()> {
 
     let api_client = Client::new();
 
-    // Collect node data using the block subscription.
-    let node_data = NodeData::collect(&ws_api_url)
+    // Collect Indexer data using the block subscription.
+    let indexer_data = IndexerData::collect(&ws_api_url)
         .await
-        .context("collect node data")?;
+        .context("collect Indexer data")?;
 
     // Test queries.
-    test_block_query(&node_data, &api_client, &api_url)
+    test_block_query(&indexer_data, &api_client, &api_url)
         .await
         .context("test block query")?;
-    test_transactions_query(&node_data, &api_client, &api_url)
+    test_transactions_query(&indexer_data, &api_client, &api_url)
         .await
         .context("test transactions query")?;
-    test_contract_action_query(&node_data, &api_client, &api_url)
+    test_contract_action_query(&indexer_data, &api_client, &api_url)
         .await
         .context("test contract action query")?;
 
     // Test mutations.
-    test_connect_mutation(&api_client, &api_url)
+    test_connect_mutation(&api_client, &api_url, network_id)
         .await
         .context("test connect mutation query")?;
     test_disconnect_mutation(&api_client, &api_url)
@@ -77,27 +85,29 @@ pub async fn run(host: &str, port: u16, secure: bool) -> anyhow::Result<()> {
         .context("test disconnect mutation query")?;
 
     // Test subscriptions (the block subscription has already been tested above).
-    test_contract_action_subscription(&node_data, &ws_api_url)
+    test_contract_action_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test contract action subscription")?;
     test_wallet_subscription(&ws_api_url)
         .await
         .context("test wallet subscription")?;
 
+    println!("### successfully finished e2e testing");
+
     Ok(())
 }
 
-/// All data needed for testing collected from the node via the blocks subscription. To be used as
-/// expected data in tests for all other API operations.
-struct NodeData {
+/// All data needed for testing collected from the Indexer via the blocks subscription. To be used
+/// as expected data in tests for all other API operations.
+struct IndexerData {
     blocks: Vec<BlockSubscriptionBlock>,
     transactions: Vec<BlockSubscriptionTransaction>,
     contract_actions: Vec<BlockSubscriptionContractAction>,
 }
 
-impl NodeData {
-    /// Not only collects the node data needed for testing, but also validates it, e.g. that block
-    /// heights start at zero and increment by one.
+impl IndexerData {
+    /// Not only collects the Indexer data needed for testing, but also validates it, e.g. that
+    /// block heights start at zero and increment by one.
     async fn collect(ws_api_url: &str) -> anyhow::Result<Self> {
         // Subscribe to blocks and collect up to MAX_HEIGHT.
         let variables = block_subscription::Variables {
@@ -153,11 +163,6 @@ impl NodeData {
             .flat_map(|block| block.transactions.to_owned())
             .collect::<Vec<_>>();
 
-        // Verify that there are transactions. This of course depends on how the node is set up,
-        // i.e. the just recipe `generate-node-data`: genesis 1, 1 initial, 6 zswap
-        // transactions, 3 contract actions.
-        assert_eq!(transactions.len(), 11);
-
         // Verify that all contract actions reference the correct transaction.
         assert!(transactions.iter().all(|transaction| {
             transaction
@@ -171,10 +176,6 @@ impl NodeData {
             .iter()
             .flat_map(|transaction| transaction.contract_actions.to_owned())
             .collect::<Vec<_>>();
-
-        // Verify that there are contract actions. This of course depends on how the node is set
-        // up, i.e. the just recipe `generate-node-data`.
-        assert_eq!(contract_actions.len(), 3);
 
         // Verify that contract calls and their deploy have the same address.
         contract_actions
@@ -197,11 +198,11 @@ impl NodeData {
 
 /// Test the block query.
 async fn test_block_query(
-    node_data: &NodeData,
+    indexer_data: &IndexerData,
     api_client: &Client,
     api_url: &str,
 ) -> anyhow::Result<()> {
-    for expected_block in &node_data.blocks {
+    for expected_block in &indexer_data.blocks {
         // Existing hash.
         let variables = block_query::Variables {
             block_offset: Some(block_query::BlockOffset::Hash(
@@ -245,7 +246,7 @@ async fn test_block_query(
 
     // Unknown height.
     let variables = block_query::Variables {
-        block_offset: Some(block_query::BlockOffset::Height(MAX_HEIGHT as i64 + 42)),
+        block_offset: Some(block_query::BlockOffset::Height(u32::MAX as i64)),
     };
     let block = send_query::<BlockQuery>(api_client, api_url, variables)
         .await?
@@ -257,22 +258,28 @@ async fn test_block_query(
 
 /// Test the transactions query.
 async fn test_transactions_query(
-    node_data: &NodeData,
+    indexer_data: &IndexerData,
     api_client: &Client,
     api_url: &str,
 ) -> anyhow::Result<()> {
-    for expected_transaction in &node_data.transactions {
+    for expected_transaction in &indexer_data.transactions {
         // Existing hash.
+        // Notice that transaction hashes are not unique, e.g. hashes of failed transactions might
+        // be also used for later transactions. Hence the query might return more than one
+        // transaction and we have to verify that the expected transaction is contained in that
+        // collection.
         let variables = transactions_query::Variables {
             transaction_offset: transactions_query::TransactionOffset::Hash(
                 expected_transaction.hash.to_owned(),
             ),
         };
-        let transaction = send_query::<TransactionsQuery>(api_client, api_url, variables)
+        let transactions = send_query::<TransactionsQuery>(api_client, api_url, variables)
             .await?
-            .transactions;
-        let transaction = transaction.first().expect("there is a first transaction");
-        assert_eq!(transaction.to_value(), expected_transaction.to_value());
+            .transactions
+            .into_iter()
+            .map(|t| t.to_value())
+            .collect::<Vec<_>>();
+        assert!(transactions.contains(&expected_transaction.to_value()));
 
         // TODO Uncomment once clear how identifiers "identify" transactions!
         // Existing identifier.
@@ -315,11 +322,11 @@ async fn test_transactions_query(
 
 /// Test the contract action query.
 async fn test_contract_action_query(
-    node_data: &NodeData,
+    indexer_data: &IndexerData,
     api_client: &Client,
     api_url: &str,
 ) -> anyhow::Result<()> {
-    for expected_contract_action in &node_data.contract_actions {
+    for expected_contract_action in &indexer_data.contract_actions {
         // Existing block hash.
         let variables = contract_action_query::Variables {
             address: expected_contract_action.address(),
@@ -450,12 +457,24 @@ async fn test_contract_action_query(
 }
 
 /// Test the connect mutation.
-async fn test_connect_mutation(api_client: &Client, api_url: &str) -> anyhow::Result<()> {
+async fn test_connect_mutation(
+    api_client: &Client,
+    api_url: &str,
+    network_id: NetworkId,
+) -> anyhow::Result<()> {
     // Valid viewing key.
-    let viewing_key = ViewingKey(
-        "mn_shield-esk_undeployed1qvqzq76fwwf9jqlv0uqywd9jk0q4klqk44qyc809que8q0v309z8u7qz5hja5u"
-            .to_string(),
-    );
+    let secret_key = seed_to_secret_key(&format!("{}1", "0".repeat(63)));
+    let mut serialized = Vec::with_capacity(SecretKey::serialized_size(&secret_key));
+    Serializable::serialize(&secret_key, &mut serialized).expect("secret key can be serialized");
+    let hrp = match network_id {
+        NetworkId::Undeployed => "mn_shield-esk_undeployed",
+        NetworkId::DevNet => "mn_shield-esk_dev",
+        NetworkId::TestNet => "mn_shield-esk_test",
+        NetworkId::MainNet => "mn_shield-esk",
+    };
+    let hrp = Hrp::parse(hrp).context("create HRP")?;
+    let encoded = bech32::encode::<Bech32m>(hrp, &serialized).context("encode viewing key")?;
+    let viewing_key = ViewingKey(encoded);
     let variables = connect_mutation::Variables { viewing_key };
     let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
     assert!(response.is_ok());
@@ -492,11 +511,11 @@ async fn test_disconnect_mutation(api_client: &Client, api_url: &str) -> anyhow:
 
 /// Test the contract action subscription.
 async fn test_contract_action_subscription(
-    node_data: &NodeData,
+    indexer_data: &IndexerData,
     ws_api_url: &str,
 ) -> anyhow::Result<()> {
     // Map expected contract actions by address.
-    let contract_actions_by_address = node_data
+    let contract_actions_by_address = indexer_data
         .contract_actions
         .iter()
         .map(|c| (c.address(), c.to_value()))
@@ -520,7 +539,7 @@ async fn test_contract_action_subscription(
         assert_eq!(contract_actions, expected_contract_actions);
 
         // Genesis hash.
-        let hash = node_data
+        let hash = indexer_data
             .blocks
             .first()
             .map(|b| b.hash.to_owned())
@@ -568,7 +587,10 @@ async fn test_contract_action_subscription(
 async fn test_wallet_subscription(ws_api_url: &str) -> anyhow::Result<()> {
     use wallet_subscription::WalletSubscriptionWalletOnViewingUpdateUpdate as ViewingUpdate;
 
-    let viewing_key = seed_to_viewing_key(&format!("{}1", "0".repeat(63)));
+    let viewing_key = indexer_common::domain::ViewingKey::from(seed_to_secret_key(&format!(
+        "{}1",
+        "0".repeat(63)
+    )));
     // 3d8506d3b1875c0843cdcf27ab2db6119186fdbd9600536335872f9f46cc59be
     let session_id = viewing_key.to_session_id().hex_encode();
 
@@ -733,12 +755,10 @@ where
     Ok(data)
 }
 
-fn seed_to_viewing_key(seed: &str) -> indexer_common::domain::ViewingKey {
+fn seed_to_secret_key(seed: &str) -> SecretKey {
     let seed_bytes = const_hex::decode(seed).expect("seed can be hex-decoded");
     let seed_bytes = <[u8; 32]>::try_from(seed_bytes).expect("seed has 32 bytes");
-    SecretKeys::from(Seed::from(seed_bytes))
-        .encryption_secret_key
-        .into()
+    SecretKeys::from(Seed::from(seed_bytes)).encryption_secret_key
 }
 
 #[derive(GraphQLQuery)]

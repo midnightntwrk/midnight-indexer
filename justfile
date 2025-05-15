@@ -108,6 +108,17 @@ docker-indexer-standalone profile="dev":
         -f indexer-standalone/Dockerfile \
         .
 
+docker-indexer-tests profile="dev":
+    tag=$(git rev-parse --short=8 HEAD) && \
+    docker build \
+        --build-arg "RUST_VERSION={{rust_version}}" \
+        --build-arg "PROFILE={{profile}}" \
+        --secret id=netrc,src=$NETRC \
+        -t ghcr.io/midnight-ntwrk/indexer-tests:${tag} \
+        -t ghcr.io/midnight-ntwrk/indexer-tests:latest \
+        -f indexer-tests/Dockerfile \
+        .
+
 run-chain-indexer node="ws://localhost:9944" network_id="Undeployed":
     docker compose up -d postgres nats
     RUST_LOG=chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
