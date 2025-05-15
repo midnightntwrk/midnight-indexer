@@ -27,7 +27,10 @@ pub type RawZswapState = ByteVec;
 
 /// Abstraction for zswap state storage.
 #[trait_variant::make(Send)]
-pub trait ZswapStateStorage: Sync + 'static {
+pub trait ZswapStateStorage
+where
+    Self: Clone + Sync + 'static,
+{
     type Error: StdError + Send + Sync + 'static;
 
     /// Load the last index.
@@ -45,6 +48,7 @@ pub trait ZswapStateStorage: Sync + 'static {
     ) -> Result<(), Self::Error>;
 }
 
+#[derive(Debug, Clone)]
 pub struct NoopZswapStateStorage;
 
 impl ZswapStateStorage for NoopZswapStateStorage {

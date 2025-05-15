@@ -19,12 +19,12 @@ use indexer_common::{
 };
 use log::debug;
 use midnight_ledger::transient_crypto::merkle_tree;
-use std::io;
+use std::{io, sync::Arc};
 use thiserror::Error;
 use tokio::sync::RwLock;
 
-#[derive(Debug, Default)]
-pub struct ZswapStateCache(RwLock<ZswapState>);
+#[derive(Debug, Default, Clone)]
+pub struct ZswapStateCache(Arc<RwLock<ZswapState>>);
 
 impl ZswapStateCache {
     pub async fn collapsed_update(

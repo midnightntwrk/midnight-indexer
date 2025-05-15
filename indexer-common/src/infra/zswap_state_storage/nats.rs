@@ -39,6 +39,7 @@ const BUCKET_NAME: &str = "zswap_state_store";
 const OBJECT_NAME: &str = "zswap_state";
 
 /// NATS based [ZswapStateStorage] implementation.
+#[derive(Clone)]
 pub struct NatsZswapStateStorage {
     zswap_state_store: ObjectStore,
 }

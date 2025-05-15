@@ -12,6 +12,7 @@
 // limitations under the License.
 
 pub mod v1;
+pub mod v2;
 
 use crate::domain::{Api, Storage, ZswapStateCache};
 use anyhow::Context as _;
@@ -152,6 +153,16 @@ where
 
     let v1_app = v1::make_app(
         network_id,
+        zswap_state_cache.clone(),
+        storage.clone(),
+        zswap_state_storage.clone(),
+        subscriber.clone(),
+        max_complexity,
+        max_depth,
+    );
+
+    let v2_app = v2::make_app(
+        network_id,
         zswap_state_cache,
         storage,
         zswap_state_storage,
@@ -164,6 +175,7 @@ where
         .route("/ready", get(ready))
         .route("/health", get(health))
         .nest("/api/v1", v1_app)
+        .nest("/api/v2", v2_app)
         .with_state(caught_up)
         .layer(
             ServiceBuilder::new().layer(
