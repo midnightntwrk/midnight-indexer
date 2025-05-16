@@ -1,3 +1,3 @@
 # Indexer Standalone
 
-A standalone indexer that combines `chain-indexer`, `wallet-indexer`, and `indexer-api` components with SQLite storage for local usage.
+The standalone Indexer combines the Chain Indexer, Indexer API and Wallet Indexer components in a single executable alongside an in-process SQLite database.

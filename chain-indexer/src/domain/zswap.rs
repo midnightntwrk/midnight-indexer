@@ -39,10 +39,12 @@ impl ZswapState {
     /// Serialize this [ZswapState] using the given [NetworkId].
     #[trace]
     pub fn serialize(&self, network_id: NetworkId) -> Result<RawZswapState, io::Error> {
-        let bytes = (**self).serialize(network_id)?;
+        let bytes = self.0.serialize(network_id)?;
         Ok(bytes.into())
     }
 
+    /// Apply the given transactions to this zswap state and also update relevant transaction data
+    /// like start_index and end_index.
     #[trace]
     pub fn apply_transactions(
         &mut self,
@@ -56,6 +58,7 @@ impl ZswapState {
         Ok(())
     }
 
+    /// The last used index.
     pub fn end_index(&self) -> Option<u64> {
         (self.first_free != 0).then(|| self.first_free - 1)
     }
