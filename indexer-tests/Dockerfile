@@ -49,4 +49,4 @@ COPY --from=build_stage --chown=appuser:appuser /indexer-tests /usr/local/bin/
 
 USER appuser
 WORKDIR /opt/indexer-tests
-ENTRYPOINT [indexer-tests]
+ENTRYPOINT ["indexer-tests"]

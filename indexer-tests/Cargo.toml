@@ -21,17 +21,17 @@ const-hex         = { workspace = true }
 derive_more       = { workspace = true, features = [ "display" ] }
 fake              = { workspace = true }
 futures           = { workspace = true }
-graphql_client    = { workspace = true, features = [ "reqwest" ] }
+graphql_client    = { workspace = true, features = [ "reqwest-rustls" ] }
 indexer-api       = { path = "../indexer-api" }
 indexer-common    = { path = "../indexer-common" }
 itertools         = { workspace = true }
 midnight-ledger   = { workspace = true, features = [ "fake", "proving", "transaction-construction" ] }
-reqwest           = { workspace = true, features = [ "json" ] }
+reqwest           = { workspace = true, features = [ "json", "rustls-tls" ] }
 serde             = { workspace = true, features = [ "derive" ] }
 serde_json        = { workspace = true }
 subxt             = { workspace = true }
 tokio             = { workspace = true, features = [ "process", "rt-multi-thread" ] }
-tokio-tungstenite = { workspace = true, features = [ "rustls-tls-native-roots" ] }
+tokio-tungstenite = { workspace = true, features = [ "rustls-tls-webpki-roots" ] }
 
 [dev-dependencies]
 bech32                 = { workspace = true }
