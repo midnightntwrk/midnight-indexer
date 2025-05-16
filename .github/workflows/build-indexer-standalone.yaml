@@ -63,7 +63,6 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=sha,prefix=${{env.version}}-,format=short
-            type=raw,value=latest
           labels: |
             org.opencontainers.image.source=https://github.com/midnightntwrk/midnight-indexer/
             org.opencontainers.image.title=indexer-standalone

@@ -1030,7 +1030,7 @@ dependencies = [
 
 [[package]]
 name = "chain-indexer"
-version = "2.2.0"
+version = "2.1.1"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2986,7 +2986,7 @@ dependencies = [
 
 [[package]]
 name = "indexer-api"
-version = "2.2.0"
+version = "2.1.1"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -7598,7 +7598,7 @@ dependencies = [
 
 [[package]]
 name = "wallet-indexer"
-version = "2.2.0"
+version = "2.1.1"
 dependencies = [
  "anyhow",
  "assert_matches",
