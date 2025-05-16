@@ -108,7 +108,7 @@ macro_rules! make_block_details {
                 let calls = extrinsics
                     .iter()
                     .map(|extrinsic| {
-                        let call = extrinsic.as_root_extrinsic::<Call>()?;
+                        let call = extrinsic.as_root_extrinsic::<Call>().map_err(Box::new)?;
                         Ok(call)
                     })
                     .filter_ok(|call| matches!(call, Call::Midnight(_) | Call::Timestamp(_)))
@@ -149,7 +149,7 @@ macro_rules! make_block_details {
 
                         _ => None,
                     })
-                    .collect::<Result<HashMap<_, _>, _>>()?;
+                    .collect::<Result<HashMap<_, _>, _>>().map_err(Box::new)?;
 
                 Ok(BlockDetails {
                     timestamp,
@@ -172,9 +172,9 @@ macro_rules! fetch_authorities {
                 let authorities = online_client
                     .storage()
                     .at_latest()
-                    .await?
+                    .await.map_err(Box::new)?
                     .fetch(&$module::storage().aura().authorities())
-                    .await?
+                    .await.map_err(Box::new)?
                     .map(|authorities| authorities.0.into_iter().map(|public| public.0).collect());
 
                 Ok(authorities)
@@ -215,7 +215,7 @@ macro_rules! get_contract_state {
                     .runtime_api()
                     .at(block_hash.0)
                     .call(get_state)
-                    .await?
+                    .await.map_err(Box::new)?
                     .map_err(|error| SubxtNodeError::GetContractState(format!("{error:?}")))?
                     .into();
 
@@ -242,7 +242,7 @@ macro_rules! get_zswap_state_root {
                     .runtime_api()
                     .at(block_hash.0)
                     .call(get_zswap_state_root)
-                    .await?
+                    .await.map_err(Box::new)?
                     .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}")))?;
 
                 Ok(root)

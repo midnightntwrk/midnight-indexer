@@ -118,7 +118,8 @@ impl SubxtNode {
                 .default_online_client
                 .backend()
                 .metadata_at_version(15, hash.0)
-                .await?;
+                .await
+                .map_err(Box::new)?;
 
             let legacy_rpc_methods =
                 LegacyRpcMethods::<SubstrateConfig>::new(self.rpc_client.to_owned().into());
@@ -135,7 +136,8 @@ impl SubxtNode {
                 runtime_version,
                 metadata,
                 self.rpc_client.to_owned(),
-            )?;
+            )
+            .map_err(Box::new)?;
 
             self.compatible_online_client = Some((protocol_version, online_client));
         }
@@ -240,8 +242,8 @@ impl SubxtNode {
             deserialize::<MerkleTreeDigest, _>(&mut zswap_state_root.as_slice(), network_id.into())
                 .map_err(SubxtNodeError::DeserializeZswapStateRoot)?;
 
-        let extrinsics = block.extrinsics().await?;
-        let events = block.events().await?;
+        let extrinsics = block.extrinsics().await.map_err(Box::new)?;
+        let events = block.events().await.map_err(Box::new)?;
         let BlockDetails {
             timestamp,
             raw_transactions,
@@ -298,12 +300,13 @@ impl Node for SubxtNode {
     ) -> Result<impl Stream<Item = Result<BlockInfo, Self::Error>> + Send, Self::Error> {
         let highest_blocks = self
             .subscribe_finalized_blocks()
-            .await?
+            .await
+            .map_err(Box::new)?
             .map_ok(|block| BlockInfo {
                 hash: block.hash().into(),
                 height: block.number(),
             })
-            .map_err(Self::Error::from);
+            .map_err(|error| Box::new(error).into());
 
         Ok(highest_blocks)
     }
@@ -326,10 +329,10 @@ impl Node for SubxtNode {
         let mut authorities = None;
 
         try_stream! {
-            let mut finalized_blocks = self.subscribe_finalized_blocks().await?;
+            let mut finalized_blocks = self.subscribe_finalized_blocks().await.map_err(Box::new)?;
 
             // First we receive the first finalized block.
-            let Some(first_block) = receive_block(&mut finalized_blocks).await? else {
+            let Some(first_block) = receive_block(&mut finalized_blocks).await.map_err(Box::new)? else {
                 return;
             };
             debug!(
@@ -348,7 +351,7 @@ impl Node for SubxtNode {
                 // For these we store the hashes; one hash is 32 bytes, i.e. one year is ~ 156MB.
                 let genesis_parent_hash = self
                     .fetch_block(self.default_online_client.genesis_hash())
-                    .await?
+                    .await.map_err(Box::new)?
                     .header()
                     .parent_hash;
 
@@ -367,7 +370,7 @@ impl Node for SubxtNode {
                 let mut hashes = Vec::with_capacity(capacity);
                 let mut parent_hash = first_block.header().parent_hash;
                 while parent_hash != after_hash && parent_hash != genesis_parent_hash {
-                    let block = self.fetch_block(parent_hash).await?;
+                    let block = self.fetch_block(parent_hash).await.map_err(Box::new)?;
                     if block.number() % 1_000 == 0 {
                         info!(
                             highest_stored_height:? = after_height,
@@ -382,7 +385,7 @@ impl Node for SubxtNode {
 
                 // We fetch and yield the blocks for the stored block hashes.
                 for hash in hashes.into_iter().rev() {
-                    let block = self.fetch_block(hash).await?;
+                    let block = self.fetch_block(hash).await.map_err(Box::new)?;
                     debug!(
                         hash:% = block.hash(),
                         height = block.number(),
@@ -397,7 +400,7 @@ impl Node for SubxtNode {
             }
 
             // Finally we emit all other finalized ones.
-            while let Some(block) = receive_block(&mut finalized_blocks).await? {
+            while let Some(block) = receive_block(&mut finalized_blocks).await.map_err(Box::new)? {
                 debug!(
                     hash:% = block.hash(),
                     height = block.number(),
@@ -446,16 +449,13 @@ pub enum Error {
 #[derive(Debug, Error)]
 pub enum SubxtNodeError {
     #[error(transparent)]
-    Subxt(#[from] subxt::Error),
-
-    #[error(transparent)]
-    SubxtCore(#[from] subxt::ext::subxt_core::Error),
+    Subxt(#[from] Box<subxt::Error>),
 
     #[error(transparent)]
     SubxtRcps(#[from] subxt::ext::subxt_rpcs::Error),
 
     #[error("cannot scale decode")]
-    ScalaDecode(#[from] parity_scale_codec::Error),
+    ScaleDecode(#[from] parity_scale_codec::Error),
 
     #[error(transparent)]
     DecodeProtocolVersion(#[from] ScaleDecodeProtocolVersionError),
