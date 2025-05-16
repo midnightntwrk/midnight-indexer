@@ -20,8 +20,11 @@ use indexer_common::{
 };
 use log::debug;
 use midnight_ledger::{
-    coin_structure::contract::Address, serialize::deserialize, storage::DefaultDB,
-    structure::Proof, zswap::ledger::State as LedgerZswapState,
+    coin_structure::contract::Address,
+    serialize::deserialize,
+    storage::DefaultDB,
+    structure::{Proof, StandardTransaction},
+    zswap::ledger::State as LedgerZswapState,
 };
 use std::io;
 use thiserror::Error;
@@ -36,25 +39,76 @@ impl ZswapState {
     /// Serialize this [ZswapState] using the given [NetworkId].
     #[trace]
     pub fn serialize(&self, network_id: NetworkId) -> Result<RawZswapState, io::Error> {
-        let bytes = self.0.serialize(network_id)?;
+        let bytes = (**self).serialize(network_id)?;
         Ok(bytes.into())
     }
 
     #[trace]
     pub fn apply_transactions(
-        mut self,
+        &mut self,
         transactions: &mut [Transaction],
         network_id: NetworkId,
-    ) -> Result<Self, Error> {
+    ) -> Result<(), Error> {
         for transaction in transactions.iter_mut() {
-            self = apply_transaction(self, transaction, network_id)?;
+            self.apply_transaction(transaction, network_id)?;
         }
 
-        Ok(self)
+        Ok(())
     }
 
     pub fn end_index(&self) -> Option<u64> {
         (self.first_free != 0).then(|| self.first_free - 1)
+    }
+
+    #[trace]
+    fn apply_transaction(
+        &mut self,
+        transaction: &mut Transaction,
+        network_id: NetworkId,
+    ) -> Result<(), Error> {
+        debug!(hash:% = transaction.hash; "applying transaction");
+
+        let start_index = self.first_free;
+        let mut end_index = self.first_free;
+
+        // For Failure the state is not changed.
+        if transaction.apply_stage != ApplyStage::Failure {
+            let ledger_transaction = deserialize::<LedgerTransaction, _>(
+                &mut transaction.raw.as_ref(),
+                network_id.into(),
+            )
+            .map_err(|error| Error::Io("cannot deserialize ledger transaction", error))?;
+
+            if let LedgerTransaction::Standard(StandardTransaction {
+                guaranteed_coins,
+                fallible_coins,
+                ..
+            }) = ledger_transaction
+            {
+                // Guaranteed coins are applied for both Success and PartialSuccess.
+                let (mut state, _) = self.try_apply(&guaranteed_coins, None)?;
+
+                // Fallible coins are only applied for Success.
+                if transaction.apply_stage == ApplyStage::Success {
+                    if let Some(fallible_coins) = &fallible_coins {
+                        (state, _) = state.try_apply(fallible_coins, None)?;
+                    }
+                }
+
+                if state.first_free > start_index {
+                    update_contract_zswap_state(&state, transaction, network_id)?;
+                    end_index = state.first_free - 1;
+                }
+
+                *self = ZswapState(state.into());
+            }
+        }
+
+        transaction.merkle_tree_root = extract_merkle_tree_root(self, network_id)?;
+        transaction.start_index = start_index;
+        transaction.end_index = end_index;
+
+        Ok(())
     }
 }
 
@@ -65,74 +119,6 @@ pub enum Error {
 
     #[error("{0}")]
     Io(&'static str, #[source] io::Error),
-}
-
-#[trace]
-fn apply_transaction(
-    state: ZswapState,
-    transaction: &mut Transaction,
-    network_id: NetworkId,
-) -> Result<ZswapState, Error> {
-    debug!(hash:% = transaction.hash; "applying transaction");
-
-    if transaction.apply_stage == ApplyStage::Failure {
-        update_transaction(state, transaction, network_id)
-    } else {
-        let ledger_transaction =
-            deserialize::<LedgerTransaction, _>(&mut transaction.raw.as_ref(), network_id.into())
-                .map_err(|error| Error::Io("cannot deserialize ledger transaction", error))?;
-
-        let new_state =
-            apply_ledger_transaction(&state, &ledger_transaction, transaction.apply_stage)?;
-
-        if let Some(new_state) = new_state {
-            if state.first_free >= new_state.first_free {
-                update_transaction(state, transaction, network_id)
-            } else {
-                update_contract_zswap_state(&new_state, transaction, network_id)?;
-
-                transaction.merkle_tree_root = extract_merkle_tree_root(&new_state, network_id)?;
-                transaction.start_index = state.first_free;
-                transaction.end_index = new_state.first_free - 1;
-
-                Ok(indexer_common::domain::ZswapState::from(new_state).into())
-            }
-        } else {
-            update_transaction(state, transaction, network_id)
-        }
-    }
-}
-
-fn apply_ledger_transaction(
-    state: &LedgerZswapState<DefaultDB>,
-    ledger_transaction: &LedgerTransaction,
-    apply_stage: ApplyStage,
-) -> Result<Option<LedgerZswapState<DefaultDB>>, Error> {
-    if let LedgerTransaction::Standard(standard_transaction) = ledger_transaction {
-        let (mut state, _) = state.try_apply(&standard_transaction.guaranteed_coins, None)?;
-
-        if apply_stage == ApplyStage::Success {
-            if let Some(fallible_coins) = &standard_transaction.fallible_coins {
-                (state, _) = state.try_apply(fallible_coins, None)?;
-            }
-        }
-
-        Ok(Some(state))
-    } else {
-        Ok(None)
-    }
-}
-
-fn update_transaction(
-    state: ZswapState,
-    transaction: &mut Transaction,
-    network_id: NetworkId,
-) -> Result<ZswapState, Error> {
-    transaction.merkle_tree_root = extract_merkle_tree_root(&state, network_id)?;
-    transaction.start_index = state.first_free;
-    transaction.end_index = state.first_free;
-
-    Ok(state)
 }
 
 fn update_contract_zswap_state(
@@ -146,19 +132,6 @@ fn update_contract_zswap_state(
     }
 
     Ok(())
-}
-
-fn extract_merkle_tree_root(
-    state: &LedgerZswapState<DefaultDB>,
-    network_id: NetworkId,
-) -> Result<MerkleTreeRoot, Error> {
-    let root = state
-        .coin_coms
-        .root()
-        .serialize(network_id)
-        .map_err(|error| Error::Io("cannot serialize merkle tree root", error))?;
-
-    Ok(root.into())
 }
 
 fn extract_contract_zswap_state(
@@ -176,4 +149,17 @@ fn extract_contract_zswap_state(
         .map_err(|error| Error::Io("cannot serialize Zswap state", error))?;
 
     Ok(state.into())
+}
+
+fn extract_merkle_tree_root(
+    state: &LedgerZswapState<DefaultDB>,
+    network_id: NetworkId,
+) -> Result<MerkleTreeRoot, Error> {
+    let root = state
+        .coin_coms
+        .root()
+        .serialize(network_id)
+        .map_err(|error| Error::Io("cannot serialize merkle tree root", error))?;
+
+    Ok(root.into())
 }
