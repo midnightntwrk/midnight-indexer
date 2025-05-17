@@ -14,10 +14,13 @@
 //! e2e testing library
 
 use crate::{
-    e2e::block_subscription::{
-        BlockSubscriptionBlocks as BlockSubscriptionBlock,
-        BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
-        BlockSubscriptionBlocksTransactionsContractActions as BlockSubscriptionContractAction,
+    e2e::{
+        block_subscription::{
+            BlockSubscriptionBlocks as BlockSubscriptionBlock,
+            BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
+            BlockSubscriptionBlocksTransactionsContractActions as BlockSubscriptionContractAction,
+        },
+        contract_action_query::ContractActionQueryContractAction,
     },
     graphql_ws_client,
 };
@@ -281,20 +284,21 @@ async fn test_transactions_query(
             .collect::<Vec<_>>();
         assert!(transactions.contains(&expected_transaction.to_value()));
 
-        // TODO Uncomment once clear how identifiers "identify" transactions!
         // Existing identifier.
-        // for identifier in &expected_transaction.identifiers {
-        //     let variables = transactions_query::Variables {
-        //         transaction_offset: transactions_query::TransactionOffset::Identifier(
-        //             identifier.to_owned(),
-        //         ),
-        //     };
-        //     let transaction = send_query::<TransactionsQuery>(api_client, api_url, variables)
-        //         .await?
-        //         .transactions;
-        //     let transaction = transaction.first().expect("there is a first transaction");
-        //     assert_eq!(transaction.to_value(), expected_transaction.to_value());
-        // }
+        for identifier in &expected_transaction.identifiers {
+            let variables = transactions_query::Variables {
+                transaction_offset: transactions_query::TransactionOffset::Identifier(
+                    identifier.to_owned(),
+                ),
+            };
+            let transactions = send_query::<TransactionsQuery>(api_client, api_url, variables)
+                .await?
+                .transactions
+                .into_iter()
+                .map(|t| t.to_value())
+                .collect::<Vec<_>>();
+            assert!(transactions.contains(&expected_transaction.to_value()));
+        }
     }
 
     // Unknown hash.
@@ -326,7 +330,11 @@ async fn test_contract_action_query(
     api_client: &Client,
     api_url: &str,
 ) -> anyhow::Result<()> {
-    for expected_contract_action in &indexer_data.contract_actions {
+    for expected_contract_action in indexer_data
+        .contract_actions
+        .iter()
+        .filter(|c| c.transaction_apply_stage() != ApplyStage::FailEntirely)
+    {
         // Existing block hash.
         let variables = contract_action_query::Variables {
             address: expected_contract_action.address(),
@@ -379,26 +387,27 @@ async fn test_contract_action_query(
             expected_contract_action.to_value()
         );
 
-        // TODO Uncomment once clear how identifiers "identify" transactions!
         // Existing transaction identifier.
-        // for identifier in expected_contract_action.identifiers() {
-        //     let variables = contract_action_query::Variables {
-        //         address: expected_contract_action.address(),
-        //         contract_action_offset: Some(
-        //             contract_action_query::ContractActionOffset::TransactionOffset(
-        //                 contract_action_query::TransactionOffset::Identifier(identifier),
-        //             ),
-        //         ),
-        //     };
-        //     let contract_action = send_query::<ContractActionQuery>(api_client, api_url,
-        // variables)         .await?
-        //         .contract_action
-        //         .expect("there is a contract action");
-        //     assert_eq!(
-        //         contract_action.to_value(),
-        //         expected_contract_action.to_value()
-        //     );
-        // }
+        // The query will not necessarily return the expected contract action, but the most recent
+        // one (with the highest ID); hence we can only compare addresses.
+        for identifier in expected_contract_action.identifiers() {
+            let variables = contract_action_query::Variables {
+                address: expected_contract_action.address(),
+                contract_action_offset: Some(
+                    contract_action_query::ContractActionOffset::TransactionOffset(
+                        contract_action_query::TransactionOffset::Identifier(identifier),
+                    ),
+                ),
+            };
+            let contract_action = send_query::<ContractActionQuery>(api_client, api_url, variables)
+                .await?
+                .contract_action
+                .expect("there is a contract action");
+            assert_eq!(
+                contract_action.address(),
+                expected_contract_action.address()
+            );
+        }
 
         // Unknown block hash.
         let variables = contract_action_query::Variables {
@@ -668,7 +677,8 @@ trait ContractActionExt {
     fn block_hash(&self) -> HexEncoded;
     fn block_height(&self) -> i64;
     fn transaction_hash(&self) -> HexEncoded;
-    // fn identifiers(&self) -> Vec<HexEncoded>;
+    fn transaction_apply_stage(&self) -> ApplyStage;
+    fn identifiers(&self) -> Vec<HexEncoded>;
 }
 
 impl ContractActionExt for BlockSubscriptionContractAction {
@@ -710,15 +720,85 @@ impl ContractActionExt for BlockSubscriptionContractAction {
         transaction_hash.to_owned()
     }
 
-    // fn identifiers(&self) -> Vec<HexEncoded> {
-    //     let identifiers = match self {
-    //         BlockSubscriptionContractAction::ContractDeploy(c) => &c.transaction.identifiers,
-    //         BlockSubscriptionContractAction::ContractCall(c) => &c.transaction.identifiers,
-    //         BlockSubscriptionContractAction::ContractUpdate(c) => &c.transaction.identifiers,
-    //     };
+    fn transaction_apply_stage(&self) -> ApplyStage {
+        let apply_stage = match self {
+            BlockSubscriptionContractAction::ContractCall(c) => &c.transaction.apply_stage,
+            BlockSubscriptionContractAction::ContractDeploy(c) => &c.transaction.apply_stage,
+            BlockSubscriptionContractAction::ContractUpdate(c) => &c.transaction.apply_stage,
+        };
 
-    //     identifiers.to_owned()
-    // }
+        apply_stage.to_owned()
+    }
+
+    fn identifiers(&self) -> Vec<HexEncoded> {
+        let identifiers = match self {
+            BlockSubscriptionContractAction::ContractDeploy(c) => &c.transaction.identifiers,
+            BlockSubscriptionContractAction::ContractCall(c) => &c.transaction.identifiers,
+            BlockSubscriptionContractAction::ContractUpdate(c) => &c.transaction.identifiers,
+        };
+
+        identifiers.to_owned()
+    }
+}
+
+impl ContractActionExt for ContractActionQueryContractAction {
+    fn address(&self) -> HexEncoded {
+        let address = match self {
+            ContractActionQueryContractAction::ContractDeploy(c) => &c.address,
+            ContractActionQueryContractAction::ContractCall(c) => &c.address,
+            ContractActionQueryContractAction::ContractUpdate(c) => &c.address,
+        };
+
+        address.to_owned()
+    }
+
+    fn block_hash(&self) -> HexEncoded {
+        let block_hash = match self {
+            ContractActionQueryContractAction::ContractDeploy(c) => &c.transaction.block.hash,
+            ContractActionQueryContractAction::ContractCall(c) => &c.transaction.block.hash,
+            ContractActionQueryContractAction::ContractUpdate(c) => &c.transaction.block.hash,
+        };
+
+        block_hash.to_owned()
+    }
+
+    fn block_height(&self) -> i64 {
+        match self {
+            ContractActionQueryContractAction::ContractDeploy(c) => c.transaction.block.height,
+            ContractActionQueryContractAction::ContractCall(c) => c.transaction.block.height,
+            ContractActionQueryContractAction::ContractUpdate(c) => c.transaction.block.height,
+        }
+    }
+
+    fn transaction_hash(&self) -> HexEncoded {
+        let transaction_hash = match self {
+            ContractActionQueryContractAction::ContractDeploy(c) => &c.transaction.hash,
+            ContractActionQueryContractAction::ContractCall(c) => &c.transaction.hash,
+            ContractActionQueryContractAction::ContractUpdate(c) => &c.transaction.hash,
+        };
+
+        transaction_hash.to_owned()
+    }
+
+    fn transaction_apply_stage(&self) -> ApplyStage {
+        let apply_stage = match self {
+            ContractActionQueryContractAction::ContractCall(c) => &c.transaction.apply_stage,
+            ContractActionQueryContractAction::ContractDeploy(c) => &c.transaction.apply_stage,
+            ContractActionQueryContractAction::ContractUpdate(c) => &c.transaction.apply_stage,
+        };
+
+        apply_stage.to_owned()
+    }
+
+    fn identifiers(&self) -> Vec<HexEncoded> {
+        let identifiers = match self {
+            ContractActionQueryContractAction::ContractDeploy(c) => &c.transaction.identifiers,
+            ContractActionQueryContractAction::ContractCall(c) => &c.transaction.identifiers,
+            ContractActionQueryContractAction::ContractUpdate(c) => &c.transaction.identifiers,
+        };
+
+        identifiers.to_owned()
+    }
 }
 
 async fn send_query<T>(

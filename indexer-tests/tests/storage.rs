@@ -333,16 +333,16 @@ async fn run_tests(
     let indexer_api::domain::Transaction { hash, .. } = transactions.pop().unwrap();
     assert_eq!(hash, ((TRANSACTION_1_HASH.0).0).0.into());
 
-    let transaction = indexer_api_storage
-        .get_transaction_by_identifier(&b"unknown".as_slice().into())
+    let transactions = indexer_api_storage
+        .get_transactions_by_identifier(&b"unknown".as_slice().into())
         .await?;
-    assert!(transaction.is_none());
-    let transaction = indexer_api_storage
-        .get_transaction_by_identifier(&IDENTIFIER_2)
+    assert!(transactions.is_empty());
+    let transactions = indexer_api_storage
+        .get_transactions_by_identifier(&IDENTIFIER_2)
         .await?;
-    assert!(transaction.is_some());
-    let indexer_api::domain::Transaction { hash, .. } = transaction.unwrap();
-    assert_eq!(hash, ((TRANSACTION_2_HASH.0).0).0.into());
+    assert!(!transactions.is_empty());
+    let indexer_api::domain::Transaction { hash, .. } = transactions.first().unwrap();
+    assert_eq!(*hash, ((TRANSACTION_2_HASH.0).0).0.into());
 
     let contract_action = indexer_api_storage
         .get_contract_action_by_address(&b"unknown".as_slice().into())
