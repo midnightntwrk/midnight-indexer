@@ -185,7 +185,6 @@ impl Storage for PostgresStorage {
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE transactions.hash = $1
-            ORDER BY transactions.id DESC
         "};
 
         sqlx::query_as::<_, Transaction>(query)
@@ -353,7 +352,6 @@ impl Storage for PostgresStorage {
                 SELECT id FROM transactions
                 WHERE hash = $2
                 AND apply_stage != 'Failure'
-                ORDER BY id DESC
                 LIMIT 1
             )
             ORDER BY id DESC
