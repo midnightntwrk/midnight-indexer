@@ -891,6 +891,7 @@ fn seed_to_secret_key(seed: &str) -> SecretKey {
     SecretKeys::from(Seed::from(seed_bytes)).encryption_secret_key
 }
 
+#[allow(clippy::result_large_err)]
 fn add_accept_header(mut request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
     request
         .metadata_mut()
