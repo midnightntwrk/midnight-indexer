@@ -62,7 +62,7 @@ jobs:
             ${{ github.ref_type == 'tag' && 'midnightntwrk/indexer-standalone' || '' }}
           tags: |
             type=semver,pattern={{version}}
-            type=sha,prefix=${{env.version}}-,format=short
+            ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.version) || '' }}
           labels: |
             org.opencontainers.image.source=https://github.com/midnightntwrk/midnight-indexer/
             org.opencontainers.image.title=indexer-standalone
