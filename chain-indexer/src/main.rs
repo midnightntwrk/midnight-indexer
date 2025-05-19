@@ -71,10 +71,10 @@ async fn run() -> anyhow::Result<()> {
     );
 
     let infra::Config {
-        node_config,
-        zswap_state_storage_config,
         storage_config,
         pub_sub_config,
+        zswap_state_storage_config,
+        node_config,
     } = infra_config;
 
     let node = SubxtNode::new(node_config)

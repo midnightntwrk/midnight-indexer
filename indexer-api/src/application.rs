@@ -15,17 +15,25 @@ use crate::domain::Api;
 use anyhow::Context as AnyhowContext;
 use futures::{TryStreamExt, future::ok};
 use indexer_common::{
-    domain::{BlockIndexed, Subscriber},
+    domain::{BlockIndexed, NetworkId, Subscriber},
     error::StdErrorExt,
 };
 use log::error;
+use serde::Deserialize;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
 use tokio::{select, task};
 
-pub async fn run(api: impl Api, subscriber: impl Subscriber) -> anyhow::Result<()> {
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct Config {
+    pub network_id: NetworkId,
+}
+
+pub async fn run(config: Config, api: impl Api, subscriber: impl Subscriber) -> anyhow::Result<()> {
+    let Config { network_id } = config;
+
     let caught_up = Arc::new(AtomicBool::new(false));
 
     let block_indexed_task = task::spawn({
@@ -56,8 +64,13 @@ pub async fn run(api: impl Api, subscriber: impl Subscriber) -> anyhow::Result<(
         }
     });
 
-    let serve_api_task =
-        { task::spawn(async move { api.serve(caught_up).await.context("serving API") }) };
+    let serve_api_task = {
+        task::spawn(async move {
+            api.serve(network_id, caught_up)
+                .await
+                .context("serving API")
+        })
+    };
 
     select! {
         result = block_indexed_task => result,

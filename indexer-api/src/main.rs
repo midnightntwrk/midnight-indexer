@@ -51,6 +51,7 @@ async fn run() -> anyhow::Result<()> {
     // Load configuration.
     let Config {
         run_migrations,
+        application_config,
         infra_config,
         telemetry_config:
             telemetry::Config {
@@ -63,7 +64,7 @@ async fn run() -> anyhow::Result<()> {
     telemetry::init_tracing(tracing_config);
     telemetry::init_metrics(metrics_config);
 
-    info!(run_migrations, infra_config:?; "starting");
+    info!(run_migrations, application_config:?, infra_config:?; "starting");
 
     let infra::Config {
         secret,
@@ -93,7 +94,7 @@ async fn run() -> anyhow::Result<()> {
 
     let api = AxumApi::new(api_config, storage, zswap_state_storage, subscriber.clone());
 
-    application::run(api, subscriber)
+    application::run(application_config, api, subscriber)
         .await
         .context("run indexer-API application")?;
 

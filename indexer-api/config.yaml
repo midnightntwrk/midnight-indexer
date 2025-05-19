@@ -1,5 +1,8 @@
 run_migrations: true
 
+application:
+  network_id: "Undeployed"
+
 infra:
   storage:
     host: "localhost"
@@ -8,11 +11,11 @@ infra:
     user: "indexer"
     sslmode: "prefer"
 
-  zswap_state_storage:
+  pub_sub:
     url: "localhost:4222"
     username: "indexer"
 
-  pub_sub:
+  zswap_state_storage:
     url: "localhost:4222"
     username: "indexer"
 
@@ -22,7 +25,6 @@ infra:
     request_body_limit: "1MiB"
     max_complexity: 200
     max_depth: 15
-    network_id: "Undeployed"
 
 telemetry:
   tracing:
