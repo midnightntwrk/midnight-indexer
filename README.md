@@ -1,6 +1,6 @@
 # Midnight Indexer
 
-The Midnight Indexer (midnight-indexer) is a set of components designed to optimize the flow of blockchain data from a Midnight node to end-user applications. It retrieves the history of blocks, processes them, stores indexed data efficiently, and provides a GraphQL API for queries and subscriptions. This Rust-based implementation is the next-generation iteration of the previous Scala-based indexer, offering improved performance, modularity, and ease of deployment.
+The Midnight Indexer (midnight-indexer) is a set of components designed to optimize the flow of blockchain data from a Midnight Node to end-user applications. It retrieves the history of blocks, processes them, stores indexed data efficiently, and provides a GraphQL API for queries and subscriptions. This Rust-based implementation is the next-generation iteration of the previous Scala-based indexer, offering improved performance, modularity, and ease of deployment.
 ```
                                 ┌─────────────────┐
                                 │                 │
@@ -56,7 +56,7 @@ The Midnight Indexer (midnight-indexer) is a set of components designed to optim
 
 ### Components
 
-- [Chain Indexer](chain-indexer/README.md): Connects to the Midnight node, fetches blocks and transactions, and stores indexed data.
+- [Chain Indexer](chain-indexer/README.md): Connects to the Midnight Node, fetches blocks and transactions, and stores indexed data.
 - [Wallet Indexer](wallet-indexer/README.md): Associates connected wallets with relevant transactions, enabling personalized queries and subscriptions.
 - [Indexer API](indexer-api/README.md): Exposes a GraphQL API for queries, mutations, and subscriptions.
 
@@ -69,13 +69,86 @@ The Midnight Indexer (midnight-indexer) is a set of components designed to optim
 - Supports both PostgreSQL (cloud) and SQLite (standalone) storage backends.
 - Extensively tested with integration tests and end-to-end scenarios.
 
+### Running
+
+#### Standalone Mode
+
+The standalone Indexer combines the Chain Indexer, Indexer API and Wallet Indexer components in a single executable alongside an in-process SQLite database. Therefore the only Docker image to be run is [`indexer-standalone`](https://hub.docker.com/r/midnightntwrk/indexer-standalone).
+
+By default it connects to a local Midnight Node at `ws://localhost:9944` and exposes its GraphQL API at `0.0.0.0:8088`. All configuration has defaults except for the secret used to encrypt stored sensitive data which must be provided via the `APP__INFRA__SECRET` environment variable as valid hex-encoded 32 bytes.
+
+`indexer-standalone` be configured by the following environment variables:
+
+| Env Var | Meaning | Default |
+|---|---|---|
+| APP__APPLICATION__NETWORK_ID | Network ID: MainNet, TestNet, DevNet or Undeployed | `Undeployed` |
+| APP__INFRA__STORAGE__CNN_URL | SQlite connection URL | `/data/indexer.sqlite` |
+| APP__INFRA__NODE__URL | WebSocket Endpoint of Midnight Node | `ws://localhost:9944` |
+| APP__INFRA__API__PORT | Port of the GraphQL API | `8088` |
+| APP__INFRA__SECRET | Hex-encoded 32-byte secret to encrypt stored sensitive data | - |
+
+For the full set of configuration options see [config.yaml](indexer-standalone/config.yaml).
+
+#### Cloud Mode
+
+The Chain Indexer, Indexer API and Wallet Indexer can be run as separate executables, interacting with a PostgreSQL database and a NATS messaging system. Running PostgreSQL and NATS is out of scope of this document. The respective Docker images are:
+- [`chain-indexer`](https://hub.docker.com/r/midnightntwrk/chain-indexer)
+- [`indexer-api`](https://hub.docker.com/r/midnightntwrk/indexer-api)
+- [`wallet-indexer`](https://hub.docker.com/r/midnightntwrk/wallet-indexer)
+
+##### `chain-indexer` Configuration
+
+| Env Var | Meaning | Default |
+|---|---|---|
+| APP__APPLICATION__NETWORK_ID | Network ID: MainNet, TestNet, DevNet or Undeployed | `Undeployed` |
+| APP__INFRA__STORAGE__HOST | PostgreSQL host | `localhost` |
+| APP__INFRA__STORAGE__PORT | PostgreSQL port | `5432` |
+| APP__INFRA__STORAGE__DBNAME | PostgreSQL database name | `indexer` |
+| APP__INFRA__STORAGE__USER | PostgreSQL database user | `indexer` |
+| APP__INFRA__PUB_SUB__URL | NATS URL | `localhost:4222` |
+| APP__INFRA__PUB_SUB__URL | NATS username | `indexer` |
+| APP__INFRA__ZSWAP_STATE_STORAGE__URL | NATS URL | `localhost:4222` |
+| APP__INFRA__ZSWAP_STATE_STORAGE__URL | NATS username | `indexer` |
+| APP__INFRA__NODE__URL | WebSocket Endpoint of Midnight Node | `ws://localhost:9944` |
+
+For the full set of configuration options see [config.yaml](chain-indexer/config.yaml).
+
+##### `indexer-api` Configuration
+
+| Env Var | Meaning | Default |
+|---|---|---|
+| APP__APPLICATION__NETWORK_ID | Network ID: MainNet, TestNet, DevNet or Undeployed | `Undeployed` |
+| APP__INFRA__STORAGE__HOST | PostgreSQL host | `localhost` |
+| APP__INFRA__STORAGE__PORT | PostgreSQL port | `5432` |
+| APP__INFRA__STORAGE__DBNAME | PostgreSQL database name | `indexer` |
+| APP__INFRA__STORAGE__USER | PostgreSQL database user | `indexer` |
+| APP__INFRA__PUB_SUB__URL | NATS URL | `localhost:4222` |
+| APP__INFRA__PUB_SUB__URL | NATS username | `indexer` |
+| APP__INFRA__ZSWAP_STATE_STORAGE__URL | NATS URL | `localhost:4222` |
+| APP__INFRA__ZSWAP_STATE_STORAGE__URL | NATS username | `indexer` |
+| APP__INFRA__API__PORT | Port of the GraphQL API | `8088` |
+| APP__INFRA__SECRET | Hex-encoded 32-byte secret to encrypt stored sensitive data | - |
+
+For the full set of configuration options see [config.yaml](indexer-api/config.yaml).
+
+##### `wallet-indexer` Configuration
+
+| Env Var | Meaning | Default |
+|---|---|---|
+| APP__APPLICATION__NETWORK_ID | Network ID: MainNet, TestNet, DevNet or Undeployed | `Undeployed` |
+| APP__INFRA__STORAGE__HOST | PostgreSQL host | `localhost` |
+| APP__INFRA__STORAGE__PORT | PostgreSQL port | `5432` |
+| APP__INFRA__STORAGE__DBNAME | PostgreSQL database name | `indexer` |
+| APP__INFRA__STORAGE__USER | PostgreSQL database user | `indexer` |
+| APP__INFRA__PUB_SUB__URL | NATS URL | `localhost:4222` |
+| APP__INFRA__PUB_SUB__URL | NATS username | `indexer` |
+| APP__INFRA__SECRET | Hex-encoded 32-byte secret to encrypt stored sensitive data | - |
+
+For the full set of configuration options see [config.yaml](wallet-indexer/config.yaml).
+
 ### LICENSE
 
 Apache 2.0.
-
-### README.md
-
-Provides a brief description for users and developers who want to understand the purpose, setup, and usage of the repository.
 
 ### SECURITY.md
 
@@ -88,14 +161,6 @@ Provides guidelines for how people can contribute to the Midnight project.
 ### CODEOWNERS
 
 Defines repository ownership rules.
-
-### ISSUE_TEMPLATE
-
-Provides templates for reporting various types of issues, such as: bug report, documentation improvement and feature request.
-
-### PULL_REQUEST_TEMPLATE
-
-Provides a template for a pull request.
 
 ### CLA Assistant
 

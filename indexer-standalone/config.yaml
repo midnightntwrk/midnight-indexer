@@ -11,13 +11,13 @@ application:
   transaction_batch_size: 10
 
 infra:
+  storage:
+    cnn_url: "/data/indexer.sqlite"
+
   node:
     url: "ws://localhost:9944"
     reconnect_max_delay: "10s" # 10ms, 100ms, 1s, 10s
     reconnect_max_attempts: 30 # Roughly 5m
-
-  storage:
-    cnn_url: "/data/indexer.sqlite"
 
   api:
     address: "0.0.0.0"

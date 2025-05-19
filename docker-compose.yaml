@@ -79,7 +79,7 @@ services:
     ports:
       - "8088:8088"
     environment:
-      RUST_LOG: "indexer=debug,chain_indexer=debug,indexer_api=debug,wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
+      RUST_LOG: "indexer-standalone=debug,chain_indexer=debug,indexer_api=debug,wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
       APP__INFRA__SECRET: $APP__INFRA__SECRET
       APP__INFRA__NODE__URL: "ws://node:9944"
     healthcheck:
