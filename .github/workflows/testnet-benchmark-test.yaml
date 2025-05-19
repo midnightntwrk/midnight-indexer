@@ -1,0 +1,139 @@
+name: Testnet Indexer Benchmark Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    env:
+      ENV_TYPE: compose
+      GITHUB_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+      POSTGRES_PASSWORD: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
+      ALLURE_ADMIN_USER: ${{ secrets.ALLURE_ADMIN_USER }}
+      ALLURE_ADMIN_PASSWORD: ${{ secrets.ALLURE_ADMIN_PASSWORD }}
+      NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+      APP__INFRA__PUB_SUB__PASSWORD: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}
+      APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}
+      APP__INFRA__STORAGE__PASSWORD: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
+      APP__INFRA__ZSWAP_STATE_STORAGE__PASSWORD: ${{ secrets.APP__INFRA__ZSWAP_STATE_STORAGE__PASSWORD }}
+    timeout-minutes: 600
+    runs-on: [self-hosted, gha-midnight-larger]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set toolchain
+        run: |
+          toolchain=$(grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/')
+          echo "using toolchain $toolchain from rust-toolchain.toml"
+          echo "toolchain=$toolchain" >> "$GITHUB_ENV"
+
+      - name: Add github.com credentials to netrc
+        uses: extractions/netrc@v2
+        with:
+          machine: github.com
+          username: MidnightCI
+          password: ${{ secrets.MIDNIGHTCI_REPO }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: MidnightCI
+          password: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.toolchain }}
+
+      - name: Install just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Install earthly
+        uses: earthly/actions-setup@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: v0.8.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build images
+        run: |
+          . ./.envrc
+          git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
+          rustup override set ${{ env.toolchain }}
+          just docker-chain-indexer release
+          just docker-indexer-api release
+          just docker-wallet-indexer release
+
+      - name: Yarn install
+        run: cd ts-tests && yarn install
+
+      - name: Run benchmark tests
+        run: |
+          cd ts-tests
+          yarn testnet_indexing_benchmark
+
+      - name: Upload Junit Test Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-reports
+          path: ./ts-tests/reports/jest/testResults.xml
+
+      - name: Upload E2E Allure Test Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-reports
+          path: ./ts-tests/reports/allure-results
+
+      - name: Upload logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-logs
+          path: ./ts-tests/logs/*.log
+
+  publish-test-reports:
+    name: Publish test reports
+    runs-on: ubuntu-latest-8-core-x64
+    if: always()
+    needs: [tests]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Junit Test Reports
+        uses: actions/download-artifact@v4
+        with:
+          name: junit-reports
+          path: ./ts-tests/reports/jest
+
+      - name: Publish Junit Test Report
+        uses: dorny/test-reporter@v1
+        if: ${{ always() }}
+        with:
+          name: Jest Tests Report
+          path: ./ts-tests/reports/jest/*.xml
+          reporter: jest-junit
+          fail-on-error: false
+
+      - name: Download Allure Test Reports
+        uses: actions/download-artifact@v4
+        with:
+          name: allure-reports
+          path: ./ts-tests/reports/allure-results
+
+      - name: Send Results to Allure Server
+        uses: robkatona/send-allure-results@v1.0.5
+        if: ${{ always() }}
+        with:
+          allure-server-url: https://allure-server.prd.midnight.tools
+          allure-results-directory: ts-tests/reports/allure-results
+          project-id: indexer-testnet-benchmark
+          security-user: ${{ secrets.ALLURE_ADMIN_USER }}
+          security-pass: ${{ secrets.ALLURE_ADMIN_PASSWORD }}

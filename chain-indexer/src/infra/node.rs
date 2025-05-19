@@ -18,17 +18,17 @@ use crate::{
         Block, BlockHash, BlockInfo, ContractAction, ContractAttributes, Node, SubstrateHeaderExt,
         Transaction, TransactionHash,
     },
-    infra::node::runtimes::BlockDetails,
+    infra::node::runtimes::{BlockDetails, RuntimeUnshieldedUtxoInfo},
 };
 use async_stream::try_stream;
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        ApplyStage, BlockAuthor, NetworkId, ProtocolVersion, RawTransaction,
-        ScaleDecodeProtocolVersionError,
+        ApplyStage, BlockAuthor, IntentHash, NetworkId, ProtocolVersion, RawTokenType,
+        RawTransaction, ScaleDecodeProtocolVersionError, UnshieldedAddress,
     },
-    error::{BoxError, StdErrorExt},
+    error::StdErrorExt,
     serialize::SerializableExt,
 };
 use log::{debug, error, info, warn};
@@ -47,15 +47,14 @@ use std::{
     time::Duration,
 };
 use subxt::{
-    OnlineClient, SubstrateConfig,
     backend::{
-        BackendExt,
         legacy::LegacyRpcMethods,
         rpc::reconnecting_rpc_client::{ExponentialBackoff, RpcClient},
+        BackendExt,
     },
     config::substrate::{BlakeTwo256, ConsensusEngineId, DigestItem, SubstrateHeader},
-    ext::subxt_rpcs,
     utils::H256,
+    OnlineClient, SubstrateConfig,
 };
 use thiserror::Error;
 
@@ -87,8 +86,7 @@ impl SubxtNode {
         let rpc_client = RpcClient::builder()
             .retry_policy(retry_policy)
             .build(&url)
-            .await
-            .map_err(|error| Error::RpcClient(error.into()))?;
+            .await?;
 
         let default_online_client =
             OnlineClient::<SubstrateConfig>::from_rpc_client(rpc_client.clone()).await?;
@@ -118,8 +116,7 @@ impl SubxtNode {
                 .default_online_client
                 .backend()
                 .metadata_at_version(15, hash.0)
-                .await
-                .map_err(Box::new)?;
+                .await?;
 
             let legacy_rpc_methods =
                 LegacyRpcMethods::<SubstrateConfig>::new(self.rpc_client.to_owned().into());
@@ -136,8 +133,7 @@ impl SubxtNode {
                 runtime_version,
                 metadata,
                 self.rpc_client.to_owned(),
-            )
-            .map_err(Box::new)?;
+            )?;
 
             self.compatible_online_client = Some((protocol_version, online_client));
         }
@@ -154,7 +150,7 @@ impl SubxtNode {
     /// Subscribe to finalizded blocks, filtering duplicates and disconnection errors.
     async fn subscribe_finalized_blocks(
         &self,
-    ) -> Result<impl Stream<Item = Result<SubxtBlock, subxt::Error>> + use<>, subxt::Error> {
+    ) -> Result<impl Stream<Item = Result<SubxtBlock, subxt::Error>>, subxt::Error> {
         let mut last_block_height = None;
 
         let subscribe_finalized_blocks = self
@@ -180,8 +176,8 @@ impl SubxtNode {
                         }
                     }
 
-                    Err(subxt::Error::Rpc(subxt::error::RpcError::ClientError(
-                        subxt_rpcs::Error::DisconnectedWillReconnect(_),
+                    Err(subxt::Error::Rpc(subxt::error::RpcError::DisconnectedWillReconnect(
+                        _,
                     ))) => {
                         warn!("node disconnected, reconnecting");
                         false
@@ -242,12 +238,14 @@ impl SubxtNode {
             deserialize::<MerkleTreeDigest, _>(&mut zswap_state_root.as_slice(), network_id.into())
                 .map_err(SubxtNodeError::DeserializeZswapStateRoot)?;
 
-        let extrinsics = block.extrinsics().await.map_err(Box::new)?;
-        let events = block.events().await.map_err(Box::new)?;
+        let extrinsics = block.extrinsics().await?;
+        let events = block.events().await?;
         let BlockDetails {
             timestamp,
             raw_transactions,
             apply_stages,
+            created_unshielded_utxos_info,
+            spent_unshielded_utxos_info,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
 
         let mut transactions = Vec::with_capacity(raw_transactions.len());
@@ -259,6 +257,8 @@ impl SubxtNode {
                 parent_hash == BlockHash::default(),
                 protocol_version,
                 &apply_stages,
+                &created_unshielded_utxos_info,
+                &spent_unshielded_utxos_info,
                 network_id,
                 online_client,
             )
@@ -300,13 +300,12 @@ impl Node for SubxtNode {
     ) -> Result<impl Stream<Item = Result<BlockInfo, Self::Error>> + Send, Self::Error> {
         let highest_blocks = self
             .subscribe_finalized_blocks()
-            .await
-            .map_err(Box::new)?
+            .await?
             .map_ok(|block| BlockInfo {
                 hash: block.hash().into(),
                 height: block.number(),
             })
-            .map_err(|error| Box::new(error).into());
+            .map_err(Self::Error::from);
 
         Ok(highest_blocks)
     }
@@ -329,10 +328,10 @@ impl Node for SubxtNode {
         let mut authorities = None;
 
         try_stream! {
-            let mut finalized_blocks = self.subscribe_finalized_blocks().await.map_err(Box::new)?;
+            let mut finalized_blocks = self.subscribe_finalized_blocks().await?;
 
             // First we receive the first finalized block.
-            let Some(first_block) = receive_block(&mut finalized_blocks).await.map_err(Box::new)? else {
+            let Some(first_block) = receive_block(&mut finalized_blocks).await? else {
                 return;
             };
             debug!(
@@ -351,7 +350,7 @@ impl Node for SubxtNode {
                 // For these we store the hashes; one hash is 32 bytes, i.e. one year is ~ 156MB.
                 let genesis_parent_hash = self
                     .fetch_block(self.default_online_client.genesis_hash())
-                    .await.map_err(Box::new)?
+                    .await?
                     .header()
                     .parent_hash;
 
@@ -370,7 +369,7 @@ impl Node for SubxtNode {
                 let mut hashes = Vec::with_capacity(capacity);
                 let mut parent_hash = first_block.header().parent_hash;
                 while parent_hash != after_hash && parent_hash != genesis_parent_hash {
-                    let block = self.fetch_block(parent_hash).await.map_err(Box::new)?;
+                    let block = self.fetch_block(parent_hash).await?;
                     if block.number() % 1_000 == 0 {
                         info!(
                             highest_stored_height:? = after_height,
@@ -385,7 +384,7 @@ impl Node for SubxtNode {
 
                 // We fetch and yield the blocks for the stored block hashes.
                 for hash in hashes.into_iter().rev() {
-                    let block = self.fetch_block(hash).await.map_err(Box::new)?;
+                    let block = self.fetch_block(hash).await?;
                     debug!(
                         hash:% = block.hash(),
                         height = block.number(),
@@ -400,7 +399,7 @@ impl Node for SubxtNode {
             }
 
             // Finally we emit all other finalized ones.
-            while let Some(block) = receive_block(&mut finalized_blocks).await.map_err(Box::new)? {
+            while let Some(block) = receive_block(&mut finalized_blocks).await? {
                 debug!(
                     hash:% = block.hash(),
                     height = block.number(),
@@ -439,7 +438,7 @@ impl Default for Config {
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("cannot create reconnecting subxt RPC client")]
-    RpcClient(#[source] BoxError),
+    RpcClient(#[from] jsonrpsee::core::client::Error),
 
     #[error("cannot create subxt online client")]
     OnlineClient(#[from] subxt::Error),
@@ -449,13 +448,13 @@ pub enum Error {
 #[derive(Debug, Error)]
 pub enum SubxtNodeError {
     #[error(transparent)]
-    Subxt(#[from] Box<subxt::Error>),
+    Subxt(#[from] subxt::Error),
 
     #[error(transparent)]
-    SubxtRcps(#[from] subxt::ext::subxt_rpcs::Error),
+    SubxtCore(#[from] subxt::ext::subxt_core::Error),
 
     #[error("cannot scale decode")]
-    ScaleDecode(#[from] parity_scale_codec::Error),
+    ScalaDecode(#[from] parity_scale_codec::Error),
 
     #[error(transparent)]
     DecodeProtocolVersion(#[from] ScaleDecodeProtocolVersionError),
@@ -529,6 +528,8 @@ async fn make_transaction(
     is_genesis: bool,
     protocol_version: ProtocolVersion,
     apply_stages: &HashMap<[u8; 32], ApplyStage>,
+    created_info_map: &HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>>,
+    spent_info_map: &HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>>,
     network_id: NetworkId,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<Transaction>, SubxtNodeError> {
@@ -594,6 +595,38 @@ async fn make_transaction(
         .try_collect::<Vec<_>>()
         .await?;
 
+    let created_unshielded_utxos = created_info_map
+        .get(hash.as_ref())
+        .map_or(&[] as &[_], |v| v.as_slice()) // Get &[] if None, or slice &[_] if Some
+        .iter()
+        .enumerate()
+        .map(|(index, info)| crate::domain::UnshieldedUtxo {
+            creating_transaction_id: 0,
+            output_index: index as u32,
+            owner_address: UnshieldedAddress::from(info.address.clone()),
+            token_type: RawTokenType::from(info.token_type),
+            intent_hash: IntentHash::from(info.intent_hash),
+            value: info.value,
+        })
+        .collect();
+
+    let spent_unshielded_utxos = spent_info_map
+        .get(hash.as_ref())
+        .map_or(&[] as &[_], |v| v.as_slice())
+        .iter()
+        .map(|info| {
+            crate::domain::UnshieldedUtxo {
+                creating_transaction_id: 0, /* TODO: Node event needs to provide
+                                             * creating_transaction_id for spent UTXOs */
+                output_index: 0, // TODO: Node event needs to provide output_index for spent UTXOs
+                owner_address: UnshieldedAddress::from(info.address.clone()),
+                token_type: RawTokenType::from(info.token_type),
+                intent_hash: IntentHash::from(info.intent_hash),
+                value: info.value,
+            }
+        })
+        .collect();
+
     let transaction = Transaction {
         hash,
         apply_stage,
@@ -604,6 +637,8 @@ async fn make_transaction(
         merkle_tree_root: Default::default(),
         start_index: Default::default(),
         end_index: Default::default(),
+        created_unshielded_utxos,
+        spent_unshielded_utxos,
     };
 
     Ok(Some(transaction))
@@ -682,46 +717,44 @@ mod tests {
     };
     use anyhow::Context;
     use assert_matches::assert_matches;
-    use fs_extra::dir::{CopyOptions, copy};
+    use fs_extra::dir::{copy, CopyOptions};
     use futures::{StreamExt, TryStreamExt};
     use indexer_common::{
         domain::{ApplyStage, NetworkId},
         error::BoxError,
     };
     use midnight_ledger::serialize::deserialize;
-    use std::{env, path::Path, pin::pin};
+    use std::{path::Path, pin::pin};
     use subxt::{
-        OnlineClient, SubstrateConfig,
         backend::{
-            legacy::{LegacyRpcMethods, rpc_methods::NumberOrHex},
+            legacy::{rpc_methods::NumberOrHex, LegacyRpcMethods},
             rpc::RpcClient,
         },
         utils::H256,
+        OnlineClient, SubstrateConfig,
     };
     use testcontainers::{
-        GenericImage, ImageExt,
         core::{Mount, WaitFor},
         runners::AsyncRunner,
+        GenericImage, ImageExt,
     };
 
     #[tokio::test]
     async fn test_finalized_blocks_0_12() -> Result<(), BoxError> {
         test_finalized_blocks(
-            "0.12.0",
-            "f06eeef6462073bf726f9324995b26a06ea44b6cfe6a90dff377d9d2e2a4844f",
-            8,
-            "54053a752c872382dced6dc2463d0c889589111bb0e8a236ef4d78517bc85cc9",
-            28,
+            "0.12.0-4337aca9",
+            23,
+            57,
+            "372d90b2fd0057c115692cf2dd180331d0ec874c5388bc45efaf7a6a8b248149",
         )
         .await
     }
 
     async fn test_finalized_blocks(
         node_version: &'static str,
-        before_first_tx_block_hash: &'static str,
-        before_first_tx_height: u32,
-        first_tx_hash: &'static str,
-        last_tx_height: u32,
+        highest_height: u32,
+        max_node_height: u32,
+        hash: &'static str,
     ) -> Result<(), BoxError> {
         let node_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../.node")
@@ -731,6 +764,7 @@ mod tests {
         copy(node_dir, &tmp_dir, &CopyOptions::default())?;
 
         let host_path = tmp_dir.path().join(node_version).display().to_string();
+
         let node_container =
             GenericImage::new("ghcr.io/midnight-ntwrk/midnight-node", node_version)
                 .with_wait_for(WaitFor::message_on_stderr("9944"))
@@ -758,50 +792,43 @@ mod tests {
 
         // Assert that we can start with stored blocks and receive the expected ones.
 
-        let hash = const_hex::decode(before_first_tx_block_hash)
+        let hash = const_hex::decode(hash)
             .expect("block hash can be hex-decoded")
             .try_into()
             .expect("block hash has 32 bytes");
         let blocks = subxt_node.finalized_blocks(
             Some(BlockInfo {
                 hash: H256(hash).into(),
-                height: before_first_tx_height,
+                height: highest_height,
             }),
             NetworkId::Undeployed,
         );
 
         let blocks = blocks
-            .take((last_tx_height - before_first_tx_height) as usize)
+            .take((max_node_height - highest_height) as usize)
             .try_collect::<Vec<_>>()
             .await?;
 
         let heights = blocks.iter().map(|block| block.height).collect::<Vec<_>>();
         assert_eq!(
             heights,
-            (before_first_tx_height + 1..=last_tx_height).collect::<Vec<_>>()
+            (highest_height + 1..=max_node_height).collect::<Vec<_>>()
         );
 
         let transactions = blocks
             .into_iter()
             .flat_map(|block| block.transactions)
             .collect::<Vec<_>>();
-        assert_eq!(transactions.len(), 10); // 1 initial, 6 zswap transactions, 3 contract actions.
+        assert_eq!(transactions.len(), 7); // 3 contract actions, 4 zswap transactions.
 
         assert_matches!(
             transactions.as_slice(),
             [
                 Transaction {
-                    hash: hash_0,
                     apply_stage: ApplyStage::Success,
                     contract_actions: contract_actions_0,
                     ..
                 },
-                Transaction {..},
-                Transaction {..},
-                Transaction {..},
-                Transaction {..},
-                Transaction {..},
-                Transaction {..},
                 Transaction {
                     apply_stage: ApplyStage::Success,
                     contract_actions: contract_actions_1,
@@ -812,17 +839,10 @@ mod tests {
                     contract_actions: contract_actions_2,
                     ..
                 },
-                Transaction {
-                    apply_stage: ApplyStage::Success,
-                    contract_actions: contract_actions_3,
-                    ..
-                },
-            ] if
-                hash_0.to_string() == first_tx_hash &&
-                contract_actions_0.is_empty() &&
-                contract_actions_1.len() == 1 &&
-                contract_actions_2.len() == 1 &&
-                contract_actions_3.len() == 1
+                ..
+            ] if contract_actions_0.len() == 1 &&
+                 contract_actions_1.len() == 1 &&
+                 contract_actions_2.len() == 1
         );
         let ledger_transaction = deserialize::<LedgerTransaction, _>(
             &mut transactions[0].raw.as_ref(),
@@ -871,6 +891,7 @@ mod tests {
         let result = subxt_node
             .make_block(block, &mut None, NetworkId::DevNet)
             .await;
+        println!("{result:?}");
         assert!(result.is_ok());
 
         Ok(())

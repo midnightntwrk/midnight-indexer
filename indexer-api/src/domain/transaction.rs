@@ -11,12 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::BlockHash;
-use derive_more::Debug;
+use crate::domain::{BlockHash, ContractAction, UnshieldedUtxo};
 use indexer_common::domain::{
     ApplyStage, ByteArray, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction,
 };
 use sqlx::FromRow;
+use std::fmt::Debug;
 
 pub type TransactionHash = ByteArray<32>;
 
@@ -37,14 +37,11 @@ pub struct Transaction {
 
     pub apply_stage: ApplyStage,
 
-    #[debug(skip)]
     #[cfg_attr(feature = "standalone", sqlx(skip))]
     pub identifiers: Vec<Identifier>,
 
-    #[debug(skip)]
     pub raw: RawTransaction,
 
-    #[debug(skip)]
     pub merkle_tree_root: MerkleTreeRoot,
 
     #[sqlx(try_from = "i64")]
@@ -52,4 +49,13 @@ pub struct Transaction {
 
     #[sqlx(try_from = "i64")]
     pub end_index: u64,
+
+    #[sqlx(skip)]
+    pub contract_actions: Vec<ContractAction>,
+
+    #[sqlx(skip)]
+    pub unshielded_created_outputs: Vec<UnshieldedUtxo>,
+
+    #[sqlx(skip)]
+    pub unshielded_spent_outputs: Vec<UnshieldedUtxo>,
 }

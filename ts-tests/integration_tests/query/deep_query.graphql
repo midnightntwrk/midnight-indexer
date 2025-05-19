@@ -1,0 +1,33 @@
+query {
+  block(offset: { height: 0 }) {
+    parent {
+      parent {
+        parent {
+          parent {
+            parent {
+              parent {
+                parent {
+                  parent {
+                    parent {
+                      parent {
+                        parent {
+                          parent {
+                            parent {
+                              parent {
+                                hash
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

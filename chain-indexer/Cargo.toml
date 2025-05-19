@@ -1,8 +1,9 @@
 [package]
 name          = "chain-indexer"
+version       = "1.0.1"
 description   = "Chain Indexer"
-version       = { workspace = true }
 edition       = { workspace = true }
+authors       = { workspace = true }
 license       = { workspace = true }
 readme        = { workspace = true }
 homepage      = { workspace = true }
@@ -26,6 +27,7 @@ humantime-serde    = { workspace = true }
 indexer-common     = { path = "../indexer-common" }
 indoc              = { workspace = true }
 itertools          = { workspace = true }
+jsonrpsee          = { workspace = true }
 log                = { workspace = true, features = [ "kv_std" ] }
 metrics            = { workspace = true }
 midnight-ledger    = { workspace = true }

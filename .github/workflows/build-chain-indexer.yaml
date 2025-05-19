@@ -28,7 +28,7 @@ jobs:
         run: |
           toolchain=$(grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/')
           echo "toolchain=$toolchain" | tee -a $GITHUB_ENV
-          version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
+          version=$(grep '^version.*=' indexer-api/Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
           echo "version=$version" | tee -a $GITHUB_ENV
 
       - name: Add github.com credentials to netrc
@@ -37,12 +37,6 @@ jobs:
           machine: github.com
           username: MidnightCI
           password: ${{ secrets.MIDNIGHTCI_REPO }}
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
-          password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -57,14 +51,13 @@ jobs:
         env:
           DOCKER_METADATA_SHORT_SHA_LENGTH: 8
         with:
-          images: |
-            ghcr.io/midnight-ntwrk/chain-indexer
-            ${{ github.ref_type == 'tag' && 'midnightntwrk/chain-indexer' || '' }}
+          images: ghcr.io/midnight-ntwrk/chain-indexer
           tags: |
             type=semver,pattern={{version}}
             type=sha,prefix=${{env.version}}-,format=short
+            type=raw,value=latest
           labels: |
-            org.opencontainers.image.source=https://github.com/midnightntwrk/midnight-indexer/
+            org.opencontainers.image.source=https://github.com/midnight-ntwrk/artifacts
             org.opencontainers.image.title=chain-indexer
             org.opencontainers.image.description=Midnight Chain Indexer
 

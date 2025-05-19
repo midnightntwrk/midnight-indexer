@@ -21,7 +21,7 @@ pub mod infra;
 pub mod serialize;
 pub mod telemetry;
 
-use futures::{Stream, StreamExt, stream};
+use futures::{stream, Stream, StreamExt};
 use std::iter;
 
 /// Flattens a stream of results of chunks of items into a stream of results of items.
@@ -38,7 +38,7 @@ pub fn flatten_chunks<T, E>(
 mod tests {
     use crate::flatten_chunks;
     use assert_matches::assert_matches;
-    use futures::{TryStreamExt, stream};
+    use futures::{stream, TryStreamExt};
     use std::convert::Infallible;
 
     #[tokio::test]

@@ -13,111 +13,115 @@
 
 use async_graphql::scalar;
 use derive_more::derive::From;
-use indexer_common::domain::{
-    NetworkId, TryFromBytesForViewingKey, UnknownNetworkIdError, ViewingKey as CommonViewingKey,
-};
-use midnight_ledger::{serialize::Deserializable, transient_crypto::encryption::SecretKey};
+use indexer_common::domain::ViewingKey as CommonViewingKey;
 use serde::{Deserialize, Serialize};
-use std::io;
 use thiserror::Error;
 
-/// Wrapper around Bech32m encoded viewing key.
+/// Wrapper around viewing key string that supports both Bech32m and hex formats.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, From)]
-#[from(String, &str)]
 pub struct ViewingKey(pub String);
 
 scalar!(ViewingKey);
 
-impl ViewingKey {
-    /// Converts this API viewing key into a domain viewing key, validating the bech32m format and
-    /// network ID and deserializing the bech32m data.
-    ///
-    /// Format expectations:
-    /// - For mainnet: "mn_shield-esk" + bech32m data
-    /// - For other networks: "mn_shield-esk_" + network-id + bech32m data where network-id is one
-    ///   of: "dev", "test", "undeployed"
-    pub fn try_into_domain(
-        self,
-        network_id: NetworkId,
-    ) -> Result<CommonViewingKey, ViewingKeyFormatError> {
-        let (hrp, bytes) = bech32::decode(&self.0).map_err(ViewingKeyFormatError::Decode)?;
-        let hrp = hrp.to_lowercase();
-
-        let Some(n) = hrp.strip_prefix("mn_shield-esk") else {
-            return Err(ViewingKeyFormatError::InvalidHrp(hrp));
-        };
-        let n = n.strip_prefix("_").unwrap_or(n).try_into()?;
-        if n != network_id {
-            return Err(ViewingKeyFormatError::UnexpectedNetworkId(n));
-        }
-
-        SecretKey::deserialize(&mut bytes.as_slice(), 0)?
-            .repr()
-            .as_slice()
-            .try_into()
-            .map_err(ViewingKeyFormatError::Array)
-    }
-}
-
 #[derive(Debug, Error)]
-pub enum ViewingKeyFormatError {
-    #[error("cannot bech32m-decode viewing key")]
-    Decode(#[from] bech32::DecodeError),
+#[error("invalid viewing key format: failed both Bech32m and hex decoding")]
+pub struct ViewingKeyFormatError;
 
-    #[error("unexpected bech32m HRP {0}")]
-    InvalidHrp(String),
+impl TryFrom<ViewingKey> for CommonViewingKey {
+    type Error = ViewingKeyFormatError;
 
-    #[error(transparent)]
-    TryFromStrForNetworkIdError(#[from] UnknownNetworkIdError),
-
-    #[error("unexpected network ID {0}")]
-    UnexpectedNetworkId(NetworkId),
-
-    #[error("cannot deserialize viewing key")]
-    Deserialize(#[from] io::Error),
-
-    #[error(transparent)]
-    Array(TryFromBytesForViewingKey),
+    fn try_from(key: ViewingKey) -> Result<Self, Self::Error> {
+        if let Ok((_, bytes)) = bech32::decode(&key.0) {
+            Ok(CommonViewingKey::from(bytes))
+        } else if let Ok(bytes) = const_hex::decode(&key.0) {
+            Ok(CommonViewingKey::from(bytes))
+        } else {
+            Err(ViewingKeyFormatError)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{ViewingKey, ViewingKeyFormatError};
-    use assert_matches::assert_matches;
-    use indexer_common::domain::{NetworkId, ViewingKey as CommonViewingKey};
-    use midnight_ledger::zswap::keys::{SecretKeys, Seed};
+    use crate::domain::ViewingKey;
+    use bech32::{Bech32m, Hrp};
+    use indexer_common::{
+        domain::{NetworkId, ViewingKey as CommonViewingKey},
+        serialize::SerializableExt,
+    };
+    use midnight_ledger::{
+        serialize::Serializable,
+        transient_crypto::encryption::SecretKey,
+        zswap::keys::{SecretKeys, Seed},
+    };
+
+    const SEED_0001: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 
     #[test]
-    fn test() {
-        let viewing_key = ViewingKey::from(
-            "mn_shield-esk1qvqzq76fwwf9jqlv0uqywd9jk0q4klqk44qyc809que8q0v309z8u7qzzyn2qx",
-        )
-        .try_into_domain(NetworkId::MainNet);
-        assert_matches!(viewing_key, Ok(key) if key == seed_to_viewing_key("0000000000000000000000000000000000000000000000000000000000000000"));
+    fn test_viewing_key_try_from_hex_no_network_id() {
+        let secret_key = seed_to_viewing_key(SEED_0001);
 
-        let viewing_key = ViewingKey::from(
-            "mn_shield-esk1qvqzq76fwwf9jqlv0uqywd9jk0q4klqk44qyc809que8q0v309z8u7qzzyn2qx",
-        )
-        .try_into_domain(NetworkId::DevNet);
-        assert_matches!(
-            viewing_key,
-            Err(ViewingKeyFormatError::UnexpectedNetworkId(
-                NetworkId::MainNet
-            ))
-        );
+        let mut bytes = vec![];
+        <SecretKey as Serializable>::serialize(&secret_key, &mut bytes)
+            .expect("secret key can be serialized");
+        let encoded = const_hex::encode(bytes);
+        let viewing_key = ViewingKey::from(encoded);
 
-        let viewing_key = ViewingKey::from(
-            "mn_shield-esk_dev1qvqzq76fwwf9jqlv0uqywd9jk0q4klqk44qyc809que8q0v309z8u7qz7pax9d",
-        )
-        .try_into_domain(NetworkId::DevNet);
-        assert_matches!(viewing_key, Ok(key) if key == seed_to_viewing_key("0000000000000000000000000000000000000000000000000000000000000000"));
+        let viewing_key = CommonViewingKey::try_from(viewing_key);
+        assert!(viewing_key.is_ok());
     }
 
-    fn seed_to_viewing_key(seed: &str) -> CommonViewingKey {
+    #[test]
+    fn test_viewing_key_try_from_hex_network_id() {
+        let secret_key = seed_to_viewing_key(SEED_0001);
+
+        let bytes = secret_key
+            .serialize(NetworkId::DevNet)
+            .expect("secret key can be serialized");
+        let encoded = const_hex::encode(bytes);
+        let viewing_key = ViewingKey::from(encoded);
+
+        let viewing_key = CommonViewingKey::try_from(viewing_key);
+        assert!(viewing_key.is_ok());
+    }
+
+    #[test]
+    fn test_viewing_key_try_from_bech32m_no_network_id() {
+        let secret_key = seed_to_viewing_key(SEED_0001);
+
+        let mut bytes = vec![];
+        <SecretKey as Serializable>::serialize(&secret_key, &mut bytes)
+            .expect("secret key can be serialized");
+
+        let hrp = Hrp::parse("foo_bar").expect("HRP is valid");
+        let encoded =
+            bech32::encode::<Bech32m>(hrp, &bytes).expect("secret key can be bech32m encoded");
+        let viewing_key = ViewingKey::from(encoded);
+
+        let viewing_key = CommonViewingKey::try_from(viewing_key);
+        assert!(viewing_key.is_ok());
+    }
+
+    #[test]
+    fn test_viewing_key_try_from_bech32m_network_id() {
+        let secret_key = seed_to_viewing_key(SEED_0001);
+
+        let bytes = secret_key
+            .serialize(NetworkId::DevNet)
+            .expect("secret key can be serialized");
+        let hrp = Hrp::parse("foo_bar").expect("HRP is valid");
+        let encoded =
+            bech32::encode::<Bech32m>(hrp, &bytes).expect("secret key can be bech32m encoded");
+        let viewing_key = ViewingKey::from(encoded);
+
+        let viewing_key = CommonViewingKey::try_from(viewing_key);
+        assert!(viewing_key.is_ok());
+    }
+
+    /// Produce a viewing key string from a 32‐byte hex seed.
+    fn seed_to_viewing_key(seed: &str) -> SecretKey {
         let seed_bytes = const_hex::decode(seed).expect("seed can be hex-decoded");
         let seed_bytes = <[u8; 32]>::try_from(seed_bytes).expect("seed has 32 bytes");
-        SecretKeys::from(Seed::from(seed_bytes))
-            .encryption_secret_key
-            .into()
+        SecretKeys::from(Seed::from(seed_bytes)).encryption_secret_key
     }
 }

@@ -3,6 +3,7 @@ name          = "indexer-standalone"
 version       = "1.0.1"
 description   = "Consolidated Indexer for standalone execution"
 edition       = { workspace = true }
+authors       = { workspace = true }
 license       = { workspace = true }
 readme        = { workspace = true }
 homepage      = { workspace = true }

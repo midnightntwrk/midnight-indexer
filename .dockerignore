@@ -1,0 +1,7 @@
+.github
+.idea
+.node/*/chain
+.vscode
+docs
+target
+ts-tests

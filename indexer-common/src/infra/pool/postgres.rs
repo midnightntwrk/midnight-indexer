@@ -14,7 +14,7 @@
 use log::debug;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
-use serde_with::{DisplayFromStr, serde_as};
+use serde_with::{serde_as, DisplayFromStr};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgSslMode};
 use std::ops::Deref;
 use thiserror::Error;
@@ -81,7 +81,7 @@ mod tests {
     use anyhow::Context;
     use sqlx::postgres::PgSslMode;
     use std::error::Error as StdError;
-    use testcontainers::{ImageExt, runners::AsyncRunner};
+    use testcontainers::{runners::AsyncRunner, ImageExt};
     use testcontainers_modules::postgres::Postgres;
 
     #[tokio::test]

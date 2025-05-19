@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::Transaction;
-use derive_more::{From, derive::AsRef};
+use derive_more::{derive::AsRef, From};
 use indexer_common::domain::{BlockAuthor, ProtocolVersion};
 use midnight_ledger::transient_crypto::merkle_tree::MerkleTreeDigest;
 use std::fmt::{self, Debug, Display};

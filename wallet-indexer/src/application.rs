@@ -11,10 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Wallet, storage::Storage};
+use crate::domain::{storage::Storage, Wallet};
 use anyhow::Context;
 use fastrace::trace;
-use futures::{Stream, StreamExt, TryStreamExt, stream};
+use futures::{stream, Stream, StreamExt, TryStreamExt};
 use indexer_common::domain::{NetworkId, Publisher, ViewingKey, WalletIndexed};
 use itertools::Itertools;
 use log::{debug, info};
@@ -90,12 +90,12 @@ async fn index_wallet(
     publisher: &mut impl Publisher,
     storage: &mut impl Storage,
 ) -> anyhow::Result<()> {
-    let session_id = viewing_key.to_session_id();
+    let session_id = viewing_key.as_session_id();
 
     debug!(session_id:?; "indexing wallet");
 
     let tx = storage
-        .acquire_lock(session_id)
+        .acquire_lock(&session_id)
         .await
         .context("acquire lock")?;
 
@@ -104,7 +104,7 @@ async fn index_wallet(
             debug!(session_id:?; "acquired lock, handling session ID");
 
             let wallet = storage
-                .get_wallet(session_id, &mut tx)
+                .get_wallet(&session_id, &mut tx)
                 .await
                 .context("get wallet")?
                 .unwrap_or(Wallet {

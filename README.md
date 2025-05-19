@@ -1,6 +1,6 @@
 # Midnight Indexer
 
-The Midnight Indexer (midnight-indexer) is a set of components designed to optimize the flow of blockchain data from a Midnight node to end-user applications. It retrieves the history of blocks, processes them, stores indexed data efficiently, and provides a GraphQL API for queries and subscriptions. This Rust-based implementation is the next-generation iteration of the previous Scala-based indexer, offering improved performance, modularity, and ease of deployment.
+The Midnight Indexer is a set of components designed to optimize the flow of blockchain data from a Midnight node to end-user applications. It retrieves history of blocks, processes them, stores indexed data efficiently, and provides a GraphQL API for queries and subscriptions. This Rust-based implementation is the next-generation iteration of the previous Scala-based indexer, offering improved performance, modularity, and ease of deployment.
 ```
                                 ┌─────────────────┐
                                 │                 │
@@ -54,61 +54,50 @@ The Midnight Indexer (midnight-indexer) is a set of components designed to optim
                                  └─────────────────┘
 ```
 
-### Components
+## Components
 
 - [Chain Indexer](chain-indexer/README.md): Connects to the Midnight node, fetches blocks and transactions, and stores indexed data.
-- [Wallet Indexer](wallet-indexer/README.md): Associates connected wallets with relevant transactions, enabling personalized queries and subscriptions.
-- [Indexer API](indexer-api/README.md): Exposes a GraphQL API for queries, mutations, and subscriptions.
+- [Wallet Indexer](wallet-indexer/README.md): Associates connected wallets with relevant transactions, enabling personalised data streams.
+- [Indexer API](indexer-api/README.md): Exposes a GraphQL API for queries, mutations, and subscriptions. Integrates with both chain and wallet indexers.
 
-### Features
+## Features
 
-- Fetch and query blocks, transactions and contract actions at specific block hashes, heights, transaction identifiers or contract addresses.
-- Real-time subscriptions to new blocks, contract actions and wallet-related events through WebSocket connections.
+- Fetch and query blocks, transactions, and contracts at various offsets.
+- Real-time subscriptions to new blocks, contract updates, and wallet-related events.
 - Secure wallet sessions enabling clients to track only their relevant transactions.
-- Configurable for both cloud (microservices) and standalone (single binary) deployments.
-- Supports both PostgreSQL (cloud) and SQLite (standalone) storage backends.
-- Extensively tested with integration tests and end-to-end scenarios.
+- Configurable for both local (single-binary) and cloud (microservices) deployments.
+- Supports both PostgreSQL (cloud) and SQLite (local) storage backends.
+- Extensively tested with integration tests using containers and end-to-end scenarios.
 
-### LICENSE
+## Getting Started
 
-Apache 2.0.
+1. **Installation**: Ensure you have [Rust](https://www.rust-lang.org/), [Cargo](https://doc.rust-lang.org/cargo/), and [just](https://github.com/casey/just) installed.
+2. **Build**: 
+   ```bash
+   just all-features
+   ```
+This runs checks, lints, tests, and docs.
 
-### README.md
+3. **Run Locally**:
+   ```bash
+   just run-indexer node="ws://localhost:9944"
+   ```
+   This starts the local unified indexer with SQLite storage.
 
-Provides a brief description for users and developers who want to understand the purpose, setup, and usage of the repository.
+4. **Run in Cloud Mode**:
+    - Spin up separate components using Docker or on separate hosts.
+    - For example, run `chain-indexer`, `wallet-indexer`, and `indexer-api` containers connected to a PostgreSQL instance and NATS for pub/sub.
 
-### SECURITY.md
+## Documentation
 
-Provides a brief description of the Midnight Foundation's security policy and how to properly disclose security issues.
+- [API Documentation](./docs/api/v1/api-documentation.md): Detailed info on GraphQL queries, mutations, and subscriptions.
+- [Development Setup](./docs/development-setup.md): Instructions for setting up your environment.
+- [Running the Application](./docs/running.md): How to run locally or in Docker.
+- [Integration Tests](./docs/integration-tests.md): Details on running the test suite.
+- [Releasing](./docs/releasing.md): How to release new versions.
+- [Contributing](./docs/contributing.md): Guidelines for development and contributions.
+- [Modules Structure](./docs/modules-structure.md): Overview of the project layout.
 
-### CONTRIBUTING.md
+## Status and Health Endpoints
 
-Provides guidelines for how people can contribute to the Midnight project.
-
-### CODEOWNERS
-
-Defines repository ownership rules.
-
-### ISSUE_TEMPLATE
-
-Provides templates for reporting various types of issues, such as: bug report, documentation improvement and feature request.
-
-### PULL_REQUEST_TEMPLATE
-
-Provides a template for a pull request.
-
-### CLA Assistant
-
-The Midnight Foundation appreciates contributions, and like many other open source projects asks contributors to sign a contributor License Agreement before accepting contributions. We use CLA assistant (https://github.com/cla-assistant/cla-assistant) to streamline the CLA signing process, enabling contributors to sign our CLAs directly within a GitHub pull request.
-
-### Dependabot
-
-The Midnight Foundation uses GitHub Dependabot feature to keep our projects dependencies up-to-date and address potential security vulnerabilities. 
-
-### Checkmarx
-
-The Midnight Foundation uses Checkmarx for application security (AppSec) to identify and fix security vulnerabilities. All repositories are scanned with Checkmarx's suite of tools including: Static Application Security Testing (SAST), Infrastructure as Code (IaC), Software Composition Analysis (SCA), API Security, Container Security and Supply Chain Scans (SCS).
-
-### Unito
-
-Facilitates two-way data synchronization, automated workflows and streamline processes between: Jira, GitHub issues and Github project Kanban board. 
+- `GET /ready`: returns 200 OK if ready.

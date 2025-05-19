@@ -13,7 +13,7 @@
 
 use crate::domain::SessionId;
 use derive_more::derive::From;
-use futures::{Stream, stream};
+use futures::{stream, Stream};
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, error::Error as StdError, fmt::Debug};
 
@@ -52,6 +52,17 @@ pub struct WalletIndexed {
     pub session_id: SessionId,
 }
 message!(WalletIndexed);
+
+/// Emitted when a transaction affecting unshielded UTXOs for a concrete address
+/// has been stored in the DB.  `address_bech32m` uses the same text
+/// representation the GraphQL scalar expects, so the subscription layer never
+/// needs to guess the network prefix.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnshieldedUtxoIndexed {
+    pub address_bech32m: String,
+    pub transaction_id: u64,
+}
+message!(UnshieldedUtxoIndexed);
 
 /// A pub-sub publisher.
 #[trait_variant::make(Send)]

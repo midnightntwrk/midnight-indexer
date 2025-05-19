@@ -14,32 +14,30 @@
 use crate::{
     domain::Storage,
     infra::api::{
-        ContextExt, ResultExt,
-        v1::{Block, BlockOffset, resolve_height},
+        v1::{into_from_height, Block, BlockOffsetInput},
+        ContextExt,
     },
 };
-use async_graphql::{Context, Subscription, async_stream::try_stream};
+use async_graphql::{async_stream::try_stream, Context, Subscription};
 use futures::{Stream, TryStreamExt};
-use indexer_common::domain::{BlockIndexed, Subscriber};
-use log::{debug, warn};
-use metrics::{Counter, counter};
+use indexer_common::{
+    domain::{BlockIndexed, Subscriber},
+    error::StdErrorExt,
+};
+use log::{debug, error, warn};
 use std::{marker::PhantomData, num::NonZeroU32, pin::pin};
 
 // TODO: Make configurable!
 const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
 
 pub struct BlockSubscription<S, B> {
-    blocks_calls: Counter,
     _s: PhantomData<S>,
     _b: PhantomData<B>,
 }
 
 impl<S, B> Default for BlockSubscription<S, B> {
     fn default() -> Self {
-        let blocks_calls = counter!("indexer_api_calls_subscription_blocks");
-
         Self {
-            blocks_calls,
             _s: PhantomData,
             _b: PhantomData,
         }
@@ -52,56 +50,71 @@ where
     S: Storage,
     B: Subscriber,
 {
-    /// Subscribe to blocks.
+    /// Subscribe to block events.
     async fn blocks<'a>(
         &self,
         cx: &'a Context<'a>,
-        offset: Option<BlockOffset>,
+        offset: Option<BlockOffsetInput>,
     ) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<Block<S>>> + use<'a, S, B>>
     {
-        self.blocks_calls.increment(1);
+        let storage = cx.get_storage::<S>()?;
+        let subscriber = cx.get_subscriber::<B>()?;
 
-        let storage = cx.get_storage::<S>();
-        let subscriber = cx.get_subscriber::<B>();
+        let block_indexed_stream =
+            subscriber
+                .subscribe::<BlockIndexed>()
+                .await
+                .inspect_err(|error| {
+                    error!(
+                        error:? = error.as_chain();
+                        "cannot subscribe to BlockIndexed events"
+                    )
+                })?;
 
-        let block_indexed_stream = subscriber
-            .subscribe::<BlockIndexed>()
-            .await
-            .internal("cannot subscribe to BlockIndexed events")?;
-
-        // It is fine to use `?` on `resolve_height`, because it implements correct error handling.
-        let mut height = resolve_height(offset, storage).await?;
+        let from_height = into_from_height(offset, storage).await?;
 
         let blocks_stream = try_stream! {
             let mut block_indexed_stream = pin!(block_indexed_stream);
+            let mut next_from_height = from_height;
 
-            // First get all stored `Block`s from the requested `height`.
-            let blocks = storage.get_blocks(height, BATCH_SIZE);
-            debug!(height; "got blocks");
+            // First get all stored `Block`s from the requested `from_height`.
+            let blocks = storage.get_blocks(from_height, BATCH_SIZE);
+            debug!(from_height; "got blocks");
 
             // Then yield all stored `Block`s.
             let mut blocks = pin!(blocks);
-            while let Some(block) = blocks.try_next().await.internal("get next block")? {
-                assert_eq!(block.height, height);
-                height += 1;
+            while let Some(block) = blocks
+                .try_next()
+                .await
+                .inspect_err(|error| error!(error:? = error.as_chain(); "cannot get next block"))?
+            {
+                assert_eq!(block.height, next_from_height);
+                next_from_height += 1;
 
                 yield block.into();
             }
 
             // Then get now stored `Block`s after receiving a `BlockIndexed` event.
-            while block_indexed_stream
-                .try_next()
-                .await
-                .internal("get next BlockIndexed event")?
-                .is_some()
+            while let Some(BlockIndexed { height, .. }) =
+                block_indexed_stream.try_next().await.inspect_err(|error| {
+                    error!(
+                        error:? = error.as_chain();
+                        "cannot get next BlockIndexed event"
+                    )
+                })?
             {
-                debug!("handling BlockIndexed event");
+                debug!(height; "handling BlockIndexed event");
 
-                let blocks = storage.get_blocks(height, BATCH_SIZE);
+                // The next height cannot be less than the so far last height!
+                assert!(height >= next_from_height);
+
+                let blocks = storage.get_blocks(next_from_height, BATCH_SIZE);
                 let mut blocks = pin!(blocks);
-                while let Some(block) = blocks.try_next().await.internal("get next block")? {
-                    assert_eq!(block.height, height);
-                    height += 1;
+                while let Some(block) = blocks.try_next().await.inspect_err(|error| {
+                    error!(error:? = error.as_chain(); "cannot get next block")
+                })? {
+                    assert_eq!(block.height, next_from_height);
+                    next_from_height += 1;
 
                     yield block.into();
                 }

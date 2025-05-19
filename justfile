@@ -108,35 +108,27 @@ docker-indexer-standalone profile="dev":
         -f indexer-standalone/Dockerfile \
         .
 
-docker-indexer-tests profile="dev":
-    tag=$(git rev-parse --short=8 HEAD) && \
-    docker build \
-        --build-arg "RUST_VERSION={{rust_version}}" \
-        --build-arg "PROFILE={{profile}}" \
-        --secret id=netrc,src=$NETRC \
-        -t ghcr.io/midnight-ntwrk/indexer-tests:${tag} \
-        -t ghcr.io/midnight-ntwrk/indexer-tests:latest \
-        -f indexer-tests/Dockerfile \
-        .
-
 run-chain-indexer node="ws://localhost:9944" network_id="Undeployed":
     docker compose up -d postgres nats
     RUST_LOG=chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
         CONFIG_FILE=chain-indexer/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         APP__INFRA__NODE__URL={{node}} \
+        APP__TELEMETRY__METRICS__ENABLED=false \
         cargo run -p chain-indexer --features {{feature}}
 
 run-wallet-indexer:
     docker compose up -d postgres nats
     RUST_LOG=wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
         CONFIG_FILE=wallet-indexer/config.yaml \
+        APP__TELEMETRY__METRICS__ENABLED=false \
         cargo run -p wallet-indexer --features {{feature}}
 
 run-indexer-api:
     docker compose up -d postgres nats
-    RUST_LOG=indexer_api=debug,indexer_common=debug,info \
+    RUST_LOG=indexer_api=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
         CONFIG_FILE=indexer-api/config.yaml \
+        APP__TELEMETRY__METRICS__ENABLED=false \
         cargo run -p indexer-api --bin indexer-api --features {{feature}}
 
 run-indexer-standalone node="ws://localhost:9944":
@@ -144,6 +136,7 @@ run-indexer-standalone node="ws://localhost:9944":
         CONFIG_FILE=indexer/config.yaml \
         APP__INFRA__NODE__URL={{node}} \
         APP__INFRA__STORAGE__CNN_URL=target/data/indexer.sqlite \
+        APP__TELEMETRY__METRICS__ENABLED=false \
         cargo run -p indexer-standalone --features standalone
 
 coverage-generation:
@@ -152,8 +145,8 @@ coverage-generation:
 coverage-report: coverage-generation
     RUSTC_BOOTSTRAP=1 cargo llvm-cov report --open
 
-node_version := "0.12.0"
-generator_version := "0.12.0"
+node_version := "0.12.0-4337aca9_linux_arm64"
+generator_version := "0538d189"
 
 generate-node-data:
     if [ -d ./.node/{{node_version}} ]; then rm -r ./.node/{{node_version}}; fi
@@ -168,54 +161,46 @@ generate-node-data:
     sleep 3
     docker run \
         --rm \
-        --name generator-generate-txs \
+        --name generator-generate-contract-calls \
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
-        generate-txs batches -n 3 -b 2
+        generate-contract-calls
     docker run \
         --rm \
-        --name generator-generate-contract-deploy \
+        --name generator-send \
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
-        generate-txs --dest-file /out/contract_tx_1_deploy.mn --to-bytes \
-        contract-calls deploy \
-        --rng-seed '0000000000000000000000000000000000000000000000000000000000000037'
+        send /out/contract_tx_1_deploy_undeployed.mn
     docker run \
         --rm \
-        --name generator-generate-contract-address \
+        --name generator-send \
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
-        contract-address --network undeployed \
-        --src-file /out/contract_tx_1_deploy.mn --dest-file /out/contract_address.mn
+        send /out/contract_tx_2_store_undeployed.mn
     docker run \
         --rm \
-        --name generator-send-contract-deploy \
+        --name generator-send \
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
-        generate-txs --src-files /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 \
-        send
+        send /out/contract_tx_3_check_undeployed.mn
     docker run \
         --rm \
-        --name generator-generate-contract-call \
+        --name generator-generate-zswap \
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
-        generate-txs contract-calls call \
-        --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
-        --contract-address /out/contract_address.mn
+        generate-zswap -n 3 -f /out/txs.json
     docker run \
         --rm \
-        --name generator-generate-contract-maintenance \
+        --name generator-send \
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
-        generate-txs contract-calls maintenance \
-        --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
-        --contract-address /out/contract_address.mn
+        send-zswap /out/txs.json
     docker rm -f node
 
 run-node:

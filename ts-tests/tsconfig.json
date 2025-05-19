@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "outDir": "./build",
+    "skipLibCheck": true,
+    "allowJs": false,
+    "alwaysStrict": true,
+    "sourceMap": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "incremental": true,
+    "useUnknownInCatchVariables": false,
+    "forceConsistentCasingInFileNames": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": false,
+    "noFallthroughCasesInSwitch": true,
+    "strictPropertyInitialization": false,
+    "baseUrl": ".",
+    "rootDirs": ["./", "./utils/counter/"],
+    "paths": {
+      "reporter/*": ["reporter/*.ts"]
+    }
+  },
+  "include": ["**/*", "*.ts", ".eslintrc.cjs"]
+}

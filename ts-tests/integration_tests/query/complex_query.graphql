@@ -1,0 +1,297 @@
+query {
+  Query0: block(offset: { height: 0 }) {
+    hash
+    height
+    protocolVersion
+    timestamp
+    author
+    transactions {
+      hash
+      protocolVersion
+      applyStage
+      identifiers
+      raw
+      contractCalls {
+        address
+        state
+        ... on ContractCall {
+          address
+          state
+          entryPoint
+        }
+        ... on ContractDeploy {
+          address
+          state
+        }
+        ... on ContractUpdate {
+          address
+          state
+        }
+      }
+      block {
+        hash
+        height
+        protocolVersion
+        timestamp
+        author
+        transactions {
+          hash
+          protocolVersion
+          applyStage
+          identifiers
+          raw
+        }
+      }
+    }
+    parent {
+      hash
+      height
+      protocolVersion
+      timestamp
+      author
+      transactions {
+        hash
+        protocolVersion
+        applyStage
+        identifiers
+        raw
+      }
+    }
+  }
+  Query1: block(offset: { height: 1 }) {
+    hash
+    height
+    protocolVersion
+    timestamp
+    author
+    transactions {
+      hash
+      protocolVersion
+      applyStage
+      identifiers
+      raw
+      contractCalls {
+        address
+        state
+        ... on ContractCall {
+          address
+          state
+          entryPoint
+        }
+        ... on ContractDeploy {
+          address
+          state
+        }
+        ... on ContractUpdate {
+          address
+          state
+        }
+      }
+      block {
+        hash
+        height
+        protocolVersion
+        timestamp
+        author
+        transactions {
+          hash
+          protocolVersion
+          applyStage
+          identifiers
+          raw
+        }
+      }
+    }
+    parent {
+      hash
+      height
+      protocolVersion
+      timestamp
+      author
+      transactions {
+        hash
+        protocolVersion
+        applyStage
+        identifiers
+        raw
+      }
+    }
+  }
+  Query2: block(offset: { height: 2 }) {
+    hash
+    height
+    protocolVersion
+    timestamp
+    author
+    transactions {
+      hash
+      protocolVersion
+      applyStage
+      identifiers
+      raw
+      contractCalls {
+        address
+        state
+        ... on ContractCall {
+          address
+          state
+          entryPoint
+        }
+        ... on ContractDeploy {
+          address
+          state
+        }
+        ... on ContractUpdate {
+          address
+          state
+        }
+      }
+      block {
+        hash
+        height
+        protocolVersion
+        timestamp
+        author
+        transactions {
+          hash
+          protocolVersion
+          applyStage
+          identifiers
+          raw
+        }
+      }
+    }
+    parent {
+      hash
+      height
+      protocolVersion
+      timestamp
+      author
+      transactions {
+        hash
+        protocolVersion
+        applyStage
+        identifiers
+        raw
+      }
+    }
+  }
+  Query3: block(offset: { height: 3 }) {
+    hash
+    height
+    protocolVersion
+    timestamp
+    author
+    transactions {
+      hash
+      protocolVersion
+      applyStage
+      identifiers
+      raw
+      contractCalls {
+        address
+        state
+        ... on ContractCall {
+          address
+          state
+          entryPoint
+        }
+        ... on ContractDeploy {
+          address
+          state
+        }
+        ... on ContractUpdate {
+          address
+          state
+        }
+      }
+      block {
+        hash
+        height
+        protocolVersion
+        timestamp
+        author
+        transactions {
+          hash
+          protocolVersion
+          applyStage
+          identifiers
+          raw
+        }
+      }
+    }
+    parent {
+      hash
+      height
+      protocolVersion
+      timestamp
+      author
+      transactions {
+        hash
+        protocolVersion
+        applyStage
+        identifiers
+        raw
+      }
+    }
+  }
+  Query5: block(offset: { height: 5 }) {
+    hash
+    height
+    protocolVersion
+    timestamp
+    author
+    transactions {
+      hash
+      protocolVersion
+      applyStage
+      identifiers
+      raw
+      contractCalls {
+        address
+        state
+        ... on ContractCall {
+          address
+          state
+          entryPoint
+        }
+        ... on ContractDeploy {
+          address
+          state
+        }
+        ... on ContractUpdate {
+          address
+          state
+        }
+      }
+      block {
+        hash
+        height
+        protocolVersion
+        timestamp
+        author
+        transactions {
+          hash
+          protocolVersion
+          applyStage
+          identifiers
+          raw
+        }
+      }
+    }
+    parent {
+      hash
+      height
+      protocolVersion
+      timestamp
+      author
+      transactions {
+        hash
+        protocolVersion
+        applyStage
+        identifiers
+        raw
+      }
+    }
+  }
+}

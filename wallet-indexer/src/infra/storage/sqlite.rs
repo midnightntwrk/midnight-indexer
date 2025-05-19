@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{Transaction, Wallet, storage::Storage},
+    domain::{storage::Storage, Transaction, Wallet},
     infra::storage::{self},
 };
 use chacha20poly1305::ChaCha20Poly1305;
@@ -23,7 +23,7 @@ use indexer_common::{
     infra::pool::sqlite::SqlitePool,
 };
 use indoc::indoc;
-use sqlx::{QueryBuilder, Row, Sqlite, types::time::OffsetDateTime};
+use sqlx::{types::time::OffsetDateTime, QueryBuilder, Row, Sqlite};
 use std::{num::NonZeroUsize, time::Duration};
 use uuid::Uuid;
 
@@ -47,7 +47,7 @@ impl Storage for SqliteStorage {
     type Database = sqlx::Sqlite;
 
     #[trace]
-    async fn acquire_lock(&mut self, _session_id: SessionId) -> Result<Option<Tx>, sqlx::Error> {
+    async fn acquire_lock(&mut self, _session_id: &SessionId) -> Result<Option<Tx>, sqlx::Error> {
         let tx = self.pool.begin().await?;
         Ok(Some(tx))
     }
@@ -55,7 +55,7 @@ impl Storage for SqliteStorage {
     #[trace]
     async fn get_wallet(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         tx: &mut Tx,
     ) -> Result<Option<Wallet>, sqlx::Error> {
         let query = indoc! {"
@@ -108,7 +108,7 @@ impl Storage for SqliteStorage {
         tx: &mut Tx,
     ) -> Result<(), sqlx::Error> {
         let id = Uuid::now_v7();
-        let session_id = viewing_key.to_session_id();
+        let session_id = viewing_key.as_session_id();
         let viewing_key = viewing_key
             .encrypt(id, &self.cipher)
             .map_err(|error| sqlx::Error::Encode(error.into()))?;
@@ -204,21 +204,21 @@ impl Storage for SqliteStorage {
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{Wallet, storage::Storage},
+        domain::{storage::Storage, Wallet},
         infra::storage::sqlite::SqliteStorage,
     };
     use assert_matches::assert_matches;
     use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
     use futures::{StreamExt, TryStreamExt};
     use indexer_common::{
-        domain::{ApplyStage, ViewingKey},
+        domain::{ApplyStage, NetworkId, ViewingKey},
         infra::{
             migrations,
             pool::{self, sqlite::SqlitePool},
         },
     };
     use indoc::indoc;
-    use sqlx::{QueryBuilder, Row, types::time::OffsetDateTime};
+    use sqlx::{types::time::OffsetDateTime, QueryBuilder, Row};
     use std::{error::Error as StdError, iter};
     use uuid::Uuid;
 
@@ -300,10 +300,12 @@ mod tests {
         let cipher =
             ChaCha20Poly1305::new(&Key::clone_from_slice(b"01234567890123456789012345678901"));
 
-        let viewing_key_a = ViewingKey::make_for_testing_yes_i_know_what_i_am_doing();
-        let viewing_key_b = ViewingKey::make_for_testing_yes_i_know_what_i_am_doing();
-        let session_id_a = viewing_key_a.to_session_id();
-        let session_id_b = viewing_key_b.to_session_id();
+        let viewing_key_a =
+            ViewingKey::make_for_testing_yes_i_know_what_i_am_doing(NetworkId::Undeployed);
+        let viewing_key_b =
+            ViewingKey::make_for_testing_yes_i_know_what_i_am_doing(NetworkId::Undeployed);
+        let session_id_a = viewing_key_a.as_session_id();
+        let session_id_b = viewing_key_b.as_session_id();
 
         let uuid_a = Uuid::now_v7();
         let encrypted_viewing_key_a = viewing_key_a.encrypt(uuid_a, &cipher)?;
@@ -343,13 +345,13 @@ mod tests {
 
         let mut storage = SqliteStorage::new(cipher, pool);
 
-        let tx = storage.acquire_lock(session_id_b).await?;
+        let tx = storage.acquire_lock(&session_id_b).await?;
         assert!(tx.is_some());
         let mut tx = tx.unwrap();
 
-        let wallet = storage.get_wallet([0; 32].into(), &mut tx).await?;
+        let wallet = storage.get_wallet(&[0; 32].into(), &mut tx).await?;
         assert!(wallet.is_none());
-        let wallet = storage.get_wallet(session_id_b, &mut tx).await?;
+        let wallet = storage.get_wallet(&session_id_b, &mut tx).await?;
         assert_matches!(
             wallet,
             Some(Wallet {
@@ -372,11 +374,11 @@ mod tests {
 
         tx.commit().await?;
 
-        let tx = storage.acquire_lock(session_id_b).await?;
+        let tx = storage.acquire_lock(&session_id_b).await?;
         assert!(tx.is_some());
         let mut tx = tx.unwrap();
 
-        let wallet = storage.get_wallet(session_id_b, &mut tx).await?;
+        let wallet = storage.get_wallet(&session_id_b, &mut tx).await?;
         assert_matches!(
             wallet,
             Some(Wallet {

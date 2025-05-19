@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use figment::{
-    Figment,
     providers::{Env, Format, Yaml},
+    Figment,
 };
 use serde::Deserialize;
 use std::env;
@@ -28,7 +28,7 @@ where
     /// Load the configuration from the file at the value of the `CONFIG_FILE` environment variable
     /// or `config.yaml` by default, with an overlay provided by environment variables prefixed with
     /// `"APP__"` and split/nested via `"__"`.
-    fn load() -> Result<Self, Box<figment::Error>> {
+    fn load() -> Result<Self, figment::Error> {
         let config_file = env::var(CONFIG_FILE)
             .map(Yaml::file_exact)
             .unwrap_or(Yaml::file_exact("config.yaml"));
@@ -47,7 +47,7 @@ impl<T> ConfigExt for T where T: for<'de> Deserialize<'de> {}
 #[cfg(test)]
 mod tests {
     use crate::{
-        config::{CONFIG_FILE, ConfigExt},
+        config::{ConfigExt, CONFIG_FILE},
         telemetry,
     };
     use assert_matches::assert_matches;

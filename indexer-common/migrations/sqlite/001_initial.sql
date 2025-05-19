@@ -27,7 +27,7 @@ CREATE INDEX transactions_hash ON transactions(hash);
 
 CREATE INDEX transactions_apply_stage ON transactions(apply_stage);
 
-CREATE INDEX transactions_end_index ON transactions(end_index);
+CREATE INDEX transactions_start_index ON transactions(start_index);
 
 CREATE TABLE transaction_identifiers(
     id INTEGER PRIMARY KEY,
@@ -82,4 +82,3 @@ CREATE TABLE zswap_state(
     value BLOB NOT NULL,
     last_index INTEGER
 );
-

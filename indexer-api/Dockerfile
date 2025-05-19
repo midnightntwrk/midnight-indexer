@@ -9,6 +9,10 @@ WORKDIR /build
 
 RUN git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
 
+COPY --from=ghcr.io/midnight-ntwrk/proof-server:3.1.0-rc.1 /nix/store/m2vp9cxky1ryckkmgqd5x7d2q2mi7chw-midnight-testing-public-parameters-0.1.0/kzg ./target/proof-server/public-parameters/kzg
+COPY --from=ghcr.io/midnight-ntwrk/proof-server:3.1.0-rc.1 /nix/store/m2vp9cxky1ryckkmgqd5x7d2q2mi7chw-midnight-testing-public-parameters-0.1.0/kzg.vp ./target/proof-server/public-parameters/kzg.vp
+COPY --from=ghcr.io/midnight-ntwrk/proof-server:3.1.0-rc.1 /nix/store/6vjbkbvb8ha75gbsimf1ksn980pmsm5i-midnight-zswap-artifacts-3.1.0-rc.1/zswap/ ./target/proof-server/zswap/
+
 COPY ./Cargo.toml ./Cargo.lock ./rust-toolchain.toml ./
 COPY ./.cargo/ ./.cargo/
 COPY ./indexer-common/Cargo.toml ./indexer-common/
@@ -23,12 +27,17 @@ RUN mkdir ./indexer-common/src && \
     sed -i "/\"indexer-tests\"/s/^/# /" Cargo.toml && \
     find . -path '*/src/*' | xargs touch -t 197001010000 -m
 RUN --mount=type=secret,id=netrc,target=/root/.netrc \
+    MIDNIGHT_LEDGER_STATIC_DIR=/build/target/proof-server \
+    ZKIR_PP=/build/target/proof-server/public-parameters \
     cargo build -p indexer-api --features cloud --profile $PROFILE && \
     find ./target | xargs touch -t 197001020000 -m
 
 COPY ./indexer-common/ ./indexer-common/
 COPY ./indexer-api/ ./indexer-api/
+ARG PROFILE=release
 RUN --mount=type=secret,id=netrc,target=/root/.netrc \
+    MIDNIGHT_LEDGER_STATIC_DIR=/build/target/proof-server \
+    ZKIR_PP=/build/target/proof-server/public-parameters \
     cargo build -p indexer-api --bin indexer-api --locked --features cloud --profile $PROFILE && \
     mv ./target/$([ "$PROFILE" = "release" ] && echo "release" || echo "debug")/indexer-api /
 

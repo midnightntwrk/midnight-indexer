@@ -15,7 +15,6 @@ use derive_more::{AsRef, From, Into};
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
 use std::fmt::{self, Debug, Display};
-use thiserror::Error;
 
 /// A newtype for a byte vector implementing various traits, amongst others `Debug` and `Display`
 /// returning a hex-encoded string, the former no longer than nine characters.
@@ -45,18 +44,23 @@ impl Display for ByteVec {
 pub struct ByteArray<const N: usize>(#[serde(with = "const_hex")] pub [u8; N]);
 
 impl<const N: usize> TryFrom<&[u8]> for ByteArray<N> {
-    type Error = TryFromForByteArrayError;
+    type Error = String;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         bytes
             .try_into()
-            .map_err(|_| TryFromForByteArrayError(N, bytes.len()))
+            .map_err(|_| {
+                format!(
+                    "cannot create array of len {N} from slice of len {}",
+                    bytes.len()
+                )
+            })
             .map(Self)
     }
 }
 
 impl<const N: usize> TryFrom<Vec<u8>> for ByteArray<N> {
-    type Error = TryFromForByteArrayError;
+    type Error = String;
 
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
         bytes.as_slice().try_into()
@@ -74,10 +78,6 @@ impl<const N: usize> Display for ByteArray<N> {
         display(self, f)
     }
 }
-
-#[derive(Debug, Error)]
-#[error("cannot create array of len {0} from slice of len {1}")]
-pub struct TryFromForByteArrayError(usize, usize);
 
 fn debug<T>(bytes: &T, f: &mut fmt::Formatter<'_>) -> fmt::Result
 where

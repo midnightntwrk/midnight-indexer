@@ -1,0 +1,111 @@
+services:
+  postgres:
+    container_name: postgres
+    image: postgres:17.1-alpine
+    restart: always
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_USER: indexer
+      POSTGRES_PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+      POSTGRES_DB: indexer
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U indexer']
+      interval: 5s
+      timeout: 2s
+      retries: 2
+
+  nats:
+    container_name: nats
+    image: nats:2.10.24
+    restart: always
+    command: ['--user', 'indexer', '--pass', 'indexer', '-js']
+    ports:
+      - 4222:4222
+
+  chain-indexer:
+    container_name: chain-indexer
+    image: ghcr.io/midnight-ntwrk/chain-indexer:latest
+    restart: always
+    environment:
+      RUST_LOG: chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info
+      APP__INFRA__NODE__URL: ws://node:9944
+      APP__INFRA__STORAGE__HOST: postgres
+      APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+      APP__INFRA__PUB_SUB__URL: nats:4222
+      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
+      APP__INFRA__ZSWAP_STATE_STORAGE__PASSWORD: $APP__INFRA__ZSWAP_STATE_STORAGE__PASSWORD
+      APP__INFRA__ZSWAP_STATE_STORAGE__URL: nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      node:
+        condition: service_started
+    healthcheck:
+      test: ['CMD-SHELL', 'cat /var/run/chain-indexer/running']
+      start_interval: 5s
+      interval: 5s
+      timeout: 2s
+      retries: 2
+
+  indexer-api:
+    container_name: indexer-api
+    image: ghcr.io/midnight-ntwrk/indexer-api:latest
+    restart: always
+    ports:
+      - 8088:8088
+    environment:
+      RUST_LOG: indexer_api=debug,indexer_common=debug,fastrace_opentelemetry=off,info
+      APP__INFRA__SECRET: $APP__INFRA__SECRET
+      APP__INFRA__STORAGE__HOST: postgres
+      APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+      APP__INFRA__PUB_SUB__URL: nats:4222
+      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
+      APP__INFRA__ZSWAP_STATE_STORAGE__PASSWORD: $APP__INFRA__ZSWAP_STATE_STORAGE__PASSWORD
+      APP__INFRA__ZSWAP_STATE_STORAGE__URL: nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    healthcheck:
+      test: ['CMD-SHELL', 'cat /var/run/indexer-api/running']
+      start_interval: 5s
+      interval: 5s
+      timeout: 2s
+      retries: 2
+
+  wallet-indexer:
+    container_name: wallet-indexer
+    image: ghcr.io/midnight-ntwrk/wallet-indexer:latest
+    restart: always
+    environment:
+      RUST_LOG: wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info
+      APP__INFRA__SECRET: $APP__INFRA__SECRET
+      APP__INFRA__STORAGE__HOST: postgres
+      APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+      APP__INFRA__PUB_SUB__URL: nats:4222
+      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    healthcheck:
+      test: ['CMD-SHELL', 'cat /var/run/wallet-indexer/running']
+      start_interval: 5s
+      interval: 5s
+      timeout: 2s
+      retries: 2
+
+  node:
+    container_name: node
+    image: ghcr.io/midnight-ntwrk/midnight-node:0.12.0-beta.2
+    restart: always
+    ports:
+      - 9944:9944
+    environment:
+      SHOW_CONFIG: false
+      CFG_PRESET: dev

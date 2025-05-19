@@ -13,9 +13,9 @@
 
 use indexer_common::domain::{ProtocolVersion, ScaleDecodeProtocolVersionError};
 use subxt::config::{
-    Hasher,
     polkadot::U256,
     substrate::{ConsensusEngineId, DigestItem, SubstrateHeader},
+    Hasher,
 };
 
 const VERSION_ID: ConsensusEngineId = *b"MNSV";

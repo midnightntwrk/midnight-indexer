@@ -12,7 +12,8 @@
 // limitations under the License.
 
 mod block;
-mod contract_action;
+mod contract;
+mod unshielded;
 mod wallet;
 
 use crate::domain::Storage;
@@ -22,8 +23,9 @@ use indexer_common::domain::{Subscriber, ZswapStateStorage};
 #[derive(MergedSubscription)]
 pub struct Subscription<S, B, Z>(
     block::BlockSubscription<S, B>,
-    contract_action::ContractActionSubscription<S, B>,
+    contract::ContractSubscription<S, B>,
     wallet::WalletSubscription<S, B, Z>,
+    unshielded::UnshieldedSubscription<S, B>,
 )
 where
     S: Storage,
@@ -39,8 +41,9 @@ where
     fn default() -> Self {
         Subscription(
             block::BlockSubscription::default(),
-            contract_action::ContractActionSubscription::default(),
+            contract::ContractSubscription::default(),
             wallet::WalletSubscription::default(),
+            unshielded::UnshieldedSubscription::default(),
         )
     }
 }

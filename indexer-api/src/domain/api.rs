@@ -13,7 +13,7 @@
 
 use std::{
     error::Error as StdError,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{atomic::AtomicBool, Arc},
 };
 
 /// API abstraction.

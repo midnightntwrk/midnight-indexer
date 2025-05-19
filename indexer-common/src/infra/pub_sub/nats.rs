@@ -15,7 +15,7 @@ pub mod publisher;
 pub mod subscriber;
 
 use crate::domain::Topic;
-use async_nats::{Subject, subject::ToSubject};
+use async_nats::{subject::ToSubject, Subject};
 use secrecy::SecretString;
 use serde::Deserialize;
 
@@ -38,12 +38,12 @@ mod tests {
     use crate::{
         domain::{Publisher, SessionId, Subscriber, WalletIndexed},
         error::BoxError,
-        infra::pub_sub::nats::{Config, publisher::NatsPublisher, subscriber::NatsSubscriber},
+        infra::pub_sub::nats::{publisher::NatsPublisher, subscriber::NatsSubscriber, Config},
     };
     use anyhow::Context;
     use futures::{StreamExt, TryStreamExt};
-    use std::time::{Duration, Instant};
-    use testcontainers::{GenericImage, ImageExt, core::WaitFor, runners::AsyncRunner};
+    use std::time::Duration;
+    use testcontainers::{core::WaitFor, runners::AsyncRunner, GenericImage, ImageExt};
     use tokio::time::sleep;
 
     #[tokio::test]
@@ -59,18 +59,8 @@ mod tests {
             .start()
             .await
             .context("start NATS container")?;
-
-        // In spite of the above "WaitFor" NATS stubbornly rejects connections.
-        let start = Instant::now();
-        while reqwest::get("localhost:8222/healthz")
-            .await
-            .and_then(|r| r.error_for_status())
-            .is_err()
-            && Instant::now() - start < Duration::from_millis(1_500)
-        {
-            sleep(Duration::from_millis(100)).await;
-        }
-
+        // The NATS container seems to take a while before actually accepting connections!
+        sleep(Duration::from_millis(250)).await;
         let nats_port = nats_container
             .get_host_port_ipv4(4222)
             .await

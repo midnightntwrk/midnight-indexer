@@ -11,9 +11,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+use crate::domain::{self, ContractAttributes};
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+use indexer_common::domain::{ContractAddress, ContractState, ContractZswapState};
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+use sqlx::FromRow;
+
 #[cfg_attr(docsrs, doc(cfg(feature = "cloud")))]
 #[cfg(feature = "cloud")]
 pub mod postgres;
 #[cfg_attr(docsrs, doc(cfg(feature = "standalone")))]
 #[cfg(feature = "standalone")]
 pub mod sqlite;
+
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+pub struct ContractAction {
+    #[sqlx(try_from = "i64")]
+    pub id: u64,
+
+    pub address: ContractAddress,
+
+    pub state: ContractState,
+
+    #[sqlx(json)]
+    pub attributes: ContractAttributes,
+
+    pub zswap_state: ContractZswapState,
+}
+
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+impl From<ContractAction> for domain::ContractAction {
+    fn from(action: ContractAction) -> Self {
+        let ContractAction {
+            id,
+            address,
+            state,
+            attributes,
+            zswap_state,
+        } = action;
+
+        Self {
+            id,
+            address,
+            state,
+            attributes,
+            zswap_state,
+        }
+    }
+}

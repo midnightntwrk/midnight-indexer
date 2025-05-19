@@ -13,15 +13,15 @@
 
 use crate::domain::Api;
 use anyhow::Context as AnyhowContext;
-use futures::{TryStreamExt, future::ok};
+use futures::{future::ok, TryStreamExt};
 use indexer_common::{
     domain::{BlockIndexed, Subscriber},
     error::StdErrorExt,
 };
 use log::error;
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, Ordering},
+    Arc,
 };
 use tokio::{select, task};
 

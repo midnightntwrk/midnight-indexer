@@ -23,7 +23,7 @@ use chacha20poly1305::ChaCha20Poly1305;
 use indexer_common::domain::{DecryptViewingKeyError, ViewingKey};
 use sqlx::{
     prelude::FromRow,
-    types::{Uuid, time::OffsetDateTime},
+    types::{time::OffsetDateTime, Uuid},
 };
 
 /// Persistent wallet data.

@@ -39,7 +39,7 @@ CREATE INDEX ON transactions(hash);
 
 CREATE INDEX ON transactions(apply_stage);
 
-CREATE INDEX ON transactions(end_index);
+CREATE INDEX ON transactions(start_index);
 
 CREATE TABLE contract_actions(
     id BIGSERIAL PRIMARY KEY,
@@ -74,4 +74,3 @@ CREATE TABLE relevant_transactions(
     transaction_id BIGINT NOT NULL REFERENCES transactions(id),
     UNIQUE (wallet_id, transaction_id)
 );
-

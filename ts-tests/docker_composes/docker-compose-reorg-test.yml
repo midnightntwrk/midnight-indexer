@@ -1,0 +1,262 @@
+networks:
+  network1:
+  network2:
+
+x-common-variables: &common-variables
+  ADDRESSES: /res/qanet/addresses.json
+  USE_MAIN_CHAIN_FOLLOWER_MOCK: true
+  MAIN_CHAIN_FOLLOWER_MOCK_REGISTRATIONS_FILE: /res/mock-bridge-data/default-registrations.json
+  
+services:
+  nats:
+    container_name: nats
+    image: nats:2.10.24
+    restart: always
+    command: ['--user', 'indexer', '--pass', 'indexer', '-js']
+    ports:
+      - 4222:4222
+    networks:
+      - network1
+      - network2
+
+  boot-node:
+    container_name: boot-node
+    image: ghcr.io/midnight-ntwrk/midnight-node:0.12.0-beta.2
+    platform: linux/amd64
+    ports:
+      - 0:9944
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9944/health']
+      interval: 2s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    environment:
+      <<: *common-variables
+      ARGS: >
+        --chain=res/qanet/qanetRaw.json
+        --node-key 0000000000000000000000000000000000000000000000000000000000000001
+        --port 30334
+        --base-path=/data
+        --unsafe-rpc-external
+        --rpc-cors=all
+    networks:
+      - network1
+      - network2
+
+  node0:
+    container_name: node0
+    platform: linux/amd64
+    image: ghcr.io/midnight-ntwrk/midnight-node:0.12.0-beta.2
+    ports:
+      - 0:9944
+    environment:
+      <<: *common-variables
+      SEED_PHRASE: //Alice
+      ARGS: >
+        --chain=res/qanet/qanetRaw.json
+        --node-key 0000000000000000000000000000000000000000000000000000000000000002
+        --validator
+        --bootnodes /dns/boot-node/tcp/30333/p2p/12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp
+        --port 30335
+        --base-path=/data
+        --unsafe-rpc-external
+        --rpc-cors=all
+    networks:
+      - network1
+
+  node1:
+    container_name: node1
+    platform: linux/amd64
+    image: ghcr.io/midnight-ntwrk/midnight-node:0.12.0-beta.2
+    ports:
+      - 0:9944
+    environment:
+      <<: *common-variables
+      SEED_PHRASE: //Bob
+      ARGS: >
+        --chain=res/qanet/qanetRaw.json
+        --node-key 0000000000000000000000000000000000000000000000000000000000000003
+        --validator
+        --bootnodes /dns/boot-node/tcp/30333/p2p/12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp
+        --port 30336
+        --base-path=/data
+        --unsafe-rpc-external
+        --rpc-cors=all
+    networks:
+      - network1
+
+  node2:
+    container_name: node2
+    platform: linux/amd64
+    image: ghcr.io/midnight-ntwrk/midnight-node:0.12.0-beta.2
+    ports:
+      - 9947:9944
+    environment:
+      <<: *common-variables
+      SEED_PHRASE: //Charlie
+      ARGS: >
+        --chain=res/qanet/qanetRaw.json
+        --node-key 0000000000000000000000000000000000000000000000000000000000000004
+        --validator
+        --bootnodes /dns/boot-node/tcp/30333/p2p/12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp
+        --port 30337
+        --base-path=/data
+        --unsafe-rpc-external
+        --rpc-cors=all
+    networks:
+      - network1
+
+  node3:
+    container_name: node3
+    platform: linux/amd64
+    image: ghcr.io/midnight-ntwrk/midnight-node:0.12.0-beta.2
+    ports:
+      - 9948:9944
+    environment:
+      <<: *common-variables
+      SEED_PHRASE: //Dave
+      ARGS: >
+        --chain=res/qanet/qanetRaw.json
+        --node-key 0000000000000000000000000000000000000000000000000000000000000005
+        --validator
+        --bootnodes /dns/boot-node/tcp/30333/p2p/12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp
+        --port 30338
+        --base-path=/data
+        --unsafe-rpc-external
+        --rpc-cors=all
+    networks:
+      - network1
+
+  node4:
+    container_name: node4
+    platform: linux/amd64
+    image: ghcr.io/midnight-ntwrk/midnight-node:0.12.0-beta.2
+    ports:
+      - 9949:9944
+    environment:
+      <<: *common-variables
+      SEED_PHRASE: //Eve
+      ARGS: >
+        --chain=res/qanet/qanetRaw.json
+        --node-key 0000000000000000000000000000000000000000000000000000000000000006
+        --validator
+        --bootnodes /dns/boot-node/tcp/30333/p2p/12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp
+        --port 30339
+        --base-path=/data
+        --unsafe-rpc-external
+        --rpc-cors=all
+    networks:
+      - network1
+
+  node5:
+    container_name: node5
+    platform: linux/amd64
+    image: ghcr.io/midnight-ntwrk/midnight-node:0.12.0-beta.2
+    ports:
+      - 9950:9944
+    environment:
+      <<: *common-variables
+      SEED_PHRASE: //Ferdie
+      ARGS: >
+        --chain=res/qanet/qanetRaw.json
+        --node-key 0000000000000000000000000000000000000000000000000000000000000007
+        --validator
+        --bootnodes /dns/boot-node/tcp/30333/p2p/12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp
+        --port 30340
+        --base-path=/data
+        --unsafe-rpc-external
+        --rpc-cors=all
+    networks:
+      - network2
+
+  node6:
+    container_name: node6
+    platform: linux/amd64
+    image: ghcr.io/midnight-ntwrk/midnight-node:0.12.0-beta.2
+    ports:
+      - 0:9944
+    environment:
+      <<: *common-variables
+      SEED_PHRASE: //One
+      ARGS: >
+        --chain=res/qanet/qanetRaw.json
+        --node-key 0000000000000000000000000000000000000000000000000000000000000008
+        --validator
+        --bootnodes /dns/boot-node/tcp/30333/p2p/12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp
+        --port 30341
+        --base-path=/data
+        --unsafe-rpc-external
+        --rpc-cors=all
+    networks:
+      - network2
+
+  chain-indexer:
+    container_name: chain-indexer
+    image: ghcr.io/midnight-ntwrk/chain-indexer:latest
+    restart: always
+    environment:
+      RUST_LOG: chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info
+      APP__APPLICATION__NETWORK_ID: DevNet
+      APP__INFRA__NODE__URL: ws://load_balancer:9944
+      APP__INFRA__STORAGE__HOST: postgres
+      APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+      APP__INFRA__PUB_SUB__URL: nats:4222
+      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
+      APP__INFRA__ZSWAP_STATE_STORAGE__PASSWORD: $APP__INFRA__ZSWAP_STATE_STORAGE__PASSWORD
+      APP__INFRA__ZSWAP_STATE_STORAGE__URL: nats:4222
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      load_balancer:
+        condition: service_started
+    healthcheck:
+      test: ['CMD-SHELL', 'cat /var/run/chain-indexer/running']
+      start_interval: 5s
+      interval: 5s
+      timeout: 2s
+      retries: 2
+    networks:
+      - network1
+      - network2
+
+  postgres:
+    container_name: postgres
+    image: postgres:17.1-alpine
+    restart: always
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_USER: indexer
+      POSTGRES_PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+      POSTGRES_DB: indexer
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U indexer']
+      interval: 5s
+      timeout: 2s
+      retries: 2
+    networks:
+      - network1
+      - network2
+
+  load_balancer:
+    image: nginx:latest
+    container_name: load_balancer
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - 9944:9944
+    depends_on:
+      - boot-node
+      - node0
+      - node1
+      - node2
+      - node3
+      - node4
+      - node5
+      - node6
+    networks:
+      - network1
+      - network2

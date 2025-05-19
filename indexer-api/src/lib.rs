@@ -14,7 +14,111 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod application;
-#[cfg(feature = "cloud")]
-pub mod config;
 pub mod domain;
 pub mod infra;
+
+#[cfg(feature = "cloud")]
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct Config {
+    pub run_migrations: bool,
+
+    #[serde(rename = "infra")]
+    pub infra_config: infra::Config,
+
+    #[serde(rename = "telemetry")]
+    pub telemetry_config: indexer_common::telemetry::Config,
+}
+
+#[cfg(feature = "cloud")]
+pub async fn main() -> anyhow::Result<()> {
+    use anyhow::Context;
+    use indexer_common::{config::ConfigExt, telemetry};
+    use log::error;
+    use std::panic;
+
+    // Initialize logging.
+    telemetry::init_logging();
+
+    // Replace the default panic hook with one that uses structured logging at ERROR level.
+    panic::set_hook(Box::new(|panic| error!(panic:%; "process panicked")));
+
+    // Load configuration.
+    let Config {
+        run_migrations,
+        infra_config,
+        telemetry_config:
+            telemetry::Config {
+                tracing_config,
+                metrics_config,
+            },
+    } = Config::load()
+        .context("load configuration")
+        .inspect_err(|error| {
+            let backtrace = error.backtrace();
+            let error = format!("{error:#}");
+            error!(error, backtrace:%; "process exited with ERROR")
+        })?;
+
+    // Initialize tracing and metrics.
+    telemetry::init_tracing(tracing_config);
+    telemetry::init_metrics(metrics_config);
+
+    // Run and log any error.
+    run(run_migrations, infra_config)
+        .await
+        .inspect_err(|error| {
+            let backtrace = error.backtrace();
+            let error = format!("{error:#}");
+            error!(error, backtrace:%; "process exited with ERROR")
+        })
+}
+
+#[cfg(feature = "cloud")]
+async fn run(run_migrations: bool, infra_config: infra::Config) -> anyhow::Result<()> {
+    use crate::infra::api::AxumApi;
+    use anyhow::Context;
+    use indexer_common::{
+        cipher::make_cipher,
+        infra::{migrations, pool, pub_sub, zswap_state_storage},
+    };
+    use log::{error, info};
+
+    info!(run_migrations, infra_config:?; "starting");
+
+    let infra::Config {
+        secret,
+        api_config,
+        storage_config,
+        zswap_state_storage_config,
+        pub_sub_config,
+    } = infra_config;
+
+    let pool = pool::postgres::PostgresPool::new(storage_config)
+        .await
+        .context("create DB pool for Postgres")?;
+    if run_migrations {
+        migrations::postgres::run(&pool)
+            .await
+            .context("run Postgres migrations")?;
+    }
+    let cipher = make_cipher(secret).context("make cipher")?;
+    let storage =
+        infra::storage::postgres::PostgresStorage::new(cipher, pool, api_config.network_id);
+
+    let zswap_state_storage =
+        zswap_state_storage::nats::NatsZswapStateStorage::new(zswap_state_storage_config)
+            .await
+            .context("create NatsZswapStateStorage")?;
+
+    let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config).await?;
+
+    let api = AxumApi::new(api_config, storage, zswap_state_storage, subscriber.clone());
+
+    application::run(api, subscriber)
+        .await
+        .context("run indexer-API application")?;
+
+    error!("indexer-api terminated");
+
+    Ok(())
+}

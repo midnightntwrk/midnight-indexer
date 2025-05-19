@@ -1,0 +1,18 @@
+services:
+  indexer:
+    container_name: indexer-standalone
+    image: ghcr.io/midnight-ntwrk/indexer-standalone:latest
+    restart: always
+    environment:
+      APP__INFRA__NODE__URL: ${SUBSTRATE_NODE_WS_URL}
+      APP__APPLICATION__NETWORK_ID: ${LEDGER_NETWORK_ID}
+      RUST_LOG: chain_indexer=debug,indexer_api=debug,wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info
+      APP__INFRA__SECRET: $APP__INFRA__SECRET
+    healthcheck:
+      test: ['CMD-SHELL', 'cat /var/run/indexer/running']
+      start_interval: 5s
+      interval: 5s
+      timeout: 2s
+      retries: 2
+    ports:
+      - 8088:8088

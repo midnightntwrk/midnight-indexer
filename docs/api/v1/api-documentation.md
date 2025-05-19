@@ -1,6 +1,6 @@
 # Midnight Indexer API Documentation v1
 
-The Midnight Indexer API exposes a GraphQL API that enables clients to query and subscribe to blockchain data—blocks, transactions, contracts, and wallet-related events—indexed from the Midnight blockchain. These capabilities facilitate both historical lookups and real-time monitoring.
+The Midnight Indexer API exposes a GraphQL interface that enables clients to query and subscribe to blockchain data—blocks, transactions, contracts, and wallet-related events—indexed from the Midnight blockchain. These capabilities facilitate both historical lookups and real-time monitoring.
 
 **Disclaimer:**  
 The examples provided here are illustrative and may need updating if the API changes. Always consider [`indexer-api/graphql/schema-v1.graphql`](../../../indexer-api/graphql/schema-v1.graphql) as the primary source of truth. Adjust queries as necessary to match the latest schema.
@@ -11,11 +11,11 @@ The GraphQL schema is defined in [`indexer-api/graphql/schema-v1.graphql`](../..
 
 ## Overview of Operations
 
-- **Queries**: Fetch blocks, transactions, and contract actions.  
+- **Queries**: Fetch blocks, transactions, and contract states.  
   Examples:
-    - Retrieve the latest block or a specific block by hash or height.
+    - Retrieve the latest block or a specific block by height/hash.
     - Look up transactions by their hash or identifier.
-    - Inspect the current state of a contract action at a given block or transaction offset.
+    - Inspect the current state of a contract at a given block or transaction offset.
 
 - **Mutations**: Manage wallet sessions.
     - `connect(viewingKey: ViewingKey!)`: Creates a session associated with a viewing key.
@@ -23,20 +23,20 @@ The GraphQL schema is defined in [`indexer-api/graphql/schema-v1.graphql`](../..
 
 - **Subscriptions**: Receive real-time updates.
     - `blocks`: Stream newly indexed blocks.
-    - `contractActions(address, offset)`: Stream contract actions.
+    - `contracts(address, offset)`: Stream contract state changes.
     - `wallet(sessionId, ...)`: Stream wallet updates, including relevant transactions and optional progress updates.
 
 ## API Endpoints
 
 **HTTP (Queries & Mutations):**
 ```
-POST https://<host>:<port>/api/v1/graphql
+POST http://<host>:<port>/api/v1/graphql
 Content-Type: application/json
 ```
 
 **WebSocket (Subscriptions):**
 ```
-wss://<host>:<port>/api/v1/graphql/ws
+ws://<host>:<port>/api/v1/graphql/ws
 Sec-WebSocket-Protocol: graphql-transport-ws
 ```
 
@@ -44,16 +44,16 @@ Sec-WebSocket-Protocol: graphql-transport-ws
 
 - `HexEncoded`: Hex-encoded bytes (for hashes, addresses, session IDs).
 - `ViewingKey`: A viewing key in hex or Bech32 format for wallet sessions.
-- `ApplyStage`: Enumerated stages of transaction application. This scalar represents the outcome of transaction processing on the chain ("Success", "PartialSuccess" or "Failure").
+- `ApplyStage`: Enumerated stages of transaction application (e.g., Success, Failure).
 - `Unit`: An empty return type for mutations that do not return data.
 
 ## Example Queries and Mutations
 
 **Note:** These are examples only. Refer to the schema file to confirm exact field names and structures.
 
-### block(offset: BlockOffset): Block
+### block(offset: BlockOffsetInput): Block
 
-**Parameters** (BlockOffset is a oneOf):
+**Parameters** (BlockOffsetInput is a oneOf):
 - `hash: HexEncoded` – The block hash.
 - `height: Int` – The block height (number).
 
@@ -65,10 +65,9 @@ Query by height:
 
 ```graphql
 query {
-  block(offset: { height: 3 }) {
+  block(offset: {height: 3}) {
     hash
     height
-    protocolVersion
     timestamp
     parent {
       hash
@@ -81,60 +80,55 @@ query {
 }
 ```
 
-### transactions(offset: TransactionOffset!): [Transaction!]!
+### transactions(hash: HexEncoded, identifier: HexEncoded): [Transaction!]!
 
-Fetch transactions by hash or by identifier using a TransactionOffset object. The offset must include either a hash or an identifier, but not both. Returns an array since a hash may map to multiple related actions.
+Fetch transactions by hash or by identifier. One of the parameters must be provided, but not both. Returns an array since a hash may map to multiple related actions.
+
+**Note:** This field is deprecated in favour of a future `v2/transaction` query.
 
 **Example:**
 
 ```graphql
 query {
-  transactions(offset: { hash: "3031323..." }) {
+  transactions(hash: "78f3543c77c2...") {
     hash
-    protocolVersion
-    merkleTreeRoot
     block {
       height
       hash
     }
     identifiers
     raw
-    contractActions {
+    contractCalls {
       __typename
       ... on ContractDeploy {
         address
         state
-        chainState
+        zswapChainState
       }
       ... on ContractCall {
         address
         state
         entryPoint
-        chainState
-      }
-      ... on ContractUpdate {
-        address
-        state
-        chainState
+        zswapChainState
       }
     }
   }
 }
 ```
 
-### contractAction(address: HexEncoded!, offset: ContractActionOffset): ContractAction
+### contract(address: HexEncoded!, offset: ContractOffset): ContractCallOrDeploy
 
-Retrieve the latest known contract action at a given offset (by block or transaction). If no offset is provided, returns the latest state.
+Retrieve the latest known state of a contract at a given offset (by block or transaction). If no offset is provided, returns the latest state.
 
 **Example (latest):**
 
 ```graphql
 query {
-  contractAction(address: "3031323...") {
+  contract(address: "0x1") {
     __typename
     address
     state
-    chainState
+    zswapChainState
   }
 }
 ```
@@ -143,32 +137,17 @@ query {
 
 ```graphql
 query {
-  contractAction(
-    address: "3031323...", 
-    offset: { blockOffset: { height: 10 } }
+  contract(
+    address: "0x1", 
+    offset: { blockOffsetInput: { height: 10 } }
   ) {
     __typename
     address
     state
-    chainState
+    zswapChainState
   }
 }
 ```
-
-## Contract Action Types
-
-All ContractAction types (ContractDeploy, ContractCall, ContractUpdate) implement the ContractAction interface with these common fields:
-- `address`: The contract address (HexEncoded)
-- `state`: The contract state (HexEncoded)
-- `chainState`: The chain state at this action (HexEncoded)
-- `transaction`: The transaction that contains this action
-
-Contract actions can be one of three types:
-- **ContractDeploy**: Initial contract deployment
-- **ContractCall**: Invocation of a contract's entry point
-- **ContractUpdate**: State update to an existing contract
-
-Each type implements the ContractAction interface but may have additional fields. For example, ContractCall includes an `entryPoint` field and a reference to its associated `deploy`.
 
 ## Mutations
 
@@ -188,6 +167,15 @@ Establishes a session for a given wallet viewing key in **either** bech32m or he
 mutation {
   # Provide the bech32m format:
   connect(viewingKey: "mn_shield-esk1abcdef...") 
+}
+```
+
+OR
+
+```graphql
+mutation {
+  # Provide the hex format:
+  connect(viewingKey: "000300386224d330...") 
 }
 ```
 
@@ -215,13 +203,15 @@ mutation {
 }
 ```
 
+If the session does not exist, an error is returned.
+
 ## Subscriptions: Real-time Updates
 
-Subscriptions use a WebSocket connection following the [GraphQL over WebSocket](https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md) protocol. After connecting and sending a `connection_init` message, the client can start subscription operations.
+Subscriptions use a WebSocket connection following the `graphql-transport-ws` protocol. After connecting and sending a `connection_init` message, the client can start subscription operations.
 
 ### Blocks Subscription
 
-`blocks(offset: BlockOffset): Block!`
+`blocks(offset: BlockOffsetInput): Block!`
 
 Subscribe to new blocks. The `offset` parameter lets you start receiving from a given block (by height or hash). If omitted, starts from the latest block.
 
@@ -232,18 +222,18 @@ Subscribe to new blocks. The `offset` parameter lets you start receiving from a 
   "id": "1",
   "type": "start",
   "payload": {
-    "query": "subscription { blocks(offset: { height: 10 }) { hash height timestamp transactions { hash } } }"
+    "query": "subscription { blocks(offset: {height:10}) { hash height timestamp transactions { hash } } }"
   }
 }
 ```
 
-When a new block is indexed, the client receives a `next` message.
+When a new block is indexed, the client receives a `next` message:
 
 ### Contracts Subscription
 
-`contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!`
+`contracts(address: HexEncoded!, offset: BlockOffsetInput): ContractCallOrDeploy!`
 
-Subscribes to contract actions for a particular address. New contract actions (calls, updates) are pushed as they occur.
+Subscribes to state changes of a given contract from a specific point. New contract states (deploys, calls, updates) are pushed as they occur.
 
 **Example:**
 
@@ -252,7 +242,7 @@ Subscribes to contract actions for a particular address. New contract actions (c
   "id": "2",
   "type": "start",
   "payload": {
-    "query": "subscription { contractActions(address:\"3031323...\", offset: { height: 1 }) { __typename address state } }"
+    "query": "subscription { contracts(address:\"0x1\", offset: {height:1}) { __typename address state } }"
   }
 }
 ```
@@ -261,7 +251,7 @@ Subscribes to contract actions for a particular address. New contract actions (c
 
 `wallet(sessionId: HexEncoded!, index: Int, sendProgressUpdates: Boolean): WalletSyncEvent!`
 
-Subscribes to wallet updates. This includes relevant transactions and possibly Merkle tree updates, as well as `ProgressUpdate` events if `sendProgressUpdates` is set to `true`, which is also the default. The `index` parameter can be used to resume from a certain point.
+Subscribes to wallet updates. This includes relevant transactions and possibly Merkle tree updates (`ZswapChainStateUpdate`), as well as `ProgressUpdate` events if `sendProgressUpdates` is set to `true`. The `index` parameter can be used to resume from a certain point.
 
 Adjust `index` and `offset` arguments as needed.
 
@@ -272,14 +262,14 @@ Adjust `index` and `offset` arguments as needed.
   "id": "3",
   "type": "start",
   "payload": {
-    "query": "subscription { wallet(sessionId: \"1CYq6ZsLmn\", index: 100) { __typename ... on ViewingUpdate { index update { __typename ... on RelevantTransaction { transaction { hash } } } } ... on ProgressUpdate { highestIndex highestRelevantIndex highestRelevantWalletIndex } } }"
+    "query": "subscription { wallet(sessionId:\"1CYq6ZsLmn\", index:100, sendProgressUpdates:true) { __typename ... on ViewingUpdate { index update { __typename ... on RelevantTransaction { transaction { hash } } } } ... on ProgressUpdate { synced total } } }"
   }
 }
 ```
 
 **Responses** may vary depending on what is happening in the chain:
 - A `ViewingUpdate` with new relevant transactions or a collapsed Merkle tree update.
-- A `ProgressUpdate` providing synchronization progress with fields like `highestIndex`, `highestRelevantIndex`, and `highestRelevantWalletIndex`.
+- A `ProgressUpdate` indicating synchronization progress.
 
 ## Query Limits Configuration
 
@@ -308,6 +298,7 @@ If you modify the code defining the GraphQL schema, regenerate it:
 ```bash
 just generate-indexer-api-schema
 ```
+
 This ensures the schema file stays aligned with code changes.
 
 ## Conclusion

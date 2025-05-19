@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use clap::{Parser, Subcommand, command};
+use clap::{command, Parser, Subcommand};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

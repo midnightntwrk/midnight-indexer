@@ -1,0 +1,106 @@
+name: Smoke API tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches:
+      - main
+    types: [labeled, synchronize, opened, reopened, ready_for_review]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{github.workflow}}-${{github.head_ref || github.run_id}}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    env:
+      ENV_TYPE: compose
+      GITHUB_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+      POSTGRES_PASSWORD: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
+      ALLURE_ADMIN_USER: ${{ secrets.ALLURE_ADMIN_USER }}
+      ALLURE_ADMIN_PASSWORD: ${{ secrets.ALLURE_ADMIN_PASSWORD }}
+      NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+      APP__INFRA__PUB_SUB__PASSWORD: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}
+      APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}
+      APP__INFRA__STORAGE__PASSWORD: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
+      APP__INFRA__ZSWAP_STATE_STORAGE__PASSWORD: ${{ secrets.APP__INFRA__ZSWAP_STATE_STORAGE__PASSWORD }}
+
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        deployment: [cloud, standalone]
+
+    runs-on: ubuntu-latest-16-core-x64
+
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'run_smoke_tests'))
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set toolchain
+        run: |
+          toolchain=$(grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/')
+          echo "using toolchain $toolchain from rust-toolchain.toml"
+          echo "toolchain=$toolchain" >> "$GITHUB_ENV"
+
+      - name: Add github.com credentials to netrc
+        uses: extractions/netrc@v2
+        with:
+          machine: github.com
+          username: MidnightCI
+          password: ${{ secrets.MIDNIGHTCI_REPO }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: MidnightCI
+          password: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.toolchain }}
+
+      - name: Install just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Install earthly
+        uses: earthly/actions-setup@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: v0.8.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build images
+        run: |
+          . ./.envrc
+          git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
+          rustup override set ${{ env.toolchain }}
+          if [ "${{ matrix.deployment }}" == "cloud" ]; then
+            just docker-chain-indexer & just docker-indexer-api & just docker-wallet-indexer
+          else
+            just docker-indexer-standalone
+          fi
+
+      - name: Install deps and build contract
+        run: cd ts-tests && yarn install && yarn compact
+
+      - name: Run integration tests
+        env:
+          DEPLOYMENT: ${{ matrix.deployment }}
+        run: cd ts-tests && yarn ci_integration_tests

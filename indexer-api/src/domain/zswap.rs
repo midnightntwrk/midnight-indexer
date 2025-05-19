@@ -17,7 +17,6 @@ use indexer_common::{
     error::BoxError,
     serialize::SerializableExt,
 };
-use log::debug;
 use midnight_ledger::transient_crypto::merkle_tree;
 use std::io;
 use thiserror::Error;
@@ -40,34 +39,19 @@ impl ZswapStateCache {
 
         // Check if the current zswap state is stale and needs to be updated.
         if end_index >= zswap_state_read.first_free() {
-            debug!(
-                end_index,
-                first_free = zswap_state_read.first_free;
-                "zswap state is stale"
-            );
-
             // Release the read lock.
             drop(zswap_state_read);
 
             // Acquire a write lock.
             let mut zswap_state_write = self.0.write().await;
-            debug!("acquired write lock");
 
             // Check if the state has been updated in the meantime.
             if end_index >= zswap_state_write.first_free() {
-                debug!(
-                    end_index,
-                    first_free = zswap_state_write.first_free;
-                    "zswap state is still stale, loading"
-                );
-
                 let zswap_state = zswap_state_storage
                     .load_zswap_state()
                     .await
                     .map_err(|error| ZswapStateCacheError::Load(error.into()))?
                     .map(|(zswap_state, _)| zswap_state);
-
-                debug!("zswap state loaded");
 
                 match zswap_state {
                     Some(zswap_state) => {
@@ -86,8 +70,6 @@ impl ZswapStateCache {
 
             zswap_state_read = zswap_state_write.downgrade();
         }
-
-        debug!(start_index, end_index; "creating collapsed update");
 
         let collapsed_update = zswap_state_read.collapsed_update(
             protocol_version,

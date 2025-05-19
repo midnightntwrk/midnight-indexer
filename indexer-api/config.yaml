@@ -30,6 +30,6 @@ telemetry:
     service_name: "indexer-api"
     otlp_exporter_endpoint: "http://localhost:4317"
   metrics:
-    enabled: false
+    enabled: true
     address: "0.0.0.0"
     port: 9000

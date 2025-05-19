@@ -1,8 +1,9 @@
 [package]
 name          = "indexer-api"
+version       = "1.0.1"
 description   = "Indexer API"
-version       = { workspace = true }
 edition       = { workspace = true }
+authors       = { workspace = true }
 license       = { workspace = true }
 readme        = { workspace = true }
 homepage      = { workspace = true }
@@ -25,14 +26,13 @@ byte-unit-serde    = { workspace = true }
 chacha20poly1305   = { workspace = true, features = [ "std" ] }
 clap               = { workspace = true, features = [ "derive" ] }
 const-hex          = { workspace = true }
-derive_more        = { workspace = true, features = [ "debug", "display", "from" ] }
-fastrace           = { workspace = true, features = [ "enable" ] }
+derive_more        = { workspace = true, features = [ "debug", "from" ] }
+fastrace           = { workspace = true }
 fastrace-axum      = { workspace = true }
 futures            = { workspace = true }
 indexer-common     = { path = "../indexer-common" }
 indoc              = { workspace = true }
 log                = { workspace = true, features = [ "kv" ] }
-metrics            = { workspace = true }
 midnight-ledger    = { workspace = true }
 secrecy            = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
@@ -41,16 +41,13 @@ thiserror          = { workspace = true }
 tokio              = { workspace = true, features = [ "rt-multi-thread", "time", "signal" ] }
 tokio-stream       = { workspace = true }
 tower              = { workspace = true }
-tower-http         = { workspace = true, features = [ "cors", "limit" ] }
+tower-http         = { workspace = true, features = [ "limit", "trace" ] }
 trait-variant      = { workspace = true }
-uuid               = { workspace = true, features = [ "v7" ], optional = true }
-
-[dev-dependencies]
-assert_matches = { workspace = true }
+uuid               = { workspace = true, features = [ "v7" ] }
 
 [features]
-cloud      = [ "indexer-common/cloud", "uuid" ]
-standalone = [ "indexer-common/standalone", "uuid" ]
+cloud      = [ "indexer-common/cloud" ]
+standalone = [ "indexer-common/standalone" ]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [ 'cfg(coverage)' ] }

@@ -16,41 +16,47 @@ mod query;
 mod subscription;
 
 use crate::{
-    domain::{self, AsBytesExt, BlockHash, HexEncoded, NoopStorage, Storage, ZswapStateCache},
+    domain::{
+        self, AsBytesExt, HexEncoded, NoopStorage, Storage, UnshieldedAddressFormatError,
+        ZswapStateCache,
+    },
     infra::api::{
-        ContextExt, OptionExt, ResultExt,
         v1::{mutation::Mutation, query::Query, subscription::Subscription},
+        ContextExt,
     },
 };
 use anyhow::Context as AnyhowContext;
 use async_graphql::{
-    ComplexObject, Context, Interface, OneofObject, Schema, SchemaBuilder, SimpleObject, Union,
-    scalar,
+    scalar, ComplexObject, Context, Enum, Interface, OneofObject, Schema, SchemaBuilder,
+    SimpleObject, Union,
 };
 use async_graphql_axum::{GraphQL, GraphQLSubscription};
-use axum::{Router, routing::post_service};
-use derive_more::Debug;
-use indexer_common::domain::{
-    ByteVec, NetworkId, NoopSubscriber, NoopZswapStateStorage, ProtocolVersion, SessionId,
-    Subscriber, ZswapStateStorage,
+use axum::{routing::post_service, Router};
+use indexer_common::{
+    domain::{
+        NetworkId, NoopSubscriber, NoopZswapStateStorage, ProtocolVersion, Subscriber,
+        UnshieldedAddress as CommonUnshieldedAddress, ZswapStateStorage,
+    },
+    error::StdErrorExt,
 };
+use log::error;
 use serde::{Deserialize, Serialize};
 use std::{
     marker::PhantomData,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{atomic::AtomicBool, Arc},
 };
 
 /// A block with its relevant data.
 #[derive(Debug, SimpleObject)]
 #[graphql(complex)]
-struct Block<S: Storage>
+struct Block<S>
 where
     S: Storage,
 {
     /// The block hash.
     hash: HexEncoded,
 
-    /// The block height.
+    /// The block height (number).
     height: u32,
 
     /// The protocol version.
@@ -62,11 +68,11 @@ where
     /// The block author.
     author: Option<HexEncoded>,
 
-    #[graphql(skip)]
-    id: u64,
+    /// The transactions.
+    transactions: Vec<Transaction<S>>,
 
     #[graphql(skip)]
-    parent_hash: BlockHash,
+    parent_hash: HexEncoded,
 
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -79,24 +85,27 @@ where
 {
     /// The parent of this block.
     async fn parent(&self, cx: &Context<'_>) -> async_graphql::Result<Option<Block<S>>> {
-        let block = cx
-            .get_storage::<S>()
-            .get_block_by_hash(self.parent_hash)
+        let storage = cx.get_storage::<S>()?;
+
+        let parent_hash = self.parent_hash.hex_decode().inspect_err(|error| {
+            error!(
+                error = error.as_chain(),
+                parent_hash:? = self.parent_hash;
+                "cannot hex-decode parent hash"
+            )
+        })?;
+        let block = storage
+            .get_block_by_hash(&parent_hash)
             .await
-            .internal("cannot get block by hash")?;
+            .inspect_err(|error| {
+                error!(
+                    error = error.as_chain(),
+                    parent_hash:%;
+                    "cannot get block by hash"
+                )
+            })?;
 
         Ok(block.map(Into::into))
-    }
-
-    /// The transactions within this block.
-    async fn transactions(&self, cx: &Context<'_>) -> async_graphql::Result<Vec<Transaction<S>>> {
-        let transactions = cx
-            .get_storage::<S>()
-            .get_transactions_by_block_id(self.id)
-            .await
-            .internal("cannot get transactions by block id")?;
-
-        Ok(transactions.into_iter().map(Into::into).collect())
     }
 }
 
@@ -106,13 +115,14 @@ where
 {
     fn from(value: domain::Block) -> Self {
         let domain::Block {
-            id,
             hash,
             height,
             protocol_version: ProtocolVersion(protocol_version),
             author,
             timestamp,
+            transactions,
             parent_hash,
+            ..
         } = value;
 
         Block {
@@ -121,22 +131,76 @@ where
             protocol_version,
             author: author.map(|author| author.hex_encode()),
             timestamp,
-            id,
-            parent_hash,
+            transactions: transactions.into_iter().map(Into::into).collect::<Vec<_>>(),
+            parent_hash: parent_hash.hex_encode(),
             _s: PhantomData,
         }
     }
 }
 
-/// Either a hash or a height to query a block.
+/// Either a hash or a height to query for a [crate::infra::api::query::Block].
 #[derive(Debug, OneofObject)]
-enum BlockOffset {
+enum BlockOffsetInput {
     Hash(HexEncoded),
     Height(u32),
 }
 
+impl BlockOffsetInput {
+    /// Resolves the block height from the given offset by querying storage
+    async fn resolve_height<S>(&self, storage: &S) -> async_graphql::Result<u32>
+    where
+        S: Storage,
+    {
+        match self {
+            BlockOffsetInput::Hash(hash) => {
+                let hash = hash.hex_decode().context("decode hash")?;
+                let block = storage
+                    .get_block_by_hash(&hash)
+                    .await
+                    .inspect_err(
+                        |error| error!(error:? = error.as_chain(); "cannot get block by hash"),
+                    )?
+                    .ok_or_else(|| {
+                        async_graphql::Error::new(format!("block with hash {hash:?} not found"))
+                    })?;
+                Ok(block.height)
+            }
+
+            BlockOffsetInput::Height(height) => {
+                storage
+                    .get_block_by_height(*height)
+                    .await
+                    .inspect_err(
+                        |error| error!(error:? = error.as_chain(); "cannot get block by height"),
+                    )?
+                    .ok_or_else(|| {
+                        async_graphql::Error::new(format!("block with height {} not found", height))
+                    })?;
+                Ok(*height)
+            }
+        }
+    }
+}
+
+async fn into_from_height(
+    offset: Option<BlockOffsetInput>,
+    storage: &impl Storage,
+) -> async_graphql::Result<u32> {
+    match offset {
+        Some(offset) => offset.resolve_height(storage).await,
+
+        None => {
+            let latest_block = storage.get_latest_block().await.inspect_err(
+                |error| error!(error:% = error.as_chain(); "cannot get latest block"),
+            )?;
+            let height = latest_block.map(|block| block.height).unwrap_or(1);
+            Ok(height)
+        }
+    }
+}
+
 /// A transaction with its relevant data.
-#[derive(Debug, Clone, SimpleObject)]
+#[derive(Debug, SimpleObject)]
 #[graphql(complex)]
 struct Transaction<S>
 where
@@ -152,25 +216,28 @@ where
     apply_stage: ApplyStage,
 
     /// The transaction identifiers.
-    #[debug(skip)]
     identifiers: Vec<HexEncoded>,
 
     /// The raw transaction content.
-    #[debug(skip)]
     raw: HexEncoded,
 
+    /// The contract actions.
+    #[graphql(deprecation = "use v2/contract_actions")]
+    contract_calls: Vec<ContractCallOrDeploy>,
+
     /// The merkle-tree root.
-    #[debug(skip)]
     merkle_tree_root: HexEncoded,
 
-    #[graphql(skip)]
-    id: u64,
+    /// Unshielded UTXOs created by this transaction.
+    unshielded_created_outputs: Vec<UnshieldedUtxo<S>>,
+
+    /// Unshielded UTXOs spent (consumed) by this transaction.
+    unshielded_spent_outputs: Vec<UnshieldedUtxo<S>>,
 
     #[graphql(skip)]
-    block_hash: BlockHash,
+    block_hash: HexEncoded,
 
     #[graphql(skip)]
-    #[debug(skip)]
     _s: PhantomData<S>,
 }
 
@@ -181,30 +248,15 @@ where
 {
     /// The block for this transaction.
     async fn block(&self, cx: &Context<'_>) -> async_graphql::Result<Block<S>> {
-        let block = cx
-            .get_storage::<S>()
-            .get_block_by_hash(self.block_hash)
+        Query::<S>::default()
+            .block(cx, Some(BlockOffsetInput::Hash(self.block_hash.to_owned())))
             .await?
-            .internal(format!(
-                "no block for tx {:?} with block hash {:?}",
-                self.hash, self.block_hash
-            ))?;
-
-        Ok(block.into())
-    }
-
-    /// The contract actions.
-    async fn contract_actions(
-        &self,
-        cx: &Context<'_>,
-    ) -> async_graphql::Result<Vec<ContractAction<S>>> {
-        let contract_actions = cx
-            .get_storage::<S>()
-            .get_contract_actions_by_transaction_id(self.id)
-            .await
-            .internal("cannot get contract actions by transactions id")?;
-
-        Ok(contract_actions.into_iter().map(Into::into).collect())
+            .ok_or_else(|| {
+                async_graphql::Error::new(format!(
+                    "no block for tx {:?} with block hash {:?}",
+                    self.hash, self.block_hash
+                ))
+            })
     }
 }
 
@@ -214,7 +266,6 @@ where
 {
     fn from(value: domain::Transaction) -> Self {
         let domain::Transaction {
-            id,
             hash,
             block_hash,
             protocol_version: ProtocolVersion(protocol_version),
@@ -222,11 +273,15 @@ where
             identifiers,
             raw,
             merkle_tree_root,
+            contract_actions,
+            unshielded_created_outputs,
+            unshielded_spent_outputs,
             ..
         } = value;
 
         Self {
             hash: hash.hex_encode(),
+            block_hash: block_hash.hex_encode(),
             protocol_version,
             apply_stage: apply_stage.into(),
             identifiers: identifiers
@@ -235,30 +290,32 @@ where
                 .collect::<Vec<_>>(),
             raw: raw.hex_encode(),
             merkle_tree_root: merkle_tree_root.hex_encode(),
-            id,
-            block_hash,
+            contract_calls: contract_actions
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<_>>(),
+            unshielded_created_outputs: unshielded_created_outputs
+                .into_iter()
+                .map(UnshieldedUtxo::<S>::from)
+                .collect(),
+            unshielded_spent_outputs: unshielded_spent_outputs
+                .into_iter()
+                .map(UnshieldedUtxo::<S>::from)
+                .collect(),
             _s: PhantomData,
         }
     }
 }
 
-impl<S> From<&Transaction<S>> for Transaction<S>
-where
-    S: Storage,
-{
-    fn from(value: &Transaction<S>) -> Self {
-        value.to_owned()
-    }
-}
-
-/// Either a hash or an identifier to query transactions.
+/// Either a hash or an identifier to query for a [Transaction].
 #[derive(Debug, OneofObject)]
 enum TransactionOffset {
     Hash(HexEncoded),
     Identifier(HexEncoded),
 }
 
-/// The apply stage of a transaction.
+/// Wrapper around [indexer_common::domain::ApplyStage] for the purpose of turning it into a
+/// `Scalar`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApplyStage {
     SucceedEntirely,
@@ -279,185 +336,208 @@ impl From<indexer_common::domain::ApplyStage> for ApplyStage {
 }
 
 /// A contract action.
-#[derive(Debug, Clone, Interface)]
+#[derive(Debug, Interface)]
 #[allow(clippy::duplicated_attributes)]
 #[graphql(
     field(name = "address", ty = "HexEncoded"),
     field(name = "state", ty = "HexEncoded"),
-    field(name = "chain_state", ty = "HexEncoded"),
-    field(name = "transaction", ty = "Transaction<S>")
+    field(name = "zswap_chain_state", ty = "HexEncoded")
 )]
-enum ContractAction<S: Storage> {
+enum ContractCallOrDeploy {
     /// A contract deployment.
-    Deploy(ContractDeploy<S>),
+    Deploy(ContractDeploy),
 
     /// A contract call.
-    Call(ContractCall<S>),
+    Call(ContractCall),
 
     /// A contract update.
-    Update(ContractUpdate<S>),
-}
-
-/// A contract deployment.
-#[derive(Debug, Clone, SimpleObject)]
-#[graphql(complex)]
-struct ContractDeploy<S: Storage> {
-    address: HexEncoded,
-
-    state: HexEncoded,
-
-    chain_state: HexEncoded,
-
-    #[graphql(skip)]
-    transaction_id: u64,
-
-    #[graphql(skip)]
-    _s: PhantomData<S>,
-}
-
-#[ComplexObject]
-impl<S: Storage> ContractDeploy<S> {
-    async fn transaction(&self, cx: &Context<'_>) -> async_graphql::Result<Transaction<S>> {
-        get_transaction_by_id(self.transaction_id, cx).await
-    }
+    Update(ContractUpdate),
 }
 
 /// A contract call.
-#[derive(Debug, Clone, SimpleObject)]
-#[graphql(complex)]
-struct ContractCall<S: Storage> {
+#[derive(Debug, SimpleObject)]
+struct ContractCall {
     address: HexEncoded,
-
     state: HexEncoded,
-
-    chain_state: HexEncoded,
-
     entry_point: HexEncoded,
-
-    #[graphql(skip)]
-    transaction_id: u64,
-
-    #[graphql(skip)]
-    raw_address: ByteVec,
-
-    #[graphql(skip)]
-    _s: PhantomData<S>,
+    zswap_chain_state: HexEncoded,
 }
 
-#[ComplexObject]
-impl<S: Storage> ContractCall<S> {
-    async fn transaction(&self, cx: &Context<'_>) -> async_graphql::Result<Transaction<S>> {
-        get_transaction_by_id(self.transaction_id, cx).await
-    }
-
-    async fn deploy(&self, cx: &Context<'_>) -> async_graphql::Result<ContractDeploy<S>> {
-        let action = cx
-            .get_storage::<S>()
-            .get_contract_deploy_by_address(&self.raw_address)
-            .await
-            .internal("cannot get contract deploy by address")?
-            .expect("contract call has contract deploy");
-
-        let deploy = match ContractAction::from(action) {
-            ContractAction::Deploy(deploy) => deploy,
-            _ => panic!("unexpected contract action"),
-        };
-
-        Ok(deploy)
-    }
+/// A contract deployment.
+#[derive(Debug, SimpleObject)]
+struct ContractDeploy {
+    address: HexEncoded,
+    state: HexEncoded,
+    zswap_chain_state: HexEncoded,
 }
 
 /// A contract update.
-#[derive(Debug, Clone, SimpleObject)]
-#[graphql(complex)]
-struct ContractUpdate<S: Storage> {
+#[derive(Debug, SimpleObject)]
+struct ContractUpdate {
     address: HexEncoded,
-
     state: HexEncoded,
-
-    chain_state: HexEncoded,
-
-    #[graphql(skip)]
-    transaction_id: u64,
-
-    #[graphql(skip)]
-    _s: PhantomData<S>,
+    zswap_chain_state: HexEncoded,
 }
 
-#[ComplexObject]
-impl<S: Storage> ContractUpdate<S> {
-    async fn transaction(&self, cx: &Context<'_>) -> async_graphql::Result<Transaction<S>> {
-        get_transaction_by_id(self.transaction_id, cx).await
-    }
-}
-
-async fn get_transaction_by_id<S>(
-    id: u64,
-    cx: &Context<'_>,
-) -> async_graphql::Result<Transaction<S>>
-where
-    S: Storage,
-{
-    let transaction = cx
-        .get_storage::<S>()
-        .get_transaction_by_id(id)
-        .await
-        .internal("cannot get transaction by ID")?;
-
-    Ok(transaction.into())
-}
-
-impl<S> From<domain::ContractAction> for ContractAction<S>
-where
-    S: Storage,
-{
+impl From<domain::ContractAction> for ContractCallOrDeploy {
     fn from(action: domain::ContractAction) -> Self {
         let domain::ContractAction {
             address,
             state,
             attributes,
             zswap_state,
-            transaction_id,
             ..
         } = action;
 
         match attributes {
-            domain::ContractAttributes::Deploy => ContractAction::Deploy(ContractDeploy {
+            domain::ContractAttributes::Deploy => ContractCallOrDeploy::Deploy(ContractDeploy {
                 address: address.hex_encode(),
                 state: state.hex_encode(),
-                chain_state: zswap_state.hex_encode(),
-                transaction_id,
-                _s: PhantomData,
+                zswap_chain_state: zswap_state.hex_encode(),
             }),
 
             domain::ContractAttributes::Call { entry_point } => {
-                ContractAction::Call(ContractCall {
+                ContractCallOrDeploy::Call(ContractCall {
                     address: address.hex_encode(),
                     state: state.hex_encode(),
                     entry_point: entry_point.hex_encode(),
-                    chain_state: zswap_state.hex_encode(),
-                    transaction_id,
-                    raw_address: address,
-                    _s: PhantomData,
+                    zswap_chain_state: zswap_state.hex_encode(),
                 })
             }
 
-            domain::ContractAttributes::Update => ContractAction::Update(ContractUpdate {
+            domain::ContractAttributes::Update => ContractCallOrDeploy::Update(ContractUpdate {
                 address: address.hex_encode(),
                 state: state.hex_encode(),
-                chain_state: zswap_state.hex_encode(),
-                transaction_id,
-                _s: PhantomData,
+                zswap_chain_state: zswap_state.hex_encode(),
             }),
         }
     }
 }
 
-/// Either a block offset or a transaction offset to query a contract action.
+/// Either a [BlockOffsetInput] or a [TransactionOffset] to query for a [ContractCallOrDeploy].
 #[derive(Debug, OneofObject)]
-enum ContractActionOffset {
-    BlockOffset(BlockOffset),
+enum ContractOffset {
+    BlockOffsetInput(BlockOffsetInput),
     TransactionOffset(TransactionOffset),
+}
+
+/// Represents an unshielded UTXO.
+#[derive(Debug, SimpleObject)]
+#[graphql(complex)]
+struct UnshieldedUtxo<S: Storage> {
+    /// Owner address (Bech32m, `mn_addr…`)
+    owner: UnshieldedAddress,
+    /// The hash of the intent that created this output (hex-encoded)
+    intent_hash: HexEncoded,
+    /// UTXO value (quantity) as a string to support u128
+    value: String,
+    /// Token type (hex-encoded)
+    token_type: HexEncoded,
+    /// Index of this output within its creating transaction
+    output_index: u32,
+
+    #[graphql(skip)]
+    created_at_transaction_data: Option<domain::Transaction>,
+    #[graphql(skip)]
+    spent_at_transaction_data: Option<domain::Transaction>,
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S: Storage> UnshieldedUtxo<S> {
+    /// Transaction that created this UTXO
+    async fn created_at_transaction(&self) -> async_graphql::Result<Transaction<S>> {
+        self.created_at_transaction_data
+            .clone()
+            .map(Transaction::<S>::from)
+            .ok_or_else(|| async_graphql::Error::new("Missing creating transaction data"))
+    }
+
+    /// Transaction that spent this UTXO, if spent
+    async fn spent_at_transaction(&self) -> async_graphql::Result<Option<Transaction<S>>> {
+        Ok(self
+            .spent_at_transaction_data
+            .clone()
+            .map(Transaction::<S>::from))
+    }
+}
+
+impl<S: Storage> From<domain::UnshieldedUtxo> for UnshieldedUtxo<S> {
+    fn from(domain_utxo: domain::UnshieldedUtxo) -> Self {
+        let owner_bech32m = indexer_common::domain::unshielded::to_bech32m(
+            domain_utxo.owner_address.as_ref(),
+            domain_utxo.network_id.unwrap(),
+        )
+        .expect("owner address can convert to Bech32m");
+
+        Self {
+            owner: UnshieldedAddress(owner_bech32m),
+            value: domain_utxo.value.to_string(),
+            intent_hash: domain_utxo.intent_hash.hex_encode(),
+            token_type: domain_utxo.token_type.hex_encode(),
+            output_index: domain_utxo.output_index,
+            created_at_transaction_data: domain_utxo.created_at_transaction,
+            spent_at_transaction_data: domain_utxo.spent_at_transaction,
+            _s: PhantomData,
+        }
+    }
+}
+
+/// Bech32m-encoded address, e.g. `mn_addr_test1…`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnshieldedAddress(pub String);
+scalar!(UnshieldedAddress);
+
+/// Types of events emitted by the unshielded UTXO subscription
+#[derive(Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnshieldedUtxoEventType {
+    /// Indicates a transaction that created or spent UTXOs for the address
+    UPDATE,
+    /// Status message for synchronization progress or keep-alive
+    PROGRESS,
+}
+
+/// Payload emitted by `subscription { unshieldedUtxos … }`
+#[derive(SimpleObject)]
+struct UnshieldedUtxoEvent<S>
+where
+    S: Storage,
+{
+    /// The type of event - UPDATE for changes, PROGRESS for status messages
+    event_type: UnshieldedUtxoEventType,
+    /// The transaction associated with this event
+    transaction: Transaction<S>,
+    /// UTXOs created in this transaction for the subscribed address
+    created_utxos: Vec<UnshieldedUtxo<S>>,
+    /// UTXOs spent in this transaction for the subscribed address
+    spent_utxos: Vec<UnshieldedUtxo<S>>,
+}
+
+/// Either a [BlockOffsetInput] or a [TransactionOffset] to query for a [UnshieldedUtxo].
+#[derive(Debug, OneofObject)]
+enum UnshieldedOffset {
+    BlockOffsetInput(BlockOffsetInput),
+    TransactionOffset(TransactionOffset),
+}
+
+impl UnshieldedAddress {
+    pub fn try_into_domain(
+        self,
+        network_id: NetworkId,
+    ) -> Result<CommonUnshieldedAddress, UnshieldedAddressFormatError> {
+        domain::UnshieldedAddress(self.0).try_into_domain(network_id)
+    }
+}
+
+/// Convert GraphQL wrapper into the raw-bytes domain type.
+fn addr_to_common(
+    addr: &UnshieldedAddress,
+    network_id: NetworkId,
+) -> async_graphql::Result<CommonUnshieldedAddress> {
+    addr.clone()
+        .try_into_domain(network_id)
+        .map_err(|error| async_graphql::Error::new(error.to_string()))
 }
 
 #[derive(Debug, Union)]
@@ -468,26 +548,19 @@ enum WalletSyncEvent<S: Storage> {
 
 #[derive(Debug, SimpleObject)]
 struct ProgressUpdate {
-    /// The highest end index into the zswap state of all currently known transactions.
-    highest_index: u64,
+    /// Last synced end index for the wallet.
+    synced: u64,
 
-    /// The highest end index into the zswap state of all currently known relevant transactions,
-    /// i.e. such that belong to any wallet. Less or equal `highest_index`.
-    highest_relevant_index: u64,
-
-    /// The highest end index into the zswap state of all currently known relevant transactions for
-    /// a particular wallet. Less or equal `highest_relevant_index`.
-    highest_relevant_wallet_index: u64,
+    /// Last processed transaction end index for the wallet.
+    total: u64,
 }
 
 #[derive(Debug, SimpleObject)]
 struct ViewingUpdate<S: Storage> {
-    /// Next start index into the zswap state to be queried. Usually the end index of the included
-    /// relevant transaction plus one unless that is a failure in which case just its end
-    /// index.
+    /// Update end index
     index: u64,
 
-    /// Relevant transaction for the wallet and maybe a collapsed Merkle-Tree update.
+    /// Relevant transaction for the wallet and (maybe) a collapsed Merkle-Tree update
     update: Vec<ZswapChainStateUpdate<S>>,
 }
 
@@ -502,14 +575,13 @@ struct MerkleTreeCollapsedUpdate {
     /// The protocol version.
     protocol_version: u32,
 
-    /// The start index into the zswap state.
+    /// The start index.
     start: u64,
 
-    /// The end index into the zswap state.
+    /// The end index.
     end: u64,
 
     /// The hex-encoded merkle-tree collapsed update.
-    #[debug(skip)]
     update: HexEncoded,
 }
 
@@ -533,13 +605,13 @@ impl From<domain::MerkleTreeCollapsedUpdate> for MerkleTreeCollapsedUpdate {
 
 #[derive(Debug, SimpleObject)]
 struct RelevantTransaction<S: Storage> {
-    /// Relevant transaction for the wallet.
+    /// Relevant transaction for the wallet
     transaction: Transaction<S>,
 
-    /// The start index.
+    /// Start index
     start: u64,
 
-    /// The end index.
+    /// End index
     end: u64,
 }
 
@@ -555,11 +627,6 @@ where
         }
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Unit;
-
-scalar!(Unit);
 
 /// Export the GraphQL schema in SDL format.
 pub fn export_schema() -> String {
@@ -611,54 +678,4 @@ where
         Mutation::<S>::default(),
         Subscription::<S, B, Z>::default(),
     )
-}
-
-async fn resolve_height(
-    offset: Option<BlockOffset>,
-    storage: &impl Storage,
-) -> async_graphql::Result<u32> {
-    match offset {
-        Some(offset) => match offset {
-            BlockOffset::Hash(hash) => {
-                let hash = hash.hex_decode().context("hex-decode hash")?;
-
-                let block = storage
-                    .get_block_by_hash(hash)
-                    .await
-                    .internal("get block by hash")?
-                    .with_context(|| format!("block with hash {hash:?} not found"))?;
-
-                Ok(block.height)
-            }
-
-            BlockOffset::Height(height) => {
-                storage
-                    .get_block_by_height(height)
-                    .await
-                    .internal("get block by height")?
-                    .with_context(|| format!("block with height {} not found", height))?;
-
-                Ok(height)
-            }
-        },
-
-        None => {
-            let latest_block = storage
-                .get_latest_block()
-                .await
-                .internal("get latest block")?;
-            let height = latest_block.map(|block| block.height).unwrap_or_default();
-
-            Ok(height)
-        }
-    }
-}
-
-fn hex_decode_session_id(session_id: HexEncoded) -> async_graphql::Result<SessionId> {
-    let session_id = session_id
-        .hex_decode::<Vec<u8>>()
-        .context("hex-decode session ID")?;
-    let session_id = SessionId::try_from(session_id.as_slice()).context("invalid session ID")?;
-
-    Ok(session_id)
 }

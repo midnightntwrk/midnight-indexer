@@ -15,26 +15,15 @@ use indexer_common::domain::{
     ContractAddress, ContractEntryPoint, ContractState, ContractZswapState,
 };
 use serde::Deserialize;
-use sqlx::FromRow;
 
 /// A contract action.
-
-#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {
-    #[sqlx(try_from = "i64")]
     pub id: u64,
-
     pub address: ContractAddress,
-
     pub state: ContractState,
-
-    #[sqlx(json)]
     pub attributes: ContractAttributes,
-
     pub zswap_state: ContractZswapState,
-
-    #[sqlx(try_from = "i64")]
-    pub transaction_id: u64,
 }
 
 /// Attributes for a specific [ContractAction].

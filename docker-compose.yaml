@@ -5,11 +5,11 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/chain-indexer:latest"
+    image: "ghcr.io/midnight-ntwrk/chain-indexer:1.0.1-95ef9868"
     restart: "no"
     environment:
       RUST_LOG: "chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
-      APP__INFRA__NODE__URL: "ws://node:9944"
+      APP__INFRA__NODE__URL: "ws://host.docker.internal:9944"
       APP__INFRA__STORAGE__HOST: "postgres"
       APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
       APP__INFRA__PUB_SUB__URL: "nats:4222"
@@ -22,6 +22,8 @@ services:
       interval: "5s"
       timeout: "2s"
       retries: 2
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   wallet-indexer:
     depends_on:
@@ -29,7 +31,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/wallet-indexer:latest"
+    image: "ghcr.io/midnight-ntwrk/wallet-indexer:1.0.1-95ef9868"
     restart: "no"
     environment:
       RUST_LOG: "wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
@@ -51,7 +53,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/indexer-api:latest"
+    image: "ghcr.io/midnight-ntwrk/indexer-api:1.0.1-95ef9868"
     restart: "no"
     ports:
       - "8088:8088"
@@ -119,15 +121,15 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  node:
-    image: "ghcr.io/midnight-ntwrk/midnight-node:0.12.0"
-    restart: "always"
-    ports:
-      - "9944:9944"
-    volumes:
-      - "./target/data/node:/node"
-    environment:
-      SHOW_CONFIG: "false"
-      CFG_PRESET: "dev"
-    security_opt:
-      - no-new-privileges:true
+#  node:
+#    image: "ghcr.io/midnight-ntwrk/midnight-node:0.12.0-4337aca9"
+#    restart: "always"
+#    ports:
+#      - "9944:9944"
+#    volumes:
+#      - "./target/data/node:/node"
+#    environment:
+#      SHOW_CONFIG: "false"
+#      CFG_PRESET: "dev"
+#    security_opt:
+#      - no-new-privileges:true

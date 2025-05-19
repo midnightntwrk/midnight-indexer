@@ -13,34 +13,24 @@
 
 use crate::{
     domain::{AsBytesExt, HexEncoded, Storage, ViewingKey},
-    infra::api::{
-        ContextExt, ResultExt,
-        v1::{Unit, hex_decode_session_id},
-    },
+    infra::api::{ContextExt, Unit},
 };
-use anyhow::Context as _;
 use async_graphql::{Context, Object};
 use fastrace::trace;
-use log::debug;
-use metrics::{Counter, counter};
+use indexer_common::{
+    domain::{SessionId, ViewingKey as CommonViewingKey},
+    error::StdErrorExt,
+};
+use log::{debug, error};
 use std::marker::PhantomData;
 
 pub struct Mutation<S> {
-    connect_calls: Counter,
-    disconnect_calls: Counter,
     _s: PhantomData<S>,
 }
 
 impl<S> Default for Mutation<S> {
     fn default() -> Self {
-        let connect_calls = counter!("indexer_api_calls_mutation_connect");
-        let disconnect_calls = counter!("indexer_api_calls_mutation_disconnect");
-
-        Self {
-            connect_calls,
-            disconnect_calls,
-            _s: PhantomData,
-        }
+        Self { _s: PhantomData }
     }
 }
 
@@ -49,46 +39,47 @@ impl<S> Mutation<S>
 where
     S: Storage,
 {
-    /// Connect the wallet with the given viewing key and return a session ID.
+    /// Connect a wallet using a viewing key, returns a session ID.
     #[trace]
     async fn connect(
         &self,
         cx: &Context<'_>,
         viewing_key: ViewingKey,
     ) -> async_graphql::Result<HexEncoded> {
-        self.connect_calls.increment(1);
+        let viewing_key = CommonViewingKey::try_from(viewing_key)
+            .map_err(|error| async_graphql::Error::new(error.to_string()))?;
 
-        let viewing_key = viewing_key
-            .try_into_domain(cx.get_network_id())
-            .context("decode viewing key")?;
+        if !viewing_key.validate(cx.get_network_id()?) {
+            return Err(async_graphql::Error::new("invalid viewing key"));
+        }
 
-        cx.get_storage::<S>()
+        cx.get_storage::<S>()?
             .connect_wallet(&viewing_key)
             .await
-            .internal("connect wallet")?;
-
-        let session_id = viewing_key.to_session_id();
+            .inspect_err(|error| error!(error:? = error.as_chain(); "cannot connect wallet"))?;
+        let session_id = viewing_key.as_session_id();
         debug!(session_id:?; "wallet connected");
 
         Ok(session_id.hex_encode())
     }
 
-    /// Disconnect the wallet with the given session ID.
-    #[trace(properties = { "session_id": "{session_id}" })]
+    /// Disconnect a wallet using the session ID.
+    #[trace]
     async fn disconnect(
         &self,
         cx: &Context<'_>,
         session_id: HexEncoded,
     ) -> async_graphql::Result<Unit> {
-        self.disconnect_calls.increment(1);
+        let session_id = session_id.hex_decode::<Vec<u8>>().map_err(|error| {
+            async_graphql::Error::new(format!("cannot hex-decode session ID: {error}"))
+        })?;
+        let session_id = SessionId::try_from(session_id.as_slice())
+            .map_err(|error| async_graphql::Error::new(format!("invalid session ID: {error}")))?;
 
-        let session_id = hex_decode_session_id(session_id)?;
-
-        cx.get_storage::<S>()
-            .disconnect_wallet(session_id)
+        cx.get_storage::<S>()?
+            .disconnect_wallet(&session_id)
             .await
-            .internal("disconnect wallet")?;
-
+            .inspect_err(|error| error!(error:? = error.as_chain(); "cannot disconnect wallet"))?;
         debug!(session_id:?; "wallet disconnected");
 
         Ok(Unit)

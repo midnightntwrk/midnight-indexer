@@ -1,0 +1,16 @@
+name: nightly integration ts-tests - qanet
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "45 1 * * *"
+
+jobs:
+  test:
+    name: Nightly tests
+    uses: ./.github/workflows/nightly-integration-tests.yaml
+    with:
+      deployment: qanet
+      ref: main
+      allure_report_project_id: indexer-it-qanet
+    secrets: inherit

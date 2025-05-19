@@ -33,9 +33,9 @@ mod tests {
         pool::{self, postgres::PostgresPool},
     };
     use anyhow::Context;
-    use sqlx::{Row, postgres::PgSslMode};
+    use sqlx::{postgres::PgSslMode, Row};
     use std::{collections::HashSet, error::Error as StdError};
-    use testcontainers::{ImageExt, runners::AsyncRunner};
+    use testcontainers::{runners::AsyncRunner, ImageExt};
     use testcontainers_modules::postgres::Postgres;
 
     #[tokio::test]

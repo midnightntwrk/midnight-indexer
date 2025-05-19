@@ -57,6 +57,12 @@ jobs:
         with:
           tool: just
 
+      - name: Install earthly
+        uses: earthly/actions-setup@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: v0.8.0
+
       - uses: Swatinem/rust-cache@v2
 
       - name: just check
@@ -121,6 +127,12 @@ jobs:
         with:
           tool: just
 
+      - name: Install earthly
+        uses: earthly/actions-setup@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: v0.8.0
+
       - uses: Swatinem/rust-cache@v2
 
       - name: just lint
@@ -165,6 +177,12 @@ jobs:
         with:
           tool: just
 
+      - name: Install earthly
+        uses: earthly/actions-setup@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: v0.8.0
+
       - uses: Swatinem/rust-cache@v2
 
       - name: just test
@@ -205,6 +223,12 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: just
+
+      - name: Install earthly
+        uses: earthly/actions-setup@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: v0.8.0
 
       - uses: Swatinem/rust-cache@v2
 

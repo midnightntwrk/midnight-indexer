@@ -13,17 +13,18 @@
 
 use crate::domain::{RawZswapState, ZswapStateStorage};
 use async_nats::{
-    ConnectError, ConnectOptions,
     jetstream::{
-        self, Context as Jetstream,
+        self,
         context::CreateObjectStoreError,
         object_store::{
             self, DeleteError, GetError, ListError, ObjectStore, PutError, WatcherError,
         },
+        Context as Jetstream,
     },
+    ConnectError, ConnectOptions,
 };
 use fastrace::trace;
-use futures::{StreamExt, TryStreamExt, stream};
+use futures::{stream, StreamExt, TryStreamExt};
 use log::{debug, error, info};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
@@ -243,8 +244,8 @@ mod tests {
     };
     use anyhow::Context;
     use assert_matches::assert_matches;
-    use std::time::{Duration, Instant};
-    use testcontainers::{GenericImage, ImageExt, core::WaitFor, runners::AsyncRunner};
+    use std::time::Duration;
+    use testcontainers::{core::WaitFor, runners::AsyncRunner, GenericImage, ImageExt};
     use tokio::time::sleep;
 
     #[tokio::test]
@@ -261,18 +262,8 @@ mod tests {
             .start()
             .await
             .context("start NATS container")?;
-
-        // In spite of the above "WaitFor" NATS stubbornly rejects connections.
-        let start = Instant::now();
-        while reqwest::get("localhost:8222/healthz")
-            .await
-            .and_then(|r| r.error_for_status())
-            .is_err()
-            && Instant::now() - start < Duration::from_millis(1_500)
-        {
-            sleep(Duration::from_millis(100)).await;
-        }
-
+        // The NATS container seems to take a while before actually accepting connections!
+        sleep(Duration::from_millis(500)).await;
         let nats_port = nats_container
             .get_host_port_ipv4(4222)
             .await

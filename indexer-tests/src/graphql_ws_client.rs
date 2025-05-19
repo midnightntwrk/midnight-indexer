@@ -11,26 +11,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{Context, anyhow, bail};
-use derive_more::Display;
+use anyhow::{anyhow, bail, Context};
 use futures::{
-    SinkExt, Stream, StreamExt, TryStreamExt,
-    future::{err, ok},
     stream::{SplitSink, SplitStream},
+    SinkExt, Stream, StreamExt, TryStreamExt,
 };
-use graphql_client::{GraphQLQuery, QueryBody};
-use serde::Deserialize;
-use serde_json::{Value, json};
+use graphql_client::QueryBody;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::sync::LazyLock;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
-    MaybeTlsStream, WebSocketStream, connect_async,
-    tungstenite::{Message, client::IntoClientRequest},
+    connect_async,
+    tungstenite::{client::IntoClientRequest, Message},
+    MaybeTlsStream, WebSocketStream,
 };
 
+type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsWrite = SplitSink<WsStream, Message>;
 type WsRead = SplitStream<WsStream>;
-type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+// const WS_URL: &str = "ws://127.0.0.1:8088/api/v1/graphql/ws";
 
 static CONNECTION_INIT: LazyLock<String> = LazyLock::new(|| {
     json!({
@@ -39,107 +40,91 @@ static CONNECTION_INIT: LazyLock<String> = LazyLock::new(|| {
     .to_string()
 });
 
-/// Subscribe to the given GraphQL Websocket URL (typically ending with /graphql/ws) and
-/// query variables.
-pub async fn subscribe<T>(
-    url: &str,
-    variables: T::Variables,
-) -> anyhow::Result<impl Stream<Item = anyhow::Result<T::ResponseData>>>
-where
-    T: GraphQLQuery,
-{
-    let ws_stream = connect_graphql_ws(url)
-        .await
-        .context("connect graphql websocket connection")?;
-
-    let (mut write, mut read) = ws_stream.split();
-
-    init_graphql_ws(&mut write, &mut read)
-        .await
-        .context("initialize graphql websocket connection")?;
-
-    let QueryBody {
-        variables,
-        query,
-        operation_name,
-    } = T::build_query(variables);
-
-    let subscribe_message = json!({
-        "type": "subscribe",
-        "id": "1",
-        "payload": {
-            "operationName": operation_name,
-            "query": query,
-            "variables": variables,
-        }
-    });
-
-    write
-        .send(Message::text(subscribe_message.to_string()))
-        .await
-        .context("send subscribe message")?;
-
-    let messages = read
-        .map(|result| {
-            result
-                .context("get next message")
-                .and_then(|message| match message {
-                    Message::Text(text) => serde_json::from_str::<ServerMessage>(&text)
-                        .with_context(|| {
-                            format!("deserialize text message to ServerMessage: {text}")
-                        }),
-
-                    _ => Err(anyhow!("unexpected non-text message")),
-                })
-        })
-        .try_filter_map(|message| match message {
-            ServerMessage::Next { payload } => match (payload.data, payload.errors) {
-                (Some(data), None) => serde_json::from_value::<T::ResponseData>(data)
-                    .map(|data| ok(Some(data)))
-                    .unwrap_or_else(|error| err(anyhow!(error))),
-
-                (None, Some(errors)) => err(anyhow!(
-                    errors
-                        .iter()
-                        .map(|e| e.message.to_owned())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )),
-
-                _ => err(anyhow!("unexpected GraphQL execution result")),
-            },
-
-            ServerMessage::Complete => ok(None),
-
-            ServerMessage::Error { payload } => err(anyhow!(payload)),
-        });
-
-    Ok(messages)
+pub struct GraphQlWsClient {
+    write: WsWrite,
+    read: WsRead,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
-#[serde(rename_all = "snake_case")]
-pub enum ServerMessage {
-    Next { payload: ExecutionResult },
-    Complete,
-    Error { payload: Value },
+pub enum ServerMessage<T> {
+    #[serde(rename = "next")]
+    Next { id: String, payload: Payload<T> },
+
+    #[serde(rename = "complete")]
+    Complete { id: String },
+
+    #[serde(rename = "connection_error")]
+    ConnectionError { payload: serde_json::Value },
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ExecutionResult {
-    pub data: Option<Value>,
-    pub errors: Option<Vec<GraphQLError>>,
+pub struct Payload<T> {
+    pub data: Option<T>,
+    pub errors: Option<Vec<PayloadError>>,
 }
 
-#[derive(Debug, Deserialize, Display)]
-#[display("{message}")]
-pub struct GraphQLError {
+#[derive(Debug, Deserialize)]
+pub struct PayloadError {
+    #[allow(dead_code)]
     pub message: String,
 }
 
+impl GraphQlWsClient {
+    /// Connect to the given WebSocket URL and establishes the GraphQL WebSocket connection.
+    pub async fn init<T: DeserializeOwned>(url: &str) -> anyhow::Result<Self> {
+        let ws_stream = connect_websocket(url).await?;
+        let (write, read) = ws_stream.split();
+        let client = establish_connection::<T>(write, read).await?;
+
+        Ok(client)
+    }
+
+    /// Send a subscription message for the given subscription.
+    pub async fn subscribe<T>(&mut self, subscription: QueryBody<T>) -> anyhow::Result<()>
+    where
+        T: Serialize,
+    {
+        let variables =
+            serde_json::to_value(subscription.variables).context("serialize variables")?;
+
+        let subscribe_message = json!({
+            "type": "subscribe",
+            "id": "1",
+            "payload": {
+                "operationName": subscription.operation_name,
+                "query": subscription.query,
+                "variables": variables,
+            }
+        });
+
+        self.write
+            .send(Message::text(subscribe_message.to_string()))
+            .await
+            .context("send subscribe message")?;
+
+        Ok(())
+    }
+
+    pub async fn messages<T>(self) -> impl Stream<Item = anyhow::Result<ServerMessage<T>>>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        self.read.map(|result| {
+            result
+                .context("get next message")
+                .and_then(|message| match message {
+                    Message::Text(text) => serde_json::from_str::<ServerMessage<T>>(&text)
+                        .context("deserialize text message to ServerMessage"),
+
+                    _ => Err(anyhow!("unexpected non-text message")),
+                })
+        })
+    }
+}
+
 /// Connect to the given WebSocket URL and return the WebSocket stream.
-async fn connect_graphql_ws(url: &str) -> anyhow::Result<WsStream> {
+async fn connect_websocket(url: &str) -> anyhow::Result<WsStream> {
     let mut request = url
         .into_client_request()
         .context("convert url into client request")?;
@@ -152,16 +137,19 @@ async fn connect_graphql_ws(url: &str) -> anyhow::Result<WsStream> {
         .headers_mut()
         .insert("Sec-WebSocket-Protocol", graphql_transport_ws);
 
-    // Connect to the WebSocket server.
+    // Connect to the WebSocket server
     let (ws_stream, _) = connect_async(request)
         .await
-        .context("connect to WebSocket server")?;
+        .context("connect to WebSocket")?;
 
     Ok(ws_stream)
 }
 
 /// Establish the GraphQL WebSocket connection by performing the handshake.
-pub async fn init_graphql_ws(write: &mut WsWrite, read: &mut WsRead) -> anyhow::Result<()> {
+pub async fn establish_connection<T: DeserializeOwned>(
+    mut write: WsWrite,
+    mut read: WsRead,
+) -> anyhow::Result<GraphQlWsClient> {
     // Send the connection_init message.
     write
         .send(Message::text(&*CONNECTION_INIT))
@@ -169,23 +157,20 @@ pub async fn init_graphql_ws(write: &mut WsWrite, read: &mut WsRead) -> anyhow::
         .context("send connection_init")?;
 
     // Await  the connection_ack message.
-    let Some(message) = read.try_next().await.context("read WebSocket message")? else {
-        bail!("WebSocket connection closed while awaiting connection_ack");
+    let message = read.try_next().await.context("read WebSocket message")?;
+    let Some(message) = message else {
+        bail!("not received any message while awaiting connection_ack");
     };
-
     let Message::Text(message) = message else {
-        bail!("received non-text message for connection_ack");
+        bail!("not received text message for connection_ack");
     };
-
     let message = serde_json::from_str::<Value>(&message).context("parse text message as JSON")?;
-
     let Value::String(tpe) = &message["type"] else {
         bail!("not received JSON object with string 'type' key");
     };
-
     if tpe != "connection_ack" {
         bail!("not received connection_ack");
     }
 
-    Ok(())
+    Ok(GraphQlWsClient { write, read })
 }

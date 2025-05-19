@@ -1,0 +1,156 @@
+query LatestBlock {
+    block { height, hash, author }
+}
+
+query BlockByHash($hash: HexEncoded!) {
+    block(offset: { hash: $hash }) {
+        hash
+        height
+        protocolVersion
+        author
+        timestamp
+        transactions {
+            hash
+        }
+        parent {
+            hash
+            height
+            author
+            transactions {
+                hash
+            }
+        }
+    }
+}
+
+query BlockByHeight($height: Int!) {
+    block(offset: { height: $height }) {
+        height
+        hash
+   }
+}
+
+query TransactionByHash($hash: HexEncoded!) {
+    transactions(hash: $hash) {
+        hash
+        block {
+            height
+            hash
+        }
+    }
+}
+
+query TransactionsByAddress($address: UnshieldedAddress!) {
+    transactions(address: $address) {
+        hash
+        unshieldedCreatedOutputs { owner value }
+        unshieldedSpentOutputs   { owner value }
+    }
+}
+
+mutation Connect($viewingKey: ViewingKey!) {
+    connect(viewingKey: $viewingKey)
+}
+
+mutation Disconnect($sessionId: HexEncoded!) {
+    disconnect(sessionId: $sessionId)
+}
+
+subscription BlocksSubscription($offset: BlockOffsetInput) {
+    blocks(offset: $offset) {
+        hash
+        height
+        protocolVersion
+        author
+        timestamp
+        transactions {
+            hash
+            protocolVersion
+            applyStage
+            identifiers
+            raw
+        }
+    }
+}
+
+subscription ContractsSubscription($address: HexEncoded!, $offset: BlockOffsetInput) {
+    contracts(address: $address, offset: $offset) {
+        __typename
+        ... on ContractCall {
+            address
+            state
+            entryPoint
+        }
+        __typename
+        ... on ContractDeploy {
+            address
+            state
+        }
+        __typename
+        ... on ContractUpdate {
+            address
+            state
+        }
+    }
+}
+
+query UnshieldedUtxos($address: UnshieldedAddress!) {
+    unshieldedUtxos(address: $address) {
+        owner
+        value
+        tokenType
+        outputIndex
+        intentHash
+        createdAtTransaction {
+            hash
+            block {
+                height
+            }
+        }
+        spentAtTransaction {
+            hash
+            block {
+                height
+            }
+        }
+    }
+}
+
+subscription UnshieldedUtxosSubscription($address: UnshieldedAddress!) {
+  unshieldedUtxos(address: $address) {
+    eventType
+    transaction { hash }
+    createdUtxos { owner value }
+    spentUtxos   { owner value }
+  }
+}
+
+subscription WalletSubscription($sessionId: HexEncoded!, $index: Int, $sendProgressUpdates: Boolean) {
+    wallet(sessionId: $sessionId, index: $index, sendProgressUpdates: $sendProgressUpdates) {
+        __typename
+        ... on ViewingUpdate {
+            index,
+            update {
+                __typename
+                ... on MerkleTreeCollapsedUpdate {
+                    update,
+                    start,
+                    end
+                }
+                __typename
+                ... on RelevantTransaction {
+                    transaction {
+                        hash
+                    },
+                    start,
+                    end
+                }
+            }
+        }
+        __typename
+        ... on ProgressUpdate {
+            synced,
+            total
+        }
+    }
+}

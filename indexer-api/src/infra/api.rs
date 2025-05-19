@@ -12,40 +12,38 @@
 // limitations under the License.
 
 pub mod v1;
+pub mod v2;
 
 use crate::domain::{Api, Storage, ZswapStateCache};
-use anyhow::Context as _;
-use async_graphql::Context;
+use async_graphql::{scalar, Context};
 use axum::{
-    Router,
     body::Body,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
+    Router,
 };
 use fastrace_axum::FastraceLayer;
 use indexer_common::domain::{NetworkId, Subscriber, ZswapStateStorage};
-use log::{error, info, warn};
-use serde::Deserialize;
+use log::{info, warn};
+use serde::{Deserialize, Serialize};
 use std::{
     convert::Infallible,
-    error::Error as StdError,
-    fmt::Display,
     io,
     net::IpAddr,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
 };
 use thiserror::Error;
 use tokio::{
     net::TcpListener,
-    signal::unix::{SignalKind, signal},
+    signal::unix::{signal, SignalKind},
 };
 use tower::ServiceBuilder;
-use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
+use tower_http::limit::RequestBodyLimitLayer;
 
 /// Attention: This could change if the used libraries change!
 /// See https://docs.rs/http-body-util/0.1.2/src/http_body_util/limited.rs.html#93.
@@ -132,6 +130,11 @@ pub enum AxumApiError {
     Serve(#[source] io::Error),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Unit;
+
+scalar!(Unit);
+
 #[allow(clippy::too_many_arguments)]
 fn make_app<S, Z, B>(
     caught_up: Arc<AtomicBool>,
@@ -166,13 +169,10 @@ where
         .nest("/api/v1", v1_app)
         .with_state(caught_up)
         .layer(
-            ServiceBuilder::new().layer(
-                ServiceBuilder::new()
-                    .layer(FastraceLayer)
-                    .layer(RequestBodyLimitLayer::new(request_body_limit))
-                    .layer(CorsLayer::permissive())
-                    .and_then(transform_lentgh_limit_exceeded),
-            ),
+            ServiceBuilder::new()
+                .layer(ServiceBuilder::new().layer(FastraceLayer))
+                .layer(RequestBodyLimitLayer::new(request_body_limit))
+                .and_then(transform_lentgh_limit_exceeded),
         )
 }
 
@@ -234,98 +234,56 @@ async fn shutdown_signal() {
 }
 
 trait ContextExt {
-    fn get_network_id(&self) -> NetworkId;
+    fn get_network_id(&self) -> async_graphql::Result<NetworkId>;
 
-    fn get_storage<S>(&self) -> &S
+    fn get_storage<S>(&self) -> async_graphql::Result<&S>
     where
         S: Storage;
 
-    fn get_subscriber<B>(&self) -> &B
+    fn get_subscriber<B>(&self) -> async_graphql::Result<&B>
     where
         B: Subscriber;
 
-    fn get_zswap_state_storage<Z>(&self) -> &Z
+    fn get_zswap_state_storage<Z>(&self) -> async_graphql::Result<&Z>
     where
         Z: ZswapStateStorage;
 
-    fn get_zswap_state_cache(&self) -> &ZswapStateCache;
+    fn get_zswap_state_cache(&self) -> async_graphql::Result<&ZswapStateCache>;
 }
 
 impl ContextExt for Context<'_> {
-    fn get_network_id(&self) -> NetworkId {
+    fn get_network_id(&self) -> async_graphql::Result<NetworkId> {
         self.data::<NetworkId>()
             .copied()
-            .expect("NetworkId is stored in Context")
+            .map_err(|_| async_graphql::Error::new("cannot get NetworkId from context"))
     }
 
-    fn get_storage<S>(&self) -> &S
+    fn get_storage<S>(&self) -> async_graphql::Result<&S>
     where
         S: Storage,
     {
-        self.data::<S>().expect("Storage is stored in Context")
+        self.data::<S>()
+            .map_err(|_| async_graphql::Error::new("cannot get Storage from context"))
     }
 
-    fn get_subscriber<B>(&self) -> &B
+    fn get_subscriber<B>(&self) -> async_graphql::Result<&B>
     where
         B: Subscriber,
     {
-        self.data::<B>().expect("Subscriber is stored in Context")
+        self.data::<B>()
+            .map_err(|_| async_graphql::Error::new("cannot get Subscriber from context"))
     }
 
-    fn get_zswap_state_storage<Z>(&self) -> &Z
+    fn get_zswap_state_storage<Z>(&self) -> async_graphql::Result<&Z>
     where
         Z: ZswapStateStorage,
     {
         self.data::<Z>()
-            .expect("ZswapStateStorage is stored in Context")
+            .map_err(|_| async_graphql::Error::new("cannot get ZswapStateStorage from context"))
     }
 
-    fn get_zswap_state_cache(&self) -> &ZswapStateCache {
+    fn get_zswap_state_cache(&self) -> async_graphql::Result<&ZswapStateCache> {
         self.data::<ZswapStateCache>()
-            .expect("ZswapStateCache is stored in Context")
-    }
-}
-
-trait ResultExt<T, E>
-where
-    E: StdError + Send + Sync + 'static,
-{
-    /// In case of an `Err`, log an error with the given context and return just "Internal Error"
-    /// without further details.
-    fn internal<C>(self, context: C) -> async_graphql::Result<T>
-    where
-        C: Display + Send + Sync + 'static;
-}
-
-impl<T, E> ResultExt<T, E> for Result<T, E>
-where
-    E: StdError + Send + Sync + 'static,
-{
-    fn internal<C>(self, context: C) -> async_graphql::Result<T>
-    where
-        C: Display + Send + Sync + 'static,
-    {
-        self.context(context)
-            .inspect_err(|error| error!(error = format!("{error:#}"); "API error"))
-            .map_err(|_| async_graphql::Error::new("Internal Error"))
-    }
-}
-
-trait OptionExt<T> {
-    /// In case of `None`, log an error with the given context and return just "Internal Error"
-    /// without further details.
-    fn internal<C>(self, context: C) -> async_graphql::Result<T>
-    where
-        C: Display + Send + Sync + 'static;
-}
-
-impl<T> OptionExt<T> for Option<T> {
-    fn internal<C>(self, context: C) -> async_graphql::Result<T>
-    where
-        C: Display + Send + Sync + 'static,
-    {
-        self.context(context)
-            .inspect_err(|error| error!(error = format!("{error:#}"); "API error"))
-            .map_err(|_| async_graphql::Error::new("Internal Error"))
+            .map_err(|_| async_graphql::Error::new("cannot get ZSwapStateCache from context"))
     }
 }

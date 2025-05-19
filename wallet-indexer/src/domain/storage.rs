@@ -28,13 +28,13 @@ where
     /// and only if possible.
     async fn acquire_lock(
         &mut self,
-        session_id: SessionId,
+        session_id: &SessionId,
     ) -> Result<Option<sqlx::Transaction<'static, Self::Database>>, sqlx::Error>;
 
     /// Get the wallet for the given session ID, if exists.
     async fn get_wallet(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         tx: &mut sqlx::Transaction<'static, Self::Database>,
     ) -> Result<Option<Wallet>, sqlx::Error>;
 

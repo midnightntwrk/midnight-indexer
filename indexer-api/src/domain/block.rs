@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::domain::Transaction;
 use indexer_common::domain::{BlockAuthor, ByteArray, ProtocolVersion};
 use sqlx::prelude::FromRow;
 
@@ -19,9 +20,6 @@ pub type BlockHash = ByteArray<32>;
 /// Relevant block data from the perspective of the Indexer API.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct Block {
-    #[sqlx(try_from = "i64")]
-    pub id: u64,
-
     #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     pub hash: BlockHash,
 
@@ -42,4 +40,7 @@ pub struct Block {
 
     #[sqlx(try_from = "i64")]
     pub timestamp: u64,
+
+    #[sqlx(skip)]
+    pub transactions: Vec<Transaction>,
 }

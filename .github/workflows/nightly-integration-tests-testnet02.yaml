@@ -1,0 +1,16 @@
+name: nightly integration ts-tests - testnet02
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * *"
+
+jobs:
+  test:
+    name: Nightly tests
+    uses: ./.github/workflows/nightly-integration-tests.yaml
+    with:
+      deployment: testnet02
+      ref: ${{ inputs.ref || github.ref_name }}
+      allure_report_project_id: indexer-rs-testnet-02
+    secrets: inherit

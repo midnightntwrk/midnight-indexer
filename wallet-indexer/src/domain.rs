@@ -60,10 +60,13 @@ impl Transaction {
                 fallible_coins,
                 ..
             }) => {
-                let secret_key = &wallet.viewing_key.into();
-                can_decrypt(secret_key, guaranteed_coins)
+                let key = wallet
+                    .viewing_key
+                    .deserialize(network_id)
+                    .map_err(TransactionIsRelevantError::DeserializeViewingKey)?;
+                can_decrypt(&key, guaranteed_coins)
                     || fallible_coins
-                        .map(|fallible_coins| can_decrypt(secret_key, fallible_coins))
+                        .map(|fallible_coins| can_decrypt(&key, fallible_coins))
                         .unwrap_or_default()
             }
 
@@ -117,12 +120,13 @@ mod tests {
         storage::DefaultDB,
         structure::Transaction as LedgerTransaction,
         transient_crypto::proofs::ProofPreimage,
-        zswap::{Offer, ZSWAP_EXPECTED_FILES, prove::ZswapResolver},
+        zswap::{prove::ZswapResolver, Offer, ZSWAP_EXPECTED_FILES},
     };
 
     #[tokio::test]
     async fn test_is_relevant() -> Result<(), BoxError> {
-        let viewing_key = ViewingKey::make_for_testing_yes_i_know_what_i_am_doing();
+        let viewing_key =
+            ViewingKey::make_for_testing_yes_i_know_what_i_am_doing(NetworkId::Undeployed);
 
         let raw = create_raw_transaction(NetworkId::Undeployed)?;
         let transaction = Transaction { id: 42, raw };

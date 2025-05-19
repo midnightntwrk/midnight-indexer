@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{Transaction, Wallet, storage::Storage},
+    domain::{storage::Storage, Transaction, Wallet},
     infra::storage::{self},
 };
 use chacha20poly1305::ChaCha20Poly1305;
@@ -20,12 +20,12 @@ use fastrace::trace;
 use futures::TryStreamExt;
 use indexer_common::{
     domain::{SessionId, ViewingKey},
-    infra::{pool::postgres::PostgresPool, sqlx::postgres::map_deadlock_detected},
+    infra::pool::postgres::PostgresPool,
 };
 use indoc::indoc;
 use sqlx::{
+    types::{time::OffsetDateTime, Uuid},
     Postgres, QueryBuilder, Row,
-    types::{Uuid, time::OffsetDateTime},
 };
 use std::{num::NonZeroUsize, time::Duration};
 
@@ -49,7 +49,7 @@ impl Storage for PostgresStorage {
     type Database = sqlx::Postgres;
 
     #[trace]
-    async fn acquire_lock(&mut self, session_id: SessionId) -> Result<Option<Tx>, sqlx::Error> {
+    async fn acquire_lock(&mut self, session_id: &SessionId) -> Result<Option<Tx>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
         let lock_acquired =
@@ -65,7 +65,7 @@ impl Storage for PostgresStorage {
     #[trace]
     async fn get_wallet(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         tx: &mut Tx,
     ) -> Result<Option<Wallet>, sqlx::Error> {
         let query = indoc! {"
@@ -118,7 +118,7 @@ impl Storage for PostgresStorage {
         tx: &mut Tx,
     ) -> Result<(), sqlx::Error> {
         let id = Uuid::now_v7();
-        let session_id = viewing_key.to_session_id();
+        let session_id = viewing_key.as_session_id();
         let viewing_key = viewing_key
             .encrypt(id, &self.cipher)
             .map_err(|error| sqlx::Error::Encode(error.into()))?;
@@ -165,6 +165,8 @@ impl Storage for PostgresStorage {
     }
 
     async fn active_wallets(&self, ttl: Duration) -> Result<Vec<ViewingKey>, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+
         // Query wallets.
         let query = indoc! {"
             SELECT *
@@ -173,7 +175,7 @@ impl Storage for PostgresStorage {
         "};
 
         let wallets = sqlx::query_as::<_, storage::Wallet>(query)
-            .fetch(&*self.pool)
+            .fetch(&mut *tx)
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -191,15 +193,10 @@ impl Storage for PostgresStorage {
                 WHERE id = ANY($1)
             "};
 
-            // This could cause a "deadlock_detected" error when the indexer-api sets a wallet
-            // active at the same time. These errors can be ignored, because this operation will be
-            // executed "very soon" again.
             sqlx::query(query)
                 .bind(outdated_ids)
-                .execute(&*self.pool)
-                .await
-                .map(|_| ())
-                .or_else(|error| map_deadlock_detected(error, || ()))?;
+                .execute(&mut *tx)
+                .await?;
         }
 
         // Return active viewing keys.
@@ -222,23 +219,23 @@ impl Storage for PostgresStorage {
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{Wallet, storage::Storage},
+        domain::{storage::Storage, Wallet},
         infra::storage::postgres::PostgresStorage,
     };
     use anyhow::Context;
     use assert_matches::assert_matches;
     use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
     use indexer_common::{
-        domain::{ApplyStage, ViewingKey},
+        domain::{ApplyStage, NetworkId, ViewingKey},
         infra::{
             migrations,
             pool::{self, postgres::PostgresPool},
         },
     };
     use indoc::indoc;
-    use sqlx::{QueryBuilder, postgres::PgSslMode, types::time::OffsetDateTime};
+    use sqlx::{postgres::PgSslMode, types::time::OffsetDateTime, QueryBuilder};
     use std::{error::Error as StdError, iter};
-    use testcontainers::{ImageExt, runners::AsyncRunner};
+    use testcontainers::{runners::AsyncRunner, ImageExt};
     use testcontainers_modules::postgres::Postgres;
     use uuid::Uuid;
 
@@ -325,10 +322,12 @@ mod tests {
         let cipher =
             ChaCha20Poly1305::new(&Key::clone_from_slice(b"01234567890123456789012345678901"));
 
-        let viewing_key_a = ViewingKey::make_for_testing_yes_i_know_what_i_am_doing();
-        let viewing_key_b = ViewingKey::make_for_testing_yes_i_know_what_i_am_doing();
-        let session_id_a = viewing_key_a.to_session_id();
-        let session_id_b = viewing_key_b.to_session_id();
+        let viewing_key_a =
+            ViewingKey::make_for_testing_yes_i_know_what_i_am_doing(NetworkId::Undeployed);
+        let viewing_key_b =
+            ViewingKey::make_for_testing_yes_i_know_what_i_am_doing(NetworkId::Undeployed);
+        let session_id_a = viewing_key_a.as_session_id();
+        let session_id_b = viewing_key_b.as_session_id();
 
         let uuid_a = Uuid::now_v7();
         let encrypted_viewing_key_a = viewing_key_a.encrypt(uuid_a, &cipher)?;
@@ -368,13 +367,13 @@ mod tests {
 
         let mut storage = PostgresStorage::new(cipher, pool);
 
-        let tx = storage.acquire_lock(session_id_b).await?;
+        let tx = storage.acquire_lock(&session_id_b).await?;
         assert!(tx.is_some());
         let mut tx = tx.unwrap();
 
-        let wallet = storage.get_wallet([0; 32].into(), &mut tx).await?;
+        let wallet = storage.get_wallet(&[0; 32].into(), &mut tx).await?;
         assert!(wallet.is_none());
-        let wallet = storage.get_wallet(session_id_b, &mut tx).await?;
+        let wallet = storage.get_wallet(&session_id_b, &mut tx).await?;
         assert_matches!(
             wallet,
             Some(Wallet {
@@ -397,11 +396,11 @@ mod tests {
 
         tx.commit().await?;
 
-        let tx = storage.acquire_lock(session_id_b).await?;
+        let tx = storage.acquire_lock(&session_id_b).await?;
         assert!(tx.is_some());
         let mut tx = tx.unwrap();
 
-        let wallet = storage.get_wallet(session_id_b, &mut tx).await?;
+        let wallet = storage.get_wallet(&session_id_b, &mut tx).await?;
         assert_matches!(
             wallet,
             Some(Wallet {

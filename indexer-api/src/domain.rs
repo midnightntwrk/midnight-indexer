@@ -16,6 +16,7 @@ mod block;
 mod contract_action;
 mod storage;
 mod transaction;
+mod unshielded;
 mod viewing_key;
 mod zswap;
 
@@ -24,19 +25,18 @@ pub use block::*;
 pub use contract_action::*;
 pub use storage::*;
 pub use transaction::*;
+pub use unshielded::*;
 pub use viewing_key::*;
 pub use zswap::*;
 
 use async_graphql::scalar;
 use const_hex::FromHexError;
-use derive_more::{Debug, Display};
 use serde::{Deserialize, Serialize};
-use std::any::type_name;
 use thiserror::Error;
 
 /// Wrapper around hex-encoded bytes.
-#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[debug("{_0}")]
+/// Attention: Do not implement `From` or make the wrapped value public to ensure correctness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HexEncoded(String);
 
 scalar!(HexEncoded);
@@ -48,9 +48,7 @@ impl HexEncoded {
         T: TryFrom<Vec<u8>>,
     {
         let bytes = const_hex::decode(&self.0)?;
-        let decoded = bytes
-            .try_into()
-            .map_err(|_| HexDecodeError::Convert(type_name::<T>()))?;
+        let decoded = bytes.try_into().map_err(|_| HexDecodeError::Convert)?;
         Ok(decoded)
     }
 }
@@ -60,8 +58,8 @@ pub enum HexDecodeError {
     #[error("cannot hex-decode")]
     Decode(#[from] FromHexError),
 
-    #[error("cannot convert to {0}")]
-    Convert(&'static str),
+    #[error("cannot convert")]
+    Convert,
 }
 
 // Needed to derive `Interface` for `ContractAction`. Weird!

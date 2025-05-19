@@ -16,27 +16,7 @@ mod config;
 
 #[cfg(feature = "standalone")]
 #[tokio::main]
-async fn main() {
-    use indexer_common::telemetry;
-    use log::error;
-    use std::panic;
-
-    // Initialize logging.
-    telemetry::init_logging();
-
-    // Replace the default panic hook with one that uses structured logging at ERROR level.
-    panic::set_hook(Box::new(|panic| error!(panic:%; "process panicked")));
-
-    // Run and log any error.
-    if let Err(error) = run().await {
-        let backtrace = error.backtrace();
-        let error = format!("{error:#}");
-        error!(error, backtrace:%; "process exited with ERROR")
-    }
-}
-
-#[cfg(feature = "standalone")]
-async fn run() -> anyhow::Result<()> {
+async fn main() -> anyhow::Result<()> {
     use crate::config::{Config, InfraConfig};
     use anyhow::Context;
     use chain_indexer::infra::node::SubxtNode;
@@ -47,11 +27,17 @@ async fn run() -> anyhow::Result<()> {
         infra::{migrations, pool, pub_sub, zswap_state_storage},
         telemetry,
     };
-    use log::info;
+    use log::{error, info};
     use std::panic;
     use tokio::{select, task};
 
-    // Load configuration.
+    // Initialize logging.
+    telemetry::init_logging();
+
+    // Replace the default panic hook with one that uses structured logging at ERROR level.
+    panic::set_hook(Box::new(|panic| error!(panic:%; "process panicked")));
+
+    // Load configuration first, because needed for tracing initialization.
     let Config {
         run_migrations,
         chain_indexer_application_config,
@@ -62,7 +48,13 @@ async fn run() -> anyhow::Result<()> {
                 tracing_config,
                 metrics_config,
             },
-    } = Config::load().context("load configuration")?;
+    } = Config::load()
+        .context("load configuration")
+        .inspect_err(|error| {
+            let backtrace = error.backtrace();
+            let error = format!("{error:#}");
+            error!(error, backtrace:%; "process exited with ERROR")
+        })?;
 
     // Initialize tracing and metrics.
     telemetry::init_tracing(tracing_config);
@@ -114,8 +106,11 @@ async fn run() -> anyhow::Result<()> {
     });
 
     let indexer_api = task::spawn({
-        let storage =
-            indexer_api::infra::storage::sqlite::SqliteStorage::new(cipher.clone(), pool.clone());
+        let storage = indexer_api::infra::storage::sqlite::SqliteStorage::new(
+            cipher.clone(),
+            pool.clone(),
+            api_config.network_id,
+        );
         let subscriber = pub_sub.subscriber();
         let api = AxumApi::new(api_config, storage, zswap_state_storage, subscriber.clone());
 
@@ -136,15 +131,13 @@ async fn run() -> anyhow::Result<()> {
     }
 
     info!("indexer shutting down");
-
     Ok(())
 }
 
 #[cfg(feature = "standalone")]
-fn handle_exit(task_name: &str, result: Result<anyhow::Result<()>, tokio::task::JoinError>) {
+fn handle_exit(task_name: &str, res: Result<anyhow::Result<()>, tokio::task::JoinError>) {
     use log::error;
-
-    match result {
+    match res {
         Ok(Err(error)) => {
             let backtrace = error.backtrace();
             let error = format!("{error:#}");

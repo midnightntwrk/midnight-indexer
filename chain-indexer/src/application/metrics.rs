@@ -13,7 +13,7 @@
 
 use crate::domain::{Block, ContractAction, ContractAttributes};
 use indexer_common::domain::RawZswapState;
-use metrics::{Counter, Gauge, counter, gauge};
+use metrics::{counter, gauge, Counter, Gauge};
 
 pub struct Metrics {
     block_height: Counter,
