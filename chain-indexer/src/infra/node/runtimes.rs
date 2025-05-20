@@ -26,7 +26,8 @@ use parity_scale_codec::Decode;
 use std::collections::HashMap;
 use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events};
 
-pub type RuntimeUnshieldedUtxoInfo = crate::infra::node::runtimes::runtime_0_13::runtime_types::pallet_midnight::pallet::UnshieldedUtxoInfo;
+pub type RuntimeUnshieldedUtxoInfo =
+    runtime_0_13::runtime_types::midnight_node_ledger::common::types::UtxoInfo;
 
 /// Runtime specific block details.
 pub struct BlockDetails {
