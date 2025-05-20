@@ -1,4 +1,4 @@
-name: dependabot-approve-merge
+name: dependabot
 
 on:
   pull_request:
@@ -61,6 +61,12 @@ jobs:
         with:
           tool: just
 
+      - name: Install earthly
+        uses: earthly/actions-setup@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: v0.8.0
+
       - uses: Swatinem/rust-cache@v2
 
       - name: just test
@@ -75,7 +81,7 @@ jobs:
           APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: ${{ secrets.APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD }}
           APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}
 
-  dependabot-approve-merge:
+  dependabot:
     if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest-8-core-x64
     needs: test
