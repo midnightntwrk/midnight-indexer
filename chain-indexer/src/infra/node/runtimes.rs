@@ -26,7 +26,7 @@ use parity_scale_codec::Decode;
 use std::collections::HashMap;
 use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events};
 
-pub type RuntimeUnshieldedUtxoInfo = crate::infra::node::runtimes::runtime_0_12::runtime_types::pallet_midnight::pallet::UnshieldedUtxoInfo;
+pub type RuntimeUnshieldedUtxoInfo = crate::infra::node::runtimes::runtime_0_13::runtime_types::pallet_midnight::pallet::UnshieldedUtxoInfo;
 
 /// Runtime specific block details.
 pub struct BlockDetails {
@@ -231,6 +231,9 @@ async fn make_block_details_runtime_0_13(
         spent_unshielded_utxos_info,
     })
 }
+
+make_block_details!(runtime_0_12, midnight::Event::TxOnlyGuaranteedApplied);
+make_block_details!(runtime_0_13, midnight::Event::TxPartialSuccess);
 
 macro_rules! fetch_authorities {
     ($module:ident) => {
