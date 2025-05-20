@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod chain_indexer_data;
 pub mod e2e;
 pub mod graphql_ws_client;
 
