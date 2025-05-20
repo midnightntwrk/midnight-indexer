@@ -1,11 +1,6 @@
 version: 2
 
 updates:
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-
   - package-ecosystem: "cargo"
     directory: "/"
     registries: "*"
@@ -13,6 +8,11 @@ updates:
       interval: "daily"
     ignore:
       - dependency-name: "midnight-ledger"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
 
 registries:
   github:

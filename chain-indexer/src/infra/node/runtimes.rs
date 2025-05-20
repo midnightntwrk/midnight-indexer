@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[subxt::subxt(runtime_metadata_path = "../.node/0.12.0-fb26ee62/metadata.scale")]
+#[subxt::subxt(runtime_metadata_path = "../.node/0.12.0/metadata.scale")]
 mod runtime_0_12 {}
 #[subxt::subxt(runtime_metadata_path = "../.node/0.13.0-alpha.1/metadata.scale")]
 mod runtime_0_13 {}
