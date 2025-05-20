@@ -14,12 +14,39 @@
 #[cfg_attr(docsrs, doc(cfg(feature = "cloud")))]
 #[cfg(feature = "cloud")]
 pub mod postgres;
+#[cfg_attr(docsrs, doc(cfg(feature = "standalone")))]
+#[cfg(feature = "standalone")]
+mod sqlite;
 
 use crate::domain::{ByteArray, TryFromForByteArrayError};
+use serde::{Deserialize, Serialize};
 use sqlx::{Database, Decode, Type, error::BoxDynError};
 
 /// A helper to use `Option<T>` where T does not implement `sqlx::Type` but a `TryFrom` into a
 /// supported type with `sqlx::FromRow` like this:
+/// Newtype for a byte array representing the big-endian encoded bytes of a `u128`. This can be used
+/// as a helper to use `u128` with `sqlx::FromRow` like this:
+/// ```
+/// #[sqlx(try_from = "U128BeBytes")]
+/// ```
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+pub struct U128BeBytes(pub [u8; 16]);
+
+impl From<u128> for U128BeBytes {
+    fn from(value: u128) -> Self {
+        Self(value.to_be_bytes())
+    }
+}
+
+impl From<U128BeBytes> for u128 {
+    fn from(value: U128BeBytes) -> Self {
+        u128::from_be_bytes(value.0)
+    }
+}
+
+/// A helper to use `Option<u64>` with `sqlx::FromRow` like this:
 /// ```
 /// #[sqlx(try_from = "SqlxOption<&'a [u8]>")]
 /// pub author: Option<ByteArray>,

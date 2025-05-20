@@ -23,12 +23,12 @@ pub mod storage;
 #[cfg(feature = "cloud")]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
+    pub secret: SecretString,
+
     #[serde(rename = "storage")]
     pub storage_config: pool::postgres::Config,
 
     #[cfg(feature = "cloud")]
     #[serde(rename = "pub_sub")]
     pub pub_sub_config: pub_sub::nats::Config,
-
-    pub secret: SecretString,
 }

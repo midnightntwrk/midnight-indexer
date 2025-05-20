@@ -12,12 +12,12 @@
 // limitations under the License.
 
 use crate::{
-    domain::{HexEncoded, Storage},
+    domain::{HexEncoded, Storage, UnshieldedUtxoExt},
     infra::api::{
         ContextExt, ResultExt,
         v1::{
-            Block, BlockOffset, ContractAction, ContractActionOffset, Transaction,
-            TransactionOffset,
+            self, Block, BlockOffset, ContractAction, ContractActionOffset, Transaction,
+            TransactionOffset, UnshieldedAddress, UnshieldedOffset, addr_to_common,
         },
     },
 };
@@ -96,10 +96,23 @@ where
         &self,
         cx: &Context<'_>,
         offset: TransactionOffset,
+        address: Option<UnshieldedAddress>,
     ) -> async_graphql::Result<Vec<Transaction<S>>> {
         self.transactions_calls.increment(1);
 
         let storage = cx.get_storage::<S>();
+
+        if let Some(addr) = address {
+            let network_id = cx.get_network_id();
+
+            let common_address = addr_to_common(&addr, network_id)?;
+            let txs = storage
+                .get_transactions_involving_unshielded(&common_address)
+                .await
+                .internal("get transactions by address")?;
+
+            return Ok(txs.into_iter().map(Transaction::<S>::from).collect());
+        }
 
         match offset {
             TransactionOffset::Hash(hash) => {
@@ -120,9 +133,9 @@ where
                 let identifier = identifier.hex_decode().context("hex-decode identifier")?;
 
                 let transactions = storage
-                    .get_transactions_by_identifier(&identifier)
+                    .get_transaction_by_identifier(&identifier)
                     .await
-                    .internal("get transactions by identifier")?
+                    .internal("get transaction by identifier")?
                     .into_iter()
                     .map(Into::into)
                     .collect::<Vec<_>>();
@@ -200,5 +213,63 @@ where
         };
 
         Ok(contract_action.map(Into::into))
+    }
+
+    /// Retrieve all unshielded UTXOs (both spent and unspent) associated with a given address.
+    #[trace(properties = { "address": "{address:?}" })]
+    async fn unshielded_utxos(
+        &self,
+        cx: &Context<'_>,
+        address: UnshieldedAddress,
+        offset: Option<UnshieldedOffset>,
+    ) -> async_graphql::Result<Vec<v1::UnshieldedUtxo<S>>> {
+        let storage = cx.get_storage::<S>();
+        let network_id = cx.get_network_id();
+
+        let common_address = addr_to_common(&address, network_id)?;
+        let utxos = match offset {
+            Some(UnshieldedOffset::BlockOffset(BlockOffset::Height(start))) => storage
+                .get_unshielded_utxos_by_address_from_height(&common_address, start)
+                .await
+                .internal("get unshielded UTXOs by address from height")?,
+
+            Some(UnshieldedOffset::BlockOffset(BlockOffset::Hash(hash))) => {
+                let block_hash = hash.hex_decode().context("decode block hash")?;
+                storage
+                    .get_unshielded_utxos_by_address_from_block_hash(&common_address, &block_hash)
+                    .await
+                    .internal("get unshielded UTXOs by address from block hash")?
+            }
+
+            Some(UnshieldedOffset::TransactionOffset(TransactionOffset::Hash(hash))) => {
+                let tx_hash = hash.hex_decode().context("decode tx hash")?;
+                storage
+                    .get_unshielded_utxos_by_address_from_tx_hash(&common_address, &tx_hash)
+                    .await
+                    .internal("get unshielded UTXOs by address from transaction hash")?
+            }
+
+            Some(UnshieldedOffset::TransactionOffset(TransactionOffset::Identifier(id))) => {
+                let identifier = id.hex_decode().context("decode tx identifier")?;
+                storage
+                    .get_unshielded_utxos_by_address_from_tx_identifier(
+                        &common_address,
+                        &identifier,
+                    )
+                    .await
+                    .internal("get unshielded UTXOs by address from transaction identifier")?
+            }
+
+            // no offset -> full list
+            None => storage
+                .get_unshielded_utxos_by_address(&common_address)
+                .await
+                .internal("get all unshielded UTXOs by address")?,
+        };
+
+        Ok(utxos
+            .into_iter()
+            .map(v1::UnshieldedUtxo::<S>::from)
+            .collect())
     }
 }

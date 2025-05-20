@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::BlockHash;
+use crate::domain::{BlockHash, UnshieldedUtxo};
 use derive_more::Debug;
 use indexer_common::domain::{
     ApplyStage, ByteArray, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction,
@@ -52,4 +52,10 @@ pub struct Transaction {
 
     #[sqlx(try_from = "i64")]
     pub end_index: u64,
+
+    #[sqlx(skip)]
+    pub unshielded_created_outputs: Vec<UnshieldedUtxo>,
+
+    #[sqlx(skip)]
+    pub unshielded_spent_outputs: Vec<UnshieldedUtxo>,
 }

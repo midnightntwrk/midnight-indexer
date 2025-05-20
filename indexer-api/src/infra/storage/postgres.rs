@@ -13,13 +13,14 @@
 
 use crate::domain::{
     Block, BlockHash, ContractAction, ContractAttributes, Storage, Transaction, TransactionHash,
+    UnshieldedUtxo, UnshieldedUtxoExt, UnshieldedUtxoFilter,
 };
 use async_stream::try_stream;
 use chacha20poly1305::ChaCha20Poly1305;
 use derive_more::Debug;
 use futures::{Stream, TryStreamExt};
 use indexer_common::{
-    domain::{ContractAddress, Identifier, SessionId, ViewingKey},
+    domain::{ContractAddress, Identifier, NetworkId, SessionId, UnshieldedAddress, ViewingKey},
     flatten_chunks,
     infra::{pool::postgres::PostgresPool, sqlx::postgres::map_deadlock_detected},
 };
@@ -33,14 +34,36 @@ pub struct PostgresStorage {
     #[debug(skip)]
     cipher: ChaCha20Poly1305,
     pool: PostgresPool,
+    network_id: NetworkId,
 }
 
 impl PostgresStorage {
     /// Create a new [PostgresStorage].
-    pub fn new(cipher: ChaCha20Poly1305, pool: PostgresPool) -> Self {
-        Self { cipher, pool }
+    pub fn new(cipher: ChaCha20Poly1305, pool: PostgresPool, network_id: NetworkId) -> Self {
+        Self {
+            cipher,
+            pool,
+            network_id,
+        }
     }
 }
+
+const TX_BY_ID_QUERY: &str = indoc! {"
+            SELECT
+                transactions.id,
+                transactions.hash,
+                blocks.hash AS block_hash,
+                transactions.protocol_version,
+                transactions.apply_stage,
+                transactions.identifiers,
+                transactions.raw,
+                transactions.merkle_tree_root,
+                transactions.start_index,
+                transactions.end_index
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE transactions.id = $1
+        "};
 
 impl Storage for PostgresStorage {
     async fn get_latest_block(&self) -> Result<Option<Block>, sqlx::Error> {
@@ -119,27 +142,19 @@ impl Storage for PostgresStorage {
     }
 
     async fn get_transaction_by_id(&self, id: u64) -> Result<Transaction, sqlx::Error> {
-        let query = indoc! {"
-            SELECT
-                transactions.id,
-                transactions.hash,
-                blocks.hash AS block_hash,
-                transactions.protocol_version,
-                transactions.apply_stage,
-                transactions.identifiers,
-                transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index
-            FROM transactions
-            INNER JOIN blocks ON blocks.id = transactions.block_id
-            WHERE transactions.id = $1
-        "};
-
-        sqlx::query_as::<_, Transaction>(query)
+        let mut transaction = sqlx::query_as::<_, Transaction>(TX_BY_ID_QUERY)
             .bind(id as i64)
             .fetch_one(&*self.pool)
-            .await
+            .await?;
+
+        transaction.unshielded_created_outputs = self
+            .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+            .await?;
+        transaction.unshielded_spent_outputs = self
+            .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+            .await?;
+
+        Ok(transaction)
     }
 
     async fn get_transactions_by_block_id(&self, id: u64) -> Result<Vec<Transaction>, sqlx::Error> {
@@ -160,10 +175,21 @@ impl Storage for PostgresStorage {
             WHERE transactions.block_id = $1
         "};
 
-        sqlx::query_as::<_, Transaction>(query)
+        let mut transactions = sqlx::query_as::<_, Transaction>(query)
             .bind(id as i64)
             .fetch_all(&*self.pool)
-            .await
+            .await?;
+
+        for transaction in transactions.iter_mut() {
+            transaction.unshielded_created_outputs = self
+                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+                .await?;
+            transaction.unshielded_spent_outputs = self
+                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+                .await?;
+        }
+
+        Ok(transactions)
     }
 
     async fn get_transactions_by_hash(
@@ -185,19 +211,31 @@ impl Storage for PostgresStorage {
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE transactions.hash = $1
+            ORDER BY transactions.id DESC
         "};
 
-        sqlx::query_as::<_, Transaction>(query)
+        let mut transactions = sqlx::query_as::<_, Transaction>(query)
             .bind(hash)
             .fetch_all(&*self.pool)
-            .await
+            .await?;
+
+        for transaction in transactions.iter_mut() {
+            transaction.unshielded_created_outputs = self
+                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+                .await?;
+            transaction.unshielded_spent_outputs = self
+                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+                .await?;
+        }
+
+        Ok(transactions)
     }
 
-    async fn get_transactions_by_identifier(
+    async fn get_transaction_by_identifier(
         &self,
         identifier: &Identifier,
-    ) -> Result<Vec<Transaction>, sqlx::Error> {
-        let query = indoc! {"
+    ) -> Result<Option<Transaction>, sqlx::Error> {
+        let sql = indoc! {"
             SELECT
                 transactions.id,
                 transactions.hash,
@@ -212,12 +250,24 @@ impl Storage for PostgresStorage {
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE $1 = ANY(transactions.identifiers)
+            LIMIT 1
         "};
 
-        sqlx::query_as::<_, Transaction>(query)
+        let mut transaction_option = sqlx::query_as::<_, Transaction>(sql)
             .bind(identifier)
-            .fetch_all(&*self.pool)
-            .await
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        if let Some(transaction) = &mut transaction_option {
+            transaction.unshielded_created_outputs = self
+                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+                .await?;
+            transaction.unshielded_spent_outputs = self
+                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+                .await?;
+        }
+
+        Ok(transaction_option)
     }
 
     async fn get_contract_deploy_by_address(
@@ -291,7 +341,6 @@ impl Storage for PostgresStorage {
             INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
             WHERE contract_actions.address = $1
             AND transactions.block_id = (SELECT id FROM blocks WHERE hash = $2)
-            AND transactions.apply_stage != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -321,7 +370,6 @@ impl Storage for PostgresStorage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE contract_actions.address = $1
             AND blocks.height = $2
-            AND transactions.apply_stage != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -351,7 +399,8 @@ impl Storage for PostgresStorage {
             AND contract_actions.transaction_id = (
                 SELECT id FROM transactions
                 WHERE hash = $2
-                AND apply_stage != 'Failure'
+                AND apply_stage = 'Success'
+                ORDER BY id DESC
                 LIMIT 1
             )
             ORDER BY id DESC
@@ -382,7 +431,6 @@ impl Storage for PostgresStorage {
             INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
             WHERE contract_actions.address = $1
             AND $2 = ANY(transactions.identifiers)
-            AND transactions.apply_stage != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -436,7 +484,7 @@ impl Storage for PostgresStorage {
                     FROM contract_actions
                     INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
                     INNER JOIN blocks ON blocks.id = transactions.block_id
-                    WHERE transactions.apply_stage != 'Failure'
+                    WHERE transactions.apply_stage = 'Success'
                     AND contract_actions.address = $1
                     AND blocks.height >= $2
                     AND contract_actions.id >= $3
@@ -476,12 +524,12 @@ impl Storage for PostgresStorage {
                 SELECT MAX(end_index) FROM transactions
             ) AS highest_end_index,
             (
-                SELECT MAX(end_index) 
-                FROM transactions 
+                SELECT MAX(end_index)
+                FROM transactions
                 INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
             ) AS highest_relevant_end_index,
             (
-                SELECT end_index 
+                SELECT end_index
                 FROM transactions
                 INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
                 INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
@@ -534,7 +582,7 @@ impl Storage for PostgresStorage {
                     LIMIT $3
                 "};
 
-                let transactions = sqlx::query_as::<_, Transaction>(query)
+                let mut transactions = sqlx::query_as::<_, Transaction>(query)
                     .bind(session_id)
                     .bind(index as i64)
                     .bind(batch_size.get() as i64)
@@ -545,6 +593,13 @@ impl Storage for PostgresStorage {
                     Some(end_index) => end_index + 1,
                     None => break,
                 };
+
+                for transaction in transactions.iter_mut() {
+                    transaction.unshielded_created_outputs =
+                        self.get_unshielded_utxos_by_creating_tx_id(transaction.id).await?;
+                    transaction.unshielded_spent_outputs =
+                        self.get_unshielded_utxos_by_spending_tx_id(transaction.id).await?;
+                }
 
                 yield transactions;
             }
@@ -617,5 +672,261 @@ impl Storage for PostgresStorage {
             .or_else(|error| map_deadlock_detected(error, || ()))?;
 
         Ok(())
+    }
+
+    async fn get_unshielded_utxos(
+        &self,
+        address: Option<&UnshieldedAddress>,
+        filter: UnshieldedUtxoFilter<'_>,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
+        let sql = match (&address, &filter) {
+            (Some(_), UnshieldedUtxoFilter::All) => {
+                indoc! {"
+                SELECT
+                    id, owner_address, token_type, value, output_index, intent_hash,
+                    creating_transaction_id, spending_transaction_id
+                FROM unshielded_utxos
+                WHERE owner_address = $1
+                ORDER BY id ASC
+            "}
+            }
+            (None, UnshieldedUtxoFilter::CreatedByTx(_)) => {
+                indoc! {"
+                SELECT
+                    id, owner_address, token_type, value, output_index, intent_hash,
+                    creating_transaction_id, spending_transaction_id
+                FROM unshielded_utxos
+                WHERE creating_transaction_id = $1
+            "}
+            }
+            (None, UnshieldedUtxoFilter::SpentByTx(_)) => {
+                indoc! {"
+                SELECT
+                    id, owner_address, token_type, value, output_index, intent_hash,
+                    creating_transaction_id, spending_transaction_id
+                FROM unshielded_utxos
+                WHERE spending_transaction_id = $1
+            "}
+            }
+            (Some(_), UnshieldedUtxoFilter::CreatedInTxForAddress(_)) => {
+                indoc! {"
+                SELECT
+                    id, owner_address, token_type, value, output_index, intent_hash,
+                    creating_transaction_id, spending_transaction_id
+                FROM unshielded_utxos
+                WHERE creating_transaction_id = $1
+                AND owner_address = $2
+            "}
+            }
+            (Some(_), UnshieldedUtxoFilter::SpentInTxForAddress(_)) => {
+                indoc! {"
+                SELECT
+                    id, owner_address, token_type, value, output_index, intent_hash,
+                    creating_transaction_id, spending_transaction_id
+                FROM unshielded_utxos
+                WHERE spending_transaction_id = $1
+                AND owner_address = $2
+            "}
+            }
+            (Some(_), UnshieldedUtxoFilter::FromHeight(_)) => {
+                indoc! {"
+                SELECT unshielded_utxos.id,
+                       unshielded_utxos.owner_address,
+                       unshielded_utxos.token_type,
+                       unshielded_utxos.value,
+                       unshielded_utxos.output_index,
+                       unshielded_utxos.intent_hash,
+                       unshielded_utxos.creating_transaction_id,
+                       unshielded_utxos.spending_transaction_id
+                FROM   unshielded_utxos
+                JOIN   transactions ON transactions.id = unshielded_utxos.creating_transaction_id
+                JOIN   blocks ON blocks.id = transactions.block_id
+                WHERE  unshielded_utxos.owner_address = $1
+                  AND  blocks.height >= $2
+                ORDER  BY unshielded_utxos.id ASC
+            "}
+            }
+            (Some(_), UnshieldedUtxoFilter::FromBlockHash(_)) => {
+                indoc! {"
+                SELECT unshielded_utxos.id,
+                       unshielded_utxos.owner_address,
+                       unshielded_utxos.token_type,
+                       unshielded_utxos.value,
+                       unshielded_utxos.output_index,
+                       unshielded_utxos.intent_hash,
+                       unshielded_utxos.creating_transaction_id,
+                       unshielded_utxos.spending_transaction_id
+                FROM   unshielded_utxos
+                JOIN   transactions ON transactions.id = unshielded_utxos.creating_transaction_id
+                JOIN   blocks ON blocks.id = transactions.block_id
+                WHERE  unshielded_utxos.owner_address = $1
+                  AND  blocks.hash = $2
+                ORDER  BY unshielded_utxos.id ASC
+            "}
+            }
+            (Some(_), UnshieldedUtxoFilter::FromTxHash(_)) => {
+                indoc! {"
+                SELECT unshielded_utxos.id,
+                       unshielded_utxos.owner_address,
+                       unshielded_utxos.token_type,
+                       unshielded_utxos.value,
+                       unshielded_utxos.output_index,
+                       unshielded_utxos.intent_hash,
+                       unshielded_utxos.creating_transaction_id,
+                       unshielded_utxos.spending_transaction_id
+                FROM   unshielded_utxos
+                JOIN   transactions ON transactions.id = unshielded_utxos.creating_transaction_id
+                WHERE  unshielded_utxos.owner_address = $1
+                  AND  transactions.hash = $2
+                ORDER  BY unshielded_utxos.id ASC
+            "}
+            }
+            (Some(_), UnshieldedUtxoFilter::FromTxIdentifier(_)) => {
+                indoc! {"
+                SELECT unshielded_utxos.id,
+                       unshielded_utxos.owner_address,
+                       unshielded_utxos.token_type,
+                       unshielded_utxos.value,
+                       unshielded_utxos.output_index,
+                       unshielded_utxos.intent_hash,
+                       unshielded_utxos.creating_transaction_id,
+                       unshielded_utxos.spending_transaction_id
+                FROM   unshielded_utxos
+                JOIN   transactions ON transactions.id = unshielded_utxos.creating_transaction_id
+                WHERE  unshielded_utxos.owner_address = $1
+                  AND  $2 = ANY(transactions.identifiers)
+                ORDER  BY unshielded_utxos.id ASC
+            "}
+            }
+            _ => {
+                return Err(sqlx::Error::Protocol(
+                    "Unsupported filter combination".into(),
+                ));
+            }
+        };
+
+        let mut query = sqlx::query_as::<_, UnshieldedUtxo>(sql);
+
+        match (&address, &filter) {
+            (Some(addr), UnshieldedUtxoFilter::All) => {
+                query = query.bind(addr.as_ref());
+            }
+            (None, UnshieldedUtxoFilter::CreatedByTx(tx_id)) => {
+                query = query.bind(*tx_id as i64);
+            }
+            (None, UnshieldedUtxoFilter::SpentByTx(tx_id)) => {
+                query = query.bind(*tx_id as i64);
+            }
+            (Some(addr), UnshieldedUtxoFilter::CreatedInTxForAddress(tx_id)) => {
+                query = query.bind(*tx_id as i64);
+                query = query.bind(addr.as_ref());
+            }
+            (Some(addr), UnshieldedUtxoFilter::SpentInTxForAddress(tx_id)) => {
+                query = query.bind(*tx_id as i64);
+                query = query.bind(addr.as_ref());
+            }
+            (Some(addr), UnshieldedUtxoFilter::FromHeight(height)) => {
+                query = query.bind(addr.as_ref());
+                query = query.bind(*height as i64);
+            }
+            (Some(addr), UnshieldedUtxoFilter::FromBlockHash(hash)) => {
+                query = query.bind(addr.as_ref());
+                query = query.bind(*hash);
+            }
+            (Some(addr), UnshieldedUtxoFilter::FromTxHash(hash)) => {
+                query = query.bind(addr.as_ref());
+                query = query.bind(*hash);
+            }
+            (Some(addr), UnshieldedUtxoFilter::FromTxIdentifier(identifier)) => {
+                query = query.bind(addr.as_ref());
+                query = query.bind(*identifier);
+            }
+            _ => {}
+        };
+
+        let mut utxos = query.fetch_all(&*self.pool).await?;
+
+        for utxo in utxos.iter_mut() {
+            utxo.created_at_transaction = self
+                .get_optional_transaction_by_id(utxo.creating_transaction_id)
+                .await?;
+
+            if let Some(spending_tx_id) = utxo.spending_transaction_id {
+                utxo.spent_at_transaction =
+                    self.get_optional_transaction_by_id(spending_tx_id).await?;
+            }
+
+            utxo.network_id = Some(self.network_id);
+        }
+
+        Ok(utxos)
+    }
+
+    async fn get_transactions_involving_unshielded(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
+        let sql = indoc! {"
+            SELECT DISTINCT
+                transactions.id,
+                transactions.hash,
+                blocks.hash AS block_hash,
+                transactions.protocol_version,
+                transactions.apply_stage,
+                transactions.identifiers,
+                transactions.raw,
+                transactions.merkle_tree_root,
+                transactions.start_index,
+                transactions.end_index
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN unshielded_utxos ON
+                unshielded_utxos.creating_transaction_id = transactions.id OR
+                unshielded_utxos.spending_transaction_id = transactions.id
+            WHERE unshielded_utxos.owner_address = $1
+            ORDER BY transactions.id DESC
+        "};
+
+        let mut tx = self.pool.begin().await?;
+        let mut transactions = sqlx::query_as::<_, Transaction>(sql)
+            .bind(address.as_ref())
+            .fetch_all(&mut *tx)
+            .await?;
+
+        for transaction in transactions.iter_mut() {
+            transaction.unshielded_created_outputs = self
+                .get_unshielded_utxos(
+                    Some(address),
+                    UnshieldedUtxoFilter::CreatedInTxForAddress(transaction.id),
+                )
+                .await?;
+
+            transaction.unshielded_spent_outputs = self
+                .get_unshielded_utxos(
+                    Some(address),
+                    UnshieldedUtxoFilter::SpentInTxForAddress(transaction.id),
+                )
+                .await?;
+        }
+
+        Ok(transactions)
+    }
+}
+
+impl PostgresStorage {
+    /// Returns a transaction by its database ID if it exists, or None if it doesn't.
+    /// This is a utility method used internally for cases where a transaction ID reference
+    /// might point to a transaction that doesn't exist (e.g., for spending_transaction_id
+    /// on UTXOs that haven't been spent yet).
+    async fn get_optional_transaction_by_id(
+        &self,
+        tx_id: u64,
+    ) -> Result<Option<Transaction>, sqlx::Error> {
+        let transaction = sqlx::query_as::<_, Transaction>(TX_BY_ID_QUERY)
+            .bind(tx_id as i64)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        Ok(transaction)
     }
 }

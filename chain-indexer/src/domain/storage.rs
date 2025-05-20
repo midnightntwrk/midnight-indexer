@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, BlockInfo, Transaction};
+use crate::domain::{Block, BlockInfo, Transaction, UnshieldedUtxo};
 use futures::Stream;
 
 /// Storage abstraction.
@@ -31,6 +31,13 @@ where
 
     /// Save the given [Block].
     async fn save_block(&self, block: &Block) -> Result<(), sqlx::Error>;
+
+    async fn save_unshielded_utxos(
+        &self,
+        utxos: &[UnshieldedUtxo],
+        transaction_id: i64,
+        spent: bool,
+    ) -> Result<(), sqlx::Error>;
 
     /// Get a stream of transaction chunks for all blocks starting at the given height until the
     /// given height.

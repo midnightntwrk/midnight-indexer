@@ -51,7 +51,6 @@ async fn run() -> anyhow::Result<()> {
     // Load configuration.
     let Config {
         run_migrations,
-        application_config,
         infra_config,
         telemetry_config:
             telemetry::Config {
@@ -64,7 +63,7 @@ async fn run() -> anyhow::Result<()> {
     telemetry::init_tracing(tracing_config);
     telemetry::init_metrics(metrics_config);
 
-    info!(run_migrations, application_config:?, infra_config:?; "starting");
+    info!(run_migrations, infra_config:?; "starting");
 
     let infra::Config {
         secret,
@@ -83,7 +82,8 @@ async fn run() -> anyhow::Result<()> {
             .context("run Postgres migrations")?;
     }
     let cipher = make_cipher(secret).context("make cipher")?;
-    let storage = infra::storage::postgres::PostgresStorage::new(cipher, pool);
+    let storage =
+        infra::storage::postgres::PostgresStorage::new(cipher, pool, api_config.network_id);
 
     let zswap_state_storage =
         zswap_state_storage::nats::NatsZswapStateStorage::new(zswap_state_storage_config)
@@ -94,7 +94,7 @@ async fn run() -> anyhow::Result<()> {
 
     let api = AxumApi::new(api_config, storage, zswap_state_storage, subscriber.clone());
 
-    application::run(application_config, api, subscriber)
+    application::run(api, subscriber)
         .await
         .context("run indexer-API application")?;
 

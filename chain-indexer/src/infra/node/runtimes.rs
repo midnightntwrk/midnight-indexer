@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[subxt::subxt(runtime_metadata_path = "../.node/0.12.0/metadata.scale")]
+#[subxt::subxt(runtime_metadata_path = "../.node/0.12.0-fb26ee62/metadata.scale")]
 mod runtime_0_12 {}
 
 use crate::{domain::BlockHash, infra::node::SubxtNodeError};
@@ -23,11 +23,15 @@ use parity_scale_codec::Decode;
 use std::collections::HashMap;
 use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events};
 
+pub type RuntimeUnshieldedUtxoInfo = crate::infra::node::runtimes::runtime_0_12::runtime_types::pallet_midnight::pallet::UnshieldedUtxoInfo;
+
 /// Runtime specific block details.
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
     pub raw_transactions: Vec<Vec<u8>>,
     pub apply_stages: HashMap<[u8; 32], ApplyStage>,
+    pub created_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>>,
+    pub spent_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>>,
 }
 
 /// Make block details depending on the given protocol version.
@@ -101,6 +105,7 @@ macro_rules! make_block_details {
             ) -> Result<BlockDetails, SubxtNodeError> {
                 use self::$module::{
                     midnight,
+                    runtime_types::pallet_midnight::pallet::UnshieldedEventType,
                     runtime_types::pallet_partner_chains_session::pallet as partner_chains_session,
                     timestamp, Call, Event,
                 };
@@ -108,7 +113,7 @@ macro_rules! make_block_details {
                 let calls = extrinsics
                     .iter()
                     .map(|extrinsic| {
-                        let call = extrinsic.as_root_extrinsic::<Call>().map_err(Box::new)?;
+                        let call = extrinsic.as_root_extrinsic::<Call>()?;
                         Ok(call)
                     })
                     .filter_ok(|call| matches!(call, Call::Midnight(_) | Call::Timestamp(_)))
@@ -129,32 +134,51 @@ macro_rules! make_block_details {
                     })
                     .collect();
 
-                let apply_stages = events
+                let mut apply_stages = HashMap::new();
+                let mut created_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> = HashMap::new();
+                let mut spent_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> = HashMap::new();
+
+                events
                     .iter()
-                    .map(|event| event.and_then(|event| event.as_root_event::<Event>()))
-                    .filter_map_ok(|event| match event {
-                        Event::Midnight(midnight::Event::TxApplied(details)) => {
-                            Some((details.tx_hash, ApplyStage::Success))
+                    .filter_map(|event_details_res| {
+                        match event_details_res {
+                            Ok(details) => match details.as_root_event::<Event>() {
+                                Ok(root_event) => Some(Ok(root_event)),
+                                Err(e) => Some(Err(SubxtNodeError::from(e)))
+                            },
+                            Err(e) => Some(Err(SubxtNodeError::from(e))),
                         }
-
-                        Event::Midnight(midnight::Event::TxOnlyGuaranteedApplied(details)) => {
-                            Some((details.tx_hash, ApplyStage::PartialSuccess))
-                        }
-
-                        Event::Session(partner_chains_session::Event::NewSession { .. }) => {
-                            // Trigger fetching the authorities next time.
-                            *authorities = None;
-                            None
-                        }
-
-                        _ => None,
                     })
-                    .collect::<Result<HashMap<_, _>, _>>().map_err(Box::new)?;
+                    .filter_map(Result::ok)
+                    .for_each(|event| {
+                        match event {
+                            Event::Midnight(midnight::Event::TxApplied(details)) => {
+                                apply_stages.insert(details.tx_hash, ApplyStage::Success);
+                            }
+                            Event::Midnight(midnight::Event::TxOnlyGuaranteedApplied(details)) => {
+                                apply_stages.insert(details.tx_hash, ApplyStage::PartialSuccess);
+                            }
+                            Event::Midnight(midnight::Event::UnshieldedTokens(event_data)) => {
+                                let is_created = matches!(event_data.event_type, UnshieldedEventType::Created);
+                                if is_created {
+                                    created_unshielded_utxos_info.insert(event_data.tx_hash, event_data.utxos);
+                                } else {
+                                    spent_unshielded_utxos_info.insert(event_data.tx_hash, event_data.utxos);
+                                }
+                            }
+                            Event::Session(partner_chains_session::Event::NewSession { .. }) => {
+                                *authorities = None;
+                            }
+                             _ => {}
+                        }
+                    });
 
                 Ok(BlockDetails {
                     timestamp,
                     raw_transactions,
                     apply_stages,
+                    created_unshielded_utxos_info,
+                    spent_unshielded_utxos_info,
                 })
             }
         }
@@ -172,9 +196,9 @@ macro_rules! fetch_authorities {
                 let authorities = online_client
                     .storage()
                     .at_latest()
-                    .await.map_err(Box::new)?
+                    .await?
                     .fetch(&$module::storage().aura().authorities())
-                    .await.map_err(Box::new)?
+                    .await?
                     .map(|authorities| authorities.0.into_iter().map(|public| public.0).collect());
 
                 Ok(authorities)
@@ -215,7 +239,7 @@ macro_rules! get_contract_state {
                     .runtime_api()
                     .at(block_hash.0)
                     .call(get_state)
-                    .await.map_err(Box::new)?
+                    .await?
                     .map_err(|error| SubxtNodeError::GetContractState(format!("{error:?}")))?
                     .into();
 
@@ -242,7 +266,7 @@ macro_rules! get_zswap_state_root {
                     .runtime_api()
                     .at(block_hash.0)
                     .call(get_zswap_state_root)
-                    .await.map_err(Box::new)?
+                    .await?
                     .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}")))?;
 
                 Ok(root)

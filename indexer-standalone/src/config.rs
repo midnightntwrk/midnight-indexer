@@ -11,16 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::{domain::NetworkId, infra::pool, telemetry};
+use indexer_common::{infra::pool, telemetry};
 use serde::Deserialize;
-use std::{num::NonZeroUsize, time::Duration};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub run_migrations: bool,
 
-    #[serde(rename = "application")]
-    pub application_config: ApplicationConfig,
+    #[serde(rename = "chain_indexer_application")]
+    pub chain_indexer_application_config: chain_indexer::application::Config,
+
+    #[serde(alias = "wallet_indexer_application")]
+    pub wallet_indexer_application_config: wallet_indexer::application::Config,
 
     #[serde(rename = "infra")]
     pub infra_config: InfraConfig,
@@ -29,86 +31,16 @@ pub struct Config {
     pub telemetry_config: telemetry::Config,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
-pub struct ApplicationConfig {
-    pub network_id: NetworkId,
-    pub blocks_buffer: usize,
-    pub save_zswap_state_after: u32,
-    pub caught_up_max_distance: u32,
-    pub caught_up_leeway: u32,
-    #[serde(with = "humantime_serde")]
-    pub active_wallets_repeat_delay: Duration,
-    #[serde(with = "humantime_serde")]
-    pub active_wallets_ttl: Duration,
-    pub transaction_batch_size: NonZeroUsize,
-    #[serde(default = "parallelism_default")]
-    pub parallelism: NonZeroUsize,
-}
-
-impl From<ApplicationConfig> for chain_indexer::application::Config {
-    fn from(config: ApplicationConfig) -> Self {
-        let ApplicationConfig {
-            network_id,
-            blocks_buffer,
-            save_zswap_state_after,
-            caught_up_max_distance,
-            caught_up_leeway,
-            ..
-        } = config;
-
-        Self {
-            network_id,
-            blocks_buffer,
-            save_zswap_state_after,
-            caught_up_max_distance,
-            caught_up_leeway,
-        }
-    }
-}
-
-impl From<ApplicationConfig> for indexer_api::application::Config {
-    fn from(config: ApplicationConfig) -> Self {
-        Self {
-            network_id: config.network_id,
-        }
-    }
-}
-
-impl From<ApplicationConfig> for wallet_indexer::application::Config {
-    fn from(config: ApplicationConfig) -> Self {
-        let ApplicationConfig {
-            network_id,
-            active_wallets_repeat_delay,
-            active_wallets_ttl,
-            transaction_batch_size,
-            parallelism,
-            ..
-        } = config;
-
-        Self {
-            network_id,
-            active_wallets_repeat_delay,
-            active_wallets_ttl,
-            transaction_batch_size,
-            parallelism,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct InfraConfig {
-    #[serde(rename = "storage")]
-    pub storage_config: pool::sqlite::Config,
+    pub secret: secrecy::SecretString,
 
     #[serde(rename = "node")]
     pub node_config: chain_indexer::infra::node::Config,
 
+    #[serde(rename = "storage")]
+    pub storage_config: pool::sqlite::Config,
+
     #[serde(rename = "api")]
     pub api_config: indexer_api::infra::api::Config,
-
-    pub secret: secrecy::SecretString,
-}
-
-fn parallelism_default() -> NonZeroUsize {
-    std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN)
 }

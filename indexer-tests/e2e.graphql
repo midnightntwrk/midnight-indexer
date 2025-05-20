@@ -23,7 +23,6 @@ query BlockQuery($block_offset: BlockOffset) {
                     address
                     transaction {
                         hash
-                        applyStage
                         identifiers
                         block {
                             hash
@@ -36,7 +35,6 @@ query BlockQuery($block_offset: BlockOffset) {
                     address
                     transaction {
                         hash
-                        applyStage
                         identifiers
                         block {
                             hash
@@ -51,7 +49,6 @@ query BlockQuery($block_offset: BlockOffset) {
                 ... on ContractUpdate {
                     address
                     transaction {
-                        applyStage
                         hash
                         identifiers
                         block {
@@ -60,6 +57,13 @@ query BlockQuery($block_offset: BlockOffset) {
                         }
                     }
                 }
+            }
+            unshieldedCreatedOutputs {
+                owner
+                value
+                tokenType
+                intentHash
+                outputIndex
             }
         }
     }
@@ -80,7 +84,6 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                 address
                 transaction {
                     hash
-                    applyStage
                     identifiers
                     block {
                         hash
@@ -93,7 +96,6 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                 address
                 transaction {
                     hash
-                    applyStage
                     identifiers
                     block {
                         hash
@@ -109,7 +111,6 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                 address
                 transaction {
                     hash
-                    applyStage
                     identifiers
                     block {
                         hash
@@ -117,6 +118,13 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                     }
                 }
             }
+        }
+        unshieldedCreatedOutputs {
+            owner
+            value
+            tokenType
+            intentHash
+            outputIndex
         }
     }
 }
@@ -128,7 +136,6 @@ query ContractActionQuery($address: HexEncoded!, $contract_action_offset: Contra
             address
             transaction {
                 hash
-                applyStage
                 identifiers
                 block {
                     hash
@@ -141,7 +148,6 @@ query ContractActionQuery($address: HexEncoded!, $contract_action_offset: Contra
             address
             transaction {
                 hash
-                applyStage
                 identifiers
                 block {
                     hash
@@ -157,7 +163,6 @@ query ContractActionQuery($address: HexEncoded!, $contract_action_offset: Contra
             address
             transaction {
                 hash
-                applyStage
                 identifiers
                 block {
                     hash
@@ -167,6 +172,29 @@ query ContractActionQuery($address: HexEncoded!, $contract_action_offset: Contra
         }
     }
 }
+
+query UnshieldedUtxosQuery($address: UnshieldedAddress!) {
+    unshieldedUtxos(address: $address) {
+        owner
+        value
+        tokenType
+        outputIndex
+        intentHash
+        createdAtTransaction {
+            hash
+            block {
+                height
+            }
+        }
+        spentAtTransaction {
+            hash
+            block {
+                height
+            }
+        }
+    }
+}
+
 
 mutation ConnectMutation($viewingKey: ViewingKey!) {
     connect(viewingKey: $viewingKey)
@@ -201,7 +229,6 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                     address
                     transaction {
                         hash
-                        applyStage
                         identifiers
                         block {
                             hash
@@ -214,7 +241,6 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                     address
                     transaction {
                         hash
-                        applyStage
                         identifiers
                         block {
                             hash
@@ -230,7 +256,6 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                     address
                     transaction {
                         hash
-                        applyStage
                         identifiers
                         block {
                             hash
@@ -238,6 +263,13 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                         }
                     }
                 }
+            }
+            unshieldedCreatedOutputs {
+                owner
+                value
+                tokenType
+                intentHash
+                outputIndex
             }
         }
     }
@@ -253,7 +285,6 @@ subscription ContractActionSubscription(
             address
             transaction {
                 hash
-                applyStage
                 identifiers
                 block {
                     hash
@@ -266,7 +297,6 @@ subscription ContractActionSubscription(
             address
             transaction {
                 hash
-                applyStage
                 identifiers
                 block {
                     hash
@@ -282,12 +312,46 @@ subscription ContractActionSubscription(
             address
             transaction {
                 hash
-                applyStage
                 identifiers
                 block {
                     hash
                     height
                 }
+            }
+        }
+    }
+}
+
+subscription UnshieldedUtxosSubscription($address: UnshieldedAddress!) {
+    unshieldedUtxos(address: $address) {
+        eventType
+        transaction {
+            hash
+            block {
+                height
+            }
+        }
+        createdUtxos {
+            owner
+            value
+            tokenType
+            intentHash
+            outputIndex
+            createdAtTransaction {
+                hash
+            }
+        }
+        spentUtxos {
+            owner
+            value
+            tokenType
+            intentHash
+            outputIndex
+            createdAtTransaction {
+                hash
+            }
+            spentAtTransaction {
+                hash
             }
         }
     }

@@ -19,6 +19,7 @@ mod contract_action;
 mod header;
 mod node;
 mod transaction;
+mod unshielded;
 mod zswap;
 
 pub use block::*;
@@ -26,4 +27,5 @@ pub use contract_action::*;
 pub use header::*;
 pub use node::*;
 pub use transaction::*;
+pub use unshielded::*;
 pub use zswap::*;
