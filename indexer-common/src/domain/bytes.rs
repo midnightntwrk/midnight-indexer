@@ -55,6 +55,12 @@ impl<const N: usize> TryFrom<&[u8]> for ByteArray<N> {
     }
 }
 
+impl<const N: usize> From<ByteArray<N>> for Vec<u8> {
+    fn from(bytes: ByteArray<N>) -> Self {
+        bytes.0.into()
+    }
+}
+
 impl<const N: usize> TryFrom<Vec<u8>> for ByteArray<N> {
     type Error = TryFromForByteArrayError;
 

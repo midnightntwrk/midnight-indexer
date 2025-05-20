@@ -13,6 +13,8 @@
 
 //! e2e testing library
 
+tonic::include_proto!("midnight_indexer.v1");
+
 use crate::{
     e2e::{
         block_subscription::{
@@ -21,10 +23,11 @@ use crate::{
             BlockSubscriptionBlocksTransactionsContractActions as BlockSubscriptionContractAction,
         },
         contract_action_query::ContractActionQueryContractAction,
+        transaction_service_client::TransactionServiceClient,
     },
     graphql_ws_client,
 };
-use anyhow::{Context, Ok, bail};
+use anyhow::{Context, bail};
 use bech32::{Bech32m, Hrp};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
@@ -41,7 +44,11 @@ use midnight_ledger::{
 };
 use reqwest::Client;
 use serde::Serialize;
-use std::time::{Duration, Instant};
+use std::{
+    str::FromStr,
+    time::{Duration, Instant},
+};
+use tonic::{metadata::MetadataValue, transport::Endpoint};
 
 const MAX_HEIGHT: usize = 30;
 
@@ -51,13 +58,22 @@ const MAX_HEIGHT: usize = 30;
 pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> anyhow::Result<()> {
     println!("### starting e2e testing");
 
-    let (api_url, ws_api_url) = {
-        let core = format!("{host}:{port}/api/v1/graphql");
+    let (api_url, ws_api_url, grpc_url) = {
+        let api_core = format!("{host}:{port}/api/v1/graphql");
+        let grpc_core = format!("{host}:{port}");
 
         if secure {
-            (format!("https://{core}"), format!("wss://{core}/ws"))
+            (
+                format!("https://{api_core}"),
+                format!("wss://{api_core}/ws"),
+                format!("https://{grpc_core}"),
+            )
         } else {
-            (format!("http://{core}"), format!("ws://{core}/ws"))
+            (
+                format!("http://{api_core}"),
+                format!("ws://{api_core}/ws"),
+                format!("http://{grpc_core}"),
+            )
         }
     };
 
@@ -94,6 +110,11 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_wallet_subscription(&ws_api_url)
         .await
         .context("test wallet subscription")?;
+
+    // Test gRPC.
+    test_transaction_service(&indexer_data, &grpc_url)
+        .await
+        .context("test gRPC")?;
 
     println!("### successfully finished e2e testing");
 
@@ -661,6 +682,35 @@ async fn test_wallet_subscription(ws_api_url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn test_transaction_service(node_data: &IndexerData, grpc_url: &str) -> anyhow::Result<()> {
+    let channel = Endpoint::from_str(grpc_url)
+        .context("create endpoint")?
+        .connect()
+        .await
+        .context("connect to endpoint")?;
+    let mut grpc_client = TransactionServiceClient::with_interceptor(channel, add_accept_header);
+
+    let transaction_hashes = grpc_client
+        .transactions(TransactionsRequest { id: 0 })
+        .await
+        .context("get transactions")?
+        .into_inner()
+        .map_ok(|transaction| transaction.hash)
+        .try_collect::<Vec<_>>()
+        .await
+        .context("collect transactions")?;
+
+    let expected_transaction_hashes = node_data
+        .transactions
+        .iter()
+        .flat_map(|t| t.hash.hex_decode::<Vec<u8>>())
+        .collect::<Vec<_>>();
+
+    assert_eq!(transaction_hashes, expected_transaction_hashes);
+
+    Ok(())
+}
+
 trait SerializeExt
 where
     Self: Serialize,
@@ -839,6 +889,14 @@ fn seed_to_secret_key(seed: &str) -> SecretKey {
     let seed_bytes = const_hex::decode(seed).expect("seed can be hex-decoded");
     let seed_bytes = <[u8; 32]>::try_from(seed_bytes).expect("seed has 32 bytes");
     SecretKeys::from(Seed::from(seed_bytes)).encryption_secret_key
+}
+
+#[allow(clippy::result_large_err)]
+fn add_accept_header(mut request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
+    request
+        .metadata_mut()
+        .insert("accept", MetadataValue::from_static("application/grpc"));
+    Ok(request)
 }
 
 #[derive(GraphQLQuery)]

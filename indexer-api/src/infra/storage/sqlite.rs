@@ -102,7 +102,7 @@ impl Storage for SqliteStorage {
                     LIMIT $2
                 "};
 
-                let blocks = sqlx::query_as::<_, Block>(query)
+                let blocks = sqlx::query_as(query)
                     .bind(height as i64)
                     .bind(batch_size.get() as i64)
                     .fetch_all(&*self.pool)
@@ -253,6 +253,49 @@ impl Storage for SqliteStorage {
         }
 
         Ok(transactions)
+    }
+
+    fn get_transactions(
+        &self,
+        mut id: u64,
+        batch_size: NonZeroU32,
+    ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> {
+        let chunks = try_stream! {
+            loop {
+                let query = indoc! {"
+                    SELECT
+                        transactions.id,
+                        transactions.hash,
+                        blocks.hash AS block_hash,
+                        transactions.protocol_version,
+                        transactions.apply_stage,
+                        transactions.raw,
+                        transactions.merkle_tree_root,
+                        transactions.start_index,
+                        transactions.end_index
+                    FROM transactions
+                    INNER JOIN blocks ON blocks.id = transactions.block_id
+                    WHERE transactions.id >= $1
+                    ORDER BY transactions.id
+                    LIMIT $2
+                "};
+
+                let transactions = sqlx::query_as::<_, Transaction>(query)
+                    .bind(id as i64)
+                    .bind(batch_size.get() as i64)
+                    .fetch_all(&*self.pool)
+                    .await?;
+
+                match transactions.last() {
+                    Some(t) => id = t.id + 1,
+                    None => break,
+                }
+
+                yield transactions;
+            }
+        };
+
+        flatten_chunks(chunks)
     }
 
     async fn get_contract_deploy_by_address(

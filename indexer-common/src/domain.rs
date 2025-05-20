@@ -55,6 +55,33 @@ pub enum ApplyStage {
     Failure,
 }
 
+impl From<ApplyStage> for u32 {
+    fn from(apply_stage: ApplyStage) -> Self {
+        match apply_stage {
+            ApplyStage::Success => 0,
+            ApplyStage::PartialSuccess => 1,
+            ApplyStage::Failure => 2,
+        }
+    }
+}
+
+impl TryFrom<u32> for ApplyStage {
+    type Error = ApplyStageTryFromU8Error;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Success),
+            1 => Ok(Self::PartialSuccess),
+            2 => Ok(Self::Failure),
+            other => Err(ApplyStageTryFromU8Error(other)),
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+#[error("discriminant for ApplyStage must be 0..=2, but was {0}")]
+pub struct ApplyStageTryFromU8Error(u32);
+
 /// The variant of a contract action.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[cfg_attr(feature = "cloud", sqlx(type_name = "CONTRACT_ACTION_VARIANT"))]
@@ -118,7 +145,8 @@ pub struct UnknownNetworkIdError(String);
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::NetworkId;
+    use crate::domain::{ApplyStage, NetworkId};
+    use assert_matches::assert_matches;
     use midnight_ledger::serialize::NetworkId as LedgerNetworkId;
 
     #[test]
@@ -143,5 +171,17 @@ mod tests {
 
         let network_id = serde_json::from_str::<NetworkId>("\"FooBarBaz\"");
         assert!(network_id.is_err());
+    }
+
+    #[test]
+    fn test_apply_stage() {
+        let apply_stage = ApplyStage::try_from(u32::from(ApplyStage::Success));
+        assert_matches!(apply_stage, Ok(ApplyStage::Success));
+
+        let apply_stage = ApplyStage::try_from(u32::from(ApplyStage::PartialSuccess));
+        assert_matches!(apply_stage, Ok(ApplyStage::PartialSuccess));
+
+        let apply_stage = ApplyStage::try_from(u32::from(ApplyStage::Failure));
+        assert_matches!(apply_stage, Ok(ApplyStage::Failure));
     }
 }

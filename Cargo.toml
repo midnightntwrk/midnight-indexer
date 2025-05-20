@@ -56,6 +56,7 @@ opentelemetry-otlp          = { version = "0.29" }
 parity-scale-codec          = { version = "3.7" }
 parking_lot                 = { version = "0.12" }
 paste                       = { version = "1.0" }
+prost                       = { version = "0.13" }
 reqwest                     = { version = "0.12", default-features = false }
 secrecy                     = { version = "0.10" }
 serde                       = { version = "1.0" }
@@ -72,7 +73,11 @@ tokio                       = { version = "1" }
 tokio-stream                = { version = "0.1" }
 tokio-tungstenite           = { version = "0.26" }
 tokio-util                  = { version = "0.7" }
+tonic                       = { version = "0.13" }
+tonic-reflection            = { version = "0.13" }
+tonic-build                 = { version = "0.13" }
 tower                       = { version = "0.5" }
 tower-http                  = { version = "0.6" }
 trait-variant               = { version = "0.1" }
 uuid                        = { version = "1.16" }
+walkdir                     = { version = "2.5" }
