@@ -460,6 +460,7 @@ If you modify the code defining the GraphQL schema, regenerate it:
 ```bash
 just generate-indexer-api-schema
 ```
+
 This ensures the schema file stays aligned with code changes.
 
 ## Conclusion
