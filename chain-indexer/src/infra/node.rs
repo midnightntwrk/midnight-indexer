@@ -18,15 +18,15 @@ use crate::{
         Block, BlockHash, BlockInfo, ContractAction, ContractAttributes, Node, SubstrateHeaderExt,
         Transaction, TransactionHash,
     },
-    infra::node::runtimes::BlockDetails,
+    infra::node::runtimes::{BlockDetails, RuntimeUnshieldedUtxoInfo},
 };
 use async_stream::try_stream;
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        ApplyStage, BlockAuthor, NetworkId, ProtocolVersion, RawTransaction,
-        ScaleDecodeProtocolVersionError,
+        ApplyStage, BlockAuthor, IntentHash, NetworkId, ProtocolVersion, RawTokenType,
+        RawTransaction, ScaleDecodeProtocolVersionError, UnshieldedAddress,
     },
     error::{BoxError, StdErrorExt},
     serialize::SerializableExt,
@@ -118,8 +118,7 @@ impl SubxtNode {
                 .default_online_client
                 .backend()
                 .metadata_at_version(15, hash.0)
-                .await
-                .map_err(Box::new)?;
+                .await?;
 
             let legacy_rpc_methods =
                 LegacyRpcMethods::<SubstrateConfig>::new(self.rpc_client.to_owned().into());
@@ -136,8 +135,7 @@ impl SubxtNode {
                 runtime_version,
                 metadata,
                 self.rpc_client.to_owned(),
-            )
-            .map_err(Box::new)?;
+            )?;
 
             self.compatible_online_client = Some((protocol_version, online_client));
         }
@@ -242,12 +240,14 @@ impl SubxtNode {
             deserialize::<MerkleTreeDigest, _>(&mut zswap_state_root.as_slice(), network_id.into())
                 .map_err(SubxtNodeError::DeserializeZswapStateRoot)?;
 
-        let extrinsics = block.extrinsics().await.map_err(Box::new)?;
-        let events = block.events().await.map_err(Box::new)?;
+        let extrinsics = block.extrinsics().await?;
+        let events = block.events().await?;
         let BlockDetails {
             timestamp,
             raw_transactions,
             apply_stages,
+            created_unshielded_utxos_info,
+            spent_unshielded_utxos_info,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
 
         let mut transactions = Vec::with_capacity(raw_transactions.len());
@@ -259,6 +259,8 @@ impl SubxtNode {
                 parent_hash == BlockHash::default(),
                 protocol_version,
                 &apply_stages,
+                &created_unshielded_utxos_info,
+                &spent_unshielded_utxos_info,
                 network_id,
                 online_client,
             )
@@ -300,13 +302,12 @@ impl Node for SubxtNode {
     ) -> Result<impl Stream<Item = Result<BlockInfo, Self::Error>> + Send, Self::Error> {
         let highest_blocks = self
             .subscribe_finalized_blocks()
-            .await
-            .map_err(Box::new)?
+            .await?
             .map_ok(|block| BlockInfo {
                 hash: block.hash().into(),
                 height: block.number(),
             })
-            .map_err(|error| Box::new(error).into());
+            .map_err(Self::Error::from);
 
         Ok(highest_blocks)
     }
@@ -329,10 +330,10 @@ impl Node for SubxtNode {
         let mut authorities = None;
 
         try_stream! {
-            let mut finalized_blocks = self.subscribe_finalized_blocks().await.map_err(Box::new)?;
+            let mut finalized_blocks = self.subscribe_finalized_blocks().await?;
 
             // First we receive the first finalized block.
-            let Some(first_block) = receive_block(&mut finalized_blocks).await.map_err(Box::new)? else {
+            let Some(first_block) = receive_block(&mut finalized_blocks).await? else {
                 return;
             };
             debug!(
@@ -351,7 +352,7 @@ impl Node for SubxtNode {
                 // For these we store the hashes; one hash is 32 bytes, i.e. one year is ~ 156MB.
                 let genesis_parent_hash = self
                     .fetch_block(self.default_online_client.genesis_hash())
-                    .await.map_err(Box::new)?
+                    .await?
                     .header()
                     .parent_hash;
 
@@ -370,7 +371,7 @@ impl Node for SubxtNode {
                 let mut hashes = Vec::with_capacity(capacity);
                 let mut parent_hash = first_block.header().parent_hash;
                 while parent_hash != after_hash && parent_hash != genesis_parent_hash {
-                    let block = self.fetch_block(parent_hash).await.map_err(Box::new)?;
+                    let block = self.fetch_block(parent_hash).await?;
                     if block.number() % 1_000 == 0 {
                         info!(
                             highest_stored_height:? = after_height,
@@ -385,7 +386,7 @@ impl Node for SubxtNode {
 
                 // We fetch and yield the blocks for the stored block hashes.
                 for hash in hashes.into_iter().rev() {
-                    let block = self.fetch_block(hash).await.map_err(Box::new)?;
+                    let block = self.fetch_block(hash).await?;
                     debug!(
                         hash:% = block.hash(),
                         height = block.number(),
@@ -400,7 +401,7 @@ impl Node for SubxtNode {
             }
 
             // Finally we emit all other finalized ones.
-            while let Some(block) = receive_block(&mut finalized_blocks).await.map_err(Box::new)? {
+            while let Some(block) = receive_block(&mut finalized_blocks).await? {
                 debug!(
                     hash:% = block.hash(),
                     height = block.number(),
@@ -449,13 +450,16 @@ pub enum Error {
 #[derive(Debug, Error)]
 pub enum SubxtNodeError {
     #[error(transparent)]
-    Subxt(#[from] Box<subxt::Error>),
+    Subxt(#[from] subxt::Error),
+
+    #[error(transparent)]
+    SubxtCore(#[from] subxt::ext::subxt_core::Error),
 
     #[error(transparent)]
     SubxtRcps(#[from] subxt::ext::subxt_rpcs::Error),
 
     #[error("cannot scale decode")]
-    ScaleDecode(#[from] parity_scale_codec::Error),
+    ScalaDecode(#[from] parity_scale_codec::Error),
 
     #[error(transparent)]
     DecodeProtocolVersion(#[from] ScaleDecodeProtocolVersionError),
@@ -529,6 +533,8 @@ async fn make_transaction(
     is_genesis: bool,
     protocol_version: ProtocolVersion,
     apply_stages: &HashMap<[u8; 32], ApplyStage>,
+    created_info_map: &HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>>,
+    spent_info_map: &HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>>,
     network_id: NetworkId,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<Transaction>, SubxtNodeError> {
@@ -594,6 +600,38 @@ async fn make_transaction(
         .try_collect::<Vec<_>>()
         .await?;
 
+    let created_unshielded_utxos = created_info_map
+        .get(hash.as_ref())
+        .map_or(&[] as &[_], |v| v.as_slice()) // Get &[] if None, or slice &[_] if Some
+        .iter()
+        .enumerate()
+        .map(|(index, info)| crate::domain::UnshieldedUtxo {
+            creating_transaction_id: 0,
+            output_index: index as u32,
+            owner_address: UnshieldedAddress::from(info.address.clone()),
+            token_type: RawTokenType::from(info.token_type),
+            intent_hash: IntentHash::from(info.intent_hash),
+            value: info.value,
+        })
+        .collect();
+
+    let spent_unshielded_utxos = spent_info_map
+        .get(hash.as_ref())
+        .map_or(&[] as &[_], |v| v.as_slice())
+        .iter()
+        .map(|info| {
+            crate::domain::UnshieldedUtxo {
+                creating_transaction_id: 0, /* TODO: Node event needs to provide
+                                             * creating_transaction_id for spent UTXOs */
+                output_index: 0, // TODO: Node event needs to provide output_index for spent UTXOs
+                owner_address: UnshieldedAddress::from(info.address.clone()),
+                token_type: RawTokenType::from(info.token_type),
+                intent_hash: IntentHash::from(info.intent_hash),
+                value: info.value,
+            }
+        })
+        .collect();
+
     let transaction = Transaction {
         hash,
         apply_stage,
@@ -604,6 +642,8 @@ async fn make_transaction(
         merkle_tree_root: Default::default(),
         start_index: Default::default(),
         end_index: Default::default(),
+        created_unshielded_utxos,
+        spent_unshielded_utxos,
     };
 
     Ok(Some(transaction))
@@ -707,11 +747,11 @@ mod tests {
     #[tokio::test]
     async fn test_finalized_blocks_0_12() -> Result<(), BoxError> {
         test_finalized_blocks(
-            "0.12.0",
-            "f06eeef6462073bf726f9324995b26a06ea44b6cfe6a90dff377d9d2e2a4844f",
-            8,
-            "54053a752c872382dced6dc2463d0c889589111bb0e8a236ef4d78517bc85cc9",
-            28,
+            "0.12.0-fb26ee62",
+            "f0ff7fae19801bbd7b6c2f45b74b1fcf8700e8547ca18c2ed54c6a16d8fc0754",
+            7,
+            "2238a7e23525042f16b24797fbd9420d83c0dd5515d1f653fafc5e1de7692f76",
+            26,
         )
         .await
     }

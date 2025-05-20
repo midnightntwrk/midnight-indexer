@@ -8,6 +8,11 @@ application:
   caught_up_leeway: 5
 
 infra:
+  node:
+    url: "ws://localhost:9944"
+    reconnect_max_delay: "10s" # 10ms, 100ms, 1s, 10s
+    reconnect_max_attempts: 30 # Roughly 5m
+
   storage:
     host: "localhost"
     port: 5432
@@ -15,18 +20,13 @@ infra:
     user: "indexer"
     sslmode: "prefer"
 
-  pub_sub:
-    url: "localhost:4222"
-    username: "indexer"
-
   zswap_state_storage:
     url: "localhost:4222"
     username: "indexer"
 
-  node:
-    url: "ws://localhost:9944"
-    reconnect_max_delay: "10s" # 10ms, 100ms, 1s, 10s
-    reconnect_max_attempts: 30 # Roughly 5m
+  pub_sub:
+    url: "localhost:4222"
+    username: "indexer"
 
 telemetry:
   tracing:
