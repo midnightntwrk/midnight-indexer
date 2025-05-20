@@ -20,15 +20,15 @@ use indexer_common::infra::{pool, pub_sub, zswap_state_storage};
 #[cfg(feature = "cloud")]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
+    #[serde(rename = "node")]
+    pub node_config: node::Config,
+
     #[serde(rename = "storage")]
     pub storage_config: pool::postgres::Config,
-
-    #[serde(rename = "pub_sub")]
-    pub pub_sub_config: pub_sub::nats::Config,
 
     #[serde(rename = "zswap_state_storage")]
     pub zswap_state_storage_config: zswap_state_storage::nats::Config,
 
-    #[serde(rename = "node")]
-    pub node_config: node::Config,
+    #[serde(rename = "pub_sub")]
+    pub pub_sub_config: pub_sub::nats::Config,
 }

@@ -39,6 +39,13 @@ where
         spent: bool,
     ) -> Result<(), sqlx::Error>;
 
+    async fn save_unshielded_utxos(
+        &self,
+        utxos: &[UnshieldedUtxo],
+        transaction_id: i64,
+        spent: bool,
+    ) -> Result<(), sqlx::Error>;
+
     /// Get a stream of transaction chunks for all blocks starting at the given height until the
     /// given height.
     fn get_transaction_chunks(
