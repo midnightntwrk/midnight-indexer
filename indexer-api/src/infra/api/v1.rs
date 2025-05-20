@@ -215,13 +215,18 @@ where
         &self,
         cx: &Context<'_>,
     ) -> async_graphql::Result<Vec<UnshieldedUtxo<S>>> {
-        let utxos = cx
-            .get_storage::<S>()
+        let storage = cx.get_storage::<S>();
+        let network_id = cx.get_network_id();
+
+        let utxos = storage
             .get_unshielded_utxos_by_creating_tx_id(self.id)
             .await
             .internal("cannot get unshielded UTXOs created by transaction")?;
 
-        Ok(utxos.into_iter().map(Into::into).collect())
+        Ok(utxos
+            .into_iter()
+            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+            .collect())
     }
 
     /// Unshielded UTXOs spent (consumed) by this transaction.
@@ -229,13 +234,18 @@ where
         &self,
         cx: &Context<'_>,
     ) -> async_graphql::Result<Vec<UnshieldedUtxo<S>>> {
-        let utxos = cx
-            .get_storage::<S>()
+        let storage = cx.get_storage::<S>();
+        let network_id = cx.get_network_id();
+
+        let utxos = storage
             .get_unshielded_utxos_by_spending_tx_id(self.id)
             .await
             .internal("cannot get unshielded UTXOs spent by transaction")?;
 
-        Ok(utxos.into_iter().map(Into::into).collect())
+        Ok(utxos
+            .into_iter()
+            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+            .collect())
     }
 }
 
@@ -535,11 +545,11 @@ impl<S: Storage> UnshieldedUtxo<S> {
     }
 }
 
-impl<S: Storage> From<domain::UnshieldedUtxo> for UnshieldedUtxo<S> {
-    fn from(domain_utxo: domain::UnshieldedUtxo) -> Self {
+impl<S: Storage> From<(domain::UnshieldedUtxo, NetworkId)> for UnshieldedUtxo<S> {
+    fn from((domain_utxo, network_id): (domain::UnshieldedUtxo, NetworkId)) -> Self {
         let owner_bech32m = indexer_common::domain::unshielded::to_bech32m(
             domain_utxo.owner_address.as_ref(),
-            domain_utxo.network_id.unwrap(),
+            network_id,
         )
         .expect("owner address can convert to Bech32m");
 

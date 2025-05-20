@@ -269,7 +269,7 @@ where
 
         Ok(utxos
             .into_iter()
-            .map(v1::UnshieldedUtxo::<S>::from)
+            .map(|utxo| v1::UnshieldedUtxo::<S>::from((utxo, network_id)))
             .collect())
     }
 }
