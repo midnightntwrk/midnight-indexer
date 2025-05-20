@@ -13,34 +13,22 @@
 
 use anyhow::Context;
 use assert_matches::assert_matches;
-use chacha20poly1305::aead::rand_core::OsRng;
-use chain_indexer::domain::{
-    Block, BlockHash, BlockInfo, Transaction, TransactionHash, storage::Storage as _,
-};
-use fake::{Fake, Faker};
-use futures::{StreamExt, TryStreamExt, executor::block_on};
+use chain_indexer::domain::{BlockInfo, storage::Storage as _};
+use futures::{StreamExt, TryStreamExt};
 use indexer_api::domain::{ContractAction, ContractAttributes, Storage};
 use indexer_common::{
-    self,
     cipher::make_cipher,
-    domain::{
-        ApplyStage, BlockAuthor, ContractAddress, Identifier, NetworkId, ProtocolVersion,
-        RawTransaction,
-    },
-    error::BoxError,
+    domain::ApplyStage,
     infra::{migrations, pool},
-    serialize::SerializableExt,
 };
-use midnight_ledger::{
-    base_crypto::data_provider::{FetchMode, MidnightDataProvider, OutputMode},
-    prove::{ExternalResolver, Resolver},
-    storage::DefaultDB,
-    structure::{Transaction as LedgerTransaction, TransactionHash as LedgerTransactionHash},
-    transient_crypto::{hash::HashOutput, proofs::ProofPreimage},
-    zswap::{Offer, ZSWAP_EXPECTED_FILES, prove::ZswapResolver},
+use indexer_tests::{
+    PROTOCOL_VERSION_0_1,
+    chain_indexer_data::{
+        ADDRESS, BLOCK_0, BLOCK_0_HASH, BLOCK_1_AUTHOR, BLOCK_1_B, BLOCK_1_HASH, BLOCK_2,
+        BLOCK_2_HASH, IDENTIFIER_1, IDENTIFIER_2, RAW_TRANSACTION_1, RAW_TRANSACTION_2,
+        TRANSACTION_1_HASH, TRANSACTION_2_HASH, UNKNOWN_ADDRESS, ZERO_HASH,
+    },
 };
-use std::{convert::Into, sync::LazyLock};
-use subxt::utils::H256;
 
 #[cfg(feature = "cloud")]
 type ChainIndexerStorage = chain_indexer::infra::storage::postgres::PostgresStorage;
@@ -140,7 +128,7 @@ async fn run_tests(
         .await
         .context("save block 0 with zswap state 1")?;
     chain_indexer_storage
-        .save_block(&BLOCK)
+        .save_block(&BLOCK_1_B)
         .await
         .context("save block 1 with zswap state 2")?;
     chain_indexer_storage
@@ -333,16 +321,16 @@ async fn run_tests(
     let indexer_api::domain::Transaction { hash, .. } = transactions.pop().unwrap();
     assert_eq!(hash, ((TRANSACTION_1_HASH.0).0).0.into());
 
-    let transactions = indexer_api_storage
-        .get_transactions_by_identifier(&b"unknown".as_slice().into())
+    let transaction = indexer_api_storage
+        .get_transaction_by_identifier(&b"unknown".as_slice().into())
         .await?;
-    assert!(transactions.is_empty());
-    let transactions = indexer_api_storage
-        .get_transactions_by_identifier(&IDENTIFIER_2)
+    assert!(transaction.is_none());
+    let transaction = indexer_api_storage
+        .get_transaction_by_identifier(&IDENTIFIER_2)
         .await?;
-    assert!(!transactions.is_empty());
-    let indexer_api::domain::Transaction { hash, .. } = transactions.first().unwrap();
-    assert_eq!(*hash, ((TRANSACTION_2_HASH.0).0).0.into());
+    assert!(transaction.is_some());
+    let indexer_api::domain::Transaction { hash, .. } = transaction.unwrap();
+    assert_eq!(hash, ((TRANSACTION_2_HASH.0).0).0.into());
 
     let contract_action = indexer_api_storage
         .get_contract_action_by_address(&b"unknown".as_slice().into())
@@ -484,170 +472,4 @@ async fn run_tests(
     assert_eq!(end_indices, (Some(3), None, None));
 
     Ok(())
-}
-
-static BLOCK_0: LazyLock<Block> = LazyLock::new(|| Block {
-    hash: BLOCK_0_HASH,
-    height: 0,
-    protocol_version: PROTOCOL_VERSION_0_1,
-    parent_hash: ZERO_HASH,
-    author: None,
-    timestamp: 0,
-    zswap_state_root: Faker.fake(),
-    transactions: vec![],
-});
-
-static BLOCK: LazyLock<Block> = LazyLock::new(|| Block {
-    hash: BLOCK_1_HASH,
-    height: 1,
-    protocol_version: PROTOCOL_VERSION_0_1,
-    parent_hash: BLOCK_0_HASH,
-    author: Some(BLOCK_1_AUTHOR.to_owned()),
-    timestamp: 1,
-    zswap_state_root: Faker.fake(),
-    transactions: vec![
-        Transaction {
-            hash: TRANSACTION_1_HASH,
-            protocol_version: PROTOCOL_VERSION_0_1,
-            apply_stage: ApplyStage::Failure,
-            identifiers: vec![IDENTIFIER_1.to_owned()],
-            raw: RAW_TRANSACTION_1.to_owned(),
-            contract_actions: vec![chain_indexer::domain::ContractAction {
-                address: ADDRESS.to_owned(),
-                state: b"state".as_slice().into(),
-                zswap_state: b"zswap_state".as_slice().into(),
-                attributes: chain_indexer::domain::ContractAttributes::Deploy,
-            }],
-            merkle_tree_root: b"merkle_tree_root".as_slice().into(),
-            start_index: 0,
-            end_index: 1,
-        },
-        Transaction {
-            hash: TRANSACTION_1_HASH,
-            protocol_version: PROTOCOL_VERSION_0_1,
-            apply_stage: ApplyStage::Success,
-            identifiers: vec![IDENTIFIER_1.to_owned()],
-            raw: RAW_TRANSACTION_1.to_owned(),
-            contract_actions: vec![chain_indexer::domain::ContractAction {
-                address: ADDRESS.to_owned(),
-                state: b"state".as_slice().into(),
-                zswap_state: b"zswap_state".as_slice().into(),
-                attributes: chain_indexer::domain::ContractAttributes::Deploy,
-            }],
-            merkle_tree_root: b"merkle_tree_root".as_slice().into(),
-            start_index: 0,
-            end_index: 1,
-        },
-    ],
-});
-
-static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
-    hash: BLOCK_2_HASH,
-    height: 2,
-    protocol_version: PROTOCOL_VERSION_0_1,
-    parent_hash: BLOCK_1_HASH,
-    author: Some(BLOCK_2_AUTHOR.to_owned()),
-    timestamp: 2,
-    zswap_state_root: Faker.fake(),
-    transactions: vec![Transaction {
-        hash: TRANSACTION_2_HASH,
-        protocol_version: PROTOCOL_VERSION_0_1,
-        apply_stage: ApplyStage::Success,
-        identifiers: vec![IDENTIFIER_2.to_owned()],
-        raw: RAW_TRANSACTION_2.to_owned(),
-        contract_actions: vec![
-            chain_indexer::domain::ContractAction {
-                address: ADDRESS.to_owned(),
-                state: b"state".as_slice().into(),
-                zswap_state: b"zswap_state".as_slice().into(),
-                attributes: chain_indexer::domain::ContractAttributes::Call {
-                    entry_point: b"entry_point".as_slice().into(),
-                },
-            },
-            chain_indexer::domain::ContractAction {
-                address: ADDRESS.to_owned(),
-                state: b"state".as_slice().into(),
-                zswap_state: b"zswap_state".as_slice().into(),
-                attributes: chain_indexer::domain::ContractAttributes::Update,
-            },
-            chain_indexer::domain::ContractAction {
-                address: ADDRESS.to_owned(),
-                state: b"state".as_slice().into(),
-                zswap_state: b"zswap_state".as_slice().into(),
-                attributes: chain_indexer::domain::ContractAttributes::Call {
-                    entry_point: b"entry_point".as_slice().into(),
-                },
-            },
-        ],
-        merkle_tree_root: b"merkle_tree_root".as_slice().into(),
-        start_index: 2,
-        end_index: 3,
-    }],
-});
-
-const ZERO_HASH: BlockHash = BlockHash(H256::zero());
-
-const BLOCK_0_HASH: BlockHash = BlockHash(H256([
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-]));
-
-const BLOCK_1_HASH: BlockHash = BlockHash(H256([
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-]));
-
-const BLOCK_2_HASH: BlockHash = BlockHash(H256([
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
-]));
-
-static BLOCK_1_AUTHOR: LazyLock<BlockAuthor> = LazyLock::new(|| [1; 32].into());
-static BLOCK_2_AUTHOR: LazyLock<BlockAuthor> = LazyLock::new(|| [2; 32].into());
-
-const TRANSACTION_1_HASH: TransactionHash = TransactionHash(LedgerTransactionHash(HashOutput([
-    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-])));
-
-const TRANSACTION_2_HASH: TransactionHash = TransactionHash(LedgerTransactionHash(HashOutput([
-    2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-])));
-
-static IDENTIFIER_1: LazyLock<Identifier> = LazyLock::new(|| b"identifier-1".as_slice().into());
-
-static IDENTIFIER_2: LazyLock<Identifier> = LazyLock::new(|| b"identifier-2".as_slice().into());
-
-static RAW_TRANSACTION_1: LazyLock<RawTransaction> = LazyLock::new(|| {
-    create_raw_transaction(NetworkId::Undeployed).expect("create raw transaction")
-});
-
-static RAW_TRANSACTION_2: LazyLock<RawTransaction> = LazyLock::new(|| {
-    create_raw_transaction(NetworkId::Undeployed).expect("create raw transaction")
-});
-
-static ADDRESS: LazyLock<ContractAddress> = LazyLock::new(|| b"address".as_slice().into());
-
-static UNKNOWN_ADDRESS: LazyLock<ContractAddress> =
-    LazyLock::new(|| b"unknown-address".as_slice().into());
-
-pub const PROTOCOL_VERSION_0_1: ProtocolVersion = ProtocolVersion(1_000);
-
-pub fn create_raw_transaction(network_id: NetworkId) -> Result<RawTransaction, BoxError> {
-    let empty_offer = Offer::<ProofPreimage> {
-        inputs: vec![],
-        outputs: vec![],
-        transient: vec![],
-        deltas: vec![],
-    };
-    let pre_transaction = LedgerTransaction::<_, DefaultDB>::new(empty_offer, None, None);
-
-    let zswap_resolver = ZswapResolver(MidnightDataProvider::new(
-        FetchMode::OnDemand,
-        OutputMode::Log,
-        ZSWAP_EXPECTED_FILES.to_owned(),
-    ));
-    let external_resolver: ExternalResolver = Box::new(|_| Box::pin(std::future::ready(Ok(None))));
-    let resolver = Resolver::new(zswap_resolver, external_resolver);
-
-    let transaction = block_on(pre_transaction.prove(OsRng, &resolver, &resolver))?;
-    let raw_transaction = transaction.serialize(network_id)?.into();
-
-    Ok(raw_transaction)
 }

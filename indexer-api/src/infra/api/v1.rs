@@ -460,6 +460,63 @@ enum ContractActionOffset {
     TransactionOffset(TransactionOffset),
 }
 
+/// Represents an unshielded UTXO.
+#[derive(Debug, SimpleObject)]
+#[graphql(complex)]
+struct UnshieldedUtxo<S: Storage> {
+    /// Owner address (hex-encoded for POC)
+    owner: HexEncoded,
+    /// The hash of the intent that created this output (hex-encoded)
+    intent_hash: HexEncoded,
+    /// UTXO value (quantity) as a string to support u128
+    value: String,
+    /// Token type (hex-encoded)
+    token_type: HexEncoded,
+    /// Index of this output within its creating transaction
+    output_index: u32,
+
+    #[graphql(skip)]
+    created_at_transaction_data: Option<domain::Transaction>,
+    #[graphql(skip)]
+    spent_at_transaction_data: Option<domain::Transaction>,
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S: Storage> UnshieldedUtxo<S> {
+    /// Transaction that created this UTXO
+    async fn created_at_transaction(&self) -> async_graphql::Result<Transaction<S>> {
+        self.created_at_transaction_data
+            .clone()
+            .map(Transaction::<S>::from)
+            .ok_or_else(|| async_graphql::Error::new("Missing creating transaction data"))
+    }
+
+    /// Transaction that spent this UTXO, if spent
+    async fn spent_at_transaction(&self) -> async_graphql::Result<Option<Transaction<S>>> {
+        Ok(self
+            .spent_at_transaction_data
+            .clone()
+            .map(Transaction::<S>::from))
+    }
+}
+
+impl<S: Storage> From<domain::UnshieldedUtxo> for UnshieldedUtxo<S> {
+    fn from(domain_utxo: domain::UnshieldedUtxo) -> Self {
+        Self {
+            owner: domain_utxo.owner_address.hex_encode(),
+            value: domain_utxo.value.to_string(),
+            intent_hash: domain_utxo.intent_hash.hex_encode(),
+            token_type: domain_utxo.token_type.hex_encode(),
+            output_index: domain_utxo.output_index,
+            created_at_transaction_data: domain_utxo.created_at_transaction,
+            spent_at_transaction_data: domain_utxo.spent_at_transaction,
+            _s: PhantomData,
+        }
+    }
+}
+
 #[derive(Debug, Union)]
 enum WalletSyncEvent<S: Storage> {
     ViewingUpdate(ViewingUpdate<S>),

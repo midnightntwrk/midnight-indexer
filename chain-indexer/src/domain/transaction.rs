@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::ContractAction;
+use crate::domain::{ContractAction, UnshieldedUtxo};
 use derive_more::From;
 use indexer_common::domain::{
     ApplyStage, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction,
@@ -38,6 +38,12 @@ pub struct Transaction {
 
     #[sqlx(skip)]
     pub contract_actions: Vec<ContractAction>,
+
+    #[sqlx(skip)]
+    pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
+
+    #[sqlx(skip)]
+    pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
 
     pub merkle_tree_root: MerkleTreeRoot,
 

@@ -12,11 +12,11 @@
 // limitations under the License.
 
 use crate::{
-    domain::{HexEncoded, Storage},
+    domain::{self, HexEncoded, Storage},
     infra::api::{
         ContextExt, ResultExt,
         v1::{
-            Block, BlockOffset, ContractAction, ContractActionOffset, Transaction,
+            self, Block, BlockOffset, ContractAction, ContractActionOffset, Transaction,
             TransactionOffset,
         },
     },
@@ -120,9 +120,9 @@ where
                 let identifier = identifier.hex_decode().context("hex-decode identifier")?;
 
                 let transactions = storage
-                    .get_transactions_by_identifier(&identifier)
+                    .get_transaction_by_identifier(&identifier)
                     .await
-                    .internal("get transactions by identifier")?
+                    .internal("get transaction by identifier")?
                     .into_iter()
                     .map(Into::into)
                     .collect::<Vec<_>>();
@@ -200,5 +200,26 @@ where
         };
 
         Ok(contract_action.map(Into::into))
+    }
+
+    /// Retrieve all unshielded UTXOs (both spent and unspent) associated with a given address
+    /// (hex-encoded for POC).
+    #[trace(properties = { "address": "{address}" })]
+    async fn unshielded_utxos(
+        &self,
+        cx: &Context<'_>,
+        address: HexEncoded,
+    ) -> async_graphql::Result<Vec<v1::UnshieldedUtxo<S>>> {
+        let storage = cx.get_storage::<S>();
+        let domain_address = domain::UnshieldedAddress(address);
+        let utxos = storage
+            .get_unshielded_utxos_by_address(&domain_address)
+            .await
+            .internal("cannot get unshielded utxos by address")?;
+
+        Ok(utxos
+            .into_iter()
+            .map(v1::UnshieldedUtxo::<S>::from)
+            .collect())
     }
 }

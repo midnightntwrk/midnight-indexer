@@ -16,6 +16,7 @@ mod block;
 mod contract_action;
 mod storage;
 mod transaction;
+mod unshielded;
 mod viewing_key;
 mod zswap;
 
@@ -24,6 +25,7 @@ pub use block::*;
 pub use contract_action::*;
 pub use storage::*;
 pub use transaction::*;
+pub use unshielded::*;
 pub use viewing_key::*;
 pub use zswap::*;
 
