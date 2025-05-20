@@ -61,10 +61,6 @@ pub struct UnshieldedUtxo {
     /// Full transaction data for the spending transaction (populated by queries)
     #[sqlx(skip)]
     pub spent_at_transaction: Option<Transaction>,
-
-    /// Network ID for Bech32m address formatting (Option to avoid requiring Default by Sqlx).
-    #[sqlx(skip)]
-    pub network_id: Option<NetworkId>,
 }
 
 /// GraphQL scalar wrapper

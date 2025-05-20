@@ -20,7 +20,7 @@ use chacha20poly1305::ChaCha20Poly1305;
 use derive_more::Debug;
 use futures::{Stream, stream::TryStreamExt};
 use indexer_common::{
-    domain::{ContractAddress, Identifier, NetworkId, SessionId, UnshieldedAddress, ViewingKey},
+    domain::{ContractAddress, Identifier, SessionId, UnshieldedAddress, ViewingKey},
     flatten_chunks,
     infra::pool::sqlite::SqlitePool,
 };
@@ -37,17 +37,12 @@ pub struct SqliteStorage {
     #[debug(skip)]
     cipher: ChaCha20Poly1305,
     pool: SqlitePool,
-    network_id: NetworkId,
 }
 
 impl SqliteStorage {
     /// Create a new [SqliteStorage].
-    pub fn new(cipher: ChaCha20Poly1305, pool: SqlitePool, network_id: NetworkId) -> Self {
-        Self {
-            cipher,
-            pool,
-            network_id,
-        }
+    pub fn new(cipher: ChaCha20Poly1305, pool: SqlitePool) -> Self {
+        Self { cipher, pool }
     }
 }
 
@@ -948,8 +943,6 @@ impl SqliteStorage {
 
                 utxo.spent_at_transaction = spending_tx;
             }
-
-            utxo.network_id = Some(self.network_id);
         }
 
         Ok(())

@@ -20,7 +20,7 @@ use chacha20poly1305::ChaCha20Poly1305;
 use derive_more::Debug;
 use futures::{Stream, TryStreamExt};
 use indexer_common::{
-    domain::{ContractAddress, Identifier, NetworkId, SessionId, UnshieldedAddress, ViewingKey},
+    domain::{ContractAddress, Identifier, SessionId, UnshieldedAddress, ViewingKey},
     flatten_chunks,
     infra::{pool::postgres::PostgresPool, sqlx::postgres::map_deadlock_detected},
 };
@@ -34,17 +34,12 @@ pub struct PostgresStorage {
     #[debug(skip)]
     cipher: ChaCha20Poly1305,
     pool: PostgresPool,
-    network_id: NetworkId,
 }
 
 impl PostgresStorage {
     /// Create a new [PostgresStorage].
-    pub fn new(cipher: ChaCha20Poly1305, pool: PostgresPool, network_id: NetworkId) -> Self {
-        Self {
-            cipher,
-            pool,
-            network_id,
-        }
+    pub fn new(cipher: ChaCha20Poly1305, pool: PostgresPool) -> Self {
+        Self { cipher, pool }
     }
 }
 
@@ -855,8 +850,6 @@ impl Storage for PostgresStorage {
                 utxo.spent_at_transaction =
                     self.get_optional_transaction_by_id(spending_tx_id).await?;
             }
-
-            utxo.network_id = Some(self.network_id);
         }
 
         Ok(utxos)

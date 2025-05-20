@@ -14,7 +14,8 @@
 use crate::{
     domain::{Storage, UnshieldedUtxoExt},
     infra::api::v1::{
-        ContextExt, UnshieldedAddress, UnshieldedUtxoEvent, UnshieldedUtxoEventType, addr_to_common,
+        ContextExt, UnshieldedAddress, UnshieldedUtxo, UnshieldedUtxoEvent,
+        UnshieldedUtxoEventType, addr_to_common,
     },
 };
 use anyhow::Context as AnyhowContext;
@@ -123,8 +124,12 @@ where
                 } else {
                     (
                         UnshieldedUtxoEventType::UPDATE,
-                        created.into_iter().map(Into::into).collect(),
-                        spent.into_iter().map(Into::into).collect(),
+                        created.into_iter()
+                               .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                               .collect(),
+                        spent.into_iter()
+                              .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                              .collect(),
                     )
                 };
 

@@ -18,7 +18,7 @@ use futures::{StreamExt, TryStreamExt};
 use indexer_api::domain::{ContractAction, ContractAttributes, Storage};
 use indexer_common::{
     cipher::make_cipher,
-    domain::{ApplyStage, NetworkId},
+    domain::ApplyStage,
     infra::{migrations, pool},
 };
 use indexer_tests::{
@@ -81,11 +81,7 @@ async fn main() -> anyhow::Result<()> {
 
     run_tests(
         chain_indexer::infra::storage::postgres::PostgresStorage::new(pool.clone()),
-        indexer_api::infra::storage::postgres::PostgresStorage::new(
-            cipher,
-            pool,
-            NetworkId::Undeployed,
-        ),
+        indexer_api::infra::storage::postgres::PostgresStorage::new(cipher, pool),
     )
     .await?;
 
@@ -108,11 +104,7 @@ async fn main() -> anyhow::Result<()> {
 
     run_tests(
         chain_indexer::infra::storage::sqlite::SqliteStorage::new(pool.clone()),
-        indexer_api::infra::storage::sqlite::SqliteStorage::new(
-            cipher,
-            pool,
-            NetworkId::Undeployed,
-        ),
+        indexer_api::infra::storage::sqlite::SqliteStorage::new(cipher, pool),
     )
     .await?;
 
