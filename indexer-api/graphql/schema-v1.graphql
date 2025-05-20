@@ -196,13 +196,13 @@ type Subscription {
 	wallet(sessionId: HexEncoded!, index: Int, sendProgressUpdates: Boolean): WalletSyncEvent!
 	"""
 	Subscribes to unshielded UTXO events for a specific address.
-	
+
 	Emits events whenever unshielded UTXOs are created or spent for the given address.
 	Each event includes the transaction details and lists of created/spent UTXOs.
-	
+
 	# Arguments
 	* `address` - The unshielded address to monitor (must be in Bech32m format)
-	
+
 	# Returns
 	A stream of `UnshieldedUtxoEvent`s containing:
 	- `eventType`: UPDATE (for actual changes) or PROGRESS (for keep-alive messages)
