@@ -748,10 +748,10 @@ mod tests {
     async fn test_finalized_blocks_0_12() -> Result<(), BoxError> {
         test_finalized_blocks(
             "0.12.0-fb26ee62",
-            "f0ff7fae19801bbd7b6c2f45b74b1fcf8700e8547ca18c2ed54c6a16d8fc0754",
-            7,
-            "2238a7e23525042f16b24797fbd9420d83c0dd5515d1f653fafc5e1de7692f76",
-            26,
+            "351cd53d8244d68b4bc3af745519c31ebe25bbae6677d2f9a0cc598a0a892091",
+            6,
+            "0892a9be6263550502c9ef235aafba40e506164fe90a2102b377d16e156451d7",
+            25,
         )
         .await
     }

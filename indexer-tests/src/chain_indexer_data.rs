@@ -36,11 +36,14 @@ use subxt::utils::H256;
 
 pub const UT_ADDR_1_HEX: &str = "01020304";
 pub const UT_ADDR_2_HEX: &str = "05060708";
+pub const UT_ADDR_EMPTY_HEX: &str = "11223344"; // Address with no UTXOs for testing
 
 pub static OWNER_ADDR_1: LazyLock<UnshieldedAddress> =
     LazyLock::new(|| const_hex::decode(UT_ADDR_1_HEX).unwrap().into());
 pub static OWNER_ADDR_2: LazyLock<UnshieldedAddress> =
     LazyLock::new(|| const_hex::decode(UT_ADDR_2_HEX).unwrap().into());
+pub static OWNER_ADDR_EMPTY: LazyLock<UnshieldedAddress> =
+    LazyLock::new(|| const_hex::decode(UT_ADDR_EMPTY_HEX).unwrap().into());
 
 pub static INTENT_HASH: LazyLock<IntentHash> = LazyLock::new(|| [0x11u8; 32].into());
 
