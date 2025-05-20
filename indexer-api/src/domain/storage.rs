@@ -11,7 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, BlockHash, ContractAction, Transaction, TransactionHash};
+use crate::domain::{
+    Block, BlockHash, ContractAction, Transaction, TransactionHash, UnshieldedAddress,
+    UnshieldedUtxo,
+};
 use futures::{Stream, stream};
 use indexer_common::domain::{ContractAddress, Identifier, SessionId, ViewingKey};
 use std::{fmt::Debug, num::NonZeroU32};
@@ -51,11 +54,11 @@ where
         hash: TransactionHash,
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
-    /// Get [Transaction]s for the given identifier. Identifiers are not unique.
-    async fn get_transactions_by_identifier(
+    /// Get a [Transaction] for the given identifier.
+    async fn get_transaction_by_identifier(
         &self,
         identifier: &Identifier,
-    ) -> Result<Vec<Transaction>, sqlx::Error>;
+    ) -> Result<Option<Transaction>, sqlx::Error>;
 
     /// Get the contract deploy for the given address.
     async fn get_contract_deploy_by_address(
@@ -136,6 +139,12 @@ where
     /// Connect a wallet, i.e. add it to the active ones.
     async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<(), sqlx::Error>;
 
+    /// Get all unshielded UTXOs owned by the given address (from the API domain module).
+    async fn get_unshielded_utxos_by_address(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
+
     /// Disconnect a wallet, i.e. remove it from the active ones.
     async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error>;
 
@@ -195,10 +204,10 @@ impl Storage for NoopStorage {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn get_transactions_by_identifier(
+    async fn get_transaction_by_identifier(
         &self,
         identifier: &Identifier,
-    ) -> Result<Vec<Transaction>, sqlx::Error> {
+    ) -> Result<Option<Transaction>, sqlx::Error> {
         unimplemented!()
     }
 
@@ -302,6 +311,14 @@ impl Storage for NoopStorage {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn set_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_unshielded_utxos_by_address(
+        &self,
+        _address: &UnshieldedAddress,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         unimplemented!()
     }
 }
