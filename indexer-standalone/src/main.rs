@@ -54,7 +54,8 @@ async fn run() -> anyhow::Result<()> {
     // Load configuration.
     let Config {
         run_migrations,
-        application_config,
+        chain_indexer_application_config,
+        wallet_indexer_application_config,
         infra_config,
         telemetry_config:
             telemetry::Config {
@@ -69,7 +70,8 @@ async fn run() -> anyhow::Result<()> {
 
     info!(
         run_migrations,
-        application_config:?,
+        chain_indexer_application_config:?,
+        wallet_indexer_application_config:?,
         infra_config:?;
         "starting"
     );
@@ -103,7 +105,7 @@ async fn run() -> anyhow::Result<()> {
         let storage = chain_indexer::infra::storage::sqlite::SqliteStorage::new(pool.clone());
 
         chain_indexer::application::run(
-            application_config.into(),
+            chain_indexer_application_config,
             node,
             storage,
             zswap_state_storage.clone(),
@@ -117,14 +119,14 @@ async fn run() -> anyhow::Result<()> {
         let subscriber = pub_sub.subscriber();
         let api = AxumApi::new(api_config, storage, zswap_state_storage, subscriber.clone());
 
-        indexer_api::application::run(application_config.into(), api, subscriber)
+        indexer_api::application::run(api, subscriber)
     });
 
     let wallet_indexer = task::spawn({
         let storage = wallet_indexer::infra::storage::sqlite::SqliteStorage::new(cipher, pool);
         let publisher = pub_sub.publisher();
 
-        wallet_indexer::application::run(application_config.into(), storage, publisher)
+        wallet_indexer::application::run(wallet_indexer_application_config, storage, publisher)
     });
 
     select! {

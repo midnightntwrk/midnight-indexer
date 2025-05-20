@@ -1,14 +1,20 @@
 run_migrations: true
+network_id: &network_id "Undeployed"
 
-application:
-  network_id: "Undeployed"
+chain_indexer_application:
+  network_id: *network_id
   blocks_buffer: 10
   save_zswap_state_after: 1000
   caught_up_max_distance: 10
   caught_up_leeway: 5
+
+wallet_indexer_application:
+  network_id: *network_id
   active_wallets_repeat_delay: "100ms"
   active_wallets_ttl: "30m"
   transaction_batch_size: 10
+  # Number of cores by default.
+  # parallelism:
 
 infra:
   storage:
@@ -25,6 +31,7 @@ infra:
     request_body_limit: "1MiB"
     max_complexity: 200
     max_depth: 15
+    network_id: *network_id
 
 telemetry:
   tracing:

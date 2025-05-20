@@ -11,10 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, BlockHash, BlockInfo, ContractAction, Transaction, storage::Storage};
+use crate::domain::{
+    Block, BlockHash, BlockInfo, ContractAction, Transaction, UnshieldedUtxo, storage::Storage,
+};
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
-use indexer_common::{domain::ContractActionVariant, infra::pool::postgres::PostgresPool};
+use indexer_common::{
+    domain::ContractActionVariant,
+    infra::{pool::postgres::PostgresPool, sqlx::U128BeBytes},
+};
 use indoc::indoc;
 use sqlx::{Postgres, QueryBuilder, Row, postgres::PgRow, types::Json};
 use std::iter;
@@ -105,6 +110,18 @@ impl Storage for PostgresStorage {
     async fn save_block(&self, block: &Block) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         save_block(block, &mut tx).await?;
+        tx.commit().await
+    }
+
+    #[trace]
+    async fn save_unshielded_utxos(
+        &self,
+        utxos: &[UnshieldedUtxo],
+        transaction_id: i64,
+        spent: bool,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        save_unshielded_utxos(utxos, transaction_id, spent, &mut tx).await?;
         tx.commit().await
     }
 
@@ -241,7 +258,72 @@ async fn save_transactions(
 
         for (transaction, transaction_id) in transactions.iter().zip(transaction_ids) {
             save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
+
+            save_unshielded_utxos(
+                &transaction.created_unshielded_utxos,
+                transaction_id,
+                false,
+                tx,
+            )
+            .await?;
+
+            save_unshielded_utxos(
+                &transaction.spent_unshielded_utxos,
+                transaction_id,
+                true,
+                tx,
+            )
+            .await?;
         }
+    }
+
+    Ok(())
+}
+
+#[trace]
+async fn save_unshielded_utxos(
+    utxos: &[UnshieldedUtxo],
+    transaction_id: i64,
+    spent: bool,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    if utxos.is_empty() {
+        return Ok(());
+    }
+
+    if spent {
+        for utxo_info_for_spending in utxos {
+            let query = indoc! {"
+                UPDATE unshielded_utxos
+                SET spending_transaction_id = $1
+                WHERE creating_transaction_id = $2 AND output_index = $3
+                AND spending_transaction_id IS NULL
+            "};
+
+            sqlx::query(query)
+                .bind(transaction_id)
+                .bind(utxo_info_for_spending.creating_transaction_id as i64)
+                .bind(utxo_info_for_spending.output_index as i32)
+                .execute(&mut **tx)
+                .await?;
+        }
+    } else {
+        let query_base = indoc! {"
+            INSERT INTO unshielded_utxos
+             (creating_transaction_id, output_index, owner_address, token_type, intent_hash, value)
+        "};
+        let mut query_builder = QueryBuilder::new(query_base);
+        query_builder.push_values(utxos.iter(), |mut q, utxo| {
+            q.push_bind(transaction_id)
+                .push_bind(utxo.output_index as i32)
+                .push_bind(&utxo.owner_address)
+                .push_bind(utxo.token_type)
+                .push_bind(utxo.intent_hash)
+                .push_bind(U128BeBytes::from(utxo.value));
+        });
+
+        let query = query_builder.build();
+        query.execute(&mut **tx).await?;
     }
 
     Ok(())

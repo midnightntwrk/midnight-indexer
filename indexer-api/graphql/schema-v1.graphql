@@ -161,6 +161,11 @@ type Query {
 	Find a contract action for the given address and optional offset.
 	"""
 	contractAction(address: HexEncoded!, offset: ContractActionOffset): ContractAction
+	"""
+	Retrieve all unshielded UTXOs (both spent and unspent) associated with a given address
+	(hex-encoded for POC).
+	"""
+	unshieldedUtxos(address: HexEncoded!): [UnshieldedUtxo!]!
 }
 
 type RelevantTransaction {
@@ -244,6 +249,40 @@ input TransactionOffset @oneOf {
 }
 
 scalar Unit
+
+"""
+Represents an unshielded UTXO.
+"""
+type UnshieldedUtxo {
+	"""
+	Owner address (hex-encoded for POC)
+	"""
+	owner: HexEncoded!
+	"""
+	The hash of the intent that created this output (hex-encoded)
+	"""
+	intentHash: HexEncoded!
+	"""
+	UTXO value (quantity) as a string to support u128
+	"""
+	value: String!
+	"""
+	Token type (hex-encoded)
+	"""
+	tokenType: HexEncoded!
+	"""
+	Index of this output within its creating transaction
+	"""
+	outputIndex: Int!
+	"""
+	Transaction that created this UTXO
+	"""
+	createdAtTransaction: Transaction!
+	"""
+	Transaction that spent this UTXO, if spent
+	"""
+	spentAtTransaction: Transaction
+}
 
 scalar ViewingKey
 
