@@ -77,12 +77,6 @@ CREATE TABLE relevant_transactions(
     UNIQUE (wallet_id, transaction_id)
 );
 
-CREATE TABLE zswap_state(
-    id BLOB PRIMARY KEY, -- UUID
-    value BLOB NOT NULL,
-    last_index INTEGER
-);
-
 CREATE TABLE unshielded_utxos(
     id INTEGER PRIMARY KEY,
     creating_transaction_id INTEGER NOT NULL,
@@ -102,3 +96,9 @@ CREATE INDEX unshielded_owner_idx ON unshielded_utxos(owner_address);
 CREATE INDEX unshielded_token_type_idx ON unshielded_utxos(token_type);
 
 CREATE INDEX unshielded_spent_idx ON unshielded_utxos(spending_transaction_id);
+
+CREATE TABLE zswap_state(
+    id BLOB PRIMARY KEY, -- UUID
+    value BLOB NOT NULL,
+    last_index INTEGER
+);

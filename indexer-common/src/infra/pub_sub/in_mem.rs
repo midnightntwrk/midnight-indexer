@@ -27,6 +27,7 @@ use tokio::{
 pub struct InMemPubSub {
     block_indexed_sender: Sender<Value>,
     wallet_indexed_sender: Sender<Value>,
+    unshielded_utxo_sender: Sender<Value>,
 }
 
 impl InMemPubSub {
@@ -45,10 +46,12 @@ impl Default for InMemPubSub {
     fn default() -> Self {
         let (block_indexed_sender, mut block_indexed_receiver) = broadcast::channel(42);
         let (wallet_indexed_sender, mut wallet_indexed_receiver) = broadcast::channel(42);
+        let (unshielded_utxo_sender, mut unshielded_utxo_receiver) = broadcast::channel(42);
 
         let pub_sub = InMemPubSub {
             block_indexed_sender,
             wallet_indexed_sender,
+            unshielded_utxo_sender,
         };
 
         task::spawn(async move {
@@ -69,6 +72,15 @@ impl Default for InMemPubSub {
             }
         });
 
+        task::spawn(async move {
+            loop {
+                if let Err(RecvError::Lagged(_)) = unshielded_utxo_receiver.recv().await {
+                    error!("cannot drain unshielded_utxo_receiver");
+                    break;
+                };
+            }
+        });
+
         pub_sub
     }
 }
@@ -76,7 +88,7 @@ impl Default for InMemPubSub {
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{BlockIndexed, Publisher, Subscriber, WalletIndexed},
+        domain::{BlockIndexed, Publisher, Subscriber, UnshieldedUtxoIndexed, WalletIndexed},
         infra::pub_sub::in_mem::InMemPubSub,
     };
     use assert_matches::assert_matches;
@@ -107,6 +119,19 @@ mod tests {
 
         let message = messages.next().await;
         assert_matches!(message, Some(Ok(message)) if message == wallet_indexed);
+
+        let mut utxo_messages = subscriber.subscribe::<UnshieldedUtxoIndexed>().await?;
+
+        let utxo_changed = UnshieldedUtxoIndexed {
+            address_bech32m:
+                "mn_addr_undeployed1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0uyxmn"
+                    .to_string(),
+            transaction_id: 1,
+        };
+        pub_sub.publisher().publish(&utxo_changed).await?;
+
+        let utxo_message = utxo_messages.next().await;
+        assert_matches!(utxo_message, Some(Ok(utxo_message)) if utxo_message == utxo_changed);
 
         Ok(())
     }

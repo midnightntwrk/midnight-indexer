@@ -82,7 +82,8 @@ async fn run() -> anyhow::Result<()> {
             .context("run Postgres migrations")?;
     }
     let cipher = make_cipher(secret).context("make cipher")?;
-    let storage = infra::storage::postgres::PostgresStorage::new(cipher, pool);
+    let storage =
+        infra::storage::postgres::PostgresStorage::new(cipher, pool, api_config.network_id);
 
     let zswap_state_storage =
         zswap_state_storage::nats::NatsZswapStateStorage::new(zswap_state_storage_config)

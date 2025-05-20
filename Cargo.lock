@@ -3028,6 +3028,7 @@ dependencies = [
  "assert_matches",
  "async-nats",
  "axum",
+ "bech32",
  "chacha20poly1305",
  "const-hex",
  "derive_more 2.0.1",
@@ -3081,6 +3082,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "async-nats",
  "bech32",
  "chacha20poly1305",
  "chain-indexer",

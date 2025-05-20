@@ -48,6 +48,10 @@ impl Publisher for InMemPublisher {
                 self.0.wallet_indexed_sender.send(value)?;
             }
 
+            Topic("UnshieldedUtxoIndexed") => {
+                self.0.unshielded_utxo_sender.send(value)?;
+            }
+
             // This must not happen; if it happens, we forgot to add an arm for the topic above!
             _ => panic!("unexpected topic {:?}", T::TOPIC),
         }
