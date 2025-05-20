@@ -614,7 +614,7 @@ async fn make_transaction(
         .map(|(index, info)| crate::domain::UnshieldedUtxo {
             creating_transaction_id: 0,
             output_index: index as u32,
-            owner_address: UnshieldedAddress::from(info.address.clone()),
+            owner_address: UnshieldedAddress::from(info.address.clone().as_ref()),
             token_type: RawTokenType::from(info.token_type),
             intent_hash: IntentHash::from(info.intent_hash),
             value: info.value,
@@ -630,7 +630,7 @@ async fn make_transaction(
                 creating_transaction_id: 0, /* TODO: Node event needs to provide
                                              * creating_transaction_id for spent UTXOs */
                 output_index: 0, // TODO: Node event needs to provide output_index for spent UTXOs
-                owner_address: UnshieldedAddress::from(info.address.clone()),
+                owner_address: UnshieldedAddress::from(info.address.clone().as_ref()),
                 token_type: RawTokenType::from(info.token_type),
                 intent_hash: IntentHash::from(info.intent_hash),
                 value: info.value,
@@ -753,11 +753,11 @@ mod tests {
     #[tokio::test]
     async fn test_finalized_blocks_0_12() -> Result<(), BoxError> {
         test_finalized_blocks(
-            "0.12.0-fb26ee62",
-            "351cd53d8244d68b4bc3af745519c31ebe25bbae6677d2f9a0cc598a0a892091",
-            6,
-            "0892a9be6263550502c9ef235aafba40e506164fe90a2102b377d16e156451d7",
-            25,
+            "0.12.0",
+            "f06eeef6462073bf726f9324995b26a06ea44b6cfe6a90dff377d9d2e2a4844f",
+            8,
+            "54053a752c872382dced6dc2463d0c889589111bb0e8a236ef4d78517bc85cc9",
+            28,
         )
         .await
     }
