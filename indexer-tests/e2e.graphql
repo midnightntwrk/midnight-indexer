@@ -190,6 +190,29 @@ query ContractActionQuery($address: HexEncoded!, $contract_action_offset: Contra
     }
 }
 
+query UnshieldedUtxosQuery($address: HexEncoded!) {
+    unshieldedUtxos(address: $address) {
+        owner
+        value
+        tokenType
+        outputIndex
+        intentHash
+        createdAtTransaction {
+            hash
+            block {
+                height
+            }
+        }
+        spentAtTransaction {
+            hash
+            block {
+                height
+            }
+        }
+    }
+}
+
+
 mutation ConnectMutation($viewingKey: ViewingKey!) {
     connect(viewingKey: $viewingKey)
 }

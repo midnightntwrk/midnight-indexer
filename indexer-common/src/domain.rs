@@ -27,7 +27,6 @@ use derive_more::Display;
 use midnight_serialize::NetworkId as LedgerNetworkId;
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
-use std::str::FromStr;
 use thiserror::Error;
 
 pub type BlockHash = ByteArray<32>;
@@ -38,9 +37,12 @@ pub type ContractEntryPoint = ByteVec;
 pub type ContractState = ByteVec;
 pub type ContractZswapState = ByteVec;
 pub type Identifier = ByteVec;
+pub type IntentHash = ByteArray<32>;
 pub type MerkleTreeRoot = ByteVec;
+pub type RawTokenType = ByteArray<32>;
 pub type RawTransaction = ByteVec;
 pub type SessionId = ByteArray<32>;
+pub type UnshieldedAddress = ByteVec;
 
 /// The result of applying a transaction to the ledger state.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,14 +90,6 @@ impl From<NetworkId> for LedgerNetworkId {
             NetworkId::TestNet => LedgerNetworkId::TestNet,
             NetworkId::MainNet => LedgerNetworkId::MainNet,
         }
-    }
-}
-
-impl FromStr for NetworkId {
-    type Err = UnknownNetworkIdError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.try_into()
     }
 }
 

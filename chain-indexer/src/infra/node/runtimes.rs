@@ -22,10 +22,14 @@ use itertools::Itertools;
 use parity_scale_codec::Decode;
 use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, utils::H256};
 
+pub type RuntimeUnshieldedUtxoInfo = crate::infra::node::runtimes::runtime_0_12::runtime_types::pallet_midnight::pallet::UnshieldedUtxoInfo;
+
 /// Runtime specific block details.
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
     pub raw_transactions: Vec<Vec<u8>>,
+    pub created_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>>,
+    pub spent_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>>,
 }
 
 /// Make block details depending on the given protocol version.
@@ -99,6 +103,7 @@ macro_rules! make_block_details {
             ) -> Result<BlockDetails, SubxtNodeError> {
                 use self::$module::{
                     midnight,
+                    runtime_types::pallet_midnight::pallet::UnshieldedEventType,
                     runtime_types::pallet_partner_chains_session::pallet as partner_chains_session,
                     timestamp, Call, Event,
                 };
@@ -128,6 +133,10 @@ macro_rules! make_block_details {
                     .collect();
 
                 let new_session = events
+                let mut created_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> = HashMap::new();
+                let mut spent_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> = HashMap::new();
+
+                events
                     .iter()
                     .map(|event| event.and_then(|event| event.as_root_event::<Event>()))
                     .filter_map_ok(|event| match event {
@@ -145,10 +154,44 @@ macro_rules! make_block_details {
                     // Trigger fetching the authorities next time.
                     *authorities = None;
                 }
+                    .filter_map(|event_details_res| {
+                        match event_details_res {
+                            Ok(details) => match details.as_root_event::<Event>() {
+                                Ok(root_event) => Some(Ok(root_event)),
+                                Err(e) => Some(Err(SubxtNodeError::from(e)))
+                            },
+                            Err(e) => Some(Err(SubxtNodeError::from(e))),
+                        }
+                    })
+                    .filter_map(Result::ok)
+                    .for_each(|event| {
+                        match event {
+                            Event::Midnight(midnight::Event::TxApplied(details)) => {
+                                apply_stages.insert(details.tx_hash, ApplyStage::Success);
+                            }
+                            Event::Midnight(midnight::Event::TxOnlyGuaranteedApplied(details)) => {
+                                apply_stages.insert(details.tx_hash, ApplyStage::PartialSuccess);
+                            }
+                            Event::Midnight(midnight::Event::UnshieldedTokens(event_data)) => {
+                                let is_created = matches!(event_data.event_type, UnshieldedEventType::Created);
+                                if is_created {
+                                    created_unshielded_utxos_info.insert(event_data.tx_hash, event_data.utxos);
+                                } else {
+                                    spent_unshielded_utxos_info.insert(event_data.tx_hash, event_data.utxos);
+                                }
+                            }
+                            Event::Session(partner_chains_session::Event::NewSession { .. }) => {
+                                *authorities = None;
+                            }
+                             _ => {}
+                        }
+                    });
 
                 Ok(BlockDetails {
                     timestamp,
                     raw_transactions,
+                    created_unshielded_utxos_info,
+                    spent_unshielded_utxos_info,
                 })
             }
         }

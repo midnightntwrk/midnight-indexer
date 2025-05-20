@@ -11,15 +11,3 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::infra;
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct Config {
-    pub run_migrations: bool,
-
-    #[serde(rename = "infra")]
-    pub infra_config: infra::Config,
-
-    #[serde(rename = "telemetry")]
-    pub telemetry_config: indexer_common::telemetry::Config,
-}

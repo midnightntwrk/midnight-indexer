@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::ContractAction;
+use crate::domain::{ContractAction, UnshieldedUtxo};
 use indexer_common::domain::{
     ByteArray, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction, TransactionHash,
     TransactionResult,
@@ -28,6 +28,10 @@ pub struct Transaction {
     pub identifiers: Vec<Identifier>,
     pub raw: RawTransaction,
     pub contract_actions: Vec<ContractAction>,
+    #[sqlx(skip)]
+    pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
+    #[sqlx(skip)]
+    pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub merkle_tree_root: MerkleTreeRoot,
     pub start_index: u64,
     pub end_index: u64,

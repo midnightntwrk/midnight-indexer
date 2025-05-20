@@ -19,6 +19,7 @@ chain-indexer             = { path = "../chain-indexer" }
 clap                      = { workspace = true, features = [ "derive" ] }
 const-hex                 = { workspace = true }
 derive_more               = { workspace = true, features = [ "display" ] }
+fake                      = { workspace = true }
 futures                   = { workspace = true }
 graphql_client            = { workspace = true, features = [ "reqwest-rustls" ] }
 indexer-api               = { path = "../indexer-api" }
@@ -35,10 +36,12 @@ reqwest                   = { workspace = true, features = [ "json", "rustls-tls
 serde                     = { workspace = true, features = [ "derive" ] }
 serde_json                = { workspace = true }
 subxt                     = { workspace = true }
+sqlx                      = { workspace = true }
 tokio                     = { workspace = true, features = [ "macros", "process", "rt-multi-thread" ] }
 tokio-tungstenite         = { workspace = true, features = [ "rustls-tls-webpki-roots" ] }
 
 [dev-dependencies]
+bech32                 = { workspace = true }
 const-hex              = { workspace = true }
 fake                   = { workspace = true }
 fs_extra               = { workspace = true }

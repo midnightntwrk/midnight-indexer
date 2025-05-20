@@ -85,6 +85,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_contract_action_query(&indexer_data, &api_client, &api_url)
         .await
         .context("test contract action query")?;
+    test_unshielded_utxo_queries(&node_data, &api_client, &api_url)
+        .await
+        .context("test unshielded UTXOs query")?;
 
     // Test mutations.
     test_connect_mutation(&api_client, &api_url, network_id)
@@ -468,6 +471,55 @@ async fn test_contract_action_query(
             .contract_action;
         assert!(contract_action.is_none());
     }
+
+    Ok(())
+}
+
+/// Test the unshielded UTXOs query.
+async fn test_unshielded_utxo_queries(
+    _node_data: &NodeData, //we can only use this once we have subscription endpoint for utxos
+    api_client: &Client,
+    api_url: &str,
+) -> anyhow::Result<()> {
+    let owner_addr_hex = UT_ADDR_1_HEX; //we don't have utxo subscription in this version
+
+    let expected_owner_address = HexEncoded::try_from(owner_addr_hex)?;
+    let expected_value_str = "1000";
+    let expected_token_type = HexEncoded::try_from(token_type_to_hex(&TOKEN_NIGHT))?;
+    let expected_intent_hash_str = const_hex::encode(INTENT_HASH.as_ref());
+    let expected_intent_hash = HexEncoded::try_from(expected_intent_hash_str)?;
+
+    let variables = unshielded_utxos_query::Variables {
+        address: HexEncoded::try_from(owner_addr_hex).expect("valid hex"),
+    };
+
+    let utxos = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables)
+        .await?
+        .unshielded_utxos;
+
+    assert!(!utxos.is_empty());
+
+    let utxo = utxos.first().unwrap();
+
+    assert_eq!(utxo.owner, expected_owner_address);
+    assert_eq!(utxo.value, expected_value_str);
+    assert_eq!(utxo.token_type, expected_token_type);
+    assert_eq!(utxo.intent_hash, expected_intent_hash);
+    assert_eq!(utxo.output_index, 0);
+
+    assert!(utxo.created_at_transaction.block.height >= 0);
+    assert!(utxo.spent_at_transaction.is_none());
+
+    let no_utxo_addr_hex = "11223344".to_string();
+    let no_utxo_addr = HexEncoded::try_from(no_utxo_addr_hex.clone())?;
+    let variables_empty = unshielded_utxos_query::Variables {
+        address: no_utxo_addr,
+    };
+
+    let response_empty = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables_empty)
+        .await?
+        .unshielded_utxos;
+    assert!(response_empty.is_empty());
 
     Ok(())
 }
@@ -904,6 +956,14 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct ContractActionQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    struct UnshieldedUtxosQuery;
 
     #[derive(GraphQLQuery)]
     #[graphql(

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, BlockHash, ContractAction, ContractAttributes, Storage, Transaction};
+use crate::domain::{Block, BlockHash, ContractAction, ContractAttributes, Storage, Transaction, UnshieldedAddress, UnshieldedUtxo,};
 use async_stream::try_stream;
 use chacha20poly1305::ChaCha20Poly1305;
 use derive_more::Debug;
@@ -652,6 +652,59 @@ impl Storage for SqliteStorage {
             .await?;
 
         Ok(())
+    }
+
+    async fn get_unshielded_utxos_by_address(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
+        let owner_address_bytes = address
+            .hex_decode::<Vec<u8>>()
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+
+        let utxo_sql = indoc! {"
+                SELECT
+                    id, owner_address, token_type, value, output_index, intent_hash,
+                    creating_transaction_id, spending_transaction_id
+                FROM unshielded_utxos
+                WHERE owner_address = $1
+                ORDER BY id ASC
+            "};
+
+        let mut utxos = sqlx::query_as::<_, UnshieldedUtxo>(utxo_sql)
+            .bind(owner_address_bytes)
+            .fetch_all(&*self.pool)
+            .await?;
+
+        // Handle RowNotFound errors by setting transaction to None rather than failing the query.
+        // This is particularly useful with mock data which may have incomplete transaction
+        // references. We can reconsider this approach when integrating with the full node
+        // implementation.
+        for utxo in utxos.iter_mut() {
+            utxo.created_at_transaction = match self
+                .get_transaction_by_id(utxo.creating_transaction_id)
+                .await
+            {
+                Ok(tx) => Some(tx),
+                Err(sqlx::Error::RowNotFound) => {
+                    warn!(
+                        "referenced transaction not found for UTXO: {}",
+                        utxo.creating_transaction_id
+                    );
+                    None
+                }
+                Err(e) => return Err(e),
+            };
+            if let Some(spending_id) = utxo.spending_transaction_id {
+                utxo.spent_at_transaction = match self.get_transaction_by_id(spending_id).await {
+                    Ok(tx) => Some(tx),
+                    Err(sqlx::Error::RowNotFound) => None,
+                    Err(e) => return Err(e),
+                };
+            }
+        }
+
+        Ok(utxos)
     }
 }
 
