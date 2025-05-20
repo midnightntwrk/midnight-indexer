@@ -11,10 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(feature = "cloud")]
-
 use anyhow::Context;
 use fs_extra::dir::{CopyOptions, copy};
+use indexer_common::domain::NetworkId;
 use indexer_tests::e2e;
 use reqwest::StatusCode;
 use std::{
@@ -36,22 +35,8 @@ use tokio::{
     time::sleep,
 };
 
-#[cfg(feature = "cloud")]
 const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
-
-#[cfg(feature = "cloud")]
 const NODE_VERSION: &str = "0.12.0";
-
-#[cfg(feature = "cloud")]
-struct NodeHandle {
-    node_url: String,
-
-    // Needed to extend the lifetime over the execution of `start_node`.
-    _temp_dir: TempDir,
-
-    // Needed to extend the lifetime over the execution of `start_node`.
-    _node_container: ContainerAsync<GenericImage>,
-}
 
 /// Setup for e2e testing using workspace executables built by cargo. Sets up the Indexer with the
 /// "cloud" architecture, i.e. as three separate processes and also PostgreSQL and NATS as Docker
@@ -60,8 +45,6 @@ struct NodeHandle {
 #[cfg(feature = "cloud")]
 async fn main() -> anyhow::Result<()> {
     // Start PostgreSQL and NATS.
-
-    use indexer_common::domain::NetworkId;
     let (_postgres_container, postgres_port) = start_postgres().await.context("start postgres")?;
     let (_nats_container, nats_url) = start_nats().await.context("start nats")?;
     // Give PostgreSQL and NATS some headstart.
@@ -107,7 +90,37 @@ async fn main() -> anyhow::Result<()> {
 /// (`just test`) as well as on CI.
 #[tokio::test]
 #[cfg(feature = "standalone")]
-async fn main() {}
+async fn main() -> anyhow::Result<()> {
+    // Start node.
+    let node_handle = start_node().await.context("start node")?;
+
+    // Start Indexer components.
+    let (mut indexer_standalone, api_port, _temp_dir) =
+        start_indexer_standalone(&node_handle.node_url).context("start indexer_standalone")?;
+
+    // Wait until indexer-api ready.
+    wait_for_api_ready(api_port, API_READY_TIMEOUT)
+        .await
+        .context("wait for indexer-api to become ready")?;
+
+    // Run the tests.
+    let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
+
+    // It is best practice to kill the processes even when spawned with `kill_on_drop`.
+    let _ = indexer_standalone.kill().await;
+
+    result
+}
+
+struct NodeHandle {
+    node_url: String,
+
+    // Needed to extend the lifetime over the execution of `start_node`.
+    _temp_dir: TempDir,
+
+    // Needed to extend the lifetime over the execution of `start_node`.
+    _node_container: ContainerAsync<GenericImage>,
+}
 
 async fn start_node() -> anyhow::Result<NodeHandle> {
     let node_dir = Path::new(&format!("{}/../.node", env!("CARGO_MANIFEST_DIR")))
@@ -280,6 +293,29 @@ async fn start_wallet_indexer(
     }
 
     child
+}
+
+#[cfg(feature = "standalone")]
+fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempDir)> {
+    let api_port = find_free_port()?;
+    let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
+    let sqlite_file = temp_dir.path().join("indexer.sqlite").display().to_string();
+
+    let env_vars = [
+        ("RUST_LOG", "error".to_string()),
+        (
+            "CONFIG_FILE",
+            format!(
+                "{}/../indexer-standalone/config.yaml",
+                env!("CARGO_MANIFEST_DIR")
+            ),
+        ),
+        ("APP__INFRA__API__PORT", api_port.to_string()),
+        ("APP__INFRA__NODE__URL", node_url.to_owned()),
+        ("APP__INFRA__STORAGE__CNN_URL", sqlite_file),
+    ];
+
+    spawn_child("indexer-standalone", env_vars.into()).map(|child| (child, api_port, temp_dir))
 }
 
 fn spawn_child(

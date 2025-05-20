@@ -37,9 +37,10 @@ lint:
 
 test:
     # We must build the executables needed by the e2e tests!
-    cargo build -p chain-indexer  --features {{feature}}
-    cargo build -p wallet-indexer --features {{feature}}
-    cargo build -p indexer-api    --features {{feature}}
+    if [ "{{feature}}" = "cloud" ];      then cargo build -p chain-indexer      --features cloud;      fi
+    if [ "{{feature}}" = "cloud" ];      then cargo build -p wallet-indexer     --features cloud;      fi
+    if [ "{{feature}}" = "cloud" ];      then cargo build -p indexer-api        --features cloud;      fi
+    if [ "{{feature}}" = "standalone" ]; then cargo build -p indexer-standalone --features standalone; fi
     cargo nextest run --workspace --exclude indexer-standalone --features {{feature}}
     # Check indexer-api schema:
     cargo run -p indexer-api --bin indexer-api-cli print-api-schema-v1 > indexer-api/graphql/schema-v1.graphql.check

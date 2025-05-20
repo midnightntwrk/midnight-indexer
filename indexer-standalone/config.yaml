@@ -25,7 +25,6 @@ infra:
     request_body_limit: "1MiB"
     max_complexity: 200
     max_depth: 15
-    network_id: *network_id
 
 telemetry:
   tracing:
