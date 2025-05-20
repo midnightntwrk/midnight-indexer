@@ -26,11 +26,16 @@ use parity_scale_codec::Decode;
 use std::collections::HashMap;
 use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events};
 
+pub type RuntimeUnshieldedUtxoInfo =
+    runtime_0_13::runtime_types::midnight_node_ledger::common::types::UtxoInfo;
+
 /// Runtime specific block details.
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
     pub raw_transactions: Vec<Vec<u8>>,
     pub apply_stages: HashMap<[u8; 32], ApplyStage>,
+    pub created_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>>,
+    pub spent_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>>,
 }
 
 /// Make block details depending on the given protocol version.
@@ -104,78 +109,164 @@ pub async fn get_zswap_state_root(
     }
 }
 
-macro_rules! make_block_details {
-    ($module:ident, $tx_partial_success:ty) => {
-        paste::paste! {
-            async fn [<make_block_details_ $module>](
-                extrinsics: Extrinsics<SubstrateConfig, OnlineClient<SubstrateConfig>>,
-                events: Events<SubstrateConfig>,
-                authorities: &mut Option<Vec<[u8; 32]>>,
-            ) -> Result<BlockDetails, SubxtNodeError> {
-                use self::$module::{
-                    midnight,
-                    runtime_types::pallet_partner_chains_session::pallet as partner_chains_session,
-                    timestamp, Call, Event,
-                };
-
-                let calls = extrinsics
-                    .iter()
-                    .map(|extrinsic| {
-                        let call = extrinsic.as_root_extrinsic::<Call>().map_err(Box::new)?;
-                        Ok(call)
-                    })
-                    .filter_ok(|call| matches!(call, Call::Midnight(_) | Call::Timestamp(_)))
-                    .collect::<Result<Vec<_>, SubxtNodeError>>()?;
-
-                let timestamp = calls.iter().find_map(|call| match call {
-                    Call::Timestamp(timestamp::Call::set { now }) => Some(*now),
-                    _ => None,
-                });
-
-                let raw_transactions = calls
-                    .into_iter()
-                    .filter_map(|call| match call {
-                        Call::Midnight(midnight::Call::send_mn_transaction { midnight_tx }) => {
-                            Some(midnight_tx)
-                        }
-                        _ => None,
-                    })
-                    .collect();
-
-                let apply_stages = events
-                    .iter()
-                    .map(|event| event.and_then(|event| event.as_root_event::<Event>()))
-                    .filter_map_ok(|event| match event {
-                        Event::Midnight(midnight::Event::TxApplied(details)) => {
-                            Some((details.tx_hash, ApplyStage::Success))
-                        }
-
-                        Event::Midnight($tx_partial_success(details)) => {
-                            Some((details.tx_hash, ApplyStage::PartialSuccess))
-                        }
-
-                        Event::Session(partner_chains_session::Event::NewSession { .. }) => {
-                            // Trigger fetching the authorities next time.
-                            *authorities = None;
-                            None
-                        }
-
-                        _ => None,
-                    })
-                    .collect::<Result<HashMap<_, _>, _>>().map_err(Box::new)?;
-
-                Ok(BlockDetails {
-                    timestamp,
-                    raw_transactions,
-                    apply_stages,
-                })
-            }
-        }
+// Implementation for 0.12.0 - WITHOUT unshielded tokens support
+async fn make_block_details_runtime_0_12(
+    extrinsics: Extrinsics<SubstrateConfig, OnlineClient<SubstrateConfig>>,
+    events: Events<SubstrateConfig>,
+    authorities: &mut Option<Vec<[u8; 32]>>,
+) -> Result<BlockDetails, SubxtNodeError> {
+    use self::runtime_0_12::{
+        Call, Event, midnight,
+        runtime_types::pallet_partner_chains_session::pallet as partner_chains_session, timestamp,
     };
+
+    let calls = extrinsics
+        .iter()
+        .map(|extrinsic| {
+            let call = extrinsic.as_root_extrinsic::<Call>().map_err(Box::new)?;
+            Ok(call)
+        })
+        .filter_ok(|call| matches!(call, Call::Midnight(_) | Call::Timestamp(_)))
+        .collect::<Result<Vec<_>, SubxtNodeError>>()?;
+
+    let timestamp = calls.iter().find_map(|call| match call {
+        Call::Timestamp(timestamp::Call::set { now }) => Some(*now),
+        _ => None,
+    });
+
+    let raw_transactions = calls
+        .into_iter()
+        .filter_map(|call| match call {
+            Call::Midnight(midnight::Call::send_mn_transaction { midnight_tx }) => {
+                Some(midnight_tx)
+            }
+            _ => None,
+        })
+        .collect();
+
+    let apply_stages = events
+        .iter()
+        .map(|event| event.and_then(|event| event.as_root_event::<Event>()))
+        .filter_map_ok(|event| match event {
+            Event::Midnight(midnight::Event::TxApplied(details)) => {
+                Some((details.tx_hash, ApplyStage::Success))
+            }
+
+            Event::Midnight(midnight::Event::TxOnlyGuaranteedApplied(details)) => {
+                Some((details.tx_hash, ApplyStage::PartialSuccess))
+            }
+
+            Event::Session(partner_chains_session::Event::NewSession { .. }) => {
+                *authorities = None;
+                None
+            }
+
+            _ => None,
+        })
+        .collect::<Result<HashMap<_, _>, _>>()
+        .map_err(Box::new)?;
+
+    // Create empty maps for unshielded data since 0.12.0 doesn't support it
+    let created_unshielded_utxos_info = HashMap::new();
+    let spent_unshielded_utxos_info = HashMap::new();
+
+    Ok(BlockDetails {
+        timestamp,
+        raw_transactions,
+        apply_stages,
+        created_unshielded_utxos_info,
+        spent_unshielded_utxos_info,
+    })
 }
 
-make_block_details!(runtime_0_12, midnight::Event::TxOnlyGuaranteedApplied);
-make_block_details!(runtime_0_13, midnight::Event::TxPartialSuccess);
+// Implementation for 0.13.0 - WITH unshielded tokens support
+async fn make_block_details_runtime_0_13(
+    extrinsics: Extrinsics<SubstrateConfig, OnlineClient<SubstrateConfig>>,
+    events: Events<SubstrateConfig>,
+    authorities: &mut Option<Vec<[u8; 32]>>,
+) -> Result<BlockDetails, SubxtNodeError> {
+    use self::runtime_0_13::{
+        Call, Event, midnight,
+        runtime_types::pallet_partner_chains_session::pallet as partner_chains_session, timestamp,
+    };
+
+    let calls = extrinsics
+        .iter()
+        .map(|extrinsic| {
+            let call = extrinsic.as_root_extrinsic::<Call>().map_err(Box::new)?;
+            Ok(call)
+        })
+        .filter_ok(|call| matches!(call, Call::Midnight(_) | Call::Timestamp(_)))
+        .collect::<Result<Vec<_>, SubxtNodeError>>()?;
+
+    let timestamp = calls.iter().find_map(|call| match call {
+        Call::Timestamp(timestamp::Call::set { now }) => Some(*now),
+        _ => None,
+    });
+
+    let raw_transactions = calls
+        .into_iter()
+        .filter_map(|call| match call {
+            Call::Midnight(midnight::Call::send_mn_transaction { midnight_tx }) => {
+                Some(midnight_tx)
+            }
+            _ => None,
+        })
+        .collect();
+
+    let mut apply_stages = HashMap::new();
+    let mut created_unshielded_utxos_info = HashMap::new();
+    let mut spent_unshielded_utxos_info = HashMap::new();
+
+    // Collect transaction events first
+    for event_details in events.iter().flatten() {
+        if let Ok(event) = event_details.as_root_event::<Event>() {
+            match event {
+                Event::Midnight(midnight::Event::TxApplied(details)) => {
+                    apply_stages.insert(details.tx_hash, ApplyStage::Success);
+                }
+                Event::Midnight(midnight::Event::TxPartialSuccess(details)) => {
+                    apply_stages.insert(details.tx_hash, ApplyStage::PartialSuccess);
+                }
+                Event::Session(partner_chains_session::Event::NewSession { .. }) => {
+                    *authorities = None;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut tx_hash_index = 0;
+    let tx_hashes: Vec<_> = apply_stages.keys().cloned().collect();
+
+    for event_details in events.iter().flatten() {
+        if let Ok(Event::Midnight(midnight::Event::UnshieldedTokens(details))) =
+            event_details.as_root_event::<Event>()
+        {
+            if tx_hash_index < tx_hashes.len() {
+                let tx_hash = tx_hashes[tx_hash_index];
+
+                if !details.created.is_empty() {
+                    created_unshielded_utxos_info.insert(tx_hash, details.created);
+                }
+
+                if !details.spent.is_empty() {
+                    spent_unshielded_utxos_info.insert(tx_hash, details.spent);
+                }
+
+                tx_hash_index += 1;
+            }
+        }
+    }
+
+    Ok(BlockDetails {
+        timestamp,
+        raw_transactions,
+        apply_stages,
+        created_unshielded_utxos_info,
+        spent_unshielded_utxos_info,
+    })
+}
 
 macro_rules! fetch_authorities {
     ($module:ident) => {
