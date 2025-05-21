@@ -65,29 +65,29 @@ pub async fn run(
     let highest_block = storage
         .get_highest_block()
         .await
-        .context("cannot get stream of highest blocks from node")?;
+        .context("get stream of highest blocks from node")?;
     let highest_height = highest_block.map(|BlockInfo { height, .. }| height);
     info!(highest_height:?; "starting indexing");
 
     let transaction_count = storage
         .get_transaction_count()
         .await
-        .context("cannot get transaction count")?;
+        .context("get transaction count")?;
 
     let contract_action_count = storage
         .get_contract_action_count()
         .await
-        .context("cannot get contract action count")?;
+        .context("get contract action count")?;
 
     let (zswap_state, zswap_state_block_height) = zswap_state_storage
         .load_zswap_state()
         .await
-        .context("cannot get zswap state")?
+        .context("get zswap state")?
         .unzip();
     let zswap_state = zswap_state
         .map(|zswap_state| {
             indexer_common::domain::ZswapState::deserialize(zswap_state, network_id)
-                .context("cannot deserialize zswap state")
+                .context("deserialize zswap state")
         })
         .transpose()?
         .unwrap_or_default();
@@ -108,19 +108,18 @@ pub async fn run(
             while let Some(mut transactions) = all_transactions
                 .try_next()
                 .await
-                .context("cannot get next transaction")?
+                .context("get next transaction")?
             {
-                zswap_state =
-                    zswap_state.apply_transactions(transactions.as_mut_slice(), network_id)?;
+                zswap_state.apply_transactions(transactions.as_mut_slice(), network_id)?;
             }
 
             let raw_zswap_state = zswap_state
                 .serialize(network_id)
-                .context("cannot serialize ZswapState")?;
+                .context("serialize ZswapState")?;
             zswap_state_storage
                 .save(&raw_zswap_state, highest_height, zswap_state.end_index())
                 .await
-                .context("cannot save zswap state")?;
+                .context("save zswap state")?;
         }
     }
 
@@ -136,7 +135,7 @@ pub async fn run(
             let highest_blocks = node
                 .highest_blocks()
                 .await
-                .context("cannot get stream of highest blocks")?;
+                .context("get stream of highest blocks")?;
 
             highest_blocks
                 .try_for_each(|block_info| {
@@ -151,7 +150,7 @@ pub async fn run(
                     ok(())
                 })
                 .await
-                .context("cannot get next block of highest_blocks")?;
+                .context("get next block of highest_blocks")?;
 
             Ok::<_, anyhow::Error>(())
         }
@@ -264,7 +263,7 @@ where
 {
     let block = get_next_block(blocks)
         .await
-        .context("cannot get next block for indexing")?;
+        .context("get next block for indexing")?;
 
     match block {
         Some(block) => {
@@ -309,7 +308,7 @@ async fn index_block(
         ..
     } = config;
 
-    zswap_state = zswap_state.apply_transactions(&mut block.transactions, network_id)?;
+    zswap_state.apply_transactions(&mut block.transactions, network_id)?;
 
     if zswap_state.0.coin_coms.root() != block.zswap_state_root {
         bail!(
@@ -321,7 +320,7 @@ async fn index_block(
 
     let raw_zswap_state = zswap_state
         .serialize(network_id)
-        .context("cannot serialize ZswapState")?;
+        .context("serialize ZswapState")?;
 
     // Determine whether caught up, also allowing to fall back a little in that state.
     let node_block_height = highest_block_on_node
@@ -344,10 +343,7 @@ async fn index_block(
     }
 
     // 1) Save the block first
-    storage
-        .save_block(&block)
-        .await
-        .context("cannot save block")?;
+    storage.save_block(&block).await.context("save block")?;
 
     // 2) Then save the zswap state. This order is important to prevent from applying the
     //    transactions twice.
@@ -355,7 +351,7 @@ async fn index_block(
         zswap_state_storage
             .save(&raw_zswap_state, block.height, zswap_state.end_index())
             .await
-            .context("cannot save zswap state")?;
+            .context("save zswap state")?;
     }
 
     info!(
@@ -375,7 +371,7 @@ async fn index_block(
             caught_up: *caught_up,
         })
         .await
-        .context("cannot publish BlockIndexed event")?;
+        .context("publish BlockIndexed event")?;
 
     Ok(zswap_state)
 }
