@@ -13,6 +13,7 @@ publish       = { workspace = true }
 [dependencies]
 anyhow                    = { workspace = true }
 assert_matches            = { workspace = true }
+async-nats        = { workspace = true }
 bech32                    = { workspace = true }
 chacha20poly1305          = { workspace = true }
 chain-indexer             = { path = "../chain-indexer" }

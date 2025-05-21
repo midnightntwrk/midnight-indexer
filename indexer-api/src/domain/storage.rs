@@ -78,11 +78,11 @@ where
         hash: TransactionHash,
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
-    /// Get a [Transaction] for the given identifier.
-    async fn get_transaction_by_identifier(
+    /// Get [Transaction]s for the given identifier. Identifiers are not unique.
+    async fn get_transactions_by_identifier(
         &self,
         identifier: &Identifier,
-    ) -> Result<Option<Transaction>, sqlx::Error>;
+    ) -> Result<Vec<Transaction>, sqlx::Error>;
 
     /// Get the contract deploy for the given address.
     async fn get_contract_deploy_by_address(
@@ -236,10 +236,10 @@ impl Storage for NoopStorage {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn get_transaction_by_identifier(
+    async fn get_transactions_by_identifier(
         &self,
         identifier: &Identifier,
-    ) -> Result<Option<Transaction>, sqlx::Error> {
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
         unimplemented!()
     }
 

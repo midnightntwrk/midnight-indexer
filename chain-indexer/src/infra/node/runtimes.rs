@@ -124,7 +124,7 @@ macro_rules! make_block_details {
                 let calls = extrinsics
                     .iter()
                     .map(|extrinsic| {
-                        let call = extrinsic.as_root_extrinsic::<Call>()?;
+                        let call = extrinsic.as_root_extrinsic::<Call>().map_err(Box::new)?;
                         Ok(call)
                     })
                     .filter_ok(|call| matches!(call, Call::Midnight(_) | Call::Timestamp(_)))
@@ -172,9 +172,9 @@ macro_rules! make_block_details {
                         match event_details_res {
                             Ok(details) => match details.as_root_event::<Event>() {
                                 Ok(root_event) => Some(Ok(root_event)),
-                                Err(e) => Some(Err(SubxtNodeError::from(e)))
+                                Err(e) => Some(Err(SubxtNodeError::from(Box::new(e))))
                             },
-                            Err(e) => Some(Err(SubxtNodeError::from(e))),
+                            Err(e) => Some(Err(SubxtNodeError::from(Box::new(e))))
                         }
                     })
                     .filter_map(Result::ok)
