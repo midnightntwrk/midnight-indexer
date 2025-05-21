@@ -70,6 +70,7 @@ const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
 /// A [Node] implementation based on subxt.
 #[derive(Clone)]
 pub struct SubxtNode {
+    genesis_protocol_version: ProtocolVersion,
     rpc_client: RpcClient,
     default_online_client: OnlineClient<SubstrateConfig>,
     compatible_online_client: Option<(ProtocolVersion, OnlineClient<SubstrateConfig>)>,
@@ -80,6 +81,7 @@ impl SubxtNode {
     pub async fn new(config: Config) -> Result<Self, Error> {
         let Config {
             url,
+            genesis_protocol_version,
             reconnect_max_delay: retry_max_delay,
             reconnect_max_attempts: retry_max_attempts,
         } = config;
@@ -98,6 +100,7 @@ impl SubxtNode {
 
         Ok(Self {
             rpc_client,
+            genesis_protocol_version,
             default_online_client,
             compatible_online_client: None,
         })
@@ -213,7 +216,10 @@ impl SubxtNode {
         let hash = BlockHash::from(block.hash());
         let height = block.number();
         let parent_hash = block.header().parent_hash.into();
-        let protocol_version = block.header().protocol_version()?.unwrap_or_default();
+        let protocol_version = block
+            .header()
+            .protocol_version()?
+            .unwrap_or(self.genesis_protocol_version);
 
         info!(
             hash:%,
@@ -422,20 +428,12 @@ impl Node for SubxtNode {
 pub struct Config {
     pub url: String,
 
+    pub genesis_protocol_version: ProtocolVersion,
+
     #[serde(with = "humantime_serde")]
     pub reconnect_max_delay: Duration,
 
     pub reconnect_max_attempts: usize,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            url: "ws://localhost:9944".to_string(),
-            reconnect_max_delay: Duration::from_secs(10),
-            reconnect_max_attempts: 30,
-        }
-    }
 }
 
 /// Error possibly returned by [SubxtNode::new].
@@ -686,24 +684,19 @@ mod tests {
         domain::{BlockHash, BlockInfo, Node, Transaction},
         infra::node::{Config, LedgerTransaction, SubxtNode},
     };
-    use anyhow::Context;
     use assert_matches::assert_matches;
     use fs_extra::dir::{CopyOptions, copy};
     use futures::{StreamExt, TryStreamExt};
     use indexer_common::{
-        domain::{ApplyStage, NetworkId},
+        domain::{
+            ApplyStage, NetworkId, PROTOCOL_VERSION_000_012_000, PROTOCOL_VERSION_000_013_000,
+            ProtocolVersion,
+        },
         error::BoxError,
     };
     use midnight_ledger::serialize::deserialize;
-    use std::{env, path::Path, pin::pin};
-    use subxt::{
-        OnlineClient, SubstrateConfig,
-        backend::{
-            legacy::{LegacyRpcMethods, rpc_methods::NumberOrHex},
-            rpc::RpcClient,
-        },
-        utils::H256,
-    };
+    use std::{env, path::Path, pin::pin, time::Duration};
+    use subxt::{self, utils::H256};
     use testcontainers::{
         GenericImage, ImageExt,
         core::{Mount, WaitFor},
@@ -713,7 +706,19 @@ mod tests {
     #[tokio::test]
     async fn test_finalized_blocks_0_12() -> Result<(), BoxError> {
         test_finalized_blocks(
-            "0.12.0",
+            PROTOCOL_VERSION_000_012_000,
+            "f06eeef6462073bf726f9324995b26a06ea44b6cfe6a90dff377d9d2e2a4844f",
+            8,
+            "54053a752c872382dced6dc2463d0c889589111bb0e8a236ef4d78517bc85cc9",
+            28,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn test_finalized_blocks_0_13() -> Result<(), BoxError> {
+        test_finalized_blocks(
+            PROTOCOL_VERSION_000_013_000,
             "f06eeef6462073bf726f9324995b26a06ea44b6cfe6a90dff377d9d2e2a4844f",
             8,
             "54053a752c872382dced6dc2463d0c889589111bb0e8a236ef4d78517bc85cc9",
@@ -723,34 +728,40 @@ mod tests {
     }
 
     async fn test_finalized_blocks(
-        node_version: &'static str,
+        genesis_protocol_version: ProtocolVersion,
         before_first_tx_block_hash: &'static str,
         before_first_tx_height: u32,
         first_tx_hash: &'static str,
         last_tx_height: u32,
     ) -> Result<(), BoxError> {
+        let node_version = genesis_protocol_version.to_string();
+
         let node_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../.node")
-            .join(node_version)
+            .join(&node_version)
             .canonicalize()?;
         let tmp_dir = tempfile::tempdir()?;
         copy(node_dir, &tmp_dir, &CopyOptions::default())?;
 
-        let host_path = tmp_dir.path().join(node_version).display().to_string();
-        let node_container =
-            GenericImage::new("ghcr.io/midnight-ntwrk/midnight-node", node_version)
-                .with_wait_for(WaitFor::message_on_stderr("9944"))
-                .with_mount(Mount::bind_mount(host_path, "/node"))
-                .with_env_var("SHOW_CONFIG", "false")
-                .with_env_var("CFG_PRESET", "dev")
-                .start()
-                .await?;
+        let host_path = tmp_dir.path().join(&node_version).display().to_string();
+        let node_container = GenericImage::new(
+            "ghcr.io/midnight-ntwrk/midnight-node".to_string(),
+            node_version,
+        )
+        .with_wait_for(WaitFor::message_on_stderr("9944"))
+        .with_mount(Mount::bind_mount(host_path, "/node"))
+        .with_env_var("SHOW_CONFIG", "false")
+        .with_env_var("CFG_PRESET", "dev")
+        .start()
+        .await?;
         let node_port = node_container.get_host_port_ipv4(9944).await?;
         let node_url = format!("ws://localhost:{node_port}");
 
         let config = Config {
             url: node_url,
-            ..Default::default()
+            genesis_protocol_version,
+            reconnect_max_delay: Duration::from_secs(1),
+            reconnect_max_attempts: 3,
         };
         let mut subxt_node = SubxtNode::new(config).await?;
 
@@ -835,49 +846,6 @@ mod tests {
             NetworkId::Undeployed.into(),
         );
         assert!(ledger_transaction.is_ok());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[ignore = "only to be run manually"]
-    async fn test_make_block() -> Result<(), BoxError> {
-        const URL: &str = "wss://rpc.qanet.dev.midnight.network:443";
-
-        async fn get_hash(
-            height: u32,
-            rpc: &LegacyRpcMethods<SubstrateConfig>,
-        ) -> anyhow::Result<H256> {
-            rpc.chain_get_block_hash(Some(NumberOrHex::Number(height as u64)))
-                .await
-                .context("get hash")?
-                .with_context(|| format!("unknown height {height}"))
-        }
-
-        // wss://rpc.qanet.dev.midnight.network:443
-        // wss://rpc.testnet-02.midnight.network:443
-        let rpc_client = RpcClient::from_url(URL).await.context("create RpcClient")?;
-        let legacy_rpc_methods = LegacyRpcMethods::<SubstrateConfig>::new(rpc_client.to_owned());
-        let hash = get_hash(407, &legacy_rpc_methods).await?;
-
-        let online_client = OnlineClient::<SubstrateConfig>::from_rpc_client(rpc_client)
-            .await
-            .context("create OnlineClient")?;
-        let block = online_client
-            .blocks()
-            .at(hash)
-            .await
-            .with_context(|| format!("get block with hash {hash}"))?;
-
-        let config = Config {
-            url: URL.to_string(),
-            ..Default::default()
-        };
-        let mut subxt_node = SubxtNode::new(config).await?;
-        let result = subxt_node
-            .make_block(block, &mut None, NetworkId::DevNet)
-            .await;
-        assert!(result.is_ok());
 
         Ok(())
     }
