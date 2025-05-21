@@ -493,6 +493,7 @@ async fn test_contract_action_query(
 }
 
 /// Test the unshielded UTXOs query.
+/// Test the unshielded UTXOs query.
 async fn test_unshielded_utxo_queries(
     indexer_data: &IndexerData,
     api_client: &Client,
