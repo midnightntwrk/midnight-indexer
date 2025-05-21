@@ -156,16 +156,15 @@ type Query {
 	"""
 	Find transactions for the given offset.
 	"""
-	transactions(offset: TransactionOffset!): [Transaction!]!
+	transactions(offset: TransactionOffset!, address: UnshieldedAddress): [Transaction!]!
 	"""
 	Find a contract action for the given address and optional offset.
 	"""
 	contractAction(address: HexEncoded!, offset: ContractActionOffset): ContractAction
 	"""
-	Retrieve all unshielded UTXOs (both spent and unspent) associated with a given address
-	(hex-encoded for POC).
+	Retrieve all unshielded UTXOs (both spent and unspent) associated with a given address.
 	"""
-	unshieldedUtxos(address: HexEncoded!): [UnshieldedUtxo!]!
+	unshieldedUtxos(address: UnshieldedAddress!, offset: UnshieldedOffset): [UnshieldedUtxo!]!
 }
 
 type RelevantTransaction {
@@ -200,6 +199,23 @@ type Subscription {
 	if the index is omitted. Wallet events are either a ViewingUpdate or a ProgressUpdate.
 	"""
 	wallet(sessionId: HexEncoded!, index: Int, sendProgressUpdates: Boolean): WalletSyncEvent!
+	"""
+	Subscribes to unshielded UTXO events for a specific address.
+	
+	Emits events whenever unshielded UTXOs are created or spent for the given address.
+	Each event includes the transaction details and lists of created/spent UTXOs.
+	
+	# Arguments
+	* `address` - The unshielded address to monitor (must be in Bech32m format)
+	
+	# Returns
+	A stream of `UnshieldedUtxoEvent`s containing:
+	- `eventType`: UPDATE (for actual changes) or PROGRESS (for keep-alive messages)
+	- `transaction`: The transaction that created/spent UTXOs
+	- `createdUtxos`: UTXOs created in this transaction for the address
+	- `spentUtxos`: UTXOs spent in this transaction for the address
+	"""
+	unshieldedUtxos(address: UnshieldedAddress!): UnshieldedUtxoEvent!
 }
 
 """
@@ -238,6 +254,14 @@ type Transaction {
 	The contract actions.
 	"""
 	contractActions: [ContractAction!]!
+	"""
+	Unshielded UTXOs created by this transaction.
+	"""
+	unshieldedCreatedOutputs: [UnshieldedUtxo!]!
+	"""
+	Unshielded UTXOs spent (consumed) by this transaction.
+	"""
+	unshieldedSpentOutputs: [UnshieldedUtxo!]!
 }
 
 """
@@ -250,14 +274,24 @@ input TransactionOffset @oneOf {
 
 scalar Unit
 
+scalar UnshieldedAddress
+
+"""
+Either a [BlockOffset] or a [TransactionOffset] to query for a [UnshieldedUtxo].
+"""
+input UnshieldedOffset @oneOf {
+	blockOffset: BlockOffset
+	transactionOffset: TransactionOffset
+}
+
 """
 Represents an unshielded UTXO.
 """
 type UnshieldedUtxo {
 	"""
-	Owner address (hex-encoded for POC)
+	Owner address (Bech32m, `mn_addr…`)
 	"""
-	owner: HexEncoded!
+	owner: UnshieldedAddress!
 	"""
 	The hash of the intent that created this output (hex-encoded)
 	"""
@@ -277,11 +311,47 @@ type UnshieldedUtxo {
 	"""
 	Transaction that created this UTXO
 	"""
-	createdAtTransaction: Transaction!
+	createdAtTransaction: Transaction
 	"""
 	Transaction that spent this UTXO, if spent
 	"""
 	spentAtTransaction: Transaction
+}
+
+"""
+Payload emitted by `subscription { unshieldedUtxos … }`
+"""
+type UnshieldedUtxoEvent {
+	"""
+	The type of event - UPDATE for changes, PROGRESS for status messages
+	"""
+	eventType: UnshieldedUtxoEventType!
+	"""
+	The transaction associated with this event
+	"""
+	transaction: Transaction!
+	"""
+	UTXOs created in this transaction for the subscribed address
+	"""
+	createdUtxos: [UnshieldedUtxo!]!
+	"""
+	UTXOs spent in this transaction for the subscribed address
+	"""
+	spentUtxos: [UnshieldedUtxo!]!
+}
+
+"""
+Types of events emitted by the unshielded UTXO subscription
+"""
+enum UnshieldedUtxoEventType {
+	"""
+	Indicates a transaction that created or spent UTXOs for the address
+	"""
+	UPDATE
+	"""
+	Status message for synchronization progress or keep-alive
+	"""
+	PROGRESS
 }
 
 scalar ViewingKey
