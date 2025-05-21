@@ -184,6 +184,122 @@ where
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 }
 
+/// Extension trait to provide backward compatibility for unshielded UTXO access
+pub trait UnshieldedUtxoExt: Storage {
+    fn get_unshielded_utxos_by_address(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(Some(address), UnshieldedUtxoFilter::All)
+                .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_creating_tx_id(
+        &self,
+        tx_id: u64,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(tx_id))
+                .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_spending_tx_id(
+        &self,
+        tx_id: u64,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(tx_id))
+                .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_address_created_in_tx(
+        &self,
+        tx_id: u64,
+        address: &UnshieldedAddress,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(
+                Some(address),
+                UnshieldedUtxoFilter::CreatedInTxForAddress(tx_id),
+            )
+            .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_address_spent_in_tx(
+        &self,
+        tx_id: u64,
+        address: &UnshieldedAddress,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(
+                Some(address),
+                UnshieldedUtxoFilter::SpentInTxForAddress(tx_id),
+            )
+            .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_address_from_height(
+        &self,
+        address: &UnshieldedAddress,
+        start_height: u32,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(
+                Some(address),
+                UnshieldedUtxoFilter::FromHeight(start_height),
+            )
+            .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_address_from_block_hash(
+        &self,
+        address: &UnshieldedAddress,
+        block_hash: &BlockHash,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(
+                Some(address),
+                UnshieldedUtxoFilter::FromBlockHash(block_hash),
+            )
+            .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_address_from_tx_hash(
+        &self,
+        address: &UnshieldedAddress,
+        tx_hash: &TransactionHash,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(Some(address), UnshieldedUtxoFilter::FromTxHash(tx_hash))
+                .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_address_from_tx_identifier(
+        &self,
+        address: &UnshieldedAddress,
+        identifier: &Identifier,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(
+                Some(address),
+                UnshieldedUtxoFilter::FromTxIdentifier(identifier),
+            )
+            .await
+        }
+    }
+}
+
+impl<T: Storage> UnshieldedUtxoExt for T {}
+
 /// Just needed as a type argument for `infra::api::export_schema` which should not depend on any
 /// features like "cloud" and hence types like `infra::postgres::PostgresStorage` cannot be used.
 /// Once traits with async functions are object safe, this can go away and be replaced with
