@@ -12,12 +12,36 @@
 // limitations under the License.
 
 use crate::domain::{
-    Block, BlockHash, ContractAction, Transaction, TransactionHash, UnshieldedAddress,
-    UnshieldedUtxo,
+    Block, BlockHash, ContractAction, Transaction, TransactionHash, UnshieldedUtxo,
 };
 use futures::{Stream, stream};
-use indexer_common::domain::{ContractAddress, Identifier, SessionId, ViewingKey};
+use indexer_common::domain::{
+    ContractAddress, Identifier, SessionId, UnshieldedAddress, ViewingKey,
+};
 use std::{fmt::Debug, num::NonZeroU32};
+
+/// Filter criteria for unshielded UTXOs queries
+#[derive(Debug, Clone)]
+pub enum UnshieldedUtxoFilter<'a> {
+    /// All UTXOs (no filter)
+    All,
+    /// UTXOs created by a specific transaction
+    CreatedByTx(u64),
+    /// UTXOs spent by a specific transaction
+    SpentByTx(u64),
+    /// UTXOs created in a specific transaction for a specific address
+    CreatedInTxForAddress(u64),
+    /// UTXOs spent in a specific transaction for a specific address
+    SpentInTxForAddress(u64),
+    /// UTXOs created/spent in blocks with height >= the given value
+    FromHeight(u32),
+    /// UTXOs created/spent in a specific block
+    FromBlockHash(&'a BlockHash),
+    /// UTXOs created/spent in a transaction with given hash
+    FromTxHash(&'a TransactionHash),
+    /// UTXOs created/spent in a transaction with given identifier
+    FromTxIdentifier(&'a Identifier),
+}
 
 /// Storage abstraction.
 #[trait_variant::make(Send)]
@@ -139,18 +163,142 @@ where
     /// Connect a wallet, i.e. add it to the active ones.
     async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<(), sqlx::Error>;
 
-    /// Get all unshielded UTXOs owned by the given address (from the API domain module).
-    async fn get_unshielded_utxos_by_address(
-        &self,
-        address: &UnshieldedAddress,
-    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
-
     /// Disconnect a wallet, i.e. remove it from the active ones.
     async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error>;
 
     /// Set the wallet active at the current timestamp to avoid timing out.
     async fn set_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error>;
+
+    /// Get unshielded UTXOs based on filter criteria.
+    /// This consolidated method replaces multiple specific UTXO query methods.
+    async fn get_unshielded_utxos(
+        &self,
+        address: Option<&UnshieldedAddress>,
+        filter: UnshieldedUtxoFilter<'_>,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
+
+    /// Get all transactions that create or spend unshielded UTXOs for the given address.
+    async fn get_transactions_involving_unshielded(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> Result<Vec<Transaction>, sqlx::Error>;
 }
+
+/// Extension trait to provide backward compatibility for unshielded UTXO access
+pub trait UnshieldedUtxoExt: Storage {
+    fn get_unshielded_utxos_by_address(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(Some(address), UnshieldedUtxoFilter::All)
+                .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_creating_tx_id(
+        &self,
+        tx_id: u64,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(tx_id))
+                .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_spending_tx_id(
+        &self,
+        tx_id: u64,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(tx_id))
+                .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_address_created_in_tx(
+        &self,
+        tx_id: u64,
+        address: &UnshieldedAddress,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(
+                Some(address),
+                UnshieldedUtxoFilter::CreatedInTxForAddress(tx_id),
+            )
+            .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_address_spent_in_tx(
+        &self,
+        tx_id: u64,
+        address: &UnshieldedAddress,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(
+                Some(address),
+                UnshieldedUtxoFilter::SpentInTxForAddress(tx_id),
+            )
+            .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_address_from_height(
+        &self,
+        address: &UnshieldedAddress,
+        start_height: u32,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(
+                Some(address),
+                UnshieldedUtxoFilter::FromHeight(start_height),
+            )
+            .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_address_from_block_hash(
+        &self,
+        address: &UnshieldedAddress,
+        block_hash: &BlockHash,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(
+                Some(address),
+                UnshieldedUtxoFilter::FromBlockHash(block_hash),
+            )
+            .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_address_from_tx_hash(
+        &self,
+        address: &UnshieldedAddress,
+        tx_hash: &TransactionHash,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(Some(address), UnshieldedUtxoFilter::FromTxHash(tx_hash))
+                .await
+        }
+    }
+
+    fn get_unshielded_utxos_by_address_from_tx_identifier(
+        &self,
+        address: &UnshieldedAddress,
+        identifier: &Identifier,
+    ) -> impl Future<Output = Result<Vec<UnshieldedUtxo>, sqlx::Error>> + Send {
+        async move {
+            self.get_unshielded_utxos(
+                Some(address),
+                UnshieldedUtxoFilter::FromTxIdentifier(identifier),
+            )
+            .await
+        }
+    }
+}
+
+impl<T: Storage> UnshieldedUtxoExt for T {}
 
 /// Just needed as a type argument for `infra::api::export_schema` which should not depend on any
 /// features like "cloud" and hence types like `infra::postgres::PostgresStorage` cannot be used.
@@ -315,10 +463,19 @@ impl Storage for NoopStorage {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn get_unshielded_utxos_by_address(
+    async fn get_unshielded_utxos(
         &self,
-        _address: &UnshieldedAddress,
+        address: Option<&UnshieldedAddress>,
+        filter: UnshieldedUtxoFilter<'_>,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_transactions_involving_unshielded(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
         unimplemented!()
     }
 }
