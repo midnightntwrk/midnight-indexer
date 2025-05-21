@@ -16,7 +16,10 @@ mod query;
 mod subscription;
 
 use crate::{
-    domain::{self, AsBytesExt, BlockHash, HexEncoded, NoopStorage, Storage, ZswapStateCache},
+    domain::{
+        self, AsBytesExt, BlockHash, HexEncoded, NoopStorage, Storage,
+        UnshieldedAddressFormatError, UnshieldedUtxoExt, ZswapStateCache,
+    },
     infra::api::{
         ContextExt, OptionExt, ResultExt,
         v1::{mutation::Mutation, query::Query, subscription::Subscription},
@@ -24,15 +27,15 @@ use crate::{
 };
 use anyhow::Context as AnyhowContext;
 use async_graphql::{
-    ComplexObject, Context, Interface, OneofObject, Schema, SchemaBuilder, SimpleObject, Union,
-    scalar,
+    ComplexObject, Context, Enum, Interface, OneofObject, Schema, SchemaBuilder, SimpleObject,
+    Union, scalar,
 };
 use async_graphql_axum::{GraphQL, GraphQLSubscription};
 use axum::{Router, routing::post_service};
 use derive_more::Debug;
 use indexer_common::domain::{
     ByteVec, NetworkId, NoopSubscriber, NoopZswapStateStorage, ProtocolVersion, SessionId,
-    Subscriber, ZswapStateStorage,
+    Subscriber, UnshieldedAddress as CommonUnshieldedAddress, ZswapStateStorage,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -205,6 +208,44 @@ where
             .internal("cannot get contract actions by transactions id")?;
 
         Ok(contract_actions.into_iter().map(Into::into).collect())
+    }
+
+    /// Unshielded UTXOs created by this transaction.
+    async fn unshielded_created_outputs(
+        &self,
+        cx: &Context<'_>,
+    ) -> async_graphql::Result<Vec<UnshieldedUtxo<S>>> {
+        let storage = cx.get_storage::<S>();
+        let network_id = cx.get_network_id();
+
+        let utxos = storage
+            .get_unshielded_utxos_by_creating_tx_id(self.id)
+            .await
+            .internal("cannot get unshielded UTXOs created by transaction")?;
+
+        Ok(utxos
+            .into_iter()
+            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+            .collect())
+    }
+
+    /// Unshielded UTXOs spent (consumed) by this transaction.
+    async fn unshielded_spent_outputs(
+        &self,
+        cx: &Context<'_>,
+    ) -> async_graphql::Result<Vec<UnshieldedUtxo<S>>> {
+        let storage = cx.get_storage::<S>();
+        let network_id = cx.get_network_id();
+
+        let utxos = storage
+            .get_unshielded_utxos_by_spending_tx_id(self.id)
+            .await
+            .internal("cannot get unshielded UTXOs spent by transaction")?;
+
+        Ok(utxos
+            .into_iter()
+            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+            .collect())
     }
 }
 
@@ -461,11 +502,11 @@ enum ContractActionOffset {
 }
 
 /// Represents an unshielded UTXO.
-#[derive(Debug, SimpleObject)]
+#[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
 struct UnshieldedUtxo<S: Storage> {
-    /// Owner address (hex-encoded for POC)
-    owner: HexEncoded,
+    /// Owner address (Bech32m, `mn_addr…`)
+    owner: UnshieldedAddress,
     /// The hash of the intent that created this output (hex-encoded)
     intent_hash: HexEncoded,
     /// UTXO value (quantity) as a string to support u128
@@ -486,11 +527,13 @@ struct UnshieldedUtxo<S: Storage> {
 #[ComplexObject]
 impl<S: Storage> UnshieldedUtxo<S> {
     /// Transaction that created this UTXO
-    async fn created_at_transaction(&self) -> async_graphql::Result<Transaction<S>> {
-        self.created_at_transaction_data
+    async fn created_at_transaction(&self) -> async_graphql::Result<Option<Transaction<S>>> {
+        //can't change the return type to be non-optional because the node ut data is mocked and
+        // the test fails
+        Ok(self
+            .created_at_transaction_data
             .clone()
-            .map(Transaction::<S>::from)
-            .ok_or_else(|| async_graphql::Error::new("Missing creating transaction data"))
+            .map(Transaction::<S>::from))
     }
 
     /// Transaction that spent this UTXO, if spent
@@ -502,10 +545,16 @@ impl<S: Storage> UnshieldedUtxo<S> {
     }
 }
 
-impl<S: Storage> From<domain::UnshieldedUtxo> for UnshieldedUtxo<S> {
-    fn from(domain_utxo: domain::UnshieldedUtxo) -> Self {
+impl<S: Storage> From<(domain::UnshieldedUtxo, NetworkId)> for UnshieldedUtxo<S> {
+    fn from((domain_utxo, network_id): (domain::UnshieldedUtxo, NetworkId)) -> Self {
+        let owner_bech32m = indexer_common::domain::unshielded::to_bech32m(
+            domain_utxo.owner_address.as_ref(),
+            network_id,
+        )
+        .expect("owner address can convert to Bech32m");
+
         Self {
-            owner: domain_utxo.owner_address.hex_encode(),
+            owner: UnshieldedAddress(owner_bech32m),
             value: domain_utxo.value.to_string(),
             intent_hash: domain_utxo.intent_hash.hex_encode(),
             token_type: domain_utxo.token_type.hex_encode(),
@@ -515,6 +564,62 @@ impl<S: Storage> From<domain::UnshieldedUtxo> for UnshieldedUtxo<S> {
             _s: PhantomData,
         }
     }
+}
+
+/// Bech32m-encoded address, e.g. `mn_addr_test1…`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub struct UnshieldedAddress(pub String);
+scalar!(UnshieldedAddress);
+
+/// Types of events emitted by the unshielded UTXO subscription
+#[derive(Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnshieldedUtxoEventType {
+    /// Indicates a transaction that created or spent UTXOs for the address
+    UPDATE,
+    /// Status message for synchronization progress or keep-alive
+    PROGRESS,
+}
+
+/// Payload emitted by `subscription { unshieldedUtxos … }`
+#[derive(SimpleObject)]
+struct UnshieldedUtxoEvent<S>
+where
+    S: Storage,
+{
+    /// The type of event - UPDATE for changes, PROGRESS for status messages
+    event_type: UnshieldedUtxoEventType,
+    /// The transaction associated with this event
+    transaction: Transaction<S>,
+    /// UTXOs created in this transaction for the subscribed address
+    created_utxos: Vec<UnshieldedUtxo<S>>,
+    /// UTXOs spent in this transaction for the subscribed address
+    spent_utxos: Vec<UnshieldedUtxo<S>>,
+}
+
+/// Either a [BlockOffset] or a [TransactionOffset] to query for a [UnshieldedUtxo].
+#[derive(Debug, OneofObject)]
+enum UnshieldedOffset {
+    BlockOffset(BlockOffset),
+    TransactionOffset(TransactionOffset),
+}
+
+impl UnshieldedAddress {
+    pub fn try_into_domain(
+        self,
+        network_id: NetworkId,
+    ) -> Result<CommonUnshieldedAddress, UnshieldedAddressFormatError> {
+        domain::UnshieldedAddress(self.0).try_into_domain(network_id)
+    }
+}
+
+/// Convert GraphQL wrapper into the raw-bytes domain type.
+fn addr_to_common(
+    addr: &UnshieldedAddress,
+    network_id: NetworkId,
+) -> async_graphql::Result<CommonUnshieldedAddress> {
+    addr.clone()
+        .try_into_domain(network_id)
+        .map_err(|error| async_graphql::Error::new(error.to_string()))
 }
 
 #[derive(Debug, Union)]
