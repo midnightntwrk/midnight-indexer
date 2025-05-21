@@ -19,6 +19,7 @@ use crate::{
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
+use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};
 use log::{debug, warn};
@@ -52,7 +53,9 @@ where
     S: Storage,
     B: Subscriber,
 {
-    /// Subscribe to blocks.
+    /// Subscribe to blocks starting at the given offset or at the latest block if the offset is
+    /// omitted.
+    #[trace(properties = { "offset": "{offset:?}" })]
     async fn blocks<'a>(
         &self,
         cx: &'a Context<'a>,
@@ -68,18 +71,12 @@ where
             .subscribe::<BlockIndexed>()
             .await
             .internal("cannot subscribe to BlockIndexed events")?;
-
-        // It is fine to use `?` on `resolve_height`, because it implements correct error handling.
         let mut height = resolve_height(offset, storage).await?;
 
         let blocks_stream = try_stream! {
-            let mut block_indexed_stream = pin!(block_indexed_stream);
+            debug!(height; "streaming so far stored blocks");
 
-            // First get all stored `Block`s from the requested `height`.
             let blocks = storage.get_blocks(height, BATCH_SIZE);
-            debug!(height; "got blocks");
-
-            // Then yield all stored `Block`s.
             let mut blocks = pin!(blocks);
             while let Some(block) = blocks.try_next().await.internal("get next block")? {
                 assert_eq!(block.height, height);
@@ -88,17 +85,19 @@ where
                 yield block.into();
             }
 
-            // Then get now stored `Block`s after receiving a `BlockIndexed` event.
+            // Yield "future" blocks.
+            let mut block_indexed_stream = pin!(block_indexed_stream);
             while block_indexed_stream
                 .try_next()
                 .await
                 .internal("get next BlockIndexed event")?
                 .is_some()
             {
-                debug!("handling BlockIndexed event");
+                debug!(height; "streaming next blocks");
 
                 let blocks = storage.get_blocks(height, BATCH_SIZE);
                 let mut blocks = pin!(blocks);
+
                 while let Some(block) = blocks.try_next().await.internal("get next block")? {
                     assert_eq!(block.height, height);
                     height += 1;

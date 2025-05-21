@@ -22,6 +22,7 @@ use crate::{
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
+use fastrace::trace;
 use futures::{
     Stream, StreamExt,
     future::ok,
@@ -30,7 +31,7 @@ use futures::{
 use indexer_common::domain::{
     ApplyStage, NetworkId, SessionId, Subscriber, WalletIndexed, ZswapStateStorage,
 };
-use log::debug;
+use log::{debug, warn};
 use metrics::{Counter, counter};
 use std::{future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
 use tokio::time::interval;
@@ -72,7 +73,9 @@ where
     B: Subscriber,
     Z: ZswapStateStorage,
 {
-    /// Subscribe to wallet events.
+    /// Subscribe to wallet events for the given session ID starting at the given index or at zero
+    /// if the index is omitted. Wallet events are either a ViewingUpdate or a ProgressUpdate.
+    #[trace(properties = { "session_id": "{session_id:?}", "index": "{index:?}" })]
     pub async fn wallet<'a>(
         &self,
         cx: &'a Context<'a>,
@@ -82,8 +85,6 @@ where
     ) -> async_graphql::Result<
         impl Stream<Item = async_graphql::Result<WalletSyncEvent<S>>> + use<'a, S, B, Z>,
     > {
-        debug!(session_id:%, index, send_progress_updates; "wallet subscription");
-
         self.wallet_calls.increment(1);
 
         let session_id = hex_decode_session_id(session_id)?;
@@ -120,6 +121,7 @@ where
     }
 }
 
+#[trace(properties = { "session_id": "{session_id:?}", "index": "{index}" })]
 async fn viewing_updates<'a, S, B, Z>(
     cx: &'a Context<'a>,
     session_id: SessionId,
@@ -138,24 +140,18 @@ where
     let zswap_state_storage = cx.get_zswap_state_storage::<Z>();
     let zswap_state_cache = cx.get_zswap_state_cache();
 
-    let wallet_indexed_events = {
-        subscriber
-            .subscribe::<WalletIndexed>()
-            .await
-            .internal("subscribe to WalletIndexed events")?
-            .try_filter(move |wallet_indexed| ready(wallet_indexed.session_id == session_id))
-    };
+    let wallet_indexed_events = subscriber
+        .subscribe::<WalletIndexed>()
+        .await
+        .internal("subscribe to WalletIndexed events")?
+        .try_filter(move |wallet_indexed| ready(wallet_indexed.session_id == session_id));
+    let mut next_index = index;
 
     let viewing_updates = try_stream! {
-        let mut wallet_indexed_events = pin!(wallet_indexed_events);
+        debug!(session_id:%, index; "streaming so far stored transactions");
 
-        // First get all stored relevant `Transaction`s from the requested `index`.
         let transactions = storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
-
-        // Then yield all relevant `Transactions`s.
-        let mut next_index = index;
         let mut transactions = pin!(transactions);
-
         while let Some(transaction) = transactions
             .try_next()
             .await
@@ -175,13 +171,16 @@ where
             yield viewing_update;
         }
 
-        // Then get now stored relevant `Transaction`s after receiving a `WalletIndexed` event.
+        // Yield "future" transactions.
+        let mut wallet_indexed_events = pin!(wallet_indexed_events);
         while wallet_indexed_events
             .try_next()
             .await
             .internal("get next WalletIndexed event")?
             .is_some()
         {
+            debug!(next_index; "streaming next transactions");
+
             let transactions =
                 storage.get_relevant_transactions(session_id, next_index, BATCH_SIZE);
             let mut transactions = pin!(transactions);
@@ -199,17 +198,19 @@ where
                     zswap_state_cache,
                 )
                 .await?;
-
                 next_index = viewing_update.index;
 
                 yield viewing_update;
             }
+
+            warn!("stream of WalletIndexed events completed unexpectedly");
         }
     };
 
     Ok(viewing_updates)
 }
 
+#[trace(properties = { "from": "{from:?}" })]
 async fn viewing_update<S, Z>(
     from: u64,
     transaction: Transaction,
@@ -221,8 +222,6 @@ where
     S: Storage,
     Z: ZswapStateStorage,
 {
-    debug!(transaction:?; "building viewing update");
-
     // For failures, don't increment the index, because no changes were applied to the zswap state.
     // Put another way: the next transaction will have the same start_index like this end index.
     // This avoids "update with end before start" errors when calling `collapsed_update`.

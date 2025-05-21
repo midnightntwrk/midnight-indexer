@@ -48,7 +48,7 @@ impl PostgresStorage {
 impl Storage for PostgresStorage {
     type Database = sqlx::Postgres;
 
-    #[trace]
+    #[trace(properties = { "session_id": "{session_id}" })]
     async fn acquire_lock(&mut self, session_id: SessionId) -> Result<Option<Tx>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
@@ -62,7 +62,7 @@ impl Storage for PostgresStorage {
         Ok(lock_acquired.then_some(tx))
     }
 
-    #[trace]
+    #[trace(properties = { "session_id": "{session_id}" })]
     async fn get_wallet(
         &self,
         session_id: SessionId,
@@ -87,7 +87,7 @@ impl Storage for PostgresStorage {
         Ok(wallet)
     }
 
-    #[trace]
+    #[trace(properties = { "from": "{from}", "limit": "{limit}" })]
     async fn get_transactions(
         &self,
         from: u64,
@@ -164,6 +164,7 @@ impl Storage for PostgresStorage {
         Ok(())
     }
 
+    #[trace]
     async fn active_wallets(&self, ttl: Duration) -> Result<Vec<ViewingKey>, sqlx::Error> {
         // Query wallets.
         let query = indoc! {"

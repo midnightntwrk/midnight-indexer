@@ -466,6 +466,7 @@ enum WalletSyncEvent<S: Storage> {
     ProgressUpdate(ProgressUpdate),
 }
 
+/// Aggregates information about the wallet indexing progress.
 #[derive(Debug, SimpleObject)]
 struct ProgressUpdate {
     /// The highest end index into the zswap state of all currently known transactions.
@@ -480,6 +481,8 @@ struct ProgressUpdate {
     highest_relevant_wallet_index: u64,
 }
 
+/// Aggregates a relevant transaction with the next start index and an optional collapsed
+/// Merkle-Tree update.
 #[derive(Debug, SimpleObject)]
 struct ViewingUpdate<S: Storage> {
     /// Next start index into the zswap state to be queried. Usually the end index of the included

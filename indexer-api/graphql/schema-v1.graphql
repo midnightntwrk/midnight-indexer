@@ -128,6 +128,9 @@ type Mutation {
 	disconnect(sessionId: HexEncoded!): Unit!
 }
 
+"""
+Aggregates information about the wallet indexing progress.
+"""
 type ProgressUpdate {
 	"""
 	The highest end index into the zswap state of all currently known transactions.
@@ -178,15 +181,18 @@ type RelevantTransaction {
 
 type Subscription {
 	"""
-	Subscribe to blocks.
+	Subscribe to blocks starting at the given offset or at the latest block if the offset is
+	omitted.
 	"""
 	blocks(offset: BlockOffset): Block!
 	"""
-	Subscribe to contract actions.
+	Subscribe to contract actions with the given address starting at the given offset or at the
+	latest block if the offset is omitted.
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
 	"""
-	Subscribe to wallet events.
+	Subscribe to wallet events for the given session ID starting at the given index or at zero
+	if the index is omitted. Wallet events are either a ViewingUpdate or a ProgressUpdate.
 	"""
 	wallet(sessionId: HexEncoded!, index: Int, sendProgressUpdates: Boolean): WalletSyncEvent!
 }
@@ -241,6 +247,10 @@ scalar Unit
 
 scalar ViewingKey
 
+"""
+Aggregates a relevant transaction with the next start index and an optional collapsed
+Merkle-Tree update.
+"""
 type ViewingUpdate {
 	"""
 	Next start index into the zswap state to be queried. Usually the end index of the included

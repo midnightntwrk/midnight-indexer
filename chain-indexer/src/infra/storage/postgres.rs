@@ -36,6 +36,7 @@ impl PostgresStorage {
 }
 
 impl Storage for PostgresStorage {
+    #[trace]
     async fn get_highest_block(&self) -> Result<Option<BlockInfo>, sqlx::Error> {
         let query = indoc! {"
             SELECT hash, height
@@ -62,6 +63,7 @@ impl Storage for PostgresStorage {
             .transpose()
     }
 
+    #[trace]
     async fn get_transaction_count(&self) -> Result<u64, sqlx::Error> {
         let query = indoc! {"
             SELECT count(*) 
@@ -75,6 +77,7 @@ impl Storage for PostgresStorage {
         Ok(count as u64)
     }
 
+    #[trace]
     async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error> {
         let query = indoc! {"
             SELECT count(*) 
@@ -105,6 +108,10 @@ impl Storage for PostgresStorage {
         tx.commit().await
     }
 
+    #[trace(properties = {
+        "from_block_height": "{from_block_height}",
+        "to_block_height": "{to_block_height}"
+    })]
     fn get_transactions(
         &self,
         from_block_height: u32,
@@ -181,7 +188,7 @@ async fn save_block(block: &Block, tx: &mut Tx) -> Result<(), sqlx::Error> {
     save_transactions(&block.transactions, block_id, tx).await
 }
 
-#[trace]
+#[trace(properties = { "block_id": "{block_id}" })]
 async fn save_transactions(
     transactions: &[Transaction],
     block_id: i64,
@@ -240,7 +247,7 @@ async fn save_transactions(
     Ok(())
 }
 
-#[trace]
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_contract_actions(
     contract_actions: &[ContractAction],
     transaction_id: i64,

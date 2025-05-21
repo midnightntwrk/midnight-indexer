@@ -68,7 +68,7 @@ where
             .internal("connect wallet")?;
 
         let session_id = viewing_key.to_session_id();
-        debug!(session_id:?; "wallet connected");
+        debug!(session_id:%; "wallet connected");
 
         Ok(session_id.hex_encode())
     }
@@ -89,7 +89,7 @@ where
             .await
             .internal("disconnect wallet")?;
 
-        debug!(session_id:?; "wallet disconnected");
+        debug!(session_id:%; "wallet disconnected");
 
         Ok(Unit)
     }

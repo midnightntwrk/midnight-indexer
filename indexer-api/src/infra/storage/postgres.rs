@@ -17,6 +17,7 @@ use crate::domain::{
 use async_stream::try_stream;
 use chacha20poly1305::ChaCha20Poly1305;
 use derive_more::Debug;
+use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::{
     domain::{ContractAddress, Identifier, SessionId, ViewingKey},
@@ -43,6 +44,7 @@ impl PostgresStorage {
 }
 
 impl Storage for PostgresStorage {
+    #[trace]
     async fn get_latest_block(&self) -> Result<Option<Block>, sqlx::Error> {
         let query = indoc! {"
             SELECT *
@@ -56,6 +58,7 @@ impl Storage for PostgresStorage {
             .await
     }
 
+    #[trace(properties = { "hash": "{hash}" })]
     async fn get_block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>, sqlx::Error> {
         let query = indoc! {"
             SELECT *
@@ -70,6 +73,7 @@ impl Storage for PostgresStorage {
             .await
     }
 
+    #[trace(properties = { "height": "{height}" })]
     async fn get_block_by_height(&self, height: u32) -> Result<Option<Block>, sqlx::Error> {
         let query = indoc! {"
             SELECT *
@@ -84,6 +88,7 @@ impl Storage for PostgresStorage {
             .await
     }
 
+    #[trace(properties = { "height": "{height}", "batch_size": "{batch_size}" })]
     fn get_blocks(
         &self,
         mut height: u32,
@@ -118,6 +123,7 @@ impl Storage for PostgresStorage {
         flatten_chunks(chunks)
     }
 
+    #[trace(properties = { "id": "{id}" })]
     async fn get_transaction_by_id(&self, id: u64) -> Result<Transaction, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -142,6 +148,7 @@ impl Storage for PostgresStorage {
             .await
     }
 
+    #[trace(properties = { "id": "{id}" })]
     async fn get_transactions_by_block_id(&self, id: u64) -> Result<Vec<Transaction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -166,6 +173,7 @@ impl Storage for PostgresStorage {
             .await
     }
 
+    #[trace(properties = { "hash": "{hash}" })]
     async fn get_transactions_by_hash(
         &self,
         hash: TransactionHash,
@@ -193,6 +201,7 @@ impl Storage for PostgresStorage {
             .await
     }
 
+    #[trace(properties = { "identifier": "{identifier:?}" })]
     async fn get_transactions_by_identifier(
         &self,
         identifier: &Identifier,
@@ -220,6 +229,7 @@ impl Storage for PostgresStorage {
             .await
     }
 
+    #[trace(properties = { "address": "{address:?}" })]
     async fn get_contract_deploy_by_address(
         &self,
         address: &ContractAddress,
@@ -250,6 +260,7 @@ impl Storage for PostgresStorage {
         Ok(action)
     }
 
+    #[trace(properties = { "address": "{address:?}" })]
     async fn get_contract_action_by_address(
         &self,
         address: &ContractAddress,
@@ -274,6 +285,7 @@ impl Storage for PostgresStorage {
             .await
     }
 
+    #[trace(properties = { "address": "{address:?}", "hash": "{hash}" })]
     async fn get_contract_action_by_address_and_block_hash(
         &self,
         address: &ContractAddress,
@@ -303,6 +315,7 @@ impl Storage for PostgresStorage {
             .await
     }
 
+    #[trace(properties = { "address": "{address:?}", "height": "{height}" })]
     async fn get_contract_action_by_address_and_block_height(
         &self,
         address: &ContractAddress,
@@ -333,6 +346,7 @@ impl Storage for PostgresStorage {
             .await
     }
 
+    #[trace(properties = { "address": "{address:?}", "hash": "{hash}" })]
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
         address: &ContractAddress,
@@ -365,6 +379,7 @@ impl Storage for PostgresStorage {
             .await
     }
 
+    #[trace(properties = { "address": "{address:?}", "identifier": "{identifier:?}" })]
     async fn get_contract_action_by_address_and_transaction_identifier(
         &self,
         address: &ContractAddress,
@@ -394,6 +409,7 @@ impl Storage for PostgresStorage {
             .await
     }
 
+    #[trace(properties = { "id": "{id}" })]
     async fn get_contract_actions_by_transaction_id(
         &self,
         id: u64,
@@ -416,6 +432,7 @@ impl Storage for PostgresStorage {
             .await
     }
 
+    #[trace(properties = { "address": "{address:?}", "height": "{height}" })]
     fn get_contract_actions_by_address(
         &self,
         address: &ContractAddress,
@@ -467,6 +484,7 @@ impl Storage for PostgresStorage {
         flatten_chunks(chunks)
     }
 
+    #[trace(properties = { "session_id": "{session_id}" })]
     async fn get_highest_indices(
         &self,
         session_id: SessionId,
@@ -504,6 +522,7 @@ impl Storage for PostgresStorage {
         ))
     }
 
+    #[trace(properties = { "session_id": "{session_id}" })]
     fn get_relevant_transactions(
         &self,
         session_id: SessionId,
@@ -553,6 +572,7 @@ impl Storage for PostgresStorage {
         flatten_chunks(chunks)
     }
 
+    #[trace]
     async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<(), sqlx::Error> {
         let id = Uuid::now_v7();
         let session_id = viewing_key.to_session_id();
@@ -583,6 +603,7 @@ impl Storage for PostgresStorage {
         Ok(())
     }
 
+    #[trace(properties = { "session_id": "{session_id}" })]
     async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
         let query = indoc! {"
             UPDATE wallets
@@ -601,6 +622,7 @@ impl Storage for PostgresStorage {
     // This could cause a "deadlock_detected" error when the indexer-api sets a wallet
     // active at the same time. These errors can be ignored, because this operation will be
     // executed "very soon" again for an active wallet.
+    #[trace(properties = { "session_id": "{session_id}" })]
     async fn set_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
         let query = indoc! {"
             UPDATE wallets

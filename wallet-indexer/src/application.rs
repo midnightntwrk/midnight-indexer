@@ -92,7 +92,7 @@ async fn index_wallet(
 ) -> anyhow::Result<()> {
     let session_id = viewing_key.to_session_id();
 
-    debug!(session_id:?; "indexing wallet");
+    debug!(session_id:%; "indexing wallet");
 
     let tx = storage
         .acquire_lock(session_id)
@@ -101,7 +101,7 @@ async fn index_wallet(
 
     match tx {
         Some(mut tx) => {
-            debug!(session_id:?; "acquired lock, handling session ID");
+            debug!(session_id:%; "acquired lock, handling session ID");
 
             let wallet = storage
                 .get_wallet(session_id, &mut tx)
@@ -146,7 +146,7 @@ async fn index_wallet(
                 .context("save relevant transactions")?;
 
             tx.commit().await.context("commit database transaction")?;
-            info!(session_id:?, from, transaction_batch_size; "wallet indexed");
+            info!(session_id:%, from, transaction_batch_size; "wallet indexed");
 
             if !relevant_transactions.is_empty() {
                 publisher
@@ -157,7 +157,7 @@ async fn index_wallet(
         }
 
         None => {
-            debug!(session_id:?; "could not acquire lock, not handling wallet");
+            debug!(session_id:%; "could not acquire lock, not handling wallet");
         }
     }
 

@@ -20,6 +20,7 @@ use crate::{
 };
 use anyhow::Context as AnyhowContext;
 use async_graphql::{Context, Subscription, async_stream::try_stream};
+use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};
 use log::{debug, warn};
@@ -53,7 +54,9 @@ where
     S: Storage,
     B: Subscriber,
 {
-    /// Subscribe to contract actions.
+    /// Subscribe to contract actions with the given address starting at the given offset or at the
+    /// latest block if the offset is omitted.
+    #[trace(properties = { "address": "{address:?}", "offset": "{offset:?}" })]
     async fn contract_actions<'a>(
         &self,
         cx: &'a Context<'a>,
@@ -71,26 +74,19 @@ where
             .subscribe::<BlockIndexed>()
             .await
             .internal("subscribe to BlockIndexed events")?;
-
         let address = address.hex_decode().context("hex-decode address")?;
-
-        // It is fine to use `?` on `resolve_height`, because it implements correct error handling.
         let height = resolve_height(offset, storage).await?;
+        let mut next_contract_action_id = 0;
 
         let contract_actions = try_stream! {
-            let mut block_indexed_stream = pin!(block_indexed_stream);
-            let mut next_contract_action_id = 0;
+            debug!(height; "streaming so far stored contract actions");
 
-            // First get all stored `ContractActions`s from the requested `height`.
             let contract_actions = storage.get_contract_actions_by_address(
                 &address,
                 height,
                 next_contract_action_id,
                 BATCH_SIZE,
             );
-            debug!(height; "got contract actions");
-
-            // Then yield all stored `ContractAction`s.
             let mut contract_actions = pin!(contract_actions);
             while let Some(contract_action) = contract_actions
                 .try_next()
@@ -102,13 +98,14 @@ where
                 yield contract_action.into();
             }
 
-            // Then get now stored `Contract`s after receiving a `BlockIndexed` event.
+            // Yield "future" contract actions.
+            let mut block_indexed_stream = pin!(block_indexed_stream);
             while let Some(BlockIndexed { height, .. }) = block_indexed_stream
                 .try_next()
                 .await
                 .internal("get next BlockIndexed event")?
             {
-                debug!(height; "handling BlockIndexed event");
+                debug!(height; "streaming next contract actions");
 
                 let contract_actions = storage.get_contract_actions_by_address(
                     &address,
