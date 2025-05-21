@@ -236,10 +236,10 @@ impl Storage for SqliteStorage {
         Ok(transactions)
     }
 
-    async fn get_transaction_by_identifier(
+    async fn get_transactions_by_identifier(
         &self,
         identifier: &Identifier,
-    ) -> Result<Option<Transaction>, sqlx::Error> {
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
                 transactions.id,
@@ -255,22 +255,23 @@ impl Storage for SqliteStorage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN transaction_identifiers ON transactions.id = transaction_identifiers.transaction_id
             WHERE transaction_identifiers.identifier = $1
-            LIMIT 1
         "};
 
-        let mut transaction = sqlx::query_as::<_, Transaction>(query)
+        let mut transactions = sqlx::query_as::<_, Transaction>(query)
             .bind(identifier)
-            .fetch_optional(&*self.pool)
+            .fetch_all(&*self.pool)
             .await?;
 
-        if let Some(transaction) = &mut transaction {
-            let identifiers = self
-                .get_identifiers_by_transaction_id(transaction.id)
+        for transaction in transactions.iter_mut() {
+            transaction.unshielded_created_outputs = self
+                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
                 .await?;
-            transaction.identifiers = identifiers;
+            transaction.unshielded_spent_outputs = self
+                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+                .await?;
         }
 
-        Ok(transaction)
+        Ok(transactions)
     }
 
     async fn get_contract_deploy_by_address(
@@ -344,6 +345,7 @@ impl Storage for SqliteStorage {
             INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
             WHERE contract_actions.address = $1
             AND transactions.block_id = (SELECT id FROM blocks WHERE hash = $2)
+            AND transactions.apply_stage != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -373,6 +375,7 @@ impl Storage for SqliteStorage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE contract_actions.address = $1
             AND blocks.height = $2
+            AND transactions.apply_stage != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -402,7 +405,7 @@ impl Storage for SqliteStorage {
             AND contract_actions.transaction_id = (
                 SELECT id FROM transactions
                 WHERE hash = $2
-                AND apply_stage = 'Success'
+                AND apply_stage != 'Failure'
                 ORDER BY id DESC
                 LIMIT 1
             )
@@ -435,6 +438,7 @@ impl Storage for SqliteStorage {
             INNER JOIN transaction_identifiers ON transactions.id = transaction_identifiers.transaction_id
             WHERE contract_actions.address = $1
             AND transaction_identifiers.identifier = $2
+            AND transactions.apply_stage != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -488,7 +492,7 @@ impl Storage for SqliteStorage {
                     FROM contract_actions
                     INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
                     INNER JOIN blocks ON blocks.id = transactions.block_id
-                    WHERE transactions.apply_stage = 'Success'
+                    WHERE transactions.apply_stage != 'Failure'
                     AND contract_actions.address = $1
                     AND blocks.height >= $2
                     AND contract_actions.id >= $3

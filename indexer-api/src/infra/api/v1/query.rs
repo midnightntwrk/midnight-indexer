@@ -133,9 +133,9 @@ where
                 let identifier = identifier.hex_decode().context("hex-decode identifier")?;
 
                 let transactions = storage
-                    .get_transaction_by_identifier(&identifier)
+                    .get_transactions_by_identifier(&identifier)
                     .await
-                    .internal("get transaction by identifier")?
+                    .internal("get transactions by identifier")?
                     .into_iter()
                     .map(Into::into)
                     .collect::<Vec<_>>();

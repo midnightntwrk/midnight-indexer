@@ -26,6 +26,7 @@ use crate::{
     graphql_ws_client,
 };
 use anyhow::{Context, Ok, anyhow, bail};
+use bech32::{Bech32m, Hrp};
 use async_nats::ConnectOptions;
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
@@ -35,7 +36,11 @@ use indexer_api::{
 };
 use indexer_common::domain::{NetworkId, UnshieldedUtxoIndexed, unshielded::to_bech32m};
 use itertools::Itertools;
-use midnight_ledger::zswap::keys::{SecretKeys, Seed};
+use midnight_ledger::{
+    serialize::Serializable,
+    transient_crypto::encryption::SecretKey,
+    zswap::keys::{SecretKeys, Seed},
+};
 use reqwest::Client;
 use serde::Serialize;
 use std::time::{Duration, Instant};
@@ -45,7 +50,9 @@ const MAX_HEIGHT: usize = 30;
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
 /// (http and ws) at the given host and port.
-pub async fn run(host: &str, port: u16, nats_url: &str, secure: bool) -> anyhow::Result<()> {
+pub async fn run(network_id: NetworkId, host: &str, port: u16, nats_url: &str, secure: bool) -> anyhow::Result<()> {
+    println!("### starting e2e testing");
+
     let (api_url, ws_api_url) = {
         let core = format!("{host}:{port}/api/v1/graphql");
 
@@ -58,27 +65,27 @@ pub async fn run(host: &str, port: u16, nats_url: &str, secure: bool) -> anyhow:
 
     let api_client = Client::new();
 
-    // Collect node data using the block subscription.
-    let node_data = NodeData::collect(&ws_api_url)
+    // Collect Indexer data using the block subscription.
+    let indexer_data = IndexerData::collect(&ws_api_url)
         .await
-        .context("collect node data")?;
+        .context("collect Indexer data")?;
 
     // Test queries.
-    test_block_query(&node_data, &api_client, &api_url)
+    test_block_query(&indexer_data, &api_client, &api_url)
         .await
         .context("test block query")?;
-    test_transactions_query(&node_data, &api_client, &api_url)
+    test_transactions_query(&indexer_data, &api_client, &api_url)
         .await
         .context("test transactions query")?;
-    test_contract_action_query(&node_data, &api_client, &api_url)
+    test_contract_action_query(&indexer_data, &api_client, &api_url)
         .await
         .context("test contract action query")?;
-    test_unshielded_utxo_queries(&node_data, &api_client, &api_url)
+    test_unshielded_utxo_queries(&indexer_data, &api_client, &api_url)
         .await
         .context("test unshielded UTXOs query")?;
 
     // Test mutations.
-    test_connect_mutation(&api_client, &api_url)
+    test_connect_mutation(&api_client, &api_url, network_id)
         .await
         .context("test connect mutation query")?;
     test_disconnect_mutation(&api_client, &api_url)
@@ -86,31 +93,33 @@ pub async fn run(host: &str, port: u16, nats_url: &str, secure: bool) -> anyhow:
         .context("test disconnect mutation query")?;
 
     // Test subscriptions (the block subscription has already been tested above).
-    test_contract_action_subscription(&node_data, &ws_api_url)
+    test_contract_action_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test contract action subscription")?;
-    test_unshielded_utxo_subscription(&node_data, &ws_api_url, nats_url) // we use node mock version at the moment
+    test_unshielded_utxo_subscription(&indexer_data, &ws_api_url, nats_url) // we use node mock version at the moment
         .await
         .context("test unshielded UTXOs subscription")?;
     test_wallet_subscription(&ws_api_url)
         .await
         .context("test wallet subscription")?;
 
+    println!("### successfully finished e2e testing");
+
     Ok(())
 }
 
-/// All data needed for testing collected from the node via the blocks subscription. To be used as
-/// expected data in tests for all other API operations.
-struct NodeData {
+/// All data needed for testing collected from the Indexer via the blocks subscription. To be used
+/// as expected data in tests for all other API operations.
+struct IndexerData {
     blocks: Vec<BlockSubscriptionBlock>,
     transactions: Vec<BlockSubscriptionTransaction>,
     contract_actions: Vec<BlockSubscriptionContractAction>,
     unshielded_utxos: Vec<BlockSubscriptionUnshieldedUtxo>,
 }
 
-impl NodeData {
-    /// Not only collects the node data needed for testing, but also validates it, e.g. that block
-    /// heights start at zero and increment by one.
+impl IndexerData {
+    /// Not only collects the Indexer data needed for testing, but also validates it, e.g. that
+    /// block heights start at zero and increment by one.
     async fn collect(ws_api_url: &str) -> anyhow::Result<Self> {
         // Subscribe to blocks and collect up to MAX_HEIGHT.
         let variables = block_subscription::Variables {
@@ -166,11 +175,6 @@ impl NodeData {
             .flat_map(|block| block.transactions.to_owned())
             .collect::<Vec<_>>();
 
-        // Verify that there are transactions. This of course depends on how the node is set up,
-        // i.e. the just recipe `generate-node-data`: genesis 1, 1 initial, 6 zswap
-        // transactions, 3 contract actions.
-        assert_eq!(transactions.len(), 11);
-
         // Verify that all contract actions reference the correct transaction.
         assert!(transactions.iter().all(|transaction| {
             transaction
@@ -184,10 +188,6 @@ impl NodeData {
             .iter()
             .flat_map(|transaction| transaction.contract_actions.to_owned())
             .collect::<Vec<_>>();
-
-        // Verify that there are contract actions. This of course depends on how the node is set
-        // up, i.e. the just recipe `generate-node-data`.
-        assert_eq!(contract_actions.len(), 3);
 
         // Verify that contract calls and their deploy have the same address.
         contract_actions
@@ -218,11 +218,11 @@ impl NodeData {
 
 /// Test the block query.
 async fn test_block_query(
-    node_data: &NodeData,
+    indexer_data: &IndexerData,
     api_client: &Client,
     api_url: &str,
 ) -> anyhow::Result<()> {
-    for expected_block in &node_data.blocks {
+    for expected_block in &indexer_data.blocks {
         // Existing hash.
         let variables = block_query::Variables {
             block_offset: Some(block_query::BlockOffset::Hash(
@@ -266,7 +266,7 @@ async fn test_block_query(
 
     // Unknown height.
     let variables = block_query::Variables {
-        block_offset: Some(block_query::BlockOffset::Height(MAX_HEIGHT as i64 + 42)),
+        block_offset: Some(block_query::BlockOffset::Height(u32::MAX as i64)),
     };
     let block = send_query::<BlockQuery>(api_client, api_url, variables)
         .await?
@@ -278,37 +278,44 @@ async fn test_block_query(
 
 /// Test the transactions query.
 async fn test_transactions_query(
-    node_data: &NodeData,
+    indexer_data: &IndexerData,
     api_client: &Client,
     api_url: &str,
 ) -> anyhow::Result<()> {
-    for expected_transaction in &node_data.transactions {
+    for expected_transaction in &indexer_data.transactions {
         // Existing hash.
+        // Notice that transaction hashes are not unique, e.g. hashes of failed transactions might
+        // be also used for later transactions. Hence the query might return more than one
+        // transaction and we have to verify that the expected transaction is contained in that
+        // collection.
         let variables = transactions_query::Variables {
             transaction_offset: transactions_query::TransactionOffset::Hash(
                 expected_transaction.hash.to_owned(),
             ),
         };
-        let transaction = send_query::<TransactionsQuery>(api_client, api_url, variables)
+        let transactions = send_query::<TransactionsQuery>(api_client, api_url, variables)
             .await?
-            .transactions;
-        let transaction = transaction.first().expect("there is a first transaction");
-        assert_eq!(transaction.to_value(), expected_transaction.to_value());
+            .transactions
+            .into_iter()
+            .map(|t| t.to_value())
+            .collect::<Vec<_>>();
+        assert!(transactions.contains(&expected_transaction.to_value()));
 
-        // TODO Uncomment once clear how identifiers "identify" transactions!
         // Existing identifier.
-        // for identifier in &expected_transaction.identifiers {
-        //     let variables = transactions_query::Variables {
-        //         transaction_offset: transactions_query::TransactionOffset::Identifier(
-        //             identifier.to_owned(),
-        //         ),
-        //     };
-        //     let transaction = send_query::<TransactionsQuery>(api_client, api_url, variables)
-        //         .await?
-        //         .transactions;
-        //     let transaction = transaction.first().expect("there is a first transaction");
-        //     assert_eq!(transaction.to_value(), expected_transaction.to_value());
-        // }
+        for identifier in &expected_transaction.identifiers {
+            let variables = transactions_query::Variables {
+                transaction_offset: transactions_query::TransactionOffset::Identifier(
+                    identifier.to_owned(),
+                ),
+            };
+            let transactions = send_query::<TransactionsQuery>(api_client, api_url, variables)
+                .await?
+                .transactions
+                .into_iter()
+                .map(|t| t.to_value())
+                .collect::<Vec<_>>();
+            assert!(transactions.contains(&expected_transaction.to_value()));
+        }
     }
 
     // Unknown hash.
@@ -336,11 +343,15 @@ async fn test_transactions_query(
 
 /// Test the contract action query.
 async fn test_contract_action_query(
-    node_data: &NodeData,
+    indexer_data: &IndexerData,
     api_client: &Client,
     api_url: &str,
 ) -> anyhow::Result<()> {
-    for expected_contract_action in &node_data.contract_actions {
+    for expected_contract_action in indexer_data
+        .contract_actions
+        .iter()
+        .filter(|c| c.transaction_apply_stage() != ApplyStage::FailEntirely)
+    {
         // Existing block hash.
         let variables = contract_action_query::Variables {
             address: expected_contract_action.address(),
@@ -393,26 +404,27 @@ async fn test_contract_action_query(
             expected_contract_action.to_value()
         );
 
-        // TODO Uncomment once clear how identifiers "identify" transactions!
         // Existing transaction identifier.
-        // for identifier in expected_contract_action.identifiers() {
-        //     let variables = contract_action_query::Variables {
-        //         address: expected_contract_action.address(),
-        //         contract_action_offset: Some(
-        //             contract_action_query::ContractActionOffset::TransactionOffset(
-        //                 contract_action_query::TransactionOffset::Identifier(identifier),
-        //             ),
-        //         ),
-        //     };
-        //     let contract_action = send_query::<ContractActionQuery>(api_client, api_url,
-        // variables)         .await?
-        //         .contract_action
-        //         .expect("there is a contract action");
-        //     assert_eq!(
-        //         contract_action.to_value(),
-        //         expected_contract_action.to_value()
-        //     );
-        // }
+        // The query will not necessarily return the expected contract action, but the most recent
+        // one (with the highest ID); hence we can only compare addresses.
+        for identifier in expected_contract_action.identifiers() {
+            let variables = contract_action_query::Variables {
+                address: expected_contract_action.address(),
+                contract_action_offset: Some(
+                    contract_action_query::ContractActionOffset::TransactionOffset(
+                        contract_action_query::TransactionOffset::Identifier(identifier),
+                    ),
+                ),
+            };
+            let contract_action = send_query::<ContractActionQuery>(api_client, api_url, variables)
+                .await?
+                .contract_action
+                .expect("there is a contract action");
+            assert_eq!(
+                contract_action.address(),
+                expected_contract_action.address()
+            );
+        }
 
         // Unknown block hash.
         let variables = contract_action_query::Variables {
@@ -471,84 +483,69 @@ async fn test_contract_action_query(
 }
 
 /// Test the unshielded UTXOs query.
+/// Test the unshielded UTXOs query.
 async fn test_unshielded_utxo_queries(
-    _node_data: &NodeData, //we can only use this once we have subscription endpoint for utxos
+    indexer_data: &IndexerData,
     api_client: &Client,
     api_url: &str,
 ) -> anyhow::Result<()> {
+    // Test with addresses that have UTXOs
+    for expected_utxo in &indexer_data.unshielded_utxos {
+        let variables = unshielded_utxos_query::Variables {
+            address: expected_utxo.owner.clone(),
+        };
+        let utxos = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables)
+            .await?
+            .unshielded_utxos;
+
+        assert!(!utxos.is_empty());
+        // Verify that the expected UTXO is in the results
+        assert!(utxos.iter().any(|utxo| {
+            utxo.owner == expected_utxo.owner &&
+                utxo.value == expected_utxo.value &&
+                utxo.token_type == expected_utxo.token_type &&
+                utxo.intent_hash == expected_utxo.intent_hash &&
+                utxo.output_index == expected_utxo.output_index
+        }));
+    }
+
+    // Test with unknown address (should return empty)
     const NETWORK_ID: NetworkId = NetworkId::Undeployed;
+    let unknown_addr_bytes = [0x99u8; 4]; // Some address that doesn't exist
+    let unknown_bech32m = to_bech32m(&unknown_addr_bytes, NETWORK_ID)?;
+    let unknown_addr = UnshieldedAddress(unknown_bech32m);
 
-    let owner_bech32m = to_bech32m(&const_hex::decode(UT_ADDR_1_HEX)?, NETWORK_ID)?;
-    let owner_addr_gql = UnshieldedAddress(owner_bech32m);
-
-    let expected_value_str = "1000";
-    let expected_token_type = HexEncoded::try_from(token_type_to_hex(&TOKEN_NIGHT))?;
-    let expected_intent_hash = HexEncoded::try_from(const_hex::encode(INTENT_HASH.as_ref()))?;
-
-    let query_json = serde_json::json!({ //oneOf (UnshieldedOffset) is not supported by graphql-client
-        "query": "query($address: UnshieldedAddress!, $offset: UnshieldedOffset) {
-            unshieldedUtxos(address: $address, offset: $offset) {
-                owner value tokenType intentHash outputIndex createdAtTransaction { hash block { height } } spentAtTransaction { hash block { height } }
-            }
-        }",
-        "variables": {
-            "address": owner_addr_gql.0,
-            "offset": {
-                "blockOffset": {
-                    "height": 0
-                }
-            }
-        }
-    });
-
-    let resp = api_client
-        .post(api_url)
-        .json(&query_json)
-        .send()
-        .await
-        .context("send request")?
-        .json::<Response<unshielded_utxos_query::ResponseData>>()
-        .await
-        .context("JSON deserialize response")?;
-
-    let utxos = resp
-        .data
-        .ok_or_else(|| anyhow!("missing data in UnshieldedUtxos response"))?
+    let variables = unshielded_utxos_query::Variables {
+        address: unknown_addr,
+    };
+    let utxos = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables)
+        .await?
         .unshielded_utxos;
 
-    assert!(!utxos.is_empty());
-
-    let utxo = utxos.first().unwrap();
-    assert_eq!(utxo.owner, owner_addr_gql);
-    assert_eq!(utxo.value, expected_value_str);
-    assert_eq!(utxo.token_type, expected_token_type);
-    assert_eq!(utxo.intent_hash, expected_intent_hash);
-    assert_eq!(utxo.output_index, 0);
-    assert!(utxo.created_at_transaction.clone().unwrap().block.height >= 0);
-    assert!(utxo.spent_at_transaction.is_none());
-
-    // address with no UTXOs
-    let empty_bech32m = to_bech32m(OWNER_ADDR_EMPTY.as_ref(), NETWORK_ID)?;
-    let empty_addr = UnshieldedAddress(empty_bech32m);
-    let variables = unshielded_utxos_query::Variables {
-        address: empty_addr,
-    };
-
-    let resp_empty = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables).await?;
-    let utxos_empty = resp_empty.unshielded_utxos;
-
-    assert!(utxos_empty.is_empty());
+    assert!(utxos.is_empty());
 
     Ok(())
 }
 
 /// Test the connect mutation.
-async fn test_connect_mutation(api_client: &Client, api_url: &str) -> anyhow::Result<()> {
+async fn test_connect_mutation(
+    api_client: &Client,
+    api_url: &str,
+    network_id: NetworkId,
+) -> anyhow::Result<()> {
     // Valid viewing key.
-    let viewing_key = ViewingKey(
-        "mn_shield-esk_undeployed1qvqzq76fwwf9jqlv0uqywd9jk0q4klqk44qyc809que8q0v309z8u7qz5hja5u"
-            .to_string(),
-    );
+    let secret_key = seed_to_secret_key(&format!("{}1", "0".repeat(63)));
+    let mut serialized = Vec::with_capacity(SecretKey::serialized_size(&secret_key));
+    Serializable::serialize(&secret_key, &mut serialized).expect("secret key can be serialized");
+    let hrp = match network_id {
+        NetworkId::Undeployed => "mn_shield-esk_undeployed",
+        NetworkId::DevNet => "mn_shield-esk_dev",
+        NetworkId::TestNet => "mn_shield-esk_test",
+        NetworkId::MainNet => "mn_shield-esk",
+    };
+    let hrp = Hrp::parse(hrp).context("create HRP")?;
+    let encoded = bech32::encode::<Bech32m>(hrp, &serialized).context("encode viewing key")?;
+    let viewing_key = ViewingKey(encoded);
     let variables = connect_mutation::Variables { viewing_key };
     let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
     assert!(response.is_ok());
@@ -585,11 +582,11 @@ async fn test_disconnect_mutation(api_client: &Client, api_url: &str) -> anyhow:
 
 /// Test the contract action subscription.
 async fn test_contract_action_subscription(
-    node_data: &NodeData,
+    indexer_data: &IndexerData,
     ws_api_url: &str,
 ) -> anyhow::Result<()> {
     // Map expected contract actions by address.
-    let contract_actions_by_address = node_data
+    let contract_actions_by_address = indexer_data
         .contract_actions
         .iter()
         .map(|c| (c.address(), c.to_value()))
@@ -613,7 +610,7 @@ async fn test_contract_action_subscription(
         assert_eq!(contract_actions, expected_contract_actions);
 
         // Genesis hash.
-        let hash = node_data
+        let hash = indexer_data
             .blocks
             .first()
             .map(|b| b.hash.to_owned())
@@ -658,7 +655,7 @@ async fn test_contract_action_subscription(
 }
 
 async fn test_unshielded_utxo_subscription(
-    node_data: &NodeData,
+    indexer_data: &IndexerData,
     ws_api_url: &str,
     nats_url: &str,
 ) -> anyhow::Result<()> {
@@ -666,7 +663,7 @@ async fn test_unshielded_utxo_subscription(
 
     const TOPIC: &str = "pub-sub.UnshieldedUtxoIndexed";
 
-    let utxo_addresses = node_data
+    let utxo_addresses = indexer_data
         .unshielded_utxos
         .iter()
         .map(|utxo| utxo.owner.clone())
@@ -755,7 +752,10 @@ async fn test_unshielded_utxo_subscription(
 async fn test_wallet_subscription(ws_api_url: &str) -> anyhow::Result<()> {
     use wallet_subscription::WalletSubscriptionWalletOnViewingUpdateUpdate as ViewingUpdate;
 
-    let viewing_key = seed_to_viewing_key(&format!("{}1", "0".repeat(63)));
+    let viewing_key = indexer_common::domain::ViewingKey::from(seed_to_secret_key(&format!(
+        "{}1",
+        "0".repeat(63)
+    )));
     // 3d8506d3b1875c0843cdcf27ab2db6119186fdbd9600536335872f9f46cc59be
     let session_id = viewing_key.to_session_id().hex_encode();
 
@@ -833,7 +833,8 @@ trait ContractActionExt {
     fn block_hash(&self) -> HexEncoded;
     fn block_height(&self) -> i64;
     fn transaction_hash(&self) -> HexEncoded;
-    // fn identifiers(&self) -> Vec<HexEncoded>;
+    fn transaction_apply_stage(&self) -> ApplyStage;
+    fn identifiers(&self) -> Vec<HexEncoded>;
 }
 
 impl ContractActionExt for BlockSubscriptionContractAction {
@@ -875,15 +876,85 @@ impl ContractActionExt for BlockSubscriptionContractAction {
         transaction_hash.to_owned()
     }
 
-    // fn identifiers(&self) -> Vec<HexEncoded> {
-    //     let identifiers = match self {
-    //         BlockSubscriptionContractAction::ContractDeploy(c) => &c.transaction.identifiers,
-    //         BlockSubscriptionContractAction::ContractCall(c) => &c.transaction.identifiers,
-    //         BlockSubscriptionContractAction::ContractUpdate(c) => &c.transaction.identifiers,
-    //     };
+    fn transaction_apply_stage(&self) -> ApplyStage {
+        let apply_stage = match self {
+            BlockSubscriptionContractAction::ContractCall(c) => &c.transaction.apply_stage,
+            BlockSubscriptionContractAction::ContractDeploy(c) => &c.transaction.apply_stage,
+            BlockSubscriptionContractAction::ContractUpdate(c) => &c.transaction.apply_stage,
+        };
 
-    //     identifiers.to_owned()
-    // }
+        apply_stage.to_owned()
+    }
+
+    fn identifiers(&self) -> Vec<HexEncoded> {
+        let identifiers = match self {
+            BlockSubscriptionContractAction::ContractDeploy(c) => &c.transaction.identifiers,
+            BlockSubscriptionContractAction::ContractCall(c) => &c.transaction.identifiers,
+            BlockSubscriptionContractAction::ContractUpdate(c) => &c.transaction.identifiers,
+        };
+
+        identifiers.to_owned()
+    }
+}
+
+impl ContractActionExt for ContractActionQueryContractAction {
+    fn address(&self) -> HexEncoded {
+        let address = match self {
+            ContractActionQueryContractAction::ContractDeploy(c) => &c.address,
+            ContractActionQueryContractAction::ContractCall(c) => &c.address,
+            ContractActionQueryContractAction::ContractUpdate(c) => &c.address,
+        };
+
+        address.to_owned()
+    }
+
+    fn block_hash(&self) -> HexEncoded {
+        let block_hash = match self {
+            ContractActionQueryContractAction::ContractDeploy(c) => &c.transaction.block.hash,
+            ContractActionQueryContractAction::ContractCall(c) => &c.transaction.block.hash,
+            ContractActionQueryContractAction::ContractUpdate(c) => &c.transaction.block.hash,
+        };
+
+        block_hash.to_owned()
+    }
+
+    fn block_height(&self) -> i64 {
+        match self {
+            ContractActionQueryContractAction::ContractDeploy(c) => c.transaction.block.height,
+            ContractActionQueryContractAction::ContractCall(c) => c.transaction.block.height,
+            ContractActionQueryContractAction::ContractUpdate(c) => c.transaction.block.height,
+        }
+    }
+
+    fn transaction_hash(&self) -> HexEncoded {
+        let transaction_hash = match self {
+            ContractActionQueryContractAction::ContractDeploy(c) => &c.transaction.hash,
+            ContractActionQueryContractAction::ContractCall(c) => &c.transaction.hash,
+            ContractActionQueryContractAction::ContractUpdate(c) => &c.transaction.hash,
+        };
+
+        transaction_hash.to_owned()
+    }
+
+    fn transaction_apply_stage(&self) -> ApplyStage {
+        let apply_stage = match self {
+            ContractActionQueryContractAction::ContractCall(c) => &c.transaction.apply_stage,
+            ContractActionQueryContractAction::ContractDeploy(c) => &c.transaction.apply_stage,
+            ContractActionQueryContractAction::ContractUpdate(c) => &c.transaction.apply_stage,
+        };
+
+        apply_stage.to_owned()
+    }
+
+    fn identifiers(&self) -> Vec<HexEncoded> {
+        let identifiers = match self {
+            ContractActionQueryContractAction::ContractDeploy(c) => &c.transaction.identifiers,
+            ContractActionQueryContractAction::ContractCall(c) => &c.transaction.identifiers,
+            ContractActionQueryContractAction::ContractUpdate(c) => &c.transaction.identifiers,
+        };
+
+        identifiers.to_owned()
+    }
 }
 
 async fn send_query<T>(
@@ -920,12 +991,10 @@ where
     Ok(data)
 }
 
-fn seed_to_viewing_key(seed: &str) -> indexer_common::domain::ViewingKey {
+fn seed_to_secret_key(seed: &str) -> SecretKey {
     let seed_bytes = const_hex::decode(seed).expect("seed can be hex-decoded");
     let seed_bytes = <[u8; 32]>::try_from(seed_bytes).expect("seed has 32 bytes");
-    SecretKeys::from(Seed::from(seed_bytes))
-        .encryption_secret_key
-        .into()
+    SecretKeys::from(Seed::from(seed_bytes)).encryption_secret_key
 }
 
 #[derive(GraphQLQuery)]
