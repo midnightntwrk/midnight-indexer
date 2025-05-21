@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use indexer_common::domain::NetworkId;
 use std::{
     error::Error as StdError,
     sync::{Arc, atomic::AtomicBool},
@@ -25,5 +26,9 @@ where
     type Error: StdError + Send + Sync + 'static;
 
     /// Serve the API.
-    async fn serve(self, caught_up: Arc<AtomicBool>) -> Result<(), Self::Error>;
+    async fn serve(
+        self,
+        network_id: NetworkId,
+        caught_up: Arc<AtomicBool>,
+    ) -> Result<(), Self::Error>;
 }

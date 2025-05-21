@@ -26,7 +26,6 @@ use indexer_common::{
     stream::flatten_chunks,
 };
 use indoc::indoc;
-use log::warn;
 use sqlx::types::{Uuid, time::OffsetDateTime};
 use std::num::NonZeroU32;
 

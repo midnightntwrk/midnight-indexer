@@ -79,14 +79,17 @@ where
     type Error = AxumApiError;
 
     /// Serve the API.
-    async fn serve(self, caught_up: Arc<AtomicBool>) -> Result<(), Self::Error> {
+    async fn serve(
+        self,
+        network_id: NetworkId,
+        caught_up: Arc<AtomicBool>,
+    ) -> Result<(), Self::Error> {
         let Config {
             address,
             port,
             request_body_limit,
             max_complexity,
             max_depth,
-            network_id,
         } = self.config;
 
         let app = make_app(
@@ -120,7 +123,6 @@ pub struct Config {
     pub request_body_limit: u64,
     pub max_complexity: usize,
     pub max_depth: usize,
-    pub network_id: NetworkId,
 }
 
 #[derive(Debug, Error)]
