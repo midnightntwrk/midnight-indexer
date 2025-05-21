@@ -158,9 +158,9 @@ macro_rules! make_block_details {
                         match event_details_res {
                             Ok(details) => match details.as_root_event::<Event>() {
                                 Ok(root_event) => Some(Ok(root_event)),
-                                Err(e) => Some(Err(SubxtNodeError::from(e)))
+                                Err(e) => Some(Err(SubxtNodeError::from(Box::new(e))))
                             },
-                            Err(e) => Some(Err(SubxtNodeError::from(e))),
+                            Err(e) => Some(Err(SubxtNodeError::from(Box::new(e))))
                         }
                     })
                     .filter_map(Result::ok)

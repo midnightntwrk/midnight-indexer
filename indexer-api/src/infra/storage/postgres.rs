@@ -252,10 +252,21 @@ impl Storage for PostgresStorage {
             WHERE $1 = ANY(transactions.identifiers)
         "};
 
-        sqlx::query_as::<_, Transaction>(query)
+        let mut transactions = sqlx::query_as::<_, Transaction>(query)
             .bind(identifier)
             .fetch_all(&*self.pool)
-            .await
+            .await?;
+
+        for transaction in transactions.iter_mut() {
+            transaction.unshielded_created_outputs = self
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
+                .await?;
+            transaction.unshielded_spent_outputs = self
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
+                .await?;
+        }
+
+        Ok(transactions)
     }
 
     #[trace(properties = { "address": "{address:?}" })]

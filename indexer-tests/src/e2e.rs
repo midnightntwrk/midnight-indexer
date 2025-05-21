@@ -38,6 +38,8 @@ use crate::{
     graphql_ws_client,
 };
 use anyhow::{Context, Ok, anyhow, bail};
+#[cfg(feature = "cloud")]
+// TODO: Remove once UT node image is available. nats_url is a temporarily needed for testing.
 use async_nats::ConnectOptions;
 use bech32::{Bech32m, Hrp};
 use futures::{StreamExt, TryStreamExt, future::ok};
@@ -46,8 +48,10 @@ use indexer_api::{
     domain::{AsBytesExt, HexEncoded, ViewingKey},
     infra::api::v1::{TransactionResultStatus, Unit, UnshieldedAddress},
 };
-use indexer_common::domain::NetworkId;
-use indexer_common::domain::{UnshieldedUtxoIndexed, unshielded::to_bech32m};
+#[cfg(feature = "cloud")]
+// TODO: Remove once UT node image is available. nats_url is a temporarily needed for testing.
+use indexer_common::domain::UnshieldedUtxoIndexed;
+use indexer_common::domain::{NetworkId, unshielded::to_bech32m};
 use itertools::Itertools;
 use midnight_serialize::Serializable;
 use midnight_transient_crypto::encryption::SecretKey;
@@ -61,7 +65,10 @@ const MAX_HEIGHT: usize = 30;
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
 /// (http and ws) at the given host and port.
-pub async fn run(network_id: NetworkId, host: &str, port: u16, nats_url: &str, secure: bool) -> anyhow::Result<()> {
+pub async fn run(network_id: NetworkId, host: &str, port: u16,
+                 nats_url: &str, /* TODO: Remove once UT node image is available. nats_url is a temporarily
+                     * needed for testing. */
+                 secure: bool) -> anyhow::Result<()> {
     println!("### starting e2e testing");
 
     let (api_url, ws_api_url) = {
@@ -91,7 +98,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, nats_url: &str, s
     test_contract_action_query(&indexer_data, &api_client, &api_url)
         .await
         .context("test contract action query")?;
-    test_unshielded_utxo_queries(&node_data, &api_client, &api_url)
+    test_unshielded_utxo_queries(&indexer_data, &api_client, &api_url)
         .await
         .context("test unshielded UTXOs query")?;
 
@@ -107,7 +114,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, nats_url: &str, s
     test_contract_action_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test contract action subscription")?;
-    test_unshielded_utxo_subscription(&node_data, &ws_api_url, nats_url) // we use node mock version at the moment
+    test_unshielded_utxo_subscription(&indexer_data, &ws_api_url, nats_url) // we use node mock version at the moment
         .await
         .context("test unshielded UTXOs subscription")?;
     test_wallet_subscription(&ws_api_url)
@@ -495,72 +502,44 @@ async fn test_contract_action_query(
 
 /// Test the unshielded UTXOs query.
 async fn test_unshielded_utxo_queries(
-    _node_data: &NodeData, //we can only use this once we have subscription endpoint for utxos
+    indexer_data: &IndexerData,
     api_client: &Client,
     api_url: &str,
 ) -> anyhow::Result<()> {
+    // Test with addresses that have UTXOs
+    for expected_utxo in &indexer_data.unshielded_utxos {
+        let variables = unshielded_utxos_query::Variables {
+            address: expected_utxo.owner.clone(),
+        };
+        let utxos = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables)
+            .await?
+            .unshielded_utxos;
+
+        assert!(!utxos.is_empty());
+        // Verify that the expected UTXO is in the results
+        assert!(utxos.iter().any(|utxo| {
+            utxo.owner == expected_utxo.owner
+                && utxo.value == expected_utxo.value
+                && utxo.token_type == expected_utxo.token_type
+                && utxo.intent_hash == expected_utxo.intent_hash
+                && utxo.output_index == expected_utxo.output_index
+        }));
+    }
+
+    // Test with unknown address (should return empty)
     const NETWORK_ID: NetworkId = NetworkId::Undeployed;
+    let unknown_addr_bytes = [0x99u8; 4]; // Some address that doesn't exist
+    let unknown_bech32m = to_bech32m(&unknown_addr_bytes, NETWORK_ID)?;
+    let unknown_addr = UnshieldedAddress(unknown_bech32m);
 
-    let owner_bech32m = to_bech32m(&const_hex::decode(UT_ADDR_1_HEX)?, NETWORK_ID)?;
-    let owner_addr_gql = UnshieldedAddress(owner_bech32m);
-
-    let expected_value_str = "1000";
-    let expected_token_type = HexEncoded::try_from(token_type_to_hex(&TOKEN_NIGHT))?;
-    let expected_intent_hash = HexEncoded::try_from(const_hex::encode(INTENT_HASH.as_ref()))?;
-
-    let query_json = serde_json::json!({ //oneOf (UnshieldedOffset) is not supported by graphql-client
-        "query": "query($address: UnshieldedAddress!, $offset: UnshieldedOffset) {
-            unshieldedUtxos(address: $address, offset: $offset) {
-                owner value tokenType intentHash outputIndex createdAtTransaction { hash block { height } } spentAtTransaction { hash block { height } }
-            }
-        }",
-        "variables": {
-            "address": owner_addr_gql.0,
-            "offset": {
-                "blockOffset": {
-                    "height": 0
-                }
-            }
-        }
-    });
-
-    let resp = api_client
-        .post(api_url)
-        .json(&query_json)
-        .send()
-        .await
-        .context("send request")?
-        .json::<Response<unshielded_utxos_query::ResponseData>>()
-        .await
-        .context("JSON deserialize response")?;
-
-    let utxos = resp
-        .data
-        .ok_or_else(|| anyhow!("missing data in UnshieldedUtxos response"))?
+    let variables = unshielded_utxos_query::Variables {
+        address: unknown_addr,
+    };
+    let utxos = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables)
+        .await?
         .unshielded_utxos;
 
-    assert!(!utxos.is_empty());
-
-    let utxo = utxos.first().unwrap();
-    assert_eq!(utxo.owner, owner_addr_gql);
-    assert_eq!(utxo.value, expected_value_str);
-    assert_eq!(utxo.token_type, expected_token_type);
-    assert_eq!(utxo.intent_hash, expected_intent_hash);
-    assert_eq!(utxo.output_index, 0);
-    assert!(utxo.created_at_transaction.clone().unwrap().block.height >= 0);
-    assert!(utxo.spent_at_transaction.is_none());
-
-    // address with no UTXOs
-    let empty_bech32m = to_bech32m(OWNER_ADDR_EMPTY.as_ref(), NETWORK_ID)?;
-    let empty_addr = UnshieldedAddress(empty_bech32m);
-    let variables = unshielded_utxos_query::Variables {
-        address: empty_addr,
-    };
-
-    let resp_empty = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables).await?;
-    let utxos_empty = resp_empty.unshielded_utxos;
-
-    assert!(utxos_empty.is_empty());
+    assert!(utxos.is_empty());
 
     Ok(())
 }
@@ -693,84 +672,94 @@ async fn test_contract_action_subscription(
 }
 
 async fn test_unshielded_utxo_subscription(
-    node_data: &NodeData,
+    #[cfg(feature = "cloud")] indexer_data: &IndexerData,
+    #[cfg(feature = "standalone")] _indexer_data: &IndexerData,
     ws_api_url: &str,
-    nats_url: &str,
+    #[cfg(feature = "cloud")] nats_url: &str, /* nats_url is needed temporarily until we have
+                                               * node image */
+    #[cfg(feature = "standalone")] _nats_url: &str, /* nats_url is needed temporarily until we
+                                                     * have node image */
 ) -> anyhow::Result<()> {
     use graphql_types::*;
 
-    const TOPIC: &str = "pub-sub.UnshieldedUtxoIndexed";
+    #[cfg(feature = "cloud")]
+    // TODO: Remove once UT node image is available. nats_url is a temporarily needed for testing.
+    {
+        let utxo_addresses = indexer_data
+            .unshielded_utxos
+            .iter()
+            .map(|utxo| utxo.owner.clone())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
 
-    let utxo_addresses = node_data
-        .unshielded_utxos
-        .iter()
-        .map(|utxo| utxo.owner.clone())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
+        assert!(!utxo_addresses.is_empty());
 
-    assert!(!utxo_addresses.is_empty());
+        let unshielded_address =
+            indexer_api::domain::UnshieldedAddress(utxo_addresses[0].clone().0);
 
-    let unshielded_address = indexer_api::domain::UnshieldedAddress(utxo_addresses[0].clone().0);
+        let variables = unshielded_utxos_subscription::Variables {
+            address: unshielded_address.clone(),
+        };
 
-    let variables = unshielded_utxos_subscription::Variables {
-        address: unshielded_address.clone(),
-    };
+        let subscription_stream =
+            graphql_ws_client::subscribe::<UnshieldedUtxosSubscription>(ws_api_url, variables)
+                .await
+                .context("subscribe to unshielded UTXOs")?;
 
-    let subscription_stream =
-        graphql_ws_client::subscribe::<UnshieldedUtxosSubscription>(ws_api_url, variables)
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        const TOPIC: &str = "pub-sub.UnshieldedUtxoIndexed";
+
+        let nats_client = async_nats::connect_with_options(
+            // we use node mock version at the moment
+            nats_url,
+            ConnectOptions::new().user_and_password("indexer".to_string(), "indexer".to_string()),
+        )
+        .await
+        .context("failed to connect to NATS server")?;
+
+        let test_transaction_id = 1;
+        let message = UnshieldedUtxoIndexed {
+            address_bech32m: unshielded_address.clone().0,
+            transaction_id: test_transaction_id,
+        };
+
+        let payload = serde_json::to_vec(&message).context("serialize NATS message")?;
+        nats_client
+            .publish(TOPIC, payload.clone().into())
             .await
-            .context("subscribe to unshielded UTXOs")?;
+            .context("publish test message to NATS")?;
+        nats_client
+            .publish(TOPIC, payload.into())
+            .await
+            .context("publish test message to NATS")?;
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+        let events = subscription_stream
+            .take(2)
+            .map_ok(|data| data.unshielded_utxos)
+            .try_collect::<Vec<_>>()
+            .await
+            .context("collect unshielded UTXO events")?;
 
-    let nats_client = async_nats::connect_with_options(
-        // we use node mock version at the moment
-        nats_url,
-        ConnectOptions::new().user_and_password("indexer".to_string(), "indexer".to_string()),
-    )
-    .await
-    .context("failed to connect to NATS server")?;
+        assert!(!events.is_empty());
 
-    let test_transaction_id = 1;
-    let message = UnshieldedUtxoIndexed {
-        address_bech32m: unshielded_address.clone().0,
-        transaction_id: test_transaction_id,
-    };
+        // Verify the address in returned UTXOs matches our subscription address
+        for event in &events {
+            if !event.created_utxos.is_empty() {
+                assert_eq!(event.created_utxos[0].owner, unshielded_address);
+            }
 
-    let payload = serde_json::to_vec(&message).context("serialize NATS message")?;
-    nats_client
-        .publish(TOPIC, payload.clone().into())
-        .await
-        .context("publish test message to NATS")?;
-    nats_client
-        .publish(TOPIC, payload.into())
-        .await
-        .context("publish test message to NATS")?;
-
-    let events = subscription_stream
-        .take(2)
-        .map_ok(|data| data.unshielded_utxos)
-        .try_collect::<Vec<_>>()
-        .await
-        .context("collect unshielded UTXO events")?;
-
-    assert!(!events.is_empty());
-
-    // Verify the address in returned UTXOs matches our subscription address
-    for event in &events {
-        if !event.created_utxos.is_empty() {
-            assert_eq!(event.created_utxos[0].owner, unshielded_address);
-        }
-
-        if !event.spent_utxos.is_empty() {
-            assert_eq!(event.spent_utxos[0].owner, unshielded_address,);
+            if !event.spent_utxos.is_empty() {
+                assert_eq!(event.spent_utxos[0].owner, unshielded_address,);
+            }
         }
     }
 
     // Additional test with address that has no UTXOs
     const NETWORK_ID: NetworkId = NetworkId::Undeployed;
-    let empty_addr_bech32m = to_bech32m(OWNER_ADDR_EMPTY.as_ref(), NETWORK_ID)?;
+    let empty_addr_bytes = [0x11, 0x22, 0x33, 0x44]; // Raw bytes for a non-existent address
+    let empty_addr_bech32m = to_bech32m(&empty_addr_bytes, NETWORK_ID)?;
     let empty_address = indexer_api::domain::UnshieldedAddress(empty_addr_bech32m);
 
     let empty_variables = unshielded_utxos_subscription::Variables {
