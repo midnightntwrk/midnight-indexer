@@ -28,7 +28,7 @@ where
     /// Load the configuration from the file at the value of the `CONFIG_FILE` environment variable
     /// or `config.yaml` by default, with an overlay provided by environment variables prefixed with
     /// `"APP__"` and split/nested via `"__"`.
-    fn load() -> Result<Self, figment::Error> {
+    fn load() -> Result<Self, Box<figment::Error>> {
         let config_file = env::var(CONFIG_FILE)
             .map(Yaml::file_exact)
             .unwrap_or(Yaml::file_exact("config.yaml"));
