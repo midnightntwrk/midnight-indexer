@@ -1,3 +1,5 @@
+# This Docker Compose file is for local development and testing and NOT meant for production use!
+
 services:
   chain-indexer:
     depends_on:
@@ -5,7 +7,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/chain-indexer:latest"
+    image: "midnightntwrk/chain-indexer:latest"
     restart: "no"
     environment:
       RUST_LOG: "chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
@@ -29,7 +31,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/wallet-indexer:latest"
+    image: "midnightntwrk/wallet-indexer:latest"
     restart: "no"
     environment:
       RUST_LOG: "wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
@@ -51,7 +53,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/indexer-api:latest"
+    image: "midnightntwrk/indexer-api:latest"
     restart: "no"
     ports:
       - "8088:8088"
@@ -74,12 +76,12 @@ services:
   indexer-standalone:
     profiles:
       - standalone
-    image: "ghcr.io/midnight-ntwrk/indexer-standalone:latest"
+    image: "midnightntwrk/indexer-standalone:latest"
     restart: "no"
     ports:
       - "8088:8088"
     environment:
-      RUST_LOG: "indexer-standalone=debug,chain_indexer=debug,indexer_api=debug,wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
+      RUST_LOG: "indexer_standalone=debug,chain_indexer=debug,indexer_api=debug,wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
       APP__INFRA__SECRET: $APP__INFRA__SECRET
       APP__INFRA__NODE__URL: "ws://node:9944"
     healthcheck:
