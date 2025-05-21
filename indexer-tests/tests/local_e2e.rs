@@ -13,7 +13,6 @@
 
 use anyhow::Context;
 use fs_extra::dir::{CopyOptions, copy};
-use indexer_common::domain::NetworkId;
 use indexer_tests::e2e;
 use reqwest::StatusCode;
 use std::{
@@ -75,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
         .context("wait for indexer-api to become ready")?;
 
     // Run the tests.
-    let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
+    let result = e2e::run("localhost", api_port, nats_url.as_str(), false).await;
 
     // It is best practice to kill the processes even when spawned with `kill_on_drop`.
     let _ = chain_indexer.kill().await;
@@ -251,6 +250,7 @@ async fn start_indexer_api(
             format!("{}/../indexer-api/config.yaml", env!("CARGO_MANIFEST_DIR")),
         ),
         ("APP__INFRA__API__PORT", api_port.to_string()),
+        ("APP__INFRA__API__MAX_COMPLEXITY", "250".into()),
         ("APP__INFRA__PUB_SUB__URL", nats_url.to_owned()),
         ("APP__INFRA__STORAGE__PORT", postgres_port.to_string()),
         ("APP__INFRA__ZSWAP_STATE_STORAGE__URL", nats_url.to_owned()),

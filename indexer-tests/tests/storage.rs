@@ -15,7 +15,8 @@ use anyhow::Context;
 use assert_matches::assert_matches;
 use chacha20poly1305::aead::rand_core::OsRng;
 use chain_indexer::domain::{
-    Block, BlockHash, BlockInfo, Transaction, TransactionHash, storage::Storage as _,
+    Block, BlockHash, BlockInfo, Transaction, TransactionHash, UnshieldedUtxo,
+    storage::Storage as _,
 };
 use fake::{Fake, Faker};
 use futures::{StreamExt, TryStreamExt, executor::block_on};
@@ -24,8 +25,8 @@ use indexer_common::{
     self,
     cipher::make_cipher,
     domain::{
-        ApplyStage, BlockAuthor, ContractAddress, Identifier, NetworkId, ProtocolVersion,
-        RawTransaction,
+        ApplyStage, BlockAuthor, ContractAddress, Identifier, IntentHash, NetworkId,
+        ProtocolVersion, RawTokenType, RawTransaction, UnshieldedAddress,
     },
     error::BoxError,
     infra::{migrations, pool},
@@ -519,6 +520,15 @@ static BLOCK: LazyLock<Block> = LazyLock::new(|| Block {
                 attributes: chain_indexer::domain::ContractAttributes::Deploy,
             }],
             merkle_tree_root: b"merkle_tree_root".as_slice().into(),
+            created_unshielded_utxos: vec![UnshieldedUtxo {
+                creating_transaction_id: 1,
+                output_index: 0,
+                owner_address: OWNER_ADDR_1.clone(),
+                token_type: *TOKEN_NIGHT,
+                intent_hash: *INTENT_HASH,
+                value: 100,
+            }],
+            spent_unshielded_utxos: vec![],
             start_index: 0,
             end_index: 1,
         },
@@ -535,6 +545,15 @@ static BLOCK: LazyLock<Block> = LazyLock::new(|| Block {
                 attributes: chain_indexer::domain::ContractAttributes::Deploy,
             }],
             merkle_tree_root: b"merkle_tree_root".as_slice().into(),
+            created_unshielded_utxos: vec![UnshieldedUtxo {
+                creating_transaction_id: 1,
+                output_index: 0,
+                owner_address: OWNER_ADDR_1.clone(),
+                token_type: *TOKEN_NIGHT,
+                intent_hash: *INTENT_HASH,
+                value: 100,
+            }], /* Success part creates UTXO */
+            spent_unshielded_utxos: vec![],
             start_index: 0,
             end_index: 1,
         },
@@ -580,6 +599,16 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
             },
         ],
         merkle_tree_root: b"merkle_tree_root".as_slice().into(),
+        created_unshielded_utxos: vec![UnshieldedUtxo {
+            creating_transaction_id: 2,
+            output_index: 0,
+            owner_address: OWNER_ADDR_2.clone(),
+            token_type: *TOKEN_NIGHT,
+            intent_hash: *INTENT_HASH,
+            value: 50,
+        }],
+        spent_unshielded_utxos: vec![sample_spent_utxo()],
+
         start_index: 2,
         end_index: 3,
     }],
@@ -628,6 +657,29 @@ static UNKNOWN_ADDRESS: LazyLock<ContractAddress> =
     LazyLock::new(|| b"unknown-address".as_slice().into());
 
 pub const PROTOCOL_VERSION_0_1: ProtocolVersion = ProtocolVersion(1_000);
+pub const UT_ADDR_1_HEX: &str = "01020304";
+pub const UT_ADDR_2_HEX: &str = "05060708";
+pub const UT_ADDR_EMPTY_HEX: &str = "11223344"; // Address with no UTXOs for testing
+
+pub static OWNER_ADDR_1: LazyLock<UnshieldedAddress> = LazyLock::new(|| {
+    const_hex::decode(indexer_tests::chain_indexer_data::UT_ADDR_1_HEX)
+        .unwrap()
+        .into()
+});
+pub static OWNER_ADDR_2: LazyLock<UnshieldedAddress> = LazyLock::new(|| {
+    const_hex::decode(indexer_tests::chain_indexer_data::UT_ADDR_2_HEX)
+        .unwrap()
+        .into()
+});
+pub static OWNER_ADDR_EMPTY: LazyLock<UnshieldedAddress> = LazyLock::new(|| {
+    const_hex::decode(indexer_tests::chain_indexer_data::UT_ADDR_EMPTY_HEX)
+        .unwrap()
+        .into()
+});
+
+pub static INTENT_HASH: LazyLock<IntentHash> = LazyLock::new(|| [0x11u8; 32].into());
+
+pub static TOKEN_NIGHT: LazyLock<RawTokenType> = LazyLock::new(|| [0u8; 32].into());
 
 pub fn create_raw_transaction(network_id: NetworkId) -> Result<RawTransaction, BoxError> {
     let empty_offer = Offer::<ProofPreimage> {
@@ -650,4 +702,15 @@ pub fn create_raw_transaction(network_id: NetworkId) -> Result<RawTransaction, B
     let raw_transaction = transaction.serialize(network_id)?.into();
 
     Ok(raw_transaction)
+}
+
+pub fn sample_spent_utxo() -> UnshieldedUtxo {
+    UnshieldedUtxo {
+        creating_transaction_id: 0,
+        output_index: 0,
+        owner_address: indexer_tests::chain_indexer_data::OWNER_ADDR_1.clone(),
+        token_type: *indexer_tests::chain_indexer_data::TOKEN_NIGHT,
+        intent_hash: *indexer_tests::chain_indexer_data::INTENT_HASH,
+        value: 0,
+    }
 }

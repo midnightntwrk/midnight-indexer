@@ -13,7 +13,7 @@
 
 use crate::domain::{
     Block, BlockHash, ContractAction, ContractAttributes, Storage, Transaction, TransactionHash,
-    UnshieldedUtxo, UnshieldedUtxoExt, UnshieldedUtxoFilter,
+    UnshieldedUtxo, UnshieldedUtxoFilter,
 };
 use async_stream::try_stream;
 use chacha20poly1305::ChaCha20Poly1305;
@@ -137,19 +137,10 @@ impl Storage for PostgresStorage {
     }
 
     async fn get_transaction_by_id(&self, id: u64) -> Result<Transaction, sqlx::Error> {
-        let mut transaction = sqlx::query_as::<_, Transaction>(TX_BY_ID_QUERY)
+        sqlx::query_as::<_, Transaction>(TX_BY_ID_QUERY)
             .bind(id as i64)
             .fetch_one(&*self.pool)
-            .await?;
-
-        transaction.unshielded_created_outputs = self
-            .get_unshielded_utxos_by_creating_tx_id(transaction.id)
-            .await?;
-        transaction.unshielded_spent_outputs = self
-            .get_unshielded_utxos_by_spending_tx_id(transaction.id)
-            .await?;
-
-        Ok(transaction)
+            .await
     }
 
     async fn get_transactions_by_block_id(&self, id: u64) -> Result<Vec<Transaction>, sqlx::Error> {
@@ -170,21 +161,10 @@ impl Storage for PostgresStorage {
             WHERE transactions.block_id = $1
         "};
 
-        let mut transactions = sqlx::query_as::<_, Transaction>(query)
+        sqlx::query_as::<_, Transaction>(query)
             .bind(id as i64)
             .fetch_all(&*self.pool)
-            .await?;
-
-        for transaction in transactions.iter_mut() {
-            transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
-                .await?;
-            transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
-                .await?;
-        }
-
-        Ok(transactions)
+            .await
     }
 
     async fn get_transactions_by_hash(
@@ -206,31 +186,19 @@ impl Storage for PostgresStorage {
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE transactions.hash = $1
-            ORDER BY transactions.id DESC
         "};
 
-        let mut transactions = sqlx::query_as::<_, Transaction>(query)
+        sqlx::query_as::<_, Transaction>(query)
             .bind(hash)
             .fetch_all(&*self.pool)
-            .await?;
-
-        for transaction in transactions.iter_mut() {
-            transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
-                .await?;
-            transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
-                .await?;
-        }
-
-        Ok(transactions)
+            .await
     }
 
-    async fn get_transaction_by_identifier(
+    async fn get_transactions_by_identifier(
         &self,
         identifier: &Identifier,
-    ) -> Result<Option<Transaction>, sqlx::Error> {
-        let sql = indoc! {"
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
+        let query = indoc! {"
             SELECT
                 transactions.id,
                 transactions.hash,
@@ -245,24 +213,12 @@ impl Storage for PostgresStorage {
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE $1 = ANY(transactions.identifiers)
-            LIMIT 1
         "};
 
-        let mut transaction_option = sqlx::query_as::<_, Transaction>(sql)
+        sqlx::query_as::<_, Transaction>(query)
             .bind(identifier)
-            .fetch_optional(&*self.pool)
-            .await?;
-
-        if let Some(transaction) = &mut transaction_option {
-            transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
-                .await?;
-            transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
-                .await?;
-        }
-
-        Ok(transaction_option)
+            .fetch_all(&*self.pool)
+            .await
     }
 
     async fn get_contract_deploy_by_address(
@@ -336,6 +292,7 @@ impl Storage for PostgresStorage {
             INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
             WHERE contract_actions.address = $1
             AND transactions.block_id = (SELECT id FROM blocks WHERE hash = $2)
+            AND transactions.apply_stage != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -365,6 +322,7 @@ impl Storage for PostgresStorage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE contract_actions.address = $1
             AND blocks.height = $2
+            AND transactions.apply_stage != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -394,8 +352,7 @@ impl Storage for PostgresStorage {
             AND contract_actions.transaction_id = (
                 SELECT id FROM transactions
                 WHERE hash = $2
-                AND apply_stage = 'Success'
-                ORDER BY id DESC
+                AND apply_stage != 'Failure'
                 LIMIT 1
             )
             ORDER BY id DESC
@@ -426,6 +383,7 @@ impl Storage for PostgresStorage {
             INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
             WHERE contract_actions.address = $1
             AND $2 = ANY(transactions.identifiers)
+            AND transactions.apply_stage != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -479,7 +437,7 @@ impl Storage for PostgresStorage {
                     FROM contract_actions
                     INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
                     INNER JOIN blocks ON blocks.id = transactions.block_id
-                    WHERE transactions.apply_stage = 'Success'
+                    WHERE transactions.apply_stage != 'Failure'
                     AND contract_actions.address = $1
                     AND blocks.height >= $2
                     AND contract_actions.id >= $3
@@ -577,7 +535,7 @@ impl Storage for PostgresStorage {
                     LIMIT $3
                 "};
 
-                let mut transactions = sqlx::query_as::<_, Transaction>(query)
+                let transactions = sqlx::query_as::<_, Transaction>(query)
                     .bind(session_id)
                     .bind(index as i64)
                     .bind(batch_size.get() as i64)
@@ -588,13 +546,6 @@ impl Storage for PostgresStorage {
                     Some(end_index) => end_index + 1,
                     None => break,
                 };
-
-                for transaction in transactions.iter_mut() {
-                    transaction.unshielded_created_outputs =
-                        self.get_unshielded_utxos_by_creating_tx_id(transaction.id).await?;
-                    transaction.unshielded_spent_outputs =
-                        self.get_unshielded_utxos_by_spending_tx_id(transaction.id).await?;
-                }
 
                 yield transactions;
             }
