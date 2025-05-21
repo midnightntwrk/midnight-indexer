@@ -11,11 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::infra;
+use crate::{application, infra};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
     pub run_migrations: bool,
+
+    #[serde(rename = "application")]
+    pub application_config: application::Config,
 
     #[serde(rename = "infra")]
     pub infra_config: infra::Config,
