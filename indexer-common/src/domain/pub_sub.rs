@@ -74,10 +74,12 @@ pub trait Subscriber
 where
     Self: Clone + Send + Sync + 'static,
 {
-    /// Error type for the [Subscriber::subscribe] method.
+    /// Conversion errors into the message type of the [Subscriber::subscribe] method.
     type Error: StdError + Send + Sync + 'static;
 
-    /// Infinitely subscribe to the given messages.
+    /// Subscribe to the messages of the given type. Implementations must return an infinite stream
+    /// that can handle any underlying errors transparently, i.e. without leaking into the
+    /// `Self::Error` type which is reserved for conversion errors.
     fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
     where
         T: Message;
