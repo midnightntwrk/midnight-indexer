@@ -146,10 +146,10 @@ impl Storage for PostgresStorage {
             .await?;
 
         transaction.unshielded_created_outputs = self
-            .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+            .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
             .await?;
         transaction.unshielded_spent_outputs = self
-            .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+            .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
             .await?;
 
         Ok(transaction)
@@ -181,10 +181,10 @@ impl Storage for PostgresStorage {
 
         for transaction in transactions.iter_mut() {
             transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
                 .await?;
             transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
                 .await?;
         }
 
@@ -220,10 +220,10 @@ impl Storage for PostgresStorage {
 
         for transaction in transactions.iter_mut() {
             transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
                 .await?;
             transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
                 .await?;
         }
 
@@ -529,12 +529,12 @@ impl Storage for PostgresStorage {
                 SELECT MAX(end_index) FROM transactions
             ) AS highest_end_index,
             (
-                SELECT MAX(end_index) 
-                FROM transactions 
+                SELECT MAX(end_index)
+                FROM transactions
                 INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
             ) AS highest_relevant_end_index,
             (
-                SELECT end_index 
+                SELECT end_index
                 FROM transactions
                 INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
                 INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
@@ -602,9 +602,9 @@ impl Storage for PostgresStorage {
 
                 for transaction in transactions.iter_mut() {
                     transaction.unshielded_created_outputs =
-                        self.get_unshielded_utxos_by_creating_tx_id(transaction.id).await?;
+                        self.get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id)).await?;
                     transaction.unshielded_spent_outputs =
-                        self.get_unshielded_utxos_by_spending_tx_id(transaction.id).await?;
+                        self.get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id)).await?;
                 }
 
                 yield transactions;

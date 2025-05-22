@@ -147,10 +147,10 @@ impl Storage for SqliteStorage {
         transaction.identifiers = identifiers;
 
         transaction.unshielded_created_outputs = self
-            .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+            .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
             .await?;
         transaction.unshielded_spent_outputs = self
-            .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+            .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
             .await?;
 
         Ok(transaction)
@@ -223,10 +223,10 @@ impl Storage for SqliteStorage {
 
         for transaction in transactions.iter_mut() {
             transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
                 .await?;
             transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
                 .await?;
         }
 
@@ -602,9 +602,9 @@ impl Storage for SqliteStorage {
                     transaction.identifiers = identifiers;
 
                     transaction.unshielded_created_outputs =
-                        self.get_unshielded_utxos_by_creating_tx_id(transaction.id).await?;
+                        self.get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id)).await?;
                     transaction.unshielded_spent_outputs =
-                        self.get_unshielded_utxos_by_spending_tx_id(transaction.id).await?;
+                        self.get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id)).await?;
                 }
 
                 yield transactions;
