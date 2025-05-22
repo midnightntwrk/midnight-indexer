@@ -13,7 +13,7 @@
 
 use crate::domain::{
     Block, BlockHash, ContractAction, ContractAttributes, Storage, Transaction, TransactionHash,
-    UnshieldedUtxo, UnshieldedUtxoExt, UnshieldedUtxoFilter,
+    UnshieldedUtxo, UnshieldedUtxoFilter,
 };
 use async_stream::try_stream;
 use chacha20poly1305::ChaCha20Poly1305;
@@ -143,10 +143,10 @@ impl Storage for PostgresStorage {
             .await?;
 
         transaction.unshielded_created_outputs = self
-            .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+            .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
             .await?;
         transaction.unshielded_spent_outputs = self
-            .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+            .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
             .await?;
 
         Ok(transaction)
@@ -177,10 +177,10 @@ impl Storage for PostgresStorage {
 
         for transaction in transactions.iter_mut() {
             transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
                 .await?;
             transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
                 .await?;
         }
 
@@ -216,10 +216,10 @@ impl Storage for PostgresStorage {
 
         for transaction in transactions.iter_mut() {
             transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
                 .await?;
             transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
                 .await?;
         }
 
@@ -255,10 +255,10 @@ impl Storage for PostgresStorage {
 
         if let Some(transaction) = &mut transaction_option {
             transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
                 .await?;
             transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
                 .await?;
         }
 
@@ -591,9 +591,9 @@ impl Storage for PostgresStorage {
 
                 for transaction in transactions.iter_mut() {
                     transaction.unshielded_created_outputs =
-                        self.get_unshielded_utxos_by_creating_tx_id(transaction.id).await?;
+                        self.get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id)).await?;
                     transaction.unshielded_spent_outputs =
-                        self.get_unshielded_utxos_by_spending_tx_id(transaction.id).await?;
+                        self.get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id)).await?;
                 }
 
                 yield transactions;
