@@ -1,0 +1,1 @@
+impl futures::Future<Output = std::result::Result<impl futures::Stream<Item = std::result::Result<T, <infra::pub_sub::in_mem::subscriber::InMemSubscriber as domain::pub_sub::Subscriber>::Error>> + std::marker::Send, <infra::pub_sub::in_mem::subscriber::InMemSubscriber as domain::pub_sub::Subscriber>::Error>>

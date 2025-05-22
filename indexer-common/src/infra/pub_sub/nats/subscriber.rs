@@ -16,7 +16,7 @@ use crate::{
     infra::pub_sub::nats::Config,
 };
 use async_nats::{Client, ConnectOptions};
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, stream};
 use secrecy::ExposeSecret;
 use thiserror::Error;
 
@@ -45,18 +45,24 @@ impl NatsSubscriber {
 impl Subscriber for NatsSubscriber {
     type Error = SubscriberError;
 
-    async fn subscribe<T>(
-        &self,
-    ) -> Result<impl Stream<Item = Result<T, Self::Error>> + Send, Self::Error>
+    fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
     where
         T: Message,
     {
-        let subscriber = self.client.subscribe(T::TOPIC).await?;
-        let subscriber = subscriber.map(|message| {
-            let message = serde_json::from_slice(&message.payload)?;
-            Ok(message)
-        });
-        Ok(subscriber)
+        stream::repeat(())
+            .map(|_| Ok::<_, Self::Error>(()))
+            .and_then(|_| {
+                self.client
+                    .subscribe(T::TOPIC)
+                    .map_err(SubscriberError::Subscribe)
+            })
+            .map_ok(|subscriber| {
+                subscriber.map(|message| {
+                    let message = serde_json::from_slice(&message.payload)?;
+                    Ok(message)
+                })
+            })
+            .try_flatten()
     }
 }
 

@@ -37,6 +37,7 @@ midnight-ledger    = { workspace = true }
 secrecy            = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
 sqlx               = { workspace = true, features = [ "runtime-tokio", "time" ] }
+stream-cancel      = { workspace = true }
 thiserror          = { workspace = true }
 tokio              = { workspace = true, features = [ "rt-multi-thread", "time", "signal" ] }
 tokio-stream       = { workspace = true }

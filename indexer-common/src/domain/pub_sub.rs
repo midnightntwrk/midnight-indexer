@@ -77,10 +77,8 @@ where
     /// Error type for the [Subscriber::subscribe] method.
     type Error: StdError + Send + Sync + 'static;
 
-    /// Subscribe to the given messages.
-    async fn subscribe<T>(
-        &self,
-    ) -> Result<impl Stream<Item = Result<T, Self::Error>> + Send, Self::Error>
+    /// Infinitely subscribe to the given messages.
+    fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
     where
         T: Message;
 }
@@ -92,11 +90,11 @@ pub struct NoopSubscriber;
 impl Subscriber for NoopSubscriber {
     type Error = Infallible;
 
-    async fn subscribe<T>(&self) -> Result<impl Stream<Item = Result<T, Self::Error>>, Self::Error>
+    fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
     where
         T: Message,
     {
-        Ok(stream::empty())
+        stream::empty()
     }
 }
 

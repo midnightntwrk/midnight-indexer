@@ -98,7 +98,7 @@ mod tests {
         assert!(publish_block_res.is_ok());
 
         let subscriber = pub_sub.subscriber();
-        let mut messages = subscriber.subscribe::<WalletIndexed>().await?;
+        let mut messages = subscriber.subscribe::<WalletIndexed>();
 
         let wallet_indexed = WalletIndexed {
             session_id: [0; 32].into(),

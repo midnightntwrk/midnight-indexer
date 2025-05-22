@@ -34,6 +34,7 @@ use indexer_common::domain::{
 use log::{debug, warn};
 use metrics::{Counter, counter};
 use std::{future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
+use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
 
@@ -91,21 +92,28 @@ where
         let index = index.unwrap_or_default();
         let send_progress_updates = send_progress_updates.unwrap_or(true);
 
-        // Build stream of WalletSyncEvents by merging ViewingUpdates and ProgressUpdates.
-        let viewing_updates = viewing_updates::<S, B, Z>(cx, session_id, index)
+        // Build a stream of WalletSyncEvents by merging ViewingUpdates and ProgressUpdates. The
+        // stream of ViewingUpdates should be infinite, but in the theoretical case it completes,
+        // the Trigger is used to cancel the Tripwire which completes the stream of ProgressUpdates.
+        let (trigger, tripwire) = Tripwire::new();
+
+        let viewing_updates = viewing_updates::<S, B, Z>(cx, session_id, index, trigger)
             .await?
             .map_ok(|viewing_update| {
                 debug!(viewing_update:?; "emitting viewing update");
                 WalletSyncEvent::ViewingUpdate(viewing_update)
             });
+
         let progress_updates = if send_progress_updates {
             progress_updates::<S>(cx, session_id)
                 .await?
+                .take_until_if(tripwire)
                 .map_ok(WalletSyncEvent::ProgressUpdate)
                 .boxed()
         } else {
             stream::empty().boxed()
         };
+
         let events = tokio_stream::StreamExt::merge(viewing_updates, progress_updates);
 
         // As long as the subscription is alive, the wallet is periodically set active, even if
@@ -126,6 +134,7 @@ async fn viewing_updates<'a, S, B, Z>(
     cx: &'a Context<'a>,
     session_id: SessionId,
     index: u64,
+    trigger: Trigger,
 ) -> async_graphql::Result<
     impl Stream<Item = async_graphql::Result<ViewingUpdate<S>>> + use<'a, S, B, Z>,
 >
@@ -142,8 +151,6 @@ where
 
     let wallet_indexed_events = subscriber
         .subscribe::<WalletIndexed>()
-        .await
-        .internal("subscribe to WalletIndexed events")?
         .try_filter(move |wallet_indexed| ready(wallet_indexed.session_id == session_id));
     let mut next_index = index;
 
@@ -202,9 +209,10 @@ where
 
                 yield viewing_update;
             }
-
-            warn!("stream of WalletIndexed events completed unexpectedly");
         }
+
+        warn!("stream of WalletIndexed events completed unexpectedly");
+        trigger.cancel();
     };
 
     Ok(viewing_updates)

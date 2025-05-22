@@ -70,10 +70,7 @@ where
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
 
-        let block_indexed_stream = subscriber
-            .subscribe::<BlockIndexed>()
-            .await
-            .internal("subscribe to BlockIndexed events")?;
+        let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
         let address = address.hex_decode().context("hex-decode address")?;
         let height = resolve_height(offset, storage).await?;
         let mut next_contract_action_id = 0;

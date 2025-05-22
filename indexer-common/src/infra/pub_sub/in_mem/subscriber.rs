@@ -34,9 +34,7 @@ impl InMemSubscriber {
 impl Subscriber for InMemSubscriber {
     type Error = SubscriberError;
 
-    async fn subscribe<T>(
-        &self,
-    ) -> Result<impl Stream<Item = Result<T, Self::Error>> + Send, Self::Error>
+    fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>>
     where
         T: Message,
     {
@@ -55,13 +53,11 @@ impl Subscriber for InMemSubscriber {
             _ => panic!("unexpected topic {:?}", T::TOPIC),
         };
 
-        let messages = values.map(|value| {
+        values.map(|value| {
             let value = value?;
             let message = serde_json::from_value::<T>(value)?;
             Ok(message)
-        });
-
-        Ok(messages)
+        })
     }
 }
 

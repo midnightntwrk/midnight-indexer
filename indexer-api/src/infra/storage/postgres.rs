@@ -21,8 +21,8 @@ use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::{
     domain::{ContractAddress, Identifier, SessionId, ViewingKey},
-    flatten_chunks,
     infra::{pool::postgres::PostgresPool, sqlx::postgres::map_deadlock_detected},
+    stream::flatten_chunks,
 };
 use indoc::indoc;
 use sqlx::types::{Uuid, time::OffsetDateTime};

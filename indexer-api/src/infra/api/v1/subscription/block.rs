@@ -67,10 +67,7 @@ where
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
 
-        let block_indexed_stream = subscriber
-            .subscribe::<BlockIndexed>()
-            .await
-            .internal("cannot subscribe to BlockIndexed events")?;
+        let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
         let mut height = resolve_height(offset, storage).await?;
 
         let blocks_stream = try_stream! {

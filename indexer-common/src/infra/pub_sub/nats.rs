@@ -91,10 +91,7 @@ mod tests {
             .await
             .context("create NatsSubscriber")?;
 
-        let wallet_indexed_messages = subscriber
-            .subscribe::<WalletIndexed>()
-            .await
-            .context("subscribe")?;
+        let wallet_indexed_messages = subscriber.subscribe::<WalletIndexed>();
         sleep(Duration::from_millis(250)).await;
 
         let wallet_indexed_a = WalletIndexed::from(SessionId::from([0; 32]));

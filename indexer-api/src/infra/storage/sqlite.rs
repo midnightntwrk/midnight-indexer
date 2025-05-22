@@ -20,8 +20,8 @@ use derive_more::Debug;
 use futures::{Stream, stream::TryStreamExt};
 use indexer_common::{
     domain::{ContractAddress, Identifier, SessionId, ViewingKey},
-    flatten_chunks,
     infra::pool::sqlite::SqlitePool,
+    stream::flatten_chunks,
 };
 use indoc::indoc;
 use sqlx::{
