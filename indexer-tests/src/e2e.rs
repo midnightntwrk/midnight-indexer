@@ -14,25 +14,32 @@
 //! e2e testing library
 
 use crate::{
-    e2e::block_subscription::{
-        BlockSubscriptionBlocks as BlockSubscriptionBlock,
-        BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
-        BlockSubscriptionBlocksTransactionsContractActions as BlockSubscriptionContractAction,
-        BlockSubscriptionBlocksTransactionsUnshieldedCreatedOutputs as BlockSubscriptionUnshieldedUtxo,
+    e2e::{
+        block_subscription::{
+            BlockSubscriptionBlocks as BlockSubscriptionBlock,
+            BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
+            BlockSubscriptionBlocksTransactionsContractActions as BlockSubscriptionContractAction,
+            BlockSubscriptionBlocksTransactionsUnshieldedCreatedOutputs as BlockSubscriptionUnshieldedUtxo,
+        },
+        contract_action_query::ContractActionQueryContractAction,
     },
-    e2e::contract_action_query::ContractActionQueryContractAction,
     graphql_ws_client,
 };
-use anyhow::{Context, Ok, anyhow, bail};
-use bech32::{Bech32m, Hrp};
+use anyhow::{Context, Ok, bail};
+#[cfg(feature = "cloud")]
+// TODO: Remove once UT node image is available. nats_url is a temporarily needed for testing.
 use async_nats::ConnectOptions;
+use bech32::{Bech32m, Hrp};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::{
     domain::{AsBytesExt, HexEncoded, ViewingKey},
     infra::api::v1::{ApplyStage, Unit, UnshieldedAddress},
 };
-use indexer_common::domain::{NetworkId, UnshieldedUtxoIndexed, unshielded::to_bech32m};
+#[cfg(feature = "cloud")]
+// TODO: Remove once UT node image is available. nats_url is a temporarily needed for testing.
+use indexer_common::domain::UnshieldedUtxoIndexed;
+use indexer_common::domain::{NetworkId, unshielded::to_bech32m};
 use itertools::Itertools;
 use midnight_ledger::{
     serialize::Serializable,
@@ -48,7 +55,14 @@ const MAX_HEIGHT: usize = 30;
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
 /// (http and ws) at the given host and port.
-pub async fn run(network_id: NetworkId, host: &str, port: u16, nats_url: &str, secure: bool) -> anyhow::Result<()> {
+pub async fn run(
+    network_id: NetworkId,
+    host: &str,
+    port: u16,
+    nats_url: &str, /* TODO: Remove once UT node image is available. nats_url is a temporarily
+                     * needed for testing. */
+    secure: bool,
+) -> anyhow::Result<()> {
     println!("### starting e2e testing");
 
     let (api_url, ws_api_url) = {
@@ -499,11 +513,11 @@ async fn test_unshielded_utxo_queries(
         assert!(!utxos.is_empty());
         // Verify that the expected UTXO is in the results
         assert!(utxos.iter().any(|utxo| {
-            utxo.owner == expected_utxo.owner &&
-                utxo.value == expected_utxo.value &&
-                utxo.token_type == expected_utxo.token_type &&
-                utxo.intent_hash == expected_utxo.intent_hash &&
-                utxo.output_index == expected_utxo.output_index
+            utxo.owner == expected_utxo.owner
+                && utxo.value == expected_utxo.value
+                && utxo.token_type == expected_utxo.token_type
+                && utxo.intent_hash == expected_utxo.intent_hash
+                && utxo.output_index == expected_utxo.output_index
         }));
     }
 
@@ -653,86 +667,94 @@ async fn test_contract_action_subscription(
 }
 
 async fn test_unshielded_utxo_subscription(
-    indexer_data: &IndexerData,
+    #[cfg(feature = "cloud")] indexer_data: &IndexerData,
+    #[cfg(feature = "standalone")] _indexer_data: &IndexerData,
     ws_api_url: &str,
-    nats_url: &str,
+    #[cfg(feature = "cloud")] nats_url: &str, /* nats_url is needed temporarily until we have
+                                               * node image */
+    #[cfg(feature = "standalone")] _nats_url: &str, /* nats_url is needed temporarily until we
+                                                     * have node image */
 ) -> anyhow::Result<()> {
     use graphql_types::*;
 
-    const TOPIC: &str = "pub-sub.UnshieldedUtxoIndexed";
+    #[cfg(feature = "cloud")]
+    // TODO: Remove once UT node image is available. nats_url is a temporarily needed for testing.
+    {
+        let utxo_addresses = indexer_data
+            .unshielded_utxos
+            .iter()
+            .map(|utxo| utxo.owner.clone())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
 
-    let utxo_addresses = indexer_data
-        .unshielded_utxos
-        .iter()
-        .map(|utxo| utxo.owner.clone())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
+        assert!(!utxo_addresses.is_empty());
 
-    assert!(!utxo_addresses.is_empty());
+        let unshielded_address =
+            indexer_api::domain::UnshieldedAddress(utxo_addresses[0].clone().0);
 
-    let unshielded_address = indexer_api::domain::UnshieldedAddress(utxo_addresses[0].clone().0);
+        let variables = unshielded_utxos_subscription::Variables {
+            address: unshielded_address.clone(),
+        };
 
-    let variables = unshielded_utxos_subscription::Variables {
-        address: unshielded_address.clone(),
-    };
+        let subscription_stream =
+            graphql_ws_client::subscribe::<UnshieldedUtxosSubscription>(ws_api_url, variables)
+                .await
+                .context("subscribe to unshielded UTXOs")?;
 
-    let subscription_stream =
-        graphql_ws_client::subscribe::<UnshieldedUtxosSubscription>(ws_api_url, variables)
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        const TOPIC: &str = "pub-sub.UnshieldedUtxoIndexed";
+
+        let nats_client = async_nats::connect_with_options(
+            // we use node mock version at the moment
+            nats_url,
+            ConnectOptions::new().user_and_password("indexer".to_string(), "indexer".to_string()),
+        )
+        .await
+        .context("failed to connect to NATS server")?;
+
+        let test_transaction_id = 1;
+        let message = UnshieldedUtxoIndexed {
+            address_bech32m: unshielded_address.clone().0,
+            transaction_id: test_transaction_id,
+        };
+
+        let payload = serde_json::to_vec(&message).context("serialize NATS message")?;
+        nats_client
+            .publish(TOPIC, payload.clone().into())
             .await
-            .context("subscribe to unshielded UTXOs")?;
+            .context("publish test message to NATS")?;
+        nats_client
+            .publish(TOPIC, payload.into())
+            .await
+            .context("publish test message to NATS")?;
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+        let events = subscription_stream
+            .take(2)
+            .map_ok(|data| data.unshielded_utxos)
+            .try_collect::<Vec<_>>()
+            .await
+            .context("collect unshielded UTXO events")?;
 
-    let nats_client = async_nats::connect_with_options(
-        // we use node mock version at the moment
-        nats_url,
-        ConnectOptions::new().user_and_password("indexer".to_string(), "indexer".to_string()),
-    )
-    .await
-    .context("failed to connect to NATS server")?;
+        assert!(!events.is_empty());
 
-    let test_transaction_id = 1;
-    let message = UnshieldedUtxoIndexed {
-        address_bech32m: unshielded_address.clone().0,
-        transaction_id: test_transaction_id,
-    };
+        // Verify the address in returned UTXOs matches our subscription address
+        for event in &events {
+            if !event.created_utxos.is_empty() {
+                assert_eq!(event.created_utxos[0].owner, unshielded_address);
+            }
 
-    let payload = serde_json::to_vec(&message).context("serialize NATS message")?;
-    nats_client
-        .publish(TOPIC, payload.clone().into())
-        .await
-        .context("publish test message to NATS")?;
-    nats_client
-        .publish(TOPIC, payload.into())
-        .await
-        .context("publish test message to NATS")?;
-
-    let events = subscription_stream
-        .take(2)
-        .map_ok(|data| data.unshielded_utxos)
-        .try_collect::<Vec<_>>()
-        .await
-        .context("collect unshielded UTXO events")?;
-
-    assert!(!events.is_empty());
-
-    // Verify the address in returned UTXOs matches our subscription address
-    for event in &events {
-        if !event.created_utxos.is_empty() {
-            assert_eq!(event.created_utxos[0].owner, unshielded_address);
-        }
-
-        if !event.spent_utxos.is_empty() {
-            assert_eq!(event.spent_utxos[0].owner, unshielded_address,);
+            if !event.spent_utxos.is_empty() {
+                assert_eq!(event.spent_utxos[0].owner, unshielded_address,);
+            }
         }
     }
 
     // Additional test with address that has no UTXOs
     const NETWORK_ID: NetworkId = NetworkId::Undeployed;
-    let empty_owner_address = UnshieldedAddress("11223344".to_string());
-
-    let empty_addr_bech32m = to_bech32m(empty_owner_address.as_ref(), NETWORK_ID)?;
+    let empty_addr_bytes = [0x11, 0x22, 0x33, 0x44]; // Raw bytes for a non-existent address
+    let empty_addr_bech32m = to_bech32m(&empty_addr_bytes, NETWORK_ID)?;
     let empty_address = indexer_api::domain::UnshieldedAddress(empty_addr_bech32m);
 
     let empty_variables = unshielded_utxos_subscription::Variables {

@@ -661,21 +661,12 @@ pub const UT_ADDR_1_HEX: &str = "01020304";
 pub const UT_ADDR_2_HEX: &str = "05060708";
 pub const UT_ADDR_EMPTY_HEX: &str = "11223344"; // Address with no UTXOs for testing
 
-pub static OWNER_ADDR_1: LazyLock<UnshieldedAddress> = LazyLock::new(|| {
-    const_hex::decode(indexer_tests::chain_indexer_data::UT_ADDR_1_HEX)
-        .unwrap()
-        .into()
-});
-pub static OWNER_ADDR_2: LazyLock<UnshieldedAddress> = LazyLock::new(|| {
-    const_hex::decode(indexer_tests::chain_indexer_data::UT_ADDR_2_HEX)
-        .unwrap()
-        .into()
-});
-pub static OWNER_ADDR_EMPTY: LazyLock<UnshieldedAddress> = LazyLock::new(|| {
-    const_hex::decode(indexer_tests::chain_indexer_data::UT_ADDR_EMPTY_HEX)
-        .unwrap()
-        .into()
-});
+pub static OWNER_ADDR_1: LazyLock<UnshieldedAddress> =
+    LazyLock::new(|| const_hex::decode(UT_ADDR_1_HEX).unwrap().into());
+pub static OWNER_ADDR_2: LazyLock<UnshieldedAddress> =
+    LazyLock::new(|| const_hex::decode(UT_ADDR_2_HEX).unwrap().into());
+pub static OWNER_ADDR_EMPTY: LazyLock<UnshieldedAddress> =
+    LazyLock::new(|| const_hex::decode(UT_ADDR_EMPTY_HEX).unwrap().into());
 
 pub static INTENT_HASH: LazyLock<IntentHash> = LazyLock::new(|| [0x11u8; 32].into());
 
@@ -708,9 +699,9 @@ pub fn sample_spent_utxo() -> UnshieldedUtxo {
     UnshieldedUtxo {
         creating_transaction_id: 0,
         output_index: 0,
-        owner_address: indexer_tests::chain_indexer_data::OWNER_ADDR_1.clone(),
-        token_type: *indexer_tests::chain_indexer_data::TOKEN_NIGHT,
-        intent_hash: *indexer_tests::chain_indexer_data::INTENT_HASH,
+        owner_address: OWNER_ADDR_1.clone(),
+        token_type: *TOKEN_NIGHT,
+        intent_hash: *INTENT_HASH,
         value: 0,
     }
 }

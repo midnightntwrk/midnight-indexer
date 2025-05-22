@@ -263,11 +263,18 @@ impl Storage for SqliteStorage {
             .await?;
 
         for transaction in transactions.iter_mut() {
+            let identifiers = self
+                .get_identifiers_by_transaction_id(transaction.id)
+                .await?;
+            transaction.identifiers = identifiers;
+        }
+
+        for transaction in transactions.iter_mut() {
             transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos_by_creating_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
                 .await?;
             transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos_by_spending_tx_id(transaction.id)
+                .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
                 .await?;
         }
 

@@ -74,8 +74,15 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("wait for indexer-api to become ready")?;
 
-    // Run the tests.
-    let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, nats_url.as_str(),false).await;
+    // Run the tests. (nats_url is needed temporarily until we have node image)
+    let result = e2e::run(
+        NetworkId::Undeployed,
+        "localhost",
+        api_port,
+        nats_url.as_str(),
+        false,
+    )
+    .await;
 
     // It is best practice to kill the processes even when spawned with `kill_on_drop`.
     let _ = chain_indexer.kill().await;
@@ -103,8 +110,8 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("wait for indexer-api to become ready")?;
 
-    // Run the tests.
-    let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, nats_url, false).await;
+    // Run the tests. (pass empty string for nats_url - it won't be used in standalone mode)
+    let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, "", false).await;
 
     // It is best practice to kill the processes even when spawned with `kill_on_drop`.
     let _ = indexer_standalone.kill().await;
@@ -313,6 +320,7 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
             ),
         ),
         ("APP__INFRA__API__PORT", api_port.to_string()),
+        ("APP__INFRA__API__MAX_COMPLEXITY", "250".into()),
         ("APP__INFRA__NODE__URL", node_url.to_owned()),
         ("APP__INFRA__STORAGE__CNN_URL", sqlite_file),
     ];
