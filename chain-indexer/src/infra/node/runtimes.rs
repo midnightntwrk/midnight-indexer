@@ -13,7 +13,7 @@
 
 #[subxt::subxt(runtime_metadata_path = "../.node/0.12.0/metadata.scale")]
 mod runtime_0_12 {}
-#[subxt::subxt(runtime_metadata_path = "../.node/0.13.0-443bc2bf/metadata.scale")]
+#[subxt::subxt(runtime_metadata_path = "../.node/0.13.0-8a17df53/metadata.scale")]
 mod runtime_0_13 {}
 
 use crate::{domain::BlockHash, infra::node::SubxtNodeError};

@@ -49,7 +49,7 @@ log                         = { version = "0.4" }
 logforth                    = { version = "0.25" }
 metrics                     = { version = "0.24" }
 metrics-exporter-prometheus = { version = "0.17", default-features = false }
-midnight-ledger             = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-4.0.0" }
+midnight-ledger             = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", rev = "482fe64a5683bcabf5bf9f3aad037f527e739f8b" }
 opentelemetry               = { version = "0.29" }
 opentelemetry_sdk           = { version = "0.29" }
 opentelemetry-otlp          = { version = "0.29" }

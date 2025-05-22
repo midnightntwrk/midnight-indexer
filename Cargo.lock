@@ -3732,8 +3732,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-coin-structure"
-version = "0.4.0"
-source = "git+https://github.com/input-output-hk/midnight-ledger-prototype?tag=coin-structure-0.4#b315c1d60d97c076e23fa3b6acf3329dde1aa4c4"
+version = "0.5.0-alpha"
+source = "git+https://github.com/input-output-hk/midnight-ledger-prototype?tag=coin-structure-0.5#4e413286933e62d2b57e72d03a42440dfcc8652c"
 dependencies = [
  "fake",
  "lazy_static",
@@ -3744,8 +3744,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "4.0.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-4.0.0#b315c1d60d97c076e23fa3b6acf3329dde1aa4c4"
+version = "5.0.0-alpha"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?rev=482fe64a5683bcabf5bf9f3aad037f527e739f8b#482fe64a5683bcabf5bf9f3aad037f527e739f8b"
 dependencies = [
  "derive-where",
  "fake",
@@ -3766,8 +3766,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "0.3.0"
-source = "git+https://github.com/input-output-hk/midnight-ledger-prototype?tag=onchain-runtime-0.3#b315c1d60d97c076e23fa3b6acf3329dde1aa4c4"
+version = "0.4.0-alpha"
+source = "git+https://github.com/input-output-hk/midnight-ledger-prototype?tag=onchain-runtime-0.4#4e413286933e62d2b57e72d03a42440dfcc8652c"
 dependencies = [
  "derive-where",
  "enum_index",
@@ -3785,8 +3785,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "0.3.0"
-source = "git+https://github.com/input-output-hk/midnight-ledger-prototype?tag=onchain-runtime-0.3#b315c1d60d97c076e23fa3b6acf3329dde1aa4c4"
+version = "0.4.0-alpha"
+source = "git+https://github.com/input-output-hk/midnight-ledger-prototype?tag=onchain-runtime-0.4#4e413286933e62d2b57e72d03a42440dfcc8652c"
 dependencies = [
  "derive-where",
  "fake",
@@ -3797,8 +3797,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "0.3.0"
-source = "git+https://github.com/input-output-hk/midnight-ledger-prototype?tag=onchain-runtime-0.3#b315c1d60d97c076e23fa3b6acf3329dde1aa4c4"
+version = "0.4.0-alpha"
+source = "git+https://github.com/input-output-hk/midnight-ledger-prototype?tag=onchain-runtime-0.4#4e413286933e62d2b57e72d03a42440dfcc8652c"
 dependencies = [
  "derive-where",
  "fake",
@@ -3901,8 +3901,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "4.0.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-4.0.0#b315c1d60d97c076e23fa3b6acf3329dde1aa4c4"
+version = "4.1.0-alpha"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?rev=482fe64a5683bcabf5bf9f3aad037f527e739f8b#482fe64a5683bcabf5bf9f3aad037f527e739f8b"
 dependencies = [
  "derive-where",
  "fake",

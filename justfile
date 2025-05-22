@@ -158,8 +158,8 @@ coverage-report: coverage-generation
 
 # node_version := "0.12.0"
 # generator_version := "0.12.0"
-node_version := "0.13.0-443bc2bf"
-generator_version := "443bc2bf"
+node_version := "0.13.0-8a17df53"
+generator_version := "8a17df53"
 
 generate-node-data:
     if [ -d ./.node/{{node_version}} ]; then rm -r ./.node/{{node_version}}; fi
@@ -172,6 +172,13 @@ generate-node-data:
         -v ./.node/{{node_version}}:/node \
         ghcr.io/midnight-ntwrk/midnight-node:{{node_version}}
     sleep 3
+    docker run \
+        --rm \
+        --name generator-generate-txs \
+        --network host \
+        -v /tmp:/out \
+        ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
+        generate-txs batches -n 3 -b 2
     docker run \
         --rm \
         --name generator-generate-contract-deploy \
@@ -215,13 +222,6 @@ generate-node-data:
         generate-txs contract-calls maintenance \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
         --contract-address /out/contract_address.mn
-    docker run \
-        --rm \
-        --name generator-generate-txs \
-        --network host \
-        -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
-        generate-txs batches -n 3 -b 2
     docker rm -f node
 
 run-node:
