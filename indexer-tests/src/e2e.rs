@@ -1088,6 +1088,10 @@ struct BlockSubscription;
 )]
 struct ContractActionSubscription;
 
+// TODO(midnight-indexer/PR #23): Temporary wrapper to dodge the
+// GraphQLQuery error-type mismatch (anyhow::Error vs serde::de::Error).
+// Delete this `mod graphql_types` once we align the error types or
+// customise the derive to return our own error.
 mod graphql_types {
     use graphql_client::GraphQLQuery;
     use indexer_api::domain::{HexEncoded, UnshieldedAddress};
