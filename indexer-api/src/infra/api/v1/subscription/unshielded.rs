@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{Storage, UnshieldedUtxoExt},
+    domain::{Storage, UnshieldedUtxoFilter},
     infra::api::v1::{
         ContextExt, UnshieldedAddress, UnshieldedUtxo, UnshieldedUtxoEvent,
         UnshieldedUtxoEventType, addr_to_common,
@@ -106,12 +106,18 @@ where
                     .context("fetch tx for subscription event")?;
 
                 let created = storage
-                    .get_unshielded_utxos_by_address_created_in_tx(transaction_id, &common_address)
+                    .get_unshielded_utxos(
+                        Some(&common_address),
+                        UnshieldedUtxoFilter::CreatedInTxForAddress(transaction_id),
+                    )
                     .await
                     .context("fetch created UTXOs")?;
 
                 let spent = storage
-                    .get_unshielded_utxos_by_address_spent_in_tx(transaction_id, &common_address)
+                    .get_unshielded_utxos(
+                        Some(&common_address),
+                        UnshieldedUtxoFilter::SpentInTxForAddress(transaction_id),
+                    )
                     .await
                     .context("fetch spent UTXOs")?;
 
