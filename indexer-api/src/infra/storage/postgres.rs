@@ -26,7 +26,6 @@ use indexer_common::{
     infra::{pool::postgres::PostgresPool, sqlx::postgres::map_deadlock_detected},
 };
 use indoc::indoc;
-use log::warn;
 use sqlx::types::{Uuid, time::OffsetDateTime};
 use std::num::NonZeroU32;
 
