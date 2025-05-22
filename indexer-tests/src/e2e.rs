@@ -14,15 +14,13 @@
 //! e2e testing library
 
 use crate::{
-    chain_indexer_data::{
-        INTENT_HASH, OWNER_ADDR_EMPTY, TOKEN_NIGHT, UT_ADDR_1_HEX, token_type_to_hex,
-    },
     e2e::block_subscription::{
         BlockSubscriptionBlocks as BlockSubscriptionBlock,
         BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
         BlockSubscriptionBlocksTransactionsContractActions as BlockSubscriptionContractAction,
         BlockSubscriptionBlocksTransactionsUnshieldedCreatedOutputs as BlockSubscriptionUnshieldedUtxo,
     },
+    e2e::contract_action_query::ContractActionQueryContractAction,
     graphql_ws_client,
 };
 use anyhow::{Context, Ok, anyhow, bail};
@@ -732,7 +730,9 @@ async fn test_unshielded_utxo_subscription(
 
     // Additional test with address that has no UTXOs
     const NETWORK_ID: NetworkId = NetworkId::Undeployed;
-    let empty_addr_bech32m = to_bech32m(OWNER_ADDR_EMPTY.as_ref(), NETWORK_ID)?;
+    let empty_owner_address = UnshieldedAddress("11223344".to_string());
+
+    let empty_addr_bech32m = to_bech32m(empty_owner_address.as_ref(), NETWORK_ID)?;
     let empty_address = indexer_api::domain::UnshieldedAddress(empty_addr_bech32m);
 
     let empty_variables = unshielded_utxos_subscription::Variables {
