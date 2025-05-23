@@ -94,8 +94,8 @@ where
 
         // Build a stream of WalletSyncEvents by merging ViewingUpdates and ProgressUpdates. The
         // ViewingUpdates stream should be infinite by definition (see the trait). However, if it
-        // nevertheless completes, we use the Tripwire pattern to ensure the ProgressUpdates stream
-        // also completes, preventing the merged stream from hanging indefinitely waiting for both
+        // nevertheless completes, we use a Tripwire to ensure the ProgressUpdates stream also
+        // completes, preventing the merged stream from hanging indefinitely waiting for both
         // streams to complete.
         let (trigger, tripwire) = Tripwire::new();
 
