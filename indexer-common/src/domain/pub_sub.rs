@@ -47,7 +47,7 @@ pub struct BlockIndexed {
 message!(BlockIndexed);
 
 /// Message/event signaling that a wallet has been indexed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, From)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, From)]
 pub struct WalletIndexed {
     pub session_id: SessionId,
 }

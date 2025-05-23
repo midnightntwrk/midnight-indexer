@@ -42,13 +42,19 @@ mod tests {
     };
     use anyhow::Context;
     use futures::{StreamExt, TryStreamExt};
-    use std::time::{Duration, Instant};
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::{Duration, Instant},
+    };
     use testcontainers::{GenericImage, ImageExt, core::WaitFor, runners::AsyncRunner};
-    use tokio::time::sleep;
+    use tokio::{task, time::sleep};
 
     #[tokio::test]
     async fn test() -> Result<(), BoxError> {
-        let nats_container = GenericImage::new("nats", "2.10.24")
+        let nats_container = GenericImage::new("nats", "2.11.1")
             .with_wait_for(WaitFor::message_on_stderr("Server is ready"))
             .with_cmd([
                 "--user",
@@ -76,41 +82,43 @@ mod tests {
             .await
             .context("get NATS port")?;
         let nats_url = format!("localhost:{nats_port}");
-
         let config = Config {
             url: nats_url.clone(),
             username: "indexer".to_string(),
             password: env!("APP__INFRA__PUB_SUB__PASSWORD").into(),
         };
 
-        let publisher = NatsPublisher::new(config.clone())
-            .await
-            .context("create NatsPublisher")?;
-
-        let subscriber = NatsSubscriber::new(config)
+        let subscriber = NatsSubscriber::new(config.clone())
             .await
             .context("create NatsSubscriber")?;
-
         let wallet_indexed_messages = subscriber.subscribe::<WalletIndexed>();
-        sleep(Duration::from_millis(250)).await;
 
-        let wallet_indexed_a = WalletIndexed::from(SessionId::from([0; 32]));
-        let wallet_indexed_b = WalletIndexed::from(SessionId::from([1; 32]));
-        publisher
-            .publish(&wallet_indexed_a)
-            .await
-            .context("publish")?;
-        publisher
-            .publish(&wallet_indexed_b)
-            .await
-            .context("publish")?;
+        let wallet_indexed = WalletIndexed::from(SessionId::from([0; 32]));
+        let message_received = Arc::new(AtomicBool::new(false));
+
+        task::spawn({
+            let publisher = NatsPublisher::new(config)
+                .await
+                .context("create NatsPublisher")?;
+            let message_received = message_received.clone();
+            async move {
+                while !message_received.load(Ordering::Relaxed) {
+                    sleep(Duration::from_millis(100)).await;
+                    publisher
+                        .publish(&wallet_indexed)
+                        .await
+                        .expect("can publish");
+                }
+            }
+        });
 
         let messages = wallet_indexed_messages
-            .take(2)
+            .take(1)
             .try_collect::<Vec<_>>()
             .await
             .context("collect messages")?;
-        assert_eq!(messages, [wallet_indexed_a, wallet_indexed_b]);
+        message_received.store(true, Ordering::Relaxed);
+        assert_eq!(messages, [wallet_indexed]);
 
         Ok(())
     }

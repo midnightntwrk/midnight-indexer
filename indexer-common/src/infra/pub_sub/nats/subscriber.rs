@@ -17,7 +17,7 @@ use crate::{
 };
 use async_nats::{Client, ConnectOptions, Event};
 use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, stream};
-use log::warn;
+use log::{debug, warn};
 use secrecy::ExposeSecret;
 use std::time::Duration;
 use thiserror::Error;
@@ -42,6 +42,7 @@ impl NatsSubscriber {
             .user_and_password(username, password.expose_secret().to_owned())
             .event_callback(|event| async {
                 match event {
+                    Event::Connected => debug!("NATS client connected"),
                     Event::Disconnected => warn!("NATS client disconnected"),
                     Event::LameDuckMode => warn!("NATS client in lame duck mode"),
                     Event::Draining => warn!("NATS client draining"),
@@ -49,7 +50,6 @@ impl NatsSubscriber {
                     Event::SlowConsumer(_) => warn!("NATS client has slow consumer"),
                     Event::ServerError(error) => warn!(error:%; "NATS server error"),
                     Event::ClientError(error) => warn!(error:%; "NATS client error"),
-                    _ => {}
                 }
             });
         let client = options.connect(url).await?;

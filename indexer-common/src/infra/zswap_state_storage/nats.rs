@@ -249,7 +249,7 @@ mod tests {
 
     #[tokio::test]
     async fn test() -> anyhow::Result<()> {
-        let nats_container = GenericImage::new("nats", "2.10.24")
+        let nats_container = GenericImage::new("nats", "2.11.1")
             .with_wait_for(WaitFor::message_on_stderr("Server is ready"))
             .with_cmd([
                 "--user",

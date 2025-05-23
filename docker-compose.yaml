@@ -111,7 +111,7 @@ services:
       - no-new-privileges:true
 
   nats:
-    image: "nats:2.10.24"
+    image: "nats:2.11.1"
     restart: "always"
     command: ["--user", "indexer", "--pass", $APP__INFRA__PUB_SUB__PASSWORD, "-js"]
     ports:
