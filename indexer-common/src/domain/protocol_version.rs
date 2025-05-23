@@ -13,6 +13,7 @@
 
 use derive_more::From;
 use parity_scale_codec::Decode;
+use serde::Deserialize;
 use std::{
     fmt::{self, Display},
     num::TryFromIntError,
@@ -20,16 +21,16 @@ use std::{
 use thiserror::Error;
 
 pub const PROTOCOL_VERSION_000_012_000: ProtocolVersion = ProtocolVersion(12_000);
+pub const PROTOCOL_VERSION_000_013_000: ProtocolVersion = ProtocolVersion(13_000);
 
 /// The runtime specification version of the chain; defaults to 1, i.e. 0.0.1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, From)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, From)]
 pub struct ProtocolVersion(pub u32);
 
 impl ProtocolVersion {
     /// Get compatibility with given other [ProtocolVersion] based upon major and minor equality.
-    /// The default (1) is compatible with any other [ProtocolVersion].
     pub fn is_compatible(&self, other: ProtocolVersion) -> bool {
-        self.0 == 1 || self.major() == other.major() && self.minor() == other.minor()
+        self.major() == other.major() && self.minor() == other.minor()
     }
 
     /// The major version, i.e. `1` in `1.2.3`.
@@ -93,6 +94,9 @@ mod tests {
 
     #[test]
     fn test_protocol_version_display() {
+        let version = ProtocolVersion::from(12_000);
+        assert_eq!(version.to_string(), "0.12.0");
+
         let version = ProtocolVersion::from(1_002_003);
         assert_eq!(version.to_string(), "1.2.3");
 
