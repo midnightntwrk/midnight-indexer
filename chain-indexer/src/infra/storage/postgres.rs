@@ -112,7 +112,7 @@ impl Storage for PostgresStorage {
         "from_block_height": "{from_block_height}",
         "to_block_height": "{to_block_height}"
     })]
-    fn get_transactions(
+    fn get_transaction_chunks(
         &self,
         from_block_height: u32,
         to_block_height: u32,

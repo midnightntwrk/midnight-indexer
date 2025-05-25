@@ -66,7 +66,7 @@ pub async fn run(
         .get_highest_block()
         .await
         .context("get stream of highest blocks from node")?;
-    let highest_height = highest_block.map(|BlockInfo { height, .. }| height);
+    let highest_height = highest_block.map(|b| b.height);
     info!(highest_height:?; "starting indexing");
 
     let transaction_count = storage
@@ -79,7 +79,9 @@ pub async fn run(
         .await
         .context("get contract action count")?;
 
-    let (zswap_state, zswap_state_block_height) = zswap_state_storage
+    let metrics = Metrics::new(highest_height, transaction_count, contract_action_count);
+
+    let (zswap_state, mut zswap_state_block_height) = zswap_state_storage
         .load_zswap_state()
         .await
         .context("get zswap state")?
@@ -93,19 +95,25 @@ pub async fn run(
         .unwrap_or_default();
     let mut zswap_state = ZswapState::from(zswap_state);
 
+    // If storage is behind the zswap state storage, reset zswap state. It will be built and stored
+    // in the next step.
+    if zswap_state_block_height > highest_height {
+        zswap_state_block_height = None;
+        zswap_state = ZswapState::default();
+    }
+
     // Apply the transactions to the zswap state from the saved zswap state height (exclusively, +1)
     // to the highest saved block height (inclusively); also save the zswap state thereafter.
     if let Some(highest_height) = highest_height {
-        let from_height = zswap_state_block_height
-            .map(|height| height + 1)
-            .unwrap_or_default();
+        let zswap_state_block_height = zswap_state_block_height.unwrap_or_default();
 
-        if from_height <= highest_height {
-            info!(from_height, highest_height; "updating zswap state");
+        if zswap_state_block_height < highest_height {
+            info!(zswap_state_block_height, highest_height; "updating zswap state");
 
-            let all_transactions = storage.get_transactions(from_height, highest_height);
-            let mut all_transactions = pin!(all_transactions);
-            while let Some(mut transactions) = all_transactions
+            let transaction_chunks =
+                storage.get_transaction_chunks(zswap_state_block_height + 1, highest_height);
+            let mut transaction_chunks = pin!(transaction_chunks);
+            while let Some(mut transactions) = transaction_chunks
                 .try_next()
                 .await
                 .context("get next transaction")?
@@ -122,8 +130,6 @@ pub async fn run(
                 .context("save zswap state")?;
         }
     }
-
-    let metrics = Metrics::new(highest_height, transaction_count, contract_action_count);
 
     let highest_block_on_node = Arc::new(RwLock::new(None));
 

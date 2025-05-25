@@ -34,7 +34,7 @@ where
 
     /// Get a stream of transaction chunks for all blocks starting at the given height until the
     /// given height.
-    fn get_transactions(
+    fn get_transaction_chunks(
         &self,
         from_block_height: u32,
         to_block_height: u32,

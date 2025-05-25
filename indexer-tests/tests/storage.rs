@@ -169,7 +169,7 @@ async fn run_tests(
     assert_eq!(contract_action_count, (2, 2, 1));
 
     let chunks = chain_indexer_storage
-        .get_transactions(0, 1)
+        .get_transaction_chunks(0, 1)
         .try_collect::<Vec<_>>()
         .await
         .context("collect transactions 0..=1")?;

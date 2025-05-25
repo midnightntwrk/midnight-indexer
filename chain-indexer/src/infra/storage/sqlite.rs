@@ -106,7 +106,7 @@ impl Storage for SqliteStorage {
         tx.commit().await
     }
 
-    fn get_transactions(
+    fn get_transaction_chunks(
         &self,
         from_block_height: u32,
         to_block_height: u32,
