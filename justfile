@@ -174,6 +174,13 @@ generate-node-data:
     sleep 3
     docker run \
         --rm \
+        --name generator-generate-txs \
+        --network host \
+        -v /tmp:/out \
+        ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
+        generate-txs batches -n 3 -b 2
+    docker run \
+        --rm \
         --name generator-generate-contract-deploy \
         --network host \
         -v /tmp:/out \
@@ -215,13 +222,6 @@ generate-node-data:
         generate-txs contract-calls maintenance \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
         --contract-address /out/contract_address.mn
-    docker run \
-        --rm \
-        --name generator-generate-txs \
-        --network host \
-        -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
-        generate-txs batches -n 3 -b 2
     docker rm -f node
 
 run-node:
