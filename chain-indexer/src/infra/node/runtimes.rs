@@ -109,7 +109,6 @@ pub async fn get_zswap_state_root(
     }
 }
 
-// Implementation for 0.12.0 - WITHOUT unshielded tokens support
 async fn make_block_details_runtime_0_12(
     extrinsics: Extrinsics<SubstrateConfig, OnlineClient<SubstrateConfig>>,
     events: Events<SubstrateConfig>,
@@ -151,22 +150,19 @@ async fn make_block_details_runtime_0_12(
             Event::Midnight(midnight::Event::TxApplied(details)) => {
                 Some((details.tx_hash, ApplyStage::Success))
             }
-
             Event::Midnight(midnight::Event::TxOnlyGuaranteedApplied(details)) => {
                 Some((details.tx_hash, ApplyStage::PartialSuccess))
             }
-
             Event::Session(partner_chains_session::Event::NewSession { .. }) => {
                 *authorities = None;
                 None
             }
-
             _ => None,
         })
         .collect::<Result<HashMap<_, _>, _>>()
         .map_err(Box::new)?;
 
-    // Create empty maps for unshielded data since 0.12.0 doesn't support it
+    // 0.12.0 doesn't support unshielded tokens
     let created_unshielded_utxos_info = HashMap::new();
     let spent_unshielded_utxos_info = HashMap::new();
 
@@ -179,7 +175,7 @@ async fn make_block_details_runtime_0_12(
     })
 }
 
-// Implementation for 0.13.0 - WITH unshielded tokens support
+// WITH unshielded tokens support
 async fn make_block_details_runtime_0_13(
     extrinsics: Extrinsics<SubstrateConfig, OnlineClient<SubstrateConfig>>,
     events: Events<SubstrateConfig>,
@@ -218,7 +214,7 @@ async fn make_block_details_runtime_0_13(
     let mut created_unshielded_utxos_info = HashMap::new();
     let mut spent_unshielded_utxos_info = HashMap::new();
 
-    // Collect transaction events first
+    // First pass: collect transaction success/failure states
     for event_details in events.iter().flatten() {
         if let Ok(event) = event_details.as_root_event::<Event>() {
             match event {
@@ -236,8 +232,10 @@ async fn make_block_details_runtime_0_13(
         }
     }
 
-    let mut tx_hash_index = 0;
+    // Second pass: collect unshielded UTXOs
+    // The node emits one UnshieldedTokens event per transaction with both created and spent
     let tx_hashes: Vec<_> = apply_stages.keys().cloned().collect();
+    let mut tx_hash_index = 0;
 
     for event_details in events.iter().flatten() {
         if let Ok(Event::Midnight(midnight::Event::UnshieldedTokens(details))) =
