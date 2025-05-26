@@ -25,7 +25,6 @@ use indexer_common::{
     stream::flatten_chunks,
 };
 use indoc::indoc;
-use log::warn;
 use sqlx::{
     Database, Row, Sqlite,
     types::{Uuid, time::OffsetDateTime},

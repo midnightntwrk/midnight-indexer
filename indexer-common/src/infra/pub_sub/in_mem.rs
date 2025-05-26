@@ -121,7 +121,7 @@ mod tests {
         let message = messages.next().await;
         assert_matches!(message, Some(Ok(message)) if message == wallet_indexed);
 
-        let mut utxo_messages = subscriber.subscribe::<UnshieldedUtxoIndexed>().await?;
+        let mut utxo_messages = subscriber.subscribe::<UnshieldedUtxoIndexed>();
 
         let utxo_changed = UnshieldedUtxoIndexed {
             address_bech32m:
