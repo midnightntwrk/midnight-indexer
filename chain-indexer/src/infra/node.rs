@@ -53,7 +53,10 @@ use subxt::{
         legacy::LegacyRpcMethods,
         rpc::reconnecting_rpc_client::{ExponentialBackoff, RpcClient},
     },
-    config::substrate::{BlakeTwo256, ConsensusEngineId, DigestItem, SubstrateHeader},
+    config::{
+        Hasher,
+        substrate::{ConsensusEngineId, DigestItem, SubstrateHeader},
+    },
     ext::subxt_rpcs,
     utils::H256,
 };
@@ -494,11 +497,14 @@ async fn receive_block(
 
 /// Check an authority set against a block header's digest logs to determine the author of that
 /// block.
-fn extract_block_author(
-    header: &SubstrateHeader<u32, BlakeTwo256>,
+fn extract_block_author<H>(
+    header: &SubstrateHeader<u32, H>,
     authorities: &[[u8; 32]],
     protocol_version: ProtocolVersion,
-) -> Result<Option<BlockAuthor>, SubxtNodeError> {
+) -> Result<Option<BlockAuthor>, SubxtNodeError>
+where
+    H: Hasher,
+{
     if authorities.is_empty() {
         return Ok(None);
     }

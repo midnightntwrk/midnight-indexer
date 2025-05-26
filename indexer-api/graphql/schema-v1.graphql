@@ -42,7 +42,6 @@ input BlockOffset @oneOf {
 	height: Int
 }
 
-
 """
 A contract action.
 """
@@ -93,10 +92,7 @@ type ContractUpdate implements ContractAction {
 	transaction: Transaction!
 }
 
-
 scalar HexEncoded
-
-
 
 type MerkleTreeCollapsedUpdate {
 	"""
@@ -177,7 +173,6 @@ type RelevantTransaction {
 	"""
 	end: Int!
 }
-
 
 type Subscription {
 	"""
@@ -268,8 +263,17 @@ union WalletSyncEvent = ViewingUpdate | ProgressUpdate
 
 union ZswapChainStateUpdate = MerkleTreeCollapsedUpdate | RelevantTransaction
 
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
 directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Indicates that an Input Object is a OneOf Input Object (and thus requires exactly one of its field be provided)
+"""
 directive @oneOf on INPUT_OBJECT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
 directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
 schema {
 	query: Query
