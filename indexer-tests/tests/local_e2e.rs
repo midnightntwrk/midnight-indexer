@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("wait for indexer-api to become ready")?;
 
-    // Run the tests. (nats_url is needed temporarily until we have node image)
+    // Run the tests.
     let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
 
     // It is best practice to kill the processes even when spawned with `kill_on_drop`.
@@ -103,8 +103,8 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("wait for indexer-api to become ready")?;
 
-    // Run the tests. (pass empty string for nats_url - it won't be used in standalone mode)
-    let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, "", false).await;
+    // Run the tests.
+    let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
 
     // It is best practice to kill the processes even when spawned with `kill_on_drop`.
     let _ = indexer_standalone.kill().await;
