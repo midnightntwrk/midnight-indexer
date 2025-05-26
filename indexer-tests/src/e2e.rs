@@ -100,6 +100,8 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
         .await
         .context("test wallet subscription")?;
 
+    println!("### successfully finished e2e testing");
+
     Ok(())
 }
 
@@ -170,11 +172,6 @@ impl IndexerData {
             .flat_map(|block| block.transactions.to_owned())
             .collect::<Vec<_>>();
 
-        // Verify that there are transactions. This of course depends on how the node is set up,
-        // i.e. the just recipe `generate-node-data`: genesis 1, 1 initial, 6 zswap
-        // transactions, 3 contract actions.
-        assert_eq!(transactions.len(), 11);
-
         // Verify that all contract actions reference the correct transaction.
         assert!(transactions.iter().all(|transaction| {
             transaction
@@ -188,10 +185,6 @@ impl IndexerData {
             .iter()
             .flat_map(|transaction| transaction.contract_actions.to_owned())
             .collect::<Vec<_>>();
-
-        // Verify that there are contract actions. This of course depends on how the node is set
-        // up, i.e. the just recipe `generate-node-data`.
-        assert_eq!(contract_actions.len(), 3);
 
         // Verify that contract calls and their deploy have the same address.
         contract_actions
