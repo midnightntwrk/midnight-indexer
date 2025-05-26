@@ -26,9 +26,6 @@ use crate::{
     graphql_ws_client,
 };
 use anyhow::{Context, Ok, bail};
-#[cfg(feature = "cloud")]
-// TODO: Remove once UT node image is available. nats_url is a temporarily needed for testing.
-use async_nats::ConnectOptions;
 use bech32::{Bech32m, Hrp};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
@@ -36,9 +33,6 @@ use indexer_api::{
     domain::{AsBytesExt, HexEncoded, ViewingKey},
     infra::api::v1::{ApplyStage, Unit, UnshieldedAddress},
 };
-#[cfg(feature = "cloud")]
-// TODO: Remove once UT node image is available. nats_url is a temporarily needed for testing.
-use indexer_common::domain::UnshieldedUtxoIndexed;
 use indexer_common::domain::{NetworkId, unshielded::to_bech32m};
 use itertools::Itertools;
 use midnight_serialize::Serializable;
@@ -53,14 +47,7 @@ const MAX_HEIGHT: usize = 30;
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
 /// (http and ws) at the given host and port.
-pub async fn run(
-    network_id: NetworkId,
-    host: &str,
-    port: u16,
-    nats_url: &str, /* TODO: Remove once UT node image is available. nats_url is a temporarily
-                     * needed for testing. */
-    secure: bool,
-) -> anyhow::Result<()> {
+pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> anyhow::Result<()> {
     println!("### starting e2e testing");
 
     let (api_url, ws_api_url) = {
@@ -106,7 +93,7 @@ pub async fn run(
     test_contract_action_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test contract action subscription")?;
-    test_unshielded_utxo_subscription(&indexer_data, &ws_api_url, nats_url) // we use node mock version at the moment
+    test_unshielded_utxo_subscription(&indexer_data, &ws_api_url) // we use node mock version at the moment
         .await
         .context("test unshielded UTXOs subscription")?;
     test_wallet_subscription(&ws_api_url)
@@ -672,13 +659,8 @@ async fn test_contract_action_subscription(
 }
 
 async fn test_unshielded_utxo_subscription(
-    #[cfg(feature = "cloud")] indexer_data: &IndexerData,
-    #[cfg(feature = "standalone")] _indexer_data: &IndexerData,
+    indexer_data: &IndexerData,
     ws_api_url: &str,
-    #[cfg(feature = "cloud")] nats_url: &str, /* nats_url is needed temporarily until we have
-                                               * node image */
-    #[cfg(feature = "standalone")] _nats_url: &str, /* nats_url is needed temporarily until we
-                                                     * have node image */
 ) -> anyhow::Result<()> {
     use graphql_types::*;
 
@@ -706,34 +688,6 @@ async fn test_unshielded_utxo_subscription(
             graphql_ws_client::subscribe::<UnshieldedUtxosSubscription>(ws_api_url, variables)
                 .await
                 .context("subscribe to unshielded UTXOs")?;
-
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
-        const TOPIC: &str = "pub-sub.UnshieldedUtxoIndexed";
-
-        let nats_client = async_nats::connect_with_options(
-            // we use node mock version at the moment
-            nats_url,
-            ConnectOptions::new().user_and_password("indexer".to_string(), "indexer".to_string()),
-        )
-        .await
-        .context("failed to connect to NATS server")?;
-
-        let test_transaction_id = 1;
-        let message = UnshieldedUtxoIndexed {
-            address_bech32m: unshielded_address.clone().0,
-            transaction_id: test_transaction_id,
-        };
-
-        let payload = serde_json::to_vec(&message).context("serialize NATS message")?;
-        nats_client
-            .publish(TOPIC, payload.clone().into())
-            .await
-            .context("publish test message to NATS")?;
-        nats_client
-            .publish(TOPIC, payload.into())
-            .await
-            .context("publish test message to NATS")?;
 
         let events = subscription_stream
             .take(2)
