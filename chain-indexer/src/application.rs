@@ -65,7 +65,7 @@ pub async fn run(
     let highest_block = storage
         .get_highest_block()
         .await
-        .context("get stream of highest blocks from node")?;
+        .context("get highest block")?;
     let highest_height = highest_block.map(|b| b.height);
     info!(highest_height:?; "starting indexing");
 
@@ -95,8 +95,7 @@ pub async fn run(
         .unwrap_or_default();
     let mut zswap_state = ZswapState::from(zswap_state);
 
-    // If storage is behind the zswap state storage, reset zswap state. It will be built and stored
-    // in the next step.
+    // Reset zswap state if storage is behind zswap state storage.
     if zswap_state_block_height > highest_height {
         zswap_state_block_height = None;
         zswap_state = ZswapState::default();
@@ -116,7 +115,7 @@ pub async fn run(
             while let Some(mut transactions) = transaction_chunks
                 .try_next()
                 .await
-                .context("get next transaction")?
+                .context("get next transaction chunk")?
             {
                 zswap_state.apply_transactions(transactions.as_mut_slice(), network_id)?;
             }
