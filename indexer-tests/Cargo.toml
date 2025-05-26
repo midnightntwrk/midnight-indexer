@@ -20,7 +20,6 @@ chain-indexer     = { path = "../chain-indexer" }
 clap              = { workspace = true, features = [ "derive" ] }
 const-hex         = { workspace = true }
 derive_more       = { workspace = true, features = [ "display" ] }
-fake              = { workspace = true }
 futures           = { workspace = true }
 graphql_client    = { workspace = true, features = [ "reqwest-rustls" ] }
 indexer-api       = { path = "../indexer-api" }
