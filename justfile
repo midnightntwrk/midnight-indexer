@@ -158,8 +158,8 @@ coverage-report: coverage-generation
 
 # node_version := "0.12.0"
 # generator_version := "0.12.0"
-node_version := "0.13.0-443bc2bf"
-generator_version := "443bc2bf"
+node_version := "0.13.0-8a17df53"
+generator_version := "8a17df53"
 
 generate-node-data:
     if [ -d ./.node/{{node_version}} ]; then rm -r ./.node/{{node_version}}; fi
