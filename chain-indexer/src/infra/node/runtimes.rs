@@ -225,6 +225,31 @@ async fn make_block_details_runtime_0_13(
         }
     }
 
+    // Second pass: collect unshielded UTXOs
+    // The node emits one UnshieldedTokens event per transaction with both created and spent
+    let tx_hashes: Vec<_> = apply_stages.keys().cloned().collect();
+    let mut tx_hash_index = 0;
+
+    for event_details in events.iter().flatten() {
+        if let Ok(Event::Midnight(midnight::Event::UnshieldedTokens(details))) =
+            event_details.as_root_event::<Event>()
+        {
+            if tx_hash_index < tx_hashes.len() {
+                let tx_hash = tx_hashes[tx_hash_index];
+
+                if !details.created.is_empty() {
+                    created_unshielded_utxos_info.insert(tx_hash, details.created);
+                }
+
+                if !details.spent.is_empty() {
+                    spent_unshielded_utxos_info.insert(tx_hash, details.spent);
+                }
+
+                tx_hash_index += 1;
+            }
+        }
+    }
+
     Ok(BlockDetails {
         timestamp,
         raw_transactions,
