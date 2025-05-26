@@ -74,15 +74,7 @@ where
         let storage = cx.get_storage::<S>();
         let network_id = cx.get_network_id();
 
-        let utxo_stream = subscriber
-            .subscribe::<UnshieldedUtxoIndexed>()
-            .await
-            .inspect_err(|e| {
-                error!(
-                    error:? = e.as_chain();
-                    "cannot subscribe to UnshieldedUtxoIndexed"
-                )
-            })?;
+        let utxo_stream = subscriber.subscribe::<UnshieldedUtxoIndexed>();
 
         let requested = address;
 
