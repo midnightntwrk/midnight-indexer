@@ -59,6 +59,9 @@ pub async fn run(
         parallelism,
     } = config;
 
+    // Shared atomic counter for the maximum transaction ID seen in BlockIndexed events. This allows
+    // Wallet Indexer to skip database queries when it is already up-to-date. Updated by the
+    // block_indexed_task, read by index_wallet tasks.
     let max_transaction_id = Arc::new(AtomicU64::new(0));
 
     let block_indexed_task = task::spawn({
