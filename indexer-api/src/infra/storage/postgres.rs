@@ -21,7 +21,7 @@ use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::{
     domain::{ContractAddress, Identifier, SessionId, ViewingKey},
-    infra::{pool::postgres::PostgresPool, sqlx::postgres::map_deadlock_detected},
+    infra::{pool::postgres::PostgresPool, sqlx::postgres::ignore_deadlock_detected},
     stream::flatten_chunks,
 };
 use indoc::indoc;
@@ -636,7 +636,7 @@ impl Storage for PostgresStorage {
             .execute(&*self.pool)
             .await
             .map(|_| ())
-            .or_else(|error| map_deadlock_detected(error, || ()))?;
+            .or_else(|error| ignore_deadlock_detected(error, || ()))?;
 
         Ok(())
     }

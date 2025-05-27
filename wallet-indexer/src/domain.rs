@@ -28,7 +28,7 @@ use std::io;
 use thiserror::Error;
 
 /// Relevant data of a wallet from the perspective of the Wallet Indexer.
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct Wallet {
     pub viewing_key: ViewingKey,
     pub last_indexed_transaction_id: u64,

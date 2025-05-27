@@ -15,7 +15,7 @@ use crate::domain::{Wallet, storage::Storage};
 use anyhow::Context;
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
-use indexer_common::domain::{NetworkId, Publisher, ViewingKey, WalletIndexed};
+use indexer_common::domain::{NetworkId, Publisher, WalletIndexed};
 use itertools::Itertools;
 use log::{debug, info};
 use serde::Deserialize;
@@ -52,13 +52,13 @@ pub async fn run(
 
     active_wallets(active_wallets_repeat_delay, active_wallets_ttl, &storage)
         .map(|result| result.context("get next active wallet"))
-        .try_for_each_concurrent(Some(parallelism.get()), |viewing_key| {
+        .try_for_each_concurrent(Some(parallelism.get()), |wallet| {
             let mut publisher = publisher.clone();
             let mut storage = storage.clone();
 
             async move {
                 index_wallet(
-                    viewing_key,
+                    wallet,
                     transaction_batch_size,
                     network_id,
                     &mut publisher,
@@ -74,7 +74,7 @@ fn active_wallets(
     active_wallets_repeat_delay: Duration,
     active_wallets_ttl: Duration,
     storage: &impl Storage,
-) -> impl Stream<Item = Result<ViewingKey, sqlx::Error>> + '_ {
+) -> impl Stream<Item = Result<Wallet, sqlx::Error>> + '_ {
     tokio_stream::StreamExt::throttle(stream::repeat(()), active_wallets_repeat_delay)
         .map(|_| Ok::<_, sqlx::Error>(()))
         .and_then(move |_| storage.active_wallets(active_wallets_ttl))
@@ -84,13 +84,13 @@ fn active_wallets(
 
 #[trace]
 async fn index_wallet(
-    viewing_key: ViewingKey,
+    wallet: Wallet,
     transaction_batch_size: NonZeroUsize,
     network_id: NetworkId,
     publisher: &mut impl Publisher,
     storage: &mut impl Storage,
 ) -> anyhow::Result<()> {
-    let session_id = viewing_key.to_session_id();
+    let session_id = wallet.viewing_key.to_session_id();
 
     debug!(session_id:%; "indexing wallet");
 
@@ -102,15 +102,6 @@ async fn index_wallet(
     match tx {
         Some(mut tx) => {
             debug!(session_id:%; "acquired lock, handling session ID");
-
-            let wallet = storage
-                .get_wallet(session_id, &mut tx)
-                .await
-                .context("get wallet")?
-                .unwrap_or(Wallet {
-                    viewing_key,
-                    last_indexed_transaction_id: 0,
-                });
 
             let from = wallet.last_indexed_transaction_id + 1;
             let transactions = storage
