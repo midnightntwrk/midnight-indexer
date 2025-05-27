@@ -53,31 +53,6 @@ impl Storage for SqliteStorage {
     }
 
     #[trace]
-    async fn get_wallet(
-        &self,
-        session_id: SessionId,
-        tx: &mut Tx,
-    ) -> Result<Option<Wallet>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT id, viewing_key, last_indexed_transaction_id, last_active
-            FROM wallets
-            WHERE session_id = $1
-        "};
-
-        let wallet = sqlx::query_as::<_, storage::Wallet>(query)
-            .bind(session_id.as_ref())
-            .fetch_optional(&mut **tx)
-            .await?
-            .map(|wallet| {
-                Wallet::try_from((wallet, &self.cipher))
-                    .map_err(|error| sqlx::Error::Decode(error.into()))
-            })
-            .transpose()?;
-
-        Ok(wallet)
-    }
-
-    #[trace]
     async fn get_transactions(
         &self,
         from: u64,
@@ -153,7 +128,7 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
-    async fn active_wallets(&self, ttl: Duration) -> Result<Vec<ViewingKey>, sqlx::Error> {
+    async fn active_wallets(&self, ttl: Duration) -> Result<Vec<Wallet>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
         // Query wallets.
@@ -184,20 +159,15 @@ impl Storage for SqliteStorage {
             sqlx::query(query).bind(id).execute(&mut *tx).await?;
         }
 
-        // Return active viewing keys.
-        let viewing_keys = wallets
+        // Return active wallets.
+        wallets
             .into_iter()
-            .filter_map(|wallet| {
-                (now - wallet.last_active <= ttl).then_some(ViewingKey::decrypt(
-                    &wallet.viewing_key,
-                    wallet.id,
-                    &self.cipher,
-                ))
+            .filter(|wallet| now - wallet.last_active <= ttl)
+            .map(|wallet| {
+                Wallet::try_from((wallet, &self.cipher))
+                    .map_err(|error| sqlx::Error::Decode(error.into()))
             })
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| sqlx::Error::Decode(error.into()))?;
-
-        Ok(viewing_keys)
     }
 }
 
@@ -207,7 +177,6 @@ mod tests {
         domain::{Wallet, storage::Storage},
         infra::storage::sqlite::SqliteStorage,
     };
-    use assert_matches::assert_matches;
     use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
     use futures::{StreamExt, TryStreamExt};
     use indexer_common::{
@@ -219,7 +188,7 @@ mod tests {
     };
     use indoc::indoc;
     use sqlx::{QueryBuilder, Row, types::time::OffsetDateTime};
-    use std::{error::Error as StdError, iter};
+    use std::{error::Error as StdError, iter, time::Duration};
     use uuid::Uuid;
 
     #[tokio::test]
@@ -343,20 +312,24 @@ mod tests {
 
         let mut storage = SqliteStorage::new(cipher, pool);
 
+        let active_wallets = storage.active_wallets(Duration::from_secs(60)).await?;
+        assert_eq!(
+            active_wallets,
+            [
+                Wallet {
+                    viewing_key: viewing_key_a,
+                    last_indexed_transaction_id: 1
+                },
+                Wallet {
+                    viewing_key: viewing_key_b,
+                    last_indexed_transaction_id: 42
+                }
+            ]
+        );
+
         let tx = storage.acquire_lock(session_id_b).await?;
         assert!(tx.is_some());
         let mut tx = tx.unwrap();
-
-        let wallet = storage.get_wallet([0; 32].into(), &mut tx).await?;
-        assert!(wallet.is_none());
-        let wallet = storage.get_wallet(session_id_b, &mut tx).await?;
-        assert_matches!(
-            wallet,
-            Some(Wallet {
-                last_indexed_transaction_id: 42,
-                ..
-            })
-        );
 
         let transactions = storage
             .get_transactions(42, 10.try_into()?, &mut tx)
@@ -375,15 +348,6 @@ mod tests {
         let tx = storage.acquire_lock(session_id_b).await?;
         assert!(tx.is_some());
         let mut tx = tx.unwrap();
-
-        let wallet = storage.get_wallet(session_id_b, &mut tx).await?;
-        assert_matches!(
-            wallet,
-            Some(Wallet {
-                last_indexed_transaction_id: 51,
-                ..
-            })
-        );
 
         let relevant_transactions = sqlx::query_as::<_, (Uuid, i64)>(
             "SELECT wallet_id, transaction_id

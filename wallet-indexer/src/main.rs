@@ -84,12 +84,15 @@ async fn run() -> anyhow::Result<()> {
     let cipher = make_cipher(secret).context("make cipher")?;
     let storage = infra::storage::postgres::PostgresStorage::new(cipher, pool);
 
-    let publisher = pub_sub::nats::publisher::NatsPublisher::new(pub_sub_config)
+    let publisher = pub_sub::nats::publisher::NatsPublisher::new(pub_sub_config.clone())
         .await
         .context("create NatsPublisher")?;
+    let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config)
+        .await
+        .context("create NatsSubscriber")?;
 
     // Run indexing.
-    application::run(application_config, storage, publisher)
+    application::run(application_config, storage, publisher, subscriber)
         .await
         .context("run application")?;
 

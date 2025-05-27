@@ -14,7 +14,7 @@
 /// Maps a "deadlock_detected" PosgtreSQL error to the result of the given function wrapped in `Ok`
 /// and passes all other errors along.
 /// For "40P01" see <https://www.postgresql.org/docs/current/errcodes-appendix.html>.
-pub fn map_deadlock_detected<F, T>(error: sqlx::Error, on_deadlock: F) -> Result<T, sqlx::Error>
+pub fn ignore_deadlock_detected<F, T>(error: sqlx::Error, on_deadlock: F) -> Result<T, sqlx::Error>
 where
     F: FnOnce() -> T,
 {

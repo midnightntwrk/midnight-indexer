@@ -91,6 +91,7 @@ mod tests {
 
         let block_indexed = BlockIndexed {
             height: 123,
+            max_transaction_id: None,
             caught_up: false,
         };
         let publish_block_res = pub_sub.publisher().publish(&block_indexed).await;

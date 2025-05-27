@@ -125,8 +125,14 @@ async fn run() -> anyhow::Result<()> {
     let wallet_indexer = task::spawn({
         let storage = wallet_indexer::infra::storage::sqlite::SqliteStorage::new(cipher, pool);
         let publisher = pub_sub.publisher();
+        let subscriber = pub_sub.subscriber();
 
-        wallet_indexer::application::run(wallet_indexer_application_config, storage, publisher)
+        wallet_indexer::application::run(
+            wallet_indexer_application_config,
+            storage,
+            publisher,
+            subscriber,
+        )
     });
 
     select! {

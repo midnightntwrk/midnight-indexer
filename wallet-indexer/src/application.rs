@@ -14,12 +14,20 @@
 use crate::domain::{Wallet, storage::Storage};
 use anyhow::Context;
 use fastrace::trace;
-use futures::{Stream, StreamExt, TryStreamExt, stream};
-use indexer_common::domain::{NetworkId, Publisher, ViewingKey, WalletIndexed};
+use futures::{Stream, StreamExt, TryStreamExt, future::ok, stream};
+use indexer_common::domain::{BlockIndexed, NetworkId, Publisher, Subscriber, WalletIndexed};
 use itertools::Itertools;
-use log::{debug, info};
+use log::debug;
 use serde::Deserialize;
-use std::{num::NonZeroUsize, time::Duration};
+use std::{
+    num::NonZeroUsize,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
+use tokio::{select, task};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -41,6 +49,7 @@ pub async fn run(
     config: Config,
     storage: impl Storage,
     publisher: impl Publisher,
+    subscriber: impl Subscriber,
 ) -> anyhow::Result<()> {
     let Config {
         network_id,
@@ -50,31 +59,68 @@ pub async fn run(
         parallelism,
     } = config;
 
-    active_wallets(active_wallets_repeat_delay, active_wallets_ttl, &storage)
-        .map(|result| result.context("get next active wallet"))
-        .try_for_each_concurrent(Some(parallelism.get()), |viewing_key| {
-            let mut publisher = publisher.clone();
-            let mut storage = storage.clone();
+    // Shared atomic counter for the maximum transaction ID seen in BlockIndexed events. This allows
+    // Wallet Indexer to skip database queries when it is already up-to-date. Updated by the
+    // block_indexed_task, read by index_wallet tasks.
+    let max_transaction_id = Arc::new(AtomicU64::new(0));
 
-            async move {
-                index_wallet(
-                    viewing_key,
-                    transaction_batch_size,
-                    network_id,
-                    &mut publisher,
-                    &mut storage,
-                )
+    let block_indexed_task = task::spawn({
+        let subscriber = subscriber.clone();
+        let max_transaction_id = max_transaction_id.clone();
+
+        async move {
+            let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
+
+            block_indexed_stream
+                .try_for_each(|block_indexed| {
+                    if let Some(id) = block_indexed.max_transaction_id {
+                        max_transaction_id.store(id, Ordering::Release);
+                    }
+                    ok(())
+                })
                 .await
-            }
+                .context("cannot get next BlockIndexed event")?;
+
+            Ok::<(), anyhow::Error>(())
+        }
+    });
+
+    let index_wallets_task = {
+        task::spawn(async move {
+            active_wallets(active_wallets_repeat_delay, active_wallets_ttl, &storage)
+                .map(|result| result.context("get next active wallet"))
+                .try_for_each_concurrent(Some(parallelism.get()), |wallet| {
+                    let max_transaction_id = max_transaction_id.clone();
+                    let mut publisher = publisher.clone();
+                    let mut storage = storage.clone();
+
+                    async move {
+                        index_wallet(
+                            wallet,
+                            transaction_batch_size,
+                            network_id,
+                            max_transaction_id,
+                            &mut publisher,
+                            &mut storage,
+                        )
+                        .await
+                    }
+                })
+                .await
         })
-        .await
+    };
+
+    select! {
+        result = block_indexed_task => result,
+        result = index_wallets_task => result,
+    }?
 }
 
 fn active_wallets(
     active_wallets_repeat_delay: Duration,
     active_wallets_ttl: Duration,
     storage: &impl Storage,
-) -> impl Stream<Item = Result<ViewingKey, sqlx::Error>> + '_ {
+) -> impl Stream<Item = Result<Wallet, sqlx::Error>> + '_ {
     tokio_stream::StreamExt::throttle(stream::repeat(()), active_wallets_repeat_delay)
         .map(|_| Ok::<_, sqlx::Error>(()))
         .and_then(move |_| storage.active_wallets(active_wallets_ttl))
@@ -84,80 +130,73 @@ fn active_wallets(
 
 #[trace]
 async fn index_wallet(
-    viewing_key: ViewingKey,
+    wallet: Wallet,
     transaction_batch_size: NonZeroUsize,
     network_id: NetworkId,
+    max_transaction_id: Arc<AtomicU64>,
     publisher: &mut impl Publisher,
     storage: &mut impl Storage,
 ) -> anyhow::Result<()> {
-    let session_id = viewing_key.to_session_id();
+    // Only access with storage if possibly needed.
+    if wallet.last_indexed_transaction_id < max_transaction_id.load(Ordering::Acquire) {
+        let session_id = wallet.viewing_key.to_session_id();
 
-    debug!(session_id:%; "indexing wallet");
+        let tx = storage
+            .acquire_lock(session_id)
+            .await
+            .context("acquire lock")?;
 
-    let tx = storage
-        .acquire_lock(session_id)
-        .await
-        .context("acquire lock")?;
+        match tx {
+            Some(mut tx) => {
+                debug!(session_id:%; "indexing wallet");
 
-    match tx {
-        Some(mut tx) => {
-            debug!(session_id:%; "acquired lock, handling session ID");
-
-            let wallet = storage
-                .get_wallet(session_id, &mut tx)
-                .await
-                .context("get wallet")?
-                .unwrap_or(Wallet {
-                    viewing_key,
-                    last_indexed_transaction_id: 0,
-                });
-
-            let from = wallet.last_indexed_transaction_id + 1;
-            let transactions = storage
-                .get_transactions(from, transaction_batch_size, &mut tx)
-                .await
-                .context("get transactions")?;
-            let Some(last_indexed_transaction_id) = transactions.iter().map(|t| t.id).max() else {
-                debug!(from, transaction_batch_size; "no transactions");
-                return Ok(());
-            };
-            debug!(from, last_indexed_transaction_id; "got transactions");
-
-            let relevant_transactions = transactions
-                .into_iter()
-                .map(|transaction| {
-                    transaction
-                        .relevant(&wallet, network_id)
-                        .context("check transaction relevance")
-                        .map(|relevant| (relevant, transaction))
-                })
-                .filter_map_ok(|(relevant, transaction)| relevant.then_some(transaction))
-                .collect::<Result<Vec<_>, _>>()?;
-            debug!(len = relevant_transactions.len(); "relevant transactions");
-
-            storage
-                .save_relevant_transactions(
-                    &wallet.viewing_key,
-                    &relevant_transactions,
-                    last_indexed_transaction_id,
-                    &mut tx,
-                )
-                .await
-                .context("save relevant transactions")?;
-
-            tx.commit().await.context("commit database transaction")?;
-            info!(session_id:%, from, transaction_batch_size; "wallet indexed");
-
-            if !relevant_transactions.is_empty() {
-                publisher
-                    .publish(&WalletIndexed { session_id })
+                let from = wallet.last_indexed_transaction_id + 1;
+                let transactions = storage
+                    .get_transactions(from, transaction_batch_size, &mut tx)
                     .await
-                    .context("cannot publish WalletIndexed event")?;
-            }
-        }
+                    .context("get transactions")?;
 
-        None => {
-            debug!(session_id:%; "could not acquire lock, not handling wallet");
+                let last_indexed_transaction_id = transactions.iter().map(|t| t.id).max();
+                let Some(last_indexed_transaction_id) = last_indexed_transaction_id else {
+                    debug!(session_id:%; "no transactions for wallet");
+                    return Ok(());
+                };
+
+                let relevant_transactions = transactions
+                    .into_iter()
+                    .map(|transaction| {
+                        transaction
+                            .relevant(&wallet, network_id)
+                            .context("check transaction relevance")
+                            .map(|relevant| (relevant, transaction))
+                    })
+                    .filter_map_ok(|(relevant, transaction)| relevant.then_some(transaction))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                storage
+                    .save_relevant_transactions(
+                        &wallet.viewing_key,
+                        &relevant_transactions,
+                        last_indexed_transaction_id,
+                        &mut tx,
+                    )
+                    .await
+                    .context("save relevant transactions")?;
+
+                tx.commit().await.context("commit database transaction")?;
+                debug!(session_id:%, from, transaction_batch_size; "wallet indexed");
+
+                if !relevant_transactions.is_empty() {
+                    publisher
+                        .publish(&WalletIndexed { session_id })
+                        .await
+                        .context("cannot publish WalletIndexed event")?;
+                }
+            }
+
+            None => {
+                debug!(session_id:%; "not handling wallet");
+            }
         }
     }
 

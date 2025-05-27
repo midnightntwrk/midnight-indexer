@@ -42,6 +42,7 @@ pub struct Topic(pub &'static str);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, From)]
 pub struct BlockIndexed {
     pub height: u32,
+    pub max_transaction_id: Option<u64>,
     pub caught_up: bool,
 }
 message!(BlockIndexed);

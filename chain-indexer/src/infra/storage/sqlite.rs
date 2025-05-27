@@ -100,10 +100,12 @@ impl Storage for SqliteStorage {
         Ok((deploy_count as u64, call_count as u64, update_count as u64))
     }
 
-    async fn save_block(&self, block: &Block) -> Result<(), sqlx::Error> {
+    async fn save_block(&self, block: &Block) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        save_block(block, &mut tx).await?;
-        tx.commit().await
+        let max_transaction_id = save_block(block, &mut tx).await?;
+        tx.commit().await?;
+
+        Ok(max_transaction_id)
     }
 
     fn get_transactions(
@@ -142,7 +144,7 @@ impl SqliteStorage {
     }
 }
 
-async fn save_block(block: &Block, tx: &mut Tx) -> Result<(), sqlx::Error> {
+async fn save_block(block: &Block, tx: &mut Tx) -> Result<Option<u64>, sqlx::Error> {
     let query = indoc! {"
         INSERT INTO blocks (
             hash,
@@ -185,9 +187,12 @@ async fn save_transactions(
     transactions: &[Transaction],
     block_id: i64,
     tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    if !transactions.is_empty() {
-        let query = indoc! {"
+) -> Result<Option<u64>, sqlx::Error> {
+    if transactions.is_empty() {
+        return Ok(None);
+    }
+
+    let query = indoc! {"
                     INSERT INTO transactions (
                         block_id,
                         hash,
@@ -200,41 +205,40 @@ async fn save_transactions(
                     )
                 "};
 
-        let transaction_ids = QueryBuilder::new(query)
-            .push_values(transactions.iter(), |mut q, transaction| {
-                let Transaction {
-                    hash,
-                    protocol_version,
-                    apply_stage,
-                    raw,
-                    merkle_tree_root,
-                    start_index,
-                    end_index,
-                    ..
-                } = transaction;
-                q.push_bind(block_id)
-                    .push_bind(hash.as_ref())
-                    .push_bind(protocol_version.0 as i64)
-                    .push_bind(apply_stage)
-                    .push_bind(raw)
-                    .push_bind(merkle_tree_root)
-                    .push_bind(*start_index as i64)
-                    .push_bind(*end_index as i64);
-            })
-            .push(" RETURNING id")
-            .build()
-            .fetch(&mut **tx)
-            .map(|row| row.and_then(|row| row.try_get::<i64, _>("id")))
-            .try_collect::<Vec<_>>()
-            .await?;
+    let transaction_ids = QueryBuilder::new(query)
+        .push_values(transactions.iter(), |mut q, transaction| {
+            let Transaction {
+                hash,
+                protocol_version,
+                apply_stage,
+                raw,
+                merkle_tree_root,
+                start_index,
+                end_index,
+                ..
+            } = transaction;
+            q.push_bind(block_id)
+                .push_bind(hash.as_ref())
+                .push_bind(protocol_version.0 as i64)
+                .push_bind(apply_stage)
+                .push_bind(raw)
+                .push_bind(merkle_tree_root)
+                .push_bind(*start_index as i64)
+                .push_bind(*end_index as i64);
+        })
+        .push(" RETURNING id")
+        .build()
+        .fetch(&mut **tx)
+        .map(|row| row.and_then(|row| row.try_get::<i64, _>("id")))
+        .try_collect::<Vec<_>>()
+        .await?;
 
-        for (transaction, transaction_id) in transactions.iter().zip(transaction_ids) {
-            save_identifiers(&transaction.identifiers, transaction_id, tx).await?;
-            save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
-        }
+    for (transaction, transaction_id) in transactions.iter().zip(transaction_ids.iter()) {
+        save_identifiers(&transaction.identifiers, *transaction_id, tx).await?;
+        save_contract_actions(&transaction.contract_actions, *transaction_id, tx).await?;
     }
 
-    Ok(())
+    Ok(transaction_ids.into_iter().max().map(|n| n as u64))
 }
 
 async fn save_identifiers(
