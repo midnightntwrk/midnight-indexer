@@ -36,7 +36,7 @@ serde              = { workspace = true, features = [ "derive" ] }
 sqlx               = { workspace = true, features = [ "runtime-tokio", "time" ] }
 subxt              = { workspace = true, features = [ "reconnecting-rpc-client" ] }
 thiserror          = { workspace = true }
-tokio              = { workspace = true, features = [ "rt-multi-thread", "time" ] }
+tokio              = { workspace = true, features = [ "macros", "rt-multi-thread", "time" ] }
 trait-variant      = { workspace = true }
 
 [dev-dependencies]
