@@ -11,10 +11,12 @@ The GraphQL schema is defined in [`indexer-api/graphql/schema-v1.graphql`](../..
 
 ## Overview of Operations
 
-- **Queries**: Fetch blocks, transactions, and contract actions.  
+- **Queries**: Fetch blocks, transactions, contract actions, and unshielded tokens.  
   Examples:
     - Retrieve the latest block or a specific block by hash or height.
     - Look up transactions by their hash or identifier.
+    - Filter transactions by unshielded address to see token transfers.
+    - List all unshielded UTXOs (spent and unspent) for a given address.
     - Inspect the current state of a contract action at a given block or transaction offset.
 
 - **Mutations**: Manage wallet sessions.
@@ -25,6 +27,7 @@ The GraphQL schema is defined in [`indexer-api/graphql/schema-v1.graphql`](../..
     - `blocks`: Stream newly indexed blocks.
     - `contractActions(address, offset)`: Stream contract actions.
     - `wallet(sessionId, ...)`: Stream wallet updates, including relevant transactions and optional progress updates.
+    - `unshieldedUtxos(address)`: Stream unshielded UTXO creation and spending events for a specific address.
 
 ## API Endpoints
 
@@ -45,6 +48,7 @@ Sec-WebSocket-Protocol: graphql-transport-ws
 - `HexEncoded`: Hex-encoded bytes (for hashes, addresses, session IDs).
 - `ViewingKey`: A viewing key in hex or Bech32 format for wallet sessions.
 - `Unit`: An empty return type for mutations that do not return data.
+- `UnshieldedAddress`: An unshielded address in Bech32m format (e.g., `mn_addr_test1...`). Used for unshielded token operations.
 
 ## Example Queries and Mutations
 
@@ -80,11 +84,17 @@ query {
 }
 ```
 
-### transactions(offset: TransactionOffset!): [Transaction!]!
+### transactions(offset: TransactionOffset!, address: UnshieldedAddress): [Transaction!]!
 
-Fetch transactions by hash or by identifier using a TransactionOffset object. The offset must include either a hash or an identifier, but not both. Returns an array since a hash may map to multiple related actions.
+Fetch transactions by hash or by identifier using a TransactionOffset object. The offset must include either a hash or an identifier, but not both.
 
-**Example:**
+Optionally, you can filter by an unshielded address to retrieve only transactions that create or spend unshielded UTXOs for that address.
+
+**Parameters:**
+- `offset`: Required. Either a transaction hash or identifier.
+- `address`: Optional. An unshielded address (Bech32m format) to filter transactions.
+
+**Example (by hash):**
 
 ```graphql
 query {
@@ -117,9 +127,46 @@ query {
         chainState
       }
     }
+    unshieldedCreatedOutputs {
+      owner
+      value
+      tokenType
+      intentHash
+      outputIndex
+    }
+    unshieldedSpentOutputs {
+      owner
+      value
+      tokenType
+      intentHash
+      outputIndex
+    }
   }
 }
 ```
+
+**Example (filtered by unshielded address):**
+```graphql
+query {
+  transactions(
+    offset: { identifier: "abc123..." },
+    address: "mn_addr_test1..."
+  ) {
+    hash
+    unshieldedCreatedOutputs {
+      owner
+      value
+      tokenType
+    }
+    unshieldedSpentOutputs {
+      owner
+      value
+      tokenType
+    }
+  }
+}
+```
+
 
 ### contractAction(address: HexEncoded!, offset: ContractActionOffset): ContractAction
 
@@ -168,6 +215,73 @@ Contract actions can be one of three types:
 - **ContractUpdate**: State update to an existing contract
 
 Each type implements the ContractAction interface but may have additional fields. For example, ContractCall includes an `entryPoint` field and a reference to its associated `deploy`.
+
+### unshieldedUtxos(address: UnshieldedAddress!, offset: UnshieldedOffset): [UnshieldedUtxo!]!
+
+Retrieve all unshielded UTXOs (both spent and unspent) associated with a given address.
+
+**Parameters:**
+- `address`: Required. The unshielded address in Bech32m format.
+- `offset`: Optional. Either a BlockOffset or TransactionOffset to query from a specific point.
+
+**Example (all UTXOs for an address):**
+
+```graphql
+query {
+  unshieldedUtxos(address: "mn_addr_test1...") {
+    owner
+    intentHash
+    value
+    tokenType
+    outputIndex
+    createdAtTransaction {
+      hash
+      block {
+        height
+      }
+    }
+    spentAtTransaction {
+      hash
+    }
+  }
+}
+```
+
+**Example (with block offset):**
+
+```graphql
+query {
+  unshieldedUtxos(
+    address: "mn_addr_test1...",
+    offset: { blockOffset: { height: 100 } }
+  ) {
+    value
+    tokenType
+    spentAtTransaction {
+      hash
+    }
+  }
+}
+```
+
+## Unshielded Token Types
+
+### UnshieldedUtxo
+
+Represents an unshielded UTXO (Unspent Transaction Output):
+- `owner`: The owner's address in Bech32m format
+- `intentHash`: The hash of the intent that created this output (HexEncoded)
+- `value`: The UTXO value as a string (to support u128)
+- `tokenType`: The token type identifier (HexEncoded)
+- `outputIndex`: The index of this output within its creating transaction
+- `createdAtTransaction`: Reference to the transaction that created this UTXO
+- `spentAtTransaction`: Reference to the transaction that spent this UTXO (null if unspent)
+
+### UnshieldedOffset
+
+A oneOf input type for querying unshielded UTXOs from a specific point:
+- `blockOffset`: Query from a specific block (by hash or height)
+- `transactionOffset`: Query from a specific transaction (by hash or identifier)
 
 ## Mutations
 
@@ -279,6 +393,44 @@ Adjust `index` and `offset` arguments as needed.
 **Responses** may vary depending on what is happening in the chain:
 - A `ViewingUpdate` with new relevant transactions or a collapsed Merkle tree update.
 - A `ProgressUpdate` providing synchronization progress with fields like `highestIndex`, `highestRelevantIndex`, and `highestRelevantWalletIndex`.
+
+### Unshielded UTXOs Subscription
+
+`unshieldedUtxos(address: UnshieldedAddress!): UnshieldedUtxoEvent!`
+
+Subscribes to unshielded UTXO events for a specific address. Emits events whenever unshielded UTXOs are created or spent for the given address.
+
+**Parameters:**
+- `address`: The unshielded address to monitor (must be in Bech32m format).
+
+**Example:**
+
+```json
+{
+  "id": "4",
+  "type": "start",
+  "payload": {
+    "query": "subscription { unshieldedUtxos(address: \"mn_addr_test1...\") { eventType transaction { hash block { height } } createdUtxos { owner value tokenType intentHash outputIndex } spentUtxos { owner value tokenType intentHash outputIndex } } }"
+  }
+}
+```
+**Response Types:**
+
+- UPDATE: Indicates a transaction that created or spent UTXOs for the address.
+- PROGRESS: Status message for synchronization progress or keep-alive.
+
+**Each event includes:**
+
+- The transaction that triggered the event
+- Lists of created and spent UTXOs in that transaction
+
+**UnshieldedUtxoEvent**
+
+Event payload for the unshielded UTXO subscription:
+- `eventType`: Either `UPDATE` (for actual changes) or `PROGRESS` (for status messages)
+- `transaction`: The transaction associated with this event
+- `createdUtxos`: List of UTXOs created in this transaction for the subscribed address
+- `spentUtxos`: List of UTXOs spent in this transaction for the subscribed address
 
 ## Query Limits Configuration
 
