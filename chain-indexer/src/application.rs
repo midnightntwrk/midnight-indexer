@@ -348,7 +348,7 @@ async fn index_block(
     }
 
     // 1) Save the block first
-    storage.save_block(&block).await.context("save block")?;
+    let max_transaction_id = storage.save_block(&block).await.context("save block")?;
 
     // 2) Then save the zswap state. This order is important to prevent from applying the
     //    transactions twice.
@@ -373,6 +373,7 @@ async fn index_block(
     publisher
         .publish(&BlockIndexed {
             height: block.height,
+            max_transaction_id,
             caught_up: *caught_up,
         })
         .await

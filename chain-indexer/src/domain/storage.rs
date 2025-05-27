@@ -29,8 +29,8 @@ where
     /// Get the number of stored contract actions: deploys, calls, updates.
     async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error>;
 
-    /// Save the given [Block].
-    async fn save_block(&self, block: &Block) -> Result<(), sqlx::Error>;
+    /// Save the given [Block] and return the max transaction ID.
+    async fn save_block(&self, block: &Block) -> Result<Option<u64>, sqlx::Error>;
 
     /// Get a stream of transaction chunks for all blocks starting at the given height until the
     /// given height.
