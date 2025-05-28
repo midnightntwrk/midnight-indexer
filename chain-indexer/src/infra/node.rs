@@ -24,6 +24,7 @@ use async_stream::try_stream;
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{
+    LedgerTransaction,
     domain::{
         ApplyStage, BlockAuthor, NetworkId, ProtocolVersion, RawTransaction,
         ScaleDecodeProtocolVersionError,
@@ -32,12 +33,10 @@ use indexer_common::{
     serialize::SerializableExt,
 };
 use log::{debug, error, info, warn};
-use midnight_ledger::{
-    serialize::deserialize,
-    storage::DefaultDB,
-    structure::{ContractAction as LedgerContractAction, Proof},
-    transient_crypto::merkle_tree::MerkleTreeDigest,
-};
+use midnight_ledger::structure::{ContractAction as LedgerContractAction, ProofMarker};
+use midnight_serialize::deserialize;
+use midnight_storage::DefaultDB;
+use midnight_transient_crypto::merkle_tree::MerkleTreeDigest;
 use serde::Deserialize;
 use sqlx::types::time::OffsetDateTime;
 use std::{
@@ -62,7 +61,6 @@ use subxt::{
 };
 use thiserror::Error;
 
-type LedgerTransaction = midnight_ledger::structure::Transaction<Proof, DefaultDB>;
 type SubxtBlock = subxt::blocks::Block<SubstrateConfig, OnlineClient<SubstrateConfig>>;
 
 const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
@@ -576,27 +574,29 @@ async fn make_transaction(
         .collect::<Result<Vec<_>, _>>()?;
 
     let contract_actions = match ledger_transaction {
-        LedgerTransaction::Standard(standard_transaction) => standard_transaction
-            .contract_calls
-            .map(|actions| actions.calls)
-            .unwrap_or_default(),
+        LedgerTransaction::Standard(standard_transaction) => {
+            let contract_actions = standard_transaction
+                .actions()
+                .into_iter()
+                .map(|(_, action)| action);
+
+            futures::stream::iter(contract_actions)
+                .then(|contract_action| async {
+                    ledger_contract_action_into_domain(
+                        contract_action,
+                        block_hash,
+                        network_id,
+                        online_client,
+                        protocol_version,
+                    )
+                    .await
+                })
+                .try_collect::<Vec<_>>()
+                .await?
+        }
 
         LedgerTransaction::ClaimMint(_) => vec![],
     };
-
-    let contract_actions = futures::stream::iter(contract_actions)
-        .then(|contract_action| async {
-            ledger_contract_action_into_domain(
-                contract_action,
-                block_hash,
-                network_id,
-                online_client,
-                protocol_version,
-            )
-            .await
-        })
-        .try_collect::<Vec<_>>()
-        .await?;
 
     let transaction = Transaction {
         hash,
@@ -614,7 +614,7 @@ async fn make_transaction(
 }
 
 async fn ledger_contract_action_into_domain(
-    contract_action: LedgerContractAction<Proof, DefaultDB>,
+    contract_action: LedgerContractAction<ProofMarker, DefaultDB>,
     block_hash: BlockHash,
     network_id: NetworkId,
     online_client: &OnlineClient<SubstrateConfig>,
@@ -694,7 +694,7 @@ mod tests {
         },
         error::BoxError,
     };
-    use midnight_ledger::serialize::deserialize;
+    use midnight_serialize::deserialize;
     use std::{env, path::Path, pin::pin, time::Duration};
     use subxt::{self, utils::H256};
     use testcontainers::{

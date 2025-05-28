@@ -15,21 +15,18 @@ use crate::domain::Transaction;
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::{
+    LedgerTransaction,
     domain::{ApplyStage, ContractAddress, MerkleTreeRoot, NetworkId, RawZswapState},
     serialize::SerializableExt,
 };
 use log::debug;
-use midnight_ledger::{
-    coin_structure::contract::Address,
-    serialize::deserialize,
-    storage::DefaultDB,
-    structure::{Proof, StandardTransaction},
-    zswap::ledger::State as LedgerZswapState,
-};
+use midnight_coin_structure::contract::ContractAddress as Address;
+use midnight_ledger::structure::StandardTransaction;
+use midnight_serialize::deserialize;
+use midnight_storage::DefaultDB;
+use midnight_zswap::ledger::State as LedgerZswapState;
 use std::io;
 use thiserror::Error;
-
-type LedgerTransaction = midnight_ledger::structure::Transaction<Proof, DefaultDB>;
 
 /// Wrapper around ZswapState from indexer_common.
 #[derive(Debug, Clone, Default, From, Deref)]
@@ -88,14 +85,18 @@ impl ZswapState {
                 ..
             }) = ledger_transaction
             {
+                let mut state;
+
                 // Guaranteed coins are applied for both Success and PartialSuccess.
-                let (mut state, _) = self.try_apply(&guaranteed_coins, None)?;
+                if let Some(guaranteed_coins) = guaranteed_coins {
+                    let (s, _) = self.try_apply(&guaranteed_coins, None)?;
+                    state = s;
+                }
 
                 // Fallible coins are only applied for Success.
                 if transaction.apply_stage == ApplyStage::Success {
-                    if let Some(fallible_coins) = &fallible_coins {
-                        (state, _) = state.try_apply(fallible_coins, None)?;
-                    }
+                    let (s, _) = state.try_apply(&fallible_coins, None)?;
+                    state = s;
                 }
 
                 if state.first_free > start_index {
@@ -118,7 +119,7 @@ impl ZswapState {
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("cannot apply transaction")]
-    ApplyTransaction(#[from] midnight_ledger::zswap::error::TransactionInvalid),
+    ApplyTransaction(#[from] midnight_zswap::error::TransactionInvalid),
 
     #[error("{0}")]
     Io(&'static str, #[source] io::Error),

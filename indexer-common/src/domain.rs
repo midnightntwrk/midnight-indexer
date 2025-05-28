@@ -24,7 +24,7 @@ pub use viewing_key::*;
 pub use zswap::*;
 
 use derive_more::Display;
-use midnight_ledger::serialize::NetworkId as LedgerNetworkId;
+use midnight_serialize::NetworkId as LedgerNetworkId;
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
 use std::str::FromStr;
@@ -70,7 +70,7 @@ pub enum ContractActionVariant {
     Update,
 }
 
-/// Clone of midnight_ledger::serialize::NetworkId for the purpose of Serde deserialization.
+/// Clone of midnight_serialize::NetworkId for the purpose of Serde deserialization.
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum NetworkId {
     Undeployed,
@@ -119,7 +119,7 @@ pub struct UnknownNetworkIdError(String);
 #[cfg(test)]
 mod tests {
     use crate::domain::NetworkId;
-    use midnight_ledger::serialize::NetworkId as LedgerNetworkId;
+    use midnight_serialize::NetworkId as LedgerNetworkId;
 
     #[test]
     fn test_network_id_from() {
