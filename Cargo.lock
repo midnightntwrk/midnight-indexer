@@ -1751,7 +1751,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cea14ef9355e3beab063703aa9dab15afd25f0667c341310c1e5274bb1d0da18"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3007,7 +3007,7 @@ dependencies = [
  "opentelemetry_sdk",
  "parity-scale-codec",
  "parking_lot",
- "reqwest 0.12.16",
+ "reqwest 0.12.18",
  "secrecy",
  "serde",
  "serde_json",
@@ -3059,7 +3059,7 @@ dependencies = [
  "indexer-common",
  "itertools 0.14.0",
  "midnight-ledger",
- "reqwest 0.12.16",
+ "reqwest 0.12.18",
  "serde",
  "serde_json",
  "sqlx",
@@ -3199,7 +3199,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4156,7 +4156,7 @@ dependencies = [
  "bytes",
  "http 1.3.1",
  "opentelemetry",
- "reqwest 0.12.16",
+ "reqwest 0.12.18",
  "tracing",
 ]
 
@@ -4173,7 +4173,7 @@ dependencies = [
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "prost",
- "reqwest 0.12.16",
+ "reqwest 0.12.18",
  "thiserror 2.0.12",
  "tokio",
  "tonic",
@@ -4775,7 +4775,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5013,9 +5013,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.12.16"
+version = "0.12.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bf597b113be201cb2269b4c39b39a804d01b99ee95a4278f0ed04e45cff1c71"
+checksum = "e98ff6b0dbbe4d5a37318f433d4fc82babd21631f194d370409ceb2e40b2f0b5"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -5195,7 +5195,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5308,7 +5308,7 @@ dependencies = [
  "security-framework 3.2.0",
  "security-framework-sys",
  "webpki-root-certs 0.26.11",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6726,7 +6726,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
