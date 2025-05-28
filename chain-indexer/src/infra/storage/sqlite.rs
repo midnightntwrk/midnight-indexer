@@ -113,7 +113,7 @@ impl Storage for SqliteStorage {
     async fn save_unshielded_utxos(
         &self,
         utxos: &[UnshieldedUtxo],
-        transaction_id: i64,
+        transaction_id: &i64,
         spent: bool,
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
@@ -262,7 +262,7 @@ async fn save_transactions(
             false,
             tx,
         )
-            .await?;
+        .await?;
 
         save_unshielded_utxos(
             &transaction.spent_unshielded_utxos,
@@ -270,15 +270,15 @@ async fn save_transactions(
             true,
             tx,
         )
-            .await?;
+        .await?;
     }
 
-    Ok(())
+    Ok(transaction_ids.into_iter().max().map(|n| n as u64))
 }
 
 async fn save_unshielded_utxos(
     utxos: &[UnshieldedUtxo],
-    transaction_id: i64,
+    transaction_id: &i64,
     spent: bool,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
@@ -322,7 +322,7 @@ async fn save_unshielded_utxos(
         query.execute(&mut **tx).await?;
     }
 
-    Ok(transaction_ids.into_iter().max().map(|n| n as u64))
+    Ok(())
 }
 
 async fn save_identifiers(
