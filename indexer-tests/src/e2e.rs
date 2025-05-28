@@ -657,49 +657,44 @@ async fn test_unshielded_utxo_subscription(
 ) -> anyhow::Result<()> {
     use graphql_types::*;
 
-    #[cfg(feature = "cloud")]
-    // TODO: Remove once UT node image is available. nats_url is a temporarily needed for testing.
-    {
-        let utxo_addresses = indexer_data
-            .unshielded_utxos
-            .iter()
-            .map(|utxo| utxo.owner.clone())
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
+    let utxo_addresses = indexer_data
+        .unshielded_utxos
+        .iter()
+        .map(|utxo| utxo.owner.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
 
-        assert!(!utxo_addresses.is_empty());
+    assert!(!utxo_addresses.is_empty());
 
-        let unshielded_address =
-            indexer_api::domain::UnshieldedAddress(utxo_addresses[0].clone().0);
+    let unshielded_address = indexer_api::domain::UnshieldedAddress(utxo_addresses[0].clone().0);
 
-        let variables = unshielded_utxos_subscription::Variables {
-            address: unshielded_address.clone(),
-        };
+    let variables = unshielded_utxos_subscription::Variables {
+        address: unshielded_address.clone(),
+    };
 
-        let subscription_stream =
-            graphql_ws_client::subscribe::<UnshieldedUtxosSubscription>(ws_api_url, variables)
-                .await
-                .context("subscribe to unshielded UTXOs")?;
-
-        let events = subscription_stream
-            .take(2)
-            .map_ok(|data| data.unshielded_utxos)
-            .try_collect::<Vec<_>>()
+    let subscription_stream =
+        graphql_ws_client::subscribe::<UnshieldedUtxosSubscription>(ws_api_url, variables)
             .await
-            .context("collect unshielded UTXO events")?;
+            .context("subscribe to unshielded UTXOs")?;
 
-        assert!(!events.is_empty());
+    let events = subscription_stream
+        .take(2)
+        .map_ok(|data| data.unshielded_utxos)
+        .try_collect::<Vec<_>>()
+        .await
+        .context("collect unshielded UTXO events")?;
 
-        // Verify the address in returned UTXOs matches our subscription address
-        for event in &events {
-            if !event.created_utxos.is_empty() {
-                assert_eq!(event.created_utxos[0].owner, unshielded_address);
-            }
+    assert!(!events.is_empty());
 
-            if !event.spent_utxos.is_empty() {
-                assert_eq!(event.spent_utxos[0].owner, unshielded_address,);
-            }
+    // Verify the address in returned UTXOs matches our subscription address
+    for event in &events {
+        if !event.created_utxos.is_empty() {
+            assert_eq!(event.created_utxos[0].owner, unshielded_address);
+        }
+
+        if !event.spent_utxos.is_empty() {
+            assert_eq!(event.spent_utxos[0].owner, unshielded_address,);
         }
     }
 

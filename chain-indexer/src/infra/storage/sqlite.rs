@@ -326,55 +326,6 @@ async fn save_unshielded_utxos(
     Ok(())
 }
 
-async fn save_unshielded_utxos(
-    utxos: &[UnshieldedUtxo],
-    transaction_id: i64,
-    spent: bool,
-    tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    if utxos.is_empty() {
-        return Ok(());
-    }
-
-    if spent {
-        for utxo_info_for_spending in utxos {
-            let query = indoc! {"
-                UPDATE unshielded_utxos
-                SET spending_transaction_id = $1
-                WHERE creating_transaction_id = $2 AND output_index = $3
-                AND spending_transaction_id IS NULL -- Ensure we only mark unspent ones
-            "};
-
-            sqlx::query(query)
-                .bind(transaction_id)
-                .bind(utxo_info_for_spending.creating_transaction_id as i64)
-                .bind(utxo_info_for_spending.output_index as i32)
-                .execute(&mut **tx)
-                .await?
-                .rows_affected();
-        }
-    } else {
-        let query_base = indoc! {"
-            INSERT INTO unshielded_utxos
-             (creating_transaction_id, output_index, owner_address, token_type, intent_hash, value)
-        "};
-        let mut query_builder = QueryBuilder::new(query_base);
-        query_builder.push_values(utxos.iter(), |mut q, utxo| {
-            q.push_bind(transaction_id)
-                .push_bind(utxo.output_index as i32)
-                .push_bind(&utxo.owner_address)
-                .push_bind(utxo.token_type.as_ref())
-                .push_bind(utxo.intent_hash.as_ref())
-                .push_bind(U128BeBytes::from(utxo.value));
-        });
-
-        let query = query_builder.build();
-        query.execute(&mut **tx).await?;
-    }
-
-    Ok(())
-}
-
 async fn save_identifiers(
     identifiers: &[Identifier],
     transaction_id: i64,
