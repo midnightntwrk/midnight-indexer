@@ -35,7 +35,7 @@ where
     async fn save_unshielded_utxos(
         &self,
         utxos: &[UnshieldedUtxo],
-        transaction_id: i64,
+        transaction_id: &i64,
         spent: bool,
     ) -> Result<(), sqlx::Error>;
 
