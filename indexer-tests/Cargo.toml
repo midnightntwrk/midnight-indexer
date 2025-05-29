@@ -25,7 +25,7 @@ graphql_client    = { workspace = true, features = [ "reqwest-rustls" ] }
 indexer-api       = { path = "../indexer-api" }
 indexer-common    = { path = "../indexer-common" }
 itertools         = { workspace = true }
-midnight-ledger   = { workspace = true, features = [ "fake", "proving", "transaction-construction" ] }
+midnight-ledger   = { workspace = true, features = [ "proving" ] }
 reqwest           = { workspace = true, features = [ "json", "rustls-tls" ] }
 serde             = { workspace = true, features = [ "derive" ] }
 serde_json        = { workspace = true }
