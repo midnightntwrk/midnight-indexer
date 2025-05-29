@@ -77,26 +77,28 @@ impl ZswapState {
                 &mut transaction.raw.as_ref(),
                 network_id.into(),
             )
-            .map_err(|error| Error::Io("cannot deserialize ledger transaction", error))?;
+                .map_err(|error| Error::Io("cannot deserialize ledger transaction", error))?;
 
             if let LedgerTransaction::Standard(StandardTransaction {
-                guaranteed_coins,
-                fallible_coins,
-                ..
-            }) = ledger_transaction
+                                                   guaranteed_coins,
+                                                   fallible_coins,
+                                                   ..
+                                               }) = ledger_transaction
             {
-                let mut state;
+                let mut state = self.0.clone(); // Get the inner indexer_common::domain::ZswapState
 
                 // Guaranteed coins are applied for both Success and PartialSuccess.
                 if let Some(guaranteed_coins) = guaranteed_coins {
-                    let (s, _) = self.try_apply(&guaranteed_coins, None)?;
-                    state = s;
+                    let (s, _) = state.try_apply(&guaranteed_coins, None)?;
+                    state = s.into(); // Convert back to indexer_common::domain::ZswapState
                 }
 
                 // Fallible coins are only applied for Success.
                 if transaction.apply_stage == ApplyStage::Success {
-                    let (s, _) = state.try_apply(&fallible_coins, None)?;
-                    state = s;
+                    for seg_offer in fallible_coins.iter() {
+                        let (s, _) = state.try_apply(&seg_offer.1, None)?;
+                        state = s.into(); // Convert back to indexer_common::domain::ZswapState
+                    }
                 }
 
                 if state.first_free > start_index {
@@ -104,7 +106,7 @@ impl ZswapState {
                     end_index = state.first_free - 1;
                 }
 
-                *self = ZswapState(state.into());
+                *self = ZswapState(state);
             }
         }
 
