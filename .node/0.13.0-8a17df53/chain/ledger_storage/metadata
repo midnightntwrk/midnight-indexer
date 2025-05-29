@@ -1,5 +1,0 @@
-version=8
-salt=24054408df7aa4d88b0c5360dbb4d9e014aa2778aad6ad1bede3693e7d9eeb0c
-col0=preimage: false, uniform: false, refc: false, compression: 0, ordered: true
-col1=preimage: false, uniform: false, refc: false, compression: 0, ordered: true
-col2=preimage: false, uniform: false, refc: false, compression: 0, ordered: true
