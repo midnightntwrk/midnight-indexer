@@ -159,12 +159,11 @@ generate-node-data:
     sleep 3
     docker run \
         --rm \
-        --name generator-generate-unshielded \
+        --name generator-generate-txs \
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
-        generate-txs unshielded -n 3 -b 2
-        --rng-seed "0000000000000000000000000000000000000000000000000000000000000037"
+        generate-txs batches -n 3 -b 2
     docker run \
         --rm \
         --name generator-generate-contract-deploy \
