@@ -44,7 +44,7 @@ async fn run() -> anyhow::Result<()> {
     use indexer_common::{
         cipher::make_cipher,
         config::ConfigExt,
-        infra::{migrations, pool, pub_sub, zswap_state_storage},
+        infra::{migrations, pool, pub_sub, ledger_state_storage},
         telemetry,
     };
     use log::info;
@@ -92,7 +92,7 @@ async fn run() -> anyhow::Result<()> {
 
     let cipher = make_cipher(secret).context("make cipher")?;
 
-    let zswap_state_storage = zswap_state_storage::in_mem::InMemZswapStateStorage::default();
+    let ledger_state_storage = ledger_state_storage::in_mem::InMemZswapStateStorage::default();
 
     let pub_sub = pub_sub::in_mem::InMemPubSub::default();
 
@@ -106,7 +106,7 @@ async fn run() -> anyhow::Result<()> {
             application_config.into(),
             node,
             storage,
-            zswap_state_storage.clone(),
+            ledger_state_storage.clone(),
             pub_sub.publisher(),
         )
     });
@@ -115,7 +115,7 @@ async fn run() -> anyhow::Result<()> {
         let storage =
             indexer_api::infra::storage::sqlite::SqliteStorage::new(cipher.clone(), pool.clone());
         let subscriber = pub_sub.subscriber();
-        let api = AxumApi::new(api_config, storage, zswap_state_storage, subscriber.clone());
+        let api = AxumApi::new(api_config, storage, ledger_state_storage, subscriber.clone());
 
         indexer_api::application::run(application_config.into(), api, subscriber)
     });

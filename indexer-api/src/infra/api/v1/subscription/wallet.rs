@@ -148,7 +148,7 @@ where
     let network_id = cx.get_network_id();
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
-    let zswap_state_storage = cx.get_zswap_state_storage::<Z>();
+    let ledger_state_storage = cx.get_ledger_state_storage::<Z>();
     let zswap_state_cache = cx.get_zswap_state_cache();
 
     let wallet_indexed_events = subscriber
@@ -170,7 +170,7 @@ where
                 next_index,
                 transaction,
                 network_id,
-                zswap_state_storage,
+                ledger_state_storage,
                 zswap_state_cache,
             )
             .await?;
@@ -203,7 +203,7 @@ where
                     next_index,
                     transaction,
                     network_id,
-                    zswap_state_storage,
+                    ledger_state_storage,
                     zswap_state_cache,
                 )
                 .await?;
@@ -225,7 +225,7 @@ async fn viewing_update<S, Z>(
     from: u64,
     transaction: Transaction,
     network_id: NetworkId,
-    zswap_state_storage: &Z,
+    ledger_state_storage: &Z,
     zswap_state_cache: &ZswapStateCache,
 ) -> async_graphql::Result<ViewingUpdate<S>>
 where
@@ -252,7 +252,7 @@ where
                 transaction.start_index - 1,
                 network_id,
                 transaction.protocol_version,
-                zswap_state_storage,
+                ledger_state_storage,
             )
             .await
             .internal("create collapsed update")?;

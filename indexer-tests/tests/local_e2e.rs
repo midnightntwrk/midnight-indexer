@@ -230,7 +230,7 @@ fn start_chain_indexer(
         ("APP__INFRA__NODE__URL", node_url.to_owned()),
         ("APP__INFRA__PUB_SUB__URL", nats_url.to_owned()),
         ("APP__INFRA__STORAGE__PORT", postgres_port.to_string()),
-        ("APP__INFRA__ZSWAP_STATE_STORAGE__URL", nats_url.to_owned()),
+        ("APP__INFRA__LEDGER_STATE_STORAGE__URL", nats_url.to_owned()),
     ];
 
     spawn_child("chain-indexer", env_vars.into())
@@ -253,7 +253,7 @@ async fn start_indexer_api(
         ("APP__INFRA__API__PORT", api_port.to_string()),
         ("APP__INFRA__PUB_SUB__URL", nats_url.to_owned()),
         ("APP__INFRA__STORAGE__PORT", postgres_port.to_string()),
-        ("APP__INFRA__ZSWAP_STATE_STORAGE__URL", nats_url.to_owned()),
+        ("APP__INFRA__LEDGER_STATE_STORAGE__URL", nats_url.to_owned()),
     ];
 
     let child = spawn_child("indexer-api", env_vars.into());

@@ -232,7 +232,7 @@ async fn create_zswap_state_store(
 mod tests {
     use crate::{
         domain::{LedgerState, LedgerStateStorage, NetworkId},
-        infra::zswap_state_storage::nats::{Config, NatsLedgerStateStorage},
+        infra::ledger_state_storage::nats::{Config, NatsLedgerStateStorage},
         serialize::SerializableExt,
     };
     use anyhow::Context;
@@ -249,7 +249,7 @@ mod tests {
                 "--user",
                 "indexer",
                 "--pass",
-                env!("APP__INFRA__ZSWAP_STATE_STORAGE__PASSWORD"),
+                env!("APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD"),
                 "-js",
             ])
             .start()
@@ -276,19 +276,19 @@ mod tests {
         let config = Config {
             url: nats_url,
             username: "indexer".to_string(),
-            password: env!("APP__INFRA__ZSWAP_STATE_STORAGE__PASSWORD").into(),
+            password: env!("APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD").into(),
         };
-        let mut zswap_state_storage = NatsLedgerStateStorage::new(config)
+        let mut ledger_state_storage = NatsLedgerStateStorage::new(config)
             .await
             .context("create NatsZswapStateStorage")?;
 
-        let last_index = zswap_state_storage
+        let last_index = ledger_state_storage
             .load_last_index()
             .await
             .context("load last index")?;
         assert!(last_index.is_none());
 
-        let zswap_state = zswap_state_storage
+        let zswap_state = ledger_state_storage
             .load_ledger_state()
             .await
             .context("load zswap state")?;
@@ -298,18 +298,18 @@ mod tests {
             .serialize(NetworkId::Undeployed)
             .unwrap()
             .into();
-        zswap_state_storage
+        ledger_state_storage
             .save(&default_state, 0, None)
             .await
             .context("save zswap state")?;
 
-        let last_index = zswap_state_storage
+        let last_index = ledger_state_storage
             .load_last_index()
             .await
             .context("load last index")?;
         assert!(last_index.is_none());
 
-        let zswap_state = zswap_state_storage
+        let zswap_state = ledger_state_storage
             .load_ledger_state()
             .await
             .context("load zswap state")?;
@@ -318,7 +318,7 @@ mod tests {
             Some((state, 0)) if state == default_state
         );
 
-        zswap_state_storage
+        ledger_state_storage
             .save(
                 &LedgerState::default()
                     .serialize(NetworkId::Undeployed)
@@ -330,7 +330,7 @@ mod tests {
             .await
             .context("save zswap state")?;
 
-        let last_index = zswap_state_storage
+        let last_index = ledger_state_storage
             .load_last_index()
             .await
             .context("load last index")?;

@@ -15,7 +15,7 @@ infra:
     url: "localhost:4222"
     username: "indexer"
 
-  zswap_state_storage:
+  ledger_state_storage:
     url: "localhost:4222"
     username: "indexer"
 

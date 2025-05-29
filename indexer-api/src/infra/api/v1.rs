@@ -577,7 +577,7 @@ pub fn make_app<S, B, Z>(
     network_id: NetworkId,
     zswap_state_cache: ZswapStateCache,
     storage: S,
-    zswap_state_storage: Z,
+    ledger_state_storage: Z,
     subscriber: B,
     max_complexity: usize,
     max_depth: usize,
@@ -591,7 +591,7 @@ where
         .data(network_id)
         .data(zswap_state_cache)
         .data(storage)
-        .data(zswap_state_storage)
+        .data(ledger_state_storage)
         .data(subscriber)
         .limit_complexity(max_complexity)
         .limit_depth(max_depth)

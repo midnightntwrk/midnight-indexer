@@ -55,16 +55,16 @@ const LENGTH_LIMIT_EXCEEDED_BODY: &[u8] =
 pub struct AxumApi<S, Z, B> {
     config: Config,
     storage: S,
-    zswap_state_storage: Z,
+    ledger_state_storage: Z,
     subscriber: B,
 }
 
 impl<S, Z, B> AxumApi<S, Z, B> {
-    pub fn new(config: Config, storage: S, zswap_state_storage: Z, subscriber: B) -> Self {
+    pub fn new(config: Config, storage: S, ledger_state_storage: Z, subscriber: B) -> Self {
         Self {
             config,
             storage,
-            zswap_state_storage,
+            ledger_state_storage,
             subscriber,
         }
     }
@@ -96,7 +96,7 @@ where
             caught_up,
             network_id,
             self.storage,
-            self.zswap_state_storage,
+            self.ledger_state_storage,
             self.subscriber,
             max_complexity,
             max_depth,
@@ -139,7 +139,7 @@ fn make_app<S, Z, B>(
     caught_up: Arc<AtomicBool>,
     network_id: NetworkId,
     storage: S,
-    zswap_state_storage: Z,
+    ledger_state_storage: Z,
     subscriber: B,
     max_complexity: usize,
     max_depth: usize,
@@ -156,7 +156,7 @@ where
         network_id,
         zswap_state_cache,
         storage,
-        zswap_state_storage,
+        ledger_state_storage,
         subscriber,
         max_complexity,
         max_depth,
@@ -246,7 +246,7 @@ trait ContextExt {
     where
         B: Subscriber;
 
-    fn get_zswap_state_storage<Z>(&self) -> &Z
+    fn get_ledger_state_storage<Z>(&self) -> &Z
     where
         Z: LedgerStateStorage;
 
@@ -274,7 +274,7 @@ impl ContextExt for Context<'_> {
         self.data::<B>().expect("Subscriber is stored in Context")
     }
 
-    fn get_zswap_state_storage<Z>(&self) -> &Z
+    fn get_ledger_state_storage<Z>(&self) -> &Z
     where
         Z: LedgerStateStorage,
     {

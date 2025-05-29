@@ -17,7 +17,7 @@ pub mod storage;
 #[cfg(feature = "cloud")]
 use indexer_common::infra::pool;
 #[cfg(feature = "cloud")]
-use indexer_common::infra::{pub_sub, zswap_state_storage};
+use indexer_common::infra::{pub_sub, ledger_state_storage};
 
 #[cfg(feature = "cloud")]
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -28,8 +28,8 @@ pub struct Config {
     #[serde(rename = "pub_sub")]
     pub pub_sub_config: pub_sub::nats::Config,
 
-    #[serde(rename = "zswap_state_storage")]
-    pub zswap_state_storage_config: zswap_state_storage::nats::Config,
+    #[serde(rename = "ledger_state_storage")]
+    pub ledger_state_storage_config: ledger_state_storage::nats::Config,
 
     #[serde(rename = "api")]
     pub api_config: api::Config,

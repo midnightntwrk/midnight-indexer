@@ -43,7 +43,7 @@ async fn run() -> anyhow::Result<()> {
     use indexer_common::{
         cipher::make_cipher,
         config::ConfigExt,
-        infra::{migrations, pool, pub_sub, zswap_state_storage},
+        infra::{migrations, pool, pub_sub, ledger_state_storage},
         telemetry,
     };
     use log::{error, info};
@@ -70,7 +70,7 @@ async fn run() -> anyhow::Result<()> {
         secret,
         api_config,
         storage_config,
-        zswap_state_storage_config,
+        ledger_state_storage_config,
         pub_sub_config,
     } = infra_config;
 
@@ -85,14 +85,14 @@ async fn run() -> anyhow::Result<()> {
     let cipher = make_cipher(secret).context("make cipher")?;
     let storage = infra::storage::postgres::PostgresStorage::new(cipher, pool);
 
-    let zswap_state_storage =
-        zswap_state_storage::nats::NatsLedgerStateStorage::new(zswap_state_storage_config)
+    let ledger_state_storage =
+        ledger_state_storage::nats::NatsLedgerStateStorage::new(ledger_state_storage_config)
             .await
             .context("create NatsZswapStateStorage")?;
 
     let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config).await?;
 
-    let api = AxumApi::new(api_config, storage, zswap_state_storage, subscriber.clone());
+    let api = AxumApi::new(api_config, storage, ledger_state_storage, subscriber.clone());
 
     application::run(application_config, api, subscriber)
         .await

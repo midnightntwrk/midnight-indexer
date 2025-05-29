@@ -109,8 +109,8 @@ The Chain Indexer, Indexer API and Wallet Indexer can be run as separate executa
 | APP__INFRA__STORAGE__USER | PostgreSQL database user | `indexer` |
 | APP__INFRA__PUB_SUB__URL | NATS URL | `localhost:4222` |
 | APP__INFRA__PUB_SUB__USERNAME | NATS username | `indexer` |
-| APP__INFRA__ZSWAP_STATE_STORAGE__URL | NATS URL | `localhost:4222` |
-| APP__INFRA__ZSWAP_STATE_STORAGE__USERNAME | NATS username | `indexer` |
+| APP__INFRA__LEDGER_STATE_STORAGE__URL | NATS URL | `localhost:4222` |
+| APP__INFRA__LEDGER_STATE_STORAGE__USERNAME | NATS username | `indexer` |
 | APP__INFRA__NODE__URL | WebSocket Endpoint of Midnight Node | `ws://localhost:9944` |
 
 For the full set of configuration options see [config.yaml](chain-indexer/config.yaml).
@@ -126,8 +126,8 @@ For the full set of configuration options see [config.yaml](chain-indexer/config
 | APP__INFRA__STORAGE__USER | PostgreSQL database user | `indexer` |
 | APP__INFRA__PUB_SUB__URL | NATS URL | `localhost:4222` |
 | APP__INFRA__PUB_SUB__USERNAME | NATS username | `indexer` |
-| APP__INFRA__ZSWAP_STATE_STORAGE__URL | NATS URL | `localhost:4222` |
-| APP__INFRA__ZSWAP_STATE_STORAGE__USERNAME | NATS username | `indexer` |
+| APP__INFRA__LEDGER_STATE_STORAGE__URL | NATS URL | `localhost:4222` |
+| APP__INFRA__LEDGER_STATE_STORAGE__USERNAME | NATS username | `indexer` |
 | APP__INFRA__API__PORT | Port of the GraphQL API | `8088` |
 | APP__INFRA__SECRET | Hex-encoded 32-byte secret to encrypt stored sensitive data | - |
 

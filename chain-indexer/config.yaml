@@ -3,7 +3,7 @@ run_migrations: true
 application:
   network_id: "Undeployed"
   blocks_buffer: 10
-  save_zswap_state_after: 1000
+  save_ledger_state_after: 1000
   caught_up_max_distance: 10
   caught_up_leeway: 5
 
@@ -19,7 +19,7 @@ infra:
     url: "localhost:4222"
     username: "indexer"
 
-  zswap_state_storage:
+  ledger_state_storage:
     url: "localhost:4222"
     username: "indexer"
 

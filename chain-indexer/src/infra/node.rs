@@ -467,7 +467,7 @@ pub enum SubxtNodeError {
     #[error("cannot deserialize ledger transaction")]
     DeserializeTransaction(#[source] io::Error),
 
-    #[error("cannot deserialize ledger zswap state root")]
+    #[error("cannot deserialize zswap state root")]
     DeserializeZswapStateRoot(#[source] io::Error),
 
     #[error("cannot get contract state: {0}")]

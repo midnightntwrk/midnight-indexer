@@ -15,4 +15,4 @@ pub mod migrations;
 pub mod pool;
 pub mod pub_sub;
 pub mod sqlx;
-pub mod zswap_state_storage;
+pub mod ledger_state_storage;

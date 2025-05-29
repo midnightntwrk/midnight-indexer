@@ -33,7 +33,7 @@ pub struct Config {
 pub struct ApplicationConfig {
     pub network_id: NetworkId,
     pub blocks_buffer: usize,
-    pub save_zswap_state_after: u32,
+    pub save_ledger_state_after: u32,
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
     #[serde(with = "humantime_serde")]
@@ -50,7 +50,7 @@ impl From<ApplicationConfig> for chain_indexer::application::Config {
         let ApplicationConfig {
             network_id,
             blocks_buffer,
-            save_zswap_state_after,
+            save_ledger_state_after,
             caught_up_max_distance,
             caught_up_leeway,
             ..
@@ -59,7 +59,7 @@ impl From<ApplicationConfig> for chain_indexer::application::Config {
         Self {
             network_id,
             blocks_buffer,
-            save_zswap_state_after,
+            save_ledger_state_after,
             caught_up_max_distance,
             caught_up_leeway,
         }
