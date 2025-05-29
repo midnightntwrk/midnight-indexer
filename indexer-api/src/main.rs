@@ -43,7 +43,7 @@ async fn run() -> anyhow::Result<()> {
     use indexer_common::{
         cipher::make_cipher,
         config::ConfigExt,
-        infra::{migrations, pool, pub_sub, ledger_state_storage},
+        infra::{ledger_state_storage, migrations, pool, pub_sub},
         telemetry,
     };
     use log::{error, info};
@@ -92,7 +92,12 @@ async fn run() -> anyhow::Result<()> {
 
     let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config).await?;
 
-    let api = AxumApi::new(api_config, storage, ledger_state_storage, subscriber.clone());
+    let api = AxumApi::new(
+        api_config,
+        storage,
+        ledger_state_storage,
+        subscriber.clone(),
+    );
 
     application::run(application_config, api, subscriber)
         .await

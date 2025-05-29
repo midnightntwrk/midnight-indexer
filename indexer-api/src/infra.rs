@@ -17,7 +17,7 @@ pub mod storage;
 #[cfg(feature = "cloud")]
 use indexer_common::infra::pool;
 #[cfg(feature = "cloud")]
-use indexer_common::infra::{pub_sub, ledger_state_storage};
+use indexer_common::infra::{ledger_state_storage, pub_sub};
 
 #[cfg(feature = "cloud")]
 #[derive(Debug, Clone, serde::Deserialize)]

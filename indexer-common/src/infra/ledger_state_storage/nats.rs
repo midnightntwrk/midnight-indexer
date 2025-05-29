@@ -35,12 +35,12 @@ use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio_util::io::StreamReader;
 
-const BUCKET_NAME: &str = "zswap_state_store";
-const OBJECT_NAME: &str = "zswap_state";
+const BUCKET_NAME: &str = "ledger_state_store";
+const OBJECT_NAME: &str = "ledger_state";
 
 /// NATS based ledger state storage implementation.
 pub struct NatsLedgerStateStorage {
-    zswap_state_store: ObjectStore,
+    ledger_state_store: ObjectStore,
 }
 
 impl NatsLedgerStateStorage {
@@ -56,14 +56,14 @@ impl NatsLedgerStateStorage {
             ConnectOptions::new().user_and_password(username, password.expose_secret().to_owned());
         let client = options.connect(url).await?;
         let jetstream = jetstream::new(client);
-        let zswap_state_store = create_zswap_state_store(&jetstream).await?;
+        let ledger_state_store = create_ledger_state_store(&jetstream).await?;
 
-        Ok(Self { zswap_state_store })
+        Ok(Self { ledger_state_store })
     }
 
     #[trace]
-    async fn current_object_name(&self) -> Result<Option<String>, ZswapStateStorageError> {
-        let objects = self.zswap_state_store.list().await?;
+    async fn current_object_name(&self) -> Result<Option<String>, LedgerStateStorageError> {
+        let objects = self.ledger_state_store.list().await?;
 
         let names = objects
             .map_ok(|info| info.name)
@@ -76,7 +76,7 @@ impl NatsLedgerStateStorage {
 }
 
 impl LedgerStateStorage for NatsLedgerStateStorage {
-    type Error = ZswapStateStorageError;
+    type Error = LedgerStateStorageError;
 
     #[trace]
     async fn load_last_index(&self) -> Result<Option<u64>, Self::Error> {
@@ -85,7 +85,7 @@ impl LedgerStateStorage for NatsLedgerStateStorage {
 
         match object_name {
             Some(object_name) => {
-                let object = self.zswap_state_store.get(object_name).await;
+                let object = self.ledger_state_store.get(object_name).await;
 
                 match object {
                     Ok(mut object) => {
@@ -112,7 +112,7 @@ impl LedgerStateStorage for NatsLedgerStateStorage {
 
         match object_name {
             Some(object_name) => {
-                let object = self.zswap_state_store.get(object_name).await;
+                let object = self.ledger_state_store.get(object_name).await;
 
                 match object {
                     Ok(mut object) => {
@@ -137,7 +137,7 @@ impl LedgerStateStorage for NatsLedgerStateStorage {
     #[trace]
     async fn save(
         &mut self,
-        zswap_state: &RawLedgerState,
+        ledger_state: &RawLedgerState,
         block_height: u32,
         last_index: Option<u64>,
     ) -> Result<(), Self::Error> {
@@ -150,12 +150,14 @@ impl LedgerStateStorage for NatsLedgerStateStorage {
         let block_height = block_height.to_le_bytes();
         let block_height = Cursor::new(block_height.as_slice());
 
-        let zswap_state = Cursor::new(zswap_state.as_ref());
+        let ledger_state = Cursor::new(ledger_state.as_ref());
 
-        let object = stream::iter([last_index, block_height, zswap_state].into_iter());
+        let object = stream::iter([last_index, block_height, ledger_state].into_iter());
         let mut object = StreamReader::new(object.map(Ok::<_, io::Error>));
 
-        self.zswap_state_store.put(OBJECT_NAME, &mut object).await?;
+        self.ledger_state_store
+            .put(OBJECT_NAME, &mut object)
+            .await?;
 
         Ok(())
     }
@@ -171,20 +173,20 @@ pub enum Error {
 }
 
 #[derive(Debug, Error)]
-pub enum ZswapStateStorageError {
+pub enum LedgerStateStorageError {
     #[error("cannot convert into last index")]
     LastIndex(#[from] TryFromSliceError),
 
-    #[error("cannot load zswap state")]
+    #[error("cannot load ledger state")]
     Get(#[from] GetError),
 
-    #[error("cannot load zswap state")]
+    #[error("cannot load ledger state")]
     Read(#[from] io::Error),
 
-    #[error("cannot save zswap state")]
+    #[error("cannot save ledger state")]
     Put(#[from] PutError),
 
-    #[error("cannot cleanup zswap state store")]
+    #[error("cannot cleanup ledger state store")]
     Cleanup(CleanupError),
 
     #[error("trying to receive an error from the cleanup task failed")]
@@ -217,7 +219,7 @@ pub enum CleanupError {
     Delete(#[from] DeleteError),
 }
 
-async fn create_zswap_state_store(
+async fn create_ledger_state_store(
     jetstream: &Jetstream,
 ) -> Result<ObjectStore, CreateObjectStoreError> {
     let config = object_store::Config {
@@ -288,11 +290,11 @@ mod tests {
             .context("load last index")?;
         assert!(last_index.is_none());
 
-        let zswap_state = ledger_state_storage
+        let ledger_state = ledger_state_storage
             .load_ledger_state()
             .await
-            .context("load zswap state")?;
-        assert!(zswap_state.is_none());
+            .context("load ledger state")?;
+        assert!(ledger_state.is_none());
 
         let default_state = LedgerState::default()
             .serialize(NetworkId::Undeployed)
@@ -301,7 +303,7 @@ mod tests {
         ledger_state_storage
             .save(&default_state, 0, None)
             .await
-            .context("save zswap state")?;
+            .context("save ledger state")?;
 
         let last_index = ledger_state_storage
             .load_last_index()
@@ -309,12 +311,12 @@ mod tests {
             .context("load last index")?;
         assert!(last_index.is_none());
 
-        let zswap_state = ledger_state_storage
+        let ledger_state = ledger_state_storage
             .load_ledger_state()
             .await
-            .context("load zswap state")?;
+            .context("load ledger state")?;
         assert_matches!(
-            zswap_state,
+            ledger_state,
             Some((state, 0)) if state == default_state
         );
 
@@ -328,7 +330,7 @@ mod tests {
                 Some(42),
             )
             .await
-            .context("save zswap state")?;
+            .context("save ledger state")?;
 
         let last_index = ledger_state_storage
             .load_last_index()

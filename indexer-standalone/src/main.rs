@@ -44,7 +44,7 @@ async fn run() -> anyhow::Result<()> {
     use indexer_common::{
         cipher::make_cipher,
         config::ConfigExt,
-        infra::{migrations, pool, pub_sub, ledger_state_storage},
+        infra::{ledger_state_storage, migrations, pool, pub_sub},
         telemetry,
     };
     use log::info;
@@ -115,7 +115,12 @@ async fn run() -> anyhow::Result<()> {
         let storage =
             indexer_api::infra::storage::sqlite::SqliteStorage::new(cipher.clone(), pool.clone());
         let subscriber = pub_sub.subscriber();
-        let api = AxumApi::new(api_config, storage, ledger_state_storage, subscriber.clone());
+        let api = AxumApi::new(
+            api_config,
+            storage,
+            ledger_state_storage,
+            subscriber.clone(),
+        );
 
         indexer_api::application::run(application_config.into(), api, subscriber)
     });
