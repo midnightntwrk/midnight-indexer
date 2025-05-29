@@ -13,9 +13,9 @@
 
 use crate::domain::{ByteVec, NetworkId};
 use derive_more::derive::{Deref, From};
-use midnight_ledger::{
-    serialize::deserialize, storage::DefaultDB, zswap::ledger::State as LedgerZswapState,
-};
+use midnight_serialize::deserialize;
+use midnight_storage::DefaultDB;
+use midnight_zswap::ledger::State as LedgerZswapState;
 use std::{
     convert::Infallible,
     error::Error as StdError,

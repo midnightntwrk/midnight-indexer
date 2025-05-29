@@ -14,7 +14,7 @@
 use crate::domain::Transaction;
 use derive_more::{From, derive::AsRef};
 use indexer_common::domain::{BlockAuthor, ProtocolVersion};
-use midnight_ledger::transient_crypto::merkle_tree::MerkleTreeDigest;
+use midnight_transient_crypto::merkle_tree::MerkleTreeDigest;
 use std::fmt::{self, Debug, Display};
 use subxt::utils::H256;
 

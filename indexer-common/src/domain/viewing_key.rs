@@ -17,7 +17,8 @@ use chacha20poly1305::{
     aead::{Aead, OsRng, Payload},
 };
 use derive_more::{AsRef, From, Into};
-use midnight_ledger::{transient_crypto::encryption::SecretKey, zswap::keys::SecretKeys};
+use midnight_transient_crypto::encryption::SecretKey;
+use midnight_zswap::keys::SecretKeys;
 use sha2::{Digest, Sha256};
 use sqlx::{Type, types::Uuid};
 use std::fmt::{self, Debug, Display};

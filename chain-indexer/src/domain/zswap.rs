@@ -15,21 +15,18 @@ use crate::domain::Transaction;
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::{
+    LedgerTransaction,
     domain::{ApplyStage, ContractAddress, MerkleTreeRoot, NetworkId, RawZswapState},
     serialize::SerializableExt,
 };
 use log::debug;
-use midnight_ledger::{
-    coin_structure::contract::Address,
-    serialize::deserialize,
-    storage::DefaultDB,
-    structure::{Proof, StandardTransaction},
-    zswap::ledger::State as LedgerZswapState,
-};
+use midnight_coin_structure::contract::ContractAddress as Address;
+use midnight_ledger::structure::StandardTransaction;
+use midnight_serialize::deserialize;
+use midnight_storage::DefaultDB;
+use midnight_zswap::ledger::State as LedgerZswapState;
 use std::io;
 use thiserror::Error;
-
-type LedgerTransaction = midnight_ledger::structure::Transaction<Proof, DefaultDB>;
 
 /// Wrapper around ZswapState from indexer_common.
 #[derive(Debug, Clone, Default, From, Deref)]
@@ -80,21 +77,27 @@ impl ZswapState {
                 &mut transaction.raw.as_ref(),
                 network_id.into(),
             )
-            .map_err(|error| Error::Io("cannot deserialize ledger transaction", error))?;
+                .map_err(|error| Error::Io("cannot deserialize ledger transaction", error))?;
 
             if let LedgerTransaction::Standard(StandardTransaction {
-                guaranteed_coins,
-                fallible_coins,
-                ..
-            }) = ledger_transaction
+                                                   guaranteed_coins,
+                                                   fallible_coins,
+                                                   ..
+                                               }) = ledger_transaction
             {
+                let mut state = self.0.clone(); // Get the inner indexer_common::domain::ZswapState
+
                 // Guaranteed coins are applied for both Success and PartialSuccess.
-                let (mut state, _) = self.try_apply(&guaranteed_coins, None)?;
+                if let Some(guaranteed_coins) = guaranteed_coins {
+                    let (s, _) = state.try_apply(&guaranteed_coins, None)?;
+                    state = s.into(); // Convert back to indexer_common::domain::ZswapState
+                }
 
                 // Fallible coins are only applied for Success.
                 if transaction.apply_stage == ApplyStage::Success {
-                    if let Some(fallible_coins) = &fallible_coins {
-                        (state, _) = state.try_apply(fallible_coins, None)?;
+                    for seg_offer in fallible_coins.iter() {
+                        let (s, _) = state.try_apply(&seg_offer.1, None)?;
+                        state = s.into(); // Convert back to indexer_common::domain::ZswapState
                     }
                 }
 
@@ -103,7 +106,7 @@ impl ZswapState {
                     end_index = state.first_free - 1;
                 }
 
-                *self = ZswapState(state.into());
+                *self = ZswapState(state);
             }
         }
 
@@ -118,7 +121,7 @@ impl ZswapState {
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("cannot apply transaction")]
-    ApplyTransaction(#[from] midnight_ledger::zswap::error::TransactionInvalid),
+    ApplyTransaction(#[from] midnight_zswap::error::TransactionInvalid),
 
     #[error("{0}")]
     Io(&'static str, #[source] io::Error),

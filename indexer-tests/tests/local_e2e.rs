@@ -36,7 +36,7 @@ use tokio::{
 };
 
 const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
-const NODE_VERSION: &str = "0.12.0-fb26ee62";
+const NODE_VERSION: &str = "0.13.0-alpha.1";
 
 /// Setup for e2e testing using workspace executables built by cargo. Sets up the Indexer with the
 /// "cloud" architecture, i.e. as three separate processes and also PostgreSQL and NATS as Docker
@@ -74,15 +74,8 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("wait for indexer-api to become ready")?;
 
-    // Run the tests. (nats_url is needed temporarily until we have node image)
-    let result = e2e::run(
-        NetworkId::Undeployed,
-        "localhost",
-        api_port,
-        nats_url.as_str(),
-        false,
-    )
-    .await;
+    // Run the tests.
+    let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
 
     // It is best practice to kill the processes even when spawned with `kill_on_drop`.
     let _ = chain_indexer.kill().await;
@@ -110,8 +103,8 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("wait for indexer-api to become ready")?;
 
-    // Run the tests. (pass empty string for nats_url - it won't be used in standalone mode)
-    let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, "", false).await;
+    // Run the tests.
+    let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
 
     // It is best practice to kill the processes even when spawned with `kill_on_drop`.
     let _ = indexer_standalone.kill().await;
