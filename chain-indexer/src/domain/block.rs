@@ -13,9 +13,14 @@
 
 use crate::domain::Transaction;
 use derive_more::{From, derive::AsRef};
-use indexer_common::domain::{BlockAuthor, ProtocolVersion};
-use midnight_ledger::transient_crypto::merkle_tree::MerkleTreeDigest;
-use std::fmt::{self, Debug, Display};
+use indexer_common::domain::{BlockAuthor, ByteArray, ProtocolVersion};
+use midnight_ledger::{
+    base_crypto::hash::HashOutput, transient_crypto::merkle_tree::MerkleTreeDigest,
+};
+use std::{
+    array::TryFromSliceError,
+    fmt::{self, Debug, Display},
+};
 use subxt::utils::H256;
 
 /// Relevant block data from the perspective of the Chain Indexer.
@@ -67,5 +72,26 @@ impl Display for BlockHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let hex_encoded = const_hex::encode(self.as_ref());
         write!(f, "{hex_encoded}")
+    }
+}
+
+impl From<BlockHash> for HashOutput {
+    fn from(hash: BlockHash) -> Self {
+        Self(hash.0.0)
+    }
+}
+
+impl From<ByteArray<32>> for BlockHash {
+    fn from(bytes: ByteArray<32>) -> Self {
+        Self(H256(bytes.0))
+    }
+}
+
+impl TryFrom<&[u8]> for BlockHash {
+    type Error = TryFromSliceError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        let bytes = bytes.try_into()?;
+        Ok(Self(H256(bytes)))
     }
 }

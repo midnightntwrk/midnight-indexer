@@ -25,7 +25,7 @@ use axum::{
     routing::get,
 };
 use fastrace_axum::FastraceLayer;
-use indexer_common::domain::{NetworkId, Subscriber, ZswapStateStorage};
+use indexer_common::domain::{LedgerStateStorage, NetworkId, Subscriber};
 use log::{error, info, warn};
 use serde::Deserialize;
 use std::{
@@ -74,7 +74,7 @@ impl<S, Z, B> Api for AxumApi<S, Z, B>
 where
     S: Storage,
     B: Subscriber,
-    Z: ZswapStateStorage,
+    Z: LedgerStateStorage,
 {
     type Error = AxumApiError;
 
@@ -148,7 +148,7 @@ fn make_app<S, Z, B>(
 where
     S: Storage,
     B: Subscriber,
-    Z: ZswapStateStorage,
+    Z: LedgerStateStorage,
 {
     let zswap_state_cache = ZswapStateCache::default();
 
@@ -248,7 +248,7 @@ trait ContextExt {
 
     fn get_zswap_state_storage<Z>(&self) -> &Z
     where
-        Z: ZswapStateStorage;
+        Z: LedgerStateStorage;
 
     fn get_zswap_state_cache(&self) -> &ZswapStateCache;
 }
@@ -276,7 +276,7 @@ impl ContextExt for Context<'_> {
 
     fn get_zswap_state_storage<Z>(&self) -> &Z
     where
-        Z: ZswapStateStorage,
+        Z: LedgerStateStorage,
     {
         self.data::<Z>()
             .expect("ZswapStateStorage is stored in Context")

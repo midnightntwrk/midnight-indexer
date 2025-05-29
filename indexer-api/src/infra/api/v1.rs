@@ -31,8 +31,8 @@ use async_graphql_axum::{GraphQL, GraphQLSubscription};
 use axum::{Router, routing::post_service};
 use derive_more::Debug;
 use indexer_common::domain::{
-    ByteVec, NetworkId, NoopSubscriber, NoopZswapStateStorage, ProtocolVersion, SessionId,
-    Subscriber, ZswapStateStorage,
+    ByteVec, LedgerStateStorage, NetworkId, NoopLedgerStateStorage, NoopSubscriber,
+    ProtocolVersion, SessionId, Subscriber,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -568,7 +568,7 @@ scalar!(Unit);
 pub fn export_schema() -> String {
     //Once traits with async functions are object safe, `NoopStorage` can be replaced with
     // `<Box<dyn Storage>`.
-    schema_builder::<NoopStorage, NoopSubscriber, NoopZswapStateStorage>()
+    schema_builder::<NoopStorage, NoopSubscriber, NoopLedgerStateStorage>()
         .finish()
         .sdl()
 }
@@ -585,7 +585,7 @@ pub fn make_app<S, B, Z>(
 where
     S: Storage,
     B: Subscriber,
-    Z: ZswapStateStorage,
+    Z: LedgerStateStorage,
 {
     let schema = schema_builder::<S, B, Z>()
         .data(network_id)
@@ -607,7 +607,7 @@ fn schema_builder<S, B, Z>() -> SchemaBuilder<Query<S>, Mutation<S>, Subscriptio
 where
     S: Storage,
     B: Subscriber,
-    Z: ZswapStateStorage,
+    Z: LedgerStateStorage,
 {
     Schema::build(
         Query::<S>::default(),

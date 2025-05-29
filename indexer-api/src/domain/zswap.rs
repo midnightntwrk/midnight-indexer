@@ -13,7 +13,7 @@
 
 use derive_more::derive::{Deref, From};
 use indexer_common::{
-    domain::{NetworkId, ProtocolVersion, ZswapStateStorage},
+    domain::{LedgerStateStorage, NetworkId, ProtocolVersion},
     error::BoxError,
     serialize::SerializableExt,
 };
@@ -33,7 +33,7 @@ impl ZswapStateCache {
         end_index: u64,
         network_id: NetworkId,
         protocol_version: ProtocolVersion,
-        zswap_state_storage: &impl ZswapStateStorage,
+        zswap_state_storage: &impl LedgerStateStorage,
     ) -> Result<MerkleTreeCollapsedUpdate, ZswapStateCacheError> {
         // Acquire a read lock
         let mut zswap_state_read = self.0.read().await;
@@ -42,7 +42,7 @@ impl ZswapStateCache {
         if end_index >= zswap_state_read.first_free() {
             debug!(
                 end_index,
-                first_free = zswap_state_read.first_free;
+                first_free = zswap_state_read.zswap.first_free;
                 "zswap state is stale"
             );
 
@@ -57,12 +57,12 @@ impl ZswapStateCache {
             if end_index >= zswap_state_write.first_free() {
                 debug!(
                     end_index,
-                    first_free = zswap_state_write.first_free;
+                    first_free = zswap_state_write.zswap.first_free;
                     "zswap state is still stale, loading"
                 );
 
                 let zswap_state = zswap_state_storage
-                    .load_zswap_state()
+                    .load_ledger_state()
                     .await
                     .map_err(|error| ZswapStateCacheError::Load(error.into()))?
                     .map(|(zswap_state, _)| zswap_state);
@@ -71,7 +71,7 @@ impl ZswapStateCache {
 
                 match zswap_state {
                     Some(zswap_state) => {
-                        let zswap_state = indexer_common::domain::ZswapState::deserialize(
+                        let zswap_state = indexer_common::domain::LedgerState::deserialize(
                             zswap_state,
                             network_id,
                         )?
@@ -117,11 +117,11 @@ pub enum ZswapStateCacheError {
 
 /// Wrapper around ZswapState from indexer_common.
 #[derive(Debug, Clone, Default, From, Deref)]
-pub struct ZswapState(indexer_common::domain::ZswapState);
+pub struct ZswapState(indexer_common::domain::LedgerState);
 
 impl ZswapState {
     pub fn first_free(&self) -> u64 {
-        self.first_free
+        self.zswap.first_free
     }
 
     /// Produce a collapsed Merkle Tree from this [ZswapState].
@@ -132,9 +132,12 @@ impl ZswapState {
         end_index: u64,
         network_id: NetworkId,
     ) -> Result<MerkleTreeCollapsedUpdate, ZswapStateError> {
-        let update =
-            merkle_tree::MerkleTreeCollapsedUpdate::new(&self.coin_coms, start_index, end_index)?
-                .serialize(network_id)?;
+        let update = merkle_tree::MerkleTreeCollapsedUpdate::new(
+            &self.zswap.coin_coms,
+            start_index,
+            end_index,
+        )?
+        .serialize(network_id)?;
 
         Ok(MerkleTreeCollapsedUpdate {
             protocol_version,

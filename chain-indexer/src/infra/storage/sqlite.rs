@@ -12,13 +12,13 @@
 // limitations under the License.
 
 use crate::domain::{Block, BlockHash, BlockInfo, ContractAction, Transaction, storage::Storage};
-use futures::{Stream, StreamExt, TryStreamExt, stream};
+use futures::{FutureExt, Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{ContractActionVariant, Identifier},
     infra::pool::sqlite::SqlitePool,
 };
 use indoc::indoc;
-use sqlx::{QueryBuilder, Row, Sqlite, sqlite::SqliteRow, types::Json};
+use sqlx::{FromRow, QueryBuilder, Row, Sqlite, sqlite::SqliteRow, types::Json};
 use std::iter;
 use subxt::utils::H256;
 
@@ -112,7 +112,7 @@ impl Storage for SqliteStorage {
         &self,
         from_block_height: u32,
         to_block_height: u32,
-    ) -> impl Stream<Item = Result<Vec<Transaction>, sqlx::Error>> + Send {
+    ) -> impl Stream<Item = Result<Vec<(Transaction, BlockHash)>, sqlx::Error>> + Send {
         stream::iter(from_block_height..=to_block_height)
             .then(|block_height| self.get_transactions_by_block_height(block_height))
     }
@@ -122,25 +122,37 @@ impl SqliteStorage {
     async fn get_transactions_by_block_height(
         &self,
         block_height: u32,
-    ) -> Result<Vec<Transaction>, sqlx::Error> {
+    ) -> Result<Vec<(Transaction, BlockHash)>, sqlx::Error> {
         let sql = indoc! {"
             SELECT
                 transactions.apply_stage,
                 transactions.raw,
                 transactions.merkle_tree_root,
                 transactions.start_index,
-                transactions.end_index
+                transactions.end_index,
+                blocks.hash AS block_hash
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE blocks.height = $1
         "};
 
-        let transactions = sqlx::query_as::<_, Transaction>(sql)
+        sqlx::query(sql)
             .bind(block_height as i64)
             .fetch_all(&*self.pool)
-            .await?;
-
-        Ok(transactions)
+            .map(|rows| {
+                rows.and_then(|rows| {
+                    rows.into_iter()
+                        .map(|row| {
+                            let transaction = Transaction::from_row(&row)?;
+                            let block_hash = row.try_get::<&[u8], _>("block_hash")?;
+                            let block_hash = BlockHash::try_from(block_hash)
+                                .map_err(|error| sqlx::Error::Decode(error.into()))?;
+                            Ok::<_, sqlx::Error>((transaction, block_hash))
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                })
+            })
+            .await
     }
 }
 

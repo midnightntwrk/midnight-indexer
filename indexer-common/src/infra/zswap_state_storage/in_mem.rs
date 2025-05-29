@@ -11,30 +11,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{RawZswapState, ZswapStateStorage};
+use crate::domain::{LedgerStateStorage, RawLedgerState};
 use parking_lot::RwLock;
 use std::{convert::Infallible, sync::Arc};
 
-/// In-memory based implementation of [ZswapStateStorage].
+/// In-memory based ledger state storage implementation.
 #[derive(Default, Clone)]
 pub struct InMemZswapStateStorage {
     data: Arc<RwLock<Data>>,
 }
 
-impl ZswapStateStorage for InMemZswapStateStorage {
+impl LedgerStateStorage for InMemZswapStateStorage {
     type Error = Infallible;
 
     async fn load_last_index(&self) -> Result<Option<u64>, Self::Error> {
         Ok(self.data.read().last_index)
     }
 
-    async fn load_zswap_state(&self) -> Result<Option<(RawZswapState, u32)>, Self::Error> {
+    async fn load_ledger_state(&self) -> Result<Option<(RawLedgerState, u32)>, Self::Error> {
         Ok(self.data.read().zswap_state.clone())
     }
 
     async fn save(
         &mut self,
-        zswap_state: &RawZswapState,
+        zswap_state: &RawLedgerState,
         block_height: u32,
         last_index: Option<u64>,
     ) -> Result<(), Self::Error> {
@@ -49,6 +49,6 @@ impl ZswapStateStorage for InMemZswapStateStorage {
 
 #[derive(Default)]
 struct Data {
-    zswap_state: Option<(RawZswapState, u32)>,
+    zswap_state: Option<(RawLedgerState, u32)>,
     last_index: Option<u64>,
 }

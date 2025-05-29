@@ -17,7 +17,7 @@ mod wallet;
 
 use crate::domain::Storage;
 use async_graphql::MergedSubscription;
-use indexer_common::domain::{Subscriber, ZswapStateStorage};
+use indexer_common::domain::{LedgerStateStorage, Subscriber};
 
 #[derive(MergedSubscription)]
 pub struct Subscription<S, B, Z>(
@@ -28,13 +28,13 @@ pub struct Subscription<S, B, Z>(
 where
     S: Storage,
     B: Subscriber,
-    Z: ZswapStateStorage;
+    Z: LedgerStateStorage;
 
 impl<S, B, Z> Default for Subscription<S, B, Z>
 where
     S: Storage,
     B: Subscriber,
-    Z: ZswapStateStorage,
+    Z: LedgerStateStorage,
 {
     fn default() -> Self {
         Subscription(

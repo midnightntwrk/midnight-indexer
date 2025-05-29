@@ -86,7 +86,7 @@ async fn run() -> anyhow::Result<()> {
     let storage = infra::storage::postgres::PostgresStorage::new(cipher, pool);
 
     let zswap_state_storage =
-        zswap_state_storage::nats::NatsZswapStateStorage::new(zswap_state_storage_config)
+        zswap_state_storage::nats::NatsLedgerStateStorage::new(zswap_state_storage_config)
             .await
             .context("create NatsZswapStateStorage")?;
 

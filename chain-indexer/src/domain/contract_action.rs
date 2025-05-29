@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use indexer_common::domain::{
-    ContractActionVariant, ContractAddress, ContractEntryPoint, ContractState, RawZswapState,
+    ContractActionVariant, ContractAddress, ContractEntryPoint, ContractState, RawLedgerState,
 };
 use serde::Serialize;
 
@@ -21,7 +21,7 @@ use serde::Serialize;
 pub struct ContractAction {
     pub address: ContractAddress,
     pub state: ContractState,
-    pub zswap_state: RawZswapState,
+    pub zswap_state: RawLedgerState,
     pub attributes: ContractAttributes,
 }
 

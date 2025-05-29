@@ -11,19 +11,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::Transaction;
+use crate::domain::{BlockHash, Transaction};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::{
-    domain::{ApplyStage, ContractAddress, MerkleTreeRoot, NetworkId, RawZswapState},
+    domain::{ApplyStage, ContractAddress, MerkleTreeRoot, NetworkId, RawLedgerState},
     serialize::SerializableExt,
 };
 use log::debug;
 use midnight_ledger::{
     coin_structure::contract::Address,
+    onchain_runtime::context::BlockContext,
+    semantics::{TransactionContext, TransactionResult},
     serialize::deserialize,
     storage::DefaultDB,
-    structure::{Proof, StandardTransaction},
+    structure::Proof,
     zswap::ledger::State as LedgerZswapState,
 };
 use std::io;
@@ -31,28 +33,42 @@ use thiserror::Error;
 
 type LedgerTransaction = midnight_ledger::structure::Transaction<Proof, DefaultDB>;
 
-/// Wrapper around ZswapState from indexer_common.
+/// New type for ledger state from indexer_common.
 #[derive(Debug, Clone, Default, From, Deref)]
-pub struct ZswapState(pub indexer_common::domain::ZswapState);
+pub struct LedgerState(pub indexer_common::domain::LedgerState);
 
-impl ZswapState {
-    /// Serialize this [ZswapState] using the given [NetworkId].
+impl LedgerState {
+    /// Serialize this ledger state using the given network ID.
     #[trace]
-    pub fn serialize(&self, network_id: NetworkId) -> Result<RawZswapState, io::Error> {
+    pub fn serialize(&self, network_id: NetworkId) -> Result<RawLedgerState, io::Error> {
         let bytes = self.0.serialize(network_id)?;
         Ok(bytes.into())
     }
 
-    /// Apply the given transactions to this zswap state and also update relevant transaction data
-    /// like start_index and end_index.
+    /// Apply the given transactions to this ledger state.
     #[trace]
-    pub fn apply_transactions(
+    pub fn apply_transactions<'a>(
         &mut self,
-        transactions: &mut [Transaction],
+        transactions: impl Iterator<Item = (&'a Transaction, BlockHash)>,
         network_id: NetworkId,
     ) -> Result<(), Error> {
-        for transaction in transactions.iter_mut() {
-            self.apply_transaction(transaction, network_id)?;
+        for (transaction, block_hash) in transactions {
+            self.apply_transaction(transaction, block_hash, network_id)?;
+        }
+
+        Ok(())
+    }
+
+    /// Apply the given transactions to this ledger state and also update relevant transaction data
+    /// like start_index and end_index.
+    #[trace]
+    pub fn apply_transactions_mut<'a>(
+        &mut self,
+        transactions: impl Iterator<Item = (&'a mut Transaction, BlockHash)>,
+        network_id: NetworkId,
+    ) -> Result<(), Error> {
+        for (transaction, block_hash) in transactions {
+            self.apply_transaction_mut(transaction, block_hash, network_id)?;
         }
 
         Ok(())
@@ -60,54 +76,64 @@ impl ZswapState {
 
     /// The last used index.
     pub fn end_index(&self) -> Option<u64> {
-        (self.first_free != 0).then(|| self.first_free - 1)
+        (self.zswap.first_free != 0).then(|| self.zswap.first_free - 1)
     }
 
     #[trace]
     fn apply_transaction(
         &mut self,
-        transaction: &mut Transaction,
+        transaction: &Transaction,
+        block_hash: BlockHash,
         network_id: NetworkId,
-    ) -> Result<(), Error> {
+    ) -> Result<TransactionResult<DefaultDB>, Error> {
         debug!(hash:% = transaction.hash; "applying transaction");
 
-        let start_index = self.first_free;
-        let mut end_index = self.first_free;
+        let ledger_transaction =
+            deserialize::<LedgerTransaction, _>(&mut transaction.raw.as_ref(), network_id.into())
+                .map_err(|error| Error::Io("cannot deserialize ledger transaction", error))?;
 
-        // For Failure the state is not changed.
-        if transaction.apply_stage != ApplyStage::Failure {
-            let ledger_transaction = deserialize::<LedgerTransaction, _>(
-                &mut transaction.raw.as_ref(),
-                network_id.into(),
-            )
-            .map_err(|error| Error::Io("cannot deserialize ledger transaction", error))?;
+        // Apply transaction to ledger state.
+        let cx = TransactionContext {
+            ref_state: self.0.0.clone(),
+            block_context: BlockContext {
+                seconds_since_epoch: 42,     // This value seems not important.
+                seconds_since_epoch_err: 30, // This value seems not important.
+                block_hash: block_hash.into(),
+            },
+            whitelist: None,
+        };
+        let (state, transaction_result) = self.apply(&ledger_transaction, &cx);
+        *self = LedgerState(state.into());
 
-            if let LedgerTransaction::Standard(StandardTransaction {
-                guaranteed_coins,
-                fallible_coins,
-                ..
-            }) = ledger_transaction
-            {
-                // Guaranteed coins are applied for both Success and PartialSuccess.
-                let (mut state, _) = self.try_apply(&guaranteed_coins, None)?;
+        Ok(transaction_result)
+    }
 
-                // Fallible coins are only applied for Success.
-                if transaction.apply_stage == ApplyStage::Success {
-                    if let Some(fallible_coins) = &fallible_coins {
-                        (state, _) = state.try_apply(fallible_coins, None)?;
-                    }
-                }
+    #[trace]
+    fn apply_transaction_mut(
+        &mut self,
+        transaction: &mut Transaction,
+        block_hash: BlockHash,
+        network_id: NetworkId,
+    ) -> Result<(), Error> {
+        let start_index = self.zswap.first_free;
+        let mut end_index = self.zswap.first_free;
 
-                if state.first_free > start_index {
-                    update_contract_zswap_state(&state, transaction, network_id)?;
-                    end_index = state.first_free - 1;
-                }
+        let transaction_result = self.apply_transaction(transaction, block_hash, network_id)?;
+        let zswap = &self.zswap;
 
-                *self = ZswapState(state.into());
-            }
+        // Update end_index and contract zswap state if necessary.
+        if zswap.first_free > start_index {
+            update_contract_zswap_state(zswap, transaction, network_id)?;
+            end_index = zswap.first_free - 1;
         }
 
-        transaction.merkle_tree_root = extract_merkle_tree_root(self, network_id)?;
+        // Update transaction.
+        transaction.apply_stage = match transaction_result {
+            TransactionResult::Success => ApplyStage::Success,
+            TransactionResult::PartialSuccess(_) => ApplyStage::PartialSuccess,
+            TransactionResult::Failure(_) => ApplyStage::Failure,
+        };
+        transaction.merkle_tree_root = extract_merkle_tree_root(zswap, network_id)?;
         transaction.start_index = start_index;
         transaction.end_index = end_index;
 
@@ -129,9 +155,10 @@ fn update_contract_zswap_state(
     transaction: &mut Transaction,
     network_id: NetworkId,
 ) -> Result<(), Error> {
-    for action in transaction.contract_actions.iter_mut() {
-        let zswap_state = extract_contract_zswap_state(state, &action.address, network_id)?;
-        action.zswap_state = zswap_state;
+    for contract_action in transaction.contract_actions.iter_mut() {
+        let zswap_state =
+            extract_contract_zswap_state(state, &contract_action.address, network_id)?;
+        contract_action.zswap_state = zswap_state;
     }
 
     Ok(())
@@ -141,7 +168,7 @@ fn extract_contract_zswap_state(
     state: &LedgerZswapState<DefaultDB>,
     address: &ContractAddress,
     network_id: NetworkId,
-) -> Result<RawZswapState, Error> {
+) -> Result<RawLedgerState, Error> {
     let address = deserialize::<Address, _>(&mut address.as_ref(), network_id.into())
         .map_err(|error| Error::Io("cannot deserialize contract address", error))?;
 

@@ -29,7 +29,7 @@ use futures::{
     stream::{self, TryStreamExt},
 };
 use indexer_common::domain::{
-    ApplyStage, NetworkId, SessionId, Subscriber, WalletIndexed, ZswapStateStorage,
+    ApplyStage, LedgerStateStorage, NetworkId, SessionId, Subscriber, WalletIndexed,
 };
 use log::{debug, warn};
 use metrics::{Counter, counter};
@@ -72,7 +72,7 @@ impl<S, B, Z> WalletSubscription<S, B, Z>
 where
     S: Storage,
     B: Subscriber,
-    Z: ZswapStateStorage,
+    Z: LedgerStateStorage,
 {
     /// Subscribe to wallet events for the given session ID starting at the given index or at zero
     /// if the index is omitted. Wallet events are either a ViewingUpdate or a ProgressUpdate.
@@ -143,7 +143,7 @@ async fn viewing_updates<'a, S, B, Z>(
 where
     S: Storage,
     B: Subscriber,
-    Z: ZswapStateStorage,
+    Z: LedgerStateStorage,
 {
     let network_id = cx.get_network_id();
     let storage = cx.get_storage::<S>();
@@ -230,7 +230,7 @@ async fn viewing_update<S, Z>(
 ) -> async_graphql::Result<ViewingUpdate<S>>
 where
     S: Storage,
-    Z: ZswapStateStorage,
+    Z: LedgerStateStorage,
 {
     // For failures, don't increment the index, because no changes were applied to the zswap state.
     // Put another way: the next transaction will have the same start_index like this end index.

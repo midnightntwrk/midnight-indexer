@@ -25,8 +25,7 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        ApplyStage, BlockAuthor, NetworkId, ProtocolVersion, RawTransaction,
-        ScaleDecodeProtocolVersionError,
+        BlockAuthor, NetworkId, ProtocolVersion, RawTransaction, ScaleDecodeProtocolVersionError,
     },
     error::{BoxError, StdErrorExt},
     serialize::SerializableExt,
@@ -41,7 +40,6 @@ use midnight_ledger::{
 use serde::Deserialize;
 use sqlx::types::time::OffsetDateTime;
 use std::{
-    collections::HashMap,
     future::ready,
     io::{self},
     time::Duration,
@@ -250,7 +248,6 @@ impl SubxtNode {
         let BlockDetails {
             timestamp,
             raw_transactions,
-            apply_stages,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
 
         let mut transactions = Vec::with_capacity(raw_transactions.len());
@@ -259,9 +256,7 @@ impl SubxtNode {
                 n,
                 raw_transaction,
                 hash,
-                parent_hash == BlockHash::default(),
                 protocol_version,
-                &apply_stages,
                 network_id,
                 online_client,
             )
@@ -532,9 +527,7 @@ async fn make_transaction(
     transaction_idx: usize,
     raw_transaction: Vec<u8>,
     block_hash: BlockHash,
-    is_genesis: bool,
     protocol_version: ProtocolVersion,
-    apply_stages: &HashMap<[u8; 32], ApplyStage>,
     network_id: NetworkId,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<Transaction>, SubxtNodeError> {
@@ -559,11 +552,6 @@ async fn make_transaction(
             .map_err(SubxtNodeError::DeserializeTransaction)?;
 
     let hash = TransactionHash::from(ledger_transaction.transaction_hash());
-    let apply_stage = if is_genesis {
-        ApplyStage::Success
-    } else {
-        apply_stages.get(hash.as_ref()).copied().unwrap_or_default()
-    };
 
     let identifiers = ledger_transaction
         .identifiers()
@@ -602,7 +590,7 @@ async fn make_transaction(
 
     let transaction = Transaction {
         hash,
-        apply_stage,
+        apply_stage: Default::default(),
         protocol_version,
         identifiers,
         contract_actions,
@@ -690,10 +678,7 @@ mod tests {
     use assert_matches::assert_matches;
     use fs_extra::dir::{CopyOptions, copy};
     use futures::{StreamExt, TryStreamExt};
-    use indexer_common::{
-        domain::{ApplyStage, NetworkId},
-        error::BoxError,
-    };
+    use indexer_common::{domain::NetworkId, error::BoxError};
     use midnight_ledger::serialize::deserialize;
     use std::{env, path::Path, pin::pin};
     use subxt::{
@@ -798,7 +783,6 @@ mod tests {
             [
                 Transaction {
                     hash: hash_0,
-                    apply_stage: ApplyStage::Success,
                     contract_actions: contract_actions_0,
                     ..
                 },
@@ -809,17 +793,14 @@ mod tests {
                 Transaction {..},
                 Transaction {..},
                 Transaction {
-                    apply_stage: ApplyStage::Success,
                     contract_actions: contract_actions_1,
                     ..
                 },
                 Transaction {
-                    apply_stage: ApplyStage::Success,
                     contract_actions: contract_actions_2,
                     ..
                 },
                 Transaction {
-                    apply_stage: ApplyStage::Success,
                     contract_actions: contract_actions_3,
                     ..
                 },

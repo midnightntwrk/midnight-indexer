@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{Block, ContractAction, ContractAttributes};
-use indexer_common::domain::RawZswapState;
+use indexer_common::domain::RawLedgerState;
 use metrics::{Counter, Gauge, counter, gauge};
 
 pub struct Metrics {
@@ -61,7 +61,7 @@ impl Metrics {
     pub fn update(
         &self,
         block: &Block,
-        zswap_state: &RawZswapState,
+        zswap_state: &RawLedgerState,
         node_block_height: u32,
         caught_up: bool,
     ) {

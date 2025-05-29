@@ -176,14 +176,14 @@ async fn run_tests(
     assert_eq!(chunks.len(), 2);
     assert_eq!(chunks[0].len(), 0);
     assert_eq!(chunks[1].len(), 2);
-    assert_eq!(chunks[1][0].apply_stage, ApplyStage::Failure);
-    assert_eq!(chunks[1][0].raw, RAW_TRANSACTION_1.to_owned());
+    assert_eq!(chunks[1][0].0.apply_stage, ApplyStage::Failure);
+    assert_eq!(chunks[1][0].0.raw, RAW_TRANSACTION_1.to_owned());
     assert_eq!(
-        chunks[1][0].merkle_tree_root,
+        chunks[1][0].0.merkle_tree_root,
         b"merkle_tree_root".as_slice().into()
     );
-    assert_eq!(chunks[1][0].start_index, 0);
-    assert_eq!(chunks[1][0].end_index, 1);
+    assert_eq!(chunks[1][0].0.start_index, 0);
+    assert_eq!(chunks[1][0].0.end_index, 1);
 
     // indexer-api =================================================================================
 

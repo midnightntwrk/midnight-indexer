@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, BlockInfo, Transaction};
+use crate::domain::{Block, BlockHash, BlockInfo, Transaction};
 use futures::Stream;
 
 /// Storage abstraction.
@@ -38,5 +38,5 @@ where
         &self,
         from_block_height: u32,
         to_block_height: u32,
-    ) -> impl Stream<Item = Result<Vec<Transaction>, sqlx::Error>> + Send;
+    ) -> impl Stream<Item = Result<Vec<(Transaction, BlockHash)>, sqlx::Error>> + Send;
 }

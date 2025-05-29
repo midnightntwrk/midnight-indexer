@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{RawZswapState, ZswapStateStorage};
+use crate::domain::{LedgerStateStorage, RawLedgerState};
 use async_nats::{
     ConnectError, ConnectOptions,
     jetstream::{
@@ -38,13 +38,13 @@ use tokio_util::io::StreamReader;
 const BUCKET_NAME: &str = "zswap_state_store";
 const OBJECT_NAME: &str = "zswap_state";
 
-/// NATS based [ZswapStateStorage] implementation.
-pub struct NatsZswapStateStorage {
+/// NATS based ledger state storage implementation.
+pub struct NatsLedgerStateStorage {
     zswap_state_store: ObjectStore,
 }
 
-impl NatsZswapStateStorage {
-    /// Create a new [NatsZswapStateStorage] with the given [Config].
+impl NatsLedgerStateStorage {
+    /// Create a new ledger state storage with the given configuration.
     pub async fn new(config: Config) -> Result<Self, Error> {
         let Config {
             url,
@@ -75,7 +75,7 @@ impl NatsZswapStateStorage {
     }
 }
 
-impl ZswapStateStorage for NatsZswapStateStorage {
+impl LedgerStateStorage for NatsLedgerStateStorage {
     type Error = ZswapStateStorageError;
 
     #[trace]
@@ -106,9 +106,9 @@ impl ZswapStateStorage for NatsZswapStateStorage {
     }
 
     #[trace]
-    async fn load_zswap_state(&self) -> Result<Option<(RawZswapState, u32)>, Self::Error> {
+    async fn load_ledger_state(&self) -> Result<Option<(RawLedgerState, u32)>, Self::Error> {
         let object_name = self.current_object_name().await?;
-        debug!(object_name; "loading zswap_state");
+        debug!(object_name; "loading ledger state");
 
         match object_name {
             Some(object_name) => {
@@ -137,17 +137,11 @@ impl ZswapStateStorage for NatsZswapStateStorage {
     #[trace]
     async fn save(
         &mut self,
-        zswap_state: &RawZswapState,
+        zswap_state: &RawLedgerState,
         block_height: u32,
         last_index: Option<u64>,
     ) -> Result<(), Self::Error> {
-        info!(
-            block_height,
-            last_index:?,
-            len = zswap_state.len(),
-            hash = zswap_state.hash();
-            "saving zswap_state"
-        );
+        info!(block_height, last_index:?; "saving ledger state");
 
         // We (ab)use `u64::MAX` as None!
         let last_index = last_index.unwrap_or(u64::MAX).to_le_bytes();
@@ -203,7 +197,7 @@ pub enum ZswapStateStorageError {
     Next(#[from] WatcherError),
 }
 
-/// Configuration settings for [NatsZswapStateStorage].
+/// Configuration settings for [NatsLedgerStateStorage].
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub url: String,
@@ -237,8 +231,8 @@ async fn create_zswap_state_store(
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{NetworkId, ZswapState, ZswapStateStorage},
-        infra::zswap_state_storage::nats::{Config, NatsZswapStateStorage},
+        domain::{LedgerState, LedgerStateStorage, NetworkId},
+        infra::zswap_state_storage::nats::{Config, NatsLedgerStateStorage},
         serialize::SerializableExt,
     };
     use anyhow::Context;
@@ -284,7 +278,7 @@ mod tests {
             username: "indexer".to_string(),
             password: env!("APP__INFRA__ZSWAP_STATE_STORAGE__PASSWORD").into(),
         };
-        let mut zswap_state_storage = NatsZswapStateStorage::new(config)
+        let mut zswap_state_storage = NatsLedgerStateStorage::new(config)
             .await
             .context("create NatsZswapStateStorage")?;
 
@@ -295,12 +289,12 @@ mod tests {
         assert!(last_index.is_none());
 
         let zswap_state = zswap_state_storage
-            .load_zswap_state()
+            .load_ledger_state()
             .await
             .context("load zswap state")?;
         assert!(zswap_state.is_none());
 
-        let default_state = ZswapState::default()
+        let default_state = LedgerState::default()
             .serialize(NetworkId::Undeployed)
             .unwrap()
             .into();
@@ -316,7 +310,7 @@ mod tests {
         assert!(last_index.is_none());
 
         let zswap_state = zswap_state_storage
-            .load_zswap_state()
+            .load_ledger_state()
             .await
             .context("load zswap state")?;
         assert_matches!(
@@ -326,7 +320,7 @@ mod tests {
 
         zswap_state_storage
             .save(
-                &ZswapState::default()
+                &LedgerState::default()
                     .serialize(NetworkId::Undeployed)
                     .unwrap()
                     .into(),

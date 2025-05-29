@@ -16,18 +16,16 @@ mod runtime_0_12 {}
 
 use crate::{domain::BlockHash, infra::node::SubxtNodeError};
 use indexer_common::domain::{
-    ApplyStage, ContractAddress, ContractState, PROTOCOL_VERSION_000_012_000, ProtocolVersion,
+    ContractAddress, ContractState, PROTOCOL_VERSION_000_012_000, ProtocolVersion,
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
-use std::collections::HashMap;
 use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events};
 
 /// Runtime specific block details.
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
     pub raw_transactions: Vec<Vec<u8>>,
-    pub apply_stages: HashMap<[u8; 32], ApplyStage>,
 }
 
 /// Make block details depending on the given protocol version.
@@ -129,32 +127,28 @@ macro_rules! make_block_details {
                     })
                     .collect();
 
-                let apply_stages = events
+                let new_session = events
                     .iter()
                     .map(|event| event.and_then(|event| event.as_root_event::<Event>()))
                     .filter_map_ok(|event| match event {
-                        Event::Midnight(midnight::Event::TxApplied(details)) => {
-                            Some((details.tx_hash, ApplyStage::Success))
-                        }
-
-                        Event::Midnight(midnight::Event::TxOnlyGuaranteedApplied(details)) => {
-                            Some((details.tx_hash, ApplyStage::PartialSuccess))
-                        }
-
                         Event::Session(partner_chains_session::Event::NewSession { .. }) => {
-                            // Trigger fetching the authorities next time.
-                            *authorities = None;
-                            None
+                            Some(())
                         }
 
                         _ => None,
                     })
-                    .collect::<Result<HashMap<_, _>, _>>().map_err(Box::new)?;
+                    .next()
+                    .transpose()
+                    .map_err(Box::new)?
+                    .is_some();
+                if new_session {
+                    // Trigger fetching the authorities next time.
+                    *authorities = None;
+                }
 
                 Ok(BlockDetails {
                     timestamp,
                     raw_transactions,
-                    apply_stages,
                 })
             }
         }
