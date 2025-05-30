@@ -16,7 +16,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgSslMode};
-use std::ops::Deref;
+use std::{ops::Deref, time::Duration};
 use thiserror::Error;
 
 /// New type for `sqlx::PgPool`, allowing for some custom extensions as well as security.
@@ -29,7 +29,32 @@ pub struct PostgresPool(sqlx::PgPool);
 impl PostgresPool {
     /// Try to create a new [PostgresPool] with the given config.
     pub async fn new(config: Config) -> Result<Self, Error> {
-        let inner = PgPoolOptions::new().connect_with(config.into()).await?;
+        let Config {
+            host,
+            port,
+            dbname,
+            user,
+            password,
+            sslmode,
+            max_connections,
+            idle_timeout,
+            max_lifetime,
+        } = config;
+
+        let connect_options = PgConnectOptions::new()
+            .host(&host)
+            .database(&dbname)
+            .username(&user)
+            .password(password.expose_secret())
+            .port(port)
+            .ssl_mode(sslmode);
+
+        let inner = PgPoolOptions::new()
+            .max_connections(max_connections)
+            .idle_timeout(Some(idle_timeout))
+            .max_lifetime(max_lifetime)
+            .connect_with(connect_options)
+            .await?;
         let pool = PostgresPool(inner);
         debug!(pool:?; "created pool");
 
@@ -61,18 +86,11 @@ pub struct Config {
     pub password: SecretString,
     #[serde_as(as = "DisplayFromStr")]
     pub sslmode: PgSslMode,
-}
-
-impl From<Config> for PgConnectOptions {
-    fn from(config: Config) -> Self {
-        PgConnectOptions::new()
-            .host(&config.host)
-            .database(&config.dbname)
-            .username(&config.user)
-            .password(config.password.expose_secret())
-            .port(config.port)
-            .ssl_mode(config.sslmode)
-    }
+    pub max_connections: u32,
+    #[serde(with = "humantime_serde")]
+    pub idle_timeout: Duration,
+    #[serde(with = "humantime_serde")]
+    pub max_lifetime: Duration,
 }
 
 #[cfg(test)]
@@ -80,7 +98,7 @@ mod tests {
     use crate::infra::pool::postgres::{Config, PostgresPool};
     use anyhow::Context;
     use sqlx::postgres::PgSslMode;
-    use std::error::Error as StdError;
+    use std::{error::Error as StdError, time::Duration};
     use testcontainers::{ImageExt, runners::AsyncRunner};
     use testcontainers_modules::postgres::Postgres;
 
@@ -106,6 +124,9 @@ mod tests {
             user: "indexer".to_string(),
             password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
             sslmode: PgSslMode::Prefer,
+            max_connections: 10,
+            idle_timeout: Duration::from_secs(60),
+            max_lifetime: Duration::from_secs(5 * 60),
         };
 
         let pool = PostgresPool::new(config).await;

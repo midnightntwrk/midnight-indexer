@@ -23,6 +23,7 @@ fastrace                    = { workspace = true }
 fastrace-opentelemetry      = { workspace = true }
 figment                     = { workspace = true, features = [ "env", "yaml" ] }
 futures                     = { workspace = true }
+humantime-serde             = { workspace = true }
 log                         = { workspace = true, features = [ "kv_std" ] }
 logforth                    = { workspace = true, features = [ "fastrace", "json" ] }
 metrics-exporter-prometheus = { workspace = true, features = [ "http-listener" ] }

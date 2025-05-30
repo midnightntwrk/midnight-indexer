@@ -56,6 +56,7 @@ type IndexerApiStorage = indexer_api::infra::storage::sqlite::SqliteStorage;
 #[cfg(feature = "cloud")]
 async fn main() -> anyhow::Result<()> {
     use sqlx::postgres::PgSslMode;
+    use std::time::Duration;
     use testcontainers::{ImageExt, runners::AsyncRunner};
     use testcontainers_modules::postgres::Postgres;
 
@@ -79,6 +80,9 @@ async fn main() -> anyhow::Result<()> {
         user: "indexer".to_string(),
         password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
         sslmode: PgSslMode::Prefer,
+        max_connections: 10,
+        idle_timeout: Duration::from_secs(60),
+        max_lifetime: Duration::from_secs(5 * 60),
     };
     let pool = pool::postgres::PostgresPool::new(config)
         .await
