@@ -16,7 +16,8 @@ use derive_more::derive::From;
 use indexer_common::domain::{
     NetworkId, TryFromBytesForViewingKey, UnknownNetworkIdError, ViewingKey as CommonViewingKey,
 };
-use midnight_ledger::{serialize::Deserializable, transient_crypto::encryption::SecretKey};
+use midnight_serialize::Deserializable;
+use midnight_transient_crypto::encryption::SecretKey;
 use serde::{Deserialize, Serialize};
 use std::io;
 use thiserror::Error;
@@ -85,7 +86,7 @@ mod tests {
     use crate::domain::{ViewingKey, ViewingKeyFormatError};
     use assert_matches::assert_matches;
     use indexer_common::domain::{NetworkId, ViewingKey as CommonViewingKey};
-    use midnight_ledger::zswap::keys::{SecretKeys, Seed};
+    use midnight_zswap::keys::{SecretKeys, Seed};
 
     #[test]
     fn test() {

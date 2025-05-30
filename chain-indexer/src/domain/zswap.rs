@@ -11,27 +11,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{BlockHash, Transaction};
+use crate::domain::Transaction;
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::{
-    domain::{ApplyStage, ContractAddress, MerkleTreeRoot, NetworkId, RawLedgerState},
+    LedgerTransaction,
+    domain::{
+        ApplyStage, ByteArray, ContractAddress, MerkleTreeRoot, NetworkId, RawLedgerState,
+        RawTransaction,
+    },
     serialize::SerializableExt,
 };
-use log::debug;
-use midnight_ledger::{
-    coin_structure::contract::Address,
-    onchain_runtime::context::BlockContext,
-    semantics::{TransactionContext, TransactionResult},
-    serialize::deserialize,
-    storage::DefaultDB,
-    structure::Proof,
-    zswap::ledger::State as LedgerZswapState,
-};
+use midnight_base_crypto::{hash::HashOutput, time::Timestamp};
+use midnight_ledger::semantics::{TransactionContext, TransactionResult};
+use midnight_onchain_runtime::context::BlockContext;
+use midnight_serialize::deserialize;
+use midnight_storage::DefaultDB;
+use midnight_zswap::ledger::State as LedgerZswapState;
 use std::io;
 use thiserror::Error;
-
-type LedgerTransaction = midnight_ledger::structure::Transaction<Proof, DefaultDB>;
 
 /// New type for ledger state from indexer_common.
 #[derive(Debug, Clone, Default, From, Deref)]
@@ -45,16 +43,20 @@ impl LedgerState {
         Ok(bytes.into())
     }
 
-    /// Apply the given transactions to this ledger state.
+    /// Apply the given raw transactions to this ledger state.
     #[trace]
-    pub fn apply_transactions<'a>(
+    pub fn apply_raw_transactions<'a>(
         &mut self,
-        transactions: impl Iterator<Item = (&'a Transaction, BlockHash)>,
+        transactions: impl Iterator<Item = &'a RawTransaction>,
+        block_parent_hash: ByteArray<32>,
+        block_timestamp: u64,
         network_id: NetworkId,
     ) -> Result<(), Error> {
-        for (transaction, block_hash) in transactions {
-            self.apply_transaction(transaction, block_hash, network_id)?;
+        for transaction in transactions {
+            self.apply_transaction(transaction, block_parent_hash, block_timestamp, network_id)?;
         }
+
+        self.post_apply_transactions(block_timestamp);
 
         Ok(())
     }
@@ -62,14 +64,23 @@ impl LedgerState {
     /// Apply the given transactions to this ledger state and also update relevant transaction data
     /// like start_index and end_index.
     #[trace]
-    pub fn apply_transactions_mut<'a>(
+    pub fn apply_and_update_transactions<'a>(
         &mut self,
-        transactions: impl Iterator<Item = (&'a mut Transaction, BlockHash)>,
+        transactions: impl Iterator<Item = &'a mut Transaction>,
+        block_parent_hash: ByteArray<32>,
+        block_timestamp: u64,
         network_id: NetworkId,
     ) -> Result<(), Error> {
-        for (transaction, block_hash) in transactions {
-            self.apply_transaction_mut(transaction, block_hash, network_id)?;
+        for transaction in transactions {
+            self.apply_transaction_mut(
+                transaction,
+                block_parent_hash,
+                block_timestamp,
+                network_id,
+            )?;
         }
+
+        self.post_apply_transactions(block_timestamp);
 
         Ok(())
     }
@@ -82,23 +93,22 @@ impl LedgerState {
     #[trace]
     fn apply_transaction(
         &mut self,
-        transaction: &Transaction,
-        block_hash: BlockHash,
+        transaction: &RawTransaction,
+        block_parent_hash: ByteArray<32>,
+        block_timestamp: u64,
         network_id: NetworkId,
     ) -> Result<TransactionResult<DefaultDB>, Error> {
-        debug!(hash:% = transaction.hash; "applying transaction");
-
         let ledger_transaction =
-            deserialize::<LedgerTransaction, _>(&mut transaction.raw.as_ref(), network_id.into())
+            deserialize::<LedgerTransaction, _>(&mut transaction.as_ref(), network_id.into())
                 .map_err(|error| Error::Io("cannot deserialize ledger transaction", error))?;
 
         // Apply transaction to ledger state.
         let cx = TransactionContext {
             ref_state: self.0.0.clone(),
             block_context: BlockContext {
-                seconds_since_epoch: 42,     // This value seems not important.
-                seconds_since_epoch_err: 30, // This value seems not important.
-                block_hash: block_hash.into(),
+                tblock: timestamp(block_timestamp),
+                tblock_err: 30,
+                parent_block_hash: HashOutput(block_parent_hash.0),
             },
             whitelist: None,
         };
@@ -112,13 +122,19 @@ impl LedgerState {
     fn apply_transaction_mut(
         &mut self,
         transaction: &mut Transaction,
-        block_hash: BlockHash,
+        block_parent_hash: ByteArray<32>,
+        block_timestamp: u64,
         network_id: NetworkId,
     ) -> Result<(), Error> {
         let start_index = self.zswap.first_free;
         let mut end_index = self.zswap.first_free;
 
-        let transaction_result = self.apply_transaction(transaction, block_hash, network_id)?;
+        let transaction_result = self.apply_transaction(
+            &transaction.raw,
+            block_parent_hash,
+            block_timestamp,
+            network_id,
+        )?;
         let zswap = &self.zswap;
 
         // Update end_index and contract zswap state if necessary.
@@ -139,12 +155,17 @@ impl LedgerState {
 
         Ok(())
     }
+
+    fn post_apply_transactions(&mut self, block_timestamp: u64) {
+        let timestamp = timestamp(block_timestamp);
+        *self = LedgerState(self.post_block_update(timestamp).into());
+    }
 }
 
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("cannot apply transaction")]
-    ApplyTransaction(#[from] midnight_ledger::zswap::error::TransactionInvalid),
+    ApplyTransaction(#[from] midnight_zswap::error::TransactionInvalid),
 
     #[error("{0}")]
     Io(&'static str, #[source] io::Error),
@@ -169,8 +190,11 @@ fn extract_contract_zswap_state(
     address: &ContractAddress,
     network_id: NetworkId,
 ) -> Result<RawLedgerState, Error> {
-    let address = deserialize::<Address, _>(&mut address.as_ref(), network_id.into())
-        .map_err(|error| Error::Io("cannot deserialize contract address", error))?;
+    let address = deserialize::<midnight_coin_structure::contract::ContractAddress, _>(
+        &mut address.as_ref(),
+        network_id.into(),
+    )
+    .map_err(|error| Error::Io("cannot deserialize contract address", error))?;
 
     let mut contract_zswap_state = LedgerZswapState::new();
     contract_zswap_state.coin_coms = state.filter(&[address]);
@@ -192,4 +216,8 @@ fn extract_merkle_tree_root(
         .map_err(|error| Error::Io("cannot serialize merkle tree root", error))?;
 
     Ok(root.into())
+}
+
+fn timestamp(block_timestamp: u64) -> Timestamp {
+    Timestamp::from_secs(block_timestamp / 1000)
 }

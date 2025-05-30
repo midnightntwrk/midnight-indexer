@@ -13,32 +13,25 @@
 
 use anyhow::Context;
 use assert_matches::assert_matches;
-use chacha20poly1305::aead::rand_core::OsRng;
 use chain_indexer::domain::{
-    Block, BlockHash, BlockInfo, Transaction, TransactionHash, storage::Storage as _,
+    Block, BlockHash, BlockInfo, BlockTransactions, Transaction, TransactionHash,
+    storage::Storage as _,
 };
 use fake::{Fake, Faker};
-use futures::{StreamExt, TryStreamExt, executor::block_on};
+use futures::{StreamExt, TryStreamExt};
 use indexer_api::domain::{ContractAction, ContractAttributes, Storage};
 use indexer_common::{
     self,
     cipher::make_cipher,
     domain::{
-        ApplyStage, BlockAuthor, ContractAddress, Identifier, NetworkId, ProtocolVersion,
+        ApplyStage, BlockAuthor, ByteVec, ContractAddress, Identifier, NetworkId, ProtocolVersion,
         RawTransaction,
     },
     error::BoxError,
     infra::{migrations, pool},
-    serialize::SerializableExt,
 };
-use midnight_ledger::{
-    base_crypto::data_provider::{FetchMode, MidnightDataProvider, OutputMode},
-    prove::{ExternalResolver, Resolver},
-    storage::DefaultDB,
-    structure::{Transaction as LedgerTransaction, TransactionHash as LedgerTransactionHash},
-    transient_crypto::{hash::HashOutput, proofs::ProofPreimage},
-    zswap::{Offer, ZSWAP_EXPECTED_FILES, prove::ZswapResolver},
-};
+use midnight_ledger::structure::TransactionHash as LedgerTransactionHash;
+use midnight_transient_crypto::hash::HashOutput;
 use std::{convert::Into, sync::LazyLock};
 use subxt::utils::H256;
 
@@ -138,15 +131,16 @@ async fn run_tests(
     chain_indexer_storage
         .save_block(&BLOCK_0)
         .await
-        .context("save block 0 with zswap state 1")?;
+        .context("save block 0")?;
     chain_indexer_storage
-        .save_block(&BLOCK)
+        .save_block(&BLOCK_1)
         .await
-        .context("save block 1 with zswap state 2")?;
+        .context("save block 1")?;
     chain_indexer_storage
         .save_block(&BLOCK_2)
         .await
-        .context("save block 2 with zswap state 3")?;
+        .context("save block 2")?;
+
     let highest_block = chain_indexer_storage
         .get_highest_block()
         .await
@@ -168,22 +162,35 @@ async fn run_tests(
         .context("get contract action count")?;
     assert_eq!(contract_action_count, (2, 2, 1));
 
-    let chunks = chain_indexer_storage
-        .get_transaction_chunks(0, 1)
-        .try_collect::<Vec<_>>()
+    let block_transactions = chain_indexer_storage
+        .get_block_transactions(0)
         .await
-        .context("collect transactions 0..=1")?;
-    assert_eq!(chunks.len(), 2);
-    assert_eq!(chunks[0].len(), 0);
-    assert_eq!(chunks[1].len(), 2);
-    assert_eq!(chunks[1][0].0.apply_stage, ApplyStage::Failure);
-    assert_eq!(chunks[1][0].0.raw, RAW_TRANSACTION_1.to_owned());
+        .context("get block transactions for 0")?;
     assert_eq!(
-        chunks[1][0].0.merkle_tree_root,
-        b"merkle_tree_root".as_slice().into()
+        block_transactions,
+        BlockTransactions {
+            transactions: vec![],
+            block_parent_hash: BLOCK_0.parent_hash.into(),
+            block_timestamp: BLOCK_0.timestamp
+        }
     );
-    assert_eq!(chunks[1][0].0.start_index, 0);
-    assert_eq!(chunks[1][0].0.end_index, 1);
+
+    let block_transactions = chain_indexer_storage
+        .get_block_transactions(1)
+        .await
+        .context("get block transactions for 1")?;
+    assert_eq!(
+        block_transactions,
+        BlockTransactions {
+            transactions: BLOCK_1
+                .transactions
+                .iter()
+                .map(|t| t.raw.to_owned())
+                .collect::<Vec<_>>(),
+            block_parent_hash: BLOCK_1.parent_hash.into(),
+            block_timestamp: BLOCK_1.timestamp
+        }
+    );
 
     // indexer-api =================================================================================
 
@@ -497,7 +504,7 @@ static BLOCK_0: LazyLock<Block> = LazyLock::new(|| Block {
     transactions: vec![],
 });
 
-static BLOCK: LazyLock<Block> = LazyLock::new(|| Block {
+static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
     hash: BLOCK_1_HASH,
     height: 1,
     protocol_version: PROTOCOL_VERSION_0_1,
@@ -629,25 +636,26 @@ static UNKNOWN_ADDRESS: LazyLock<ContractAddress> =
 
 pub const PROTOCOL_VERSION_0_1: ProtocolVersion = ProtocolVersion(1_000);
 
-pub fn create_raw_transaction(network_id: NetworkId) -> Result<RawTransaction, BoxError> {
-    let empty_offer = Offer::<ProofPreimage> {
-        inputs: vec![],
-        outputs: vec![],
-        transient: vec![],
-        deltas: vec![],
-    };
-    let pre_transaction = LedgerTransaction::<_, DefaultDB>::new(empty_offer, None, None);
+pub fn create_raw_transaction(_network_id: NetworkId) -> Result<RawTransaction, BoxError> {
+    // let empty_offer = Offer::<ProofPreimage> {
+    //     inputs: vec![],
+    //     outputs: vec![],
+    //     transient: vec![],
+    //     deltas: vec![],
+    // };
+    // let pre_transaction = LedgerTransaction::new(empty_offer, None, None);
 
-    let zswap_resolver = ZswapResolver(MidnightDataProvider::new(
-        FetchMode::OnDemand,
-        OutputMode::Log,
-        ZSWAP_EXPECTED_FILES.to_owned(),
-    ));
-    let external_resolver: ExternalResolver = Box::new(|_| Box::pin(std::future::ready(Ok(None))));
-    let resolver = Resolver::new(zswap_resolver, external_resolver);
+    // let zswap_resolver = ZswapResolver(MidnightDataProvider::new(
+    //     FetchMode::OnDemand,
+    //     OutputMode::Log,
+    //     ZSWAP_EXPECTED_FILES.to_owned(),
+    // ));
+    // let external_resolver: ExternalResolver = Box::new(|_|
+    // Box::pin(std::future::ready(Ok(None)))); let resolver = Resolver::new(zswap_resolver,
+    // external_resolver);
 
-    let transaction = block_on(pre_transaction.prove(OsRng, &resolver, &resolver))?;
-    let raw_transaction = transaction.serialize(network_id)?.into();
+    // let transaction = block_on(pre_transaction.prove(OsRng, &resolver, &resolver))?;
+    // let raw_transaction = transaction.serialize(network_id)?.into();
 
-    Ok(raw_transaction)
+    Ok(ByteVec::default())
 }

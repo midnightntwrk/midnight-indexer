@@ -14,9 +14,7 @@
 use crate::domain::Transaction;
 use derive_more::{From, derive::AsRef};
 use indexer_common::domain::{BlockAuthor, ByteArray, ProtocolVersion};
-use midnight_ledger::{
-    base_crypto::hash::HashOutput, transient_crypto::merkle_tree::MerkleTreeDigest,
-};
+use midnight_transient_crypto::merkle_tree::MerkleTreeDigest;
 use std::{
     array::TryFromSliceError,
     fmt::{self, Debug, Display},
@@ -75,15 +73,15 @@ impl Display for BlockHash {
     }
 }
 
-impl From<BlockHash> for HashOutput {
-    fn from(hash: BlockHash) -> Self {
-        Self(hash.0.0)
-    }
-}
-
 impl From<ByteArray<32>> for BlockHash {
     fn from(bytes: ByteArray<32>) -> Self {
         Self(H256(bytes.0))
+    }
+}
+
+impl From<BlockHash> for ByteArray<32> {
+    fn from(hash: BlockHash) -> Self {
+        Self(hash.0.0)
     }
 }
 

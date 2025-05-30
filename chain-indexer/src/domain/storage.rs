@@ -11,8 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, BlockHash, BlockInfo, Transaction};
-use futures::Stream;
+use crate::domain::{Block, BlockInfo, BlockTransactions};
 
 /// Storage abstraction.
 #[trait_variant::make(Send)]
@@ -32,11 +31,9 @@ where
     /// Save the given [Block] and return the max transaction ID.
     async fn save_block(&self, block: &Block) -> Result<Option<u64>, sqlx::Error>;
 
-    /// Get a stream of transaction chunks for all blocks starting at the given height until the
-    /// given height.
-    fn get_transaction_chunks(
+    /// Get all transactions with additional block data for the given block height.
+    async fn get_block_transactions(
         &self,
-        from_block_height: u32,
-        to_block_height: u32,
-    ) -> impl Stream<Item = Result<Vec<(Transaction, BlockHash)>, sqlx::Error>> + Send;
+        block_height: u32,
+    ) -> Result<BlockTransactions, sqlx::Error>;
 }

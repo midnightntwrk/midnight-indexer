@@ -13,7 +13,8 @@
 
 use crate::domain::{ByteVec, NetworkId};
 use derive_more::derive::{Deref, From};
-use midnight_ledger::{serialize::deserialize, storage::DefaultDB};
+use midnight_serialize::deserialize;
+use midnight_storage::DefaultDB;
 use std::{convert::Infallible, error::Error as StdError, io};
 
 pub type RawLedgerState = ByteVec;

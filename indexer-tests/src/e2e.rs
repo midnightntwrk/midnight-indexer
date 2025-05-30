@@ -34,11 +34,9 @@ use indexer_api::{
 };
 use indexer_common::domain::NetworkId;
 use itertools::Itertools;
-use midnight_ledger::{
-    serialize::Serializable,
-    transient_crypto::encryption::SecretKey,
-    zswap::keys::{SecretKeys, Seed},
-};
+use midnight_serialize::Serializable;
+use midnight_transient_crypto::encryption::SecretKey;
+use midnight_zswap::keys::{SecretKeys, Seed};
 use reqwest::Client;
 use serde::Serialize;
 use std::time::{Duration, Instant};

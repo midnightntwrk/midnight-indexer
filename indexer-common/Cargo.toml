@@ -26,7 +26,12 @@ futures                     = { workspace = true }
 log                         = { workspace = true, features = [ "kv_std" ] }
 logforth                    = { workspace = true, features = [ "fastrace", "json" ] }
 metrics-exporter-prometheus = { workspace = true, features = [ "http-listener" ] }
+midnight-base-crypto        = { workspace = true }
 midnight-ledger             = { workspace = true }
+midnight-serialize          = { workspace = true }
+midnight-storage            = { workspace = true }
+midnight-transient-crypto   = { workspace = true }
+midnight-zswap              = { workspace = true }
 opentelemetry               = { workspace = true }
 opentelemetry_sdk           = { workspace = true }
 opentelemetry-otlp          = { workspace = true, features = [ "grpc-tonic" ] }

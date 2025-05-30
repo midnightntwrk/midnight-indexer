@@ -110,16 +110,20 @@ pub async fn run(
         if ledger_state_block_height < highest_height {
             info!(ledger_state_block_height, highest_height; "updating ledger state");
 
-            let transaction_chunks =
-                storage.get_transaction_chunks(ledger_state_block_height + 1, highest_height);
-            let mut transaction_chunks = pin!(transaction_chunks);
-            while let Some(transactions) = transaction_chunks
-                .try_next()
-                .await
-                .context("get next transaction chunk")?
-            {
-                let transactions = transactions.iter().map(|(t, h)| (t, *h));
-                ledger_state.apply_transactions(transactions, network_id)?;
+            for block_height in (ledger_state_block_height + 1)..=highest_height {
+                let block_transactions = storage
+                    .get_block_transactions(block_height)
+                    .await
+                    .context("get block transactions")?;
+
+                ledger_state
+                    .apply_raw_transactions(
+                        block_transactions.transactions.iter(),
+                        block_transactions.block_parent_hash,
+                        block_transactions.block_timestamp,
+                        network_id,
+                    )
+                    .context("apply transactions")?;
             }
 
             let raw_ledger_state = ledger_state
@@ -315,8 +319,15 @@ async fn index_block(
         ..
     } = config;
 
-    let transactions = block.transactions.iter_mut().map(|t| (t, block.hash));
-    ledger_state.apply_transactions_mut(transactions, network_id)?;
+    let transactions = block.transactions.iter_mut();
+    ledger_state
+        .apply_and_update_transactions(
+            transactions,
+            block.parent_hash.into(),
+            block.timestamp,
+            network_id,
+        )
+        .context("apply and update transactions")?;
 
     if ledger_state.zswap.coin_coms.root() != block.zswap_state_root {
         bail!(

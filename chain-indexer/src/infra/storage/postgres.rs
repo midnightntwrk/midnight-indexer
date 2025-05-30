@@ -11,15 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, BlockHash, BlockInfo, ContractAction, Transaction, storage::Storage};
+use crate::domain::{
+    Block, BlockHash, BlockInfo, BlockTransactions, ContractAction, Transaction, storage::Storage,
+};
 use fastrace::trace;
-use futures::{FutureExt, Stream, StreamExt, TryStreamExt, stream};
+use futures::{StreamExt, TryStreamExt};
 use indexer_common::{
-    domain::{ByteArray, ContractActionVariant},
+    domain::{ByteArray, ByteVec, ContractActionVariant},
     infra::pool::postgres::PostgresPool,
 };
 use indoc::indoc;
-use sqlx::{FromRow, Postgres, QueryBuilder, Row, postgres::PgRow, types::Json};
+use sqlx::{Postgres, QueryBuilder, Row, postgres::PgRow, types::Json};
 use std::iter;
 use subxt::utils::H256;
 
@@ -113,53 +115,44 @@ impl Storage for PostgresStorage {
         Ok(max_transaction_id)
     }
 
-    #[trace(properties = {
-        "from_block_height": "{from_block_height}",
-        "to_block_height": "{to_block_height}"
-    })]
-    fn get_transaction_chunks(
-        &self,
-        from_block_height: u32,
-        to_block_height: u32,
-    ) -> impl Stream<Item = Result<Vec<(Transaction, BlockHash)>, sqlx::Error>> + Send {
-        stream::iter(from_block_height..=to_block_height)
-            .then(|block_height| self.get_transactions_by_block_height(block_height))
-    }
-}
-
-impl PostgresStorage {
-    async fn get_transactions_by_block_height(
+    #[trace(properties = { "block_height": "{block_height}" })]
+    async fn get_block_transactions(
         &self,
         block_height: u32,
-    ) -> Result<Vec<(Transaction, BlockHash)>, sqlx::Error> {
+    ) -> Result<BlockTransactions, sqlx::Error> {
         let sql = indoc! {"
             SELECT
-                transactions.apply_stage,
-                transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                blocks.hash AS block_hash
-            FROM transactions
-            INNER JOIN blocks ON blocks.id = transactions.block_id
-            WHERE blocks.height = $1
+                id,
+                parent_hash,
+                timestamp
+            FROM blocks
+            WHERE height = $1
         "};
 
-        sqlx::query(sql)
-            .bind(block_height as i64)
-            .fetch_all(&*self.pool)
-            .map(|rows| {
-                rows.and_then(|rows| {
-                    rows.into_iter()
-                        .map(|row| {
-                            let transaction = Transaction::from_row(&row)?;
-                            let block_hash = row.try_get::<ByteArray<32>, _>("block_hash")?;
-                            Ok::<_, sqlx::Error>((transaction, block_hash.into()))
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                })
-            })
-            .await
+        let (block_id, block_parent_hash, block_timestamp) =
+            sqlx::query_as::<_, (i64, ByteArray<32>, i64)>(sql)
+                .bind(block_height as i64)
+                .fetch_one(&*self.pool)
+                .await?;
+
+        let sql = indoc! {"
+            SELECT transactions.raw
+            FROM transactions
+            WHERE block_id = $1
+        "};
+
+        let transactions = sqlx::query_as::<_, (ByteVec,)>(sql)
+            .bind(block_id)
+            .fetch(&*self.pool)
+            .map_ok(|(t,)| t)
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        Ok(BlockTransactions {
+            transactions,
+            block_parent_hash,
+            block_timestamp: block_timestamp as u64,
+        })
     }
 }
 

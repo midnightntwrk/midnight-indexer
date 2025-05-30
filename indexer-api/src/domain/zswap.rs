@@ -18,7 +18,7 @@ use indexer_common::{
     serialize::SerializableExt,
 };
 use log::debug;
-use midnight_ledger::transient_crypto::merkle_tree;
+use midnight_transient_crypto::merkle_tree;
 use std::io;
 use thiserror::Error;
 use tokio::sync::RwLock;

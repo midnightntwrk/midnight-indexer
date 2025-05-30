@@ -14,37 +14,23 @@
 use crate::domain::ContractAction;
 use derive_more::From;
 use indexer_common::domain::{
-    ApplyStage, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction,
+    ApplyStage, ByteArray, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction,
 };
 use midnight_ledger::structure::TransactionHash as LedgerTransactionHash;
 use sqlx::FromRow;
 use std::fmt::{self, Debug, Display};
 
 /// Relevant transaction data from the perspective of the Chain Indexer.
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transaction {
-    #[sqlx(skip)]
     pub hash: TransactionHash,
-
-    #[sqlx(skip)]
     pub protocol_version: ProtocolVersion,
-
     pub apply_stage: ApplyStage,
-
-    #[sqlx(skip)]
     pub identifiers: Vec<Identifier>,
-
     pub raw: RawTransaction,
-
-    #[sqlx(skip)]
     pub contract_actions: Vec<ContractAction>,
-
     pub merkle_tree_root: MerkleTreeRoot,
-
-    #[sqlx(try_from = "i64")]
     pub start_index: u64,
-
-    #[sqlx(try_from = "i64")]
     pub end_index: u64,
 }
 
@@ -74,4 +60,15 @@ impl Display for TransactionHash {
         let hex_encoded = const_hex::encode(self.as_ref());
         write!(f, "{hex_encoded}")
     }
+}
+
+/// All raw transactions of some block with additional block data.
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+pub struct BlockTransactions {
+    pub transactions: Vec<RawTransaction>,
+
+    pub block_parent_hash: ByteArray<32>,
+
+    #[sqlx(try_from = "i64")]
+    pub block_timestamp: u64,
 }

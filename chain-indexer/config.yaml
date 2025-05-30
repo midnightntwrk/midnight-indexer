@@ -25,6 +25,7 @@ infra:
 
   node:
     url: "ws://localhost:9944"
+    genesis_protocol_version: 13000
     reconnect_max_delay: "10s" # 10ms, 100ms, 1s, 10s
     reconnect_max_attempts: 30 # Roughly 5m
 

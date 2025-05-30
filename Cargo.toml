@@ -49,7 +49,14 @@ log                         = { version = "0.4" }
 logforth                    = { version = "0.25" }
 metrics                     = { version = "0.24" }
 metrics-exporter-prometheus = { version = "0.17", default-features = false }
-midnight-ledger             = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-4.0.0" }
+midnight-base-crypto        = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
+midnight-coin-structure     = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
+midnight-ledger             = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
+midnight-onchain-runtime    = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
+midnight-serialize          = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
+midnight-storage            = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
+midnight-transient-crypto   = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
+midnight-zswap              = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
 opentelemetry               = { version = "0.29" }
 opentelemetry_sdk           = { version = "0.29" }
 opentelemetry-otlp          = { version = "0.29" }

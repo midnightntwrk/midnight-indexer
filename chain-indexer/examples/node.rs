@@ -1,19 +1,22 @@
 use anyhow::Context;
 use chain_indexer::{
     domain::Node,
-    infra::node::{self, SubxtNode},
+    infra::node::{Config, SubxtNode},
 };
 use futures::{StreamExt, TryStreamExt};
-use indexer_common::domain::NetworkId;
-use std::pin::pin;
+use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_013_000};
+use std::{pin::pin, time::Duration};
 
 /// This program connects to a local node and prints some first blocks and their transactions.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let node_config = node::Config::default();
-    let mut node = SubxtNode::new(node_config)
-        .await
-        .context("create SubxtNode")?;
+    let config = Config {
+        url: "ws://localhost:9944".to_string(),
+        genesis_protocol_version: PROTOCOL_VERSION_000_013_000,
+        reconnect_max_delay: Duration::from_secs(1),
+        reconnect_max_attempts: 3,
+    };
+    let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 
     let blocks = node.finalized_blocks(None, NetworkId::Undeployed).take(60);
     let mut blocks = pin!(blocks);

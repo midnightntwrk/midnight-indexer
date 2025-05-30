@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::NetworkId;
-use midnight_ledger::serialize::{Serializable, serialize};
+use midnight_serialize::{Serializable, serialize};
 use std::io;
 
 /// Extension methods for `Serializable` implementations.
