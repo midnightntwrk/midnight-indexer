@@ -2998,6 +2998,7 @@ dependencies = [
  "fastrace-opentelemetry",
  "figment",
  "futures",
+ "humantime-serde",
  "log",
  "logforth",
  "metrics-exporter-prometheus",

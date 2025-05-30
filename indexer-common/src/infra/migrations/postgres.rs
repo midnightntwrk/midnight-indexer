@@ -34,7 +34,7 @@ mod tests {
     };
     use anyhow::Context;
     use sqlx::{Row, postgres::PgSslMode};
-    use std::{collections::HashSet, error::Error as StdError};
+    use std::{collections::HashSet, error::Error as StdError, time::Duration};
     use testcontainers::{ImageExt, runners::AsyncRunner};
     use testcontainers_modules::postgres::Postgres;
 
@@ -60,6 +60,9 @@ mod tests {
             user: "indexer".to_string(),
             password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
             sslmode: PgSslMode::Prefer,
+            max_connections: 10,
+            idle_timeout: Duration::from_secs(60),
+            max_lifetime: Duration::from_secs(5 * 60),
         };
         let pool = PostgresPool::new(config).await?;
 

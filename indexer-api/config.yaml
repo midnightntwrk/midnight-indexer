@@ -10,6 +10,9 @@ infra:
     dbname: "indexer"
     user: "indexer"
     sslmode: "prefer"
+    max_connections: 25
+    idle_timeout: "1m"
+    max_lifetime: "5m"
 
   pub_sub:
     url: "localhost:4222"
