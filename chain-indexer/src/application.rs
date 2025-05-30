@@ -123,7 +123,9 @@ pub async fn run(
                         block_transactions.block_timestamp,
                         network_id,
                     )
-                    .context("apply transactions")?;
+                    .with_context(|| {
+                        format!("apply transactions for block at height {block_height}")
+                    })?;
             }
 
             let raw_ledger_state = ledger_state

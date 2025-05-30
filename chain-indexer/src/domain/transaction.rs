@@ -62,7 +62,8 @@ impl Display for TransactionHash {
     }
 }
 
-/// All raw transactions of some block with additional block data.
+/// All raw transactions from a single block along with metadata needed for ledger state
+/// application.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct BlockTransactions {
     pub transactions: Vec<RawTransaction>,

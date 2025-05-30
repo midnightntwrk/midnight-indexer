@@ -103,7 +103,7 @@ pub async fn get_zswap_state_root(
 }
 
 macro_rules! make_block_details {
-    ($module:ident, $tx_partial_success:ty) => {
+    ($module:ident) => {
         paste::paste! {
             async fn [<make_block_details_ $module>](
                 extrinsics: Extrinsics<SubstrateConfig, OnlineClient<SubstrateConfig>>,
@@ -168,8 +168,8 @@ macro_rules! make_block_details {
     };
 }
 
-make_block_details!(runtime_0_12, midnight::Event::TxOnlyGuaranteedApplied);
-make_block_details!(runtime_0_13, midnight::Event::TxPartialSuccess);
+make_block_details!(runtime_0_12);
+make_block_details!(runtime_0_13);
 
 macro_rules! fetch_authorities {
     ($module:ident) => {

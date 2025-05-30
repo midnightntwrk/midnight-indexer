@@ -109,6 +109,7 @@ fn can_decrypt(key: &SecretKey, offer: Offer<Proof, DefaultDB>) -> bool {
     ciphertexts.any(|ciphertext| key.decrypt::<Info>(&ciphertext.into()).is_some())
 }
 
+// TODO Find a way to test this for ledger v5.
 // #[cfg(test)]
 // mod tests {
 //     use crate::domain::{Transaction, Wallet};

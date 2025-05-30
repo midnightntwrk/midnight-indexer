@@ -218,6 +218,7 @@ fn extract_merkle_tree_root(
     Ok(root.into())
 }
 
+/// Converts a block timestamp which is in milliseconds to a ledger timestamp.
 fn timestamp(block_timestamp: u64) -> Timestamp {
     Timestamp::from_secs(block_timestamp / 1000)
 }
