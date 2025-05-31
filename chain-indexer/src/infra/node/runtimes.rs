@@ -20,6 +20,7 @@ use indexer_common::domain::{
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
+use std::collections::HashMap;
 use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, utils::H256};
 
 pub type RuntimeUnshieldedUtxoInfo = crate::infra::node::runtimes::runtime_0_12::runtime_types::pallet_midnight::pallet::UnshieldedUtxoInfo;
@@ -108,7 +109,7 @@ macro_rules! make_block_details {
                     timestamp, Call, Event,
                 };
 
-                let calls = extrinsics
+               let calls = extrinsics
                     .iter()
                     .map(|extrinsic| {
                         let call = extrinsic.as_root_extrinsic::<Call>().map_err(Box::new)?;
@@ -132,60 +133,18 @@ macro_rules! make_block_details {
                     })
                     .collect();
 
-                let new_session = events
-                let mut created_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> = HashMap::new();
-                let mut spent_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> = HashMap::new();
+                let created_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> =
+                    HashMap::new();
+                let spent_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> =
+                    HashMap::new();
 
-                events
-                    .iter()
-                    .map(|event| event.and_then(|event| event.as_root_event::<Event>()))
-                    .filter_map_ok(|event| match event {
-                        Event::Session(partner_chains_session::Event::NewSession { .. }) => {
-                            Some(())
-                        }
-
-                        _ => None,
-                    })
-                    .next()
-                    .transpose()
-                    .map_err(Box::new)?
-                    .is_some();
-                if new_session {
-                    // Trigger fetching the authorities next time.
-                    *authorities = None;
+                for event in events.iter().flatten() {
+                    if let Ok(Event::Session(partner_chains_session::Event::NewSession { .. })) =
+                        event.as_root_event::<Event>()
+                    {
+                        *authorities = None;
+                    }
                 }
-                    .filter_map(|event_details_res| {
-                        match event_details_res {
-                            Ok(details) => match details.as_root_event::<Event>() {
-                                Ok(root_event) => Some(Ok(root_event)),
-                                Err(e) => Some(Err(SubxtNodeError::from(Box::new(e))))
-                            },
-                            Err(e) => Some(Err(SubxtNodeError::from(Box::new(e))))
-                        }
-                    })
-                    .filter_map(Result::ok)
-                    .for_each(|event| {
-                        match event {
-                            Event::Midnight(midnight::Event::TxApplied(details)) => {
-                                apply_stages.insert(details.tx_hash, ApplyStage::Success);
-                            }
-                            Event::Midnight(midnight::Event::TxOnlyGuaranteedApplied(details)) => {
-                                apply_stages.insert(details.tx_hash, ApplyStage::PartialSuccess);
-                            }
-                            Event::Midnight(midnight::Event::UnshieldedTokens(event_data)) => {
-                                let is_created = matches!(event_data.event_type, UnshieldedEventType::Created);
-                                if is_created {
-                                    created_unshielded_utxos_info.insert(event_data.tx_hash, event_data.utxos);
-                                } else {
-                                    spent_unshielded_utxos_info.insert(event_data.tx_hash, event_data.utxos);
-                                }
-                            }
-                            Event::Session(partner_chains_session::Event::NewSession { .. }) => {
-                                *authorities = None;
-                            }
-                             _ => {}
-                        }
-                    });
 
                 Ok(BlockDetails {
                     timestamp,

@@ -35,7 +35,7 @@ use axum::{Router, routing::post_service};
 use derive_more::Debug;
 use indexer_common::domain::{
     ByteVec, LedgerStateStorage, NetworkId, NoopLedgerStateStorage, NoopSubscriber,
-    ProtocolVersion, SessionId, Subscriber, UnshieldedAddress as CommonUnshieldedAddress, Subscriber,
+    ProtocolVersion, SessionId, Subscriber, UnshieldedAddress as CommonUnshieldedAddress,
 };
 use serde::{Deserialize, Serialize};
 use std::{

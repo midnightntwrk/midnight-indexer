@@ -39,6 +39,7 @@ use midnight_storage::DefaultDB;
 use midnight_transient_crypto::merkle_tree::MerkleTreeDigest;
 use serde::Deserialize;
 use std::{
+    collections::HashMap,
     future::ready,
     io::{self},
     time::Duration,

@@ -18,7 +18,7 @@ use sqlx::FromRow;
 /// This struct holds information needed to insert a new UTXO or identify one being spent.
 /// It does *not* include the database-generated primary key (`id`) or the
 /// `spending_transaction_id`.
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, Eq, FromRow, PartialEq)]
 pub struct UnshieldedUtxo {
     #[sqlx(try_from = "i64")]
     pub creating_transaction_id: u64,

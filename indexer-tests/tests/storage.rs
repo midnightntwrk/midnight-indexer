@@ -28,7 +28,6 @@ use indexer_common::{
     },
     error::BoxError,
     infra::{migrations, pool},
-    serialize::SerializableExt,
 };
 use std::{convert::Into, sync::LazyLock};
 

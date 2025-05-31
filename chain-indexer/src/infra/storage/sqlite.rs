@@ -17,7 +17,7 @@ use crate::domain::{
 use futures::{StreamExt, TryStreamExt};
 use indexer_common::{
     domain::{ByteArray, ByteVec, ContractActionVariant, Identifier},
-    infra::pool::sqlite::{SqlitePool, sqlx::U128BeBytes},
+    infra::{pool::sqlite::SqlitePool, sqlx::U128BeBytes},
 };
 use indoc::indoc;
 use sqlx::{QueryBuilder, Row, Sqlite, sqlite::SqliteRow, types::Json};

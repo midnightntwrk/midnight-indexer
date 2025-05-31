@@ -26,7 +26,7 @@ use crate::{
             BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
             BlockSubscriptionBlocksTransactionsContractActions as BlockSubscriptionContractAction,
             TransactionResultStatus as BlockSubscriptionTransactionResultStatus,
-
+            BlockSubscriptionBlocksTransactionsUnshieldedCreatedOutputs as BlockSubscriptionUnshieldedUtxo,
         },
         connect_mutation,
         contract_action_query::{
@@ -35,6 +35,7 @@ use crate::{
         },
         contract_action_subscription, disconnect_mutation, transactions_query, wallet_subscription,
     },
+    e2e::contract_action_query::ContractActionQueryContractAction,
     graphql_ws_client,
 };
 use anyhow::{Context, Ok, anyhow, bail};
@@ -65,10 +66,14 @@ const MAX_HEIGHT: usize = 30;
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
 /// (http and ws) at the given host and port.
-pub async fn run(network_id: NetworkId, host: &str, port: u16,
-                 nats_url: &str, /* TODO: Remove once UT node image is available. nats_url is a temporarily
+pub async fn run(
+    network_id: NetworkId,
+    host: &str,
+    port: u16,
+    nats_url: &str, /* TODO: Remove once UT node image is available. nats_url is a temporarily
                      * needed for testing. */
-                 secure: bool) -> anyhow::Result<()> {
+    secure: bool,
+) -> anyhow::Result<()> {
     println!("### starting e2e testing");
 
     let (api_url, ws_api_url) = {
