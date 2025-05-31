@@ -29,9 +29,7 @@ pub struct Transaction {
     pub identifiers: Vec<Identifier>,
     pub raw: RawTransaction,
     pub contract_actions: Vec<ContractAction>,
-    #[sqlx(skip)]
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
-    #[sqlx(skip)]
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub merkle_tree_root: MerkleTreeRoot,
     pub start_index: u64,

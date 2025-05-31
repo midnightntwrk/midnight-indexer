@@ -14,19 +14,18 @@
 //! e2e testing library
 
 use crate::{
-    chain_indexer_data::{
-        INTENT_HASH, OWNER_ADDR_EMPTY, TOKEN_NIGHT, UT_ADDR_1_HEX, token_type_to_hex,
+    e2e::{
+        block_subscription::{
+            BlockSubscriptionBlocks as BlockSubscriptionBlock,
+            BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
+            BlockSubscriptionBlocksTransactionsContractActions as BlockSubscriptionContractAction,
+            BlockSubscriptionBlocksTransactionsUnshieldedCreatedOutputs as BlockSubscriptionUnshieldedUtxo,
+        },
+        contract_action_query::ContractActionQueryContractAction,
     },
-    e2e::block_subscription::{
-        BlockSubscriptionBlocks as BlockSubscriptionBlock,
-        BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
-        BlockSubscriptionBlocksTransactionsContractActions as BlockSubscriptionContractAction,
-        BlockSubscriptionBlocksTransactionsUnshieldedCreatedOutputs as BlockSubscriptionUnshieldedUtxo,
-    },
-    e2e::contract_action_query::ContractActionQueryContractAction,
     graphql_ws_client,
 };
-use anyhow::{Context, Ok, anyhow, bail};
+use anyhow::{Context, Ok, bail};
 #[cfg(feature = "cloud")]
 // TODO: Remove once UT node image is available. nats_url is a temporarily needed for testing.
 use async_nats::ConnectOptions;
@@ -54,10 +53,14 @@ const MAX_HEIGHT: usize = 30;
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
 /// (http and ws) at the given host and port.
-pub async fn run(network_id: NetworkId, host: &str, port: u16,
-                 nats_url: &str, /* TODO: Remove once UT node image is available. nats_url is a temporarily
+pub async fn run(
+    network_id: NetworkId,
+    host: &str,
+    port: u16,
+    nats_url: &str, /* TODO: Remove once UT node image is available. nats_url is a temporarily
                      * needed for testing. */
-                 secure: bool) -> anyhow::Result<()> {
+    secure: bool,
+) -> anyhow::Result<()> {
     println!("### starting e2e testing");
 
     let (api_url, ws_api_url) = {

@@ -24,12 +24,11 @@ use indexer_common::{
     self,
     cipher::make_cipher,
     domain::{
-        ApplyStage, BlockAuthor, ByteVec, ContractAddress, Identifier, IntentHash, NetworkId, ProtocolVersion,
-        RawTokenType, RawTransaction, UnshieldedAddress,
+        ApplyStage, BlockAuthor, ByteVec, ContractAddress, Identifier, IntentHash, NetworkId,
+        ProtocolVersion, RawTokenType, RawTransaction, UnshieldedAddress,
     },
     error::BoxError,
     infra::{migrations, pool},
-    serialize::SerializableExt,
 };
 use midnight_ledger::structure::TransactionHash as LedgerTransactionHash;
 use midnight_transient_crypto::hash::HashOutput;

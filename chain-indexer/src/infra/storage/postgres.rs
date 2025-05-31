@@ -12,13 +12,14 @@
 // limitations under the License.
 
 use crate::domain::{
-    Block, BlockHash, BlockInfo, BlockTransactions, ContractAction, Transaction, UnshieldedUtxo, storage::Storage,
+    Block, BlockHash, BlockInfo, BlockTransactions, ContractAction, Transaction, UnshieldedUtxo,
+    storage::Storage,
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
 use indexer_common::{
     domain::{ByteArray, ByteVec, ContractActionVariant},
-    infra::pool::postgres::{PostgresPool, sqlx::U128BeBytes},
+    infra::{pool::postgres::PostgresPool, sqlx::U128BeBytes},
 };
 use indoc::indoc;
 use sqlx::{Postgres, QueryBuilder, Row, postgres::PgRow, types::Json};

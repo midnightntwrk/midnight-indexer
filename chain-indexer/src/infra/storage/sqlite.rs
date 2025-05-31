@@ -12,12 +12,13 @@
 // limitations under the License.
 
 use crate::domain::{
-    Block, BlockHash, BlockInfo, BlockTransactions, ContractAction, Transaction, UnshieldedUtxo, storage::Storage,
+    Block, BlockHash, BlockInfo, BlockTransactions, ContractAction, Transaction, UnshieldedUtxo,
+    storage::Storage,
 };
 use futures::{StreamExt, TryStreamExt};
 use indexer_common::{
     domain::{ByteArray, ByteVec, ContractActionVariant, Identifier},
-    infra::pool::sqlite::{SqlitePool, sqlx::U128BeBytes},
+    infra::{pool::sqlite::SqlitePool, sqlx::U128BeBytes},
 };
 use indoc::indoc;
 use sqlx::{QueryBuilder, Row, Sqlite, sqlite::SqliteRow, types::Json};

@@ -27,7 +27,7 @@ use indexer_common::{
     LedgerTransaction,
     domain::{
         BlockAuthor, ByteVec, IntentHash, NetworkId, ProtocolVersion, RawTokenType, RawTransaction,
-        UnshieldedAddress, ScaleDecodeProtocolVersionError,
+        ScaleDecodeProtocolVersionError, UnshieldedAddress,
     },
     error::{BoxError, StdErrorExt},
     serialize::SerializableExt,
@@ -40,6 +40,7 @@ use midnight_storage::DefaultDB;
 use midnight_transient_crypto::merkle_tree::MerkleTreeDigest;
 use serde::Deserialize;
 use std::{
+    collections::HashMap,
     future::ready,
     io::{self},
     time::Duration,
