@@ -116,7 +116,6 @@ async fn make_block_details_runtime_0_12(
     use self::runtime_0_12::{
         Call, Event, midnight,
         runtime_types::{
-            pallet_midnight::pallet::UnshieldedEventType,
             pallet_partner_chains_session::pallet as partner_chains_session,
         },
         timestamp,
@@ -146,27 +145,16 @@ async fn make_block_details_runtime_0_12(
         })
         .collect();
 
-    let mut created_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> =
+    let created_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> =
         HashMap::new();
-    let mut spent_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> =
+    let spent_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> =
         HashMap::new();
 
     for event in events.iter().flatten() {
-        if let Ok(root_event) = event.as_root_event::<Event>() {
-            match root_event {
-                Event::Session(partner_chains_session::Event::NewSession { .. }) => {
-                    *authorities = None;
-                }
-                Event::Midnight(midnight::Event::UnshieldedTokens(event_data)) => {
-                    let is_created = matches!(event_data.event_type, UnshieldedEventType::Created);
-                    if is_created {
-                        created_unshielded_utxos_info.insert(event_data.tx_hash, event_data.utxos);
-                    } else {
-                        spent_unshielded_utxos_info.insert(event_data.tx_hash, event_data.utxos);
-                    }
-                }
-                _ => {}
-            }
+        if let Ok(Event::Session(partner_chains_session::Event::NewSession { .. })) =
+            event.as_root_event::<Event>()
+        {
+            *authorities = None;
         }
     }
 
@@ -211,45 +199,31 @@ async fn make_block_details_runtime_0_13(
             _ => None,
         })
         .collect();
-
-    let created_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> =
+    
+    let mut created_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> =
         HashMap::new();
-    let spent_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> =
+    let mut spent_unshielded_utxos_info: HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>> =
         HashMap::new();
 
     for event in events.iter().flatten() {
-        if let Ok(Event::Session(partner_chains_session::Event::NewSession { .. })) =
-            event.as_root_event::<Event>()
-        {
-            *authorities = None;
-        }
-    }
-
-    // Second pass: collect unshielded UTXOs
-    // The node emits one UnshieldedTokens event per transaction with both created and spent
-    let tx_hashes: Vec<_> = apply_stages.keys().cloned().collect();
-    let mut tx_hash_index = 0;
-
-    for event_details in events.iter().flatten() {
-        if let Ok(Event::Midnight(midnight::Event::UnshieldedTokens(details))) =
-            event_details.as_root_event::<Event>()
-        {
-            if tx_hash_index < tx_hashes.len() {
-                let tx_hash = tx_hashes[tx_hash_index];
-
-                if !details.created.is_empty() {
-                    created_unshielded_utxos_info.insert(tx_hash, details.created);
+        if let Ok(root_event) = event.as_root_event::<Event>() {
+            match root_event {
+                Event::Session(partner_chains_session::Event::NewSession { .. }) => {
+                    *authorities = None;
                 }
-
-                if !details.spent.is_empty() {
-                    spent_unshielded_utxos_info.insert(tx_hash, details.spent);
+                Event::Midnight(midnight::Event::UnshieldedTokens(event_data)) => {
+                    let is_created = matches!(event_data.event_type, UnshieldedEventType::Created);
+                    if is_created {
+                        created_unshielded_utxos_info.insert(event_data.tx_hash, event_data.utxos);
+                    } else {
+                        spent_unshielded_utxos_info.insert(event_data.tx_hash, event_data.utxos);
+                    }
                 }
-
-                tx_hash_index += 1;
+                _ => {}
             }
         }
     }
-
+    
     Ok(BlockDetails {
         timestamp,
         raw_transactions,
@@ -257,9 +231,6 @@ async fn make_block_details_runtime_0_13(
         spent_unshielded_utxos_info,
     })
 }
-
-make_block_details!(runtime_0_12, midnight::Event::TxOnlyGuaranteedApplied);
-make_block_details!(runtime_0_13, midnight::Event::TxPartialSuccess);
 
 macro_rules! fetch_authorities {
     ($module:ident) => {

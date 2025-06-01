@@ -50,7 +50,7 @@ trait-variant             = { workspace = true }
 assert_matches  = { workspace = true }
 fs_extra        = { workspace = true }
 fake            = { workspace = true }
-midnight-ledger = { workspace = true, features = [ "fake" ] }
+midnight-ledger = { workspace = true }
 tempfile        = { workspace = true }
 testcontainers  = { workspace = true }
 
