@@ -586,38 +586,6 @@ async fn make_transaction(
 
     let created_unshielded_utxos = created_info_map
         .get(hash.as_ref())
-        .map_or(&[] as &[_], |v| v.as_slice()) // Get &[] if None, or slice &[_] if Some
-        .iter()
-        .enumerate()
-        .map(|(index, info)| crate::domain::UnshieldedUtxo {
-            creating_transaction_id: 0,
-            output_index: index as u32,
-            owner_address: UnshieldedAddress::from(info.address.clone()),
-            token_type: RawTokenType::from(info.token_type),
-            intent_hash: IntentHash::from(info.intent_hash),
-            value: info.value,
-        })
-        .collect();
-
-    let spent_unshielded_utxos = spent_info_map
-        .get(hash.as_ref())
-        .map_or(&[] as &[_], |v| v.as_slice())
-        .iter()
-        .map(|info| {
-            crate::domain::UnshieldedUtxo {
-                creating_transaction_id: 0, /* TODO: Node event needs to provide
-                                             * creating_transaction_id for spent UTXOs */
-                output_index: 0, // TODO: Node event needs to provide output_index for spent UTXOs
-                owner_address: UnshieldedAddress::from(info.address.clone()),
-                token_type: RawTokenType::from(info.token_type),
-                intent_hash: IntentHash::from(info.intent_hash),
-                value: info.value,
-            }
-        })
-        .collect();
-
-    let created_unshielded_utxos = created_info_map
-        .get(hash.as_ref())
         .map_or(&[] as &[_], |v| v.as_slice())
         .iter()
         .map(|info| crate::domain::UnshieldedUtxo {
