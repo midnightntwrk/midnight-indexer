@@ -375,6 +375,8 @@ async fn index_block(
         height = block.height,
         parent_hash:% = block.parent_hash,
         protocol_version:% = block.protocol_version,
+        distance,
+        caught_up = *caught_up,
         ledger_state_size = format_bytes(raw_ledger_state.as_ref().len());
         "block indexed"
     );

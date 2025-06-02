@@ -15,6 +15,7 @@ use crate::domain::Api;
 use anyhow::Context as AnyhowContext;
 use futures::{TryStreamExt, future::ok};
 use indexer_common::domain::{BlockIndexed, NetworkId, Subscriber};
+use log::debug;
 use serde::Deserialize;
 use std::sync::{
     Arc,
@@ -41,6 +42,7 @@ pub async fn run(config: Config, api: impl Api, subscriber: impl Subscriber) -> 
 
             block_indexed_stream
                 .try_for_each(|block_indexed| {
+                    debug!(caught_up = block_indexed.caught_up; "received block indexed event");
                     caught_up.store(block_indexed.caught_up, Ordering::Release);
                     ok(())
                 })
