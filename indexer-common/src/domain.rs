@@ -30,6 +30,8 @@ use sqlx::Type;
 use std::str::FromStr;
 use thiserror::Error;
 
+pub type BlockHash = ByteArray<32>;
+pub type TransactionHash = ByteArray<32>;
 pub type BlockAuthor = ByteArray<32>;
 pub type ContractAddress = ByteVec;
 pub type ContractEntryPoint = ByteVec;

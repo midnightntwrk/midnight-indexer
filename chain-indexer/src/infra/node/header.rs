@@ -22,9 +22,6 @@ const VERSION_ID: ConsensusEngineId = *b"MNSV";
 
 /// Extension methods for Substrate block headers.
 pub trait SubstrateHeaderExt<N> {
-    /// The block height, in Substrate called `number`.
-    fn height(&self) -> N;
-
     /// Try to decode the [ProtocolVersion] from this Substrate block header.
     fn protocol_version(&self) -> Result<Option<ProtocolVersion>, ScaleDecodeProtocolVersionError>;
 }
@@ -32,10 +29,6 @@ pub trait SubstrateHeaderExt<N> {
 impl<N: Copy + Into<U256> + TryFrom<U256>, H: Hasher> SubstrateHeaderExt<N>
     for SubstrateHeader<N, H>
 {
-    fn height(&self) -> N {
-        self.number
-    }
-
     fn protocol_version(&self) -> Result<Option<ProtocolVersion>, ScaleDecodeProtocolVersionError> {
         self.digest
             .logs

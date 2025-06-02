@@ -11,9 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, BlockHash, ContractAction, Transaction, TransactionHash};
+use crate::domain::{Block, BlockHash, ContractAction, Transaction};
 use futures::{Stream, stream};
-use indexer_common::domain::{ContractAddress, Identifier, SessionId, ViewingKey};
+use indexer_common::domain::{ContractAddress, Identifier, SessionId, TransactionHash, ViewingKey};
 use std::{fmt::Debug, num::NonZeroU32};
 
 /// Storage abstraction.

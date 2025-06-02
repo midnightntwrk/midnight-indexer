@@ -11,16 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{
-    Block, BlockHash, ContractAction, ContractAttributes, Storage, Transaction, TransactionHash,
-};
+use crate::domain::{Block, BlockHash, ContractAction, ContractAttributes, Storage, Transaction};
 use async_stream::try_stream;
 use chacha20poly1305::ChaCha20Poly1305;
 use derive_more::Debug;
 use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::{
-    domain::{ContractAddress, Identifier, SessionId, ViewingKey},
+    domain::{ContractAddress, Identifier, SessionId, TransactionHash, ViewingKey},
     infra::{pool::postgres::PostgresPool, sqlx::postgres::ignore_deadlock_detected},
     stream::flatten_chunks,
 };

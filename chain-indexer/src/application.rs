@@ -323,12 +323,7 @@ async fn index_block(
 
     let transactions = block.transactions.iter_mut();
     ledger_state
-        .apply_and_update_transactions(
-            transactions,
-            block.parent_hash.into(),
-            block.timestamp,
-            network_id,
-        )
+        .apply_and_update_transactions(transactions, block.parent_hash, block.timestamp, network_id)
         .context("apply and update transactions")?;
 
     if ledger_state.zswap.coin_coms.root() != block.zswap_state_root {
@@ -411,16 +406,15 @@ fn format_bytes(value: impl Into<Byte>) -> String {
 mod tests {
     use crate::{
         application::blocks,
-        domain::{Block, BlockHash, BlockInfo, Node},
+        domain::{Block, BlockInfo, Node},
     };
     use fake::{Fake, Faker};
     use futures::{Stream, StreamExt, TryStreamExt, stream};
     use indexer_common::{
-        domain::{NetworkId, ProtocolVersion},
+        domain::{BlockHash, ByteArray, NetworkId, ProtocolVersion},
         error::BoxError,
     };
     use std::{convert::Infallible, sync::LazyLock};
-    use subxt::utils::H256;
 
     #[tokio::test]
     async fn test_blocks() -> Result<(), BoxError> {
@@ -501,15 +495,12 @@ mod tests {
         transactions: Default::default(),
     });
 
-    pub const ZERO_HASH: BlockHash = BlockHash(H256::zero());
+    pub const ZERO_HASH: BlockHash = ByteArray([0; 32]);
 
-    pub const BLOCK_0_HASH: BlockHash = BlockHash(H256([1; 32]));
-
-    pub const BLOCK_1_HASH: BlockHash = BlockHash(H256([2; 32]));
-
-    pub const BLOCK_2_HASH: BlockHash = BlockHash(H256([3; 32]));
-
-    pub const BLOCK_3_HASH: BlockHash = BlockHash(H256([3; 32]));
+    pub const BLOCK_0_HASH: BlockHash = ByteArray([1; 32]);
+    pub const BLOCK_1_HASH: BlockHash = ByteArray([2; 32]);
+    pub const BLOCK_2_HASH: BlockHash = ByteArray([3; 32]);
+    pub const BLOCK_3_HASH: BlockHash = ByteArray([3; 32]);
 
     pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion(1_000);
 }

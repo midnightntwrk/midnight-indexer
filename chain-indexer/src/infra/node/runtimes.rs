@@ -16,14 +16,14 @@ mod runtime_0_12 {}
 #[subxt::subxt(runtime_metadata_path = "../.node/0.13.0-alpha.1/metadata.scale")]
 mod runtime_0_13 {}
 
-use crate::{domain::BlockHash, infra::node::SubxtNodeError};
+use crate::infra::node::SubxtNodeError;
 use indexer_common::domain::{
-    ContractAddress, ContractState, PROTOCOL_VERSION_000_012_000, PROTOCOL_VERSION_000_013_000,
-    ProtocolVersion,
+    BlockHash, ContractAddress, ContractState, PROTOCOL_VERSION_000_012_000,
+    PROTOCOL_VERSION_000_013_000, ProtocolVersion,
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
-use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events};
+use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, utils::H256};
 
 /// Runtime specific block details.
 pub struct BlockDetails {
@@ -223,7 +223,7 @@ macro_rules! get_contract_state {
 
                 let state = online_client
                     .runtime_api()
-                    .at(block_hash.0)
+                    .at(H256(block_hash.0))
                     .call(get_state)
                     .await.map_err(Box::new)?
                     .map_err(|error| SubxtNodeError::GetContractState(format!("{error:?}")))?
@@ -251,7 +251,7 @@ macro_rules! get_zswap_state_root {
 
                 let root = online_client
                     .runtime_api()
-                    .at(block_hash.0)
+                    .at(H256(block_hash.0))
                     .call(get_zswap_state_root)
                     .await.map_err(Box::new)?
                     .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}")))?;
@@ -268,10 +268,10 @@ get_zswap_state_root!(runtime_0_13);
 
 #[cfg(test)]
 mod tests {
-    use crate::{domain::BlockHash, infra::node::runtimes::get_contract_state};
+    use crate::infra::node::runtimes::get_contract_state;
     use anyhow::Context;
     use indexer_common::{
-        domain::{ContractAddress, ProtocolVersion},
+        domain::{BlockHash, ContractAddress, ProtocolVersion},
         error::BoxError,
     };
     use subxt::{
@@ -290,20 +290,20 @@ mod tests {
             OnlineClient::<SubstrateConfig>::from_rpc_client(rpc_client.clone()).await?;
 
         let hash = "50457371e70aa856742ea94de650b00d58501629c290666eb3b561dc205c4541";
-        let hash = BlockHash::from(H256::from_slice(&const_hex::decode(hash).unwrap()));
+        let hash = BlockHash::try_from(const_hex::decode(hash).unwrap()).unwrap();
 
         let genesis_hash = online_client.genesis_hash();
 
         // Version must be greater or equal 15.
         let metadata = online_client
             .backend()
-            .metadata_at_version(15, hash.0)
+            .metadata_at_version(15, H256(hash.0))
             .await
             .context("get metadata")?;
 
         let legacy_rpc_methods = LegacyRpcMethods::<SubstrateConfig>::new(rpc_client.clone());
         let runtime_version = legacy_rpc_methods
-            .state_get_runtime_version(Some(hash.0))
+            .state_get_runtime_version(Some(H256(hash.0)))
             .await
             .context("get runtime version")?;
         let runtime_version = subxt::client::RuntimeVersion {

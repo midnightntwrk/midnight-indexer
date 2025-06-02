@@ -12,14 +12,9 @@
 // limitations under the License.
 
 use crate::domain::Transaction;
-use derive_more::{From, derive::AsRef};
-use indexer_common::domain::{BlockAuthor, ByteArray, ProtocolVersion};
+use indexer_common::domain::{BlockAuthor, BlockHash, ProtocolVersion};
 use midnight_transient_crypto::merkle_tree::MerkleTreeDigest;
-use std::{
-    array::TryFromSliceError,
-    fmt::{self, Debug, Display},
-};
-use subxt::utils::H256;
+use std::fmt::Debug;
 
 /// Relevant block data from the perspective of the Chain Indexer.
 #[derive(Debug, Clone)]
@@ -46,50 +41,5 @@ impl From<&Block> for BlockInfo {
             hash: block.hash,
             height: block.height,
         }
-    }
-}
-
-/// Hash for a [Block].
-#[derive(Clone, Copy, Default, PartialEq, Eq, From, AsRef)]
-#[as_ref([u8])]
-pub struct BlockHash(pub H256);
-
-impl Debug for BlockHash {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let hex_encoded = const_hex::encode(self.as_ref());
-
-        if hex_encoded.len() <= 8 {
-            write!(f, "BlockHash({hex_encoded})")
-        } else {
-            write!(f, "BlockHash({}…)", &hex_encoded[0..8])
-        }
-    }
-}
-
-impl Display for BlockHash {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let hex_encoded = const_hex::encode(self.as_ref());
-        write!(f, "{hex_encoded}")
-    }
-}
-
-impl From<ByteArray<32>> for BlockHash {
-    fn from(bytes: ByteArray<32>) -> Self {
-        Self(H256(bytes.0))
-    }
-}
-
-impl From<BlockHash> for ByteArray<32> {
-    fn from(hash: BlockHash) -> Self {
-        Self(hash.0.0)
-    }
-}
-
-impl TryFrom<&[u8]> for BlockHash {
-    type Error = TryFromSliceError;
-
-    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let bytes = bytes.try_into()?;
-        Ok(Self(H256(bytes)))
     }
 }

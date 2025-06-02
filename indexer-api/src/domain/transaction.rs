@@ -14,11 +14,9 @@
 use crate::domain::BlockHash;
 use derive_more::Debug;
 use indexer_common::domain::{
-    ApplyStage, ByteArray, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction,
+    ApplyStage, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction, TransactionHash,
 };
 use sqlx::FromRow;
-
-pub type TransactionHash = ByteArray<32>;
 
 /// Relevant transaction data from the perspective of the Indexer API.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]

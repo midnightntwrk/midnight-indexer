@@ -44,6 +44,12 @@ impl Display for ByteVec {
 #[sqlx(transparent)]
 pub struct ByteArray<const N: usize>(#[serde(with = "const_hex")] pub [u8; N]);
 
+impl<const N: usize> Default for ByteArray<N> {
+    fn default() -> Self {
+        Self([0; N])
+    }
+}
+
 impl<const N: usize> TryFrom<&[u8]> for ByteArray<N> {
     type Error = TryFromForByteArrayError;
 

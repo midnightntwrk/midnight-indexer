@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{
-    Block, BlockHash, BlockInfo, BlockTransactions, ContractAction, Transaction, storage::Storage,
+    Block, BlockInfo, BlockTransactions, ContractAction, Transaction, storage::Storage,
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
@@ -23,7 +23,6 @@ use indexer_common::{
 use indoc::indoc;
 use sqlx::{Postgres, QueryBuilder, Row, postgres::PgRow, types::Json};
 use std::iter;
-use subxt::utils::H256;
 
 type Tx = sqlx::Transaction<'static, Postgres>;
 
@@ -60,10 +59,7 @@ impl Storage for PostgresStorage {
 
                 let height = row.try_get::<i64, _>("height")? as u32;
 
-                Ok(BlockInfo {
-                    hash: BlockHash(H256(hash)),
-                    height,
-                })
+                Ok(BlockInfo { hash, height })
             })
             .transpose()
     }

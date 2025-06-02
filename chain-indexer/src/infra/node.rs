@@ -11,14 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod header;
 mod runtimes;
 
 use crate::{
-    domain::{
-        Block, BlockHash, BlockInfo, ContractAction, ContractAttributes, Node, SubstrateHeaderExt,
-        Transaction, TransactionHash,
-    },
-    infra::node::runtimes::BlockDetails,
+    domain::{Block, BlockInfo, ContractAction, ContractAttributes, Node, Transaction},
+    infra::node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
 };
 use async_stream::try_stream;
 use fastrace::trace;
@@ -26,8 +24,8 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{
     LedgerTransaction,
     domain::{
-        BlockAuthor, ByteVec, NetworkId, ProtocolVersion, RawTransaction,
-        ScaleDecodeProtocolVersionError,
+        BlockAuthor, BlockHash, ByteVec, NetworkId, ProtocolVersion, RawTransaction,
+        ScaleDecodeProtocolVersionError, TransactionHash,
     },
     error::{BoxError, StdErrorExt},
     serialize::SerializableExt,
@@ -120,14 +118,14 @@ impl SubxtNode {
             let metadata = self
                 .default_online_client
                 .backend()
-                .metadata_at_version(15, hash.0)
+                .metadata_at_version(15, H256(hash.0))
                 .await
                 .map_err(Box::new)?;
 
             let legacy_rpc_methods =
                 LegacyRpcMethods::<SubstrateConfig>::new(self.rpc_client.to_owned().into());
             let runtime_version = legacy_rpc_methods
-                .state_get_runtime_version(Some(hash.0))
+                .state_get_runtime_version(Some(H256(hash.0)))
                 .await?;
             let runtime_version = subxt::client::RuntimeVersion {
                 spec_version: runtime_version.spec_version,
@@ -210,9 +208,9 @@ impl SubxtNode {
         authorities: &mut Option<Vec<[u8; 32]>>,
         network_id: NetworkId,
     ) -> Result<Block, SubxtNodeError> {
-        let hash = BlockHash::from(block.hash());
+        let hash = block.hash().0.into();
         let height = block.number();
-        let parent_hash = block.header().parent_hash.into();
+        let parent_hash = block.header().parent_hash.0.into();
         let protocol_version = block
             .header()
             .protocol_version()?
@@ -308,7 +306,7 @@ impl Node for SubxtNode {
             .await
             .map_err(Box::new)?
             .map_ok(|block| BlockInfo {
-                hash: block.hash().into(),
+                hash: block.hash().0.into(),
                 height: block.number(),
             })
             .map_err(|error| Box::new(error).into());
@@ -330,7 +328,7 @@ impl Node for SubxtNode {
             "subscribing to finalized blocks"
         );
 
-        let after_hash = after_hash.unwrap_or_default().0;
+        let after_hash = after_hash.unwrap_or_default();
         let mut authorities = None;
 
         try_stream! {
@@ -349,7 +347,7 @@ impl Node for SubxtNode {
 
             // Then we fetch and yield earlier blocks and then yield the first finalized block,
             // unless the highest stored block matches the first finalized block.
-            if first_block.hash() != after_hash {
+            if first_block.hash().0 != after_hash.0 {
                 // If we have not already stored the first finalized block, we fetch all blocks
                 // starting with the one with the parent hash of the first finalized block, until
                 // we arrive at the highest stored block hash (excluded) or at genesis (included).
@@ -358,7 +356,8 @@ impl Node for SubxtNode {
                     .fetch_block(self.default_online_client.genesis_hash())
                     .await.map_err(Box::new)?
                     .header()
-                    .parent_hash;
+                    .parent_hash
+                    ;
 
                 let capacity = match after_height {
                     Some(highest_height) if highest_height < first_block.number() => {
@@ -374,7 +373,7 @@ impl Node for SubxtNode {
 
                 let mut hashes = Vec::with_capacity(capacity);
                 let mut parent_hash = first_block.header().parent_hash;
-                while parent_hash != after_hash && parent_hash != genesis_parent_hash {
+                while parent_hash.0 != after_hash.0 && parent_hash != genesis_parent_hash {
                     let block = self.fetch_block(parent_hash).await.map_err(Box::new)?;
                     if block.number() % 1_000 == 0 {
                         info!(
@@ -541,7 +540,7 @@ async fn make_transaction(
         deserialize::<LedgerTransaction, _>(&mut raw.as_ref(), network_id.into())
             .map_err(|error| SubxtNodeError::Io("cannot deserialize ledger transaction", error))?;
 
-    let hash = TransactionHash::from(ledger_transaction.transaction_hash());
+    let hash = TransactionHash::from(ledger_transaction.transaction_hash().0.0);
 
     let identifiers = ledger_transaction
         .identifiers()
@@ -658,7 +657,7 @@ fn serialize_address(
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{BlockHash, BlockInfo, Node, Transaction},
+        domain::{BlockInfo, Node, Transaction},
         infra::node::{Config, LedgerTransaction, SubxtNode},
     };
     use assert_matches::assert_matches;
@@ -672,7 +671,6 @@ mod tests {
     };
     use midnight_serialize::deserialize;
     use std::{env, path::Path, pin::pin, time::Duration};
-    use subxt::utils::H256;
     use testcontainers::{
         GenericImage, ImageExt,
         core::{Mount, WaitFor},
@@ -749,7 +747,7 @@ mod tests {
         let blocks = subxt_node_2.finalized_blocks(None, NetworkId::Undeployed);
         let mut blocks = pin!(blocks);
         let genesis = blocks.try_next().await?;
-        assert_matches!(genesis, Some(block) if block.parent_hash == BlockHash::default());
+        assert_matches!(genesis, Some(block) if block.parent_hash == [0; 32].into());
 
         // Assert that we can start with stored blocks and receive the expected ones.
 
@@ -759,7 +757,7 @@ mod tests {
             .expect("block hash has 32 bytes");
         let blocks = subxt_node.finalized_blocks(
             Some(BlockInfo {
-                hash: H256(hash).into(),
+                hash,
                 height: before_first_tx_height,
             }),
             NetworkId::Undeployed,

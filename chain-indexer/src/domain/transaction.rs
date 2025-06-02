@@ -12,13 +12,12 @@
 // limitations under the License.
 
 use crate::domain::ContractAction;
-use derive_more::From;
 use indexer_common::domain::{
     ApplyStage, ByteArray, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction,
+    TransactionHash,
 };
-use midnight_ledger::structure::TransactionHash as LedgerTransactionHash;
 use sqlx::FromRow;
-use std::fmt::{self, Debug, Display};
+use std::fmt::Debug;
 
 /// Relevant transaction data from the perspective of the Chain Indexer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,34 +31,6 @@ pub struct Transaction {
     pub merkle_tree_root: MerkleTreeRoot,
     pub start_index: u64,
     pub end_index: u64,
-}
-
-/// Hash for a [Transaction].
-#[derive(Default, Clone, Copy, PartialEq, Eq, From)]
-pub struct TransactionHash(pub LedgerTransactionHash);
-
-impl AsRef<[u8]> for TransactionHash {
-    fn as_ref(&self) -> &[u8] {
-        self.0.0.0.as_slice()
-    }
-}
-
-impl Debug for TransactionHash {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let hex_encoded = const_hex::encode(self.as_ref());
-        if hex_encoded.len() <= 8 {
-            write!(f, "TransactionHash({hex_encoded})")
-        } else {
-            write!(f, "TransactionHash({}…)", &hex_encoded[0..8])
-        }
-    }
-}
-
-impl Display for TransactionHash {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let hex_encoded = const_hex::encode(self.as_ref());
-        write!(f, "{hex_encoded}")
-    }
 }
 
 /// All raw transactions from a single block along with metadata needed for ledger state

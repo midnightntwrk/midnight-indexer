@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{
-    Block, BlockHash, BlockInfo, BlockTransactions, ContractAction, Transaction, storage::Storage,
+    Block, BlockInfo, BlockTransactions, ContractAction, Transaction, storage::Storage,
 };
 use futures::{StreamExt, TryStreamExt};
 use indexer_common::{
@@ -22,7 +22,6 @@ use indexer_common::{
 use indoc::indoc;
 use sqlx::{QueryBuilder, Row, Sqlite, sqlite::SqliteRow, types::Json};
 use std::iter;
-use subxt::utils::H256;
 
 type Tx = sqlx::Transaction<'static, Sqlite>;
 
@@ -58,10 +57,7 @@ impl Storage for SqliteStorage {
 
                 let height = row.try_get::<i64, _>("height")? as u32;
 
-                Ok(BlockInfo {
-                    hash: BlockHash(H256(hash)),
-                    height,
-                })
+                Ok(BlockInfo { hash, height })
             })
             .transpose()
     }

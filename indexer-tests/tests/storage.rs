@@ -14,8 +14,7 @@
 use anyhow::Context;
 use assert_matches::assert_matches;
 use chain_indexer::domain::{
-    Block, BlockHash, BlockInfo, BlockTransactions, Transaction, TransactionHash,
-    storage::Storage as _,
+    Block, BlockInfo, BlockTransactions, Transaction, storage::Storage as _,
 };
 use fake::{Fake, Faker};
 use futures::{StreamExt, TryStreamExt};
@@ -24,16 +23,13 @@ use indexer_common::{
     self,
     cipher::make_cipher,
     domain::{
-        ApplyStage, BlockAuthor, ByteVec, ContractAddress, Identifier, NetworkId, ProtocolVersion,
-        RawTransaction,
+        ApplyStage, BlockAuthor, BlockHash, ByteArray, ByteVec, ContractAddress, Identifier,
+        NetworkId, ProtocolVersion, RawTransaction, TransactionHash,
     },
     error::BoxError,
     infra::{migrations, pool},
 };
-use midnight_ledger::structure::TransactionHash as LedgerTransactionHash;
-use midnight_transient_crypto::hash::HashOutput;
 use std::{convert::Into, sync::LazyLock};
-use subxt::utils::H256;
 
 #[cfg(feature = "cloud")]
 type ChainIndexerStorage = chain_indexer::infra::storage::postgres::PostgresStorage;
@@ -174,7 +170,7 @@ async fn run_tests(
         block_transactions,
         BlockTransactions {
             transactions: vec![],
-            block_parent_hash: BLOCK_0.parent_hash.into(),
+            block_parent_hash: BLOCK_0.parent_hash,
             block_timestamp: BLOCK_0.timestamp
         }
     );
@@ -191,7 +187,7 @@ async fn run_tests(
                 .iter()
                 .map(|t| t.raw.to_owned())
                 .collect::<Vec<_>>(),
-            block_parent_hash: BLOCK_1.parent_hash.into(),
+            block_parent_hash: BLOCK_1.parent_hash,
             block_timestamp: BLOCK_1.timestamp
         }
     );
@@ -204,15 +200,15 @@ async fn run_tests(
         .context("get block by unknown hash")?;
     assert!(block.is_none());
     let block = indexer_api_storage
-        .get_block_by_hash((BLOCK_0_HASH.0).0.into())
+        .get_block_by_hash(BLOCK_0_HASH)
         .await
         .context("get block by block 0 hash")?;
     assert!(block.is_some());
     let block = block.unwrap();
-    assert_eq!(block.hash, (BLOCK_0_HASH.0).0.into());
+    assert_eq!(block.hash, BLOCK_0_HASH);
     assert_eq!(block.height, 0);
     assert_eq!(block.protocol_version, PROTOCOL_VERSION_0_1);
-    assert_eq!(block.parent_hash, (ZERO_HASH.0).0.into());
+    assert_eq!(block.parent_hash, ZERO_HASH);
     assert!(block.author.is_none());
     assert_eq!(block.timestamp, 0);
 
@@ -227,10 +223,10 @@ async fn run_tests(
         .context("get block by height 1")?;
     assert!(block.is_some());
     let block = block.unwrap();
-    assert_eq!(block.hash, (BLOCK_1_HASH.0).0.into());
+    assert_eq!(block.hash, BLOCK_1_HASH);
     assert_eq!(block.height, 1);
     assert_eq!(block.protocol_version, PROTOCOL_VERSION_0_1);
-    assert_eq!(block.parent_hash, (BLOCK_0_HASH.0).0.into());
+    assert_eq!(block.parent_hash, BLOCK_0_HASH);
     assert_matches!(block.author, Some(author) if author == *BLOCK_1_AUTHOR);
     assert_eq!(block.timestamp, 1);
     let transactions = indexer_api_storage
@@ -239,8 +235,8 @@ async fn run_tests(
         .context("get_transactions_by_block_id")?;
     assert_eq!(transactions.len(), 2);
     let transaction = &transactions[0];
-    assert_eq!(transaction.hash, ((TRANSACTION_1_HASH.0).0).0.into());
-    assert_eq!(transaction.block_hash, (BLOCK_1_HASH.0).0.into());
+    assert_eq!(transaction.hash, TRANSACTION_1_HASH);
+    assert_eq!(transaction.block_hash, BLOCK_1_HASH);
     assert_eq!(transaction.protocol_version, PROTOCOL_VERSION_0_1);
     assert_eq!(transaction.apply_stage, ApplyStage::Failure);
     assert_eq!(transaction.identifiers, vec![IDENTIFIER_1.to_owned()]);
@@ -259,7 +255,7 @@ async fn run_tests(
              *state == b"state".as_slice().into()
     );
     let transaction = &transactions[1];
-    assert_eq!(transaction.hash, ((TRANSACTION_1_HASH.0).0).0.into());
+    assert_eq!(transaction.hash, TRANSACTION_1_HASH);
     assert_eq!(transaction.apply_stage, ApplyStage::Success);
 
     let block = indexer_api_storage
@@ -268,10 +264,10 @@ async fn run_tests(
         .context("get latest block")?;
     assert!(block.is_some());
     let block = block.unwrap();
-    assert_eq!(block.hash, (BLOCK_2_HASH.0).0.into());
+    assert_eq!(block.hash, BLOCK_2_HASH);
     assert_eq!(block.height, 2);
     assert_eq!(block.protocol_version, PROTOCOL_VERSION_0_1);
-    assert_eq!(block.parent_hash, (BLOCK_1_HASH.0).0.into());
+    assert_eq!(block.parent_hash, BLOCK_1_HASH);
     assert_eq!(block.timestamp, 2);
     let transactions = indexer_api_storage
         .get_transactions_by_block_id(block.id)
@@ -279,8 +275,8 @@ async fn run_tests(
         .context("get_transactions_by_block_id")?;
     assert_eq!(transactions.len(), 1);
     let transaction = &transactions[0];
-    assert_eq!(transaction.hash, ((TRANSACTION_2_HASH.0).0).0.into());
-    assert_eq!(transaction.block_hash, (BLOCK_2_HASH.0).0.into());
+    assert_eq!(transaction.hash, TRANSACTION_2_HASH);
+    assert_eq!(transaction.block_hash, BLOCK_2_HASH);
     assert_eq!(transaction.protocol_version, PROTOCOL_VERSION_0_1);
     assert_eq!(transaction.apply_stage, ApplyStage::Success);
     assert_eq!(transaction.identifiers, vec![IDENTIFIER_2.to_owned()]);
@@ -309,7 +305,7 @@ async fn run_tests(
         .get_transaction_by_id(transaction.id)
         .await
         .context("get_transaction_by_id")?;
-    assert_eq!(transaction.hash, ((TRANSACTION_2_HASH.0).0).0.into());
+    assert_eq!(transaction.hash, TRANSACTION_2_HASH);
 
     let blocks = indexer_api_storage.get_blocks(10, 10.try_into()?);
     let len = blocks.count().await;
@@ -338,11 +334,11 @@ async fn run_tests(
         .await?;
     assert!(transactions.is_empty());
     let mut transactions = indexer_api_storage
-        .get_transactions_by_hash(((TRANSACTION_1_HASH.0).0).0.into())
+        .get_transactions_by_hash(TRANSACTION_1_HASH)
         .await?;
     assert!(!transactions.is_empty());
     let indexer_api::domain::Transaction { hash, .. } = transactions.pop().unwrap();
-    assert_eq!(hash, ((TRANSACTION_1_HASH.0).0).0.into());
+    assert_eq!(hash, TRANSACTION_1_HASH);
 
     let transactions = indexer_api_storage
         .get_transactions_by_identifier(&b"unknown".as_slice().into())
@@ -353,7 +349,7 @@ async fn run_tests(
         .await?;
     assert!(!transactions.is_empty());
     let indexer_api::domain::Transaction { hash, .. } = transactions.first().unwrap();
-    assert_eq!(*hash, ((TRANSACTION_2_HASH.0).0).0.into());
+    assert_eq!(*hash, TRANSACTION_2_HASH);
 
     let contract_action = indexer_api_storage
         .get_contract_action_by_address(&b"unknown".as_slice().into())
@@ -374,10 +370,7 @@ async fn run_tests(
     );
 
     let contract_action = indexer_api_storage
-        .get_contract_action_by_address_and_block_hash(
-            &b"unknown".as_slice().into(),
-            (BLOCK_1_HASH.0).0.into(),
-        )
+        .get_contract_action_by_address_and_block_hash(&b"unknown".as_slice().into(), BLOCK_1_HASH)
         .await?;
     assert!(contract_action.is_none());
     let contract_action = indexer_api_storage
@@ -385,7 +378,7 @@ async fn run_tests(
         .await?;
     assert!(contract_action.is_none());
     let contract_action = indexer_api_storage
-        .get_contract_action_by_address_and_block_hash(&ADDRESS, (BLOCK_1_HASH.0).0.into())
+        .get_contract_action_by_address_and_block_hash(&ADDRESS, BLOCK_1_HASH)
         .await?;
     assert_matches!(
         contract_action,
@@ -413,7 +406,7 @@ async fn run_tests(
     let contract_action = indexer_api_storage
         .get_contract_action_by_address_and_transaction_hash(
             &b"unknown".as_slice().into(),
-            ((TRANSACTION_1_HASH.0).0).0.into(),
+            TRANSACTION_1_HASH,
         )
         .await?;
     assert!(contract_action.is_none());
@@ -422,10 +415,7 @@ async fn run_tests(
         .await?;
     assert!(contract_action.is_none());
     let contract_action = indexer_api_storage
-        .get_contract_action_by_address_and_transaction_hash(
-            &ADDRESS,
-            ((TRANSACTION_1_HASH.0).0).0.into(),
-        )
+        .get_contract_action_by_address_and_transaction_hash(&ADDRESS, TRANSACTION_1_HASH)
         .await?;
     assert_matches!(
         contract_action,
@@ -596,30 +586,30 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
     }],
 });
 
-const ZERO_HASH: BlockHash = BlockHash(H256::zero());
+const ZERO_HASH: BlockHash = ByteArray::<32>([0; 32]);
 
-const BLOCK_0_HASH: BlockHash = BlockHash(H256([
+const BLOCK_0_HASH: BlockHash = ByteArray::<32>([
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-]));
+]);
 
-const BLOCK_1_HASH: BlockHash = BlockHash(H256([
+const BLOCK_1_HASH: BlockHash = ByteArray::<32>([
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-]));
+]);
 
-const BLOCK_2_HASH: BlockHash = BlockHash(H256([
+const BLOCK_2_HASH: BlockHash = ByteArray::<32>([
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
-]));
+]);
 
 static BLOCK_1_AUTHOR: LazyLock<BlockAuthor> = LazyLock::new(|| [1; 32].into());
 static BLOCK_2_AUTHOR: LazyLock<BlockAuthor> = LazyLock::new(|| [2; 32].into());
 
-const TRANSACTION_1_HASH: TransactionHash = TransactionHash(LedgerTransactionHash(HashOutput([
+const TRANSACTION_1_HASH: TransactionHash = ByteArray::<32>([
     1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-])));
+]);
 
-const TRANSACTION_2_HASH: TransactionHash = TransactionHash(LedgerTransactionHash(HashOutput([
+const TRANSACTION_2_HASH: TransactionHash = ByteArray::<32>([
     2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-])));
+]);
 
 static IDENTIFIER_1: LazyLock<Identifier> = LazyLock::new(|| b"identifier-1".as_slice().into());
 
