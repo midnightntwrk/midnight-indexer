@@ -42,17 +42,17 @@ pub type MerkleTreeRoot = ByteVec;
 pub type RawTransaction = ByteVec;
 pub type SessionId = ByteArray<32>;
 
-/// The apply stage of a transaction.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[cfg_attr(feature = "cloud", sqlx(type_name = "APPLY_STAGE"))]
-pub enum ApplyStage {
-    /// Guaranteed and fallible coins succeeded.
+/// The result of applying a transaction to the ledger state.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[cfg_attr(feature = "cloud", sqlx(type_name = "TRANSACTION_RESULT"))]
+pub enum TransactionResult {
+    /// All guaranteed and fallible coins succeeded.
     Success,
 
-    /// Only guaranteed coins succeeded.
+    /// Not all fallible coins succeeded.
     PartialSuccess,
 
-    /// Both guaranteed and fallible coins failed.
+    /// Guaranteed coins failed.
     #[default]
     Failure,
 }

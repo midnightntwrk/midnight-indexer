@@ -13,8 +13,8 @@
 
 use crate::domain::ContractAction;
 use indexer_common::domain::{
-    ApplyStage, ByteArray, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction,
-    TransactionHash,
+    ByteArray, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction, TransactionHash,
+    TransactionResult,
 };
 use sqlx::FromRow;
 use std::fmt::Debug;
@@ -24,7 +24,7 @@ use std::fmt::Debug;
 pub struct Transaction {
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
-    pub apply_stage: ApplyStage,
+    pub transaction_result: TransactionResult,
     pub identifiers: Vec<Identifier>,
     pub raw: RawTransaction,
     pub contract_actions: Vec<ContractAction>,

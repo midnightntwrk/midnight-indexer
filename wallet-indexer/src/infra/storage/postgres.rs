@@ -199,7 +199,7 @@ mod tests {
     use anyhow::Context;
     use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
     use indexer_common::{
-        domain::{ApplyStage, ViewingKey},
+        domain::{TransactionResult, ViewingKey},
         infra::{
             migrations,
             pool::{self, postgres::PostgresPool},
@@ -271,7 +271,7 @@ mod tests {
                 block_id,
                 hash,
                 protocol_version,
-                apply_stage,
+                transaction_result,
                 identifiers,
                 raw,
                 merkle_tree_root,
@@ -284,7 +284,7 @@ mod tests {
                 q.push_bind(1)
                     .push_bind(id.to_string().into_bytes())
                     .push_bind(1_000)
-                    .push_bind(ApplyStage::Success)
+                    .push_bind(TransactionResult::Success)
                     .push_bind([b"identifier"])
                     .push_bind(b"raw")
                     .push_bind(b"merkle_tree_root")

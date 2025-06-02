@@ -207,7 +207,7 @@ async fn save_transactions(
                 block_id,
                 hash,
                 protocol_version,
-                apply_stage,
+                transaction_result,
                 identifiers,
                 raw,
                 merkle_tree_root,
@@ -221,7 +221,7 @@ async fn save_transactions(
             let Transaction {
                 hash,
                 protocol_version,
-                apply_stage,
+                transaction_result,
                 identifiers,
                 raw,
                 merkle_tree_root,
@@ -232,7 +232,7 @@ async fn save_transactions(
             q.push_bind(block_id)
                 .push_bind(hash.as_ref())
                 .push_bind(protocol_version.0 as i64)
-                .push_bind(apply_stage)
+                .push_bind(transaction_result)
                 .push_bind(identifiers)
                 .push_bind(raw)
                 .push_bind(merkle_tree_root)

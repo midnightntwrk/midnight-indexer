@@ -1,5 +1,3 @@
-scalar ApplyStage
-
 """
 A block with its relevant data.
 """
@@ -205,9 +203,9 @@ type Transaction {
 	"""
 	protocolVersion: Int!
 	"""
-	The transaction apply stage.
+	The result of applying a transaction to the ledger state.
 	"""
-	applyStage: ApplyStage!
+	transactionResult: TransactionResult!
 	"""
 	The transaction identifiers.
 	"""
@@ -237,6 +235,8 @@ input TransactionOffset @oneOf {
 	hash: HexEncoded
 	identifier: HexEncoded
 }
+
+scalar TransactionResult
 
 scalar Unit
 

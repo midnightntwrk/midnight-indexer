@@ -30,7 +30,7 @@ use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::{
     domain::{AsBytesExt, HexEncoded, ViewingKey},
-    infra::api::v1::{ApplyStage, Unit},
+    infra::api::v1::{TransactionResult, Unit},
 };
 use indexer_common::domain::NetworkId;
 use itertools::Itertools;
@@ -331,7 +331,7 @@ async fn test_contract_action_query(
     for expected_contract_action in indexer_data
         .contract_actions
         .iter()
-        .filter(|c| c.transaction_apply_stage() != ApplyStage::FailEntirely)
+        .filter(|c| c.transaction_transaction_result() != TransactionResult::Failure)
     {
         // Existing block hash.
         let variables = contract_action_query::Variables {
@@ -675,7 +675,7 @@ trait ContractActionExt {
     fn block_hash(&self) -> HexEncoded;
     fn block_height(&self) -> i64;
     fn transaction_hash(&self) -> HexEncoded;
-    fn transaction_apply_stage(&self) -> ApplyStage;
+    fn transaction_transaction_result(&self) -> TransactionResult;
     fn identifiers(&self) -> Vec<HexEncoded>;
 }
 
@@ -718,14 +718,14 @@ impl ContractActionExt for BlockSubscriptionContractAction {
         transaction_hash.to_owned()
     }
 
-    fn transaction_apply_stage(&self) -> ApplyStage {
-        let apply_stage = match self {
-            BlockSubscriptionContractAction::ContractCall(c) => &c.transaction.apply_stage,
-            BlockSubscriptionContractAction::ContractDeploy(c) => &c.transaction.apply_stage,
-            BlockSubscriptionContractAction::ContractUpdate(c) => &c.transaction.apply_stage,
+    fn transaction_transaction_result(&self) -> TransactionResult {
+        let transaction_result = match self {
+            BlockSubscriptionContractAction::ContractCall(c) => &c.transaction.transaction_result,
+            BlockSubscriptionContractAction::ContractDeploy(c) => &c.transaction.transaction_result,
+            BlockSubscriptionContractAction::ContractUpdate(c) => &c.transaction.transaction_result,
         };
 
-        apply_stage.to_owned()
+        transaction_result.to_owned()
     }
 
     fn identifiers(&self) -> Vec<HexEncoded> {
@@ -778,14 +778,18 @@ impl ContractActionExt for ContractActionQueryContractAction {
         transaction_hash.to_owned()
     }
 
-    fn transaction_apply_stage(&self) -> ApplyStage {
-        let apply_stage = match self {
-            ContractActionQueryContractAction::ContractCall(c) => &c.transaction.apply_stage,
-            ContractActionQueryContractAction::ContractDeploy(c) => &c.transaction.apply_stage,
-            ContractActionQueryContractAction::ContractUpdate(c) => &c.transaction.apply_stage,
+    fn transaction_transaction_result(&self) -> TransactionResult {
+        let transaction_result = match self {
+            ContractActionQueryContractAction::ContractCall(c) => &c.transaction.transaction_result,
+            ContractActionQueryContractAction::ContractDeploy(c) => {
+                &c.transaction.transaction_result
+            }
+            ContractActionQueryContractAction::ContractUpdate(c) => {
+                &c.transaction.transaction_result
+            }
         };
 
-        apply_stage.to_owned()
+        transaction_result.to_owned()
     }
 
     fn identifiers(&self) -> Vec<HexEncoded> {

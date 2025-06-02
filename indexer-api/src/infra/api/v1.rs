@@ -148,8 +148,8 @@ where
     /// The protocol version.
     protocol_version: u32,
 
-    /// The transaction apply stage.
-    apply_stage: ApplyStage,
+    /// The result of applying a transaction to the ledger state.
+    transaction_result: TransactionResult,
 
     /// The transaction identifiers.
     #[debug(skip)]
@@ -218,7 +218,7 @@ where
             hash,
             block_hash,
             protocol_version: ProtocolVersion(protocol_version),
-            apply_stage,
+            transaction_result,
             identifiers,
             raw,
             merkle_tree_root,
@@ -228,7 +228,7 @@ where
         Self {
             hash: hash.hex_encode(),
             protocol_version,
-            apply_stage: apply_stage.into(),
+            transaction_result: transaction_result.into(),
             identifiers: identifiers
                 .into_iter()
                 .map(|identifier| identifier.hex_encode())
@@ -258,22 +258,22 @@ enum TransactionOffset {
     Identifier(HexEncoded),
 }
 
-/// The apply stage of a transaction.
+/// The result of applying a transaction to the ledger state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ApplyStage {
-    SucceedEntirely,
-    FailFallible,
-    FailEntirely,
+pub enum TransactionResult {
+    Success,
+    PartialSuccess,
+    Failure,
 }
 
-scalar!(ApplyStage);
+scalar!(TransactionResult);
 
-impl From<indexer_common::domain::ApplyStage> for ApplyStage {
-    fn from(apply_stage: indexer_common::domain::ApplyStage) -> Self {
-        match apply_stage {
-            indexer_common::domain::ApplyStage::Success => Self::SucceedEntirely,
-            indexer_common::domain::ApplyStage::PartialSuccess => Self::FailFallible,
-            indexer_common::domain::ApplyStage::Failure => Self::FailEntirely,
+impl From<indexer_common::domain::TransactionResult> for TransactionResult {
+    fn from(transaction_result: indexer_common::domain::TransactionResult) -> Self {
+        match transaction_result {
+            indexer_common::domain::TransactionResult::Success => Self::Success,
+            indexer_common::domain::TransactionResult::PartialSuccess => Self::PartialSuccess,
+            indexer_common::domain::TransactionResult::Failure => Self::Failure,
         }
     }
 }

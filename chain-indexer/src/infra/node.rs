@@ -587,7 +587,7 @@ async fn make_transaction(
 
     let transaction = Transaction {
         hash,
-        apply_stage: Default::default(),
+        transaction_result: Default::default(),
         protocol_version,
         identifiers,
         contract_actions,

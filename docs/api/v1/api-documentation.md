@@ -44,7 +44,6 @@ Sec-WebSocket-Protocol: graphql-transport-ws
 
 - `HexEncoded`: Hex-encoded bytes (for hashes, addresses, session IDs).
 - `ViewingKey`: A viewing key in hex or Bech32 format for wallet sessions.
-- `ApplyStage`: Enumerated stages of transaction application. This scalar represents the outcome of transaction processing on the chain ("Success", "PartialSuccess" or "Failure").
 - `Unit`: An empty return type for mutations that do not return data.
 
 ## Example Queries and Mutations
@@ -75,7 +74,7 @@ query {
     }
     transactions {
       hash
-      applyStage
+      transactionResult
     }
   }
 }

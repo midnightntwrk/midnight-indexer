@@ -129,7 +129,7 @@ impl Storage for PostgresStorage {
                 transactions.hash,
                 blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.apply_stage,
+                transactions.transaction_result,
                 transactions.identifiers,
                 transactions.raw,
                 transactions.merkle_tree_root,
@@ -154,7 +154,7 @@ impl Storage for PostgresStorage {
                 transactions.hash,
                 blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.apply_stage,
+                transactions.transaction_result,
                 transactions.identifiers,
                 transactions.raw,
                 transactions.merkle_tree_root,
@@ -182,7 +182,7 @@ impl Storage for PostgresStorage {
                 transactions.hash,
                 blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.apply_stage,
+                transactions.transaction_result,
                 transactions.identifiers,
                 transactions.raw,
                 transactions.merkle_tree_root,
@@ -210,7 +210,7 @@ impl Storage for PostgresStorage {
                 transactions.hash,
                 blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.apply_stage,
+                transactions.transaction_result,
                 transactions.identifiers,
                 transactions.raw,
                 transactions.merkle_tree_root,
@@ -301,7 +301,7 @@ impl Storage for PostgresStorage {
             INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
             WHERE contract_actions.address = $1
             AND transactions.block_id = (SELECT id FROM blocks WHERE hash = $2)
-            AND transactions.apply_stage != 'Failure'
+            AND transactions.transaction_result != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -332,7 +332,7 @@ impl Storage for PostgresStorage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE contract_actions.address = $1
             AND blocks.height = $2
-            AND transactions.apply_stage != 'Failure'
+            AND transactions.transaction_result != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -363,7 +363,7 @@ impl Storage for PostgresStorage {
             AND contract_actions.transaction_id = (
                 SELECT id FROM transactions
                 WHERE hash = $2
-                AND apply_stage != 'Failure'
+                AND transaction_result != 'Failure'
                 LIMIT 1
             )
             ORDER BY id DESC
@@ -395,7 +395,7 @@ impl Storage for PostgresStorage {
             INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
             WHERE contract_actions.address = $1
             AND $2 = ANY(transactions.identifiers)
-            AND transactions.apply_stage != 'Failure'
+            AND transactions.transaction_result != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -451,7 +451,7 @@ impl Storage for PostgresStorage {
                     FROM contract_actions
                     INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
                     INNER JOIN blocks ON blocks.id = transactions.block_id
-                    WHERE transactions.apply_stage != 'Failure'
+                    WHERE transactions.transaction_result != 'Failure'
                     AND contract_actions.address = $1
                     AND blocks.height >= $2
                     AND contract_actions.id >= $3
@@ -535,7 +535,7 @@ impl Storage for PostgresStorage {
                         transactions.hash,
                         blocks.hash AS block_hash,
                         transactions.protocol_version,
-                        transactions.apply_stage,
+                        transactions.transaction_result,
                         transactions.identifiers,
                         transactions.raw,
                         transactions.merkle_tree_root,

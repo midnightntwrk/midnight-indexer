@@ -17,13 +17,15 @@ use fastrace::trace;
 use indexer_common::{
     LedgerTransaction,
     domain::{
-        ApplyStage, ByteArray, ContractAddress, MerkleTreeRoot, NetworkId, RawLedgerState,
-        RawTransaction,
+        ByteArray, ContractAddress, MerkleTreeRoot, NetworkId, RawLedgerState, RawTransaction,
+        TransactionResult,
     },
     serialize::SerializableExt,
 };
 use midnight_base_crypto::{hash::HashOutput, time::Timestamp};
-use midnight_ledger::semantics::{TransactionContext, TransactionResult};
+use midnight_ledger::semantics::{
+    TransactionContext, TransactionResult as LedgerTransactionResult,
+};
 use midnight_onchain_runtime::context::BlockContext;
 use midnight_serialize::deserialize;
 use midnight_storage::DefaultDB;
@@ -97,7 +99,7 @@ impl LedgerState {
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
         network_id: NetworkId,
-    ) -> Result<TransactionResult<DefaultDB>, Error> {
+    ) -> Result<TransactionResult, Error> {
         let ledger_transaction =
             deserialize::<LedgerTransaction, _>(&mut transaction.as_ref(), network_id.into())
                 .map_err(|error| Error::Io("cannot deserialize ledger transaction", error))?;
@@ -114,6 +116,17 @@ impl LedgerState {
         };
         let (state, transaction_result) = self.apply(&ledger_transaction, &cx);
         *self = LedgerState(state.into());
+
+        let transaction_result = match transaction_result {
+            LedgerTransactionResult::Success => TransactionResult::Success,
+
+            LedgerTransactionResult::PartialSuccess(segments) => {
+                let _segments = segments.into_iter().collect::<Vec<_>>();
+                TransactionResult::PartialSuccess
+            }
+
+            LedgerTransactionResult::Failure(_) => TransactionResult::Failure,
+        };
 
         Ok(transaction_result)
     }
@@ -144,11 +157,7 @@ impl LedgerState {
         }
 
         // Update transaction.
-        transaction.apply_stage = match transaction_result {
-            TransactionResult::Success => ApplyStage::Success,
-            TransactionResult::PartialSuccess(_) => ApplyStage::PartialSuccess,
-            TransactionResult::Failure(_) => ApplyStage::Failure,
-        };
+        transaction.transaction_result = transaction_result;
         transaction.merkle_tree_root = extract_merkle_tree_root(zswap, network_id)?;
         transaction.start_index = start_index;
         transaction.end_index = end_index;

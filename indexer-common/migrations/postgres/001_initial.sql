@@ -1,4 +1,4 @@
-CREATE TYPE APPLY_STAGE AS ENUM(
+CREATE TYPE TRANSACTION_RESULT AS ENUM(
     'Success',
     'PartialSuccess',
     'Failure'
@@ -25,7 +25,7 @@ CREATE TABLE transactions(
     block_id BIGINT NOT NULL REFERENCES blocks(id),
     hash BYTEA NOT NULL,
     protocol_version BIGINT NOT NULL,
-    apply_stage APPLY_STAGE NOT NULL,
+    transaction_result TRANSACTION_RESULT NOT NULL,
     identifiers BYTEA[] NOT NULL,
     raw BYTEA NOT NULL,
     merkle_tree_root BYTEA NOT NULL,
@@ -37,7 +37,7 @@ CREATE INDEX ON transactions(block_id);
 
 CREATE INDEX ON transactions(hash);
 
-CREATE INDEX ON transactions(apply_stage);
+CREATE INDEX ON transactions(transaction_result);
 
 CREATE INDEX ON transactions(end_index);
 

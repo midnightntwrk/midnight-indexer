@@ -13,7 +13,7 @@ CREATE TABLE transactions(
     block_id INTEGER NOT NULL,
     hash BLOB NOT NULL,
     protocol_version INTEGER NOT NULL,
-    apply_stage TEXT CHECK (apply_stage IN ('Success', 'PartialSuccess', 'Failure')) NOT NULL,
+    transaction_result TEXT CHECK (transaction_result IN ('Success', 'PartialSuccess', 'Failure')) NOT NULL,
     raw BLOB NOT NULL,
     merkle_tree_root BLOB NOT NULL,
     start_index INTEGER NOT NULL,
@@ -25,7 +25,7 @@ CREATE INDEX transactions_block_id ON transactions(block_id);
 
 CREATE INDEX transactions_hash ON transactions(hash);
 
-CREATE INDEX transactions_apply_stage ON transactions(apply_stage);
+CREATE INDEX transactions_transaction_result ON transactions(transaction_result);
 
 CREATE INDEX transactions_end_index ON transactions(end_index);
 

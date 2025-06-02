@@ -29,7 +29,7 @@ use futures::{
     stream::{self, TryStreamExt},
 };
 use indexer_common::domain::{
-    ApplyStage, LedgerStateStorage, NetworkId, SessionId, Subscriber, WalletIndexed,
+    LedgerStateStorage, NetworkId, SessionId, Subscriber, TransactionResult, WalletIndexed,
 };
 use log::{debug, warn};
 use metrics::{Counter, counter};
@@ -235,7 +235,7 @@ where
     // For failures, don't increment the index, because no changes were applied to the zswap state.
     // Put another way: the next transaction will have the same start_index like this end index.
     // This avoids "update with end before start" errors when calling `collapsed_update`.
-    let index = if transaction.apply_stage == ApplyStage::Failure {
+    let index = if transaction.transaction_result == TransactionResult::Failure {
         transaction.end_index
     } else {
         transaction.end_index + 1

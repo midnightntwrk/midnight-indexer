@@ -126,7 +126,7 @@ impl Storage for SqliteStorage {
                 transactions.hash,
                 blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.apply_stage,
+                transactions.transaction_result,
                 transactions.raw,
                 transactions.merkle_tree_root,
                 transactions.start_index,
@@ -156,7 +156,7 @@ impl Storage for SqliteStorage {
                 transactions.hash,
                 blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.apply_stage,
+                transactions.transaction_result,
                 transactions.raw,
                 transactions.merkle_tree_root,
                 transactions.start_index,
@@ -191,7 +191,7 @@ impl Storage for SqliteStorage {
                 transactions.hash,
                 blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.apply_stage,
+                transactions.transaction_result,
                 transactions.raw,
                 transactions.merkle_tree_root,
                 transactions.start_index,
@@ -227,7 +227,7 @@ impl Storage for SqliteStorage {
                 transactions.hash,
                 blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.apply_stage,
+                transactions.transaction_result,
                 transactions.raw,
                 transactions.merkle_tree_root,
                 transactions.start_index,
@@ -324,7 +324,7 @@ impl Storage for SqliteStorage {
             INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
             WHERE contract_actions.address = $1
             AND transactions.block_id = (SELECT id FROM blocks WHERE hash = $2)
-            AND transactions.apply_stage != 'Failure'
+            AND transactions.transaction_result != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -354,7 +354,7 @@ impl Storage for SqliteStorage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE contract_actions.address = $1
             AND blocks.height = $2
-            AND transactions.apply_stage != 'Failure'
+            AND transactions.transaction_result != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -384,7 +384,7 @@ impl Storage for SqliteStorage {
             AND contract_actions.transaction_id = (
                 SELECT id FROM transactions
                 WHERE hash = $2
-                AND apply_stage != 'Failure'
+                AND transaction_result != 'Failure'
                 ORDER BY id DESC
                 LIMIT 1
             )
@@ -417,7 +417,7 @@ impl Storage for SqliteStorage {
             INNER JOIN transaction_identifiers ON transactions.id = transaction_identifiers.transaction_id
             WHERE contract_actions.address = $1
             AND transaction_identifiers.identifier = $2
-            AND transactions.apply_stage != 'Failure'
+            AND transactions.transaction_result != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -471,7 +471,7 @@ impl Storage for SqliteStorage {
                     FROM contract_actions
                     INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
                     INNER JOIN blocks ON blocks.id = transactions.block_id
-                    WHERE transactions.apply_stage != 'Failure'
+                    WHERE transactions.transaction_result != 'Failure'
                     AND contract_actions.address = $1
                     AND blocks.height >= $2
                     AND contract_actions.id >= $3
@@ -553,7 +553,7 @@ impl Storage for SqliteStorage {
                         transactions.hash,
                         blocks.hash AS block_hash,
                         transactions.protocol_version,
-                        transactions.apply_stage,
+                        transactions.transaction_result,
                         transactions.raw,
                         transactions.merkle_tree_root,
                         transactions.start_index,

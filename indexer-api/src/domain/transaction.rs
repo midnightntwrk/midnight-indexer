@@ -14,7 +14,7 @@
 use crate::domain::BlockHash;
 use derive_more::Debug;
 use indexer_common::domain::{
-    ApplyStage, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction, TransactionHash,
+    Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction, TransactionHash, TransactionResult,
 };
 use sqlx::FromRow;
 
@@ -33,7 +33,7 @@ pub struct Transaction {
     #[sqlx(try_from = "i64")]
     pub protocol_version: ProtocolVersion,
 
-    pub apply_stage: ApplyStage,
+    pub transaction_result: TransactionResult,
 
     #[debug(skip)]
     #[cfg_attr(feature = "standalone", sqlx(skip))]

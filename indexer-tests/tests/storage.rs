@@ -23,8 +23,8 @@ use indexer_common::{
     self,
     cipher::make_cipher,
     domain::{
-        ApplyStage, BlockAuthor, BlockHash, ByteArray, ByteVec, ContractAddress, Identifier,
-        NetworkId, ProtocolVersion, RawTransaction, TransactionHash,
+        BlockAuthor, BlockHash, ByteArray, ByteVec, ContractAddress, Identifier, NetworkId,
+        ProtocolVersion, RawTransaction, TransactionHash, TransactionResult,
     },
     error::BoxError,
     infra::{migrations, pool},
@@ -238,7 +238,7 @@ async fn run_tests(
     assert_eq!(transaction.hash, TRANSACTION_1_HASH);
     assert_eq!(transaction.block_hash, BLOCK_1_HASH);
     assert_eq!(transaction.protocol_version, PROTOCOL_VERSION_0_1);
-    assert_eq!(transaction.apply_stage, ApplyStage::Failure);
+    assert_eq!(transaction.transaction_result, TransactionResult::Failure);
     assert_eq!(transaction.identifiers, vec![IDENTIFIER_1.to_owned()]);
     assert_eq!(&transaction.raw, &*RAW_TRANSACTION_1);
     let contract_actions = indexer_api_storage
@@ -256,7 +256,7 @@ async fn run_tests(
     );
     let transaction = &transactions[1];
     assert_eq!(transaction.hash, TRANSACTION_1_HASH);
-    assert_eq!(transaction.apply_stage, ApplyStage::Success);
+    assert_eq!(transaction.transaction_result, TransactionResult::Success);
 
     let block = indexer_api_storage
         .get_latest_block()
@@ -278,7 +278,7 @@ async fn run_tests(
     assert_eq!(transaction.hash, TRANSACTION_2_HASH);
     assert_eq!(transaction.block_hash, BLOCK_2_HASH);
     assert_eq!(transaction.protocol_version, PROTOCOL_VERSION_0_1);
-    assert_eq!(transaction.apply_stage, ApplyStage::Success);
+    assert_eq!(transaction.transaction_result, TransactionResult::Success);
     assert_eq!(transaction.identifiers, vec![IDENTIFIER_2.to_owned()]);
     assert_eq!(&transaction.raw, &*RAW_TRANSACTION_2);
     let contract_actions = indexer_api_storage
@@ -510,7 +510,7 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
         Transaction {
             hash: TRANSACTION_1_HASH,
             protocol_version: PROTOCOL_VERSION_0_1,
-            apply_stage: ApplyStage::Failure,
+            transaction_result: TransactionResult::Failure,
             identifiers: vec![IDENTIFIER_1.to_owned()],
             raw: RAW_TRANSACTION_1.to_owned(),
             contract_actions: vec![chain_indexer::domain::ContractAction {
@@ -526,7 +526,7 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
         Transaction {
             hash: TRANSACTION_1_HASH,
             protocol_version: PROTOCOL_VERSION_0_1,
-            apply_stage: ApplyStage::Success,
+            transaction_result: TransactionResult::Success,
             identifiers: vec![IDENTIFIER_1.to_owned()],
             raw: RAW_TRANSACTION_1.to_owned(),
             contract_actions: vec![chain_indexer::domain::ContractAction {
@@ -553,7 +553,7 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
     transactions: vec![Transaction {
         hash: TRANSACTION_2_HASH,
         protocol_version: PROTOCOL_VERSION_0_1,
-        apply_stage: ApplyStage::Success,
+        transaction_result: TransactionResult::Success,
         identifiers: vec![IDENTIFIER_2.to_owned()],
         raw: RAW_TRANSACTION_2.to_owned(),
         contract_actions: vec![
