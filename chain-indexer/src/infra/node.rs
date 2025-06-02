@@ -25,7 +25,7 @@ use indexer_common::{
     LedgerTransaction,
     domain::{
         BlockAuthor, BlockHash, ByteVec, NetworkId, ProtocolVersion, RawTransaction,
-        ScaleDecodeProtocolVersionError, TransactionHash,
+        ScaleDecodeProtocolVersionError,
     },
     error::{BoxError, StdErrorExt},
     serialize::SerializableExt,
@@ -61,6 +61,7 @@ use thiserror::Error;
 type SubxtBlock = subxt::blocks::Block<SubstrateConfig, OnlineClient<SubstrateConfig>>;
 
 const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
+const TRAVERSE_BACK_LOG_AFTER: u32 = 1_000;
 
 /// A [Node] implementation based on subxt.
 #[derive(Clone)]
@@ -114,7 +115,7 @@ impl SubxtNode {
         {
             let genesis_hash = self.default_online_client.genesis_hash();
 
-            // Version must be greater or equal 15.
+            // Version must be greater or equal 15. This is a substrate/subxt detail.
             let metadata = self
                 .default_online_client
                 .backend()
@@ -335,7 +336,10 @@ impl Node for SubxtNode {
             let mut finalized_blocks = self.subscribe_finalized_blocks().await.map_err(Box::new)?;
 
             // First we receive the first finalized block.
-            let Some(first_block) = receive_block(&mut finalized_blocks).await.map_err(Box::new)? else {
+            let Some(first_block) = receive_block(&mut finalized_blocks)
+                .await
+                .map_err(Box::new)?
+            else {
                 return;
             };
             debug!(
@@ -354,10 +358,10 @@ impl Node for SubxtNode {
                 // For these we store the hashes; one hash is 32 bytes, i.e. one year is ~ 156MB.
                 let genesis_parent_hash = self
                     .fetch_block(self.default_online_client.genesis_hash())
-                    .await.map_err(Box::new)?
+                    .await
+                    .map_err(Box::new)?
                     .header()
-                    .parent_hash
-                    ;
+                    .parent_hash;
 
                 let capacity = match after_height {
                     Some(highest_height) if highest_height < first_block.number() => {
@@ -375,7 +379,7 @@ impl Node for SubxtNode {
                 let mut parent_hash = first_block.header().parent_hash;
                 while parent_hash.0 != after_hash.0 && parent_hash != genesis_parent_hash {
                     let block = self.fetch_block(parent_hash).await.map_err(Box::new)?;
-                    if block.number() % 1_000 == 0 {
+                    if block.number() % TRAVERSE_BACK_LOG_AFTER == 0 {
                         info!(
                             highest_stored_height:? = after_height,
                             current_height = block.number(),
@@ -400,11 +404,16 @@ impl Node for SubxtNode {
                 }
 
                 // Then we yield the first finalized block.
-                yield self.make_block(first_block, &mut authorities, network_id).await?;
+                yield self
+                    .make_block(first_block, &mut authorities, network_id)
+                    .await?;
             }
 
             // Finally we emit all other finalized ones.
-            while let Some(block) = receive_block(&mut finalized_blocks).await.map_err(Box::new)? {
+            while let Some(block) = receive_block(&mut finalized_blocks)
+                .await
+                .map_err(Box::new)?
+            {
                 debug!(
                     hash:% = block.hash(),
                     height = block.number(),
@@ -540,7 +549,7 @@ async fn make_transaction(
         deserialize::<LedgerTransaction, _>(&mut raw.as_ref(), network_id.into())
             .map_err(|error| SubxtNodeError::Io("cannot deserialize ledger transaction", error))?;
 
-    let hash = TransactionHash::from(ledger_transaction.transaction_hash().0.0);
+    let hash = ledger_transaction.transaction_hash().0.0.into();
 
     let identifiers = ledger_transaction
         .identifiers()
@@ -747,6 +756,7 @@ mod tests {
         let blocks = subxt_node_2.finalized_blocks(None, NetworkId::Undeployed);
         let mut blocks = pin!(blocks);
         let genesis = blocks.try_next().await?;
+        // The genesis block has a "zero" parent hash, i.e. `[0; 32]`.
         assert_matches!(genesis, Some(block) if block.parent_hash == [0; 32].into());
 
         // Assert that we can start with stored blocks and receive the expected ones.

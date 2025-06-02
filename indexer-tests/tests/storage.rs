@@ -588,28 +588,19 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
 
 const ZERO_HASH: BlockHash = ByteArray::<32>([0; 32]);
 
-const BLOCK_0_HASH: BlockHash = ByteArray::<32>([
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-]);
-
-const BLOCK_1_HASH: BlockHash = ByteArray::<32>([
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-]);
-
-const BLOCK_2_HASH: BlockHash = ByteArray::<32>([
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
-]);
+const BLOCK_0_HASH: BlockHash = ByteArray::<32>({
+    let mut hash = [0; 32];
+    hash[0] = 1;
+    hash
+});
+const BLOCK_1_HASH: BlockHash = ByteArray::<32>([1; 32]);
+const BLOCK_2_HASH: BlockHash = ByteArray::<32>([2; 32]);
 
 static BLOCK_1_AUTHOR: LazyLock<BlockAuthor> = LazyLock::new(|| [1; 32].into());
 static BLOCK_2_AUTHOR: LazyLock<BlockAuthor> = LazyLock::new(|| [2; 32].into());
 
-const TRANSACTION_1_HASH: TransactionHash = ByteArray::<32>([
-    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-]);
-
-const TRANSACTION_2_HASH: TransactionHash = ByteArray::<32>([
-    2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-]);
+const TRANSACTION_1_HASH: TransactionHash = ByteArray::<32>([1; 32]);
+const TRANSACTION_2_HASH: TransactionHash = ByteArray::<32>([2; 32]);
 
 static IDENTIFIER_1: LazyLock<Identifier> = LazyLock::new(|| b"identifier-1".as_slice().into());
 
