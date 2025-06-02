@@ -164,7 +164,6 @@ where
 
     Router::new()
         .route("/ready", get(ready))
-        .route("/health", get(health))
         .nest("/api/v1", v1_app)
         .with_state(caught_up)
         .layer(
@@ -187,18 +186,6 @@ async fn ready(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
             .into_response()
     } else {
         StatusCode::OK.into_response()
-    }
-}
-
-// TODO: Remove once clients no longer use it!
-async fn health(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
-    if !caught_up.load(Ordering::Acquire) {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "indexer has not yet caught up with the node; deprecated: use ../ready instead",
-        )
-    } else {
-        (StatusCode::OK, "OK, deprecated: use ../ready instead")
     }
 }
 
