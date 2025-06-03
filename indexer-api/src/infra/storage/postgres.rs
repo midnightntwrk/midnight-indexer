@@ -263,7 +263,7 @@ impl Storage for PostgresStorage {
         &self,
         address: &ContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
-        let query = indoc! {"
+        let query = indoc! {r#"
             SELECT
                 contract_actions.id AS id,
                 contract_actions.address,
@@ -272,10 +272,12 @@ impl Storage for PostgresStorage {
                 contract_actions.zswap_state,
                 contract_actions.transaction_id
             FROM contract_actions
+            INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
             WHERE contract_actions.address = $1
+            AND transactions.transaction_result != '"Failure"'::jsonb
             ORDER BY id DESC
             LIMIT 1
-        "};
+        "#};
 
         sqlx::query_as::<_, ContractAction>(query)
             .bind(address)
@@ -359,13 +361,15 @@ impl Storage for PostgresStorage {
                 contract_actions.zswap_state,
                 contract_actions.transaction_id
             FROM contract_actions
+            INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
             WHERE contract_actions.address = $1
-            AND contract_actions.transaction_id = (
+            AND transactions.id = (
                 SELECT id FROM transactions
                 WHERE hash = $2
                 AND transaction_result != '"Failure"'::jsonb
                 LIMIT 1
             )
+            AND transactions.transaction_result != '"Failure"'::jsonb
             ORDER BY id DESC
             LIMIT 1
         "#};
@@ -412,7 +416,7 @@ impl Storage for PostgresStorage {
         &self,
         id: u64,
     ) -> Result<Vec<ContractAction>, sqlx::Error> {
-        let query = indoc! {"
+        let query = indoc! {r#"
             SELECT
                 contract_actions.id AS id,
                 contract_actions.address,
@@ -421,8 +425,10 @@ impl Storage for PostgresStorage {
                 contract_actions.zswap_state,
                 contract_actions.transaction_id
             FROM contract_actions
+            INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
             WHERE contract_actions.transaction_id = $1
-        "};
+            AND transactions.transaction_result != '"Failure"'::jsonb
+        "#};
 
         sqlx::query_as::<_, ContractAction>(query)
             .bind(id as i64)

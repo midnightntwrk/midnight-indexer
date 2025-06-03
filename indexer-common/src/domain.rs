@@ -48,7 +48,7 @@ pub enum TransactionResult {
     /// All guaranteed and fallible coins succeeded.
     Success,
 
-    /// Not all fallible coins succeeded.
+    /// Not all fallible coins succeeded; the value maps segemt ID to success.
     PartialSuccess(Vec<(u16, bool)>),
 
     /// Guaranteed coins failed.

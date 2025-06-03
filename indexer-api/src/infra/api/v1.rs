@@ -274,7 +274,8 @@ pub enum TransactionResultStatus {
     Failure,
 }
 
-/// One of many segments for a partially successful transaction result.
+/// One of many segments for a partially successful transaction result showing success for some
+/// segment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
 pub struct Segment {
     /// Segment ID.

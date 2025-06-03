@@ -173,7 +173,8 @@ type RelevantTransaction {
 }
 
 """
-One of many segments for a partially successful transaction result.
+One of many segments for a partially successful transaction result showing success for some
+segment.
 """
 type Segment {
 	"""

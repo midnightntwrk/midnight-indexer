@@ -27,6 +27,8 @@ CREATE INDEX transactions_hash ON transactions(hash);
 
 CREATE INDEX transactions_transaction_result ON transactions(transaction_result);
 
+CREATE INDEX transactions_start_index ON transactions(start_index);
+
 CREATE INDEX transactions_end_index ON transactions(end_index);
 
 CREATE TABLE transaction_identifiers(

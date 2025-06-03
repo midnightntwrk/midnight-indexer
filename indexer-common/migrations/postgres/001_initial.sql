@@ -33,7 +33,11 @@ CREATE INDEX ON transactions(hash);
 
 CREATE INDEX ON transactions(transaction_result);
 
+CREATE INDEX ON transactions(start_index);
+
 CREATE INDEX ON transactions(end_index);
+
+CREATE INDEX ON transactions USING GIN(transaction_result);
 
 CREATE TABLE contract_actions(
     id BIGSERIAL PRIMARY KEY,

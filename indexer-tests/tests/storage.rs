@@ -160,7 +160,7 @@ async fn run_tests(
         .get_contract_action_count()
         .await
         .context("get contract action count")?;
-    assert_eq!(contract_action_count, (2, 2, 1));
+    assert_eq!(contract_action_count, (1, 3, 1));
 
     let block_transactions = chain_indexer_storage
         .get_block_transactions(0)
@@ -238,7 +238,7 @@ async fn run_tests(
     assert_eq!(transaction.hash, TRANSACTION_1_HASH);
     assert_eq!(transaction.block_hash, BLOCK_1_HASH);
     assert_eq!(transaction.protocol_version, PROTOCOL_VERSION_0_1);
-    assert_eq!(transaction.transaction_result, TransactionResult::Failure);
+    assert_eq!(transaction.transaction_result, TransactionResult::Success);
     assert_eq!(transaction.identifiers, vec![IDENTIFIER_1.to_owned()]);
     assert_eq!(&transaction.raw, &*RAW_TRANSACTION_1);
     let contract_actions = indexer_api_storage
@@ -256,7 +256,7 @@ async fn run_tests(
     );
     let transaction = &transactions[1];
     assert_eq!(transaction.hash, TRANSACTION_1_HASH);
-    assert_eq!(transaction.transaction_result, TransactionResult::Success);
+    assert_eq!(transaction.transaction_result, TransactionResult::Failure);
 
     let block = indexer_api_storage
         .get_latest_block()
@@ -510,7 +510,7 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
         Transaction {
             hash: TRANSACTION_1_HASH,
             protocol_version: PROTOCOL_VERSION_0_1,
-            transaction_result: TransactionResult::Failure,
+            transaction_result: TransactionResult::Success,
             identifiers: vec![IDENTIFIER_1.to_owned()],
             raw: RAW_TRANSACTION_1.to_owned(),
             contract_actions: vec![chain_indexer::domain::ContractAction {
@@ -526,14 +526,16 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
         Transaction {
             hash: TRANSACTION_1_HASH,
             protocol_version: PROTOCOL_VERSION_0_1,
-            transaction_result: TransactionResult::Success,
+            transaction_result: TransactionResult::Failure,
             identifiers: vec![IDENTIFIER_1.to_owned()],
             raw: RAW_TRANSACTION_1.to_owned(),
             contract_actions: vec![chain_indexer::domain::ContractAction {
                 address: ADDRESS.to_owned(),
                 state: b"state".as_slice().into(),
                 zswap_state: b"zswap_state".as_slice().into(),
-                attributes: chain_indexer::domain::ContractAttributes::Deploy,
+                attributes: chain_indexer::domain::ContractAttributes::Call {
+                    entry_point: b"entry_point".as_slice().into(),
+                },
             }],
             merkle_tree_root: b"merkle_tree_root".as_slice().into(),
             start_index: 0,
