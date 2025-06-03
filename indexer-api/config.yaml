@@ -26,7 +26,7 @@ infra:
     address: "0.0.0.0"
     port: 8088
     request_body_limit: "1MiB"
-    max_complexity: 200
+    max_complexity: 250
     max_depth: 15
 
 telemetry:
