@@ -155,6 +155,7 @@ async fn make_block_details_runtime_0_12(
         .map_err(Box::new)?
         .is_some();
     if new_session {
+        // Trigger fetching the authorities next time.
         *authorities = None;
     }
 
