@@ -293,7 +293,7 @@ async fn save_unshielded_utxos(
                 UPDATE unshielded_utxos
                 SET spending_transaction_id = $1
                 WHERE creating_transaction_id = $2 AND output_index = $3
-                AND spending_transaction_id IS NULL -- Ensure we only mark unspent ones
+                AND spending_transaction_id IS NULL
             "};
 
             sqlx::query(query)
@@ -301,8 +301,7 @@ async fn save_unshielded_utxos(
                 .bind(utxo_info_for_spending.creating_transaction_id as i64)
                 .bind(utxo_info_for_spending.output_index as i32)
                 .execute(&mut **tx)
-                .await?
-                .rows_affected();
+                .await?;
         }
     } else {
         let query_base = indoc! {"

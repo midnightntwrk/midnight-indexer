@@ -271,16 +271,16 @@ async fn save_transactions(
             transaction_id,
             false,
             tx,
-        )
-        .await?;
-
+        ).await?;
+    }
+    
+    for (transaction, transaction_id) in transactions.iter().zip(transaction_ids.iter()) {
         save_unshielded_utxos(
             &transaction.spent_unshielded_utxos,
             transaction_id,
             true,
             tx,
-        )
-        .await?;
+        ).await?;
     }
 
     Ok(transaction_ids.into_iter().max().map(|n| n as u64))
@@ -300,16 +300,22 @@ async fn save_unshielded_utxos(
     if spent {
         for utxo_info_for_spending in utxos {
             let query = indoc! {"
-                UPDATE unshielded_utxos
-                SET spending_transaction_id = $1
-                WHERE creating_transaction_id = $2 AND output_index = $3
-                AND spending_transaction_id IS NULL
+                INSERT INTO unshielded_utxos
+                (creating_transaction_id, output_index, owner_address, token_type, intent_hash, value, spending_transaction_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (intent_hash, output_index)
+                DO UPDATE SET spending_transaction_id = $7
+                WHERE unshielded_utxos.spending_transaction_id IS NULL
             "};
 
             sqlx::query(query)
-                .bind(transaction_id)
-                .bind(utxo_info_for_spending.creating_transaction_id as i64)
+                .bind(*transaction_id)  // Use the current transaction_id as creating_transaction_id
                 .bind(utxo_info_for_spending.output_index as i32)
+                .bind(&utxo_info_for_spending.owner_address)
+                .bind(&utxo_info_for_spending.token_type)
+                .bind(&utxo_info_for_spending.intent_hash)
+                .bind(U128BeBytes::from(utxo_info_for_spending.value))
+                .bind(transaction_id)
                 .execute(&mut **tx)
                 .await?;
         }
@@ -323,8 +329,8 @@ async fn save_unshielded_utxos(
             q.push_bind(transaction_id)
                 .push_bind(utxo.output_index as i32)
                 .push_bind(&utxo.owner_address)
-                .push_bind(utxo.token_type)
-                .push_bind(utxo.intent_hash)
+                .push_bind(&utxo.token_type)
+                .push_bind(&utxo.intent_hash)
                 .push_bind(U128BeBytes::from(utxo.value));
         });
 

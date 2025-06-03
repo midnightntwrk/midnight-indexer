@@ -84,7 +84,7 @@ CREATE TABLE unshielded_utxos(
     intent_hash BYTEA NOT NULL,
     value BYTEA NOT NULL,
     spending_transaction_id BIGINT REFERENCES transactions(id),
-    UNIQUE (creating_transaction_id, output_index)
+    UNIQUE (intent_hash, output_index)
 );
 
 CREATE INDEX unshielded_owner_idx ON unshielded_utxos(owner_address);
