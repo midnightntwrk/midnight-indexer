@@ -108,10 +108,15 @@ impl Storage for PostgresStorage {
     }
 
     #[trace]
-    async fn save_block(&self, block: &Block) -> Result<Option<u64>, sqlx::Error> {
+    async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let max_transaction_id = save_block(block, &mut tx).await?;
+        let (max_transaction_id, transaction_ids) = save_block(block, &mut tx).await?;
         tx.commit().await?;
+
+        // Update the block's transactions with their database IDs
+        for (transaction, id) in block.transactions.iter_mut().zip(transaction_ids.iter()) {
+            transaction.id = Some(*id as u64);
+        }
 
         Ok(max_transaction_id)
     }
@@ -170,7 +175,7 @@ impl Storage for PostgresStorage {
 }
 
 #[trace]
-async fn save_block(block: &Block, tx: &mut Tx) -> Result<Option<u64>, sqlx::Error> {
+async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
     let query = indoc! {"
         INSERT INTO blocks (
             hash,
@@ -214,9 +219,9 @@ async fn save_transactions(
     transactions: &[Transaction],
     block_id: i64,
     tx: &mut Tx,
-) -> Result<Option<u64>, sqlx::Error> {
+) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
     if transactions.is_empty() {
-        return Ok(None);
+        return Ok((None, vec![]));
     }
 
     let query = indoc! {"
@@ -271,19 +276,20 @@ async fn save_transactions(
             transaction_id,
             false,
             tx,
-        ).await?;
-    }
-    
-    for (transaction, transaction_id) in transactions.iter().zip(transaction_ids.iter()) {
+        )
+            .await?;
+
         save_unshielded_utxos(
             &transaction.spent_unshielded_utxos,
             transaction_id,
             true,
             tx,
-        ).await?;
+        )
+            .await?;
     }
 
-    Ok(transaction_ids.into_iter().max().map(|n| n as u64))
+    let max_id = transaction_ids.iter().max().copied().map(|n| n as u64);
+    Ok((max_id, transaction_ids))
 }
 
 #[trace]
