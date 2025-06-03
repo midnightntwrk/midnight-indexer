@@ -2931,6 +2931,7 @@ dependencies = [
  "midnight-serialize",
  "midnight-transient-crypto",
  "midnight-zswap",
+ "scopeguard",
  "secrecy",
  "serde",
  "sqlx",
