@@ -14,13 +14,22 @@
 //! e2e testing library
 
 use crate::{
-    e2e::{
+    e2e::graphql::{
+        BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
+        ContractActionSubscription, DisconnectMutation, TransactionsQuery, WalletSubscription,
+        block_query,
         block_subscription::{
-            BlockSubscriptionBlocks as BlockSubscriptionBlock,
+            self, BlockSubscriptionBlocks as BlockSubscriptionBlock,
             BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
             BlockSubscriptionBlocksTransactionsContractActions as BlockSubscriptionContractAction,
+            TransactionResultStatus as BlockSubscriptionTransactionResultStatus,
         },
-        contract_action_query::ContractActionQueryContractAction,
+        connect_mutation,
+        contract_action_query::{
+            self, ContractActionQueryContractAction,
+            TransactionResultStatus as ContractActionQueryTransactionResultStatus,
+        },
+        contract_action_subscription, disconnect_mutation, transactions_query, wallet_subscription,
     },
     graphql_ws_client,
 };
@@ -30,7 +39,7 @@ use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::{
     domain::{AsBytesExt, HexEncoded, ViewingKey},
-    infra::api::v1::{TransactionResult, Unit},
+    infra::api::v1::TransactionResultStatus,
 };
 use indexer_common::domain::NetworkId;
 use itertools::Itertools;
@@ -331,7 +340,7 @@ async fn test_contract_action_query(
     for expected_contract_action in indexer_data
         .contract_actions
         .iter()
-        .filter(|c| c.transaction_transaction_result() != TransactionResult::Failure)
+        .filter(|c| c.transaction_transaction_result_status() != TransactionResultStatus::Failure)
     {
         // Existing block hash.
         let variables = contract_action_query::Variables {
@@ -675,7 +684,7 @@ trait ContractActionExt {
     fn block_hash(&self) -> HexEncoded;
     fn block_height(&self) -> i64;
     fn transaction_hash(&self) -> HexEncoded;
-    fn transaction_transaction_result(&self) -> TransactionResult;
+    fn transaction_transaction_result_status(&self) -> TransactionResultStatus;
     fn identifiers(&self) -> Vec<HexEncoded>;
 }
 
@@ -718,14 +727,27 @@ impl ContractActionExt for BlockSubscriptionContractAction {
         transaction_hash.to_owned()
     }
 
-    fn transaction_transaction_result(&self) -> TransactionResult {
-        let transaction_result = match self {
-            BlockSubscriptionContractAction::ContractCall(c) => &c.transaction.transaction_result,
-            BlockSubscriptionContractAction::ContractDeploy(c) => &c.transaction.transaction_result,
-            BlockSubscriptionContractAction::ContractUpdate(c) => &c.transaction.transaction_result,
+    fn transaction_transaction_result_status(&self) -> TransactionResultStatus {
+        let status = match self {
+            BlockSubscriptionContractAction::ContractCall(c) => {
+                &c.transaction.transaction_result.status
+            }
+            BlockSubscriptionContractAction::ContractDeploy(c) => {
+                &c.transaction.transaction_result.status
+            }
+            BlockSubscriptionContractAction::ContractUpdate(c) => {
+                &c.transaction.transaction_result.status
+            }
         };
 
-        transaction_result.to_owned()
+        match status {
+            BlockSubscriptionTransactionResultStatus::SUCCESS => TransactionResultStatus::Success,
+            BlockSubscriptionTransactionResultStatus::PARTIAL_SUCCESS => {
+                TransactionResultStatus::PartialSuccess
+            }
+            BlockSubscriptionTransactionResultStatus::FAILURE => TransactionResultStatus::Failure,
+            other => panic!("unexpected variant: {other:?}"),
+        }
     }
 
     fn identifiers(&self) -> Vec<HexEncoded> {
@@ -778,18 +800,27 @@ impl ContractActionExt for ContractActionQueryContractAction {
         transaction_hash.to_owned()
     }
 
-    fn transaction_transaction_result(&self) -> TransactionResult {
-        let transaction_result = match self {
-            ContractActionQueryContractAction::ContractCall(c) => &c.transaction.transaction_result,
+    fn transaction_transaction_result_status(&self) -> TransactionResultStatus {
+        let status = match self {
+            ContractActionQueryContractAction::ContractCall(c) => {
+                &c.transaction.transaction_result.status
+            }
             ContractActionQueryContractAction::ContractDeploy(c) => {
-                &c.transaction.transaction_result
+                &c.transaction.transaction_result.status
             }
             ContractActionQueryContractAction::ContractUpdate(c) => {
-                &c.transaction.transaction_result
+                &c.transaction.transaction_result.status
             }
         };
 
-        transaction_result.to_owned()
+        match status {
+            ContractActionQueryTransactionResultStatus::SUCCESS => TransactionResultStatus::Success,
+            ContractActionQueryTransactionResultStatus::PARTIAL_SUCCESS => {
+                TransactionResultStatus::PartialSuccess
+            }
+            ContractActionQueryTransactionResultStatus::FAILURE => TransactionResultStatus::Failure,
+            other => panic!("unexpected variant: {other:?}"),
+        }
     }
 
     fn identifiers(&self) -> Vec<HexEncoded> {
@@ -843,66 +874,74 @@ fn seed_to_secret_key(seed: &str) -> SecretKey {
     SecretKeys::from(Seed::from(seed_bytes)).encryption_secret_key
 }
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "../indexer-api/graphql/schema-v1.graphql",
-    query_path = "./e2e.graphql",
-    response_derives = "Debug, Clone, Serialize"
-)]
-struct BlockQuery;
+mod graphql {
+    use graphql_client::GraphQLQuery;
+    use indexer_api::{
+        domain::{HexEncoded, ViewingKey},
+        infra::api::v1::Unit,
+    };
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "../indexer-api/graphql/schema-v1.graphql",
-    query_path = "./e2e.graphql",
-    response_derives = "Debug, Clone, Serialize"
-)]
-struct TransactionsQuery;
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct BlockQuery;
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "../indexer-api/graphql/schema-v1.graphql",
-    query_path = "./e2e.graphql",
-    response_derives = "Debug, Clone, Serialize"
-)]
-struct ContractActionQuery;
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct TransactionsQuery;
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "../indexer-api/graphql/schema-v1.graphql",
-    query_path = "./e2e.graphql",
-    response_derives = "Debug, Clone, Serialize"
-)]
-struct ConnectMutation;
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct ContractActionQuery;
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "../indexer-api/graphql/schema-v1.graphql",
-    query_path = "./e2e.graphql",
-    response_derives = "Debug, Clone, Serialize"
-)]
-struct DisconnectMutation;
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct ConnectMutation;
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "../indexer-api/graphql/schema-v1.graphql",
-    query_path = "./e2e.graphql",
-    response_derives = "Debug, Clone, Serialize"
-)]
-struct BlockSubscription;
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DisconnectMutation;
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "../indexer-api/graphql/schema-v1.graphql",
-    query_path = "./e2e.graphql",
-    response_derives = "Debug, Clone, Serialize"
-)]
-struct ContractActionSubscription;
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct BlockSubscription;
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "../indexer-api/graphql/schema-v1.graphql",
-    query_path = "./e2e.graphql",
-    response_derives = "Debug, Clone, Serialize"
-)]
-struct WalletSubscription;
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct ContractActionSubscription;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct WalletSubscription;
+}

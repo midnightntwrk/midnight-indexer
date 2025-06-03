@@ -187,7 +187,10 @@ mod tests {
         },
     };
     use indoc::indoc;
-    use sqlx::{QueryBuilder, Row, types::time::OffsetDateTime};
+    use sqlx::{
+        QueryBuilder, Row,
+        types::{Json, time::OffsetDateTime},
+    };
     use std::{error::Error as StdError, iter, time::Duration};
     use uuid::Uuid;
 
@@ -240,7 +243,7 @@ mod tests {
                 q.push_bind(block_id)
                     .push_bind(id.to_string())
                     .push_bind(1_000)
-                    .push_bind(TransactionResult::Success)
+                    .push_bind(Json(TransactionResult::Success))
                     .push_bind("raw")
                     .push_bind("merkle_tree_root")
                     .push_bind(0)

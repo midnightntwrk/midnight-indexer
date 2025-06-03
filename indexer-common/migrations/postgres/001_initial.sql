@@ -1,9 +1,3 @@
-CREATE TYPE TRANSACTION_RESULT AS ENUM(
-    'Success',
-    'PartialSuccess',
-    'Failure'
-);
-
 CREATE TYPE CONTRACT_ACTION_VARIANT AS ENUM(
     'Deploy',
     'Call',
@@ -25,7 +19,7 @@ CREATE TABLE transactions(
     block_id BIGINT NOT NULL REFERENCES blocks(id),
     hash BYTEA NOT NULL,
     protocol_version BIGINT NOT NULL,
-    transaction_result TRANSACTION_RESULT NOT NULL,
+    transaction_result JSONB NOT NULL,
     identifiers BYTEA[] NOT NULL,
     raw BYTEA NOT NULL,
     merkle_tree_root BYTEA NOT NULL,

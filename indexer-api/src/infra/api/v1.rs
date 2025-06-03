@@ -24,8 +24,8 @@ use crate::{
 };
 use anyhow::Context as AnyhowContext;
 use async_graphql::{
-    ComplexObject, Context, Interface, OneofObject, Schema, SchemaBuilder, SimpleObject, Union,
-    scalar,
+    ComplexObject, Context, Enum, Interface, OneofObject, Schema, SchemaBuilder, SimpleObject,
+    Union, scalar,
 };
 use async_graphql_axum::{GraphQL, GraphQLSubscription};
 use axum::{Router, routing::post_service};
@@ -259,21 +259,55 @@ enum TransactionOffset {
 }
 
 /// The result of applying a transaction to the ledger state.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TransactionResult {
+/// In case of a partial success (status), there will be segments.
+#[derive(Debug, Clone, Serialize, Deserialize, SimpleObject)]
+pub struct TransactionResult {
+    pub status: TransactionResultStatus,
+    pub segments: Option<Vec<Segment>>,
+}
+
+/// The status of the transaction result: success, partial success or failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum)]
+pub enum TransactionResultStatus {
     Success,
     PartialSuccess,
     Failure,
 }
 
-scalar!(TransactionResult);
+/// One of many segments for a partially successful transaction result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
+pub struct Segment {
+    /// Segment ID.
+    id: u16,
+
+    /// Successful or not.
+    success: bool,
+}
 
 impl From<indexer_common::domain::TransactionResult> for TransactionResult {
     fn from(transaction_result: indexer_common::domain::TransactionResult) -> Self {
         match transaction_result {
-            indexer_common::domain::TransactionResult::Success => Self::Success,
-            indexer_common::domain::TransactionResult::PartialSuccess => Self::PartialSuccess,
-            indexer_common::domain::TransactionResult::Failure => Self::Failure,
+            indexer_common::domain::TransactionResult::Success => Self {
+                status: TransactionResultStatus::Success,
+                segments: None,
+            },
+
+            indexer_common::domain::TransactionResult::PartialSuccess(segments) => {
+                let segments = segments
+                    .into_iter()
+                    .map(|(id, success)| Segment { id, success })
+                    .collect();
+
+                Self {
+                    status: TransactionResultStatus::PartialSuccess,
+                    segments: Some(segments),
+                }
+            }
+
+            indexer_common::domain::TransactionResult::Failure => Self {
+                status: TransactionResultStatus::Failure,
+                segments: None,
+            },
         }
     }
 }

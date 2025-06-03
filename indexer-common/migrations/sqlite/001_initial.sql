@@ -13,7 +13,7 @@ CREATE TABLE transactions(
     block_id INTEGER NOT NULL,
     hash BLOB NOT NULL,
     protocol_version INTEGER NOT NULL,
-    transaction_result TEXT CHECK (transaction_result IN ('Success', 'PartialSuccess', 'Failure')) NOT NULL,
+    transaction_result TEXT NOT NULL,
     raw BLOB NOT NULL,
     merkle_tree_root BLOB NOT NULL,
     start_index INTEGER NOT NULL,

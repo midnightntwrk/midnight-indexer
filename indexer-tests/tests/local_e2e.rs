@@ -251,6 +251,7 @@ async fn start_indexer_api(
             format!("{}/../indexer-api/config.yaml", env!("CARGO_MANIFEST_DIR")),
         ),
         ("APP__INFRA__API__PORT", api_port.to_string()),
+        ("APP__INFRA__API__MAX_COMPLEXITY", "500".to_string()),
         ("APP__INFRA__PUB_SUB__URL", nats_url.to_owned()),
         ("APP__INFRA__STORAGE__PORT", postgres_port.to_string()),
         ("APP__INFRA__LEDGER_STATE_STORAGE__URL", nats_url.to_owned()),
@@ -311,6 +312,7 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
             ),
         ),
         ("APP__INFRA__API__PORT", api_port.to_string()),
+        ("APP__INFRA__API__MAX_COMPLEXITY", "500".to_string()),
         ("APP__INFRA__NODE__URL", node_url.to_owned()),
         ("APP__INFRA__STORAGE__CNN_URL", sqlite_file),
     ];

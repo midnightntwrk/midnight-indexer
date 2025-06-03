@@ -43,14 +43,13 @@ pub type RawTransaction = ByteVec;
 pub type SessionId = ByteArray<32>;
 
 /// The result of applying a transaction to the ledger state.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[cfg_attr(feature = "cloud", sqlx(type_name = "TRANSACTION_RESULT"))]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransactionResult {
     /// All guaranteed and fallible coins succeeded.
     Success,
 
     /// Not all fallible coins succeeded.
-    PartialSuccess,
+    PartialSuccess(Vec<(u16, bool)>),
 
     /// Guaranteed coins failed.
     #[default]

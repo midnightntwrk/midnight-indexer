@@ -12,7 +12,9 @@ query BlockQuery($block_offset: BlockOffset) {
         transactions {
             hash
             protocolVersion
-            transactionResult
+            transactionResult {
+                status
+            }
             identifiers
             block {
                 hash
@@ -23,7 +25,9 @@ query BlockQuery($block_offset: BlockOffset) {
                     address
                     transaction {
                         hash
-                        transactionResult
+                        transactionResult {
+                            status
+                        }
                         identifiers
                         block {
                             hash
@@ -36,7 +40,9 @@ query BlockQuery($block_offset: BlockOffset) {
                     address
                     transaction {
                         hash
-                        transactionResult
+                        transactionResult {
+                            status
+                        }
                         identifiers
                         block {
                             hash
@@ -51,7 +57,9 @@ query BlockQuery($block_offset: BlockOffset) {
                 ... on ContractUpdate {
                     address
                     transaction {
-                        transactionResult
+                        transactionResult {
+                            status
+                        }
                         hash
                         identifiers
                         block {
@@ -69,7 +77,9 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
     transactions(offset: $transaction_offset) {
         hash
         protocolVersion
-        transactionResult
+        transactionResult {
+                status
+            }
         identifiers
         block {
             hash
@@ -80,7 +90,9 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                 address
                 transaction {
                     hash
-                    transactionResult
+                    transactionResult {
+                        status
+                    }
                     identifiers
                     block {
                         hash
@@ -93,7 +105,9 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                 address
                 transaction {
                     hash
-                    transactionResult
+                    transactionResult {
+                        status
+                    }
                     identifiers
                     block {
                         hash
@@ -109,7 +123,9 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                 address
                 transaction {
                     hash
-                    transactionResult
+                    transactionResult {
+                        status
+                    }
                     identifiers
                     block {
                         hash
@@ -128,7 +144,9 @@ query ContractActionQuery($address: HexEncoded!, $contract_action_offset: Contra
             address
             transaction {
                 hash
-                transactionResult
+                transactionResult {
+                    status
+                }
                 identifiers
                 block {
                     hash
@@ -141,7 +159,9 @@ query ContractActionQuery($address: HexEncoded!, $contract_action_offset: Contra
             address
             transaction {
                 hash
-                transactionResult
+                transactionResult {
+                    status
+                }
                 identifiers
                 block {
                     hash
@@ -157,7 +177,9 @@ query ContractActionQuery($address: HexEncoded!, $contract_action_offset: Contra
             address
             transaction {
                 hash
-                transactionResult
+                transactionResult {
+                    status
+                }
                 identifiers
                 block {
                     hash
@@ -190,7 +212,9 @@ subscription BlockSubscription($block_offset: BlockOffset) {
         transactions {
             hash
             protocolVersion
-            transactionResult
+            transactionResult {
+                status
+            }
             identifiers
             block {
                 hash
@@ -201,7 +225,9 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                     address
                     transaction {
                         hash
-                        transactionResult
+                        transactionResult {
+                            status
+                        }
                         identifiers
                         block {
                             hash
@@ -214,7 +240,9 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                     address
                     transaction {
                         hash
-                        transactionResult
+                        transactionResult {
+                            status
+                        }
                         identifiers
                         block {
                             hash
@@ -230,7 +258,9 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                     address
                     transaction {
                         hash
-                        transactionResult
+                        transactionResult {
+                            status
+                        }
                         identifiers
                         block {
                             hash
@@ -253,7 +283,9 @@ subscription ContractActionSubscription(
             address
             transaction {
                 hash
-                transactionResult
+                transactionResult {
+                    status
+                }
                 identifiers
                 block {
                     hash
@@ -266,7 +298,9 @@ subscription ContractActionSubscription(
             address
             transaction {
                 hash
-                transactionResult
+                transactionResult {
+                    status
+                }
                 identifiers
                 block {
                     hash
@@ -282,7 +316,9 @@ subscription ContractActionSubscription(
             address
             transaction {
                 hash
-                transactionResult
+                transactionResult {
+                    status
+                }
                 identifiers
                 block {
                     hash

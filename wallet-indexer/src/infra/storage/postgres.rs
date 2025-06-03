@@ -206,7 +206,11 @@ mod tests {
         },
     };
     use indoc::indoc;
-    use sqlx::{QueryBuilder, postgres::PgSslMode, types::time::OffsetDateTime};
+    use sqlx::{
+        QueryBuilder,
+        postgres::PgSslMode,
+        types::{Json, time::OffsetDateTime},
+    };
     use std::{error::Error as StdError, iter, time::Duration};
     use testcontainers::{ImageExt, runners::AsyncRunner};
     use testcontainers_modules::postgres::Postgres;
@@ -284,7 +288,7 @@ mod tests {
                 q.push_bind(1)
                     .push_bind(id.to_string().into_bytes())
                     .push_bind(1_000)
-                    .push_bind(TransactionResult::Success)
+                    .push_bind(Json(TransactionResult::Success))
                     .push_bind([b"identifier"])
                     .push_bind(b"raw")
                     .push_bind(b"merkle_tree_root")

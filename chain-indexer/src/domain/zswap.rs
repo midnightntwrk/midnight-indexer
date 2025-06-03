@@ -121,8 +121,11 @@ impl LedgerState {
             LedgerTransactionResult::Success => TransactionResult::Success,
 
             LedgerTransactionResult::PartialSuccess(segments) => {
-                let _segments = segments.into_iter().collect::<Vec<_>>();
-                TransactionResult::PartialSuccess
+                let segments = segments
+                    .into_iter()
+                    .map(|(id, result)| (id, result.is_ok()))
+                    .collect::<Vec<_>>();
+                TransactionResult::PartialSuccess(segments)
             }
 
             LedgerTransactionResult::Failure(_) => TransactionResult::Failure,

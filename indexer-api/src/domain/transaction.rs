@@ -33,6 +33,7 @@ pub struct Transaction {
     #[sqlx(try_from = "i64")]
     pub protocol_version: ProtocolVersion,
 
+    #[sqlx(json)]
     pub transaction_result: TransactionResult,
 
     #[debug(skip)]

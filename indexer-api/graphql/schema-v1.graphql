@@ -172,6 +172,20 @@ type RelevantTransaction {
 	end: Int!
 }
 
+"""
+One of many segments for a partially successful transaction result.
+"""
+type Segment {
+	"""
+	Segment ID.
+	"""
+	id: Int!
+	"""
+	Successful or not.
+	"""
+	success: Boolean!
+}
+
 type Subscription {
 	"""
 	Subscribe to blocks starting at the given offset or at the latest block if the offset is
@@ -236,7 +250,23 @@ input TransactionOffset @oneOf {
 	identifier: HexEncoded
 }
 
-scalar TransactionResult
+"""
+The result of applying a transaction to the ledger state.
+In case of a partial success (status), there will be segments.
+"""
+type TransactionResult {
+	status: TransactionResultStatus!
+	segments: [Segment!]
+}
+
+"""
+The status of the transaction result: success, partial success or failure.
+"""
+enum TransactionResultStatus {
+	SUCCESS
+	PARTIAL_SUCCESS
+	FAILURE
+}
 
 scalar Unit
 

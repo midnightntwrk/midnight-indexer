@@ -324,7 +324,7 @@ impl Storage for SqliteStorage {
             INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
             WHERE contract_actions.address = $1
             AND transactions.block_id = (SELECT id FROM blocks WHERE hash = $2)
-            AND transactions.transaction_result != 'Failure'
+            AND json_extract(transactions.transaction_result, '$') != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -354,7 +354,7 @@ impl Storage for SqliteStorage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE contract_actions.address = $1
             AND blocks.height = $2
-            AND transactions.transaction_result != 'Failure'
+            AND json_extract(transactions.transaction_result, '$') != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -384,7 +384,7 @@ impl Storage for SqliteStorage {
             AND contract_actions.transaction_id = (
                 SELECT id FROM transactions
                 WHERE hash = $2
-                AND transaction_result != 'Failure'
+                AND json_extract(transaction_result, '$') != 'Failure'
                 ORDER BY id DESC
                 LIMIT 1
             )
@@ -417,7 +417,7 @@ impl Storage for SqliteStorage {
             INNER JOIN transaction_identifiers ON transactions.id = transaction_identifiers.transaction_id
             WHERE contract_actions.address = $1
             AND transaction_identifiers.identifier = $2
-            AND transactions.transaction_result != 'Failure'
+            AND json_extract(transactions.transaction_result, '$') != 'Failure'
             ORDER BY id DESC
             LIMIT 1
         "};
@@ -471,10 +471,10 @@ impl Storage for SqliteStorage {
                     FROM contract_actions
                     INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
                     INNER JOIN blocks ON blocks.id = transactions.block_id
-                    WHERE transactions.transaction_result != 'Failure'
-                    AND contract_actions.address = $1
+                    WHERE contract_actions.address = $1
                     AND blocks.height >= $2
                     AND contract_actions.id >= $3
+                    AND json_extract(transactions.transaction_result, '$') != 'Failure'
                     ORDER BY id ASC
                     LIMIT $4
                 "};
