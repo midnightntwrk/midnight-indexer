@@ -664,35 +664,35 @@ async fn test_unshielded_utxo_subscription(
     //     .collect::<std::collections::HashSet<_>>()
     //     .into_iter()
     //     .collect::<Vec<_>>();
-    // 
+    //
     // assert!(!utxo_addresses.is_empty());
-    // 
+    //
     // let unshielded_address = indexer_api::domain::UnshieldedAddress(utxo_addresses[0].clone().0);
-    // 
+    //
     // let variables = unshielded_utxos_subscription::Variables {
     //     address: unshielded_address.clone(),
     // };
-    // 
+    //
     // let subscription_stream =
     //     graphql_ws_client::subscribe::<UnshieldedUtxosSubscription>(ws_api_url, variables)
     //         .await
     //         .context("subscribe to unshielded UTXOs")?;
-    // 
+    //
     // let events = subscription_stream
     //     .take(2)
     //     .map_ok(|data| data.unshielded_utxos)
     //     .try_collect::<Vec<_>>()
     //     .await
     //     .context("collect unshielded UTXO events")?;
-    // 
+    //
     // assert!(!events.is_empty());
-    // 
+    //
     // // Verify the address in returned UTXOs matches our subscription address
     // for event in &events {
     //     if !event.created_utxos.is_empty() {
     //         assert_eq!(event.created_utxos[0].owner, unshielded_address);
     //     }
-    // 
+    //
     //     if !event.spent_utxos.is_empty() {
     //         assert_eq!(event.spent_utxos[0].owner, unshielded_address,);
     //     }

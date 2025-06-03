@@ -277,7 +277,7 @@ async fn save_transactions(
             false,
             tx,
         )
-            .await?;
+        .await?;
 
         save_unshielded_utxos(
             &transaction.spent_unshielded_utxos,
@@ -285,7 +285,7 @@ async fn save_transactions(
             true,
             tx,
         )
-            .await?;
+        .await?;
     }
 
     let max_id = transaction_ids.iter().max().copied().map(|n| n as u64);
@@ -315,11 +315,11 @@ async fn save_unshielded_utxos(
             "};
 
             sqlx::query(query)
-                .bind(*transaction_id)  // Use the current transaction_id as creating_transaction_id
+                .bind(*transaction_id)
                 .bind(utxo_info_for_spending.output_index as i32)
                 .bind(&utxo_info_for_spending.owner_address)
-                .bind(&utxo_info_for_spending.token_type)
-                .bind(&utxo_info_for_spending.intent_hash)
+                .bind(utxo_info_for_spending.token_type)
+                .bind(utxo_info_for_spending.intent_hash)
                 .bind(U128BeBytes::from(utxo_info_for_spending.value))
                 .bind(transaction_id)
                 .execute(&mut **tx)
@@ -335,8 +335,8 @@ async fn save_unshielded_utxos(
             q.push_bind(transaction_id)
                 .push_bind(utxo.output_index as i32)
                 .push_bind(&utxo.owner_address)
-                .push_bind(&utxo.token_type)
-                .push_bind(&utxo.intent_hash)
+                .push_bind(utxo.token_type)
+                .push_bind(utxo.intent_hash)
                 .push_bind(U128BeBytes::from(utxo.value));
         });
 

@@ -16,8 +16,8 @@ use crate::{
     infra::api::{
         ContextExt, ResultExt,
         v1::{
-            UnshieldedAddress, UnshieldedUtxo, UnshieldedUtxoEvent,
-            UnshieldedUtxoEventType, addr_to_common,
+            UnshieldedAddress, UnshieldedUtxo, UnshieldedUtxoEvent, UnshieldedUtxoEventType,
+            addr_to_common,
         },
     },
 };
@@ -30,7 +30,10 @@ use indexer_common::{
 };
 use log::{debug, error, warn};
 use std::{marker::PhantomData, pin::pin, time::Duration};
-use tokio::{select, time::{interval, MissedTickBehavior}};
+use tokio::{
+    select,
+    time::{MissedTickBehavior, interval},
+};
 
 /// Same skeleton pattern as block / contract / wallet subscriptions
 pub struct UnshieldedSubscription<S, B> {
@@ -88,12 +91,12 @@ where
             let _guard = scopeguard::guard((), |_| {
                 debug!("unshielded UTXO subscription dropped for address: {:?}", &requested.0);
             });
-            
+
             let mut utxo_stream = pin!(utxo_stream);
-            
+
             let mut keep_alive = interval(Duration::from_secs(30));
             keep_alive.set_missed_tick_behavior(MissedTickBehavior::Skip);
-            
+
             let mut last_transaction = storage
                 .get_transactions_involving_unshielded(&common_address)
                 .await
@@ -110,14 +113,14 @@ where
                                     continue;
                                 }
 
-                                debug!("handling UnshieldedUtxoIndexed event, address: {:?}, tx_id: {:?}", 
+                                debug!("handling UnshieldedUtxoIndexed event, address: {:?}, tx_id: {:?}",
                                       &address_bech32m, &transaction_id);
 
                                 let tx = storage
                                     .get_transaction_by_id(transaction_id)
                                     .await
                                     .internal("fetch tx for subscription event").unwrap();
-                                
+
                                 last_transaction = Some(tx.clone());
 
                                 let created = storage

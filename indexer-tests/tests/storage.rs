@@ -131,17 +131,21 @@ async fn run_tests(
         .await
         .context("get max block height")?;
     assert!(highest_block_hash.is_none());
+    
+    let mut block_0 = BLOCK_0.clone();
+    let mut block_1 = BLOCK_1.clone();
+    let mut block_2 = BLOCK_2.clone();
 
     chain_indexer_storage
-        .save_block(&BLOCK_0)
+        .save_block(&mut block_0)
         .await
         .context("save block 0")?;
     chain_indexer_storage
-        .save_block(&BLOCK_1)
+        .save_block(&mut block_1)
         .await
         .context("save block 1")?;
     chain_indexer_storage
-        .save_block(&BLOCK_2)
+        .save_block(&mut block_2)
         .await
         .context("save block 2")?;
 
@@ -518,6 +522,7 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
     zswap_state_root: Faker.fake(),
     transactions: vec![
         Transaction {
+            id: None,
             hash: TRANSACTION_1_HASH,
             protocol_version: PROTOCOL_VERSION_0_1,
             apply_stage: ApplyStage::Failure,
@@ -543,6 +548,7 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
             end_index: 1,
         },
         Transaction {
+            id: None,
             hash: TRANSACTION_1_HASH,
             protocol_version: PROTOCOL_VERSION_0_1,
             apply_stage: ApplyStage::Success,
@@ -562,7 +568,7 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
                 token_type: *TOKEN_NIGHT,
                 intent_hash: *INTENT_HASH,
                 value: 100,
-            }], /* Success part creates UTXO */
+            }],
             spent_unshielded_utxos: vec![],
             start_index: 0,
             end_index: 1,
@@ -579,6 +585,7 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
     timestamp: 2,
     zswap_state_root: Faker.fake(),
     transactions: vec![Transaction {
+        id: None,
         hash: TRANSACTION_2_HASH,
         protocol_version: PROTOCOL_VERSION_0_1,
         apply_stage: ApplyStage::Success,

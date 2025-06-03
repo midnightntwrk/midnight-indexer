@@ -22,12 +22,13 @@ use async_stream::stream;
 use byte_unit::{Byte, UnitType};
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
-use indexer_common::domain::{BlockIndexed, LedgerStateStorage, NetworkId, Publisher, UnshieldedUtxoIndexed};
+use indexer_common::domain::{
+    BlockIndexed, LedgerStateStorage, NetworkId, Publisher, UnshieldedUtxoIndexed,
+};
 use log::{info, warn};
 use parking_lot::RwLock;
 use serde::Deserialize;
-use std::{error::Error as StdError, future::ready, pin::pin, sync::Arc};
-use std::collections::HashSet;
+use std::{collections::HashSet, error::Error as StdError, future::ready, pin::pin, sync::Arc};
 use tokio::{
     select,
     task::{self},
@@ -371,7 +372,10 @@ async fn index_block(
     for transaction in &block.transactions {
         // Skip if transaction doesn't have a database ID yet
         let Some(transaction_id) = transaction.id else {
-            warn!("Transaction {:?} has no database ID after saving", transaction.hash);
+            warn!(
+                "Transaction {:?} has no database ID after saving",
+                transaction.hash
+            );
             continue;
         };
 
@@ -383,7 +387,7 @@ async fn index_block(
                 utxo.owner_address.as_ref(),
                 network_id,
             )
-                .context("convert address to bech32m")?;
+            .context("convert address to bech32m")?;
 
             if published_addresses.insert(address_bech32m.clone()) {
                 publisher
@@ -402,7 +406,7 @@ async fn index_block(
                 utxo.owner_address.as_ref(),
                 network_id,
             )
-                .context("convert address to bech32m")?;
+            .context("convert address to bech32m")?;
 
             if published_addresses.insert(address_bech32m.clone()) {
                 publisher
