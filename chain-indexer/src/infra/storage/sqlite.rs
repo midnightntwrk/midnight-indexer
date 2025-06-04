@@ -98,10 +98,14 @@ impl Storage for SqliteStorage {
         Ok((deploy_count as u64, call_count as u64, update_count as u64))
     }
 
-    async fn save_block(&self, block: &Block) -> Result<Option<u64>, sqlx::Error> {
+    async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let max_transaction_id = save_block(block, &mut tx).await?;
+        let (max_transaction_id, transaction_ids) = save_block(block, &mut tx).await?;
         tx.commit().await?;
+
+        for (transaction, id) in block.transactions.iter_mut().zip(transaction_ids.iter()) {
+            transaction.id = *id as u64;
+        }
 
         Ok(max_transaction_id)
     }
@@ -159,7 +163,7 @@ impl Storage for SqliteStorage {
     }
 }
 
-async fn save_block(block: &Block, tx: &mut Tx) -> Result<Option<u64>, sqlx::Error> {
+async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
     let query = indoc! {"
         INSERT INTO blocks (
             hash,
@@ -202,9 +206,9 @@ async fn save_transactions(
     transactions: &[Transaction],
     block_id: i64,
     tx: &mut Tx,
-) -> Result<Option<u64>, sqlx::Error> {
+) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
     if transactions.is_empty() {
-        return Ok(None);
+        return Ok((None, vec![]));
     }
 
     let query = indoc! {"
@@ -269,7 +273,8 @@ async fn save_transactions(
         .await?;
     }
 
-    Ok(transaction_ids.into_iter().max().map(|n| n as u64))
+    let max_id = transaction_ids.iter().max().copied().map(|n| n as u64);
+    Ok((max_id, transaction_ids))
 }
 
 async fn save_unshielded_utxos(
@@ -285,19 +290,24 @@ async fn save_unshielded_utxos(
     if spent {
         for utxo_info_for_spending in utxos {
             let query = indoc! {"
-                UPDATE unshielded_utxos
-                SET spending_transaction_id = $1
-                WHERE creating_transaction_id = $2 AND output_index = $3
-                AND spending_transaction_id IS NULL -- Ensure we only mark unspent ones
+                INSERT INTO unshielded_utxos
+                (creating_transaction_id, output_index, owner_address, token_type, intent_hash, value, spending_transaction_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (intent_hash, output_index)
+                DO UPDATE SET spending_transaction_id = $7
+                WHERE unshielded_utxos.spending_transaction_id IS NULL
             "};
 
             sqlx::query(query)
-                .bind(transaction_id)
-                .bind(utxo_info_for_spending.creating_transaction_id as i64)
+                .bind(*transaction_id)
                 .bind(utxo_info_for_spending.output_index as i32)
+                .bind(&utxo_info_for_spending.owner_address)
+                .bind(utxo_info_for_spending.token_type.as_ref())
+                .bind(utxo_info_for_spending.intent_hash.as_ref())
+                .bind(U128BeBytes::from(utxo_info_for_spending.value))
+                .bind(transaction_id)
                 .execute(&mut **tx)
-                .await?
-                .rows_affected();
+                .await?;
         }
     } else {
         let query_base = indoc! {"

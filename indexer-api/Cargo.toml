@@ -36,6 +36,7 @@ metrics                   = { workspace = true }
 midnight-ledger           = { workspace = true }
 midnight-serialize        = { workspace = true }
 midnight-transient-crypto = { workspace = true }
+scopeguard                = { workspace = true }
 secrecy                   = { workspace = true }
 serde                     = { workspace = true, features = [ "derive" ] }
 sqlx                      = { workspace = true, features = [ "runtime-tokio", "time" ] }
@@ -47,6 +48,7 @@ tower                     = { workspace = true }
 tower-http                = { workspace = true, features = [ "cors", "limit" ] }
 trait-variant             = { workspace = true }
 uuid                      = { workspace = true, features = [ "v7" ], optional = true }
+
 
 [dev-dependencies]
 assert_matches = { workspace = true }

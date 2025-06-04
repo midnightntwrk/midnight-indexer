@@ -595,13 +595,12 @@ async fn make_transaction(
 
     let created_unshielded_utxos = created_info_map
         .get(hash.as_ref())
-        .map_or(&[] as &[_], |v| v.as_slice()) // Get &[] if None, or slice &[_] if Some
+        .map_or(&[] as &[_], |v| v.as_slice())
         .iter()
-        .enumerate()
-        .map(|(index, info)| crate::domain::UnshieldedUtxo {
+        .map(|info| crate::domain::UnshieldedUtxo {
             creating_transaction_id: 0,
-            output_index: index as u32,
-            owner_address: UnshieldedAddress::from(info.address.clone()),
+            output_index: info.output_no,
+            owner_address: UnshieldedAddress::from(info.address.as_ref()),
             token_type: RawTokenType::from(info.token_type),
             intent_hash: IntentHash::from(info.intent_hash),
             value: info.value,
@@ -612,20 +611,18 @@ async fn make_transaction(
         .get(hash.as_ref())
         .map_or(&[] as &[_], |v| v.as_slice())
         .iter()
-        .map(|info| {
-            crate::domain::UnshieldedUtxo {
-                creating_transaction_id: 0, /* TODO: Node event needs to provide
-                                             * creating_transaction_id for spent UTXOs */
-                output_index: 0, // TODO: Node event needs to provide output_index for spent UTXOs
-                owner_address: UnshieldedAddress::from(info.address.clone()),
-                token_type: RawTokenType::from(info.token_type),
-                intent_hash: IntentHash::from(info.intent_hash),
-                value: info.value,
-            }
+        .map(|info| crate::domain::UnshieldedUtxo {
+            creating_transaction_id: 0,
+            output_index: info.output_no,
+            owner_address: UnshieldedAddress::from(info.address.as_ref()),
+            token_type: RawTokenType::from(info.token_type),
+            intent_hash: IntentHash::from(info.intent_hash),
+            value: info.value,
         })
         .collect();
 
     let transaction = Transaction {
+        id: 0,
         hash,
         transaction_result: Default::default(),
         protocol_version,
@@ -731,9 +728,9 @@ mod tests {
         test_finalized_blocks(
             PROTOCOL_VERSION_000_013_000,
             Some("alpha.1"),
-            "4cd31d3f8531fbaeadb07ba59f151fc8e8fff7a4f87b381edc561d41cb8c8d5c",
+            "4b88d38dd59b0f5e9deffda46e20d23f194efa65bf2e1c029411cd9537c7777d",,
             8,
-            "8e8b4a1a3c6828f5dda24a794377b5bfda540174cb4ae7ef19924537d9b19aa9",
+            "519d12a758644f193d635a020bb4ad5c125423db0a69089741264e1015cd39b3",
             27,
         )
         .await
@@ -819,7 +816,7 @@ mod tests {
             .into_iter()
             .flat_map(|block| block.transactions)
             .collect::<Vec<_>>();
-        assert_eq!(transactions.len(), 10); // 1 initial, 6 zswap transactions, 3 contract actions.
+        assert_eq!(transactions.len(), 9); // 6 unshielded token transactions, 3 contract actions.
 
         assert_matches!(
             transactions.as_slice(),
@@ -829,7 +826,6 @@ mod tests {
                     contract_actions: contract_actions_0,
                     ..
                 },
-                Transaction {..},
                 Transaction {..},
                 Transaction {..},
                 Transaction {..},

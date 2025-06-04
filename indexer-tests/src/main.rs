@@ -37,9 +37,6 @@ struct Cli {
     #[arg(long)]
     port: u16,
 
-    #[arg(long)]
-    nats_url: String,
-
     /// If set, use https and wss, else http and ws for the Indexer API.
     #[arg(long)]
     secure: bool,
@@ -51,10 +48,8 @@ impl Cli {
             network_id,
             host,
             port,
-            nats_url, /* TODO: Remove once UT node image is available. nats_url is a temporarily
-                       * needed for testing. */
             secure,
         } = self;
-        e2e::run(network_id, &host, port, nats_url.as_str(), secure).await
+        e2e::run(network_id, &host, port, secure).await
     }
 }

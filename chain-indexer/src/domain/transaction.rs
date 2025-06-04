@@ -22,6 +22,7 @@ use std::fmt::Debug;
 /// Relevant transaction data from the perspective of the Chain Indexer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transaction {
+    pub id: u64, // 0 = not yet saved; valid DB IDs start from 1
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
     pub transaction_result: TransactionResult,

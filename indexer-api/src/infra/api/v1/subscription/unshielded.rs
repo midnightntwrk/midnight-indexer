@@ -13,12 +13,14 @@
 
 use crate::{
     domain::{Storage, UnshieldedUtxoFilter},
-    infra::api::v1::{
-        ContextExt, UnshieldedAddress, UnshieldedUtxo, UnshieldedUtxoEvent,
-        UnshieldedUtxoEventType, addr_to_common,
+    infra::api::{
+        ContextExt, ResultExt,
+        v1::{
+            UnshieldedAddress, UnshieldedUtxo, UnshieldedUtxoEvent, UnshieldedUtxoEventType,
+            addr_to_common,
+        },
     },
 };
-use anyhow::Context as AnyhowContext;
 use async_graphql::{Context, Subscription, async_stream::try_stream};
 use fastrace::trace;
 use futures::{Stream, TryStreamExt};
@@ -27,13 +29,18 @@ use indexer_common::{
     error::StdErrorExt,
 };
 use log::{debug, error, warn};
-use std::{marker::PhantomData, pin::pin};
+use std::{marker::PhantomData, pin::pin, time::Duration};
+use tokio::{
+    select,
+    time::{MissedTickBehavior, interval},
+};
 
 /// Same skeleton pattern as block / contract / wallet subscriptions
 pub struct UnshieldedSubscription<S, B> {
     _s: PhantomData<S>,
     _b: PhantomData<B>,
 }
+
 impl<S, B> Default for UnshieldedSubscription<S, B> {
     fn default() -> Self {
         Self {
@@ -75,71 +82,124 @@ where
         let network_id = cx.get_network_id();
 
         let utxo_stream = subscriber.subscribe::<UnshieldedUtxoIndexed>();
-
         let requested = address;
 
+        let common_address = addr_to_common(&requested, network_id)?;
+
         let stream = try_stream! {
+            // Create a drop guard that logs when the subscription ends
+            let _guard = scopeguard::guard((), |_| {
+                debug!("unshielded UTXO subscription dropped for address: {:?}", &requested.0);
+            });
+
             let mut utxo_stream = pin!(utxo_stream);
 
-            while let Some(UnshieldedUtxoIndexed {address_bech32m, transaction_id} ) = utxo_stream.try_next().await.inspect_err(|e| error!(
-                error:? = e.as_chain(); "cannot get next UnshieldedUtxoIndexed"
-            ))? {
-                if address_bech32m != requested.0 {
-                    continue;
+            let mut keep_alive = interval(Duration::from_secs(30));
+            keep_alive.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+            let mut last_transaction = storage
+                .get_transactions_involving_unshielded(&common_address)
+                .await
+                .internal("get latest transaction for address")?
+                .into_iter()
+                .next();
+
+            loop {
+                select! {
+                    event_result = utxo_stream.try_next() => {
+                        match event_result {
+                            Ok(Some(UnshieldedUtxoIndexed { address_bech32m, transaction_id })) => {
+                                if address_bech32m != requested.0 {
+                                    continue;
+                                }
+
+                                debug!("handling UnshieldedUtxoIndexed event, address: {:?}, tx_id: {:?}",
+                                      &address_bech32m, &transaction_id);
+
+                                let tx = storage
+                                    .get_transaction_by_id(transaction_id)
+                                    .await
+                                    .internal("fetch tx for subscription event").unwrap();
+
+                                last_transaction = Some(tx.clone());
+
+                                let created = storage
+                                    .get_unshielded_utxos(
+                                        Some(&common_address),
+                                        UnshieldedUtxoFilter::CreatedInTxForAddress(transaction_id),
+                                    )
+                                    .await
+                                    .internal("fetch created UTXOs").unwrap();
+
+                                let spent = storage
+                                    .get_unshielded_utxos(
+                                        Some(&common_address),
+                                        UnshieldedUtxoFilter::SpentInTxForAddress(transaction_id),
+                                    )
+                                    .await
+                                    .internal("fetch spent UTXOs").unwrap();
+
+                                yield UnshieldedUtxoEvent {
+                                    event_type: UnshieldedUtxoEventType::UPDATE,
+                                    transaction: tx.into(),
+                                    created_utxos: created.into_iter()
+                                        .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                                        .collect(),
+                                    spent_utxos: spent.into_iter()
+                                        .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                                        .collect(),
+                                };
+                            }
+                            Ok(None) => {
+                                warn!("stream of UnshieldedUtxoIndexed ended unexpectedly");
+                                break;
+                            }
+                            Err(error) => {
+                                error!(error = error.as_chain(); "cannot get next UnshieldedUtxoIndexed");
+                                break;
+                            }
+                        }
+                    }
+
+                    // Emit periodic PROGRESS events
+                    _ = keep_alive.tick() => {
+                        debug!("emitting PROGRESS event for address: {:?}", &requested.0);
+
+                        // For PROGRESS events, we need a transaction to include
+                        // If we don't have one for this address, we'll get the latest one from the chain
+                        let tx = match &last_transaction {
+                            Some(tx) => tx.clone(),
+                            None => {
+                                // Try to get the latest transaction from the chain
+                                match storage.get_latest_block().await {
+                                    Ok(Some(block)) => {
+                                        match storage.get_transactions_by_block_id(block.id).await {
+                                            Ok(transactions) if !transactions.is_empty() => {
+                                                transactions.into_iter().next().unwrap()
+                                            }
+                                            _ => {
+                                                // No transactions available, skip this PROGRESS event
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        // Can't get latest block, skip this PROGRESS event
+                                        continue;
+                                    }
+                                }
+                            }
+                        };
+
+                        yield UnshieldedUtxoEvent {
+                            event_type: UnshieldedUtxoEventType::PROGRESS,
+                            transaction: tx.into(),
+                            created_utxos: Vec::new(),
+                            spent_utxos: Vec::new(),
+                        };
+                    }
                 }
-
-                let common_address = addr_to_common(&requested, network_id)?;
-
-                debug!("handling UnshieldedUtxoIndexed event, address: {:?}, tx_id: {:?}", &address_bech32m, &transaction_id);
-
-                let tx = storage
-                    .get_transaction_by_id(transaction_id)
-                    .await
-                    .context("fetch tx for subscription event")?;
-
-                let created = storage
-                    .get_unshielded_utxos(
-                        Some(&common_address),
-                        UnshieldedUtxoFilter::CreatedInTxForAddress(transaction_id),
-                    )
-                    .await
-                    .context("fetch created UTXOs")?;
-
-                let spent = storage
-                    .get_unshielded_utxos(
-                        Some(&common_address),
-                        UnshieldedUtxoFilter::SpentInTxForAddress(transaction_id),
-                    )
-                    .await
-                    .context("fetch spent UTXOs")?;
-
-                let (event_type, created_utxos, spent_utxos) = if created.is_empty() && spent.is_empty() {
-                    (
-                        UnshieldedUtxoEventType::PROGRESS,
-                        Vec::new(),
-                        Vec::new(),
-                    )
-                } else {
-                    (
-                        UnshieldedUtxoEventType::UPDATE,
-                        created.into_iter()
-                               .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                               .collect(),
-                        spent.into_iter()
-                              .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                              .collect(),
-                    )
-                };
-
-                yield UnshieldedUtxoEvent {
-                    event_type,
-                    transaction: tx.into(),
-                    created_utxos,
-                    spent_utxos,
-                };
             }
-
-            warn!("stream of UnshieldedUtxoIndexed ended unexpectedly");
         };
 
         Ok(stream)

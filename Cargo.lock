@@ -985,7 +985,7 @@ dependencies = [
 
 [[package]]
 name = "chain-indexer"
-version = "2.2.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2906,7 +2906,7 @@ dependencies = [
 
 [[package]]
 name = "indexer-api"
-version = "2.2.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2931,6 +2931,7 @@ dependencies = [
  "midnight-serialize",
  "midnight-transient-crypto",
  "midnight-zswap",
+ "scopeguard",
  "secrecy",
  "serde",
  "sqlx",
@@ -7487,7 +7488,7 @@ dependencies = [
 
 [[package]]
 name = "wallet-indexer"
-version = "2.2.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "assert_matches",

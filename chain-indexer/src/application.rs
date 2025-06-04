@@ -22,11 +22,13 @@ use async_stream::stream;
 use byte_unit::{Byte, UnitType};
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
-use indexer_common::domain::{BlockIndexed, LedgerStateStorage, NetworkId, Publisher};
+use indexer_common::domain::{
+    BlockIndexed, LedgerStateStorage, NetworkId, Publisher, UnshieldedUtxoIndexed,
+};
 use log::{info, warn};
 use parking_lot::RwLock;
 use serde::Deserialize;
-use std::{error::Error as StdError, future::ready, pin::pin, sync::Arc};
+use std::{collections::HashSet, error::Error as StdError, future::ready, pin::pin, sync::Arc};
 use tokio::{
     select,
     task::{self},
@@ -358,10 +360,63 @@ async fn index_block(
         info!(caught_up:%; "caught-up status changed")
     }
 
-    // 1) Save the block first
-    let max_transaction_id = storage.save_block(&block).await.context("save block")?;
+    // 1) Save the block first (note: block is now mutable)
+    let max_transaction_id = storage.save_block(&mut block).await.context("save block")?;
 
-    // 2) Then save the ledger state. This order is important to prevent from applying the
+    // 2) Publish UnshieldedUtxoIndexed events for affected addresses
+    for transaction in &block.transactions {
+        // Skip if transaction doesn't have a database ID yet (0 = not saved)
+        if transaction.id == 0 {
+            warn!(
+                "Transaction {:?} has no database ID after saving",
+                transaction.hash
+            );
+            continue;
+        };
+        let transaction_id = transaction.id;
+
+        let mut published_addresses = HashSet::new();
+
+        // For created UTXOs
+        for utxo in &transaction.created_unshielded_utxos {
+            let address_bech32m = indexer_common::domain::unshielded::to_bech32m(
+                utxo.owner_address.as_ref(),
+                network_id,
+            )
+            .context("convert address to bech32m")?;
+
+            if published_addresses.insert(address_bech32m.clone()) {
+                publisher
+                    .publish(&UnshieldedUtxoIndexed {
+                        address_bech32m,
+                        transaction_id,
+                    })
+                    .await
+                    .context("publish UnshieldedUtxoIndexed for created")?;
+            }
+        }
+
+        // For spent UTXOs
+        for utxo in &transaction.spent_unshielded_utxos {
+            let address_bech32m = indexer_common::domain::unshielded::to_bech32m(
+                utxo.owner_address.as_ref(),
+                network_id,
+            )
+            .context("convert address to bech32m")?;
+
+            if published_addresses.insert(address_bech32m.clone()) {
+                publisher
+                    .publish(&UnshieldedUtxoIndexed {
+                        address_bech32m,
+                        transaction_id,
+                    })
+                    .await
+                    .context("publish UnshieldedUtxoIndexed for spent")?;
+            }
+        }
+    }
+
+    // 3) Then save the ledger state. This order is important to prevent from applying the
     //    transactions twice.
     if *caught_up || block.height % save_ledger_state_after == 0 {
         ledger_state_storage

@@ -90,7 +90,7 @@ CREATE TABLE unshielded_utxos(
     spending_transaction_id INTEGER,
     FOREIGN KEY (creating_transaction_id) REFERENCES transactions(id),
     FOREIGN KEY (spending_transaction_id) REFERENCES transactions(id),
-    UNIQUE (creating_transaction_id, output_index)
+    UNIQUE (intent_hash, output_index)
 );
 
 CREATE INDEX unshielded_owner_idx ON unshielded_utxos(owner_address);
