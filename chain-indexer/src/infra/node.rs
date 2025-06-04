@@ -673,9 +673,7 @@ mod tests {
     use fs_extra::dir::{CopyOptions, copy};
     use futures::{StreamExt, TryStreamExt};
     use indexer_common::{
-        domain::{
-            NetworkId, PROTOCOL_VERSION_000_012_000, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
-        },
+        domain::{NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion},
         error::BoxError,
     };
     use midnight_serialize::deserialize;
@@ -686,23 +684,11 @@ mod tests {
         runners::AsyncRunner,
     };
 
-    #[ignore = "we need to support different ledger versions"]
-    #[tokio::test]
-    async fn test_finalized_blocks_0_12() -> Result<(), BoxError> {
-        test_finalized_blocks(
-            PROTOCOL_VERSION_000_012_000,
-            "f06eeef6462073bf726f9324995b26a06ea44b6cfe6a90dff377d9d2e2a4844f",
-            8,
-            "54053a752c872382dced6dc2463d0c889589111bb0e8a236ef4d78517bc85cc9",
-            28,
-        )
-        .await
-    }
-
     #[tokio::test]
     async fn test_finalized_blocks_0_13() -> Result<(), BoxError> {
         test_finalized_blocks(
             PROTOCOL_VERSION_000_013_000,
+            Some("alpha.1"),
             "4cd31d3f8531fbaeadb07ba59f151fc8e8fff7a4f87b381edc561d41cb8c8d5c",
             8,
             "8e8b4a1a3c6828f5dda24a794377b5bfda540174cb4ae7ef19924537d9b19aa9",
@@ -713,13 +699,16 @@ mod tests {
 
     async fn test_finalized_blocks(
         genesis_protocol_version: ProtocolVersion,
+        suffix: Option<&'static str>,
         before_first_tx_block_hash: &'static str,
         before_first_tx_height: u32,
         first_tx_hash: &'static str,
         last_tx_height: u32,
     ) -> Result<(), BoxError> {
-        let node_version = genesis_protocol_version.to_string();
-        let node_version = format!("{node_version}-alpha.1");
+        let mut node_version = genesis_protocol_version.to_string();
+        if let Some(suffix) = suffix {
+            node_version = format!("{node_version}-{suffix}");
+        }
 
         let node_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../.node")

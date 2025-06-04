@@ -11,15 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[subxt::subxt(runtime_metadata_path = "../.node/0.12.0/metadata.scale")]
-mod runtime_0_12 {}
 #[subxt::subxt(runtime_metadata_path = "../.node/0.13.0-alpha.1/metadata.scale")]
 mod runtime_0_13 {}
 
 use crate::infra::node::SubxtNodeError;
 use indexer_common::domain::{
-    BlockHash, ContractAddress, ContractState, PROTOCOL_VERSION_000_012_000,
-    PROTOCOL_VERSION_000_013_000, ProtocolVersion,
+    BlockHash, ContractAddress, ContractState, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
@@ -38,9 +35,7 @@ pub async fn make_block_details(
     authorities: &mut Option<Vec<[u8; 32]>>,
     protocol_version: ProtocolVersion,
 ) -> Result<BlockDetails, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_012_000) {
-        make_block_details_runtime_0_12(extrinsics, events, authorities).await
-    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
         make_block_details_runtime_0_13(extrinsics, events, authorities).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
@@ -52,9 +47,7 @@ pub async fn fetch_authorities(
     online_client: &OnlineClient<SubstrateConfig>,
     protocol_version: ProtocolVersion,
 ) -> Result<Option<Vec<[u8; 32]>>, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_012_000) {
-        fetch_authorities_runtime_0_12(online_client).await
-    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
         fetch_authorities_runtime_0_13(online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
@@ -63,9 +56,7 @@ pub async fn fetch_authorities(
 
 /// Decode slot depending on the given protocol version.
 pub fn decode_slot(slot: &[u8], protocol_version: ProtocolVersion) -> Result<u64, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_012_000) {
-        decode_slot_runtime_0_12(slot)
-    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
         decode_slot_runtime_0_13(slot)
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
@@ -79,9 +70,7 @@ pub async fn get_contract_state(
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
 ) -> Result<ContractState, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_012_000) {
-        get_contract_state_runtime_0_12(online_client, address, block_hash).await
-    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
         get_contract_state_runtime_0_13(online_client, address, block_hash).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
@@ -93,9 +82,7 @@ pub async fn get_zswap_state_root(
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
 ) -> Result<Vec<u8>, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_012_000) {
-        get_zswap_state_root_runtime_0_12(online_client, block_hash).await
-    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
         get_zswap_state_root_runtime_0_13(online_client, block_hash).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
@@ -168,7 +155,6 @@ macro_rules! make_block_details {
     };
 }
 
-make_block_details!(runtime_0_12);
 make_block_details!(runtime_0_13);
 
 macro_rules! fetch_authorities {
@@ -191,7 +177,6 @@ macro_rules! fetch_authorities {
     };
 }
 
-fetch_authorities!(runtime_0_12);
 fetch_authorities!(runtime_0_13);
 
 macro_rules! decode_slot {
@@ -206,7 +191,6 @@ macro_rules! decode_slot {
     };
 }
 
-decode_slot!(runtime_0_12);
 decode_slot!(runtime_0_13);
 
 macro_rules! get_contract_state {
@@ -235,7 +219,6 @@ macro_rules! get_contract_state {
     };
 }
 
-get_contract_state!(runtime_0_12);
 get_contract_state!(runtime_0_13);
 
 macro_rules! get_zswap_state_root {
@@ -263,7 +246,6 @@ macro_rules! get_zswap_state_root {
     };
 }
 
-get_zswap_state_root!(runtime_0_12);
 get_zswap_state_root!(runtime_0_13);
 
 #[cfg(test)]

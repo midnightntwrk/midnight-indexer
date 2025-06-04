@@ -20,7 +20,6 @@ use std::{
 };
 use thiserror::Error;
 
-pub const PROTOCOL_VERSION_000_012_000: ProtocolVersion = ProtocolVersion(12_000);
 pub const PROTOCOL_VERSION_000_013_000: ProtocolVersion = ProtocolVersion(13_000);
 
 /// The runtime specification version of the chain; defaults to 1, i.e. 0.0.1.
@@ -94,13 +93,13 @@ mod tests {
 
     #[test]
     fn test_protocol_version_display() {
-        let version = ProtocolVersion::from(12_000);
-        assert_eq!(version.to_string(), "0.12.0");
+        let version = ProtocolVersion::from(13_000);
+        assert_eq!(version.to_string(), "0.13.0");
 
         let version = ProtocolVersion::from(1_002_003);
         assert_eq!(version.to_string(), "1.2.3");
 
-        let version = ProtocolVersion::from(123_045);
-        assert_eq!(version.to_string(), "0.123.45")
+        let version = ProtocolVersion::from(666_042);
+        assert_eq!(version.to_string(), "0.666.42")
     }
 }

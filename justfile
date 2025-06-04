@@ -156,8 +156,6 @@ coverage-generation:
 coverage-report: coverage-generation
     RUSTC_BOOTSTRAP=1 cargo llvm-cov report --open
 
-# node_version := "0.12.0"
-# generator_version := "0.12.0"
 node_version := "0.13.0-alpha.1"
 generator_version := "0.13.0-alpha.1"
 
