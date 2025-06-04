@@ -895,7 +895,7 @@ impl Storage for PostgresStorage {
                 transactions.hash,
                 blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.apply_stage,
+                transactions.transaction_result,
                 transactions.identifiers,
                 transactions.raw,
                 transactions.merkle_tree_root,

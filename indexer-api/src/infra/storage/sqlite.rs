@@ -849,7 +849,7 @@ impl Storage for SqliteStorage {
             transactions.hash,
             blocks.hash AS block_hash,
             transactions.protocol_version,
-            transactions.apply_stage,
+            transactions.transaction_result,
             transactions.raw,
             transactions.merkle_tree_root,
             transactions.start_index,
@@ -924,7 +924,7 @@ impl SqliteStorage {
             let sql = indoc! {"
                 SELECT
                     transactions.id, transactions.hash, blocks.hash as block_hash,
-                    transactions.protocol_version, transactions.apply_stage,
+                    transactions.protocol_version, transactions.transaction_result,
                     transactions.raw, transactions.merkle_tree_root,
                     transactions.start_index, transactions.end_index
                 FROM transactions
