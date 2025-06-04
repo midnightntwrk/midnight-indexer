@@ -12,7 +12,8 @@
 // limitations under the License.
 
 use crate::domain::{
-    Block, BlockInfo, BlockTransactions, ContractAction, Transaction, UnshieldedUtxo, storage::Storage,
+    Block, BlockInfo, BlockTransactions, ContractAction, Transaction, UnshieldedUtxo,
+    storage::Storage,
 };
 use futures::{StreamExt, TryStreamExt};
 use indexer_common::{

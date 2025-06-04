@@ -11,14 +11,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, BlockHash, ContractAction, ContractAttributes, Storage, Transaction, UnshieldedUtxo, UnshieldedUtxoFilter};
+use crate::domain::{
+    Block, BlockHash, ContractAction, ContractAttributes, Storage, Transaction, UnshieldedUtxo,
+    UnshieldedUtxoFilter,
+};
 use async_stream::try_stream;
 use chacha20poly1305::ChaCha20Poly1305;
 use derive_more::Debug;
 use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::{
-    domain::{ContractAddress, Identifier, SessionId, TransactionHash, UnshieldedAddress, ViewingKey},
+    domain::{
+        ContractAddress, Identifier, SessionId, TransactionHash, UnshieldedAddress, ViewingKey,
+    },
     infra::{pool::postgres::PostgresPool, sqlx::postgres::ignore_deadlock_detected},
     stream::flatten_chunks,
 };

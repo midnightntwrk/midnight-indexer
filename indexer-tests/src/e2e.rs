@@ -22,8 +22,8 @@ use crate::{
             self, BlockSubscriptionBlocks as BlockSubscriptionBlock,
             BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
             BlockSubscriptionBlocksTransactionsContractActions as BlockSubscriptionContractAction,
-            TransactionResultStatus as BlockSubscriptionTransactionResultStatus,
             BlockSubscriptionBlocksTransactionsUnshieldedCreatedOutputs as BlockSubscriptionUnshieldedUtxo,
+            TransactionResultStatus as BlockSubscriptionTransactionResultStatus,
         },
         connect_mutation,
         contract_action_query::{
@@ -32,16 +32,15 @@ use crate::{
         },
         contract_action_subscription, disconnect_mutation, transactions_query, wallet_subscription,
     },
-    e2e::contract_action_query::ContractActionQueryContractAction,
     graphql_ws_client,
 };
-use anyhow::{Context, Ok, anyhow, bail};
+use anyhow::{Context, Ok, bail};
 use bech32::{Bech32m, Hrp};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::{
     domain::{AsBytesExt, HexEncoded, ViewingKey},
-    infra::api::v1::{TransactionResultStatus, Unit, UnshieldedAddress},
+    infra::api::v1::TransactionResultStatus,
 };
 use indexer_common::domain::{NetworkId, unshielded::to_bech32m};
 use itertools::Itertools;
@@ -495,6 +494,9 @@ async fn test_unshielded_utxo_queries(
     api_client: &Client,
     api_url: &str,
 ) -> anyhow::Result<()> {
+    use graphql::graphql_types::*;
+    use indexer_api::domain::UnshieldedAddress;
+
     // Test with addresses that have UTXOs
     for expected_utxo in &indexer_data.unshielded_utxos {
         let variables = unshielded_utxos_query::Variables {
@@ -664,15 +666,13 @@ async fn test_unshielded_utxo_subscription(
     indexer_data: &IndexerData,
     ws_api_url: &str,
 ) -> anyhow::Result<()> {
-    use graphql_types::*;
+    use graphql::graphql_types::*;
     use tokio::time::{Duration, timeout};
 
     let utxo_addresses = indexer_data
         .unshielded_utxos
         .iter()
         .map(|utxo| utxo.owner.clone())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
         .collect::<Vec<_>>();
 
     assert!(!utxo_addresses.is_empty());
@@ -1028,7 +1028,7 @@ fn seed_to_secret_key(seed: &str) -> SecretKey {
 mod graphql {
     use graphql_client::GraphQLQuery;
     use indexer_api::{
-        domain::{HexEncoded, ViewingKey},
+        domain::{HexEncoded, UnshieldedAddress, ViewingKey},
         infra::api::v1::Unit,
     };
 
@@ -1056,13 +1056,29 @@ mod graphql {
     )]
     pub struct ContractActionQuery;
 
-    #[derive(GraphQLQuery)]
-    #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
-        query_path = "./e2e.graphql",
-        response_derives = "Debug, Clone, Serialize"
-    )]
-    struct UnshieldedUtxosQuery;
+    // TODO(midnight-indexer/PR #23): Temporary wrapper to dodge the
+    // GraphQLQuery error-type mismatch (anyhow::Error vs serde::de::Error).
+    // Delete this `mod graphql_types` once we align the error types or
+    // customise the derive to return our own error.
+    pub mod graphql_types {
+        use graphql_client::GraphQLQuery;
+        use indexer_api::domain::{HexEncoded, UnshieldedAddress};
+        #[derive(GraphQLQuery)]
+        #[graphql(
+            schema_path = "../indexer-api/graphql/schema-v1.graphql",
+            query_path = "./e2e.graphql",
+            response_derives = "Debug, Clone, Serialize"
+        )]
+        pub struct UnshieldedUtxosQuery;
+
+        #[derive(GraphQLQuery)]
+        #[graphql(
+            schema_path = "../indexer-api/graphql/schema-v1.graphql",
+            query_path = "./e2e.graphql",
+            response_derives = "Debug, Clone, Serialize"
+        )]
+        pub struct UnshieldedUtxosSubscription;
+    }
 
     #[derive(GraphQLQuery)]
     #[graphql(
@@ -1095,23 +1111,6 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct ContractActionSubscription;
-
-    // TODO(midnight-indexer/PR #23): Temporary wrapper to dodge the
-    // GraphQLQuery error-type mismatch (anyhow::Error vs serde::de::Error).
-    // Delete this `mod graphql_types` once we align the error types or
-    // customise the derive to return our own error.
-    mod graphql_types {
-        use graphql_client::GraphQLQuery;
-        use indexer_api::domain::{HexEncoded, UnshieldedAddress};
-
-        #[derive(GraphQLQuery)]
-        #[graphql(
-            schema_path = "../indexer-api/graphql/schema-v1.graphql",
-            query_path = "./e2e.graphql",
-            response_derives = "Debug, Clone, Serialize"
-        )]
-        pub struct UnshieldedUtxosSubscription;
-    }
 
     #[derive(GraphQLQuery)]
     #[graphql(

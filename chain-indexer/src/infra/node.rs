@@ -16,8 +16,10 @@ mod runtimes;
 
 use crate::{
     domain::{Block, BlockInfo, ContractAction, ContractAttributes, Node, Transaction},
-    infra::node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
-    infra::node::runtimes::{RuntimeUnshieldedUtxoInfo},
+    infra::node::{
+        header::SubstrateHeaderExt,
+        runtimes::{BlockDetails, RuntimeUnshieldedUtxoInfo},
+    },
 };
 use async_stream::try_stream;
 use fastrace::trace;
@@ -25,8 +27,8 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{
     LedgerTransaction,
     domain::{
-        BlockAuthor, BlockHash, ByteVec, IntentHash, NetworkId, ProtocolVersion, RawTokenType, RawTransaction,
-        UnshieldedAddress, ScaleDecodeProtocolVersionError,
+        BlockAuthor, BlockHash, ByteVec, IntentHash, NetworkId, ProtocolVersion, RawTokenType,
+        RawTransaction, ScaleDecodeProtocolVersionError, TransactionHash, UnshieldedAddress,
     },
     error::{BoxError, StdErrorExt},
     serialize::SerializableExt,
@@ -557,7 +559,7 @@ async fn make_transaction(
         deserialize::<LedgerTransaction, _>(&mut raw.as_ref(), network_id.into())
             .map_err(|error| SubxtNodeError::Io("cannot deserialize ledger transaction", error))?;
 
-    let hash = ledger_transaction.transaction_hash().0.0.into();
+    let hash: TransactionHash = ledger_transaction.transaction_hash().0.0.into();
 
     let identifiers = ledger_transaction
         .identifiers()
@@ -728,7 +730,7 @@ mod tests {
         test_finalized_blocks(
             PROTOCOL_VERSION_000_013_000,
             Some("alpha.1"),
-            "4b88d38dd59b0f5e9deffda46e20d23f194efa65bf2e1c029411cd9537c7777d",,
+            "4b88d38dd59b0f5e9deffda46e20d23f194efa65bf2e1c029411cd9537c7777d",
             8,
             "519d12a758644f193d635a020bb4ad5c125423db0a69089741264e1015cd39b3",
             27,

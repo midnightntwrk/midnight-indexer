@@ -105,7 +105,6 @@ macro_rules! make_block_details {
             ) -> Result<BlockDetails, SubxtNodeError> {
                 use self::$module::{
                     midnight,
-                    runtime_types::pallet_midnight::pallet::UnshieldedEventType,
                     runtime_types::pallet_partner_chains_session::pallet as partner_chains_session,
                     timestamp, Call, Event,
                 };

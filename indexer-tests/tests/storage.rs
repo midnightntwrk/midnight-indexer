@@ -23,8 +23,9 @@ use indexer_common::{
     self,
     cipher::make_cipher,
     domain::{
-        BlockAuthor, BlockHash, ByteArray, ByteVec, ContractAddress, Identifier, IntentHash, NetworkId,
-        ProtocolVersion, RawTokenType, RawTransaction, UnshieldedAddress, TransactionHash, TransactionResult,
+        BlockAuthor, BlockHash, ByteArray, ByteVec, ContractAddress, Identifier, IntentHash,
+        NetworkId, ProtocolVersion, RawTokenType, RawTransaction, TransactionHash,
+        TransactionResult, UnshieldedAddress,
     },
     error::BoxError,
     infra::{migrations, pool},

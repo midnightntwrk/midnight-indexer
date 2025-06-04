@@ -11,9 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, BlockHash, ContractAction, Transaction, UnshieldedUtxo,};
+use crate::domain::{Block, BlockHash, ContractAction, Transaction, UnshieldedUtxo};
 use futures::{Stream, stream};
-use indexer_common::domain::{ContractAddress, Identifier, SessionId, TransactionHash, UnshieldedAddress, ViewingKey};
+use indexer_common::domain::{
+    ContractAddress, Identifier, SessionId, TransactionHash, UnshieldedAddress, ViewingKey,
+};
 use std::{fmt::Debug, num::NonZeroU32};
 
 /// Filter criteria for unshielded UTXOs queries
