@@ -54,13 +54,13 @@ The Midnight Indexer (midnight-indexer) is a set of components designed to optim
                                  └─────────────────┘
 ```
 
-### Components
+## Components
 
 - [Chain Indexer](chain-indexer/README.md): Connects to the Midnight Node, fetches blocks and transactions, and stores indexed data.
 - [Wallet Indexer](wallet-indexer/README.md): Associates connected wallets with relevant transactions, enabling personalized queries and subscriptions.
 - [Indexer API](indexer-api/README.md): Exposes a GraphQL API for queries, mutations, and subscriptions.
 
-### Features
+## Features
 
 - Fetch and query blocks, transactions and contract actions at specific block hashes, heights, transaction identifiers or contract addresses.
 - Real-time subscriptions to new blocks, contract actions and wallet-related events through WebSocket connections.
@@ -69,11 +69,11 @@ The Midnight Indexer (midnight-indexer) is a set of components designed to optim
 - Supports both PostgreSQL (cloud) and SQLite (standalone) storage backends.
 - Extensively tested with integration tests and end-to-end scenarios.
 
-### Running
+## Running
 
 To run the Midnight Indexer Docker images are provided under the [`midnightntwrk`](https://hub.docker.com/r/midnightntwrk) organization. It is supposed that users are familiar with running Docker images, e.g. via Docker Compose or Kubernetes.
 
-#### Standalone Mode
+### Standalone Mode
 
 The standalone Indexer combines the Chain Indexer, Indexer API and Wallet Indexer components in a single executable alongside an in-process SQLite database. Therefore the only Docker image to be run is [`indexer-standalone`](https://hub.docker.com/r/midnightntwrk/indexer-standalone).
 
@@ -91,14 +91,14 @@ By default it connects to a local Midnight Node at `ws://localhost:9944` and exp
 
 For the full set of configuration options see [config.yaml](indexer-standalone/config.yaml).
 
-#### Cloud Mode
+### Cloud Mode
 
 The Chain Indexer, Indexer API and Wallet Indexer can be run as separate executables, interacting with a PostgreSQL database and a NATS messaging system. Running PostgreSQL and NATS is out of scope of this document. The respective Docker images are:
 - [`chain-indexer`](https://hub.docker.com/r/midnightntwrk/chain-indexer)
 - [`indexer-api`](https://hub.docker.com/r/midnightntwrk/indexer-api)
 - [`wallet-indexer`](https://hub.docker.com/r/midnightntwrk/wallet-indexer)
 
-##### `chain-indexer` Configuration
+#### `chain-indexer` Configuration
 
 | Env Var | Meaning | Default |
 |---|---|---|
@@ -115,7 +115,7 @@ The Chain Indexer, Indexer API and Wallet Indexer can be run as separate executa
 
 For the full set of configuration options see [config.yaml](chain-indexer/config.yaml).
 
-##### `indexer-api` Configuration
+#### `indexer-api` Configuration
 
 | Env Var | Meaning | Default |
 |---|---|---|
@@ -133,7 +133,7 @@ For the full set of configuration options see [config.yaml](chain-indexer/config
 
 For the full set of configuration options see [config.yaml](indexer-api/config.yaml).
 
-##### `wallet-indexer` Configuration
+#### `wallet-indexer` Configuration
 
 | Env Var | Meaning | Default |
 |---|---|---|
@@ -147,6 +147,38 @@ For the full set of configuration options see [config.yaml](indexer-api/config.y
 | APP__INFRA__SECRET | Hex-encoded 32-byte secret to encrypt stored sensitive data | - |
 
 For the full set of configuration options see [config.yaml](wallet-indexer/config.yaml).
+
+## Development Setup
+
+### Requirements
+
+- **Rust**: The latest stable version (see `rust-toolchain.toml`).
+- **Cargo**: Comes with Rust.
+- **Just**: A command-runner used for tasks. Install from [GitHub](https://github.com/casey/just).
+- **direnv**: For a reproducible development environment.
+- **Docker**: For integration tests and running services locally.
+
+### Required Configuration for Private Repositories
+
+You may need access to private Midnight repositories and containers. To achieve this:
+
+1. **GitHub Personal Access Token (PAT)**:  
+   Create a classic PAT with:
+   - `repo` (all)
+   - `write:packages`
+   - `org:read`
+
+2. **~/.netrc Setup**:
+   ```bash
+   machine github.com
+   login <YOUR_GITHUB_ID>
+   password <YOUR_GITHUB_PAT>
+   ```
+
+3. **Docker Authentication**:
+   ```bash
+   echo $GITHUB_TOKEN | docker login ghcr.io -u <YOUR_GITHUB_ID> --password-stdin
+   ```
 
 ### LICENSE
 
