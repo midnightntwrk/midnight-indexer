@@ -115,7 +115,7 @@ impl Storage for PostgresStorage {
 
         // Update the block's transactions with their database IDs
         for (transaction, id) in block.transactions.iter_mut().zip(transaction_ids.iter()) {
-            transaction.id = Some(*id as u64);
+            transaction.id = *id as u64;
         }
 
         Ok(max_transaction_id)

@@ -522,7 +522,7 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
     zswap_state_root: Faker.fake(),
     transactions: vec![
         Transaction {
-            id: None,
+            id: 0, //they are not saved in the db yet
             hash: TRANSACTION_1_HASH,
             protocol_version: PROTOCOL_VERSION_0_1,
             apply_stage: ApplyStage::Failure,
@@ -548,7 +548,7 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
             end_index: 1,
         },
         Transaction {
-            id: None,
+            id: 0,
             hash: TRANSACTION_1_HASH,
             protocol_version: PROTOCOL_VERSION_0_1,
             apply_stage: ApplyStage::Success,
@@ -585,7 +585,7 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
     timestamp: 2,
     zswap_state_root: Faker.fake(),
     transactions: vec![Transaction {
-        id: None,
+        id: 0,
         hash: TRANSACTION_2_HASH,
         protocol_version: PROTOCOL_VERSION_0_1,
         apply_stage: ApplyStage::Success,

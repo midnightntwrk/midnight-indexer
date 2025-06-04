@@ -613,7 +613,7 @@ async fn make_transaction(
         .collect();
 
     let transaction = Transaction {
-        id: None,
+        id: 0,
         hash,
         apply_stage: Default::default(),
         protocol_version,

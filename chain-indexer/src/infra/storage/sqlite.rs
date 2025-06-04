@@ -109,7 +109,7 @@ impl Storage for SqliteStorage {
         tx.commit().await?;
 
         for (transaction, id) in block.transactions.iter_mut().zip(transaction_ids.iter()) {
-            transaction.id = Some(*id as u64);
+            transaction.id = *id as u64;
         }
 
         Ok(max_transaction_id)

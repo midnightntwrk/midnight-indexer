@@ -370,14 +370,15 @@ async fn index_block(
 
     // 2) Publish UnshieldedUtxoIndexed events for affected addresses
     for transaction in &block.transactions {
-        // Skip if transaction doesn't have a database ID yet
-        let Some(transaction_id) = transaction.id else {
+        // Skip if transaction doesn't have a database ID yet (0 = not saved)
+        if transaction.id == 0 {
             warn!(
                 "Transaction {:?} has no database ID after saving",
                 transaction.hash
             );
             continue;
         };
+        let transaction_id = transaction.id;
 
         let mut published_addresses = HashSet::new();
 
