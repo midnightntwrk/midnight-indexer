@@ -148,6 +148,22 @@ For the full set of configuration options see [config.yaml](indexer-api/config.y
 
 For the full set of configuration options see [config.yaml](wallet-indexer/config.yaml).
 
+### Running Locally
+
+For development, you can use Docker Compose or run components manually:
+
+#### Using Docker Compose
+
+A `docker-compose.yaml` file is provided that defines services for the Indexer components as well as for dependencies like `postgres`, `nats`, and `node`. The latter are particularly interesting when running Indexer components "manually".
+
+#### Manual Startup
+
+The justfile defines recipes for each Indexer component to start it alongside its dependencies. E.g. run the Chain Indexer like this:
+
+```bash
+just run-chain-indexer
+```
+
 ## Development Setup
 
 ### Requirements
@@ -158,27 +174,44 @@ For the full set of configuration options see [config.yaml](wallet-indexer/confi
 - **direnv**: For a reproducible development environment.
 - **Docker**: For integration tests and running services locally.
 
+### Environment Variables
+
+As we allow zero secrets in the git repository, you need to define a couple of environment variables for build (tests) and runtime (tests). Notice that the values are just used locally for testing and can be chosen arbitrarily; `APP__INFRA__SECRET` must be a hex-encoded 32-byte value.
+
+It is recommended to provide these environment variables via an `~/.midnight-indexer.envrc` file which is sourced by the `.envrc` file:
+
+```bash
+export APP__INFRA__STORAGE__PASSWORD=postgres
+export APP__INFRA__PUB_SUB__PASSWORD=nats
+export APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD=nats
+export APP__INFRA__SECRET=303132333435363738393031323334353637383930313233343536373839303132
+```
+
 ### Required Configuration for Private Repositories
 
 You may need access to private Midnight repositories and containers. To achieve this:
 
-1. **GitHub Personal Access Token (PAT)**:  
-   Create a classic PAT with:
-   - `repo` (all)
-   - `write:packages`
-   - `org:read`
+#### GitHub Personal Access Token (PAT)
 
-2. **~/.netrc Setup**:
-   ```bash
-   machine github.com
-   login <YOUR_GITHUB_ID>
-   password <YOUR_GITHUB_PAT>
-   ```
+Create a classic PAT with:
 
-3. **Docker Authentication**:
-   ```bash
-   echo $GITHUB_TOKEN | docker login ghcr.io -u <YOUR_GITHUB_ID> --password-stdin
-   ```
+- `repo` (all)
+- `read:packages`
+- `read:org`
+
+#### ~/.netrc Setup
+
+```bash
+machine github.com
+login <YOUR_GITHUB_ID>
+password <YOUR_GITHUB_PAT>
+```
+
+#### Docker Authentication
+
+```bash
+echo $GITHUB_TOKEN | docker login ghcr.io -u <YOUR_GITHUB_ID> --password-stdin
+```
 
 ### LICENSE
 
