@@ -151,13 +151,6 @@ impl Storage for SqliteStorage {
             .await?;
         transaction.identifiers = identifiers;
 
-        transaction.unshielded_created_outputs = self
-            .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
-            .await?;
-        transaction.unshielded_spent_outputs = self
-            .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
-            .await?;
-
         Ok(transaction)
     }
 
@@ -226,15 +219,6 @@ impl Storage for SqliteStorage {
             transaction.identifiers = identifiers;
         }
 
-        for transaction in transactions.iter_mut() {
-            transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
-                .await?;
-            transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
-                .await?;
-        }
-
         Ok(transactions)
     }
 
@@ -269,15 +253,6 @@ impl Storage for SqliteStorage {
                 .get_identifiers_by_transaction_id(transaction.id)
                 .await?;
             transaction.identifiers = identifiers;
-        }
-
-        for transaction in transactions.iter_mut() {
-            transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
-                .await?;
-            transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
-                .await?;
         }
 
         Ok(transactions)
@@ -614,11 +589,6 @@ impl Storage for SqliteStorage {
                     let identifiers = self.
                         get_identifiers_by_transaction_id(transaction.id).await?;
                     transaction.identifiers = identifiers;
-
-                    transaction.unshielded_created_outputs =
-                        self.get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id)).await?;
-                    transaction.unshielded_spent_outputs =
-                        self.get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id)).await?;
                 }
 
                 yield transactions;
@@ -872,22 +842,6 @@ impl Storage for SqliteStorage {
         for transaction in transactions.iter_mut() {
             let identifiers = get_identifiers_by_transaction_id(transaction.id, &mut tx).await?;
             transaction.identifiers = identifiers;
-
-            transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos_with_tx(
-                    Some(address),
-                    UnshieldedUtxoFilter::CreatedInTxForAddress(transaction.id),
-                    &mut tx,
-                )
-                .await?;
-
-            transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos_with_tx(
-                    Some(address),
-                    UnshieldedUtxoFilter::SpentInTxForAddress(transaction.id),
-                    &mut tx,
-                )
-                .await?;
         }
 
         Ok(transactions)
@@ -959,91 +913,6 @@ impl SqliteStorage {
         }
 
         Ok(())
-    }
-
-    async fn get_unshielded_utxos_with_tx(
-        &self,
-        address: Option<&UnshieldedAddress>,
-        filter: UnshieldedUtxoFilter<'_>,
-        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
-        let sql = match (&address, &filter) {
-            (Some(_), UnshieldedUtxoFilter::All) => {
-                indoc! {"
-                    SELECT
-                        id, owner_address, token_type, value, output_index, intent_hash,
-                        creating_transaction_id, spending_transaction_id
-                    FROM unshielded_utxos
-                    WHERE owner_address = ?
-                    ORDER BY id ASC
-                "}
-            }
-            (None, UnshieldedUtxoFilter::CreatedByTx(_)) => {
-                indoc! {"
-                    SELECT *
-                    FROM unshielded_utxos
-                    WHERE creating_transaction_id = ?
-                "}
-            }
-            (None, UnshieldedUtxoFilter::SpentByTx(_)) => {
-                indoc! {"
-                    SELECT *
-                    FROM unshielded_utxos
-                    WHERE spending_transaction_id = ?
-                "}
-            }
-            (Some(_), UnshieldedUtxoFilter::CreatedInTxForAddress(_)) => {
-                indoc! {"
-                    SELECT *
-                    FROM unshielded_utxos
-                    WHERE creating_transaction_id = ?
-                    AND owner_address = ?
-                "}
-            }
-            (Some(_), UnshieldedUtxoFilter::SpentInTxForAddress(_)) => {
-                indoc! {"
-                    SELECT *
-                    FROM unshielded_utxos
-                    WHERE spending_transaction_id = ?
-                    AND owner_address = ?
-                "}
-            }
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    "Unsupported filter combination in get_unshielded_utxos_with_tx".into(),
-                ));
-            }
-        };
-
-        let mut query = sqlx::query_as::<_, UnshieldedUtxo>(sql);
-
-        match (&address, &filter) {
-            (Some(addr), UnshieldedUtxoFilter::All) => {
-                query = query.bind(addr.as_ref());
-            }
-            (None, UnshieldedUtxoFilter::CreatedByTx(tx_id)) => {
-                query = query.bind(*tx_id as i64);
-            }
-            (None, UnshieldedUtxoFilter::SpentByTx(tx_id)) => {
-                query = query.bind(*tx_id as i64);
-            }
-            (Some(addr), UnshieldedUtxoFilter::CreatedInTxForAddress(tx_id)) => {
-                query = query.bind(*tx_id as i64);
-                query = query.bind(addr.as_ref());
-            }
-            (Some(addr), UnshieldedUtxoFilter::SpentInTxForAddress(tx_id)) => {
-                query = query.bind(*tx_id as i64);
-                query = query.bind(addr.as_ref());
-            }
-            _ => {}
-        };
-
-        let mut utxos = query.fetch_all(&mut **tx).await?;
-
-        self.enrich_utxos_with_transaction_data(&mut utxos, tx)
-            .await?;
-
-        Ok(utxos)
     }
 }
 

@@ -146,16 +146,9 @@ impl Storage for PostgresStorage {
 
     #[trace(properties = { "id": "{id}" })]
     async fn get_transaction_by_id(&self, id: u64) -> Result<Transaction, sqlx::Error> {
-        let mut transaction = sqlx::query_as::<_, Transaction>(TX_BY_ID_QUERY)
+        let transaction = sqlx::query_as::<_, Transaction>(TX_BY_ID_QUERY)
             .bind(id as i64)
             .fetch_one(&*self.pool)
-            .await?;
-
-        transaction.unshielded_created_outputs = self
-            .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
-            .await?;
-        transaction.unshielded_spent_outputs = self
-            .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
             .await?;
 
         Ok(transaction)
@@ -180,19 +173,10 @@ impl Storage for PostgresStorage {
             WHERE transactions.block_id = $1
         "};
 
-        let mut transactions = sqlx::query_as::<_, Transaction>(query)
+        let transactions = sqlx::query_as::<_, Transaction>(query)
             .bind(id as i64)
             .fetch_all(&*self.pool)
             .await?;
-
-        for transaction in transactions.iter_mut() {
-            transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
-                .await?;
-            transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
-                .await?;
-        }
 
         Ok(transactions)
     }
@@ -219,19 +203,10 @@ impl Storage for PostgresStorage {
             WHERE transactions.hash = $1
         "};
 
-        let mut transactions = sqlx::query_as::<_, Transaction>(query)
+        let transactions = sqlx::query_as::<_, Transaction>(query)
             .bind(hash)
             .fetch_all(&*self.pool)
             .await?;
-
-        for transaction in transactions.iter_mut() {
-            transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
-                .await?;
-            transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
-                .await?;
-        }
 
         Ok(transactions)
     }
@@ -258,19 +233,10 @@ impl Storage for PostgresStorage {
             WHERE $1 = ANY(transactions.identifiers)
         "};
 
-        let mut transactions = sqlx::query_as::<_, Transaction>(query)
+        let transactions = sqlx::query_as::<_, Transaction>(query)
             .bind(identifier)
             .fetch_all(&*self.pool)
             .await?;
-
-        for transaction in transactions.iter_mut() {
-            transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id))
-                .await?;
-            transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
-                .await?;
-        }
 
         Ok(transactions)
     }
@@ -605,7 +571,7 @@ impl Storage for PostgresStorage {
                     LIMIT $3
                 "};
 
-                let mut transactions = sqlx::query_as::<_, Transaction>(query)
+                let transactions = sqlx::query_as::<_, Transaction>(query)
                     .bind(session_id)
                     .bind(index as i64)
                     .bind(batch_size.get() as i64)
@@ -618,18 +584,6 @@ impl Storage for PostgresStorage {
                     Some(end_index) => end_index + 1,
                     None => break,
                 };
-
-                for transaction in transactions.iter_mut() {
-                    transaction.unshielded_created_outputs = self
-                        .get_unshielded_utxos(
-                            None,
-                            UnshieldedUtxoFilter::CreatedByTx(transaction.id),
-                        )
-                        .await?;
-                    transaction.unshielded_spent_outputs = self
-                        .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
-                        .await?;
-                }
 
                 yield transactions;
             }
@@ -919,26 +873,10 @@ impl Storage for PostgresStorage {
         "};
 
         let mut tx = self.pool.begin().await?;
-        let mut transactions = sqlx::query_as::<_, Transaction>(sql)
+        let transactions = sqlx::query_as::<_, Transaction>(sql)
             .bind(address.as_ref())
             .fetch_all(&mut *tx)
             .await?;
-
-        for transaction in transactions.iter_mut() {
-            transaction.unshielded_created_outputs = self
-                .get_unshielded_utxos(
-                    Some(address),
-                    UnshieldedUtxoFilter::CreatedInTxForAddress(transaction.id),
-                )
-                .await?;
-
-            transaction.unshielded_spent_outputs = self
-                .get_unshielded_utxos(
-                    Some(address),
-                    UnshieldedUtxoFilter::SpentInTxForAddress(transaction.id),
-                )
-                .await?;
-        }
 
         Ok(transactions)
     }
