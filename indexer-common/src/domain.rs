@@ -14,7 +14,6 @@
 mod bytes;
 mod protocol_version;
 mod pub_sub;
-pub mod unshielded;
 mod viewing_key;
 mod zswap;
 

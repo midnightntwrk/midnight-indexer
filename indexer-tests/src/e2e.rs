@@ -42,7 +42,7 @@ use indexer_api::{
     domain::{AsBytesExt, HexEncoded, ViewingKey},
     infra::api::v1::{TransactionResultStatus, UnshieldedAddress},
 };
-use indexer_common::domain::{NetworkId, unshielded::bech32m_encode};
+use indexer_common::domain::NetworkId;
 use itertools::Itertools;
 use midnight_serialize::Serializable;
 use midnight_transient_crypto::encryption::SecretKey;
@@ -519,8 +519,7 @@ async fn test_unshielded_utxo_queries(
     // Test with unknown address (should return empty)
     const NETWORK_ID: NetworkId = NetworkId::Undeployed;
     let unknown_addr_bytes = [0x99u8; 4]; // Some address that doesn't exist
-    let unknown_bech32m = bech32m_encode(unknown_addr_bytes, NETWORK_ID)?;
-    let unknown_addr = UnshieldedAddress(unknown_bech32m);
+    let unknown_addr = UnshieldedAddress::bech32m_encode(unknown_addr_bytes, NETWORK_ID);
 
     let variables = unshielded_utxos_query::Variables {
         address: unknown_addr,
@@ -734,8 +733,7 @@ async fn test_unshielded_utxo_subscription(
     // Additional test with address that has no UTXOs
     const NETWORK_ID: NetworkId = NetworkId::Undeployed;
     let empty_addr_bytes = [0x11, 0x22, 0x33, 0x44]; // Raw bytes for a non-existent address
-    let empty_addr_bech32m = bech32m_encode(empty_addr_bytes, NETWORK_ID)?;
-    let empty_address = UnshieldedAddress(empty_addr_bech32m);
+    let empty_address = UnshieldedAddress::bech32m_encode(empty_addr_bytes, NETWORK_ID);
 
     let empty_variables = unshielded_utxos_subscription::Variables {
         address: empty_address,

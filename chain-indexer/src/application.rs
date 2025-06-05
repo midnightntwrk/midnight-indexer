@@ -379,11 +379,7 @@ async fn index_block(
 
         // For created UTXOs
         for utxo in &transaction.created_unshielded_utxos {
-            let address = indexer_common::domain::unshielded::bech32m_encode(
-                utxo.owner_address.as_ref(),
-                network_id,
-            )
-            .context("convert address to bech32m")?;
+            let address = utxo.owner_address.to_owned();
 
             if published_addresses.insert(address.clone()) {
                 publisher
@@ -398,11 +394,7 @@ async fn index_block(
 
         // For spent UTXOs
         for utxo in &transaction.spent_unshielded_utxos {
-            let address = indexer_common::domain::unshielded::bech32m_encode(
-                utxo.owner_address.as_ref(),
-                network_id,
-            )
-            .context("convert address to bech32m")?;
+            let address = utxo.owner_address.to_owned();
 
             if published_addresses.insert(address.clone()) {
                 publisher

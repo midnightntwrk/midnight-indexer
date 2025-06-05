@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use thiserror::Error;
 
-/// Bech32m encoded viewing key.
+/// Bech32m-encoded viewing key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, From)]
 #[from(String, &str)]
 pub struct ViewingKey(pub String);

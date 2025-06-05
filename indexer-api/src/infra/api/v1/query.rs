@@ -17,7 +17,7 @@ use crate::{
         ContextExt, ResultExt,
         v1::{
             self, Block, BlockOffset, ContractAction, ContractActionOffset, Transaction,
-            TransactionOffset, UnshieldedAddress, UnshieldedOffset, addr_to_common,
+            TransactionOffset, UnshieldedAddress, UnshieldedOffset,
         },
     },
 };
@@ -102,12 +102,14 @@ where
 
         let storage = cx.get_storage::<S>();
 
-        if let Some(addr) = address {
+        if let Some(address) = address {
             let network_id = cx.get_network_id();
 
-            let common_address = addr_to_common(&addr, network_id)?;
+            let address = address
+                .try_into_domain(network_id)
+                .internal("convert address into domain address")?;
             let txs = storage
-                .get_transactions_involving_unshielded(&common_address)
+                .get_transactions_involving_unshielded(&address)
                 .await
                 .internal("get transactions by address")?;
 
@@ -226,13 +228,12 @@ where
         let storage = cx.get_storage::<S>();
         let network_id = cx.get_network_id();
 
-        let common_address = addr_to_common(&address, network_id)?;
+        let address = address
+            .try_into_domain(network_id)
+            .internal("convert address into domain address")?;
         let utxos = match offset {
             Some(UnshieldedOffset::BlockOffset(BlockOffset::Height(start))) => storage
-                .get_unshielded_utxos(
-                    Some(&common_address),
-                    UnshieldedUtxoFilter::FromHeight(start),
-                )
+                .get_unshielded_utxos(Some(&address), UnshieldedUtxoFilter::FromHeight(start))
                 .await
                 .internal("get unshielded UTXOs by address from height")?,
 
@@ -240,7 +241,7 @@ where
                 let block_hash = hash.hex_decode().context("decode block hash")?;
                 storage
                     .get_unshielded_utxos(
-                        Some(&common_address),
+                        Some(&address),
                         UnshieldedUtxoFilter::FromBlockHash(&block_hash),
                     )
                     .await
@@ -251,7 +252,7 @@ where
                 let tx_hash = hash.hex_decode().context("decode tx hash")?;
                 storage
                     .get_unshielded_utxos(
-                        Some(&common_address),
+                        Some(&address),
                         UnshieldedUtxoFilter::FromTxHash(&tx_hash),
                     )
                     .await
@@ -262,7 +263,7 @@ where
                 let identifier = id.hex_decode().context("decode tx identifier")?;
                 storage
                     .get_unshielded_utxos(
-                        Some(&common_address),
+                        Some(&address),
                         UnshieldedUtxoFilter::FromTxIdentifier(&identifier),
                     )
                     .await
@@ -271,7 +272,7 @@ where
 
             // no offset -> full list
             None => storage
-                .get_unshielded_utxos(Some(&common_address), UnshieldedUtxoFilter::All)
+                .get_unshielded_utxos(Some(&address), UnshieldedUtxoFilter::All)
                 .await
                 .internal("get all unshielded UTXOs by address")?,
         };

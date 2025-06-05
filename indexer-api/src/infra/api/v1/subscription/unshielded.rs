@@ -15,10 +15,7 @@ use crate::{
     domain::{Storage, UnshieldedUtxoFilter},
     infra::api::{
         ContextExt, ResultExt,
-        v1::{
-            UnshieldedAddress, UnshieldedUtxo, UnshieldedUtxoEvent, UnshieldedUtxoEventType,
-            addr_to_common,
-        },
+        v1::{UnshieldedAddress, UnshieldedUtxo, UnshieldedUtxoEvent, UnshieldedUtxoEventType},
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
@@ -81,18 +78,17 @@ where
         let storage = cx.get_storage::<S>();
         let network_id = cx.get_network_id();
 
-        let utxo_stream = subscriber.subscribe::<UnshieldedUtxoIndexed>();
-        let requested = address;
+        let encoded_address = address.0.clone();
+        let address = address
+            .try_into_domain(network_id)
+            .internal("convert address into domain address")?;
 
-        let common_address = addr_to_common(&requested, network_id)?;
+        let utxo_stream = subscriber.subscribe::<UnshieldedUtxoIndexed>();
 
         let stream = try_stream! {
             // Create a drop guard that logs when the subscription ends
             let _guard = scopeguard::guard((), |_| {
-                debug!(
-                    "unshielded UTXO subscription dropped for address: {:?}",
-                    &requested.0
-                );
+                debug!(address = encoded_address; "unshielded UTXO subscription dropped");
             });
 
             let mut utxo_stream = pin!(utxo_stream);
@@ -101,7 +97,7 @@ where
             keep_alive.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
             let mut last_transaction = storage
-                .get_transactions_involving_unshielded(&common_address)
+                .get_transactions_involving_unshielded(&address)
                 .await
                 .internal("get latest transaction for address")?
                 .into_iter()
@@ -111,12 +107,16 @@ where
                 select! {
                     event_result = utxo_stream.try_next() => {
                         match event_result {
-                            Ok(Some(UnshieldedUtxoIndexed { address, transaction_id })) => {
-                                if address != requested.0 {
+                            Ok(Some(UnshieldedUtxoIndexed { address: a, transaction_id })) => {
+                                if a != address {
                                     continue;
                                 }
 
-                                debug!(address, transaction_id; "handling UnshieldedUtxoIndexed event");
+                                debug!(
+                                    address = encoded_address,
+                                    transaction_id;
+                                    "handling UnshieldedUtxoIndexed event"
+                                );
 
                                 let tx = storage
                                     .get_transaction_by_id(transaction_id)
@@ -127,7 +127,7 @@ where
 
                                 let created = storage
                                     .get_unshielded_utxos(
-                                        Some(&common_address),
+                                        Some(&address),
                                         UnshieldedUtxoFilter::CreatedInTxForAddress(transaction_id),
                                     )
                                     .await
@@ -135,7 +135,7 @@ where
 
                                 let spent = storage
                                     .get_unshielded_utxos(
-                                        Some(&common_address),
+                                        Some(&address),
                                         UnshieldedUtxoFilter::SpentInTxForAddress(transaction_id),
                                     )
                                     .await
@@ -167,7 +167,7 @@ where
 
                     // Emit periodic PROGRESS events
                     _ = keep_alive.tick() => {
-                        debug!(address = requested.0; "emitting PROGRESS event");
+                        debug!(address = encoded_address; "emitting PROGRESS event");
 
                         // For PROGRESS events, we need a transaction to include
                         // If we don't have one for this address, we'll get the latest one from the chain

@@ -32,6 +32,7 @@ use async_graphql::{
 };
 use async_graphql_axum::{GraphQL, GraphQLSubscription};
 use axum::{Router, routing::post_service};
+use bech32::{Bech32m, Hrp};
 use derive_more::Debug;
 use indexer_common::domain::{
     ByteVec, LedgerStateStorage, NetworkId, NoopLedgerStateStorage, NoopSubscriber,
@@ -44,6 +45,8 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
 };
 use thiserror::Error;
+
+const HRP_UNSHIELDED_BASE: &str = "mn_addr";
 
 /// A block with its relevant data.
 #[derive(Debug, SimpleObject)]
@@ -589,21 +592,15 @@ impl<S: Storage> UnshieldedUtxo<S> {
 }
 
 impl<S: Storage> From<(domain::UnshieldedUtxo, NetworkId)> for UnshieldedUtxo<S> {
-    fn from((domain_utxo, network_id): (domain::UnshieldedUtxo, NetworkId)) -> Self {
-        let owner_bech32m = indexer_common::domain::unshielded::bech32m_encode(
-            domain_utxo.owner_address.as_ref(),
-            network_id,
-        )
-        .expect("owner address can convert to Bech32m");
-
+    fn from((utxo, network_id): (domain::UnshieldedUtxo, NetworkId)) -> Self {
         Self {
-            owner: UnshieldedAddress(owner_bech32m),
-            value: domain_utxo.value.to_string(),
-            intent_hash: domain_utxo.intent_hash.hex_encode(),
-            token_type: domain_utxo.token_type.hex_encode(),
-            output_index: domain_utxo.output_index,
-            created_at_transaction_data: domain_utxo.created_at_transaction,
-            spent_at_transaction_data: domain_utxo.spent_at_transaction,
+            owner: UnshieldedAddress::bech32m_encode(utxo.owner_address, network_id),
+            value: utxo.value.to_string(),
+            intent_hash: utxo.intent_hash.hex_encode(),
+            token_type: utxo.token_type.hex_encode(),
+            output_index: utxo.output_index,
+            created_at_transaction_data: utxo.created_at_transaction,
+            spent_at_transaction_data: utxo.spent_at_transaction,
             _s: PhantomData,
         }
     }
@@ -641,6 +638,21 @@ impl UnshieldedAddress {
         }
 
         Ok(CommonUnshieldedAddress::from(bytes))
+    }
+
+    /// Encode raw bytes into a Bech32m-encoded address.
+    pub fn bech32m_encode(bytes: impl AsRef<[u8]>, network_id: NetworkId) -> Self {
+        let hrp = match network_id {
+            NetworkId::MainNet => HRP_UNSHIELDED_BASE.to_string(),
+            NetworkId::DevNet => format!("{}_dev", HRP_UNSHIELDED_BASE),
+            NetworkId::TestNet => format!("{}_test", HRP_UNSHIELDED_BASE),
+            NetworkId::Undeployed => format!("{}_undeployed", HRP_UNSHIELDED_BASE),
+        };
+        let hrp = Hrp::parse(&hrp).expect("unshielded address HRP can be parsed");
+
+        let encoded = bech32::encode::<Bech32m>(hrp, bytes.as_ref())
+            .expect("bytes for unshielded address can be Bech32m-encoded");
+        Self(encoded)
     }
 }
 
@@ -689,16 +701,6 @@ where
 enum UnshieldedOffset {
     BlockOffset(BlockOffset),
     TransactionOffset(TransactionOffset),
-}
-
-/// Convert GraphQL wrapper into the raw-bytes domain type.
-fn addr_to_common(
-    addr: &UnshieldedAddress,
-    network_id: NetworkId,
-) -> async_graphql::Result<CommonUnshieldedAddress> {
-    addr.to_owned()
-        .try_into_domain(network_id)
-        .map_err(|error| async_graphql::Error::new(error.to_string()))
 }
 
 #[derive(Debug, Union)]
