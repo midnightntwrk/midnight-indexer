@@ -28,6 +28,7 @@ use indexer_common::{
     stream::flatten_chunks,
 };
 use indoc::indoc;
+use log::debug;
 use sqlx::types::{Uuid, time::OffsetDateTime};
 use std::num::NonZeroU32;
 
@@ -611,16 +612,23 @@ impl Storage for PostgresStorage {
                     .fetch_all(&*self.pool)
                     .await?;
 
+                debug!(index, batch_size, len = transactions.len(); "fetched transactions");
+
                 index = match transactions.iter().map(|t| t.end_index).max() {
                     Some(end_index) => end_index + 1,
                     None => break,
                 };
 
                 for transaction in transactions.iter_mut() {
-                    transaction.unshielded_created_outputs =
-                        self.get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(transaction.id)).await?;
-                    transaction.unshielded_spent_outputs =
-                        self.get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id)).await?;
+                    transaction.unshielded_created_outputs = self
+                        .get_unshielded_utxos(
+                            None,
+                            UnshieldedUtxoFilter::CreatedByTx(transaction.id),
+                        )
+                        .await?;
+                    transaction.unshielded_spent_outputs = self
+                        .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(transaction.id))
+                        .await?;
                 }
 
                 yield transactions;
