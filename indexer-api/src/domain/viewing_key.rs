@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use thiserror::Error;
 
-/// Wrapper around Bech32m encoded viewing key.
+/// Bech32m encoded viewing key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, From)]
 #[from(String, &str)]
 pub struct ViewingKey(pub String);
@@ -49,7 +49,7 @@ impl ViewingKey {
         };
         let n = n.strip_prefix("_").unwrap_or(n).try_into()?;
         if n != network_id {
-            return Err(ViewingKeyFormatError::UnexpectedNetworkId(n));
+            return Err(ViewingKeyFormatError::UnexpectedNetworkId(n, network_id));
         }
 
         SecretKey::deserialize(&mut bytes.as_slice(), 0)?
@@ -65,14 +65,14 @@ pub enum ViewingKeyFormatError {
     #[error("cannot bech32m-decode viewing key")]
     Decode(#[from] bech32::DecodeError),
 
-    #[error("unexpected bech32m HRP {0}")]
+    #[error("invalid bech32m HRP {0}, expected 'mn_shield-esk' prefix")]
     InvalidHrp(String),
 
     #[error(transparent)]
     TryFromStrForNetworkIdError(#[from] UnknownNetworkIdError),
 
-    #[error("unexpected network ID {0}")]
-    UnexpectedNetworkId(NetworkId),
+    #[error("network ID mismatch: got {0}, expected {1}")]
+    UnexpectedNetworkId(NetworkId, NetworkId),
 
     #[error("cannot deserialize viewing key")]
     Deserialize(#[from] io::Error),
@@ -103,7 +103,8 @@ mod tests {
         assert_matches!(
             viewing_key,
             Err(ViewingKeyFormatError::UnexpectedNetworkId(
-                NetworkId::MainNet
+                NetworkId::MainNet,
+                NetworkId::DevNet
             ))
         );
 

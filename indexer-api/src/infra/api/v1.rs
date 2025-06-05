@@ -17,8 +17,8 @@ mod subscription;
 
 use crate::{
     domain::{
-        self, AsBytesExt, BlockHash, HexEncoded, NoopStorage, Storage,
-        UnshieldedAddressFormatError, UnshieldedUtxoFilter, ZswapStateCache,
+        self, AsBytesExt, BlockHash, HexEncoded, NoopStorage, Storage, UnshieldedUtxoFilter,
+        ZswapStateCache,
     },
     infra::api::{
         ContextExt, OptionExt, ResultExt,
@@ -35,13 +35,15 @@ use axum::{Router, routing::post_service};
 use derive_more::Debug;
 use indexer_common::domain::{
     ByteVec, LedgerStateStorage, NetworkId, NoopLedgerStateStorage, NoopSubscriber,
-    ProtocolVersion, SessionId, Subscriber, UnshieldedAddress as CommonUnshieldedAddress,
+    ProtocolVersion, SessionId, Subscriber, UnknownNetworkIdError,
+    UnshieldedAddress as CommonUnshieldedAddress,
 };
 use serde::{Deserialize, Serialize};
 use std::{
     marker::PhantomData,
     sync::{Arc, atomic::AtomicBool},
 };
+use thiserror::Error;
 
 /// A block with its relevant data.
 #[derive(Debug, SimpleObject)]
@@ -542,19 +544,25 @@ enum ContractActionOffset {
 struct UnshieldedUtxo<S: Storage> {
     /// Owner address (Bech32m, `mn_addr…`)
     owner: UnshieldedAddress,
+
     /// The hash of the intent that created this output (hex-encoded)
     intent_hash: HexEncoded,
+
     /// UTXO value (quantity) as a string to support u128
     value: String,
+
     /// Token type (hex-encoded)
     token_type: HexEncoded,
+
     /// Index of this output within its creating transaction
     output_index: u32,
 
     #[graphql(skip)]
     created_at_transaction_data: Option<domain::Transaction>,
+
     #[graphql(skip)]
     spent_at_transaction_data: Option<domain::Transaction>,
+
     #[graphql(skip)]
     _s: PhantomData<S>,
 }
@@ -582,7 +590,7 @@ impl<S: Storage> UnshieldedUtxo<S> {
 
 impl<S: Storage> From<(domain::UnshieldedUtxo, NetworkId)> for UnshieldedUtxo<S> {
     fn from((domain_utxo, network_id): (domain::UnshieldedUtxo, NetworkId)) -> Self {
-        let owner_bech32m = indexer_common::domain::unshielded::to_bech32m(
+        let owner_bech32m = indexer_common::domain::unshielded::bech32m_encode(
             domain_utxo.owner_address.as_ref(),
             network_id,
         )
@@ -601,10 +609,55 @@ impl<S: Storage> From<(domain::UnshieldedUtxo, NetworkId)> for UnshieldedUtxo<S>
     }
 }
 
-/// Bech32m-encoded address, e.g. `mn_addr_test1…`
+/// Bech32m-encoded address, e.g. `mn_addr_test1…`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct UnshieldedAddress(pub String);
+
 scalar!(UnshieldedAddress);
+
+impl UnshieldedAddress {
+    /// Converts this API address into a domain address, validating the bech32m format and
+    /// network ID.
+    ///
+    /// Format expectations:
+    /// - For mainnet: "mn_addr" + bech32m data
+    /// - For other networks: "mn_addr_" + network-id + bech32m data where network-id is one of:
+    ///   "dev", "test", "undeployed"
+    pub fn try_into_domain(
+        self,
+        network_id: NetworkId,
+    ) -> Result<CommonUnshieldedAddress, UnshieldedAddressFormatError> {
+        let (hrp, bytes) = bech32::decode(&self.0).map_err(UnshieldedAddressFormatError::Decode)?;
+        let hrp = hrp.to_lowercase();
+
+        let Some(n) = hrp.strip_prefix("mn_addr") else {
+            return Err(UnshieldedAddressFormatError::InvalidHrp(hrp));
+        };
+        let n = n.strip_prefix("_").unwrap_or(n).try_into()?;
+        if n != network_id {
+            return Err(UnshieldedAddressFormatError::UnexpectedNetworkId(
+                n, network_id,
+            ));
+        }
+
+        Ok(CommonUnshieldedAddress::from(bytes))
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum UnshieldedAddressFormatError {
+    #[error("cannot bech32m-decode unshielded address")]
+    Decode(#[from] bech32::DecodeError),
+
+    #[error("invalid bech32m HRP {0}, expected 'mn_addr' prefix")]
+    InvalidHrp(String),
+
+    #[error(transparent)]
+    TryFromStrForNetworkIdError(#[from] UnknownNetworkIdError),
+
+    #[error("network ID mismatch: got {0}, expected {1}")]
+    UnexpectedNetworkId(NetworkId, NetworkId),
+}
 
 /// Types of events emitted by the unshielded UTXO subscription
 #[derive(Enum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -638,21 +691,12 @@ enum UnshieldedOffset {
     TransactionOffset(TransactionOffset),
 }
 
-impl UnshieldedAddress {
-    pub fn try_into_domain(
-        self,
-        network_id: NetworkId,
-    ) -> Result<CommonUnshieldedAddress, UnshieldedAddressFormatError> {
-        domain::UnshieldedAddress(self.0).try_into_domain(network_id)
-    }
-}
-
 /// Convert GraphQL wrapper into the raw-bytes domain type.
 fn addr_to_common(
     addr: &UnshieldedAddress,
     network_id: NetworkId,
 ) -> async_graphql::Result<CommonUnshieldedAddress> {
-    addr.clone()
+    addr.to_owned()
         .try_into_domain(network_id)
         .map_err(|error| async_graphql::Error::new(error.to_string()))
 }

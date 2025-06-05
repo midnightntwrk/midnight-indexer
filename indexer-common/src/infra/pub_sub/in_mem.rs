@@ -124,9 +124,8 @@ mod tests {
         let mut utxo_messages = subscriber.subscribe::<UnshieldedUtxoIndexed>();
 
         let utxo_changed = UnshieldedUtxoIndexed {
-            address_bech32m:
-                "mn_addr_undeployed1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0uyxmn"
-                    .to_string(),
+            address: "mn_addr_undeployed1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0uyxmn"
+                .to_string(),
             transaction_id: 1,
         };
         pub_sub.publisher().publish(&utxo_changed).await?;

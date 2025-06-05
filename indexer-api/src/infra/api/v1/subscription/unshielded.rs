@@ -89,7 +89,10 @@ where
         let stream = try_stream! {
             // Create a drop guard that logs when the subscription ends
             let _guard = scopeguard::guard((), |_| {
-                debug!("unshielded UTXO subscription dropped for address: {:?}", &requested.0);
+                debug!(
+                    "unshielded UTXO subscription dropped for address: {:?}",
+                    &requested.0
+                );
             });
 
             let mut utxo_stream = pin!(utxo_stream);
@@ -108,13 +111,12 @@ where
                 select! {
                     event_result = utxo_stream.try_next() => {
                         match event_result {
-                            Ok(Some(UnshieldedUtxoIndexed { address_bech32m, transaction_id })) => {
-                                if address_bech32m != requested.0 {
+                            Ok(Some(UnshieldedUtxoIndexed { address, transaction_id })) => {
+                                if address != requested.0 {
                                     continue;
                                 }
 
-                                debug!("handling UnshieldedUtxoIndexed event, address: {:?}, tx_id: {:?}",
-                                      &address_bech32m, &transaction_id);
+                                debug!(address, transaction_id; "handling UnshieldedUtxoIndexed event");
 
                                 let tx = storage
                                     .get_transaction_by_id(transaction_id)
@@ -150,10 +152,12 @@ where
                                         .collect(),
                                 };
                             }
+
                             Ok(None) => {
                                 warn!("stream of UnshieldedUtxoIndexed ended unexpectedly");
                                 break;
                             }
+
                             Err(error) => {
                                 error!(error = error.as_chain(); "cannot get next UnshieldedUtxoIndexed");
                                 break;
@@ -163,12 +167,13 @@ where
 
                     // Emit periodic PROGRESS events
                     _ = keep_alive.tick() => {
-                        debug!("emitting PROGRESS event for address: {:?}", &requested.0);
+                        debug!(address = requested.0; "emitting PROGRESS event");
 
                         // For PROGRESS events, we need a transaction to include
                         // If we don't have one for this address, we'll get the latest one from the chain
                         let tx = match &last_transaction {
-                            Some(tx) => tx.clone(),
+                            Some(tx) => tx.to_owned(),
+
                             None => {
                                 // Try to get the latest transaction from the chain
                                 match storage.get_latest_block().await {
@@ -177,6 +182,7 @@ where
                                             Ok(transactions) if !transactions.is_empty() => {
                                                 transactions.into_iter().next().unwrap()
                                             }
+
                                             _ => {
                                                 // No transactions available, skip this PROGRESS event
                                                 continue;

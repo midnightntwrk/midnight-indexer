@@ -55,12 +55,15 @@ pub struct WalletIndexed {
 message!(WalletIndexed);
 
 /// Emitted when a transaction affecting unshielded UTXOs for a concrete address
-/// has been stored in the DB.  `address_bech32m` uses the same text
+/// has been stored in the DB. `address` uses the same text
 /// representation the GraphQL scalar expects, so the subscription layer never
 /// needs to guess the network prefix.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnshieldedUtxoIndexed {
-    pub address_bech32m: String,
+    /// Bech32m-encoded address, e.g. `mn_addr_test1…`.
+    pub address: String,
+
+    // Transaction ID.
     pub transaction_id: u64,
 }
 message!(UnshieldedUtxoIndexed);

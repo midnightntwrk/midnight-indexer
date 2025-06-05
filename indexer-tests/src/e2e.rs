@@ -40,9 +40,9 @@ use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::{
     domain::{AsBytesExt, HexEncoded, ViewingKey},
-    infra::api::v1::TransactionResultStatus,
+    infra::api::v1::{TransactionResultStatus, UnshieldedAddress},
 };
-use indexer_common::domain::{NetworkId, unshielded::to_bech32m};
+use indexer_common::domain::{NetworkId, unshielded::bech32m_encode};
 use itertools::Itertools;
 use midnight_serialize::Serializable;
 use midnight_transient_crypto::encryption::SecretKey;
@@ -495,7 +495,6 @@ async fn test_unshielded_utxo_queries(
     api_url: &str,
 ) -> anyhow::Result<()> {
     use graphql::graphql_types::*;
-    use indexer_api::domain::UnshieldedAddress;
 
     // Test with addresses that have UTXOs
     for expected_utxo in &indexer_data.unshielded_utxos {
@@ -520,7 +519,7 @@ async fn test_unshielded_utxo_queries(
     // Test with unknown address (should return empty)
     const NETWORK_ID: NetworkId = NetworkId::Undeployed;
     let unknown_addr_bytes = [0x99u8; 4]; // Some address that doesn't exist
-    let unknown_bech32m = to_bech32m(&unknown_addr_bytes, NETWORK_ID)?;
+    let unknown_bech32m = bech32m_encode(unknown_addr_bytes, NETWORK_ID)?;
     let unknown_addr = UnshieldedAddress(unknown_bech32m);
 
     let variables = unshielded_utxos_query::Variables {
@@ -677,7 +676,7 @@ async fn test_unshielded_utxo_subscription(
 
     assert!(!utxo_addresses.is_empty());
 
-    let unshielded_address = indexer_api::domain::UnshieldedAddress(utxo_addresses[0].clone().0);
+    let unshielded_address = UnshieldedAddress(utxo_addresses[0].clone().0);
 
     let variables = unshielded_utxos_subscription::Variables {
         address: unshielded_address.clone(),
@@ -735,8 +734,8 @@ async fn test_unshielded_utxo_subscription(
     // Additional test with address that has no UTXOs
     const NETWORK_ID: NetworkId = NetworkId::Undeployed;
     let empty_addr_bytes = [0x11, 0x22, 0x33, 0x44]; // Raw bytes for a non-existent address
-    let empty_addr_bech32m = to_bech32m(&empty_addr_bytes, NETWORK_ID)?;
-    let empty_address = indexer_api::domain::UnshieldedAddress(empty_addr_bech32m);
+    let empty_addr_bech32m = bech32m_encode(empty_addr_bytes, NETWORK_ID)?;
+    let empty_address = UnshieldedAddress(empty_addr_bech32m);
 
     let empty_variables = unshielded_utxos_subscription::Variables {
         address: empty_address,
@@ -1028,8 +1027,8 @@ fn seed_to_secret_key(seed: &str) -> SecretKey {
 mod graphql {
     use graphql_client::GraphQLQuery;
     use indexer_api::{
-        domain::{HexEncoded, UnshieldedAddress, ViewingKey},
-        infra::api::v1::Unit,
+        domain::{HexEncoded, ViewingKey},
+        infra::api::v1::{Unit, UnshieldedAddress},
     };
 
     #[derive(GraphQLQuery)]
@@ -1062,7 +1061,8 @@ mod graphql {
     // customise the derive to return our own error.
     pub mod graphql_types {
         use graphql_client::GraphQLQuery;
-        use indexer_api::domain::{HexEncoded, UnshieldedAddress};
+        use indexer_api::{domain::HexEncoded, infra::api::v1::UnshieldedAddress};
+
         #[derive(GraphQLQuery)]
         #[graphql(
             schema_path = "../indexer-api/graphql/schema-v1.graphql",

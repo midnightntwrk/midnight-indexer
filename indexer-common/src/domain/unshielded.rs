@@ -18,7 +18,7 @@ use thiserror::Error;
 /// Human-readable part base prefix for unshielded addresses.
 pub const HRP_UNSHIELDED_BASE: &str = "mn_addr";
 
-/// Errors returned by [`to_bech32m`] and [`from_bech32m`].
+/// Errors returned by [`bech32m_encode`] and [`bech32m_decode`].
 #[derive(Debug, Error)]
 pub enum UnshieldedAddressError {
     #[error("cannot bech32m-decode unshielded address")]
@@ -32,25 +32,27 @@ pub enum UnshieldedAddressError {
 }
 
 /// Encode raw bytes into a Bech32m address.
-pub fn to_bech32m(bytes: &[u8], network: NetworkId) -> Result<String, UnshieldedAddressError> {
+pub fn bech32m_encode(
+    bytes: impl AsRef<[u8]>,
+    network: NetworkId,
+) -> Result<String, UnshieldedAddressError> {
     // Build HRP following wallet spec pattern
-    let hrp_str = match network {
+    let hrp = match network {
         NetworkId::MainNet => HRP_UNSHIELDED_BASE.to_string(),
         NetworkId::DevNet => format!("{}_dev", HRP_UNSHIELDED_BASE),
         NetworkId::TestNet => format!("{}_test", HRP_UNSHIELDED_BASE),
         NetworkId::Undeployed => format!("{}_undeployed", HRP_UNSHIELDED_BASE),
     };
+    let hrp = Hrp::parse(&hrp).map_err(|_| UnshieldedAddressError::InvalidHrp(hrp.clone()))?;
 
-    let hrp =
-        Hrp::parse(&hrp_str).map_err(|_| UnshieldedAddressError::InvalidHrp(hrp_str.clone()))?;
-    encode::<Bech32m>(hrp, bytes).map_err(Into::into)
+    encode::<Bech32m>(hrp, bytes.as_ref()).map_err(Into::into)
 }
 
-/// Decode a Bech32m string back to the raw bytes stored in DB.
-pub fn from_bech32m(s: &str) -> Result<Vec<u8>, UnshieldedAddressError> {
+/// Decode a Bech32m string back to raw bytes.
+pub fn bech32m_decode(s: &str) -> Result<Vec<u8>, UnshieldedAddressError> {
     let (hrp, data) = decode(s)?;
-    let hrp_str = hrp.to_lowercase();
 
+    let hrp_str = hrp.to_lowercase();
     if !hrp_str.starts_with(HRP_UNSHIELDED_BASE) {
         return Err(UnshieldedAddressError::InvalidHrp(hrp_str));
     }
@@ -62,14 +64,14 @@ pub fn from_bech32m(s: &str) -> Result<Vec<u8>, UnshieldedAddressError> {
 mod tests {
     use crate::domain::{
         NetworkId::TestNet,
-        unshielded::{from_bech32m, to_bech32m},
+        unshielded::{bech32m_decode, bech32m_encode},
     };
 
     #[test]
     fn roundtrip() {
         let bytes = vec![0u8; 32];
-        let addr = to_bech32m(&bytes, TestNet).unwrap();
-        let decoded = from_bech32m(&addr).unwrap();
+        let addr = bech32m_encode(&bytes, TestNet).unwrap();
+        let decoded = bech32m_decode(&addr).unwrap();
         assert_eq!(decoded, bytes);
     }
 }
