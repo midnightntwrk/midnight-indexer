@@ -29,7 +29,10 @@ use indexer_common::{
 };
 use indoc::indoc;
 use log::debug;
-use sqlx::types::{Uuid, time::OffsetDateTime};
+use sqlx::{
+    Row,
+    types::{Uuid, time::OffsetDateTime},
+};
 use std::num::NonZeroU32;
 
 /// Postgres based implementation of [Storage].
@@ -879,6 +882,51 @@ impl Storage for PostgresStorage {
             .await?;
 
         Ok(transactions)
+    }
+
+    #[trace]
+    async fn get_highest_transaction_end_index(&self) -> Result<Option<u64>, sqlx::Error> {
+        let sql = indoc! {"
+            SELECT MAX(end_index) as highest_index
+            FROM transactions
+        "};
+
+        let row = sqlx::query(sql).fetch_optional(&*self.pool).await?;
+
+        let highest_index = row
+            .and_then(|row| row.try_get::<Option<i64>, _>("highest_index").ok())
+            .flatten()
+            .map(|idx| idx as u64);
+
+        Ok(highest_index)
+    }
+
+    #[trace]
+    async fn get_highest_end_index_for_address(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> Result<Option<u64>, sqlx::Error> {
+        let sql = indoc! {"
+            SELECT MAX(t.end_index) as highest_index
+            FROM transactions t
+            JOIN unshielded_utxos u ON (
+                u.creating_transaction_id = t.id OR
+                u.spending_transaction_id = t.id
+            )
+            WHERE u.owner_address = $1
+        "};
+
+        let row = sqlx::query(sql)
+            .bind(address.as_ref())
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        let highest_index = row
+            .and_then(|row| row.try_get::<Option<i64>, _>("highest_index").ok())
+            .flatten()
+            .map(|idx| idx as u64);
+
+        Ok(highest_index)
     }
 }
 
