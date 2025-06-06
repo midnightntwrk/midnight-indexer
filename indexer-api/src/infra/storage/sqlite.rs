@@ -58,6 +58,43 @@ impl SqliteStorage {
 
         Ok(identifiers)
     }
+
+    async fn get_identifiers_for_transactions(
+        &self,
+        transaction_ids: &[u64],
+    ) -> Result<std::collections::HashMap<u64, Vec<Identifier>>, sqlx::Error> {
+        if transaction_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let placeholders: Vec<String> = (0..transaction_ids.len())
+            .map(|i| format!("${}", i + 1))
+            .collect();
+        let query = format!(
+            "SELECT transaction_id, identifier FROM transaction_identifiers WHERE transaction_id IN ({})",
+            placeholders.join(", ")
+        );
+
+        let mut query_builder = sqlx::query(&query);
+        for &id in transaction_ids {
+            query_builder = query_builder.bind(id as i64);
+        }
+
+        let rows = query_builder.fetch_all(&*self.pool).await?;
+
+        let mut result = std::collections::HashMap::new();
+        for row in rows {
+            let transaction_id: i64 = row.try_get("transaction_id")?;
+            let identifier: Vec<u8> = row.try_get("identifier")?;
+
+            result
+                .entry(transaction_id as u64)
+                .or_insert_with(Vec::new)
+                .push(identifier.into());
+        }
+
+        Ok(result)
+    }
 }
 
 impl Storage for SqliteStorage {}

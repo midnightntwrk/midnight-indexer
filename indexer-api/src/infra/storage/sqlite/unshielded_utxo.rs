@@ -27,7 +27,6 @@ impl UnshieldedUtxoStorage for SqliteStorage {
         address: Option<&UnshieldedAddress>,
         filter: UnshieldedUtxoFilter<'_>,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
-        // Build the appropriate SQL based on filter type
         let sql = match (&address, &filter) {
             (Some(_), UnshieldedUtxoFilter::All) => {
                 indoc! {"
@@ -160,23 +159,60 @@ impl UnshieldedUtxoStorage for SqliteStorage {
             _ => {}
         };
 
-        // Execute query and get results
         let mut utxos = query.fetch_all(&*self.pool).await?;
-
-        // Process results.
-        self.enrich_utxos_with_transaction_data(&mut utxos).await?;
+        self.enrich_utxos_with_transaction_data_optimized(&mut utxos)
+            .await?;
 
         Ok(utxos)
     }
 }
 
 impl SqliteStorage {
-    async fn enrich_utxos_with_transaction_data(
+    async fn enrich_utxos_with_transaction_data_optimized(
         &self,
         utxos: &mut [UnshieldedUtxo],
     ) -> Result<(), sqlx::Error> {
+        if utxos.is_empty() {
+            return Ok(());
+        }
+
+        let mut transaction_ids = std::collections::HashSet::new();
+        for utxo in utxos.iter() {
+            transaction_ids.insert(utxo.creating_transaction_id);
+            if let Some(spending_id) = utxo.spending_transaction_id {
+                transaction_ids.insert(spending_id);
+            }
+        }
+
+        let transaction_ids: Vec<u64> = transaction_ids.into_iter().collect();
+
+        let transactions_map = self.get_transactions_by_ids(&transaction_ids).await?;
+
         for utxo in utxos {
-            let sql = indoc! {"
+            utxo.created_at_transaction =
+                transactions_map.get(&utxo.creating_transaction_id).cloned();
+
+            if let Some(spending_id) = utxo.spending_transaction_id {
+                utxo.spent_at_transaction = transactions_map.get(&spending_id).cloned();
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn get_transactions_by_ids(
+        &self,
+        transaction_ids: &[u64],
+    ) -> Result<std::collections::HashMap<u64, Transaction>, sqlx::Error> {
+        if transaction_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let placeholders: Vec<String> = (0..transaction_ids.len())
+            .map(|i| format!("${}", i + 1))
+            .collect();
+        let query = format!(
+            indoc! {"
                 SELECT
                     transactions.id, transactions.hash, blocks.hash as block_hash,
                     transactions.protocol_version, transactions.transaction_result,
@@ -184,36 +220,34 @@ impl SqliteStorage {
                     transactions.start_index, transactions.end_index
                 FROM transactions
                 INNER JOIN blocks ON blocks.id = transactions.block_id
-                WHERE transactions.id = ?
-            "};
+                WHERE transactions.id IN ({})
+            "},
+            placeholders.join(", ")
+        );
 
-            let mut creating_tx = sqlx::query_as::<_, Transaction>(sql)
-                .bind(utxo.creating_transaction_id as i64)
-                .fetch_optional(&*self.pool)
-                .await?;
-
-            if let Some(t) = &mut creating_tx {
-                t.identifiers = self.get_identifiers_by_transaction_id(t.id).await?;
-            }
-
-            utxo.created_at_transaction = creating_tx;
-
-            if let Some(spending_tx_id) = utxo.spending_transaction_id {
-                let mut spending_tx = sqlx::query_as::<_, Transaction>(sql)
-                    .bind(spending_tx_id as i64)
-                    .fetch_optional(&*self.pool)
-                    .await?;
-
-                if let Some(transaction) = &mut spending_tx {
-                    transaction.identifiers = self
-                        .get_identifiers_by_transaction_id(transaction.id)
-                        .await?;
-                }
-
-                utxo.spent_at_transaction = spending_tx;
-            }
+        let mut query_builder = sqlx::query_as::<_, Transaction>(&query);
+        for &id in transaction_ids {
+            query_builder = query_builder.bind(id as i64);
         }
 
-        Ok(())
+        let mut transactions = query_builder.fetch_all(&*self.pool).await?;
+
+        let identifiers_map = self
+            .get_identifiers_for_transactions(transaction_ids)
+            .await?;
+
+        for transaction in &mut transactions {
+            transaction.identifiers = identifiers_map
+                .get(&transaction.id)
+                .cloned()
+                .unwrap_or_default();
+        }
+
+        let mut result = std::collections::HashMap::new();
+        for transaction in transactions {
+            result.insert(transaction.id, transaction);
+        }
+
+        Ok(result)
     }
 }
