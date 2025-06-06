@@ -684,13 +684,13 @@ pub enum UnshieldedAddressFormatError {
     UnexpectedNetworkId(NetworkId, NetworkId),
 }
 
-/// Types of events emitted by the unshielded UTXO subscription
-#[derive(Enum, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UnshieldedUtxoEventType {
-    /// Indicates a transaction that created or spent UTXOs for the address
-    UPDATE,
-    /// Status message for synchronization progress or keep-alive
-    PROGRESS,
+/// Progress tracking information for unshielded token synchronization
+#[derive(SimpleObject, Clone, Debug)]
+pub struct UnshieldedProgress {
+    /// The highest end index of all currently known transactions
+    highest_index: u64,
+    /// The current end index for this address
+    current_index: u64,
 }
 
 /// Payload emitted by `subscription { unshieldedUtxos … }`
@@ -699,14 +699,15 @@ struct UnshieldedUtxoEvent<S>
 where
     S: Storage,
 {
-    /// The type of event - UPDATE for changes, PROGRESS for status messages
-    event_type: UnshieldedUtxoEventType,
-    /// The transaction associated with this event
-    transaction: Transaction<S>,
-    /// UTXOs created in this transaction for the subscribed address
-    created_utxos: Vec<UnshieldedUtxo<S>>,
-    /// UTXOs spent in this transaction for the subscribed address
-    spent_utxos: Vec<UnshieldedUtxo<S>>,
+    /// Progress information for wallet synchronization (always present)
+    progress: UnshieldedProgress,
+    /// The transaction associated with this event (present for actual updates)
+    transaction: Option<Transaction<S>>,
+    /// UTXOs created in this transaction for the subscribed address (None for progress-only
+    /// events)
+    created_utxos: Option<Vec<UnshieldedUtxo<S>>>,
+    /// UTXOs spent in this transaction for the subscribed address (None for progress-only events)
+    spent_utxos: Option<Vec<UnshieldedUtxo<S>>>,
 }
 
 /// Either a [BlockOffset] or a [TransactionOffset] to query for a [UnshieldedUtxo].

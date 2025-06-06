@@ -15,22 +15,20 @@ use crate::{
     domain::storage::{Storage, unshielded_utxo::UnshieldedUtxoFilter},
     infra::api::{
         ContextExt, ResultExt,
-        v1::{UnshieldedAddress, UnshieldedUtxo, UnshieldedUtxoEvent, UnshieldedUtxoEventType},
+        v1::{UnshieldedAddress, UnshieldedProgress, UnshieldedUtxo, UnshieldedUtxoEvent},
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
 use fastrace::trace;
-use futures::{Stream, TryStreamExt};
-use indexer_common::{
-    domain::{Subscriber, UnshieldedUtxoIndexed},
-    error::{NotFoundError, StdErrorExt},
-};
-use log::{debug, error, warn};
-use std::{marker::PhantomData, pin::pin, time::Duration};
-use tokio::{
-    select,
-    time::{MissedTickBehavior, interval},
-};
+use futures::{Stream, StreamExt, stream::TryStreamExt};
+use indexer_common::domain::{ByteVec, NetworkId, Subscriber, UnshieldedUtxoIndexed};
+use log::{debug, warn};
+use std::{future::ready, marker::PhantomData, pin::pin, time::Duration};
+use tokio::time::interval;
+use tokio_stream::wrappers::IntervalStream;
+
+// TODO: Make configurable!
+const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Same skeleton pattern as block / contract / wallet subscriptions
 pub struct UnshieldedSubscription<S, B> {
@@ -74,143 +72,170 @@ where
         address: UnshieldedAddress,
     ) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<UnshieldedUtxoEvent<S>>> + 'a>
     {
-        let subscriber = cx.get_subscriber::<B>();
-        let storage = cx.get_storage::<S>();
+        let encoded_address = address.0.clone();
         let network_id = cx.get_network_id();
+        let address = address
+            .try_into_domain(network_id)
+            .internal("convert address into domain address")?;
 
-        let utxo_stream = subscriber.subscribe::<UnshieldedUtxoIndexed>();
-
-        let stream = try_stream! {
-            let encoded_address = &address.0;
-            let address = address
-                .try_into_domain(network_id)
-                .internal("convert address into domain address")?;
-
-            // TODO: What's the value of this? Should we remove it?
-            // Create a drop guard that logs when the subscription ends.
-            let _guard = scopeguard::guard((), |_| {
-                debug!(address = encoded_address; "unshielded UTXO subscription dropped");
+        let encoded_address_for_update = encoded_address.clone();
+        let update_events = unshielded_updates::<S, B>(cx, address.clone(), network_id)
+            .await?
+            .map_ok(move |event| {
+                debug!(address = encoded_address_for_update; "emitting UPDATE event");
+                event
             });
 
-            let mut utxo_stream = pin!(utxo_stream);
+        let encoded_address_for_progress = encoded_address.clone();
+        let progress_updates = progress_updates::<S>(cx, address)
+            .await?
+            .map_ok(move |event| {
+                debug!(address = encoded_address_for_progress; "emitting PROGRESS event");
+                event
+            });
 
-            let mut keep_alive = interval(Duration::from_secs(30));
-            keep_alive.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let events = tokio_stream::StreamExt::merge(update_events, progress_updates);
 
-            let mut last_transaction = storage
-                .get_transactions_involving_unshielded(&address)
-                .await
-                .internal("get latest transaction for address")?
-                .into_iter()
-                .next();
-
-            loop {
-                select! {
-                            event_result = utxo_stream.try_next() => {
-                                match event_result {
-                                    Ok(Some(UnshieldedUtxoIndexed { address: a, transaction_id })) => {
-                                        if a != address {
-                                            continue;
-                                        }
-
-                                        debug!(
-                                            address = encoded_address,
-                                            transaction_id;
-                                            "handling UnshieldedUtxoIndexed event"
-                                        );
-
-                                        let tx = storage
-                                            .get_transaction_by_id(transaction_id)
-                                            .await
-                                            .internal("cannot get transaction by ID").unwrap()
-                                            .ok_or_else(|| NotFoundError(format!("transaction with ID {transaction_id}")))
-                                            .internal("cannot get transaction by ID").unwrap();
-
-                                        last_transaction = Some(tx.clone());
-
-                                        let created = storage
-                                            .get_unshielded_utxos(
-                                                Some(&address),
-                                                UnshieldedUtxoFilter::CreatedInTxForAddress(transaction_id),
-                                            )
-                                            .await
-                                            .internal("fetch created UTXOs").unwrap();
-
-                                        let spent = storage
-                                            .get_unshielded_utxos(
-                                                Some(&address),
-                                                UnshieldedUtxoFilter::SpentInTxForAddress(transaction_id),
-                                            )
-                                            .await
-                                            .internal("fetch spent UTXOs").unwrap();
-
-                                        yield UnshieldedUtxoEvent {
-                                            event_type: UnshieldedUtxoEventType::UPDATE,
-                                            transaction: tx.into(),
-                                            created_utxos: created.into_iter()
-                                                .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                                                .collect(),
-                                            spent_utxos: spent.into_iter()
-                                                .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                                                .collect(),
-                                        };
-                                    }
-
-                                    Ok(None) => {
-                                        warn!("stream of UnshieldedUtxoIndexed ended unexpectedly");
-                                        break;
-                                    }
-
-                                    Err(error) => {
-                                        error!(error = error.as_chain(); "cannot get next UnshieldedUtxoIndexed");
-                                        break;
-                                    }
-                                }
-                            }
-
-                            // Emit periodic PROGRESS events
-                            _ = keep_alive.tick() => {
-                                debug!(address = encoded_address; "emitting PROGRESS event");
-
-                                // For PROGRESS events, we need a transaction to include
-                                // If we don't have one for this address, we'll get the latest one from the chain
-                                let tx = match &last_transaction {
-                                    Some(tx) => tx.to_owned(),
-
-                                    None => {
-                                        // Try to get the latest transaction from the chain
-                                        match storage.get_latest_block().await {
-                                            Ok(Some(block)) => {
-                                                match storage.get_transactions_by_block_id(block.id).await {
-                                                    Ok(transactions) if !transactions.is_empty() => {
-                                                        transactions.into_iter().next().unwrap()
-                                                    }
-
-                                                    _ => {
-                                                        // No transactions available, skip this PROGRESS event
-                                                        continue;
-                                                    }
-                                                }
-                                            }
-                                            _ => {
-                                                // Can't get latest block, skip this PROGRESS event
-                                                continue;
-                                            }
-                                        }
-                                    }
-                                };
-
-                                yield UnshieldedUtxoEvent {
-                                    event_type: UnshieldedUtxoEventType::PROGRESS,
-                                    transaction: tx.into(),
-                                    created_utxos: Vec::new(),
-                                    spent_utxos: Vec::new(),
-                                };
-                            }
-                        }
-            }
-        };
-
-        Ok(stream)
+        Ok(events)
     }
+}
+
+#[trace(properties = { "address": "{address:?}" })]
+async fn unshielded_updates<'a, S, B>(
+    cx: &'a Context<'a>,
+    address: ByteVec,
+    network_id: NetworkId,
+) -> async_graphql::Result<
+    impl Stream<Item = async_graphql::Result<UnshieldedUtxoEvent<S>>> + use<'a, S, B>,
+>
+where
+    S: Storage,
+    B: Subscriber,
+{
+    let storage = cx.get_storage::<S>();
+    let subscriber = cx.get_subscriber::<B>();
+
+    let address_for_filter = address.clone();
+    let utxo_indexed_events = subscriber
+        .subscribe::<UnshieldedUtxoIndexed>()
+        .try_filter(move |event| ready(event.address == address_for_filter));
+
+    let updates = try_stream! {
+        // Create a drop guard that logs when the subscription ends.
+        let _guard = scopeguard::guard((), |_| {
+            debug!(address:?; "unshielded UTXO subscription dropped");
+        });
+
+        let mut utxo_indexed_events = pin!(utxo_indexed_events);
+        while let Some(UnshieldedUtxoIndexed { address: _, transaction_id }) = utxo_indexed_events
+            .try_next()
+            .await
+            .internal("get next UnshieldedUtxoIndexed event")?
+        {
+            debug!(
+                address:?,
+                transaction_id;
+                "handling UnshieldedUtxoIndexed event"
+            );
+
+            let tx = storage
+                .get_transaction_by_id(transaction_id)
+                .await
+                .internal("fetch tx for subscription event")?;
+
+            let created = storage
+                .get_unshielded_utxos(
+                    Some(&address),
+                    UnshieldedUtxoFilter::CreatedInTxForAddress(transaction_id),
+                )
+                .await
+                .internal("fetch created UTXOs")?;
+
+            let spent = storage
+                .get_unshielded_utxos(
+                    Some(&address),
+                    UnshieldedUtxoFilter::SpentInTxForAddress(transaction_id),
+                )
+                .await
+                .internal("fetch spent UTXOs")?;
+
+            let highest_index = storage
+                .get_highest_transaction_end_index()
+                .await
+                .internal("fetch highest transaction end index")?
+                .unwrap_or(0);
+
+            let current_index = tx.end_index;
+
+            let progress = UnshieldedProgress {
+                highest_index,
+                current_index,
+            };
+
+            yield UnshieldedUtxoEvent {
+                progress,
+                transaction: Some(tx.into()),
+                created_utxos: Some(created.into_iter()
+                    .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                    .collect()),
+                spent_utxos: Some(spent.into_iter()
+                    .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                    .collect()),
+            };
+        }
+
+        warn!("stream of UnshieldedUtxoIndexed events completed unexpectedly");
+    };
+
+    Ok(updates)
+}
+
+async fn progress_updates<'a, S>(
+    cx: &'a Context<'a>,
+    address: ByteVec,
+) -> async_graphql::Result<
+    impl Stream<Item = async_graphql::Result<UnshieldedUtxoEvent<S>>> + use<'a, S>,
+>
+where
+    S: Storage,
+{
+    let storage = cx.get_storage::<S>();
+
+    let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
+    let updates = intervals.then(move |_| progress_update(address.clone(), storage));
+
+    Ok(updates)
+}
+
+async fn progress_update<S>(
+    address: ByteVec,
+    storage: &S,
+) -> async_graphql::Result<UnshieldedUtxoEvent<S>>
+where
+    S: Storage,
+{
+    // Calculate progress information
+    let highest_index = storage
+        .get_highest_transaction_end_index()
+        .await
+        .internal("fetch highest transaction end index")?
+        .unwrap_or(0);
+
+    let current_index = storage
+        .get_highest_end_index_for_address(&address)
+        .await
+        .internal("fetch highest end index for address")?
+        .unwrap_or(0);
+
+    let progress = UnshieldedProgress {
+        highest_index,
+        current_index,
+    };
+
+    Ok(UnshieldedUtxoEvent {
+        progress,
+        transaction: None,
+        created_utxos: None,
+        spent_utxos: None,
+    })
 }

@@ -311,6 +311,20 @@ input UnshieldedOffset @oneOf {
 }
 
 """
+Progress tracking information for unshielded token synchronization
+"""
+type UnshieldedProgress {
+	"""
+	The highest end index of all currently known transactions
+	"""
+	highestIndex: Int!
+	"""
+	The current end index for this address
+	"""
+	currentIndex: Int!
+}
+
+"""
 Represents an unshielded UTXO.
 """
 type UnshieldedUtxo {
@@ -349,35 +363,22 @@ Payload emitted by `subscription { unshieldedUtxos … }`
 """
 type UnshieldedUtxoEvent {
 	"""
-	The type of event - UPDATE for changes, PROGRESS for status messages
+	Progress information for wallet synchronization (always present)
 	"""
-	eventType: UnshieldedUtxoEventType!
+	progress: UnshieldedProgress!
 	"""
-	The transaction associated with this event
+	The transaction associated with this event (present for actual updates)
 	"""
-	transaction: Transaction!
+	transaction: Transaction
 	"""
-	UTXOs created in this transaction for the subscribed address
+	UTXOs created in this transaction for the subscribed address (None for progress-only
+	events)
 	"""
-	createdUtxos: [UnshieldedUtxo!]!
+	createdUtxos: [UnshieldedUtxo!]
 	"""
-	UTXOs spent in this transaction for the subscribed address
+	UTXOs spent in this transaction for the subscribed address (None for progress-only events)
 	"""
-	spentUtxos: [UnshieldedUtxo!]!
-}
-
-"""
-Types of events emitted by the unshielded UTXO subscription
-"""
-enum UnshieldedUtxoEventType {
-	"""
-	Indicates a transaction that created or spent UTXOs for the address
-	"""
-	UPDATE
-	"""
-	Status message for synchronization progress or keep-alive
-	"""
-	PROGRESS
+	spentUtxos: [UnshieldedUtxo!]
 }
 
 scalar ViewingKey

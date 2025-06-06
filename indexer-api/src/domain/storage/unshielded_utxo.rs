@@ -42,6 +42,12 @@ where
         address: Option<&UnshieldedAddress>,
         filter: UnshieldedUtxoFilter<'_>,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
+
+    /// Get the highest end_index for transactions involving the given unshielded address.
+    async fn get_highest_end_index_for_address(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> Result<Option<u64>, sqlx::Error>;
 }
 
 /// Filter criteria for unshielded UTXOs queries.
