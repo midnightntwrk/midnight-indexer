@@ -38,6 +38,7 @@ where
         + Sync
         + 'static,
 {
+
 }
 
 /// Just needed as a type argument for `infra::api::export_schema` which should not depend on any
