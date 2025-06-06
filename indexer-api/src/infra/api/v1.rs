@@ -606,7 +606,15 @@ impl<S: Storage> From<(domain::UnshieldedUtxo, NetworkId)> for UnshieldedUtxo<S>
     }
 }
 
-/// Bech32m-encoded address, e.g. `mn_addr_test1…`.
+/// Bech32m-encoded unshielded address.
+///
+/// Format:
+/// - MainNet: `mn_addr` + bech32m data
+/// - DevNet: `mn_addr_dev` + bech32m data
+/// - TestNet: `mn_addr_test` + bech32m data
+/// - Undeployed: `mn_addr_undeployed` + bech32m data
+///
+/// The inner string is validated to ensure proper bech32m-encoding and correct HRP prefix.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct UnshieldedAddress(pub String);
 
@@ -621,13 +629,13 @@ impl UnshieldedAddress {
     /// - For other networks: "mn_addr_" + network-id + bech32m data where network-id is one of:
     ///   "dev", "test", "undeployed"
     pub fn try_into_domain(
-        self,
+        &self,
         network_id: NetworkId,
     ) -> Result<CommonUnshieldedAddress, UnshieldedAddressFormatError> {
         let (hrp, bytes) = bech32::decode(&self.0).map_err(UnshieldedAddressFormatError::Decode)?;
         let hrp = hrp.to_lowercase();
 
-        let Some(n) = hrp.strip_prefix("mn_addr") else {
+        let Some(n) = hrp.strip_prefix(HRP_UNSHIELDED_BASE) else {
             return Err(UnshieldedAddressFormatError::InvalidHrp(hrp));
         };
         let n = n.strip_prefix("_").unwrap_or(n).try_into()?;

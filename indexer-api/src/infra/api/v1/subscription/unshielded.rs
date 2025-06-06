@@ -78,15 +78,16 @@ where
         let storage = cx.get_storage::<S>();
         let network_id = cx.get_network_id();
 
-        let encoded_address = address.0.clone();
-        let address = address
-            .try_into_domain(network_id)
-            .internal("convert address into domain address")?;
-
         let utxo_stream = subscriber.subscribe::<UnshieldedUtxoIndexed>();
 
         let stream = try_stream! {
-            // Create a drop guard that logs when the subscription ends
+            let encoded_address = &address.0;
+            let address = address
+                .try_into_domain(network_id)
+                .internal("convert address into domain address")?;
+
+            // TODO: What's the value of this? Should we remove it?
+            // Create a drop guard that logs when the subscription ends.
             let _guard = scopeguard::guard((), |_| {
                 debug!(address = encoded_address; "unshielded UTXO subscription dropped");
             });

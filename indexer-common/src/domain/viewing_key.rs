@@ -16,25 +16,26 @@ use chacha20poly1305::{
     AeadCore, ChaCha20Poly1305,
     aead::{Aead, OsRng, Payload},
 };
-use derive_more::{AsRef, From, Into};
+use derive_more::From;
 use midnight_transient_crypto::encryption::SecretKey;
 use midnight_zswap::keys::SecretKeys;
 use sha2::{Digest, Sha256};
-use sqlx::{Type, types::Uuid};
+use sqlx::types::Uuid;
 use std::fmt::{self, Debug, Display};
 use thiserror::Error;
 
 /// A secret key that is encrypted at rest.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRef, From, Into, Type)]
-#[as_ref([u8])]
-#[sqlx(transparent)]
-pub struct ViewingKey(pub [u8; SecretKey::BYTES]);
+/// Attention: Do not leak the secret! The implementation must make sure that the secret cannot
+/// accidentally be accessed. The only access must be via the decrypt and encrypt methods.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, From)]
+pub struct ViewingKey([u8; SecretKey::BYTES]);
 
 impl ViewingKey {
-    /// Try to decrypt the given bytes as [ViewingKey].
+    /// Try to decrypt the given bytes as viewing key using ChaCha20Poly1305 AEAD with the given
+    /// nonce and ciphertext and the given wallet ID.
     pub fn decrypt(
         nonce_and_ciphertext: &[u8],
-        id: Uuid,
+        wallet_id: Uuid,
         cipher: &ChaCha20Poly1305,
     ) -> Result<Self, DecryptViewingKeyError> {
         let nonce = &nonce_and_ciphertext[0..12];
@@ -42,9 +43,10 @@ impl ViewingKey {
 
         let payload = Payload {
             msg: ciphertext,
-            aad: id.as_bytes(),
+            aad: wallet_id.as_bytes(),
         };
         let bytes = cipher.decrypt(nonce.into(), payload)?;
+
         let bytes = bytes
             .try_into()
             .map_err(|bytes: Vec<u8>| DecryptViewingKeyError::Array(bytes.len()))?;
@@ -52,7 +54,7 @@ impl ViewingKey {
         Ok(Self(bytes))
     }
 
-    /// Encrypt this [ViewingKey].
+    /// Encrypt this viewing key using ChaCha20Poly1305 AEAD.
     pub fn encrypt(
         &self,
         id: Uuid,
@@ -72,7 +74,7 @@ impl ViewingKey {
         Ok(nonce_and_ciphertext)
     }
 
-    /// Return the session ID for this [ViewingKey].
+    /// Return the session ID (Sha256 hash) for this viewing key.
     pub fn to_session_id(&self) -> SessionId {
         let mut hasher = Sha256::new();
         hasher.update(self.0);
@@ -91,12 +93,14 @@ impl ViewingKey {
 }
 
 impl Debug for ViewingKey {
+    /// Attention: Do not leak the secret!
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ViewingKey(REDACTED)")
     }
 }
 
 impl Display for ViewingKey {
+    /// Attention: Do not leak the secret!
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "REDACTED")
     }
@@ -109,6 +113,7 @@ impl TryFrom<&[u8]> for ViewingKey {
         let bytes = bytes
             .try_into()
             .map_err(|_| TryFromBytesForViewingKey(SecretKey::BYTES, bytes.len()))?;
+
         Ok(Self(bytes))
     }
 }

@@ -569,7 +569,7 @@ async fn test_connect_mutation(
 /// Test the disconnect mutation.
 async fn test_disconnect_mutation(api_client: &Client, api_url: &str) -> anyhow::Result<()> {
     // Valid session ID.
-    let session_id = indexer_common::domain::ViewingKey([0; 32])
+    let session_id = indexer_common::domain::ViewingKey::from([0; 32])
         .to_session_id()
         .hex_encode();
     let variables = disconnect_mutation::Variables { session_id };
