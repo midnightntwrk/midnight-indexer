@@ -18,7 +18,13 @@ use chain_indexer::domain::{
 };
 use fake::{Fake, Faker};
 use futures::{StreamExt, TryStreamExt};
-use indexer_api::domain::{ContractAction, ContractAttributes, Storage};
+use indexer_api::domain::{
+    ContractAction, ContractAttributes,
+    storage::{
+        block::BlockStorage, contract_action::ContractActionStorage,
+        transaction::TransactionStorage,
+    },
+};
 use indexer_common::{
     self,
     cipher::make_cipher,
@@ -309,7 +315,8 @@ async fn run_tests(
     let transaction = indexer_api_storage
         .get_transaction_by_id(transaction.id)
         .await
-        .context("get_transaction_by_id")?;
+        .context("get_transaction_by_id")?
+        .expect("transaction with ID exists");
     assert_eq!(transaction.hash, TRANSACTION_2_HASH);
 
     let blocks = indexer_api_storage.get_blocks(10, 10.try_into()?);

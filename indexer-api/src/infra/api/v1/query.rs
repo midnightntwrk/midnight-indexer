@@ -12,7 +12,10 @@
 // limitations under the License.
 
 use crate::{
-    domain::{HexEncoded, Storage, UnshieldedUtxoFilter},
+    domain::{
+        HexEncoded,
+        storage::{Storage, unshielded_utxo::UnshieldedUtxoFilter},
+    },
     infra::api::{
         ContextExt, ResultExt,
         v1::{

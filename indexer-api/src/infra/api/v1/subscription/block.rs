@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::Storage,
+    domain::storage::Storage,
     infra::api::{
         ContextExt, ResultExt,
         v1::{Block, BlockOffset, resolve_height},

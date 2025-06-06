@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{HexEncoded, Storage, Transaction, ZswapStateCache},
+    domain::{HexEncoded, Transaction, ZswapStateCache, storage::Storage},
     infra::api::{
         ContextExt, ResultExt,
         v1::{

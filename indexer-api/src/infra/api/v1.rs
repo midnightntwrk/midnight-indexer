@@ -17,8 +17,8 @@ mod subscription;
 
 use crate::{
     domain::{
-        self, AsBytesExt, BlockHash, HexEncoded, NoopStorage, Storage, UnshieldedUtxoFilter,
-        ZswapStateCache,
+        self, AsBytesExt, HexEncoded, ZswapStateCache,
+        storage::{NoopStorage, Storage, unshielded_utxo::UnshieldedUtxoFilter},
     },
     infra::api::{
         ContextExt, OptionExt, ResultExt,
@@ -34,10 +34,13 @@ use async_graphql_axum::{GraphQL, GraphQLSubscription};
 use axum::{Router, routing::post_service};
 use bech32::{Bech32m, Hrp};
 use derive_more::Debug;
-use indexer_common::domain::{
-    ByteVec, LedgerStateStorage, NetworkId, NoopLedgerStateStorage, NoopSubscriber,
-    ProtocolVersion, SessionId, Subscriber, UnknownNetworkIdError,
-    UnshieldedAddress as CommonUnshieldedAddress,
+use indexer_common::{
+    domain::{
+        BlockHash, ByteVec, LedgerStateStorage, NetworkId, NoopLedgerStateStorage, NoopSubscriber,
+        ProtocolVersion, SessionId, Subscriber, UnknownNetworkIdError,
+        UnshieldedAddress as CommonUnshieldedAddress,
+    },
+    error::NotFoundError,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -483,6 +486,8 @@ where
         .get_storage::<S>()
         .get_transaction_by_id(id)
         .await
+        .internal("cannot get transaction by ID")?
+        .ok_or_else(|| NotFoundError(format!("transaction with ID {id}")))
         .internal("cannot get transaction by ID")?;
 
     Ok(transaction.into())

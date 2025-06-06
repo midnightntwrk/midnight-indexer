@@ -11,10 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::BlockHash;
 use derive_more::Debug;
 use indexer_common::domain::{
-    Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction, TransactionHash, TransactionResult,
+    BlockHash, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction, TransactionHash,
+    TransactionResult,
 };
 use sqlx::FromRow;
 

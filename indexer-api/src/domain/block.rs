@@ -11,10 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{BlockAuthor, ByteArray, ProtocolVersion};
+use indexer_common::domain::{BlockAuthor, BlockHash, ProtocolVersion};
 use sqlx::prelude::FromRow;
-
-pub type BlockHash = ByteArray<32>;
 
 /// Relevant block data from the perspective of the Indexer API.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]

@@ -13,7 +13,7 @@
 
 pub mod v1;
 
-use crate::domain::{Api, Storage, ZswapStateCache};
+use crate::domain::{Api, ZswapStateCache, storage::Storage};
 use anyhow::Context as _;
 use async_graphql::Context;
 use axum::{

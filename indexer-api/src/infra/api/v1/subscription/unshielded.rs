@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{Storage, UnshieldedUtxoFilter},
+    domain::storage::{Storage, unshielded_utxo::UnshieldedUtxoFilter},
     infra::api::{
         ContextExt, ResultExt,
         v1::{UnshieldedAddress, UnshieldedUtxo, UnshieldedUtxoEvent, UnshieldedUtxoEventType},
@@ -23,7 +23,7 @@ use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::{
     domain::{Subscriber, UnshieldedUtxoIndexed},
-    error::StdErrorExt,
+    error::{NotFoundError, StdErrorExt},
 };
 use log::{debug, error, warn};
 use std::{marker::PhantomData, pin::pin, time::Duration};
@@ -106,106 +106,108 @@ where
 
             loop {
                 select! {
-                    event_result = utxo_stream.try_next() => {
-                        match event_result {
-                            Ok(Some(UnshieldedUtxoIndexed { address: a, transaction_id })) => {
-                                if a != address {
-                                    continue;
+                            event_result = utxo_stream.try_next() => {
+                                match event_result {
+                                    Ok(Some(UnshieldedUtxoIndexed { address: a, transaction_id })) => {
+                                        if a != address {
+                                            continue;
+                                        }
+
+                                        debug!(
+                                            address = encoded_address,
+                                            transaction_id;
+                                            "handling UnshieldedUtxoIndexed event"
+                                        );
+
+                                        let tx = storage
+                                            .get_transaction_by_id(transaction_id)
+                                            .await
+                                            .internal("cannot get transaction by ID").unwrap()
+                                            .ok_or_else(|| NotFoundError(format!("transaction with ID {transaction_id}")))
+                                            .internal("cannot get transaction by ID").unwrap();
+
+                                        last_transaction = Some(tx.clone());
+
+                                        let created = storage
+                                            .get_unshielded_utxos(
+                                                Some(&address),
+                                                UnshieldedUtxoFilter::CreatedInTxForAddress(transaction_id),
+                                            )
+                                            .await
+                                            .internal("fetch created UTXOs").unwrap();
+
+                                        let spent = storage
+                                            .get_unshielded_utxos(
+                                                Some(&address),
+                                                UnshieldedUtxoFilter::SpentInTxForAddress(transaction_id),
+                                            )
+                                            .await
+                                            .internal("fetch spent UTXOs").unwrap();
+
+                                        yield UnshieldedUtxoEvent {
+                                            event_type: UnshieldedUtxoEventType::UPDATE,
+                                            transaction: tx.into(),
+                                            created_utxos: created.into_iter()
+                                                .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                                                .collect(),
+                                            spent_utxos: spent.into_iter()
+                                                .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                                                .collect(),
+                                        };
+                                    }
+
+                                    Ok(None) => {
+                                        warn!("stream of UnshieldedUtxoIndexed ended unexpectedly");
+                                        break;
+                                    }
+
+                                    Err(error) => {
+                                        error!(error = error.as_chain(); "cannot get next UnshieldedUtxoIndexed");
+                                        break;
+                                    }
                                 }
-
-                                debug!(
-                                    address = encoded_address,
-                                    transaction_id;
-                                    "handling UnshieldedUtxoIndexed event"
-                                );
-
-                                let tx = storage
-                                    .get_transaction_by_id(transaction_id)
-                                    .await
-                                    .internal("fetch tx for subscription event").unwrap();
-
-                                last_transaction = Some(tx.clone());
-
-                                let created = storage
-                                    .get_unshielded_utxos(
-                                        Some(&address),
-                                        UnshieldedUtxoFilter::CreatedInTxForAddress(transaction_id),
-                                    )
-                                    .await
-                                    .internal("fetch created UTXOs").unwrap();
-
-                                let spent = storage
-                                    .get_unshielded_utxos(
-                                        Some(&address),
-                                        UnshieldedUtxoFilter::SpentInTxForAddress(transaction_id),
-                                    )
-                                    .await
-                                    .internal("fetch spent UTXOs").unwrap();
-
-                                yield UnshieldedUtxoEvent {
-                                    event_type: UnshieldedUtxoEventType::UPDATE,
-                                    transaction: tx.into(),
-                                    created_utxos: created.into_iter()
-                                        .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                                        .collect(),
-                                    spent_utxos: spent.into_iter()
-                                        .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                                        .collect(),
-                                };
                             }
 
-                            Ok(None) => {
-                                warn!("stream of UnshieldedUtxoIndexed ended unexpectedly");
-                                break;
-                            }
+                            // Emit periodic PROGRESS events
+                            _ = keep_alive.tick() => {
+                                debug!(address = encoded_address; "emitting PROGRESS event");
 
-                            Err(error) => {
-                                error!(error = error.as_chain(); "cannot get next UnshieldedUtxoIndexed");
-                                break;
-                            }
-                        }
-                    }
+                                // For PROGRESS events, we need a transaction to include
+                                // If we don't have one for this address, we'll get the latest one from the chain
+                                let tx = match &last_transaction {
+                                    Some(tx) => tx.to_owned(),
 
-                    // Emit periodic PROGRESS events
-                    _ = keep_alive.tick() => {
-                        debug!(address = encoded_address; "emitting PROGRESS event");
+                                    None => {
+                                        // Try to get the latest transaction from the chain
+                                        match storage.get_latest_block().await {
+                                            Ok(Some(block)) => {
+                                                match storage.get_transactions_by_block_id(block.id).await {
+                                                    Ok(transactions) if !transactions.is_empty() => {
+                                                        transactions.into_iter().next().unwrap()
+                                                    }
 
-                        // For PROGRESS events, we need a transaction to include
-                        // If we don't have one for this address, we'll get the latest one from the chain
-                        let tx = match &last_transaction {
-                            Some(tx) => tx.to_owned(),
-
-                            None => {
-                                // Try to get the latest transaction from the chain
-                                match storage.get_latest_block().await {
-                                    Ok(Some(block)) => {
-                                        match storage.get_transactions_by_block_id(block.id).await {
-                                            Ok(transactions) if !transactions.is_empty() => {
-                                                transactions.into_iter().next().unwrap()
+                                                    _ => {
+                                                        // No transactions available, skip this PROGRESS event
+                                                        continue;
+                                                    }
+                                                }
                                             }
-
                                             _ => {
-                                                // No transactions available, skip this PROGRESS event
+                                                // Can't get latest block, skip this PROGRESS event
                                                 continue;
                                             }
                                         }
                                     }
-                                    _ => {
-                                        // Can't get latest block, skip this PROGRESS event
-                                        continue;
-                                    }
-                                }
-                            }
-                        };
+                                };
 
-                        yield UnshieldedUtxoEvent {
-                            event_type: UnshieldedUtxoEventType::PROGRESS,
-                            transaction: tx.into(),
-                            created_utxos: Vec::new(),
-                            spent_utxos: Vec::new(),
-                        };
-                    }
-                }
+                                yield UnshieldedUtxoEvent {
+                                    event_type: UnshieldedUtxoEventType::PROGRESS,
+                                    transaction: tx.into(),
+                                    created_utxos: Vec::new(),
+                                    spent_utxos: Vec::new(),
+                                };
+                            }
+                        }
             }
         };
 

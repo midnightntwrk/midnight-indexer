@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{AsBytesExt, HexEncoded, Storage, ViewingKey},
+    domain::{AsBytesExt, HexEncoded, ViewingKey, storage::Storage},
     infra::api::{
         ContextExt, ResultExt,
         v1::{Unit, hex_decode_session_id},

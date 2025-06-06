@@ -16,7 +16,7 @@ mod contract_action;
 mod unshielded;
 mod wallet;
 
-use crate::domain::Storage;
+use crate::domain::storage::Storage;
 use async_graphql::MergedSubscription;
 use indexer_common::domain::{LedgerStateStorage, Subscriber};
 
