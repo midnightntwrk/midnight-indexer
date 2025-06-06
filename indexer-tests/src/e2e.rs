@@ -698,11 +698,9 @@ async fn test_unshielded_utxo_subscription(
 
     match events {
         Result::Ok(Result::Ok(events)) if !events.is_empty() => {
-            let has_progress = events.iter().any(|e| {
-                matches!(
-                    e.event_type,
-                    unshielded_utxos_subscription::UnshieldedUtxoEventType::PROGRESS
-                )
+            let has_progress = events.iter().any(|event| {
+                // Progress-only events have no transaction
+                event.transaction.is_none()
             });
 
             if has_progress {
@@ -710,12 +708,22 @@ async fn test_unshielded_utxo_subscription(
             }
 
             for event in &events {
-                if !event.created_utxos.is_empty() {
-                    assert_eq!(event.created_utxos[0].owner, unshielded_address);
+                // Check progress information is always present
+                println!(
+                    "Progress: {}/{}",
+                    event.progress.current_index, event.progress.highest_index
+                );
+
+                if let Some(ref created_utxos) = event.created_utxos {
+                    if !created_utxos.is_empty() {
+                        assert_eq!(created_utxos[0].owner, unshielded_address);
+                    }
                 }
 
-                if !event.spent_utxos.is_empty() {
-                    assert_eq!(event.spent_utxos[0].owner, unshielded_address);
+                if let Some(ref spent_utxos) = event.spent_utxos {
+                    if !spent_utxos.is_empty() {
+                        assert_eq!(spent_utxos[0].owner, unshielded_address);
+                    }
                 }
             }
         }

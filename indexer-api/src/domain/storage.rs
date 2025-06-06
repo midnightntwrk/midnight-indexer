@@ -180,6 +180,15 @@ where
         &self,
         address: &UnshieldedAddress,
     ) -> Result<Vec<Transaction>, sqlx::Error>;
+
+    /// Get the highest end_index from all transactions (for progress calculation).
+    async fn get_highest_transaction_end_index(&self) -> Result<Option<u64>, sqlx::Error>;
+
+    /// Get the highest end_index for transactions involving the given unshielded address.
+    async fn get_highest_end_index_for_address(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> Result<Option<u64>, sqlx::Error>;
 }
 
 /// Just needed as a type argument for `infra::api::export_schema` which should not depend on any
@@ -358,6 +367,19 @@ impl Storage for NoopStorage {
         &self,
         address: &UnshieldedAddress,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_highest_transaction_end_index(&self) -> Result<Option<u64>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_highest_end_index_for_address(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> Result<Option<u64>, sqlx::Error> {
         unimplemented!()
     }
 }
