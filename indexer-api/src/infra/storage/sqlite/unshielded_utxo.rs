@@ -27,8 +27,6 @@ impl UnshieldedUtxoStorage for SqliteStorage {
         address: Option<&UnshieldedAddress>,
         filter: UnshieldedUtxoFilter<'_>,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
-        let mut tx = self.pool.begin().await?;
-
         // Build the appropriate SQL based on filter type
         let sql = match (&address, &filter) {
             (Some(_), UnshieldedUtxoFilter::All) => {
@@ -163,9 +161,9 @@ impl UnshieldedUtxoStorage for SqliteStorage {
         };
 
         // Execute query and get results
-        let mut utxos = query.fetch_all(&mut *tx).await?;
+        let mut utxos = query.fetch_all(&*self.pool).await?;
 
-        // Process results
+        // Process results.
         self.enrich_utxos_with_transaction_data(&mut utxos).await?;
 
         Ok(utxos)
