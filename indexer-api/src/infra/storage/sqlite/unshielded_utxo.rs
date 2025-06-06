@@ -20,6 +20,7 @@ use crate::{
 };
 use indexer_common::domain::UnshieldedAddress;
 use indoc::indoc;
+use std::collections::HashMap;
 
 impl UnshieldedUtxoStorage for SqliteStorage {
     async fn get_unshielded_utxos(
@@ -203,14 +204,15 @@ impl SqliteStorage {
     async fn get_transactions_by_ids(
         &self,
         transaction_ids: &[u64],
-    ) -> Result<std::collections::HashMap<u64, Transaction>, sqlx::Error> {
+    ) -> Result<HashMap<u64, Transaction>, sqlx::Error> {
         if transaction_ids.is_empty() {
-            return Ok(std::collections::HashMap::new());
+            return Ok(HashMap::new());
         }
 
-        let placeholders: Vec<String> = (0..transaction_ids.len())
+        let placeholders = (0..transaction_ids.len())
             .map(|i| format!("${}", i + 1))
-            .collect();
+            .collect::<Vec<_>>()
+            .join(", ");
         let query = format!(
             indoc! {"
                 SELECT
@@ -222,28 +224,26 @@ impl SqliteStorage {
                 INNER JOIN blocks ON blocks.id = transactions.block_id
                 WHERE transactions.id IN ({})
             "},
-            placeholders.join(", ")
+            placeholders
         );
 
         let mut query_builder = sqlx::query_as::<_, Transaction>(&query);
         for &id in transaction_ids {
             query_builder = query_builder.bind(id as i64);
         }
-
         let mut transactions = query_builder.fetch_all(&*self.pool).await?;
 
-        let identifiers_map = self
+        let mut identifiers_map = self
             .get_identifiers_for_transactions(transaction_ids)
             .await?;
 
         for transaction in &mut transactions {
-            transaction.identifiers = identifiers_map
-                .get(&transaction.id)
-                .cloned()
-                .unwrap_or_default();
+            if let Some(identifiers) = identifiers_map.remove(&transaction.id) {
+                transaction.identifiers = identifiers;
+            }
         }
 
-        let mut result = std::collections::HashMap::new();
+        let mut result = HashMap::new();
         for transaction in transactions {
             result.insert(transaction.id, transaction);
         }
