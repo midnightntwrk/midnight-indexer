@@ -48,10 +48,9 @@ impl TransactionStorage for SqliteStorage {
             .await?;
 
         if let Some(transaction) = &mut transaction {
-            let identifiers = self
+            transaction.identifiers = self
                 .get_identifiers_by_transaction_id(transaction.id)
                 .await?;
-            transaction.identifiers = identifiers;
         }
 
         Ok(transaction)
@@ -79,11 +78,16 @@ impl TransactionStorage for SqliteStorage {
             .fetch_all(&*self.pool)
             .await?;
 
+        let transaction_ids: Vec<u64> = transactions.iter().map(|t| t.id).collect();
+        let identifiers_map = self
+            .get_identifiers_for_transactions(&transaction_ids)
+            .await?;
+
         for transaction in transactions.iter_mut() {
-            let identifiers = self
-                .get_identifiers_by_transaction_id(transaction.id)
-                .await?;
-            transaction.identifiers = identifiers;
+            transaction.identifiers = identifiers_map
+                .get(&transaction.id)
+                .cloned()
+                .unwrap_or_default();
         }
 
         Ok(transactions)
@@ -115,11 +119,16 @@ impl TransactionStorage for SqliteStorage {
             .fetch_all(&*self.pool)
             .await?;
 
+        let transaction_ids: Vec<u64> = transactions.iter().map(|t| t.id).collect();
+        let identifiers_map = self
+            .get_identifiers_for_transactions(&transaction_ids)
+            .await?;
+
         for transaction in transactions.iter_mut() {
-            let identifiers = self
-                .get_identifiers_by_transaction_id(transaction.id)
-                .await?;
-            transaction.identifiers = identifiers;
+            transaction.identifiers = identifiers_map
+                .get(&transaction.id)
+                .cloned()
+                .unwrap_or_default();
         }
 
         Ok(transactions)
@@ -151,11 +160,16 @@ impl TransactionStorage for SqliteStorage {
             .fetch_all(&*self.pool)
             .await?;
 
+        let transaction_ids: Vec<u64> = transactions.iter().map(|t| t.id).collect();
+        let identifiers_map = self
+            .get_identifiers_for_transactions(&transaction_ids)
+            .await?;
+
         for transaction in transactions.iter_mut() {
-            let identifiers = self
-                .get_identifiers_by_transaction_id(transaction.id)
-                .await?;
-            transaction.identifiers = identifiers;
+            transaction.identifiers = identifiers_map
+                .get(&transaction.id)
+                .cloned()
+                .unwrap_or_default();
         }
 
         Ok(transactions)
@@ -202,10 +216,14 @@ impl TransactionStorage for SqliteStorage {
                     None => break,
                 };
 
+                let transaction_ids: Vec<u64> = transactions.iter().map(|t| t.id).collect();
+                let identifiers_map = self.get_identifiers_for_transactions(&transaction_ids).await?;
+
                 for transaction in transactions.iter_mut() {
-                    let identifiers = self.
-                        get_identifiers_by_transaction_id(transaction.id).await?;
-                    transaction.identifiers = identifiers;
+                    transaction.identifiers = identifiers_map
+                        .get(&transaction.id)
+                        .cloned()
+                        .unwrap_or_default();
                 }
 
                 yield transactions;
@@ -244,11 +262,16 @@ impl TransactionStorage for SqliteStorage {
             .fetch_all(&*self.pool)
             .await?;
 
+        let transaction_ids: Vec<u64> = transactions.iter().map(|t| t.id).collect();
+        let identifiers_map = self
+            .get_identifiers_for_transactions(&transaction_ids)
+            .await?;
+
         for transaction in transactions.iter_mut() {
-            let identifiers = self
-                .get_identifiers_by_transaction_id(transaction.id)
-                .await?;
-            transaction.identifiers = identifiers;
+            transaction.identifiers = identifiers_map
+                .get(&transaction.id)
+                .cloned()
+                .unwrap_or_default();
         }
 
         Ok(transactions)
