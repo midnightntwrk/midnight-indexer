@@ -729,11 +729,11 @@ mod tests {
     async fn test_finalized_blocks_0_13() -> Result<(), BoxError> {
         test_finalized_blocks(
             PROTOCOL_VERSION_000_013_000,
-            Some("alpha.1"),
-            "4b88d38dd59b0f5e9deffda46e20d23f194efa65bf2e1c029411cd9537c7777d",
+            Some("alpha.3"),
+            "0ac58cba8956851701915291080437a42993e094e0a2792f64c28ebcf977dc7c",
             8,
-            "519d12a758644f193d635a020bb4ad5c125423db0a69089741264e1015cd39b3",
-            27,
+            "9c5e8f3c01f6691ce4682442fdbd752f40975f165465f631d56d72741da283f8",
+            28,
         )
         .await
     }
@@ -818,7 +818,8 @@ mod tests {
             .into_iter()
             .flat_map(|block| block.transactions)
             .collect::<Vec<_>>();
-        assert_eq!(transactions.len(), 9); // 6 unshielded token transactions, 3 contract actions.
+        // 6 unshielded token transactions, 1 address, 3 contract actions.
+        assert_eq!(transactions.len(), 10);
 
         assert_matches!(
             transactions.as_slice(),
@@ -828,6 +829,7 @@ mod tests {
                     contract_actions: contract_actions_0,
                     ..
                 },
+                Transaction {..},
                 Transaction {..},
                 Transaction {..},
                 Transaction {..},

@@ -36,7 +36,7 @@ use tokio::{
 };
 
 const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
-const NODE_VERSION: &str = "0.13.0-alpha.1";
+const NODE_VERSION: &str = "0.13.0-alpha.3";
 
 /// Setup for e2e testing using workspace executables built by cargo. Sets up the Indexer with the
 /// "cloud" architecture, i.e. as three separate processes and also PostgreSQL and NATS as Docker
