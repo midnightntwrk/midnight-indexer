@@ -143,6 +143,14 @@ where
                 .await
                 .internal("fetch tx for subscription event")?;
 
+            let tx = match tx {
+                Some(tx) => tx,
+                None => {
+                    warn!(transaction_id; "transaction not found, skipping event");
+                    continue;
+                }
+            };
+
             let created = storage
                 .get_unshielded_utxos(
                     Some(&address),
