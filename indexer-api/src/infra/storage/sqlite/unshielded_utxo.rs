@@ -13,14 +13,13 @@
 
 use crate::{
     domain::{
-        Transaction, UnshieldedUtxo,
+        UnshieldedUtxo,
         storage::unshielded_utxo::{UnshieldedUtxoFilter, UnshieldedUtxoStorage},
     },
     infra::storage::sqlite::SqliteStorage,
 };
 use indexer_common::domain::UnshieldedAddress;
 use indoc::indoc;
-use std::collections::HashMap;
 
 impl UnshieldedUtxoStorage for SqliteStorage {
     async fn get_unshielded_utxos(
@@ -229,55 +228,5 @@ impl SqliteStorage {
         }
 
         Ok(())
-    }
-
-    async fn get_transactions_by_ids(
-        &self,
-        transaction_ids: &[u64],
-    ) -> Result<HashMap<u64, Transaction>, sqlx::Error> {
-        if transaction_ids.is_empty() {
-            return Ok(HashMap::new());
-        }
-
-        let placeholders = (0..transaction_ids.len())
-            .map(|i| format!("${}", i + 1))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let query = format!(
-            indoc! {"
-                SELECT
-                    transactions.id, transactions.hash, blocks.hash as block_hash,
-                    transactions.protocol_version, transactions.transaction_result,
-                    transactions.raw, transactions.merkle_tree_root,
-                    transactions.start_index, transactions.end_index
-                FROM transactions
-                INNER JOIN blocks ON blocks.id = transactions.block_id
-                WHERE transactions.id IN ({})
-            "},
-            placeholders
-        );
-
-        let mut query_builder = sqlx::query_as::<_, Transaction>(&query);
-        for &id in transaction_ids {
-            query_builder = query_builder.bind(id as i64);
-        }
-        let mut transactions = query_builder.fetch_all(&*self.pool).await?;
-
-        let mut identifiers_map = self
-            .get_identifiers_for_transactions(transaction_ids)
-            .await?;
-
-        for transaction in &mut transactions {
-            if let Some(identifiers) = identifiers_map.remove(&transaction.id) {
-                transaction.identifiers = identifiers;
-            }
-        }
-
-        let mut result = HashMap::new();
-        for transaction in transactions {
-            result.insert(transaction.id, transaction);
-        }
-
-        Ok(result)
     }
 }
