@@ -12,10 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{
-        HexEncoded,
-        storage::{Storage, unshielded_utxo::UnshieldedUtxoFilter},
-    },
+    domain::{HexEncoded, storage::Storage},
     infra::api::{
         ContextExt, ResultExt,
         v1::{
@@ -236,17 +233,14 @@ where
             .internal("convert address into domain address")?;
         let utxos = match offset {
             Some(UnshieldedOffset::BlockOffset(BlockOffset::Height(start))) => storage
-                .get_unshielded_utxos(Some(&address), UnshieldedUtxoFilter::FromHeight(start))
+                .get_unshielded_utxos_by_address_from_height(&address, start)
                 .await
                 .internal("get unshielded UTXOs by address from height")?,
 
             Some(UnshieldedOffset::BlockOffset(BlockOffset::Hash(hash))) => {
                 let block_hash = hash.hex_decode().context("decode block hash")?;
                 storage
-                    .get_unshielded_utxos(
-                        Some(&address),
-                        UnshieldedUtxoFilter::FromBlockHash(&block_hash),
-                    )
+                    .get_unshielded_utxos_by_address_from_block_hash(&address, &block_hash)
                     .await
                     .internal("get unshielded UTXOs by address from block hash")?
             }
@@ -254,10 +248,7 @@ where
             Some(UnshieldedOffset::TransactionOffset(TransactionOffset::Hash(hash))) => {
                 let tx_hash = hash.hex_decode().context("decode tx hash")?;
                 storage
-                    .get_unshielded_utxos(
-                        Some(&address),
-                        UnshieldedUtxoFilter::FromTxHash(&tx_hash),
-                    )
+                    .get_unshielded_utxos_by_address_from_transaction_hash(&address, &tx_hash)
                     .await
                     .internal("get unshielded UTXOs by address from transaction hash")?
             }
@@ -265,9 +256,9 @@ where
             Some(UnshieldedOffset::TransactionOffset(TransactionOffset::Identifier(id))) => {
                 let identifier = id.hex_decode().context("decode tx identifier")?;
                 storage
-                    .get_unshielded_utxos(
-                        Some(&address),
-                        UnshieldedUtxoFilter::FromTxIdentifier(&identifier),
+                    .get_unshielded_utxos_by_address_from_transaction_identifier(
+                        &address,
+                        &identifier,
                     )
                     .await
                     .internal("get unshielded UTXOs by address from transaction identifier")?
@@ -275,7 +266,7 @@ where
 
             // no offset -> full list
             None => storage
-                .get_unshielded_utxos(Some(&address), UnshieldedUtxoFilter::All)
+                .get_unshielded_utxos_by_address(&address)
                 .await
                 .internal("get all unshielded UTXOs by address")?,
         };

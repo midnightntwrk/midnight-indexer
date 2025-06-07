@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::storage::{Storage, unshielded_utxo::UnshieldedUtxoFilter},
+    domain::storage::Storage,
     infra::api::{
         ContextExt, ResultExt,
         v1::{UnshieldedAddress, UnshieldedProgress, UnshieldedUtxo, UnshieldedUtxoEvent},
@@ -152,18 +152,12 @@ where
             };
 
             let created = storage
-                .get_unshielded_utxos(
-                    Some(&address),
-                    UnshieldedUtxoFilter::CreatedInTxForAddress(transaction_id),
-                )
+                .get_unshielded_utxos_created_in_transaction_for_address(&address, transaction_id)
                 .await
                 .internal("fetch created UTXOs")?;
 
             let spent = storage
-                .get_unshielded_utxos(
-                    Some(&address),
-                    UnshieldedUtxoFilter::SpentInTxForAddress(transaction_id),
-                )
+                .get_unshielded_utxos_spent_in_transaction_for_address(&address, transaction_id)
                 .await
                 .internal("fetch spent UTXOs")?;
 

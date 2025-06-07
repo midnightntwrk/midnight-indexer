@@ -18,7 +18,7 @@ mod subscription;
 use crate::{
     domain::{
         self, AsBytesExt, HexEncoded, ZswapStateCache,
-        storage::{NoopStorage, Storage, unshielded_utxo::UnshieldedUtxoFilter},
+        storage::{NoopStorage, Storage},
     },
     infra::api::{
         ContextExt, OptionExt, ResultExt,
@@ -227,7 +227,7 @@ where
         let network_id = cx.get_network_id();
 
         let utxos = storage
-            .get_unshielded_utxos(None, UnshieldedUtxoFilter::CreatedByTx(self.id))
+            .get_unshielded_utxos_created_by_transaction(self.id)
             .await
             .internal("cannot get unshielded UTXOs created by transaction")?;
 
@@ -246,7 +246,7 @@ where
         let network_id = cx.get_network_id();
 
         let utxos = storage
-            .get_unshielded_utxos(None, UnshieldedUtxoFilter::SpentByTx(self.id))
+            .get_unshielded_utxos_spent_by_transaction(self.id)
             .await
             .internal("cannot get unshielded UTXOs spent by transaction")?;
 

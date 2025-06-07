@@ -21,7 +21,7 @@ use crate::domain::{
 use indexer_common::domain::{BlockHash, Identifier, TransactionHash, UnshieldedAddress};
 use std::fmt::Debug;
 
-/// Storage abstraction.
+/// Storage abstraction for unshielded UTXO operations.
 #[trait_variant::make(Send)]
 pub trait UnshieldedUtxoStorage
 where
@@ -35,12 +35,64 @@ where
         + Sync
         + 'static,
 {
-    /// Get unshielded UTXOs based on filter criteria.
-    /// This consolidated method replaces multiple specific UTXO query methods.
-    async fn get_unshielded_utxos(
+    /// Get all unshielded UTXOs for a given address.
+    async fn get_unshielded_utxos_by_address(
         &self,
-        address: Option<&UnshieldedAddress>,
-        filter: UnshieldedUtxoFilter<'_>,
+        address: &UnshieldedAddress,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
+
+    /// Get unshielded UTXOs created by a specific transaction.
+    async fn get_unshielded_utxos_created_by_transaction(
+        &self,
+        transaction_id: u64,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
+
+    /// Get unshielded UTXOs spent by a specific transaction.
+    async fn get_unshielded_utxos_spent_by_transaction(
+        &self,
+        transaction_id: u64,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
+
+    /// Get unshielded UTXOs created in a specific transaction for a specific address.
+    async fn get_unshielded_utxos_created_in_transaction_for_address(
+        &self,
+        address: &UnshieldedAddress,
+        transaction_id: u64,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
+
+    /// Get unshielded UTXOs spent in a specific transaction for a specific address.
+    async fn get_unshielded_utxos_spent_in_transaction_for_address(
+        &self,
+        address: &UnshieldedAddress,
+        transaction_id: u64,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
+
+    /// Get unshielded UTXOs for an address from blocks with height >= the given value.
+    async fn get_unshielded_utxos_by_address_from_height(
+        &self,
+        address: &UnshieldedAddress,
+        height: u32,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
+
+    /// Get unshielded UTXOs for an address from a specific block.
+    async fn get_unshielded_utxos_by_address_from_block_hash(
+        &self,
+        address: &UnshieldedAddress,
+        block_hash: &BlockHash,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
+
+    /// Get unshielded UTXOs for an address from a transaction with the given hash.
+    async fn get_unshielded_utxos_by_address_from_transaction_hash(
+        &self,
+        address: &UnshieldedAddress,
+        transaction_hash: &TransactionHash,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
+
+    /// Get unshielded UTXOs for an address from a transaction with the given identifier.
+    async fn get_unshielded_utxos_by_address_from_transaction_identifier(
+        &self,
+        address: &UnshieldedAddress,
+        identifier: &Identifier,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
     /// Get the highest end indices for unshielded address progress calculation.
@@ -51,47 +103,4 @@ where
         &self,
         address: &UnshieldedAddress,
     ) -> Result<(Option<u64>, Option<u64>), sqlx::Error>;
-}
-
-/// Filter criteria for unshielded UTXOs queries.
-#[derive(Debug, Clone)]
-pub enum UnshieldedUtxoFilter<'a> {
-    /// All UTXOs (no filter)
-    All,
-    /// UTXOs created by a specific transaction
-    CreatedByTx(u64),
-    /// UTXOs spent by a specific transaction
-    SpentByTx(u64),
-    /// UTXOs created in a specific transaction for a specific address
-    CreatedInTxForAddress(u64),
-    /// UTXOs spent in a specific transaction for a specific address
-    SpentInTxForAddress(u64),
-    /// UTXOs created/spent in blocks with height >= the given value
-    FromHeight(u32),
-    /// UTXOs created/spent in a specific block
-    FromBlockHash(&'a BlockHash),
-    /// UTXOs created/spent in a transaction with given hash
-    FromTxHash(&'a TransactionHash),
-    /// UTXOs created/spent in a transaction with given identifier
-    FromTxIdentifier(&'a Identifier),
-}
-
-#[allow(unused_variables)]
-impl UnshieldedUtxoStorage for NoopStorage {
-    #[cfg_attr(coverage, coverage(off))]
-    async fn get_unshielded_utxos(
-        &self,
-        address: Option<&UnshieldedAddress>,
-        filter: UnshieldedUtxoFilter<'_>,
-    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
-        unimplemented!()
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn get_highest_indices_for_address(
-        &self,
-        address: &UnshieldedAddress,
-    ) -> Result<(Option<u64>, Option<u64>), sqlx::Error> {
-        unimplemented!()
-    }
 }
