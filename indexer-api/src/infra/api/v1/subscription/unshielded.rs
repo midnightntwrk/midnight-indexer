@@ -150,6 +150,7 @@ where
                     continue;
                 }
             };
+
             let created = storage
                 .get_unshielded_utxos(
                     Some(&address),
