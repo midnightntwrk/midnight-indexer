@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::Transaction;
-use futures::Stream;
+use crate::domain::{Transaction, storage::NoopStorage};
+use futures::{Stream, stream};
 use indexer_common::domain::{Identifier, SessionId, TransactionHash, UnshieldedAddress};
 use std::{fmt::Debug, num::NonZeroU32};
 
@@ -66,4 +66,59 @@ where
         &self,
         session_id: SessionId,
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error>;
+}
+
+#[allow(unused_variables)]
+impl TransactionStorage for NoopStorage {
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_transaction_by_id(&self, id: u64) -> Result<Option<Transaction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_transactions_by_block_id(&self, id: u64) -> Result<Vec<Transaction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_transactions_by_hash(
+        &self,
+        hash: TransactionHash,
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_transactions_by_identifier(
+        &self,
+        identifier: &Identifier,
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    fn get_relevant_transactions(
+        &self,
+        session_id: SessionId,
+        index: u64,
+        batch_size: NonZeroU32,
+    ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send {
+        stream::empty()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_transactions_involving_unshielded(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_highest_indices(
+        &self,
+        session_id: SessionId,
+    ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error> {
+        unimplemented!()
+    }
 }

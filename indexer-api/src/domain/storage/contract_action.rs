@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::ContractAction;
-use futures::Stream;
+use crate::domain::{ContractAction, storage::NoopStorage};
+use futures::{Stream, stream};
 use indexer_common::domain::{BlockHash, ContractAddress, Identifier, TransactionHash};
 use std::{fmt::Debug, num::NonZeroU32};
 
@@ -77,4 +77,77 @@ where
         contract_action_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send;
+}
+
+#[allow(unused_variables)]
+impl ContractActionStorage for NoopStorage {
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_contract_deploy_by_address(
+        &self,
+        address: &ContractAddress,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_contract_action_by_address(
+        &self,
+        address: &ContractAddress,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_contract_action_by_address_and_block_hash(
+        &self,
+        address: &ContractAddress,
+        hash: BlockHash,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_contract_action_by_address_and_block_height(
+        &self,
+        address: &ContractAddress,
+        height: u32,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_contract_action_by_address_and_transaction_hash(
+        &self,
+        address: &ContractAddress,
+        hash: TransactionHash,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_contract_action_by_address_and_transaction_identifier(
+        &self,
+        address: &ContractAddress,
+        identifier: &Identifier,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_contract_actions_by_transaction_id(
+        &self,
+        id: u64,
+    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    fn get_contract_actions_by_address(
+        &self,
+        address: &ContractAddress,
+        block_height: u32,
+        contract_id: u64,
+        batch_size: NonZeroU32,
+    ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send {
+        stream::empty()
+    }
 }

@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::domain::storage::NoopStorage;
 use indexer_common::domain::{SessionId, ViewingKey};
 use std::fmt::Debug;
 
@@ -28,4 +29,22 @@ where
 
     /// Set the wallet active at the current timestamp to avoid timing out.
     async fn set_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error>;
+}
+
+#[allow(unused_variables)]
+impl WalletStorage for NoopStorage {
+    #[cfg_attr(coverage, coverage(off))]
+    async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<(), sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn set_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
+        unimplemented!()
+    }
 }

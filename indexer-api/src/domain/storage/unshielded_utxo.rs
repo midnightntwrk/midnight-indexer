@@ -14,7 +14,7 @@
 use crate::domain::{
     UnshieldedUtxo,
     storage::{
-        block::BlockStorage, contract_action::ContractActionStorage,
+        NoopStorage, block::BlockStorage, contract_action::ContractActionStorage,
         transaction::TransactionStorage, wallet::WalletStorage,
     },
 };
@@ -65,4 +65,16 @@ pub enum UnshieldedUtxoFilter<'a> {
     FromTxHash(&'a TransactionHash),
     /// UTXOs created/spent in a transaction with given identifier
     FromTxIdentifier(&'a Identifier),
+}
+
+#[allow(unused_variables)]
+impl UnshieldedUtxoStorage for NoopStorage {
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_unshielded_utxos(
+        &self,
+        address: Option<&UnshieldedAddress>,
+        filter: UnshieldedUtxoFilter<'_>,
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
+        unimplemented!()
+    }
 }
