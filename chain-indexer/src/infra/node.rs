@@ -573,7 +573,7 @@ async fn make_transaction(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let contract_actions = match ledger_transaction {
+    let contract_actions = match &ledger_transaction {
         LedgerTransaction::Standard(standard_transaction) => {
             let contract_actions = standard_transaction.actions().map(|(_, action)| action);
 
@@ -623,6 +623,31 @@ async fn make_transaction(
         })
         .collect();
 
+    let fees = match runtimes::get_transaction_cost(
+        online_client,
+        raw.as_ref(),
+        block_hash,
+        protocol_version,
+    )
+    .await
+    {
+        Ok(fee_amount) => crate::domain::TransactionFees {
+            paid_fee: fee_amount,
+            estimated_fee: fee_amount,
+        },
+        Err(error) => {
+            warn!(
+                "runtime API fee calculation failed, using fallback: {error:#}. \
+                 Block: {block_hash}, Transaction size: {} bytes",
+                raw.as_ref().len()
+            );
+            crate::domain::extract_transaction_fees_from_ledger_transaction(
+                &ledger_transaction,
+                raw.as_ref().len(),
+            )
+        }
+    };
+
     let transaction = Transaction {
         id: 0,
         hash,
@@ -636,6 +661,8 @@ async fn make_transaction(
         end_index: Default::default(),
         created_unshielded_utxos,
         spent_unshielded_utxos,
+        paid_fee: fees.paid_fee,
+        estimated_fee: fees.estimated_fee,
     };
 
     Ok(Some(transaction))

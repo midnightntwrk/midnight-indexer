@@ -221,7 +221,9 @@ async fn save_transactions(
                         raw,
                         merkle_tree_root,
                         start_index,
-                        end_index
+                        end_index,
+                        paid_fee,
+                        estimated_fee
                     )
                 "};
 
@@ -235,6 +237,8 @@ async fn save_transactions(
                 merkle_tree_root,
                 start_index,
                 end_index,
+                paid_fee,
+                estimated_fee,
                 ..
             } = transaction;
             q.push_bind(block_id)
@@ -244,7 +248,9 @@ async fn save_transactions(
                 .push_bind(raw)
                 .push_bind(merkle_tree_root)
                 .push_bind(*start_index as i64)
-                .push_bind(*end_index as i64);
+                .push_bind(*end_index as i64)
+                .push_bind(U128BeBytes::from(*paid_fee))
+                .push_bind(U128BeBytes::from(*estimated_fee));
         })
         .push(" RETURNING id")
         .build()

@@ -34,6 +34,8 @@ pub struct Transaction {
     pub merkle_tree_root: MerkleTreeRoot,
     pub start_index: u64,
     pub end_index: u64,
+    pub paid_fee: u128,
+    pub estimated_fee: u128,
 }
 
 /// All raw transactions from a single block along with metadata needed for ledger state

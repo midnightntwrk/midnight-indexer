@@ -56,6 +56,9 @@ const MAX_HEIGHT: usize = 30;
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
 /// (http and ws) at the given host and port.
+///
+/// Tests include validation of transaction fee metadata (paid_fee, estimated_fee) and segment
+/// results.
 pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> anyhow::Result<()> {
     println!("### starting e2e testing");
 
@@ -175,11 +178,54 @@ impl IndexerData {
             })
         }));
 
+        // Verify that all transactions have fee information
+        assert!(blocks.iter().all(|block| {
+            block.transactions.iter().all(|transaction| {
+                // Fees should always be present and non-empty strings
+                !transaction.fees.paid_fee.is_empty() && !transaction.fees.estimated_fee.is_empty()
+            })
+        }));
+
+        // Verify that segment results are consistent with transaction results
+        assert!(blocks.iter().all(|block| {
+            block.transactions.iter().all(|transaction| {
+                match transaction.transaction_result.status {
+                    BlockSubscriptionTransactionResultStatus::SUCCESS => {
+                        // Success transactions should have no segment results
+                        transaction.segment_results.is_empty()
+                    }
+                    BlockSubscriptionTransactionResultStatus::FAILURE => {
+                        // Failure transactions should have no segment results
+                        transaction.segment_results.is_empty()
+                    }
+                    BlockSubscriptionTransactionResultStatus::PARTIAL_SUCCESS => {
+                        // Partial success transactions should have segment results
+                        !transaction.segment_results.is_empty()
+                            && transaction.segment_results.iter().all(|segment| {
+                                // Segment IDs should be reasonable (not massive numbers)
+                                segment.segment_id < 1000
+                            })
+                    }
+                    _ => true, // Unknown status, skip validation
+                }
+            })
+        }));
+
         // Collect transactions.
         let transactions = blocks
             .iter()
             .flat_map(|block| block.transactions.to_owned())
             .collect::<Vec<_>>();
+
+        // Verify that all transactions have valid fee information
+        assert!(
+            transactions.iter().all(|transaction| {
+                // Fees should be parseable as numbers
+                transaction.fees.paid_fee.parse::<u64>().is_ok()
+                    && transaction.fees.estimated_fee.parse::<u64>().is_ok()
+            }),
+            "All transactions should have valid numeric fee values"
+        );
 
         // Verify that all contract actions reference the correct transaction.
         assert!(transactions.iter().all(|transaction| {
@@ -282,7 +328,7 @@ async fn test_block_query(
     Ok(())
 }
 
-/// Test the transactions query.
+/// Test the transactions query, including fee metadata and segment results validation.
 async fn test_transactions_query(
     indexer_data: &IndexerData,
     api_client: &Client,
@@ -301,11 +347,77 @@ async fn test_transactions_query(
         };
         let transactions = send_query::<TransactionsQuery>(api_client, api_url, variables)
             .await?
-            .transactions
-            .into_iter()
+            .transactions;
+
+        // Verify expected transaction is in results
+        let transaction_values = transactions
+            .iter()
             .map(|t| t.to_value())
             .collect::<Vec<_>>();
-        assert!(transactions.contains(&expected_transaction.to_value()));
+        assert!(transaction_values.contains(&expected_transaction.to_value()));
+
+        // Validate fee metadata and segment results for all returned transactions
+        for transaction in &transactions {
+            // Verify fee information is present and valid
+            assert!(
+                !transaction.fees.paid_fee.is_empty(),
+                "paid_fee should not be empty"
+            );
+            assert!(
+                !transaction.fees.estimated_fee.is_empty(),
+                "estimated_fee should not be empty"
+            );
+
+            // Verify fees are valid numeric strings (DUST amounts)
+            let paid_fee: u64 = transaction
+                .fees
+                .paid_fee
+                .parse()
+                .expect("paid_fee should be a valid number");
+            let estimated_fee: u64 = transaction
+                .fees
+                .estimated_fee
+                .parse()
+                .expect("estimated_fee should be a valid number");
+
+            // Fees should be reasonable values (not impossibly large)
+            assert!(
+                paid_fee <= 1_000_000_000_000,
+                "paid_fee should be reasonable"
+            );
+            assert!(
+                estimated_fee <= 1_000_000_000_000,
+                "estimated_fee should be reasonable"
+            );
+
+            // Verify segment results structure matches transaction status
+            match transaction.transaction_result.status {
+                transactions_query::TransactionResultStatus::SUCCESS => {
+                    assert!(
+                        transaction.segment_results.is_empty(),
+                        "SUCCESS transactions should have no segment results"
+                    );
+                }
+                transactions_query::TransactionResultStatus::FAILURE => {
+                    assert!(
+                        transaction.segment_results.is_empty(),
+                        "FAILURE transactions should have no segment results"
+                    );
+                }
+                transactions_query::TransactionResultStatus::PARTIAL_SUCCESS => {
+                    assert!(
+                        !transaction.segment_results.is_empty(),
+                        "PARTIAL_SUCCESS transactions should have segment results"
+                    );
+
+                    for segment in &transaction.segment_results {
+                        // Segment IDs should be reasonable
+                        assert!(segment.segment_id < 1000, "segment_id should be reasonable");
+                    }
+                }
+                _ => {} // Skip unknown statuses
+            }
+        }
 
         // Existing identifier.
         for identifier in &expected_transaction.identifiers {
@@ -316,11 +428,22 @@ async fn test_transactions_query(
             };
             let transactions = send_query::<TransactionsQuery>(api_client, api_url, variables)
                 .await?
-                .transactions
-                .into_iter()
+                .transactions;
+
+            // Verify expected transaction is in results
+            let transaction_values = transactions
+                .iter()
                 .map(|t| t.to_value())
                 .collect::<Vec<_>>();
-            assert!(transactions.contains(&expected_transaction.to_value()));
+            assert!(transaction_values.contains(&expected_transaction.to_value()));
+
+            // Also validate fee metadata for identifier queries
+            for transaction in &transactions {
+                assert!(!transaction.fees.paid_fee.is_empty());
+                assert!(!transaction.fees.estimated_fee.is_empty());
+                assert!(transaction.fees.paid_fee.parse::<u64>().is_ok());
+                assert!(transaction.fees.estimated_fee.parse::<u64>().is_ok());
+            }
         }
     }
 

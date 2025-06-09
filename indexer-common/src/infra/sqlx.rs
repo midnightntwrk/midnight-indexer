@@ -89,6 +89,15 @@ impl TryFrom<SqlxOption<i64>> for Option<u64> {
     }
 }
 
+impl TryFrom<SqlxOption<U128BeBytes>> for Option<u128> {
+    type Error = BoxDynError;
+
+    fn try_from(value: SqlxOption<U128BeBytes>) -> Result<Self, Self::Error> {
+        let value = value.0.map(Into::into);
+        Ok(value)
+    }
+}
+
 impl<const N: usize> TryFrom<SqlxOption<&[u8]>> for Option<ByteArray<N>> {
     type Error = TryFromForByteArrayError;
 

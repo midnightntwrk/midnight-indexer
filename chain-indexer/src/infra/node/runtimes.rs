@@ -102,6 +102,20 @@ pub async fn get_zswap_state_root(
     }
 }
 
+/// Get transaction cost depending on the given protocol version.
+pub async fn get_transaction_cost(
+    online_client: &OnlineClient<SubstrateConfig>,
+    raw_transaction: &[u8],
+    block_hash: BlockHash,
+    protocol_version: ProtocolVersion,
+) -> Result<u128, SubxtNodeError> {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
+        get_transaction_cost_runtime_0_13(online_client, raw_transaction, block_hash).await
+    } else {
+        Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
+    }
+}
+
 macro_rules! make_block_details {
     ($module:ident) => {
         paste::paste! {
@@ -296,6 +310,36 @@ macro_rules! get_zswap_state_root {
 }
 
 get_zswap_state_root!(runtime_0_13);
+
+macro_rules! get_transaction_cost {
+    ($module:ident) => {
+        paste::paste! {
+            async fn [<get_transaction_cost_ $module>](
+                online_client: &OnlineClient<SubstrateConfig>,
+                raw_transaction: &[u8],
+                block_hash: BlockHash,
+            ) -> Result<u128, SubxtNodeError> {
+                let get_transaction_cost = $module::apis()
+                    .midnight_runtime_api()
+                    .get_transaction_cost(raw_transaction.to_owned());
+
+                let (storage_cost, gas_cost) = online_client
+                    .runtime_api()
+                    .at(H256(block_hash.0))
+                    .call(get_transaction_cost)
+                    .await.map_err(Box::new)?
+                    .map_err(|error| SubxtNodeError::GetContractState(format!("Transaction cost error: {error:?}")))?;
+
+                // Combine storage cost and gas cost for total fee
+                // StorageCost = u128, GasCost = u64
+                let total_cost = storage_cost.saturating_add(gas_cost as u128);
+                Ok(total_cost)
+            }
+        }
+    };
+}
+
+get_transaction_cost!(runtime_0_13);
 
 #[cfg(test)]
 mod tests {

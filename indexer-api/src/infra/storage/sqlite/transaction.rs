@@ -36,7 +36,9 @@ impl TransactionStorage for SqliteStorage {
                 transactions.raw,
                 transactions.merkle_tree_root,
                 transactions.start_index,
-                transactions.end_index
+                transactions.end_index,
+                transactions.paid_fee,
+                transactions.estimated_fee
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE transactions.id = $1
@@ -67,7 +69,9 @@ impl TransactionStorage for SqliteStorage {
                 transactions.raw,
                 transactions.merkle_tree_root,
                 transactions.start_index,
-                transactions.end_index
+                transactions.end_index,
+                transactions.paid_fee,
+                transactions.estimated_fee
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE transactions.block_id = $1
@@ -107,7 +111,9 @@ impl TransactionStorage for SqliteStorage {
                 transactions.raw,
                 transactions.merkle_tree_root,
                 transactions.start_index,
-                transactions.end_index
+                transactions.end_index,
+                transactions.paid_fee,
+                transactions.estimated_fee
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE transactions.hash = $1
@@ -148,7 +154,9 @@ impl TransactionStorage for SqliteStorage {
                 transactions.raw,
                 transactions.merkle_tree_root,
                 transactions.start_index,
-                transactions.end_index
+                transactions.end_index,
+                transactions.paid_fee,
+                transactions.estimated_fee
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN transaction_identifiers ON transactions.id = transaction_identifiers.transaction_id

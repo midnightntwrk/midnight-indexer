@@ -191,6 +191,20 @@ type Segment {
 	success: Boolean!
 }
 
+"""
+Result for a specific segment within a transaction.
+"""
+type SegmentResult {
+	"""
+	The segment identifier.
+	"""
+	segmentId: Int!
+	"""
+	Whether this segment was successfully executed.
+	"""
+	success: Boolean!
+}
+
 type Subscription {
 	"""
 	Subscribe to blocks starting at the given offset or at the latest block if the offset is
@@ -243,6 +257,14 @@ type Transaction {
 	"""
 	transactionResult: TransactionResult!
 	"""
+	Fee information for this transaction.
+	"""
+	fees: TransactionFees!
+	"""
+	Segment results for client consumption.
+	"""
+	segmentResults: [SegmentResult!]!
+	"""
 	The transaction identifiers.
 	"""
 	identifiers: [HexEncoded!]!
@@ -270,6 +292,20 @@ type Transaction {
 	Unshielded UTXOs spent (consumed) by this transaction.
 	"""
 	unshieldedSpentOutputs: [UnshieldedUtxo!]!
+}
+
+"""
+Fee information for a transaction, including both paid and estimated costs.
+"""
+type TransactionFees {
+	"""
+	The actual fee paid for this transaction in DUST.
+	"""
+	paidFee: String!
+	"""
+	The estimated fee that was calculated for this transaction in DUST.
+	"""
+	estimatedFee: String!
 }
 
 """

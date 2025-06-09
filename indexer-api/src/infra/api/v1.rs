@@ -162,6 +162,12 @@ where
     /// The result of applying a transaction to the ledger state.
     transaction_result: TransactionResult,
 
+    /// Fee information for this transaction.
+    fees: TransactionFees,
+
+    /// Segment results for client consumption.
+    segment_results: Vec<SegmentResult>,
+
     /// The transaction identifiers.
     #[debug(skip)]
     identifiers: Vec<HexEncoded>,
@@ -274,10 +280,37 @@ where
             ..
         } = value;
 
+        // Use fee information from database (calculated by chain-indexer)
+        let fees = TransactionFees {
+            paid_fee: value
+                .paid_fee
+                .map(|f| f.to_string())
+                .unwrap_or_else(|| "0".to_owned()),
+            estimated_fee: value
+                .estimated_fee
+                .map(|f| f.to_string())
+                .unwrap_or_else(|| "0".to_owned()),
+        };
+
+        // Convert segment results for client consumption
+        let segment_results = match &transaction_result {
+            indexer_common::domain::TransactionResult::PartialSuccess(segments) => segments
+                .iter()
+                .map(|(segment_id, success)| SegmentResult {
+                    segment_id: *segment_id,
+                    success: *success,
+                })
+                .collect(),
+            indexer_common::domain::TransactionResult::Success => Vec::new(),
+            indexer_common::domain::TransactionResult::Failure => Vec::new(),
+        };
+
         Self {
             hash: hash.hex_encode(),
             protocol_version,
             transaction_result: transaction_result.into(),
+            fees,
+            segment_results,
             identifiers: identifiers
                 .into_iter()
                 .map(|identifier| identifier.hex_encode())
@@ -331,6 +364,24 @@ pub struct Segment {
     id: u16,
 
     /// Successful or not.
+    success: bool,
+}
+
+/// Fee information for a transaction, including both paid and estimated costs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
+pub struct TransactionFees {
+    /// The actual fee paid for this transaction in DUST.
+    paid_fee: String,
+    /// The estimated fee that was calculated for this transaction in DUST.
+    estimated_fee: String,
+}
+
+/// Result for a specific segment within a transaction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
+pub struct SegmentResult {
+    /// The segment identifier.
+    segment_id: u16,
+    /// Whether this segment was successfully executed.
     success: bool,
 }
 
@@ -754,7 +805,7 @@ struct ViewingUpdate<S: Storage> {
 #[derive(Debug, Union)]
 enum ZswapChainStateUpdate<S: Storage> {
     MerkleTreeCollapsedUpdate(MerkleTreeCollapsedUpdate),
-    RelevantTransaction(RelevantTransaction<S>),
+    RelevantTransaction(Box<RelevantTransaction<S>>),
 }
 
 #[derive(Debug, SimpleObject)]

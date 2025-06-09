@@ -12,9 +12,12 @@
 // limitations under the License.
 
 use derive_more::Debug;
-use indexer_common::domain::{
-    BlockHash, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction, TransactionHash,
-    TransactionResult,
+use indexer_common::{
+    domain::{
+        BlockHash, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction, TransactionHash,
+        TransactionResult,
+    },
+    infra::sqlx::{SqlxOption, U128BeBytes},
 };
 use sqlx::FromRow;
 
@@ -51,4 +54,10 @@ pub struct Transaction {
 
     #[sqlx(try_from = "i64")]
     pub end_index: u64,
+
+    #[sqlx(try_from = "SqlxOption<U128BeBytes>")]
+    pub paid_fee: Option<u128>,
+
+    #[sqlx(try_from = "SqlxOption<U128BeBytes>")]
+    pub estimated_fee: Option<u128>,
 }

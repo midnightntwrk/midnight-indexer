@@ -18,6 +18,8 @@ CREATE TABLE transactions(
     merkle_tree_root BLOB NOT NULL,
     start_index INTEGER NOT NULL,
     end_index INTEGER NOT NULL,
+    paid_fee BLOB,
+    estimated_fee BLOB,
     FOREIGN KEY (block_id) REFERENCES blocks(id)
 );
 

@@ -24,7 +24,9 @@ CREATE TABLE transactions(
     raw BYTEA NOT NULL,
     merkle_tree_root BYTEA NOT NULL,
     start_index BIGINT NOT NULL,
-    end_index BIGINT NOT NULL
+    end_index BIGINT NOT NULL,
+    paid_fee BYTEA,
+    estimated_fee BYTEA
 );
 
 CREATE INDEX ON transactions(block_id);
