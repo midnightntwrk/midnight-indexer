@@ -311,7 +311,7 @@ input UnshieldedOffset @oneOf {
 }
 
 """
-Progress tracking information for unshielded token synchronization
+Progress tracking information for unshielded token synchronization.
 """
 type UnshieldedProgress {
 	"""

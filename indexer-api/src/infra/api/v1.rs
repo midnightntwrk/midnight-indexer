@@ -684,7 +684,7 @@ pub enum UnshieldedAddressFormatError {
     UnexpectedNetworkId(NetworkId, NetworkId),
 }
 
-/// Progress tracking information for unshielded token synchronization
+/// Progress tracking information for unshielded token synchronization.
 #[derive(SimpleObject, Clone, Debug)]
 pub struct UnshieldedProgress {
     /// The highest end index of all currently known transactions

@@ -264,14 +264,4 @@ impl TransactionStorage for PostgresStorage {
             highest_relevant_wallet_index.map(|n| n as u64),
         ))
     }
-
-    async fn get_highest_transaction_end_index(&self) -> Result<Option<u64>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT MAX(end_index) FROM transactions
-        "};
-
-        let highest_index: Option<i64> = sqlx::query_scalar(query).fetch_one(&*self.pool).await?;
-
-        Ok(highest_index.map(|n| n as u64))
-    }
 }

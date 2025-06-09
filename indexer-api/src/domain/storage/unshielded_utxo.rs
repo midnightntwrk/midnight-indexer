@@ -43,11 +43,14 @@ where
         filter: UnshieldedUtxoFilter<'_>,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
-    /// Get the highest end_index for transactions involving the given unshielded address.
-    async fn get_highest_end_index_for_address(
+    /// Get the highest end indices for unshielded address progress calculation.
+    /// Returns a tuple of:
+    /// - the highest end index from all transactions
+    /// - the highest end index for transactions involving the given unshielded address
+    async fn get_highest_indices_for_address(
         &self,
         address: &UnshieldedAddress,
-    ) -> Result<Option<u64>, sqlx::Error>;
+    ) -> Result<(Option<u64>, Option<u64>), sqlx::Error>;
 }
 
 /// Filter criteria for unshielded UTXOs queries.
@@ -81,6 +84,14 @@ impl UnshieldedUtxoStorage for NoopStorage {
         address: Option<&UnshieldedAddress>,
         filter: UnshieldedUtxoFilter<'_>,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_highest_indices_for_address(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> Result<(Option<u64>, Option<u64>), sqlx::Error> {
         unimplemented!()
     }
 }

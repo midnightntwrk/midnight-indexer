@@ -121,11 +121,6 @@ where
         .try_filter(move |event| ready(event.address == address_for_filter));
 
     let updates = try_stream! {
-        // Create a drop guard that logs when the subscription ends.
-        let _guard = scopeguard::guard((), |_| {
-            debug!(address:?; "unshielded UTXO subscription dropped");
-        });
-
         let mut utxo_indexed_events = pin!(utxo_indexed_events);
         while let Some(UnshieldedUtxoIndexed { address: _, transaction_id }) = utxo_indexed_events
             .try_next()
@@ -167,11 +162,12 @@ where
                 .await
                 .internal("fetch spent UTXOs")?;
 
-            let highest_index = storage
-                .get_highest_transaction_end_index()
+            let (highest_index, _) = storage
+                .get_highest_indices_for_address(&address)
                 .await
-                .internal("fetch highest transaction end index")?
-                .unwrap_or(0);
+                .internal("fetch highest indices for address")?
+                ;
+            let highest_index = highest_index.unwrap_or(0);
 
             let current_index = tx.end_index;
 
@@ -223,17 +219,13 @@ where
     S: Storage,
 {
     // Calculate progress information
-    let highest_index = storage
-        .get_highest_transaction_end_index()
+    let (highest_index, current_index) = storage
+        .get_highest_indices_for_address(&address)
         .await
-        .internal("fetch highest transaction end index")?
-        .unwrap_or(0);
+        .internal("fetch highest indices for address")?;
 
-    let current_index = storage
-        .get_highest_end_index_for_address(&address)
-        .await
-        .internal("fetch highest end index for address")?
-        .unwrap_or(0);
+    let highest_index = highest_index.unwrap_or(0);
+    let current_index = current_index.unwrap_or(0);
 
     let progress = UnshieldedProgress {
         highest_index,

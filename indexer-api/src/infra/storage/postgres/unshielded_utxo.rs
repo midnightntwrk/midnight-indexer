@@ -210,24 +210,33 @@ impl UnshieldedUtxoStorage for PostgresStorage {
         Ok(utxos)
     }
 
-    async fn get_highest_end_index_for_address(
+    async fn get_highest_indices_for_address(
         &self,
         address: &UnshieldedAddress,
-    ) -> Result<Option<u64>, sqlx::Error> {
+    ) -> Result<(Option<u64>, Option<u64>), sqlx::Error> {
         let query = indoc! {"
-            SELECT MAX(transactions.end_index)
-            FROM transactions
-            INNER JOIN unshielded_utxos ON 
-                unshielded_utxos.creating_transaction_id = transactions.id OR
-                unshielded_utxos.spending_transaction_id = transactions.id
-            WHERE unshielded_utxos.owner_address = $1
+            SELECT (
+                SELECT MAX(end_index) FROM transactions
+            ) AS highest_end_index,
+            (
+                SELECT MAX(transactions.end_index)
+                FROM transactions
+                INNER JOIN unshielded_utxos ON 
+                    unshielded_utxos.creating_transaction_id = transactions.id OR
+                    unshielded_utxos.spending_transaction_id = transactions.id
+                WHERE unshielded_utxos.owner_address = $1
+            ) AS highest_end_index_for_address
         "};
 
-        let highest_index: Option<i64> = sqlx::query_scalar(query)
-            .bind(address.as_ref())
-            .fetch_one(&*self.pool)
-            .await?;
+        let (highest_index, highest_index_for_address) =
+            sqlx::query_as::<_, (Option<i64>, Option<i64>)>(query)
+                .bind(address.as_ref())
+                .fetch_one(&*self.pool)
+                .await?;
 
-        Ok(highest_index.map(|n| n as u64))
+        Ok((
+            highest_index.map(|n| n as u64),
+            highest_index_for_address.map(|n| n as u64),
+        ))
     }
 }
