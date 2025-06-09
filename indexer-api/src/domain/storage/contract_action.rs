@@ -141,11 +141,12 @@ impl ContractActionStorage for NoopStorage {
         unimplemented!()
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     fn get_contract_actions_by_address(
         &self,
         address: &ContractAddress,
         block_height: u32,
-        contract_id: u64,
+        contract_action_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send {
         stream::empty()
