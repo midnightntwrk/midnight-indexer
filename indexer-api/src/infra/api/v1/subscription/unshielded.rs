@@ -23,7 +23,6 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, stream::TryStreamExt};
 use indexer_common::domain::{ByteVec, NetworkId, Subscriber, UnshieldedUtxoIndexed};
 use log::{debug, warn};
-use scopeguard;
 use std::{future::ready, marker::PhantomData, pin::pin, time::Duration};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
@@ -122,10 +121,6 @@ where
         .try_filter(move |event| ready(event.address == address_for_filter));
 
     let updates = try_stream! {
-        // Create a drop guard that logs when the subscription ends.
-        let _guard = scopeguard::guard((), |_| {
-            debug!(address:?; "unshielded UTXO subscription dropped");
-        });
         let mut utxo_indexed_events = pin!(utxo_indexed_events);
         while let Some(UnshieldedUtxoIndexed { address: _, transaction_id }) = utxo_indexed_events
             .try_next()

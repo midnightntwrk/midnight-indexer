@@ -66,9 +66,6 @@ where
         &self,
         session_id: SessionId,
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error>;
-
-    /// Get the highest end_index from all transactions (for progress calculation).
-    async fn get_highest_transaction_end_index(&self) -> Result<Option<u64>, sqlx::Error>;
 }
 
 #[allow(unused_variables)]

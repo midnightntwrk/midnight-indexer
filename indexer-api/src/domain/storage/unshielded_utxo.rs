@@ -19,6 +19,7 @@ use crate::domain::{
     },
 };
 use indexer_common::domain::{BlockHash, Identifier, TransactionHash, UnshieldedAddress};
+use sqlx::Error;
 use std::fmt::Debug;
 
 /// Storage abstraction for unshielded UTXO operations.
@@ -103,4 +104,93 @@ where
         &self,
         address: &UnshieldedAddress,
     ) -> Result<(Option<u64>, Option<u64>), sqlx::Error>;
+}
+
+#[allow(unused_variables)]
+impl UnshieldedUtxoStorage for NoopStorage {
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_unshielded_utxos_by_address(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> Result<Vec<UnshieldedUtxo>, Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_unshielded_utxos_created_by_transaction(
+        &self,
+        transaction_id: u64,
+    ) -> Result<Vec<UnshieldedUtxo>, Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_unshielded_utxos_spent_by_transaction(
+        &self,
+        transaction_id: u64,
+    ) -> Result<Vec<UnshieldedUtxo>, Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_unshielded_utxos_created_in_transaction_for_address(
+        &self,
+        address: &UnshieldedAddress,
+        transaction_id: u64,
+    ) -> Result<Vec<UnshieldedUtxo>, Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_unshielded_utxos_spent_in_transaction_for_address(
+        &self,
+        address: &UnshieldedAddress,
+        transaction_id: u64,
+    ) -> Result<Vec<UnshieldedUtxo>, Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_unshielded_utxos_by_address_from_height(
+        &self,
+        address: &UnshieldedAddress,
+        height: u32,
+    ) -> Result<Vec<UnshieldedUtxo>, Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_unshielded_utxos_by_address_from_block_hash(
+        &self,
+        address: &UnshieldedAddress,
+        block_hash: &BlockHash,
+    ) -> Result<Vec<UnshieldedUtxo>, Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_unshielded_utxos_by_address_from_transaction_hash(
+        &self,
+        address: &UnshieldedAddress,
+        transaction_hash: &TransactionHash,
+    ) -> Result<Vec<UnshieldedUtxo>, Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_unshielded_utxos_by_address_from_transaction_identifier(
+        &self,
+        address: &UnshieldedAddress,
+        identifier: &Identifier,
+    ) -> Result<Vec<UnshieldedUtxo>, Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_highest_indices_for_address(
+        &self,
+        address: &UnshieldedAddress,
+    ) -> Result<(Option<u64>, Option<u64>), Error> {
+        unimplemented!()
+    }
 }
