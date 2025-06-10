@@ -18,7 +18,7 @@ use crate::{
     domain::{Block, BlockInfo, ContractAction, ContractAttributes, Node, Transaction},
     infra::node::{
         header::SubstrateHeaderExt,
-        runtimes::{AbstractedUtxoInfo, BlockDetails},
+        runtimes::{BlockDetails, UtxoInfo},
     },
 };
 use async_stream::try_stream;
@@ -27,8 +27,8 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{
     LedgerTransaction,
     domain::{
-        BlockAuthor, BlockHash, ByteVec, IntentHash, NetworkId, ProtocolVersion, RawTokenType,
-        RawTransaction, ScaleDecodeProtocolVersionError, TransactionHash, UnshieldedAddress,
+        BlockAuthor, BlockHash, ByteVec, NetworkId, ProtocolVersion, RawTransaction,
+        ScaleDecodeProtocolVersionError, TransactionHash, UnshieldedAddress,
     },
     error::{BoxError, StdErrorExt},
     serialize::SerializableExt,
@@ -534,8 +534,8 @@ async fn make_transaction(
     raw_transaction: Vec<u8>,
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
-    created_info_map: &HashMap<[u8; 32], Vec<AbstractedUtxoInfo>>,
-    spent_info_map: &HashMap<[u8; 32], Vec<AbstractedUtxoInfo>>,
+    created_info_map: &HashMap<TransactionHash, Vec<UtxoInfo>>,
+    spent_info_map: &HashMap<TransactionHash, Vec<UtxoInfo>>,
     network_id: NetworkId,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<Transaction>, SubxtNodeError> {
@@ -596,29 +596,29 @@ async fn make_transaction(
     };
 
     let created_unshielded_utxos = created_info_map
-        .get(hash.as_ref())
+        .get(&hash)
         .map_or(&[] as &[_], |v| v.as_slice())
         .iter()
         .map(|info| crate::domain::UnshieldedUtxo {
             creating_transaction_id: 0,
             output_index: info.output_no,
             owner_address: UnshieldedAddress::from(info.address.as_ref()),
-            token_type: RawTokenType::from(info.token_type),
-            intent_hash: IntentHash::from(info.intent_hash),
+            token_type: info.token_type,
+            intent_hash: info.intent_hash,
             value: info.value,
         })
         .collect();
 
     let spent_unshielded_utxos = spent_info_map
-        .get(hash.as_ref())
+        .get(&hash)
         .map_or(&[] as &[_], |v| v.as_slice())
         .iter()
         .map(|info| crate::domain::UnshieldedUtxo {
             creating_transaction_id: 0,
             output_index: info.output_no,
             owner_address: UnshieldedAddress::from(info.address.as_ref()),
-            token_type: RawTokenType::from(info.token_type),
-            intent_hash: IntentHash::from(info.intent_hash),
+            token_type: info.token_type,
+            intent_hash: info.intent_hash,
             value: info.value,
         })
         .collect();

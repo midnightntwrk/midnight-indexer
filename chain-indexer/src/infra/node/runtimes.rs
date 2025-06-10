@@ -16,7 +16,8 @@ mod runtime_0_13 {}
 
 use crate::infra::node::SubxtNodeError;
 use indexer_common::domain::{
-    BlockHash, ContractAddress, ContractState, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
+    BlockHash, ByteArray, ContractAddress, ContractState, IntentHash, PROTOCOL_VERSION_000_013_000,
+    ProtocolVersion, RawTokenType, TransactionHash,
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
@@ -24,11 +25,11 @@ use std::collections::HashMap;
 use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, utils::H256};
 
 /// Abstracted UTXO info that is runtime-agnostic.
-pub struct AbstractedUtxoInfo {
+pub struct UtxoInfo {
     pub output_no: u32,
-    pub address: [u8; 32],
-    pub token_type: [u8; 32],
-    pub intent_hash: [u8; 32],
+    pub address: ByteArray<32>,
+    pub token_type: RawTokenType,
+    pub intent_hash: IntentHash,
     pub value: u128,
 }
 
@@ -36,8 +37,8 @@ pub struct AbstractedUtxoInfo {
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
     pub raw_transactions: Vec<Vec<u8>>,
-    pub created_unshielded_utxos_info: HashMap<[u8; 32], Vec<AbstractedUtxoInfo>>,
-    pub spent_unshielded_utxos_info: HashMap<[u8; 32], Vec<AbstractedUtxoInfo>>,
+    pub created_unshielded_utxos_info: HashMap<TransactionHash, Vec<UtxoInfo>>,
+    pub spent_unshielded_utxos_info: HashMap<TransactionHash, Vec<UtxoInfo>>,
 }
 
 /// Make block details depending on the given protocol version.
@@ -139,12 +140,10 @@ macro_rules! make_block_details {
                     })
                     .collect();
 
-                let mut created_unshielded_utxos_info: HashMap<[u8; 32], Vec<AbstractedUtxoInfo>> =
-                    HashMap::new();
-                let mut spent_unshielded_utxos_info: HashMap<[u8; 32], Vec<AbstractedUtxoInfo>> =
-                    HashMap::new();
+                let mut created_unshielded_utxos_info = HashMap::new();
+                let mut spent_unshielded_utxos_info = HashMap::new();
 
-                let mut current_tx_hash: Option<[u8; 32]> = None;
+                let mut current_tx_hash = None;
 
                 for event in events.iter().flatten() {
                     if let Ok(root_event) = event.as_root_event::<Event>() {
@@ -162,30 +161,30 @@ macro_rules! make_block_details {
                                 // Use the most recent transaction hash
                                 if let Some(tx_hash) = current_tx_hash {
                                     if !event_data.created.is_empty() {
-                                        let abstracted_created: Vec<AbstractedUtxoInfo> = event_data.created
+                                        let abstracted_created = event_data.created
                                             .into_iter()
-                                            .map(|utxo| AbstractedUtxoInfo {
+                                            .map(|utxo| UtxoInfo {
                                                 output_no: utxo.output_no,
-                                                address: utxo.address,
-                                                token_type: utxo.token_type,
-                                                intent_hash: utxo.intent_hash,
+                                                address: utxo.address.into(),
+                                                token_type: utxo.token_type.into(),
+                                                intent_hash: utxo.intent_hash.into(),
                                                 value: utxo.value,
                                             })
                                             .collect();
-                                        created_unshielded_utxos_info.insert(tx_hash, abstracted_created);
+                                        created_unshielded_utxos_info.insert(tx_hash.into(), abstracted_created);
                                     }
                                     if !event_data.spent.is_empty() {
-                                        let abstracted_spent: Vec<AbstractedUtxoInfo> = event_data.spent
+                                        let abstracted_spent = event_data.spent
                                             .into_iter()
-                                            .map(|utxo| AbstractedUtxoInfo {
+                                            .map(|utxo| UtxoInfo {
                                                 output_no: utxo.output_no,
-                                                address: utxo.address,
-                                                token_type: utxo.token_type,
-                                                intent_hash: utxo.intent_hash,
+                                                address: utxo.address.into(),
+                                                token_type: utxo.token_type.into(),
+                                                intent_hash: utxo.intent_hash.into(),
                                                 value: utxo.value,
                                             })
                                             .collect();
-                                        spent_unshielded_utxos_info.insert(tx_hash, abstracted_spent);
+                                        spent_unshielded_utxos_info.insert(tx_hash.into(), abstracted_spent);
                                     }
                                 }
                             }
