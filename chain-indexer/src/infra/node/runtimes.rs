@@ -24,7 +24,6 @@ use std::collections::HashMap;
 use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, utils::H256};
 
 /// Abstracted UTXO info that is runtime-agnostic.
-#[derive(Debug, Clone)]
 pub struct AbstractedUtxoInfo {
     pub output_no: u32,
     pub address: [u8; 32],
