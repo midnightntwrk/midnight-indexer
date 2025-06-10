@@ -75,7 +75,8 @@ where
         height: u32,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
-    /// Get unshielded UTXOs for an address from a specific block.
+    /// Get unshielded UTXOs for an address created in the specific block identified by the given
+    /// hash.
     async fn get_unshielded_utxos_by_address_from_block_hash(
         &self,
         address: &UnshieldedAddress,

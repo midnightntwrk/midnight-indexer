@@ -18,7 +18,7 @@ use crate::{
     domain::{Block, BlockInfo, ContractAction, ContractAttributes, Node, Transaction},
     infra::node::{
         header::SubstrateHeaderExt,
-        runtimes::{BlockDetails, RuntimeUnshieldedUtxoInfo},
+        runtimes::{AbstractedUtxoInfo, BlockDetails},
     },
 };
 use async_stream::try_stream;
@@ -534,8 +534,8 @@ async fn make_transaction(
     raw_transaction: Vec<u8>,
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
-    created_info_map: &HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>>,
-    spent_info_map: &HashMap<[u8; 32], Vec<RuntimeUnshieldedUtxoInfo>>,
+    created_info_map: &HashMap<[u8; 32], Vec<AbstractedUtxoInfo>>,
+    spent_info_map: &HashMap<[u8; 32], Vec<AbstractedUtxoInfo>>,
     network_id: NetworkId,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<Transaction>, SubxtNodeError> {
