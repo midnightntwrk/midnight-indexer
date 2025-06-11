@@ -234,8 +234,10 @@ type Subscription {
 	A stream of `UnshieldedUtxoEvent`s containing:
 	- `progress`: Progress information for wallet synchronization (always present)
 	- `transaction`: The transaction that created/spent UTXOs (None for progress-only events)
-	- `createdUtxos`: UTXOs created in this transaction for the address (None for progress-only events)
-	- `spentUtxos`: UTXOs spent in this transaction for the address (None for progress-only events)
+	- `createdUtxos`: UTXOs created in this transaction for the address (None for progress-only
+	events)
+	- `spentUtxos`: UTXOs spent in this transaction for the address (None for progress-only
+	events)
 	"""
 	unshieldedUtxos(address: UnshieldedAddress!): UnshieldedUtxoEvent!
 }
