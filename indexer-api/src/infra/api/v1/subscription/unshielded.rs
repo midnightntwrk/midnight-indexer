@@ -61,10 +61,12 @@ where
     ///
     /// # Returns
     /// A stream of `UnshieldedUtxoEvent`s containing:
-    /// - `eventType`: UPDATE (for actual changes) or PROGRESS (for keep-alive messages)
-    /// - `transaction`: The transaction that created/spent UTXOs
-    /// - `createdUtxos`: UTXOs created in this transaction for the address
-    /// - `spentUtxos`: UTXOs spent in this transaction for the address
+    /// - `progress`: Progress information for wallet synchronization (always present)
+    /// - `transaction`: The transaction that created/spent UTXOs (None for progress-only events)
+    /// - `createdUtxos`: UTXOs created in this transaction for the address (None for progress-only
+    ///   events)
+    /// - `spentUtxos`: UTXOs spent in this transaction for the address (None for progress-only
+    ///   events)
     #[trace(properties = { "address": "{address:?}" })]
     async fn unshielded_utxos<'a>(
         &self,
