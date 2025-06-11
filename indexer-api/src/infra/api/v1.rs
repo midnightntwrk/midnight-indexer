@@ -280,14 +280,14 @@ where
             ..
         } = value;
 
-        // Use fee information from database (calculated by chain-indexer)
+        // Use fees information from database (calculated by chain-indexer)
         let fees = TransactionFees {
-            paid_fee: value
-                .paid_fee
+            paid_fees: value
+                .paid_fees
                 .map(|f| f.to_string())
                 .unwrap_or_else(|| "0".to_owned()),
-            estimated_fee: value
-                .estimated_fee
+            estimated_fees: value
+                .estimated_fees
                 .map(|f| f.to_string())
                 .unwrap_or_else(|| "0".to_owned()),
         };
@@ -301,8 +301,8 @@ where
                     success: *success,
                 })
                 .collect(),
-            indexer_common::domain::TransactionResult::Success => Vec::new(),
-            indexer_common::domain::TransactionResult::Failure => Vec::new(),
+            indexer_common::domain::TransactionResult::Success => vec![],
+            indexer_common::domain::TransactionResult::Failure => vec![],
         };
 
         Self {
@@ -367,13 +367,13 @@ pub struct Segment {
     success: bool,
 }
 
-/// Fee information for a transaction, including both paid and estimated costs.
+/// Fees information for a transaction, including both paid and estimated fees.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
 pub struct TransactionFees {
-    /// The actual fee paid for this transaction in DUST.
-    paid_fee: String,
-    /// The estimated fee that was calculated for this transaction in DUST.
-    estimated_fee: String,
+    /// The actual fees paid for this transaction in DUST.
+    paid_fees: String,
+    /// The estimated fees that was calculated for this transaction in DUST.
+    estimated_fees: String,
 }
 
 /// Result for a specific segment within a transaction.
@@ -803,9 +803,10 @@ struct ViewingUpdate<S: Storage> {
 }
 
 #[derive(Debug, Union)]
+#[allow(clippy::large_enum_variant)]
 enum ZswapChainStateUpdate<S: Storage> {
     MerkleTreeCollapsedUpdate(MerkleTreeCollapsedUpdate),
-    RelevantTransaction(Box<RelevantTransaction<S>>),
+    RelevantTransaction(RelevantTransaction<S>),
 }
 
 #[derive(Debug, SimpleObject)]

@@ -295,17 +295,17 @@ type Transaction {
 }
 
 """
-Fee information for a transaction, including both paid and estimated costs.
+Fees information for a transaction, including both paid and estimated fees.
 """
 type TransactionFees {
 	"""
-	The actual fee paid for this transaction in DUST.
+	The actual fees paid for this transaction in DUST.
 	"""
-	paidFee: String!
+	paidFees: String!
 	"""
-	The estimated fee that was calculated for this transaction in DUST.
+	The estimated fees that was calculated for this transaction in DUST.
 	"""
-	estimatedFee: String!
+	estimatedFees: String!
 }
 
 """

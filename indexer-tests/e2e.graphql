@@ -16,8 +16,8 @@ query BlockQuery($block_offset: BlockOffset) {
                 status
             }
             fees {
-                paidFee
-                estimatedFee
+                paidFees
+                estimatedFees
             }
             segmentResults {
                 segmentId
@@ -96,8 +96,8 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                 status
             }
         fees {
-            paidFee
-            estimatedFee
+            paidFees
+            estimatedFees
         }
         segmentResults {
             segmentId
@@ -269,8 +269,8 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                 status
             }
             fees {
-                paidFee
-                estimatedFee
+                paidFees
+                estimatedFees
             }
             segmentResults {
                 segmentId

@@ -544,8 +544,8 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
             spent_unshielded_utxos: vec![],
             start_index: 0,
             end_index: 1,
-            paid_fee: 0,
-            estimated_fee: 0,
+            paid_fees: 0,
+            estimated_fees: 0,
         },
         Transaction {
             id: 0,
@@ -574,8 +574,8 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
             spent_unshielded_utxos: vec![],
             start_index: 0,
             end_index: 1,
-            paid_fee: 0,
-            estimated_fee: 0,
+            paid_fees: 0,
+            estimated_fees: 0,
         },
     ],
 });
@@ -631,8 +631,8 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
         spent_unshielded_utxos: vec![sample_spent_utxo()],
         start_index: 2,
         end_index: 3,
-        paid_fee: 0,
-        estimated_fee: 0,
+        paid_fees: 0,
+        estimated_fees: 0,
     }],
 });
 

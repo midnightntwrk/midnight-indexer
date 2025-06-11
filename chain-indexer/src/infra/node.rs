@@ -482,6 +482,9 @@ pub enum SubxtNodeError {
     #[error("cannot get zswap state root: {0}")]
     GetZswapStateRoot(String),
 
+    #[error("cannot get transaction cost: {0}")]
+    GetTransactionCost(#[source] Box<subxt::Error>),
+
     #[error("block with hash {0} not found")]
     BlockNotFound(BlockHash),
 
@@ -631,17 +634,20 @@ async fn make_transaction(
     )
     .await
     {
-        Ok(fee_amount) => crate::domain::TransactionFees {
-            paid_fee: fee_amount,
-            estimated_fee: fee_amount,
+        Ok(fees) => crate::domain::TransactionFees {
+            paid_fees: fees,
+            estimated_fees: fees,
         },
+
         Err(error) => {
             warn!(
-                "runtime API fee calculation failed, using fallback: {error:#}. \
-                 Block: {block_hash}, Transaction size: {} bytes",
+                "runtime API fees calculation failed, using fallback: {}, block_hash = {}, transaction_size = {}",
+                error,
+                block_hash,
                 raw.as_ref().len()
             );
-            crate::domain::extract_transaction_fees_from_ledger_transaction(
+            use crate::domain::TransactionFees;
+            TransactionFees::extract_from_ledger_transaction(
                 &ledger_transaction,
                 raw.as_ref().len(),
             )
@@ -661,8 +667,8 @@ async fn make_transaction(
         end_index: Default::default(),
         created_unshielded_utxos,
         spent_unshielded_utxos,
-        paid_fee: fees.paid_fee,
-        estimated_fee: fees.estimated_fee,
+        paid_fees: fees.paid_fees,
+        estimated_fees: fees.estimated_fees,
     };
 
     Ok(Some(transaction))

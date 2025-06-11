@@ -327,8 +327,9 @@ macro_rules! get_transaction_cost {
                     .runtime_api()
                     .at(H256(block_hash.0))
                     .call(get_transaction_cost)
-                    .await.map_err(Box::new)?
-                    .map_err(|error| SubxtNodeError::GetContractState(format!("Transaction cost error: {error:?}")))?;
+                    .await.map_err(Box::new)
+                    .map_err(SubxtNodeError::GetTransactionCost)?
+                    .map_err(|_| SubxtNodeError::GetContractState("transaction cost calculation failed".to_string()))?;
 
                 // Combine storage cost and gas cost for total fee
                 // StorageCost = u128, GasCost = u64

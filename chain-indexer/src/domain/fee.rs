@@ -11,125 +11,156 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Transaction fee extraction with multi-layer fallback calculation.
+//! Transaction fees extraction with multi-layer fallback calculation.
 //!
-//! This module implements fee calculation using:
-//! 1. Runtime API call (primary) - Uses midnight-node's fee calculation
+//! This module implements fees calculation using:
+//! 1. Runtime API call (primary) - Uses midnight-node's fees calculation
 //! 2. Advanced heuristic (secondary) - Based on transaction structure analysis
 //! 3. Basic size-based calculation (tertiary) - Fallback using transaction size
-//! 4. Minimum fee (final) - Ensures non-zero fees for all transactions
+//! 4. Minimum fees (final) - Ensures non-zero fees for all transactions
 
 use indexer_common::{LedgerTransaction, domain::RawTransaction};
 use log::warn;
+use thiserror::Error;
 
-/// Fee information for a transaction, including both paid and estimated costs.
+// Fee calculation constants
+const BASE_OVERHEAD: u128 = 1000; // Base transaction overhead in smallest DUST unit
+const SIZE_MULTIPLIER: u128 = 50; // Cost per byte of transaction data
+const MINIMUM_FEE: u128 = 500; // Minimum fees for any transaction
+const INPUT_FEE_OVERHEAD: u128 = 100; // Cost per UTXO input
+const OUTPUT_FEE_OVERHEAD: u128 = 150; // Cost per UTXO output  
+const CONTRACT_OPERATION_COST: u128 = 5000; // Additional cost for contract calls/deploys
+const SEGMENT_OVERHEAD_COST: u128 = 500; // Cost per additional segment
+const MINIMUM_BASE_FEE: u128 = 1000; // Minimum base fees
+const SIZE_MULTIPLIER_MIN: u128 = 10; // Size multiplier for minimum fees
+
+/// Errors that can occur during fees calculation.
+#[derive(Error, Debug)]
+pub enum FeesError {
+    #[error("transaction data cannot be empty")]
+    EmptyTransactionData,
+    #[error("transaction data too small to be valid (minimum 32 bytes required)")]
+    TransactionDataTooSmall,
+    #[error("fees calculation failed: {0}")]
+    CalculationFailed(String),
+}
+
+/// Fees information for a transaction, including both paid and estimated fees.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransactionFees {
-    /// The actual fee paid for this transaction in DUST.
-    pub paid_fee: u128,
-    /// The estimated fee that was calculated for this transaction in DUST.
-    pub estimated_fee: u128,
+    /// The actual fees paid for this transaction in DUST.
+    pub paid_fees: u128,
+    /// The estimated fees that was calculated for this transaction in DUST.
+    pub estimated_fees: u128,
 }
 
-/// Extract fees from raw transaction bytes as final fallback.
-pub fn extract_transaction_fees(
-    raw: &RawTransaction,
-    network_id: Option<indexer_common::domain::NetworkId>,
-    _genesis_state: Option<&[u8]>,
-) -> TransactionFees {
-    if network_id.is_some() {
-        warn!(
-            "using legacy raw-byte fee calculation (both runtime API and LedgerTransaction analysis failed). \
-             Transaction size: {} bytes",
-            raw.as_ref().len()
-        );
-    }
-
-    // Use basic size-based calculation for raw bytes
-    match calculate_transaction_fee(raw.as_ref()) {
-        Ok(fee_amount) => TransactionFees {
-            paid_fee: fee_amount,
-            estimated_fee: fee_amount,
-        },
-        Err(_) => {
-            // Final fallback to minimum fee based on transaction size
-            let base_fee = calculate_minimum_fee(raw.as_ref().len());
-            TransactionFees {
-                paid_fee: base_fee,
-                estimated_fee: base_fee,
-            }
+impl TransactionFees {
+    /// Extract fees from raw transaction bytes as final fallback.
+    pub fn extract_from_raw(
+        raw: &RawTransaction,
+        network_id: Option<indexer_common::domain::NetworkId>,
+        _genesis_state: Option<&[u8]>,
+    ) -> TransactionFees {
+        // Network ID is provided when we have context about which network we're processing,
+        // indicating this is a live transaction processing scenario rather than a unit test.
+        // In such cases, falling back to raw-byte calculation suggests both the runtime API
+        // and LedgerTransaction analysis have failed, which warrants a warning.
+        if network_id.is_some() {
+            warn!(
+                "using legacy raw-byte fees calculation (both runtime API and LedgerTransaction analysis failed), transaction_size = {}",
+                raw.as_ref().len()
+            );
         }
-    }
-}
 
-/// Extract fees from deserialized LedgerTransaction (preferred method).
-pub fn extract_transaction_fees_from_ledger_transaction(
-    ledger_transaction: &LedgerTransaction,
-    transaction_size: usize,
-) -> TransactionFees {
-    // Analyze the deserialized transaction structure for more accurate fee calculation
-    match analyze_ledger_transaction_structure(ledger_transaction, transaction_size) {
-        Ok(analysis) => {
-            match calculate_fee_breakdown(&analysis) {
-                Ok(fee_breakdown) => TransactionFees {
-                    paid_fee: fee_breakdown.estimated_total,
-                    estimated_fee: fee_breakdown.estimated_total,
-                },
-                Err(_) => {
-                    // Fall back to size-based calculation
-                    let base_fee = calculate_minimum_fee(transaction_size);
-                    TransactionFees {
-                        paid_fee: base_fee,
-                        estimated_fee: base_fee,
-                    }
+        // Use basic size-based calculation for raw bytes.
+        match calculate_transaction_fees(raw.as_ref()) {
+            Ok(fees) => TransactionFees {
+                paid_fees: fees,
+                estimated_fees: fees,
+            },
+
+            _ => {
+                // Final fallback to minimum fees based on transaction size.
+                let fees = calculate_minimum_fees(raw.as_ref().len());
+                TransactionFees {
+                    paid_fees: fees,
+                    estimated_fees: fees,
                 }
             }
         }
-        Err(_) => {
-            // Final fallback to minimum fee
-            let base_fee = calculate_minimum_fee(transaction_size);
-            TransactionFees {
-                paid_fee: base_fee,
-                estimated_fee: base_fee,
+    }
+
+    /// Extract fees from deserialized LedgerTransaction (preferred method).
+    pub fn extract_from_ledger_transaction(
+        ledger_transaction: &LedgerTransaction,
+        transaction_size: usize,
+    ) -> TransactionFees {
+        // Analyze the deserialized transaction structure for more accurate fees calculation.
+        match analyze_ledger_transaction_structure(ledger_transaction, transaction_size) {
+            Ok(analysis) => {
+                match calculate_fees_breakdown(&analysis) {
+                    Ok(fees) => TransactionFees {
+                        paid_fees: fees.estimated_total,
+                        estimated_fees: fees.estimated_total,
+                    },
+
+                    _ => {
+                        // Fall back to size-based calculation.
+                        let fees = calculate_minimum_fees(transaction_size);
+                        TransactionFees {
+                            paid_fees: fees,
+                            estimated_fees: fees,
+                        }
+                    }
+                }
+            }
+
+            _ => {
+                // Final fallback to minimum fees.
+                let fees = calculate_minimum_fees(transaction_size);
+                TransactionFees {
+                    paid_fees: fees,
+                    estimated_fees: fees,
+                }
             }
         }
     }
 }
 
-/// Analyze LedgerTransaction structure for fee calculation.
+/// Analyze LedgerTransaction structure for fees calculation.
 fn analyze_ledger_transaction_structure(
     ledger_transaction: &LedgerTransaction,
     transaction_size: usize,
-) -> Result<TransactionAnalysis, Box<dyn std::error::Error>> {
+) -> Result<TransactionAnalysis, FeesError> {
     match ledger_transaction {
         LedgerTransaction::Standard(standard_transaction) => {
             // Get actual transaction data from the deserialized structure
             let identifiers_count = ledger_transaction.identifiers().count();
             let contract_actions_count = standard_transaction.actions().count();
 
-            // Estimate segments based on transaction complexity
+            // Estimate segments based on transaction complexity.
             // Midnight transactions can have multiple segments (guaranteed + fallible coins).
             // Simple transactions typically use 1 segment, while complex transactions with
             // multiple contract actions or many UTXOs likely span multiple segments for
             // independent success/failure handling.
-            let estimated_segments = if contract_actions_count > 1 || identifiers_count > 2 {
+            let segment_count = if contract_actions_count > 1 || identifiers_count > 2 {
                 2
             } else {
                 1
             };
 
-            // Better estimation based on actual transaction data
+            // Better estimation based on actual transaction data.
             // Each identifier roughly corresponds to a UTXO input. Outputs are typically
             // inputs + 1 (for change). We ensure minimum values of 1 since all transactions
-            // must have at least one input and output for fee calculation purposes.
-            let estimated_inputs = identifiers_count.max(1);
-            let estimated_outputs = (identifiers_count + 1).max(1);
+            // must have at least one input and output for fees calculation purposes.
+            let estimated_input_count = identifiers_count.max(1);
+            let estimated_output_count = (identifiers_count + 1).max(1);
             let has_contract_operations = contract_actions_count > 0;
 
             Ok(TransactionAnalysis {
-                segment_count: estimated_segments,
-                estimated_input_count: estimated_inputs,
-                estimated_output_count: estimated_outputs,
+                segment_count,
+                estimated_input_count,
+                estimated_output_count,
                 has_contract_operations,
                 transaction_size,
             })
@@ -151,41 +182,34 @@ fn analyze_ledger_transaction_structure(
     }
 }
 
-/// Calculate fee from raw bytes using basic size-based heuristics.
-fn calculate_transaction_fee(
-    raw_bytes: &[u8],
-) -> Result<u128, Box<dyn std::error::Error + Send + Sync>> {
-    // Validate input
+/// Calculate fees from raw bytes using basic size-based heuristics.
+fn calculate_transaction_fees(raw_bytes: &[u8]) -> Result<u128, FeesError> {
+    // Validate input.
     if raw_bytes.is_empty() {
-        return Err("transaction data cannot be empty".into());
+        return Err(FeesError::EmptyTransactionData);
     }
 
     if raw_bytes.len() < 32 {
-        return Err("transaction data too small to be valid".into());
+        return Err(FeesError::TransactionDataTooSmall);
     }
 
-    // Implement a size-based fee estimation that provides reasonable values
-    // This mimics the structure found in midnight-node fee calculation:
-    // - Base overhead fee (fixed cost per transaction)
-    // - Size-based fee (complexity-based cost)
+    // Implement a size-based fees estimation that provides reasonable values.
+    // This mimics the structure found in midnight-node fees calculation:
+    // - Base overhead fees (fixed cost per transaction)
+    // - Size-based fees (complexity-based cost)
+    let size_fees = raw_bytes.len() as u128 * SIZE_MULTIPLIER;
+    let total_fees = BASE_OVERHEAD + size_fees;
 
-    const BASE_OVERHEAD: u128 = 1000; // Base transaction overhead in smallest DUST unit
-    const SIZE_MULTIPLIER: u128 = 50; // Cost per byte of transaction data
-    const MINIMUM_FEE: u128 = 500; // Minimum fee for any transaction
-
-    let size_fee = raw_bytes.len() as u128 * SIZE_MULTIPLIER;
-    let total_fee = BASE_OVERHEAD + size_fee;
-
-    Ok(total_fee.max(MINIMUM_FEE))
+    Ok(total_fees.max(MINIMUM_FEE))
 }
 
-/// Detailed fee breakdown for analysis.
+/// Detailed fees breakdown for analysis.
 #[derive(Debug, Clone)]
-struct FeeBreakdown {
+struct FeesBreakdown {
     estimated_total: u128,
 }
 
-/// Transaction structure analysis for fee calculation.
+/// Transaction structure analysis for fees calculation.
 #[derive(Debug)]
 struct TransactionAnalysis {
     segment_count: usize,
@@ -195,19 +219,10 @@ struct TransactionAnalysis {
     transaction_size: usize,
 }
 
-/// Calculate fee breakdown using inputs, outputs, contracts, and segments.
-fn calculate_fee_breakdown(
-    analysis: &TransactionAnalysis,
-) -> Result<FeeBreakdown, Box<dyn std::error::Error>> {
-    // Cost model values based on midnight-node analysis
-    const INPUT_FEE_OVERHEAD: u128 = 100; // Cost per UTXO input
-    const OUTPUT_FEE_OVERHEAD: u128 = 150; // Cost per UTXO output  
-    const BASE_OVERHEAD: u128 = 1000; // Fixed transaction overhead
-    const CONTRACT_OPERATION_COST: u128 = 5000; // Additional cost for contract calls/deploys
-    const SEGMENT_OVERHEAD_COST: u128 = 500; // Cost per additional segment
-
-    // Calculate core fee components following midnight-node algorithm
-    // Midnight-node fee calculation uses: input_fee + output_fee + base_overhead + extras
+/// Calculate fees breakdown using inputs, outputs, contracts, and segments.
+fn calculate_fees_breakdown(analysis: &TransactionAnalysis) -> Result<FeesBreakdown, FeesError> {
+    // Calculate core fees components following midnight-node algorithm.
+    // Midnight-node fees calculation uses: input_fees + output_fees + base_overhead + extras
     // - Input fees: charged per UTXO consumed (storage and validation costs)
     // - Output fees: charged per UTXO created (storage and commitment costs)
     // - Base overhead: fixed per-transaction processing cost
@@ -232,19 +247,16 @@ fn calculate_fee_breakdown(
         0
     };
 
-    // Calculate total estimated fee
+    // Calculate total estimated fees.
     let estimated_total =
         input_component + output_component + base_component + contract_component + segment_overhead;
 
-    Ok(FeeBreakdown { estimated_total })
+    Ok(FeesBreakdown { estimated_total })
 }
 
-/// Calculate minimum fee based on transaction size.
-fn calculate_minimum_fee(transaction_size: usize) -> u128 {
-    const MINIMUM_BASE_FEE: u128 = 1000;
-    const SIZE_MULTIPLIER: u128 = 10;
-
-    let size_component = transaction_size as u128 * SIZE_MULTIPLIER;
+/// Calculate minimum fees based on transaction size.
+fn calculate_minimum_fees(transaction_size: usize) -> u128 {
+    let size_component = transaction_size as u128 * SIZE_MULTIPLIER_MIN;
 
     MINIMUM_BASE_FEE + size_component
 }

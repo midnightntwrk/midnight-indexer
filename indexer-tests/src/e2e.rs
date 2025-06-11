@@ -182,7 +182,8 @@ impl IndexerData {
         assert!(blocks.iter().all(|block| {
             block.transactions.iter().all(|transaction| {
                 // Fees should always be present and non-empty strings
-                !transaction.fees.paid_fee.is_empty() && !transaction.fees.estimated_fee.is_empty()
+                !transaction.fees.paid_fees.is_empty()
+                    && !transaction.fees.estimated_fees.is_empty()
             })
         }));
 
@@ -221,8 +222,8 @@ impl IndexerData {
         assert!(
             transactions.iter().all(|transaction| {
                 // Fees should be parseable as numbers
-                transaction.fees.paid_fee.parse::<u64>().is_ok()
-                    && transaction.fees.estimated_fee.parse::<u64>().is_ok()
+                transaction.fees.paid_fees.parse::<u64>().is_ok()
+                    && transaction.fees.estimated_fees.parse::<u64>().is_ok()
             }),
             "All transactions should have valid numeric fee values"
         );
@@ -360,23 +361,23 @@ async fn test_transactions_query(
         for transaction in &transactions {
             // Verify fee information is present and valid
             assert!(
-                !transaction.fees.paid_fee.is_empty(),
+                !transaction.fees.paid_fees.is_empty(),
                 "paid_fee should not be empty"
             );
             assert!(
-                !transaction.fees.estimated_fee.is_empty(),
+                !transaction.fees.estimated_fees.is_empty(),
                 "estimated_fee should not be empty"
             );
 
             // Verify fees are valid numeric strings (DUST amounts)
             let paid_fee: u64 = transaction
                 .fees
-                .paid_fee
+                .paid_fees
                 .parse()
                 .expect("paid_fee should be a valid number");
             let estimated_fee: u64 = transaction
                 .fees
-                .estimated_fee
+                .estimated_fees
                 .parse()
                 .expect("estimated_fee should be a valid number");
 
@@ -439,10 +440,10 @@ async fn test_transactions_query(
 
             // Also validate fee metadata for identifier queries
             for transaction in &transactions {
-                assert!(!transaction.fees.paid_fee.is_empty());
-                assert!(!transaction.fees.estimated_fee.is_empty());
-                assert!(transaction.fees.paid_fee.parse::<u64>().is_ok());
-                assert!(transaction.fees.estimated_fee.parse::<u64>().is_ok());
+                assert!(!transaction.fees.paid_fees.is_empty());
+                assert!(!transaction.fees.estimated_fees.is_empty());
+                assert!(transaction.fees.paid_fees.parse::<u64>().is_ok());
+                assert!(transaction.fees.estimated_fees.parse::<u64>().is_ok());
             }
         }
     }

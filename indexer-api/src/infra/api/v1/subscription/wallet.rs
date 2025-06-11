@@ -242,8 +242,7 @@ where
     };
 
     let update = if from == transaction.start_index {
-        let relevant_transaction =
-            ZswapChainStateUpdate::RelevantTransaction(Box::new(transaction.into()));
+        let relevant_transaction = ZswapChainStateUpdate::RelevantTransaction(transaction.into());
         vec![relevant_transaction]
     } else {
         // We calculate the collapsed update BEFORE the start index of the transaction, hence `- 1`!
@@ -260,7 +259,7 @@ where
 
         vec![
             ZswapChainStateUpdate::MerkleTreeCollapsedUpdate(collapsed_update.into()),
-            ZswapChainStateUpdate::RelevantTransaction(Box::new(transaction.into())),
+            ZswapChainStateUpdate::RelevantTransaction(transaction.into()),
         ]
     };
 

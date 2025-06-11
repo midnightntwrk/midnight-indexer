@@ -56,8 +56,8 @@ pub struct Transaction {
     pub end_index: u64,
 
     #[sqlx(try_from = "SqlxOption<U128BeBytes>")]
-    pub paid_fee: Option<u128>,
+    pub paid_fees: Option<u128>,
 
     #[sqlx(try_from = "SqlxOption<U128BeBytes>")]
-    pub estimated_fee: Option<u128>,
+    pub estimated_fees: Option<u128>,
 }
