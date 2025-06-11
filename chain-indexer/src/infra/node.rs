@@ -15,7 +15,9 @@ mod header;
 mod runtimes;
 
 use crate::{
-    domain::{Block, BlockInfo, ContractAction, ContractAttributes, Node, Transaction},
+    domain::{
+        Block, BlockInfo, ContractAction, ContractAttributes, Node, Transaction, TransactionFees,
+    },
     infra::node::{
         header::SubstrateHeaderExt,
         runtimes::{BlockDetails, UtxoInfo},
@@ -634,7 +636,7 @@ async fn make_transaction(
     )
     .await
     {
-        Ok(fees) => crate::domain::TransactionFees {
+        Ok(fees) => TransactionFees {
             paid_fees: fees,
             estimated_fees: fees,
         },
@@ -646,7 +648,6 @@ async fn make_transaction(
                 block_hash,
                 raw.as_ref().len()
             );
-            use crate::domain::TransactionFees;
             TransactionFees::extract_from_ledger_transaction(
                 &ledger_transaction,
                 raw.as_ref().len(),

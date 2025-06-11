@@ -19,7 +19,10 @@
 //! 3. Basic size-based calculation (tertiary) - Fallback using transaction size
 //! 4. Minimum fees (final) - Ensures non-zero fees for all transactions
 
-use indexer_common::{LedgerTransaction, domain::RawTransaction};
+use indexer_common::{
+    LedgerTransaction,
+    domain::{NetworkId, RawTransaction},
+};
 use log::warn;
 use thiserror::Error;
 
@@ -58,7 +61,7 @@ impl TransactionFees {
     /// Extract fees from raw transaction bytes as final fallback.
     pub fn extract_from_raw(
         raw: &RawTransaction,
-        network_id: Option<indexer_common::domain::NetworkId>,
+        network_id: Option<NetworkId>,
         _genesis_state: Option<&[u8]>,
     ) -> TransactionFees {
         // Network ID is provided when we have context about which network we're processing,
@@ -183,7 +186,9 @@ fn analyze_ledger_transaction_structure(
 }
 
 /// Calculate fees from raw bytes using basic size-based heuristics.
-fn calculate_transaction_fees(raw_bytes: &[u8]) -> Result<u128, FeesError> {
+fn calculate_transaction_fees(raw_bytes: impl AsRef<[u8]>) -> Result<u128, FeesError> {
+    let raw_bytes = raw_bytes.as_ref();
+
     // Validate input.
     if raw_bytes.is_empty() {
         return Err(FeesError::EmptyTransactionData);
