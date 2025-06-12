@@ -86,6 +86,8 @@ query {
 
 ### transactions(offset: TransactionOffset!, address: UnshieldedAddress): [Transaction!]!
 
+**Note:** The `fees` field is now available on transactions, providing both `paidFees` and `estimatedFees` information. The `segmentResults` field provides detailed execution results for partially successful transactions.
+
 Fetch transactions by hash or by identifier using a TransactionOffset object. The offset must include either a hash or an identifier, but not both.
 
 Optionally, you can filter by an unshielded address to retrieve only transactions that create or spend unshielded UTXOs for that address.
@@ -125,6 +127,21 @@ query {
         address
         state
         chainState
+      }
+    }
+    fees {
+      paidFees
+      estimatedFees
+    }
+    segmentResults {
+      segmentId
+      success
+    }
+    transactionResult {
+      status
+      segments {
+        id
+        success
       }
     }
     unshieldedCreatedOutputs {
@@ -410,27 +427,25 @@ Subscribes to unshielded UTXO events for a specific address. Emits events whenev
   "id": "4",
   "type": "start",
   "payload": {
-    "query": "subscription { unshieldedUtxos(address: \"mn_addr_test1...\") { eventType transaction { hash block { height } } createdUtxos { owner value tokenType intentHash outputIndex } spentUtxos { owner value tokenType intentHash outputIndex } } }"
+    "query": "subscription { unshieldedUtxos(address: \"mn_addr_test1...\") { progress { highestIndex currentIndex } transaction { hash block { height } } createdUtxos { owner value tokenType intentHash outputIndex } spentUtxos { owner value tokenType intentHash outputIndex } } }"
   }
 }
 ```
-**Response Types:**
 
-- UPDATE: Indicates a transaction that created or spent UTXOs for the address.
-- PROGRESS: Status message for synchronization progress or keep-alive.
+**Event Types:**
 
-**Each event includes:**
-
-- The transaction that triggered the event
-- Lists of created and spent UTXOs in that transaction
+- **Update Events**: When UTXOs are created or spent, includes transaction details and affected UTXOs
+- **Progress Events**: Periodic synchronization progress updates without transaction data
 
 **UnshieldedUtxoEvent**
 
 Event payload for the unshielded UTXO subscription:
-- `eventType`: Either `UPDATE` (for actual changes) or `PROGRESS` (for status messages)
-- `transaction`: The transaction associated with this event
-- `createdUtxos`: List of UTXOs created in this transaction for the subscribed address
-- `spentUtxos`: List of UTXOs spent in this transaction for the subscribed address
+- `progress`: Progress information for wallet synchronization (always present)
+  - `highestIndex`: The highest end index of all currently known transactions
+  - `currentIndex`: The current end index for this address
+- `transaction`: The transaction associated with this event (present for actual updates, null for progress-only events)
+- `createdUtxos`: UTXOs created in this transaction for the subscribed address (null for progress-only events)
+- `spentUtxos`: UTXOs spent in this transaction for the subscribed address (null for progress-only events)
 
 ## Query Limits Configuration
 
