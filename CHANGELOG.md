@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.4-rc.1] - 2025-06-13
+
+### 🐛 Bug Fixes
+
+- *(indexer-api)* Correctly determine highest relevant index (#94)
+- *(indexer-api)* Correctly determine highest relevant index for standalone (#95)
+
 ## [2.1.3] - 2025-06-10
 
 ### 🚀 Features
