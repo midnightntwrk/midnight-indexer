@@ -294,9 +294,12 @@ impl TransactionStorage for SqliteStorage {
                 SELECT MAX(end_index) FROM transactions
             ) AS highest_end_index,
             (
-                SELECT MAX(end_index)
+                SELECT end_index
                 FROM transactions
-                INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
+                WHERE id = (
+                    SELECT MAX(last_indexed_transaction_id)
+                    FROM wallets
+                )
             ) AS highest_relevant_end_index,
             (
                 SELECT end_index

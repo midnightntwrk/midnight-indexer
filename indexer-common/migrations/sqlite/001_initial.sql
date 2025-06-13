@@ -72,6 +72,8 @@ CREATE TABLE wallets(
 
 CREATE INDEX wallets_session_id ON wallets(session_id);
 
+CREATE INDEX wallets_last_indexed_transaction_id ON wallets(last_indexed_transaction_id DESC);
+
 CREATE TABLE relevant_transactions(
     id INTEGER PRIMARY KEY,
     wallet_id BLOB NOT NULL,
@@ -106,3 +108,4 @@ CREATE TABLE zswap_state(
     value BLOB NOT NULL,
     last_index INTEGER
 );
+
