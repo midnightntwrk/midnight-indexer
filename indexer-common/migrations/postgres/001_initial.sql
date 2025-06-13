@@ -68,6 +68,8 @@ CREATE TABLE wallets(
 
 CREATE INDEX ON wallets(session_id);
 
+CREATE INDEX ON wallets(last_indexed_transaction_id DESC);
+
 CREATE TABLE relevant_transactions(
     id BIGSERIAL PRIMARY KEY,
     wallet_id UUID NOT NULL REFERENCES wallets(id),
