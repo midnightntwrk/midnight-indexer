@@ -93,7 +93,7 @@ impl LedgerState {
     }
 
     #[trace]
-    fn apply_transaction(
+    pub fn apply_transaction(
         &mut self,
         transaction: &RawTransaction,
         block_parent_hash: ByteArray<32>,
