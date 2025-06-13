@@ -11,36 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Contract unshielded token balance functionality.
-//!
-//! This module provides functionality for exposing unshielded token balances
-//! held by smart contracts through the GraphQL API. The balances are extracted
-//! and stored during chain indexing by the chain-indexer component.
-//!
-//! # Architecture Notes
-//!
-//! From the midnight architecture specification:
-//!
-//! ```text
-//! struct ContractState {
-//!     data: StateValue,
-//!     operations: Map<Bytes, ZkVerifierKey>,
-//!     maintenance_authority: ContractMaintenanceAuthority,
-//!     balance: Map<TokenType, u128>,  // <- This is extracted during indexing
-//! }
-//! ```
-//!
-//! ## Balance Rules
-//!
-//! - **Deploy**: Contracts must be deployed with zero balance (architecture requirement)
-//! - **Call**: Can modify balances through `unshielded_inputs` and `unshielded_outputs`
-//! - **Update**: Maintenance updates that may affect contract state and balances
-//!
-//! ## Implementation Status
-//!
-//! This module provides GraphQL API support for querying pre-processed balance data
-//! that was extracted during chain indexing. The heavy deserialization work is done
-//! by the chain-indexer component, and this API layer simply reads the stored balance data.
+//! GraphQL types for contract unshielded token balances.
 
 use crate::domain::HexEncoded;
 use async_graphql::SimpleObject;
