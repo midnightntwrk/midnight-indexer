@@ -68,6 +68,10 @@ type ContractCall implements ContractAction {
 	entryPoint: HexEncoded!
 	transaction: Transaction!
 	deploy: ContractDeploy!
+	"""
+	Unshielded token balances held by this contract
+	"""
+	unshieldedBalances: [UnshieldedBalance!]!
 }
 
 """
@@ -78,6 +82,11 @@ type ContractDeploy implements ContractAction {
 	state: HexEncoded!
 	chainState: HexEncoded!
 	transaction: Transaction!
+	"""
+	Unshielded token balances held by this contract.
+	According to the architecture, deployed contracts must have zero balance.
+	"""
+	unshieldedBalances: [UnshieldedBalance!]!
 }
 
 """
@@ -88,6 +97,10 @@ type ContractUpdate implements ContractAction {
 	state: HexEncoded!
 	chainState: HexEncoded!
 	transaction: Transaction!
+	"""
+	Unshielded token balances held by this contract after the update.
+	"""
+	unshieldedBalances: [UnshieldedBalance!]!
 }
 
 scalar HexEncoded
@@ -339,6 +352,23 @@ enum TransactionResultStatus {
 scalar Unit
 
 scalar UnshieldedAddress
+
+"""
+Represents a token balance held by a contract.
+
+This type is exposed through the GraphQL API to allow clients to query
+unshielded token balances for any contract action (Deploy, Call, Update).
+"""
+type UnshieldedBalance {
+	"""
+	Token type identifier, hex-encoded for GraphQL compatibility
+	"""
+	tokenType: HexEncoded!
+	"""
+	Balance amount as string to support u128 values
+	"""
+	amount: String!
+}
 
 """
 Either a [BlockOffset] or a [TransactionOffset] to query for a [UnshieldedUtxo].

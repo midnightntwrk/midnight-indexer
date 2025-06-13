@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod contract_balances;
 mod mutation;
 mod query;
 mod subscription;
@@ -48,6 +49,8 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
 };
 use thiserror::Error;
+
+use self::contract_balances::UnshieldedBalance;
 
 const HRP_UNSHIELDED_BASE: &str = "mn_addr";
 
@@ -447,6 +450,9 @@ struct ContractDeploy<S: Storage> {
     transaction_id: u64,
 
     #[graphql(skip)]
+    contract_action_id: u64,
+
+    #[graphql(skip)]
     _s: PhantomData<S>,
 }
 
@@ -454,6 +460,21 @@ struct ContractDeploy<S: Storage> {
 impl<S: Storage> ContractDeploy<S> {
     async fn transaction(&self, cx: &Context<'_>) -> async_graphql::Result<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
+    }
+
+    /// Unshielded token balances held by this contract.
+    /// According to the architecture, deployed contracts must have zero balance.
+    async fn unshielded_balances(
+        &self,
+        cx: &Context<'_>,
+    ) -> async_graphql::Result<Vec<UnshieldedBalance>> {
+        let storage = cx.get_storage::<S>();
+        let balances = storage
+            .get_contract_balances_by_action_id(self.contract_action_id)
+            .await
+            .internal("cannot get contract balances by action id")?;
+
+        Ok(balances)
     }
 }
 
@@ -471,6 +492,9 @@ struct ContractCall<S: Storage> {
 
     #[graphql(skip)]
     transaction_id: u64,
+
+    #[graphql(skip)]
+    contract_action_id: u64,
 
     #[graphql(skip)]
     raw_address: ByteVec,
@@ -500,6 +524,19 @@ impl<S: Storage> ContractCall<S> {
 
         Ok(deploy)
     }
+
+    /// Unshielded token balances held by this contract
+    async fn unshielded_balances(
+        &self,
+        cx: &Context<'_>,
+    ) -> async_graphql::Result<Vec<UnshieldedBalance>> {
+        let storage = cx.get_storage::<S>();
+        let balances = storage
+            .get_contract_balances_by_action_id(self.contract_action_id)
+            .await
+            .internal("cannot get contract balances by action id")?;
+        Ok(balances)
+    }
 }
 
 /// A contract update.
@@ -516,6 +553,9 @@ struct ContractUpdate<S: Storage> {
     transaction_id: u64,
 
     #[graphql(skip)]
+    contract_action_id: u64,
+
+    #[graphql(skip)]
     _s: PhantomData<S>,
 }
 
@@ -523,6 +563,19 @@ struct ContractUpdate<S: Storage> {
 impl<S: Storage> ContractUpdate<S> {
     async fn transaction(&self, cx: &Context<'_>) -> async_graphql::Result<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
+    }
+
+    /// Unshielded token balances held by this contract after the update.
+    async fn unshielded_balances(
+        &self,
+        cx: &Context<'_>,
+    ) -> async_graphql::Result<Vec<UnshieldedBalance>> {
+        let storage = cx.get_storage::<S>();
+        let balances = storage
+            .get_contract_balances_by_action_id(self.contract_action_id)
+            .await
+            .internal("cannot get contract balances by action id")?;
+        Ok(balances)
     }
 }
 
@@ -550,6 +603,7 @@ where
 {
     fn from(action: domain::ContractAction) -> Self {
         let domain::ContractAction {
+            id,
             address,
             state,
             attributes,
@@ -564,6 +618,7 @@ where
                 state: state.hex_encode(),
                 chain_state: zswap_state.hex_encode(),
                 transaction_id,
+                contract_action_id: id,
                 _s: PhantomData,
             }),
 
@@ -574,6 +629,7 @@ where
                     entry_point: entry_point.hex_encode(),
                     chain_state: zswap_state.hex_encode(),
                     transaction_id,
+                    contract_action_id: id,
                     raw_address: address,
                     _s: PhantomData,
                 })
@@ -584,6 +640,7 @@ where
                 state: state.hex_encode(),
                 chain_state: zswap_state.hex_encode(),
                 transaction_id,
+                contract_action_id: id,
                 _s: PhantomData,
             }),
         }

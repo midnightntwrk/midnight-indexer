@@ -361,7 +361,10 @@ async fn index_block(
     }
 
     // 1) Save the block first (note: block is now mutable)
-    let max_transaction_id = storage.save_block(&mut block).await.context("save block")?;
+    let max_transaction_id = storage
+        .save_block(&mut block, network_id)
+        .await
+        .context("save block")?;
 
     // 2) Publish UnshieldedUtxoIndexed events for affected addresses
     for transaction in &block.transactions {

@@ -38,6 +38,13 @@ use indexer_common::{
 };
 use std::{convert::Into, sync::LazyLock};
 
+/// Network ID used throughout storage tests.
+///
+/// Required for contract balance extraction during block saving. The NetworkId must match
+/// the network context used when the contract state was originally serialized. Since test
+/// data uses undeployed network format, we use NetworkId::Undeployed for consistency.
+const TEST_NETWORK_ID: NetworkId = NetworkId::Undeployed;
+
 #[cfg(feature = "cloud")]
 type ChainIndexerStorage = chain_indexer::infra::storage::postgres::PostgresStorage;
 #[cfg(feature = "standalone")]
@@ -140,15 +147,15 @@ async fn run_tests(
     let mut block_2 = BLOCK_2.clone();
 
     chain_indexer_storage
-        .save_block(&mut block_0)
+        .save_block(&mut block_0, TEST_NETWORK_ID)
         .await
         .context("save block 0")?;
     chain_indexer_storage
-        .save_block(&mut block_1)
+        .save_block(&mut block_1, TEST_NETWORK_ID)
         .await
         .context("save block 1")?;
     chain_indexer_storage
-        .save_block(&mut block_2)
+        .save_block(&mut block_2, TEST_NETWORK_ID)
         .await
         .context("save block 2")?;
 
@@ -656,13 +663,11 @@ static IDENTIFIER_1: LazyLock<Identifier> = LazyLock::new(|| b"identifier-1".as_
 
 static IDENTIFIER_2: LazyLock<Identifier> = LazyLock::new(|| b"identifier-2".as_slice().into());
 
-static RAW_TRANSACTION_1: LazyLock<RawTransaction> = LazyLock::new(|| {
-    create_raw_transaction(NetworkId::Undeployed).expect("create raw transaction")
-});
+static RAW_TRANSACTION_1: LazyLock<RawTransaction> =
+    LazyLock::new(|| create_raw_transaction(TEST_NETWORK_ID).expect("create raw transaction"));
 
-static RAW_TRANSACTION_2: LazyLock<RawTransaction> = LazyLock::new(|| {
-    create_raw_transaction(NetworkId::Undeployed).expect("create raw transaction")
-});
+static RAW_TRANSACTION_2: LazyLock<RawTransaction> =
+    LazyLock::new(|| create_raw_transaction(TEST_NETWORK_ID).expect("create raw transaction"));
 
 static ADDRESS: LazyLock<ContractAddress> = LazyLock::new(|| b"address".as_slice().into());
 
