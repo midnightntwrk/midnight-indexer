@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{Block, BlockInfo, BlockTransactions, UnshieldedUtxo};
+use indexer_common::domain::NetworkId;
 
 /// Storage abstraction.
 #[trait_variant::make(Send)]
@@ -29,7 +30,15 @@ where
     async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error>;
 
     /// Save the given [Block], update transaction IDs, and return the max transaction ID.
-    async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error>;
+    ///
+    /// The `network_id` parameter is required for contract balance extraction during indexing.
+    /// Contract state bytes are serialized with network-specific formatting and require the
+    /// correct NetworkId for proper deserialization.
+    async fn save_block(
+        &self,
+        block: &mut Block,
+        network_id: NetworkId,
+    ) -> Result<Option<u64>, sqlx::Error>;
 
     async fn save_unshielded_utxos(
         &self,

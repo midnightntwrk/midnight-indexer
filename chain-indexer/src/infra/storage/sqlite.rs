@@ -13,7 +13,7 @@
 
 use crate::domain::{
     Block, BlockInfo, BlockTransactions, ContractAction, Transaction, UnshieldedUtxo,
-    storage::Storage,
+    extract_contract_balances, storage::Storage,
 };
 use futures::{StreamExt, TryStreamExt};
 use indexer_common::{
@@ -99,9 +99,13 @@ impl Storage for SqliteStorage {
         Ok((deploy_count as u64, call_count as u64, update_count as u64))
     }
 
-    async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error> {
+    async fn save_block(
+        &self,
+        block: &mut Block,
+        network_id: indexer_common::domain::NetworkId,
+    ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let (max_transaction_id, transaction_ids) = save_block(block, &mut tx).await?;
+        let (max_transaction_id, transaction_ids) = save_block(block, network_id, &mut tx).await?;
         tx.commit().await?;
 
         for (transaction, id) in block.transactions.iter_mut().zip(transaction_ids.iter()) {
@@ -164,7 +168,11 @@ impl Storage for SqliteStorage {
     }
 }
 
-async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
+async fn save_block(
+    block: &Block,
+    network_id: indexer_common::domain::NetworkId,
+    tx: &mut Tx,
+) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
     let query = indoc! {"
         INSERT INTO blocks (
             hash,
@@ -200,12 +208,13 @@ async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>
         .await?
         .try_get::<i64, _>("id")?;
 
-    save_transactions(&block.transactions, block_id, tx).await
+    save_transactions(&block.transactions, block_id, network_id, tx).await
 }
 
 async fn save_transactions(
     transactions: &[Transaction],
     block_id: i64,
+    network_id: indexer_common::domain::NetworkId,
     tx: &mut Tx,
 ) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
     if transactions.is_empty() {
@@ -261,7 +270,15 @@ async fn save_transactions(
 
     for (transaction, transaction_id) in transactions.iter().zip(transaction_ids.iter()) {
         save_identifiers(&transaction.identifiers, *transaction_id, tx).await?;
-        save_contract_actions(&transaction.contract_actions, *transaction_id, tx).await?;
+        let contract_action_ids =
+            save_contract_actions(&transaction.contract_actions, *transaction_id, tx).await?;
+        save_contract_balances(
+            &transaction.contract_actions,
+            &contract_action_ids,
+            network_id,
+            tx,
+        )
+        .await?;
 
         save_unshielded_utxos(
             &transaction.created_unshielded_utxos,
@@ -367,8 +384,15 @@ async fn save_contract_actions(
     contract_actions: &[ContractAction],
     transaction_id: i64,
     tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    if !contract_actions.is_empty() {
+) -> Result<Vec<i64>, sqlx::Error> {
+    if contract_actions.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut contract_action_ids = Vec::new();
+
+    // SQLite doesn't support RETURNING in bulk inserts, so we insert one by one
+    for action in contract_actions {
         let query = indoc! {"
             INSERT INTO contract_actions (
                 transaction_id,
@@ -378,18 +402,62 @@ async fn save_contract_actions(
                 variant,
                 attributes
             )
+            VALUES (?, ?, ?, ?, ?, ?)
         "};
 
-        QueryBuilder::new(query)
-            .push_values(contract_actions.iter(), |mut q, action| {
-                q.push_bind(transaction_id)
-                    .push_bind(&action.address)
-                    .push_bind(&action.state)
-                    .push_bind(&action.zswap_state)
-                    .push_bind(ContractActionVariant::from(&action.attributes))
-                    .push_bind(Json(&action.attributes));
-            })
-            .build()
+        let result = sqlx::query(query)
+            .bind(transaction_id)
+            .bind(&action.address)
+            .bind(&action.state)
+            .bind(&action.zswap_state)
+            .bind(ContractActionVariant::from(&action.attributes))
+            .bind(Json(&action.attributes))
+            .execute(&mut **tx)
+            .await?;
+
+        contract_action_ids.push(result.last_insert_rowid());
+    }
+
+    Ok(contract_action_ids)
+}
+
+async fn save_contract_balances(
+    contract_actions: &[ContractAction],
+    contract_action_ids: &[i64],
+    network_id: indexer_common::domain::NetworkId,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    if contract_actions.is_empty() || contract_action_ids.is_empty() {
+        return Ok(());
+    }
+
+    // Extract balances from each contract action and prepare for insert
+    let mut balances_to_insert = Vec::new();
+
+    for (action, &action_id) in contract_actions.iter().zip(contract_action_ids.iter()) {
+        // NetworkId is required for contract state deserialization
+        let extracted_balances = extract_contract_balances(&action.state, network_id);
+
+        for balance in extracted_balances {
+            balances_to_insert.push((action_id, balance));
+        }
+    }
+
+    // Insert balances one by one (SQLite limitation)
+    for (action_id, balance) in balances_to_insert {
+        let query = indoc! {"
+            INSERT INTO contract_balances (
+                contract_action_id,
+                token_type,
+                amount
+            )
+            VALUES (?, ?, ?)
+        "};
+
+        sqlx::query(query)
+            .bind(action_id)
+            .bind(&balance.token_type_bytes)
+            .bind(U128BeBytes::from(balance.amount))
             .execute(&mut **tx)
             .await?;
     }

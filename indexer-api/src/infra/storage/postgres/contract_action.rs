@@ -23,6 +23,7 @@ use indexer_common::{
     stream::flatten_chunks,
 };
 use indoc::indoc;
+use sqlx::Row;
 use std::num::NonZeroU32;
 
 impl ContractActionStorage for PostgresStorage {
@@ -285,5 +286,47 @@ impl ContractActionStorage for PostgresStorage {
         };
 
         flatten_chunks(chunks)
+    }
+
+    #[trace(properties = { "contract_action_id": "{contract_action_id}" })]
+    async fn get_contract_balances_by_action_id(
+        &self,
+        contract_action_id: u64,
+    ) -> Result<Vec<crate::infra::api::v1::contract_balances::UnshieldedBalance>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT token_type, amount 
+            FROM contract_balances 
+            WHERE contract_action_id = $1
+        "};
+
+        let rows = sqlx::query(query)
+            .bind(contract_action_id as i64)
+            .fetch_all(&*self.pool)
+            .await?;
+
+        let balances = rows
+            .into_iter()
+            .filter_map(|row| {
+                let token_type_bytes: Vec<u8> = row.get("token_type");
+                let amount_u128_bytes: indexer_common::infra::sqlx::U128BeBytes = row.get("amount");
+
+                let token_type_hex = const_hex::encode(&token_type_bytes);
+
+                let amount: u128 = amount_u128_bytes.into();
+
+                if amount > 0 {
+                    Some(
+                        crate::infra::api::v1::contract_balances::UnshieldedBalance {
+                            token_type: crate::domain::HexEncoded::try_from(token_type_hex).ok()?,
+                            amount: amount.to_string(),
+                        },
+                    )
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(balances)
     }
 }

@@ -15,6 +15,7 @@ pub mod storage;
 
 mod block;
 mod contract_action;
+mod contract_balances;
 mod fee;
 mod node;
 mod transaction;
@@ -23,6 +24,7 @@ mod zswap;
 
 pub use block::*;
 pub use contract_action::*;
+pub use contract_balances::*;
 pub use fee::*;
 pub use node::*;
 pub use transaction::*;
