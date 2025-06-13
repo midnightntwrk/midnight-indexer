@@ -473,7 +473,7 @@ struct ProgressUpdate {
     highest_index: u64,
 
     /// The highest end index into the zswap state of all currently known relevant transactions,
-    /// i.e. such that belong to any wallet. Less or equal `highest_index`.
+    /// i.e. those that belong to any known wallet. Less or equal `highest_index`.
     highest_relevant_index: u64,
 
     /// The highest end index into the zswap state of all currently known relevant transactions for

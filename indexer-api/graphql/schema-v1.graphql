@@ -138,7 +138,7 @@ type ProgressUpdate {
 	highestIndex: Int!
 	"""
 	The highest end index into the zswap state of all currently known relevant transactions,
-	i.e. such that belong to any wallet. Less or equal `highest_index`.
+	i.e. those that belong to any known wallet. Less or equal `highest_index`.
 	"""
 	highestRelevantIndex: Int!
 	"""
