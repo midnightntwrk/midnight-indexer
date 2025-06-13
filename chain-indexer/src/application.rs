@@ -363,18 +363,41 @@ async fn index_block(
     // 1) Save the block first (note: block is now mutable)
     let max_transaction_id = storage.save_block(&mut block).await.context("save block")?;
 
-    // 2) Publish UnshieldedUtxoIndexed events for affected addresses
-    for transaction in &block.transactions {
-        // Skip if transaction doesn't have a database ID yet (0 = not saved)
-        if transaction.id == 0 {
-            warn!(
-                "Transaction {:?} has no database ID after saving",
-                transaction.hash
-            );
-            continue;
-        };
-        let transaction_id = transaction.id;
+    // 2) Then save the ledger state. This order is important to prevent from applying the
+    //    transactions twice.
+    if *caught_up || block.height % save_ledger_state_after == 0 {
+        ledger_state_storage
+            .save(&raw_ledger_state, block.height, ledger_state.end_index())
+            .await
+            .context("save ledger state")?;
+    }
 
+    info!(
+        hash:% = block.hash,
+        height = block.height,
+        parent_hash:% = block.parent_hash,
+        protocol_version:% = block.protocol_version,
+        distance,
+        caught_up = *caught_up,
+        ledger_state_size = format_bytes(raw_ledger_state.as_ref().len());
+        "block indexed"
+    );
+
+    metrics.update(&block, &raw_ledger_state, node_block_height, *caught_up);
+
+    // Publish BlockIndexed.
+    publisher
+        .publish(&BlockIndexed {
+            height: block.height,
+            max_transaction_id,
+            caught_up: *caught_up,
+        })
+        .await
+        .context("publish BlockIndexed event")?;
+
+    // Publish UnshieldedUtxoIndexed events for affected addresses.
+    for transaction in &block.transactions {
+        let transaction_id = transaction.id;
         let mut published_addresses = HashSet::new();
 
         // For created UTXOs
@@ -407,37 +430,6 @@ async fn index_block(
             }
         }
     }
-
-    // 3) Then save the ledger state. This order is important to prevent from applying the
-    //    transactions twice.
-    if *caught_up || block.height % save_ledger_state_after == 0 {
-        ledger_state_storage
-            .save(&raw_ledger_state, block.height, ledger_state.end_index())
-            .await
-            .context("save ledger state")?;
-    }
-
-    info!(
-        hash:% = block.hash,
-        height = block.height,
-        parent_hash:% = block.parent_hash,
-        protocol_version:% = block.protocol_version,
-        distance,
-        caught_up = *caught_up,
-        ledger_state_size = format_bytes(raw_ledger_state.as_ref().len());
-        "block indexed"
-    );
-
-    metrics.update(&block, &raw_ledger_state, node_block_height, *caught_up);
-
-    publisher
-        .publish(&BlockIndexed {
-            height: block.height,
-            max_transaction_id,
-            caught_up: *caught_up,
-        })
-        .await
-        .context("publish BlockIndexed event")?;
 
     Ok(ledger_state)
 }

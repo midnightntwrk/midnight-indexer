@@ -109,3 +109,17 @@ CREATE TABLE zswap_state(
     last_index INTEGER
 );
 
+CREATE TABLE contract_balances(
+    id INTEGER PRIMARY KEY,
+    contract_action_id INTEGER NOT NULL REFERENCES contract_actions(id),
+    token_type BLOB NOT NULL, -- Serialized TokenType (hex-encoded)
+    amount BLOB NOT NULL, -- u128 amount as bytes (for large number support)
+    UNIQUE (contract_action_id, token_type)
+);
+
+CREATE INDEX contract_balances_action_idx ON contract_balances(contract_action_id);
+
+CREATE INDEX contract_balances_token_type_idx ON contract_balances(token_type);
+
+CREATE INDEX contract_balances_action_token_idx ON contract_balances(contract_action_id, token_type);
+

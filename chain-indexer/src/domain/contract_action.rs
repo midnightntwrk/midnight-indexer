@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::domain::ContractBalance;
 use indexer_common::domain::{
     ContractActionVariant, ContractAddress, ContractEntryPoint, ContractState, RawLedgerState,
 };
@@ -21,8 +22,9 @@ use serde::Serialize;
 pub struct ContractAction {
     pub address: ContractAddress,
     pub state: ContractState,
-    pub zswap_state: RawLedgerState,
     pub attributes: ContractAttributes,
+    pub zswap_state: RawLedgerState,
+    pub extracted_balances: Vec<ContractBalance>,
 }
 
 /// Attributes for a specific [ContractAction].

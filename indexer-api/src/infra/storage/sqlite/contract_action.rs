@@ -270,4 +270,20 @@ impl ContractActionStorage for SqliteStorage {
 
         flatten_chunks(chunks)
     }
+
+    async fn get_unshielded_balances_by_action_id(
+        &self,
+        contract_action_id: u64,
+    ) -> Result<Vec<crate::domain::ContractBalance>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT token_type, amount 
+            FROM contract_balances 
+            WHERE contract_action_id = ?
+        "};
+
+        sqlx::query_as::<_, crate::domain::ContractBalance>(query)
+            .bind(contract_action_id as i64)
+            .fetch_all(&*self.pool)
+            .await
+    }
 }

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Transaction, UnshieldedUtxo};
+use crate::domain::{ContractBalance, ContractBalanceError, Transaction, UnshieldedUtxo};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::{
@@ -172,6 +172,12 @@ impl LedgerState {
         transaction.start_index = start_index;
         transaction.end_index = end_index;
 
+        // Update extracted balances of contract actions.
+        for contract_action in &mut transaction.contract_actions {
+            let balances = ContractBalance::extract(&contract_action.state, network_id)?;
+            contract_action.extracted_balances = balances;
+        }
+
         Ok(())
     }
 
@@ -188,6 +194,9 @@ pub enum Error {
 
     #[error("{0}")]
     Io(&'static str, #[source] io::Error),
+
+    #[error("cannot extract contract balance")]
+    ContractBalance(#[from] ContractBalanceError),
 }
 
 fn update_contract_zswap_state(

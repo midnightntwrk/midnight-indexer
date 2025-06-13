@@ -280,4 +280,21 @@ impl ContractActionStorage for PostgresStorage {
 
         flatten_chunks(chunks)
     }
+
+    #[trace(properties = { "contract_action_id": "{contract_action_id}" })]
+    async fn get_unshielded_balances_by_action_id(
+        &self,
+        contract_action_id: u64,
+    ) -> Result<Vec<crate::domain::ContractBalance>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT token_type, amount 
+            FROM contract_balances 
+            WHERE contract_action_id = $1
+        "};
+
+        sqlx::query_as::<_, crate::domain::ContractBalance>(query)
+            .bind(contract_action_id as i64)
+            .fetch_all(&*self.pool)
+            .await
+    }
 }

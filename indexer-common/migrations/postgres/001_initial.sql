@@ -95,3 +95,17 @@ CREATE INDEX unshielded_token_type_idx ON unshielded_utxos(token_type);
 
 CREATE INDEX unshielded_spent_idx ON unshielded_utxos(spending_transaction_id);
 
+CREATE TABLE contract_balances(
+    id BIGSERIAL PRIMARY KEY,
+    contract_action_id BIGINT NOT NULL REFERENCES contract_actions(id),
+    token_type BYTEA NOT NULL, -- Serialized TokenType (hex-encoded)
+    amount BYTEA NOT NULL, -- u128 amount as bytes (for large number support)
+    UNIQUE (contract_action_id, token_type)
+);
+
+CREATE INDEX ON contract_balances(contract_action_id);
+
+CREATE INDEX ON contract_balances(token_type);
+
+CREATE INDEX ON contract_balances(contract_action_id, token_type);
+

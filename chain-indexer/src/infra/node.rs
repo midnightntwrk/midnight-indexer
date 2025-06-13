@@ -693,8 +693,9 @@ async fn ledger_contract_action_into_domain(
             Ok(ContractAction {
                 address,
                 state,
-                zswap_state: Default::default(),
                 attributes: ContractAttributes::Call { entry_point },
+                zswap_state: Default::default(),
+                extracted_balances: Default::default(),
             })
         }
 
@@ -707,8 +708,9 @@ async fn ledger_contract_action_into_domain(
             Ok(ContractAction {
                 address,
                 state,
-                zswap_state: Default::default(),
                 attributes: ContractAttributes::Deploy,
+                zswap_state: Default::default(),
+                extracted_balances: Default::default(),
             })
         }
 
@@ -721,8 +723,9 @@ async fn ledger_contract_action_into_domain(
             Ok(ContractAction {
                 address,
                 state,
-                zswap_state: Default::default(),
                 attributes: ContractAttributes::Update,
+                zswap_state: Default::default(),
+                extracted_balances: Default::default(),
             })
         }
     }

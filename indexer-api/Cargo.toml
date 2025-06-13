@@ -33,8 +33,12 @@ indexer-common            = { path = "../indexer-common" }
 indoc                     = { workspace = true }
 log                       = { workspace = true, features = [ "kv" ] }
 metrics                   = { workspace = true }
+midnight-base-crypto      = { workspace = true }
+midnight-coin-structure   = { workspace = true }
 midnight-ledger           = { workspace = true }
+midnight-onchain-runtime  = { workspace = true }
 midnight-serialize        = { workspace = true }
+midnight-storage          = { workspace = true }
 midnight-transient-crypto = { workspace = true }
 scopeguard                = { workspace = true }
 secrecy                   = { workspace = true }

@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::domain::{
-    Block, BlockInfo, BlockTransactions, ContractAction, Transaction, UnshieldedUtxo,
-    storage::Storage,
+    Block, BlockInfo, BlockTransactions, ContractAction, ContractBalance, Transaction,
+    UnshieldedUtxo, storage::Storage,
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
@@ -271,7 +271,21 @@ async fn save_transactions(
         .await?;
 
     for (transaction, transaction_id) in transactions.iter().zip(transaction_ids.iter()) {
-        save_contract_actions(&transaction.contract_actions, *transaction_id, tx).await?;
+        let contract_action_ids =
+            save_contract_actions(&transaction.contract_actions, *transaction_id, tx).await?;
+
+        let contract_balances = transaction
+            .contract_actions
+            .iter()
+            .zip(contract_action_ids.iter())
+            .flat_map(|(action, &action_id)| {
+                action
+                    .extracted_balances
+                    .iter()
+                    .map(move |balance| (action_id, balance.clone()))
+            })
+            .collect::<Vec<_>>();
+        save_contract_balances(contract_balances, tx).await?;
 
         save_unshielded_utxos(
             &transaction.created_unshielded_utxos,
@@ -368,27 +382,61 @@ async fn save_contract_actions(
     contract_actions: &[ContractAction],
     transaction_id: i64,
     tx: &mut Tx,
+) -> Result<Vec<i64>, sqlx::Error> {
+    if contract_actions.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let query = indoc! {"
+        INSERT INTO contract_actions (
+            transaction_id,
+            address,
+            state,
+            zswap_state,
+            variant,
+            attributes
+        )
+    "};
+
+    let contract_action_ids = QueryBuilder::new(query)
+        .push_values(contract_actions.iter(), |mut q, action| {
+            q.push_bind(transaction_id)
+                .push_bind(&action.address)
+                .push_bind(&action.state)
+                .push_bind(&action.zswap_state)
+                .push_bind(ContractActionVariant::from(&action.attributes))
+                .push_bind(Json(&action.attributes));
+        })
+        .push(" RETURNING id")
+        .build_query_as::<(i64,)>()
+        .fetch_all(&mut **tx)
+        .await?
+        .into_iter()
+        .map(|(id,)| id)
+        .collect();
+
+    Ok(contract_action_ids)
+}
+
+#[trace]
+async fn save_contract_balances(
+    balances: Vec<(i64, ContractBalance)>,
+    tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
-    if !contract_actions.is_empty() {
+    if !balances.is_empty() {
         let query = indoc! {"
-            INSERT INTO contract_actions (
-                transaction_id,
-                address,
-                state,
-                zswap_state,
-                variant,
-                attributes
+            INSERT INTO contract_balances (
+                contract_action_id,
+                token_type,
+                amount
             )
         "};
 
         QueryBuilder::new(query)
-            .push_values(contract_actions.iter(), |mut q, action| {
-                q.push_bind(transaction_id)
-                    .push_bind(&action.address)
-                    .push_bind(&action.state)
-                    .push_bind(&action.zswap_state)
-                    .push_bind(ContractActionVariant::from(&action.attributes))
-                    .push_bind(Json(&action.attributes));
+            .push_values(balances.iter(), |mut q, (action_id, balance)| {
+                q.push_bind(*action_id)
+                    .push_bind(balance.token_type.0)
+                    .push_bind(U128BeBytes::from(balance.amount));
             })
             .build()
             .execute(&mut **tx)
