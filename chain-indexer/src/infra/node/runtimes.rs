@@ -174,7 +174,7 @@ macro_rules! make_block_details {
                             Event::Midnight(midnight::Event::UnshieldedTokens(event_data)) => {
                                 // Use the most recent transaction hash, or fallback for genesis/failed transactions
                                 let tx_hash = current_tx_hash.unwrap_or_else(|| [0u8; 32].into());
-                                
+
                                 if !event_data.created.is_empty() {
                                     let abstracted_created = event_data.created
                                         .into_iter()
