@@ -143,8 +143,9 @@ run-indexer-api network_id="Undeployed":
         cargo run -p indexer-api --bin indexer-api --features {{feature}}
 
 run-indexer-standalone node="ws://localhost:9944" network_id="Undeployed":
+    mkdir -p target/data
     RUST_LOG=indexer=debug,chain_indexer=debug,wallet_indexer=debug,indexer_api=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
-        CONFIG_FILE=indexer/config.yaml \
+        CONFIG_FILE=indexer-standalone/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         APP__INFRA__NODE__URL={{node}} \
         APP__INFRA__STORAGE__CNN_URL=target/data/indexer.sqlite \
