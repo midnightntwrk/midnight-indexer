@@ -172,9 +172,9 @@ macro_rules! make_block_details {
                                 current_tx_hash = Some(tx_partial.tx_hash);
                             }
                             Event::Midnight(midnight::Event::UnshieldedTokens(event_data)) => {
-                                // For failed transactions without context, use fallback hash to group events.
-                                // This ensures UnshieldedTokens events are processed even when transaction
-                                // processing fails or when no TxStart/TxSuccess event provides context
+                                // Use transaction hash from preceding TxApplied/TxPartialSuccess events,
+                                // or fallback hash [0u8; 32] for system transactions (block rewards, minting)
+                                // that create UTXOs without transaction context.
                                 let tx_hash = current_tx_hash.unwrap_or_else(|| [0u8; 32].into());
 
                                 if !event_data.created.is_empty() {
@@ -203,6 +203,9 @@ macro_rules! make_block_details {
                                         .collect();
                                     spent_unshielded_utxos_info.insert(tx_hash.into(), abstracted_spent);
                                 }
+
+                                // Reset transaction hash to prevent stale hash usage in subsequent events
+                                current_tx_hash = None;
                             }
                             _ => {}
                         }

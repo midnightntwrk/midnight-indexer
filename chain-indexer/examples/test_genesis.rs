@@ -1,6 +1,6 @@
 use anyhow::Context;
 use chain_indexer::{
-    domain::{LedgerState, Node},
+    domain::Node,
     infra::node::{Config, SubxtNode},
 };
 use futures::{StreamExt, TryStreamExt};
