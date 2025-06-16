@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::Transaction;
+use crate::domain::{Transaction, UnshieldedUtxo};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::{
@@ -153,6 +153,13 @@ impl LedgerState {
         )?;
         let zswap = &self.zswap;
 
+        // Handle genesis block: extract any pre-funded unshielded UTXOs.
+        // Check if this is genesis block by examining parent hash.
+        if block_parent_hash == ByteArray([0; 32]) {
+            let utxos = extract_utxos_from_ledger_state(self)?;
+            transaction.created_unshielded_utxos.extend(utxos);
+        }
+
         // Update end_index and contract zswap state if necessary.
         if zswap.first_free > start_index {
             update_contract_zswap_state(zswap, transaction, network_id)?;
@@ -228,6 +235,27 @@ fn extract_merkle_tree_root(
         .map_err(|error| Error::Io("cannot serialize merkle tree root", error))?;
 
     Ok(root.into())
+}
+
+/// Extract UTXOs from the midnight-ledger state and convert them to indexer format.
+fn extract_utxos_from_ledger_state(
+    ledger_state: &LedgerState,
+) -> Result<Vec<UnshieldedUtxo>, Error> {
+    let midnight_ledger_state = &ledger_state.0.0;
+    let utxo_state = &midnight_ledger_state.utxo;
+
+    Ok(utxo_state
+        .utxos
+        .iter()
+        .map(|utxo| UnshieldedUtxo {
+            creating_transaction_id: 0,
+            output_index: utxo.output_no,
+            owner_address: utxo.owner.0.0.as_slice().into(),
+            token_type: utxo.type_.0.0.into(),
+            intent_hash: utxo.intent_hash.0.0.into(),
+            value: utxo.value,
+        })
+        .collect())
 }
 
 /// Converts a block timestamp which is in milliseconds to a ledger timestamp.

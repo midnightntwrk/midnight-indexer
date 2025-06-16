@@ -204,7 +204,7 @@ macro_rules! make_block_details {
                                     spent_unshielded_utxos_info.insert(tx_hash.into(), abstracted_spent);
                                 }
 
-                                // Reset transaction hash to prevent stale hash usage in subsequent events
+                                // Reset transaction hash to prevent stale hash usage in subsequent events.
                                 current_tx_hash = None;
                             }
                             _ => {}

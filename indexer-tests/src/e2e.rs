@@ -276,20 +276,20 @@ impl IndexerData {
             let genesis_transaction = &genesis_block.transactions[0];
 
             // Genesis transaction should have created unshielded UTXOs.
-            assert!(!genesis_transaction.unshielded_created_outputs.is_empty(),);
+            assert!(!genesis_transaction.unshielded_created_outputs.is_empty());
 
             // Verify genesis UTXOs have expected properties.
             for utxo in &genesis_transaction.unshielded_created_outputs {
                 // Genesis UTXOs should have positive values.
-                assert!(utxo.value.parse::<u128>().unwrap_or(0) > 0,);
+                assert!(utxo.value.parse::<u128>().unwrap_or(0) > 0);
 
                 // Genesis UTXOs should have valid owner addresses (non-empty string).
-                assert!(!utxo.owner.0.is_empty(),);
+                assert!(!utxo.owner.0.is_empty());
 
                 // Genesis UTXOs should have valid token types.
                 // Token type validation: attempt to decode as 32-byte array.
                 // For native tokens, this is typically all zeros.
-                assert!(utxo.token_type.hex_decode::<[u8; 32]>().is_ok(),);
+                assert!(utxo.token_type.hex_decode::<[u8; 32]>().is_ok());
             }
         }
 

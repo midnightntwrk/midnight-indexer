@@ -1,3 +1,16 @@
+// This file is part of midnight-indexer.
+// Copyright (C) 2025 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use anyhow::Context;
 use chain_indexer::{
     domain::Node,
@@ -7,27 +20,18 @@ use futures::{StreamExt, TryStreamExt};
 use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_013_000};
 use std::{pin::pin, time::Duration};
 
-/// Test genesis UTXO extraction by calling the processing pipeline directly.
+/// Simple test to verify connection to midnight-node and basic block retrieval.
+/// Note: This test bypasses the full indexing pipeline and calls the node interface
+/// directly via `node.finalized_blocks()`. As a result, it doesn't trigger the
+/// genesis UTXO extraction that happens in the zswap transaction processing layer.
 ///
-/// This test was created because the existing `examples/node.rs` bypasses the application
-/// layer entirely and calls the node interface directly via `node.finalized_blocks()`.
-/// The genesis UTXO extraction implementation is located in the application layer
-/// (`application::index_block` function), so the original example never executes the
-/// extraction code.
-///
-/// This test demonstrates that:
-/// 1. Genesis UTXO extraction works correctly when called through proper channels
-/// 2. The implementation successfully extracts UTXOs from genesis blocks
-/// 3. UTXOs are properly added to the genesis transaction's `created_unshielded_utxos`
+/// For proper genesis UTXO extraction testing, use the e2e tests which go through
+/// the complete indexing pipeline.
 ///
 /// Background:
-/// - Genesis blocks don't emit UnshieldedTokens events due to Substrate PR #5463
-/// - The indexer must apply the genesis transaction to extract UTXOs from the resulting state
-/// - This workaround is only needed for genesis blocks (height = 0)
-///
-/// Related tickets:
-/// - PM-17350: [Indexer] Implement Genesis UTXO Extraction Workaround
-/// - PM-17351: [Node] Investigate Genesis Event Emission Workarounds
+/// - Genesis blocks don't emit UnshieldedTokens events due to Substrate PR #5463.
+/// - Genesis UTXO extraction is integrated into zswap transaction processing.
+/// - Full extraction only occurs when blocks are processed through the indexing pipeline.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Note: logging is disabled for this simple test
@@ -43,31 +47,22 @@ async fn main() -> anyhow::Result<()> {
     let blocks = node.finalized_blocks(None, NetworkId::Undeployed).take(3);
     let mut blocks = pin!(blocks);
 
-    while let Some(mut block) = blocks.try_next().await.context("get next block")? {
+    while let Some(block) = blocks.try_next().await.context("get next block")? {
         println!("## BLOCK: height={}, \thash={}", block.height, block.hash);
 
-        // For genesis block, manually call my extraction function
+        // For genesis block, note that UTXO extraction doesn't happen in this test
         if block.height == 0 {
-            println!("*** TESTING GENESIS UTXO EXTRACTION ***");
+            println!("*** GENESIS BLOCK DETECTED ***");
 
-            // Call my extraction function directly
-            match chain_indexer::application::extract_genesis_unshielded_utxos(
-                &mut block,
-                NetworkId::Undeployed,
-            )
-            .await
-            {
-                Ok(()) => println!("Genesis extraction completed"),
-                Err(e) => println!("Genesis extraction failed: {}", e),
-            }
+            let utxo_count = block
+                .transactions
+                .get(0)
+                .map(|t| t.created_unshielded_utxos.len())
+                .unwrap_or(0);
 
             println!(
-                "*** AFTER EXTRACTION - UTXOs: {} ***",
-                block
-                    .transactions
-                    .get(0)
-                    .map(|t| t.created_unshielded_utxos.len())
-                    .unwrap_or(0)
+                "*** UTXOs: {} (extraction requires full indexing pipeline) ***",
+                utxo_count
             );
         }
 
