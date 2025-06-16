@@ -15,7 +15,7 @@ mod metrics;
 
 use crate::{
     application::metrics::Metrics,
-    domain::{Block, BlockInfo, LedgerState, Node, Transaction, UnshieldedUtxo, storage::Storage},
+    domain::{Block, BlockInfo, LedgerState, Node, UnshieldedUtxo, storage::Storage},
 };
 use anyhow::{Context, bail};
 use async_stream::stream;
@@ -336,14 +336,11 @@ async fn index_block(
         );
     }
 
-    // Handle genesis block: extract any pre-funded unshielded UTXOs
+    // Handle genesis block: extract any pre-funded unshielded UTXOs.
     if block.height == 0 {
-        if let Err(e) =
-            extract_genesis_unshielded_utxos(&mut block, &ledger_state, network_id).await
-        {
-            warn!("genesis UTXO extraction failed: {}", e);
-            // Continue processing even if extraction fails
-        }
+        extract_genesis_unshielded_utxos(&mut block, network_id)
+            .await
+            .context("extract genesis unshielded UTXOs")?;
     }
 
     let raw_ledger_state = ledger_state
@@ -459,13 +456,12 @@ async fn index_block(
 #[trace]
 pub async fn extract_genesis_unshielded_utxos(
     block: &mut Block,
-    _ledger_state: &LedgerState,
     network_id: NetworkId,
 ) -> Result<(), anyhow::Error> {
     let genesis_transaction = block
         .transactions
         .get_mut(0)
-        .context("cannot get genesis transaction")?;
+        .context("get genesis transaction")?;
     let mut clean_ledger_state = LedgerState::default();
     let _transaction_result = clean_ledger_state
         .apply_transaction(
@@ -474,13 +470,10 @@ pub async fn extract_genesis_unshielded_utxos(
             block.timestamp,
             network_id,
         )
-        .context("cannot apply genesis transaction to clean ledger state")?;
-    let extracted_count = extract_utxos_from_ledger_state(&clean_ledger_state, genesis_transaction)
-        .context("cannot extract UTXOs from ledger state after genesis transaction")?;
+        .context("apply genesis transaction to clean ledger state")?;
 
-    if extracted_count == 0 {
-        warn!("no UTXOs found in genesis transaction result");
-    }
+    let utxos = extract_utxos_from_ledger_state(&clean_ledger_state)?;
+    genesis_transaction.created_unshielded_utxos.extend(utxos);
 
     Ok(())
 }
@@ -488,26 +481,17 @@ pub async fn extract_genesis_unshielded_utxos(
 /// Extract UTXOs from the midnight-ledger state and convert them to indexer format.
 fn extract_utxos_from_ledger_state(
     ledger_state: &LedgerState,
-    genesis_transaction: &mut Transaction,
-) -> Result<usize, anyhow::Error> {
-    use std::ops::Deref;
-
+) -> Result<Vec<UnshieldedUtxo>, anyhow::Error> {
     let midnight_ledger_state = &ledger_state.0.0;
     let utxo_state = &midnight_ledger_state.utxo;
-    let mut extracted_count = 0;
+    let mut utxos = Vec::new();
+
     for utxo in utxo_state.utxos.iter() {
-        let utxo_data = utxo.deref();
-
-        let unshielded_utxo =
-            convert_midnight_utxo_to_indexer_utxo(utxo_data, genesis_transaction.id)?;
-
-        genesis_transaction
-            .created_unshielded_utxos
-            .push(unshielded_utxo);
-        extracted_count += 1;
+        let unshielded_utxo = convert_midnight_utxo_to_indexer_utxo(&utxo, 0)?;
+        utxos.push(unshielded_utxo);
     }
 
-    Ok(extracted_count)
+    Ok(utxos)
 }
 
 /// Convert a midnight-ledger Utxo to the indexer's UnshieldedUtxo format.
@@ -515,11 +499,9 @@ fn convert_midnight_utxo_to_indexer_utxo(
     utxo: &midnight_ledger::structure::Utxo,
     creating_transaction_id: u64,
 ) -> Result<UnshieldedUtxo, anyhow::Error> {
-    use indexer_common::domain::{IntentHash, RawTokenType};
-
     let owner_address = convert_user_address_to_unshielded(&utxo.owner)?;
-    let token_type: RawTokenType = utxo.type_.0.0.into();
-    let intent_hash: IntentHash = utxo.intent_hash.0.0.into();
+    let token_type = utxo.type_.0.0.into();
+    let intent_hash = utxo.intent_hash.0.0.into();
 
     Ok(UnshieldedUtxo {
         creating_transaction_id,
@@ -535,8 +517,7 @@ fn convert_midnight_utxo_to_indexer_utxo(
 fn convert_user_address_to_unshielded(
     user_address: &midnight_coin_structure::coin::UserAddress,
 ) -> Result<indexer_common::domain::UnshieldedAddress, anyhow::Error> {
-    let address_bytes: [u8; 32] = user_address.0.0;
-    Ok(address_bytes.as_slice().into())
+    Ok(user_address.0.0.as_slice().into())
 }
 
 fn format_bytes(value: impl Into<Byte>) -> String {
