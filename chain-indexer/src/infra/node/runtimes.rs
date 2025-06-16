@@ -178,7 +178,7 @@ macro_rules! make_block_details {
                                 let tx_hash = current_tx_hash.unwrap_or_else(|| [0u8; 32].into());
 
                                 if !event_data.created.is_empty() {
-                                    let abstracted_created = event_data.created
+                                    let created = event_data.created
                                         .into_iter()
                                         .map(|utxo| UtxoInfo {
                                             output_no: utxo.output_no,
@@ -188,10 +188,10 @@ macro_rules! make_block_details {
                                             value: utxo.value,
                                         })
                                         .collect();
-                                    created_unshielded_utxos_info.insert(tx_hash.into(), abstracted_created);
+                                    created_unshielded_utxos_info.insert(tx_hash.into(), created);
                                 }
                                 if !event_data.spent.is_empty() {
-                                    let abstracted_spent = event_data.spent
+                                    let spent = event_data.spent
                                         .into_iter()
                                         .map(|utxo| UtxoInfo {
                                             output_no: utxo.output_no,
@@ -201,7 +201,7 @@ macro_rules! make_block_details {
                                             value: utxo.value,
                                         })
                                         .collect();
-                                    spent_unshielded_utxos_info.insert(tx_hash.into(), abstracted_spent);
+                                    spent_unshielded_utxos_info.insert(tx_hash.into(), spent);
                                 }
 
                                 // Reset transaction hash to prevent stale hash usage in subsequent events.

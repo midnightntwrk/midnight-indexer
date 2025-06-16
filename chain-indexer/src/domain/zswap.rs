@@ -156,7 +156,7 @@ impl LedgerState {
         // Handle genesis block: extract any pre-funded unshielded UTXOs.
         // Check if this is genesis block by examining parent hash.
         if block_parent_hash == ByteArray([0; 32]) {
-            let utxos = extract_utxos_from_ledger_state(self)?;
+            let utxos = extract_utxos_from_ledger_state(self);
             transaction.created_unshielded_utxos.extend(utxos);
         }
 
@@ -238,13 +238,11 @@ fn extract_merkle_tree_root(
 }
 
 /// Extract UTXOs from the midnight-ledger state and convert them to indexer format.
-fn extract_utxos_from_ledger_state(
-    ledger_state: &LedgerState,
-) -> Result<Vec<UnshieldedUtxo>, Error> {
+fn extract_utxos_from_ledger_state(ledger_state: &LedgerState) -> Vec<UnshieldedUtxo> {
     let midnight_ledger_state = &ledger_state.0.0;
     let utxo_state = &midnight_ledger_state.utxo;
 
-    Ok(utxo_state
+    utxo_state
         .utxos
         .iter()
         .map(|utxo| UnshieldedUtxo {
@@ -255,7 +253,7 @@ fn extract_utxos_from_ledger_state(
             intent_hash: utxo.intent_hash.0.0.into(),
             value: utxo.value,
         })
-        .collect())
+        .collect()
 }
 
 /// Converts a block timestamp which is in milliseconds to a ledger timestamp.
