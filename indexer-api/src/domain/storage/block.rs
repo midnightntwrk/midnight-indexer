@@ -21,16 +21,16 @@ pub trait BlockStorage
 where
     Self: Debug + Clone + Send + Sync + 'static,
 {
-    /// Get the latest [Block].
+    /// Get the latest block.
     async fn get_latest_block(&self) -> Result<Option<Block>, sqlx::Error>;
 
-    /// Get a [Block] for the given hash.
+    /// Get a block for the given hash.
     async fn get_block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>, sqlx::Error>;
 
-    /// Get a [Block] for the given block height.
+    /// Get a block for the given block height.
     async fn get_block_by_height(&self, height: u32) -> Result<Option<Block>, sqlx::Error>;
 
-    /// Get a stream of all [Block]s starting at the given height.
+    /// Get a stream of all blocks starting at the given height, ordered by block height.
     fn get_blocks(
         &self,
         height: u32,

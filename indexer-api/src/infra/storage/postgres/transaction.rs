@@ -76,6 +76,7 @@ impl TransactionStorage for PostgresStorage {
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE transactions.block_id = $1
+            ORDER BY transactions.id
         "};
 
         let transactions = sqlx::query_as::<_, Transaction>(query)
@@ -108,6 +109,7 @@ impl TransactionStorage for PostgresStorage {
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE transactions.hash = $1
+            ORDER BY transactions.id DESC
         "};
 
         let transactions = sqlx::query_as::<_, Transaction>(query)
@@ -140,6 +142,7 @@ impl TransactionStorage for PostgresStorage {
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE $1 = ANY(transactions.identifiers)
+            ORDER BY transactions.id
         "};
 
         let transactions = sqlx::query_as::<_, Transaction>(query)
@@ -224,7 +227,7 @@ impl TransactionStorage for PostgresStorage {
                 unshielded_utxos.creating_transaction_id = transactions.id OR
                 unshielded_utxos.spending_transaction_id = transactions.id
             WHERE unshielded_utxos.owner_address = $1
-            ORDER BY transactions.id DESC
+            ORDER BY transactions.id
         "};
 
         let transactions = sqlx::query_as::<_, Transaction>(sql)

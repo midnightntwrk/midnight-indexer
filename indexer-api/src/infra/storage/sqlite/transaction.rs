@@ -75,6 +75,7 @@ impl TransactionStorage for SqliteStorage {
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE transactions.block_id = $1
+            ORDER BY transactions.id
         "};
 
         let mut transactions = sqlx::query_as::<_, Transaction>(query)
@@ -161,6 +162,7 @@ impl TransactionStorage for SqliteStorage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN transaction_identifiers ON transactions.id = transaction_identifiers.transaction_id
             WHERE transaction_identifiers.identifier = $1
+            ORDER BY transactions.id
         "};
 
         let mut transactions = sqlx::query_as::<_, Transaction>(query)
@@ -262,7 +264,7 @@ impl TransactionStorage for SqliteStorage {
             unshielded_utxos.creating_transaction_id = transactions.id OR
             unshielded_utxos.spending_transaction_id = transactions.id
         WHERE unshielded_utxos.owner_address = ?
-        ORDER BY transactions.id DESC
+        ORDER BY transactions.id
     "};
 
         let mut transactions = sqlx::query_as::<_, Transaction>(sql)

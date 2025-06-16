@@ -68,13 +68,15 @@ impl BlockStorage for SqliteStorage {
         mut height: u32,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<Block, sqlx::Error>> {
+        // We know that by construction the sequence of block heights is equivalent to the natural
+        // numbers starting at zero. Therefore the below order by and height calculation are valid.
         let chunks = try_stream! {
             loop {
                 let query = indoc! {"
                     SELECT *
                     FROM blocks
                     WHERE height >= $1
-                    ORDER BY id
+                    ORDER BY height
                     LIMIT $2
                 "};
 

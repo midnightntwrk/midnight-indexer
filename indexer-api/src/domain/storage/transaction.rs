@@ -25,24 +25,25 @@ where
     /// Get a transaction for the given ID.
     async fn get_transaction_by_id(&self, id: u64) -> Result<Option<Transaction>, sqlx::Error>;
 
-    /// Get the transactions for the block with the given ID.
+    /// Get the transactions for the block with the given ID, ordered by transaction ID.
     async fn get_transactions_by_block_id(&self, id: u64) -> Result<Vec<Transaction>, sqlx::Error>;
 
-    /// Get transactions for the given hash, ordered descendingly by ID. Transaction hashes are
-    /// unique for successful transactions, yet not for failed ones.
+    /// Get transactions for the given hash, ordered descendingly by transaction ID. Transaction
+    /// hashes are unique for successful transactions, yet not for failed ones.
     async fn get_transactions_by_hash(
         &self,
         hash: TransactionHash,
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
-    /// Get transactions for the given identifier. Identifiers are not unique.
+    /// Get transactions for the given identifier, ordered by transaction ID. There can be more
+    /// than one, because identifiers are not unique.
     async fn get_transactions_by_identifier(
         &self,
         identifier: &Identifier,
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
     /// Get a stream of all transactions relevant for a wallet with the given session ID, starting
-    /// at the given index.
+    /// at the given index, ordered by transaction ID.
     fn get_relevant_transactions(
         &self,
         session_id: SessionId,
@@ -50,7 +51,8 @@ where
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send;
 
-    /// Get all transactions that create or spend unshielded UTXOs for the given address.
+    /// Get all transactions that create or spend unshielded UTXOs for the given address, ordered by
+    /// transaction ID.
     async fn get_transactions_involving_unshielded(
         &self,
         address: &UnshieldedAddress,
