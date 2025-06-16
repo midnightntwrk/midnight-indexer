@@ -75,7 +75,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     let api_client = Client::new();
 
     // Collect Indexer data using the block subscription.
-    let indexer_data = IndexerData::collect(&ws_api_url)
+    let indexer_data = IndexerData::collect(&ws_api_url, network_id)
         .await
         .context("collect Indexer data")?;
 
@@ -129,7 +129,7 @@ struct IndexerData {
 impl IndexerData {
     /// Not only collects the Indexer data needed for testing, but also validates it, e.g. that
     /// block heights start at zero and increment by one.
-    async fn collect(ws_api_url: &str) -> anyhow::Result<Self> {
+    async fn collect(ws_api_url: &str, network_id: NetworkId) -> anyhow::Result<Self> {
         // Subscribe to blocks and collect up to MAX_HEIGHT.
         let variables = block_subscription::Variables {
             block_offset: Some(block_subscription::BlockOffset::Height(0)),
@@ -259,6 +259,39 @@ impl IndexerData {
             .collect::<Vec<_>>();
 
         assert!(!unshielded_utxos.is_empty());
+
+        // Test genesis UTXOs for non-MainNet networks.
+        // MainNet has no pre-funded accounts (clean genesis), while test/dev networks
+        // contain pre-funded UTXOs for testing purposes. This validation ensures the
+        // genesis UTXO extraction workaround works correctly on networks where it's needed.
+        if network_id != NetworkId::MainNet {
+            let genesis_block = blocks
+                .iter()
+                .find(|block| block.height == 0)
+                .context("genesis block not found")?;
+
+            // Genesis block should have exactly one transaction.
+            assert_eq!(genesis_block.transactions.len(), 1);
+
+            let genesis_transaction = &genesis_block.transactions[0];
+
+            // Genesis transaction should have created unshielded UTXOs.
+            assert!(!genesis_transaction.unshielded_created_outputs.is_empty());
+
+            // Verify genesis UTXOs have expected properties.
+            for utxo in &genesis_transaction.unshielded_created_outputs {
+                // Genesis UTXOs should have positive values.
+                assert!(utxo.value.parse::<u128>().unwrap_or(0) > 0);
+
+                // Genesis UTXOs should have valid owner addresses (non-empty string).
+                assert!(!utxo.owner.0.is_empty());
+
+                // Genesis UTXOs should have valid token types.
+                // Token type validation: attempt to decode as 32-byte array.
+                // For native tokens, this is typically all zeros.
+                assert!(utxo.token_type.hex_decode::<[u8; 32]>().is_ok());
+            }
+        }
 
         Ok(Self {
             blocks,

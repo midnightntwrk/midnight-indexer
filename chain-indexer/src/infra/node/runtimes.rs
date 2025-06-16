@@ -172,35 +172,40 @@ macro_rules! make_block_details {
                                 current_tx_hash = Some(tx_partial.tx_hash);
                             }
                             Event::Midnight(midnight::Event::UnshieldedTokens(event_data)) => {
-                                // Use the most recent transaction hash
-                                if let Some(tx_hash) = current_tx_hash {
-                                    if !event_data.created.is_empty() {
-                                        let abstracted_created = event_data.created
-                                            .into_iter()
-                                            .map(|utxo| UtxoInfo {
-                                                output_no: utxo.output_no,
-                                                address: utxo.address.into(),
-                                                token_type: utxo.token_type.into(),
-                                                intent_hash: utxo.intent_hash.into(),
-                                                value: utxo.value,
-                                            })
-                                            .collect();
-                                        created_unshielded_utxos_info.insert(tx_hash.into(), abstracted_created);
-                                    }
-                                    if !event_data.spent.is_empty() {
-                                        let abstracted_spent = event_data.spent
-                                            .into_iter()
-                                            .map(|utxo| UtxoInfo {
-                                                output_no: utxo.output_no,
-                                                address: utxo.address.into(),
-                                                token_type: utxo.token_type.into(),
-                                                intent_hash: utxo.intent_hash.into(),
-                                                value: utxo.value,
-                                            })
-                                            .collect();
-                                        spent_unshielded_utxos_info.insert(tx_hash.into(), abstracted_spent);
-                                    }
+                                // Use transaction hash from preceding TxApplied/TxPartialSuccess events,
+                                // or fallback hash [0u8; 32] for system transactions (block rewards, minting)
+                                // that create UTXOs without transaction context.
+                                let tx_hash = current_tx_hash.unwrap_or_else(|| [0u8; 32].into());
+
+                                if !event_data.created.is_empty() {
+                                    let created = event_data.created
+                                        .into_iter()
+                                        .map(|utxo| UtxoInfo {
+                                            output_no: utxo.output_no,
+                                            address: utxo.address.into(),
+                                            token_type: utxo.token_type.into(),
+                                            intent_hash: utxo.intent_hash.into(),
+                                            value: utxo.value,
+                                        })
+                                        .collect();
+                                    created_unshielded_utxos_info.insert(tx_hash.into(), created);
                                 }
+                                if !event_data.spent.is_empty() {
+                                    let spent = event_data.spent
+                                        .into_iter()
+                                        .map(|utxo| UtxoInfo {
+                                            output_no: utxo.output_no,
+                                            address: utxo.address.into(),
+                                            token_type: utxo.token_type.into(),
+                                            intent_hash: utxo.intent_hash.into(),
+                                            value: utxo.value,
+                                        })
+                                        .collect();
+                                    spent_unshielded_utxos_info.insert(tx_hash.into(), spent);
+                                }
+
+                                // Reset transaction hash to prevent stale hash usage in subsequent events.
+                                current_tx_hash = None;
                             }
                             _ => {}
                         }
