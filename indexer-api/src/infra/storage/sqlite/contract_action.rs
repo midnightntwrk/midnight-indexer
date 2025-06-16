@@ -29,9 +29,10 @@ impl ContractActionStorage for SqliteStorage {
         &self,
         address: &ContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
+        // For any address the first contract action is always a deploy.
         let query = indoc! {"
             SELECT
-                contract_actions.id AS id,
+                contract_actions.id,
                 contract_actions.address,
                 contract_actions.state,
                 contract_actions.attributes,
@@ -39,7 +40,7 @@ impl ContractActionStorage for SqliteStorage {
                 contract_actions.transaction_id
             FROM contract_actions
             WHERE contract_actions.address = $1
-            ORDER BY id ASC
+            ORDER BY id
             LIMIT 1
         "};
 
@@ -61,7 +62,7 @@ impl ContractActionStorage for SqliteStorage {
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
-                contract_actions.id AS id,
+                contract_actions.id,
                 contract_actions.address,
                 contract_actions.state,
                 contract_actions.attributes,
@@ -86,7 +87,7 @@ impl ContractActionStorage for SqliteStorage {
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
-                contract_actions.id AS id,
+                contract_actions.id,
                 contract_actions.address,
                 contract_actions.state,
                 contract_actions.attributes,
@@ -96,8 +97,7 @@ impl ContractActionStorage for SqliteStorage {
             INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
             WHERE contract_actions.address = $1
             AND transactions.block_id = (SELECT id FROM blocks WHERE hash = $2)
-            AND json_extract(transactions.transaction_result, '$') != 'Failure'
-            ORDER BY id DESC
+            ORDER BY contract_actions.id DESC
             LIMIT 1
         "};
 
@@ -126,8 +126,7 @@ impl ContractActionStorage for SqliteStorage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             WHERE contract_actions.address = $1
             AND blocks.height = $2
-            AND json_extract(transactions.transaction_result, '$') != 'Failure'
-            ORDER BY id DESC
+            ORDER BY contract_actions.id DESC
             LIMIT 1
         "};
 
@@ -156,8 +155,7 @@ impl ContractActionStorage for SqliteStorage {
             AND contract_actions.transaction_id = (
                 SELECT id FROM transactions
                 WHERE hash = $2
-                AND json_extract(transaction_result, '$') != 'Failure'
-                ORDER BY id DESC
+                ORDER BY id
                 LIMIT 1
             )
             ORDER BY id DESC
@@ -189,8 +187,7 @@ impl ContractActionStorage for SqliteStorage {
             INNER JOIN transaction_identifiers ON transactions.id = transaction_identifiers.transaction_id
             WHERE contract_actions.address = $1
             AND transaction_identifiers.identifier = $2
-            AND json_extract(transactions.transaction_result, '$') != 'Failure'
-            ORDER BY id DESC
+            ORDER BY contract_actions.id DESC
             LIMIT 1
         "};
 
@@ -215,6 +212,7 @@ impl ContractActionStorage for SqliteStorage {
                 contract_actions.transaction_id
             FROM contract_actions
             WHERE contract_actions.transaction_id = $1
+            ORDER BY id
         "};
 
         sqlx::query_as::<_, ContractAction>(query)
@@ -234,7 +232,7 @@ impl ContractActionStorage for SqliteStorage {
             loop {
                 let query = indoc! {"
                     SELECT
-                        contract_actions.id AS id,
+                        contract_actions.id,
                         contract_actions.address,
                         contract_actions.state,
                         contract_actions.attributes,
@@ -246,8 +244,7 @@ impl ContractActionStorage for SqliteStorage {
                     WHERE contract_actions.address = $1
                     AND blocks.height >= $2
                     AND contract_actions.id >= $3
-                    AND json_extract(transactions.transaction_result, '$') != 'Failure'
-                    ORDER BY id ASC
+                    ORDER BY contract_actions.id
                     LIMIT $4
                 "};
 

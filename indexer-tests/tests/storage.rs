@@ -245,6 +245,7 @@ async fn run_tests(
         .await
         .context("get_transactions_by_block_id")?;
     assert_eq!(transactions.len(), 2);
+    assert_eq!(transactions[1].id - transactions[0].id, 1);
     let transaction = &transactions[0];
     assert_eq!(transaction.hash, TRANSACTION_1_HASH);
     assert_eq!(transaction.block_hash, BLOCK_1_HASH);
@@ -345,23 +346,25 @@ async fn run_tests(
         .get_transactions_by_hash([0; 32].into())
         .await?;
     assert!(transactions.is_empty());
-    let mut transactions = indexer_api_storage
+    let transactions = indexer_api_storage
         .get_transactions_by_hash(TRANSACTION_1_HASH)
         .await?;
-    assert!(!transactions.is_empty());
-    let indexer_api::domain::Transaction { hash, .. } = transactions.pop().unwrap();
-    assert_eq!(hash, TRANSACTION_1_HASH);
+    assert_eq!(transactions.len(), 2);
+    assert_eq!(transactions[0].id - transactions[1].id, 1);
+    assert_eq!(transactions[0].hash, TRANSACTION_1_HASH);
+    assert_eq!(transactions[1].hash, TRANSACTION_1_HASH);
 
     let transactions = indexer_api_storage
         .get_transactions_by_identifier(&b"unknown".as_slice().into())
         .await?;
     assert!(transactions.is_empty());
     let transactions = indexer_api_storage
-        .get_transactions_by_identifier(&IDENTIFIER_2)
+        .get_transactions_by_identifier(&IDENTIFIER_1)
         .await?;
-    assert!(!transactions.is_empty());
-    let indexer_api::domain::Transaction { hash, .. } = transactions.first().unwrap();
-    assert_eq!(*hash, TRANSACTION_2_HASH);
+    assert_eq!(transactions.len(), 2);
+    assert_eq!(transactions[1].id - transactions[0].id, 1);
+    assert_eq!(transactions[0].hash, TRANSACTION_1_HASH);
+    assert_eq!(transactions[1].hash, TRANSACTION_1_HASH);
 
     let contract_action = indexer_api_storage
         .get_contract_action_by_address(&b"unknown".as_slice().into())
@@ -394,7 +397,7 @@ async fn run_tests(
         .await?;
     assert_matches!(
         contract_action,
-        Some(ContractAction { address, attributes: ContractAttributes::Deploy, .. })
+        Some(ContractAction { address, attributes: ContractAttributes::Call { .. }, .. })
             if address == ADDRESS.to_owned()
     );
 
@@ -471,13 +474,13 @@ async fn run_tests(
         .get_contract_actions_by_address(&ADDRESS, 0, 0, 10.try_into().unwrap())
         .try_collect::<Vec<_>>()
         .await?;
-    assert_eq!(contract_actions.len(), 4);
+    assert_eq!(contract_actions.len(), 5);
 
     let contract_actions = indexer_api_storage
         .get_contract_actions_by_address(&ADDRESS, 0, 0, 1.try_into().unwrap())
         .try_collect::<Vec<_>>()
         .await?;
-    assert_eq!(contract_actions.len(), 4);
+    assert_eq!(contract_actions.len(), 5);
 
     let contract_actions = indexer_api_storage
         .get_contract_actions_by_address(&ADDRESS, 2, 0, 10.try_into().unwrap())

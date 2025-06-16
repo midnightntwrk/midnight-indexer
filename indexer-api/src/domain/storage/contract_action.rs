@@ -27,49 +27,48 @@ where
         address: &ContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
-    /// Get the latest [ContractAction] for the given address.
+    /// Get the latest contract action for the given address.
     async fn get_contract_action_by_address(
         &self,
         address: &ContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
-    /// Get a [ContractAction] for the given address and block hash.
+    /// Get the latest contract action for the given address and block hash.
     async fn get_contract_action_by_address_and_block_hash(
         &self,
         address: &ContractAddress,
         hash: BlockHash,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
-    /// Get a [ContractAction] for the given address and block height.
+    /// Get the latest contract action for the given address and block height.
     async fn get_contract_action_by_address_and_block_height(
         &self,
         address: &ContractAddress,
         height: u32,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
-    /// Get a [ContractAction] for the given address and transaction hash. Only the unique
-    /// successful transaction identified by the given hash is considered.
+    /// Get the latest contract action for the given address and transaction hash.
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
         address: &ContractAddress,
         hash: TransactionHash,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
-    /// Get a [ContractAction] for the given address and transaction identifier.
+    /// Get the latest contract action for the given address and transaction identifier.
     async fn get_contract_action_by_address_and_transaction_identifier(
         &self,
         address: &ContractAddress,
         identifier: &Identifier,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
-    /// Get the contract actions for the transaction with the given id.
+    /// Get the contract actions for the transaction with the given id, ordered by transaction ID.
     async fn get_contract_actions_by_transaction_id(
         &self,
         id: u64,
     ) -> Result<Vec<ContractAction>, sqlx::Error>;
 
-    /// Get a stream of [ContractAction]s for the given address starting at the given block height
-    /// and contract_action ID.
+    /// Get a stream of contract actions for the given address starting at the given block height
+    /// and contract_action ID, ordered by transaction ID.
     fn get_contract_actions_by_address(
         &self,
         address: &ContractAddress,
