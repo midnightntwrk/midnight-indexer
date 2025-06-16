@@ -261,7 +261,7 @@ impl IndexerData {
         assert!(!unshielded_utxos.is_empty());
 
         // Test genesis UTXOs for non-MainNet networks.
-        // MainNet has no pre-funded accounts (clean genesis), while test/dev networks 
+        // MainNet has no pre-funded accounts (clean genesis), while test/dev networks
         // contain pre-funded UTXOs for testing purposes. This validation ensures the
         // genesis UTXO extraction workaround works correctly on networks where it's needed.
         if network_id != NetworkId::MainNet {
