@@ -50,13 +50,9 @@ async fn main() -> anyhow::Result<()> {
         if block.height == 0 {
             println!("*** TESTING GENESIS UTXO EXTRACTION ***");
 
-            // Create a basic ledger state for testing
-            let ledger_state = LedgerState::default();
-
             // Call my extraction function directly
             match chain_indexer::application::extract_genesis_unshielded_utxos(
                 &mut block,
-                &ledger_state,
                 NetworkId::Undeployed,
             )
             .await

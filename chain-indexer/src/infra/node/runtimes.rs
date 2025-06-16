@@ -172,7 +172,9 @@ macro_rules! make_block_details {
                                 current_tx_hash = Some(tx_partial.tx_hash);
                             }
                             Event::Midnight(midnight::Event::UnshieldedTokens(event_data)) => {
-                                // Use the most recent transaction hash, or fallback for genesis/failed transactions
+                                // For failed transactions without context, use fallback hash to group events.
+                                // This ensures UnshieldedTokens events are processed even when transaction
+                                // processing fails or when no TxStart/TxSuccess event provides context
                                 let tx_hash = current_tx_hash.unwrap_or_else(|| [0u8; 32].into());
 
                                 if !event_data.created.is_empty() {
