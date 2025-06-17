@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Wallet, storage::Storage};
+use crate::domain::storage::Storage;
 use anyhow::Context;
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, future::ok, stream};
@@ -28,6 +28,7 @@ use std::{
     time::Duration,
 };
 use tokio::{select, task};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -89,14 +90,14 @@ pub async fn run(
         task::spawn(async move {
             active_wallets(active_wallets_repeat_delay, active_wallets_ttl, &storage)
                 .map(|result| result.context("get next active wallet"))
-                .try_for_each_concurrent(Some(parallelism.get()), |wallet| {
+                .try_for_each_concurrent(Some(parallelism.get()), |wallet_id| {
                     let max_transaction_id = max_transaction_id.clone();
                     let mut publisher = publisher.clone();
                     let mut storage = storage.clone();
 
                     async move {
                         index_wallet(
-                            wallet,
+                            wallet_id,
                             transaction_batch_size,
                             network_id,
                             max_transaction_id,
@@ -120,7 +121,7 @@ fn active_wallets(
     active_wallets_repeat_delay: Duration,
     active_wallets_ttl: Duration,
     storage: &impl Storage,
-) -> impl Stream<Item = Result<Wallet, sqlx::Error>> + '_ {
+) -> impl Stream<Item = Result<Uuid, sqlx::Error>> + '_ {
     tokio_stream::StreamExt::throttle(stream::repeat(()), active_wallets_repeat_delay)
         .map(|_| Ok::<_, sqlx::Error>(()))
         .and_then(move |_| storage.active_wallets(active_wallets_ttl))
@@ -130,26 +131,29 @@ fn active_wallets(
 
 #[trace]
 async fn index_wallet(
-    wallet: Wallet,
+    wallet_id: Uuid,
     transaction_batch_size: NonZeroUsize,
     network_id: NetworkId,
     max_transaction_id: Arc<AtomicU64>,
     publisher: &mut impl Publisher,
     storage: &mut impl Storage,
 ) -> anyhow::Result<()> {
-    // Only access with storage if possibly needed.
-    if wallet.last_indexed_transaction_id < max_transaction_id.load(Ordering::Acquire) {
-        let session_id = wallet.viewing_key.to_session_id();
+    let tx = storage
+        .acquire_lock(wallet_id)
+        .await
+        .with_context(|| format!("acquire lock for wallet ID {wallet_id}"))?;
 
-        let tx = storage
-            .acquire_lock(session_id)
-            .await
-            .context("acquire lock")?;
+    match tx {
+        Some(mut tx) => {
+            debug!(wallet_id:%; "indexing wallet");
 
-        match tx {
-            Some(mut tx) => {
-                debug!(session_id:%; "indexing wallet");
+            let wallet = storage
+                .get_wallet_by_id(wallet_id, &mut tx)
+                .await
+                .with_context(|| format!("get wallet for wallet ID {wallet_id}"))?;
 
+            // Only continue if possibly needed.
+            if wallet.last_indexed_transaction_id < max_transaction_id.load(Ordering::Acquire) {
                 let from = wallet.last_indexed_transaction_id + 1;
                 let transactions = storage
                     .get_transactions(from, transaction_batch_size, &mut tx)
@@ -158,7 +162,7 @@ async fn index_wallet(
 
                 let last_indexed_transaction_id = transactions.iter().map(|t| t.id).max();
                 let Some(last_indexed_transaction_id) = last_indexed_transaction_id else {
-                    debug!(session_id:%; "no transactions for wallet");
+                    debug!(wallet_id:%; "no transactions for wallet");
                     return Ok(());
                 };
 
@@ -184,19 +188,21 @@ async fn index_wallet(
                     .context("save relevant transactions")?;
 
                 tx.commit().await.context("commit database transaction")?;
-                debug!(session_id:%, from, transaction_batch_size; "wallet indexed");
+                debug!(wallet_id:%, from, transaction_batch_size; "wallet indexed");
 
                 if !relevant_transactions.is_empty() {
+                    let session_id = wallet.viewing_key.to_session_id();
+
                     publisher
                         .publish(&WalletIndexed { session_id })
                         .await
                         .context("cannot publish WalletIndexed event")?;
                 }
             }
+        }
 
-            None => {
-                debug!(session_id:%; "not handling wallet");
-            }
+        None => {
+            debug!(wallet_id:%; "not handling wallet");
         }
     }
 

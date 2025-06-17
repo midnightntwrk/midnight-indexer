@@ -16,12 +16,8 @@ use crate::{
     infra::storage::{self},
 };
 use chacha20poly1305::ChaCha20Poly1305;
-use fastrace::trace;
 use futures::TryStreamExt;
-use indexer_common::{
-    domain::{SessionId, ViewingKey},
-    infra::pool::sqlite::SqlitePool,
-};
+use indexer_common::{domain::ViewingKey, infra::pool::sqlite::SqlitePool};
 use indoc::indoc;
 use sqlx::{QueryBuilder, Row, Sqlite, types::time::OffsetDateTime};
 use std::{num::NonZeroUsize, time::Duration};
@@ -46,13 +42,11 @@ impl SqliteStorage {
 impl Storage for SqliteStorage {
     type Database = sqlx::Sqlite;
 
-    #[trace]
-    async fn acquire_lock(&mut self, _session_id: SessionId) -> Result<Option<Tx>, sqlx::Error> {
+    async fn acquire_lock(&mut self, _wallet_id: Uuid) -> Result<Option<Tx>, sqlx::Error> {
         let tx = self.pool.begin().await?;
         Ok(Some(tx))
     }
 
-    #[trace]
     async fn get_transactions(
         &self,
         from: u64,
@@ -74,7 +68,6 @@ impl Storage for SqliteStorage {
             .await
     }
 
-    #[trace]
     async fn save_relevant_transactions(
         &self,
         viewing_key: &ViewingKey,
@@ -128,27 +121,26 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
-    async fn active_wallets(&self, ttl: Duration) -> Result<Vec<Wallet>, sqlx::Error> {
+    async fn active_wallets(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
         // Query wallets.
         let query = indoc! {"
-            SELECT *
+            SELECT id, last_active
             FROM wallets
             WHERE active = TRUE
         "};
 
-        let wallets = sqlx::query_as::<_, storage::Wallet>(query)
+        let wallets = sqlx::query_as::<_, (Uuid, OffsetDateTime)>(query)
             .fetch(&mut *tx)
             .try_collect::<Vec<_>>()
             .await?;
 
-        let now = OffsetDateTime::now_utc();
-
         // Mark inactive wallets.
+        let now = OffsetDateTime::now_utc();
         let outdated_ids = wallets
             .iter()
-            .filter_map(|wallet| (now - wallet.last_active > ttl).then_some(wallet.id));
+            .filter_map(|&(id, last_active)| (now - last_active > ttl).then_some(id));
         for id in outdated_ids {
             let query = indoc! {"
                 UPDATE wallets
@@ -159,24 +151,33 @@ impl Storage for SqliteStorage {
             sqlx::query(query).bind(id).execute(&mut *tx).await?;
         }
 
-        // Return active wallets.
-        wallets
+        // Return active wallet IDs.
+        let ids = wallets
             .into_iter()
-            .filter(|wallet| now - wallet.last_active <= ttl)
-            .map(|wallet| {
-                Wallet::try_from((wallet, &self.cipher))
-                    .map_err(|error| sqlx::Error::Decode(error.into()))
-            })
-            .collect::<Result<Vec<_>, _>>()
+            .filter_map(|(id, last_active)| (now - last_active <= ttl).then_some(id))
+            .collect::<Vec<_>>();
+        Ok(ids)
+    }
+
+    async fn get_wallet_by_id(&self, id: Uuid, tx: &mut Tx) -> Result<Wallet, sqlx::Error> {
+        let query = indoc! {"
+            SELECT id, viewing_key, last_indexed_transaction_id
+            FROM wallets
+            WHERE id = $1
+        "};
+
+        let wallet = sqlx::query_as::<_, storage::Wallet>(query)
+            .bind(id)
+            .fetch_one(&mut **tx)
+            .await?;
+
+        Wallet::try_from((wallet, &self.cipher)).map_err(|error| sqlx::Error::Decode(error.into()))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        domain::{Wallet, storage::Storage},
-        infra::storage::sqlite::SqliteStorage,
-    };
+    use crate::{domain::storage::Storage, infra::storage::sqlite::SqliteStorage};
     use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
     use futures::{StreamExt, TryStreamExt};
     use indexer_common::{
@@ -316,21 +317,9 @@ mod tests {
         let mut storage = SqliteStorage::new(cipher, pool);
 
         let active_wallets = storage.active_wallets(Duration::from_secs(60)).await?;
-        assert_eq!(
-            active_wallets,
-            [
-                Wallet {
-                    viewing_key: viewing_key_a,
-                    last_indexed_transaction_id: 1
-                },
-                Wallet {
-                    viewing_key: viewing_key_b,
-                    last_indexed_transaction_id: 42
-                }
-            ]
-        );
+        assert_eq!(active_wallets, [uuid_a, uuid_b]);
 
-        let tx = storage.acquire_lock(session_id_b).await?;
+        let tx = storage.acquire_lock(uuid_b).await?;
         assert!(tx.is_some());
         let mut tx = tx.unwrap();
 
@@ -348,7 +337,7 @@ mod tests {
 
         tx.commit().await?;
 
-        let tx = storage.acquire_lock(session_id_b).await?;
+        let tx = storage.acquire_lock(uuid_b).await?;
         assert!(tx.is_some());
         let mut tx = tx.unwrap();
 
