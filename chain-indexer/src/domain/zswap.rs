@@ -157,6 +157,20 @@ impl LedgerState {
         // Check if this is genesis block by examining parent hash.
         if block_parent_hash == ByteArray([0; 32]) {
             let utxos = extract_utxos_from_ledger_state(self);
+            log::info!(
+                "genesis UTXO extraction: found {} pre-funded UTXOs from ledger state",
+                utxos.len()
+            );
+            for (index, utxo) in utxos.iter().enumerate() {
+                log::info!(
+                    "genesis UTXO {}: owner={}, value={}, token_type={}, output_index={}",
+                    index + 1,
+                    const_hex::encode(&utxo.owner_address),
+                    utxo.value,
+                    const_hex::encode(utxo.token_type),
+                    utxo.output_index
+                );
+            }
             transaction.created_unshielded_utxos.extend(utxos);
         }
 

@@ -323,6 +323,15 @@ async fn index_block(
         ..
     } = config;
 
+    // Log when processing genesis block
+    if block.height == 0 {
+        info!(
+            hash:% = block.hash,
+            parent_hash:% = block.parent_hash;
+            "processing genesis block - extracting pre-funded UTXOs"
+        );
+    }
+
     let transactions = block.transactions.iter_mut();
     ledger_state
         .apply_and_update_transactions(transactions, block.parent_hash, block.timestamp, network_id)
@@ -415,6 +424,28 @@ async fn index_block(
             .save(&raw_ledger_state, block.height, ledger_state.end_index())
             .await
             .context("save ledger state")?;
+    }
+
+    // Log additional genesis block information after indexing
+    if block.height == 0 {
+        let total_genesis_utxos: usize = block
+            .transactions
+            .iter()
+            .map(|tx| tx.created_unshielded_utxos.len())
+            .sum();
+        let total_genesis_value: u128 = block
+            .transactions
+            .iter()
+            .flat_map(|tx| &tx.created_unshielded_utxos)
+            .map(|utxo| utxo.value)
+            .sum();
+
+        info!(
+            total_genesis_utxos,
+            total_genesis_value,
+            transactions_count = block.transactions.len();
+            "genesis block indexing completed"
+        );
     }
 
     info!(
