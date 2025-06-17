@@ -213,19 +213,19 @@ async fn save_transactions(
     }
 
     let query = indoc! {"
-                    INSERT INTO transactions (
-                        block_id,
-                        hash,
-                        protocol_version,
-                        transaction_result,
-                        raw,
-                        merkle_tree_root,
-                        start_index,
-                        end_index,
-                        paid_fees,
-                        estimated_fees
-                    )
-                "};
+        INSERT INTO transactions (
+            block_id,
+            hash,
+            protocol_version,
+            transaction_result,
+            raw,
+            merkle_tree_root,
+            start_index,
+            end_index,
+            paid_fees,
+            estimated_fees
+        )
+    "};
 
     let transaction_ids = QueryBuilder::new(query)
         .push_values(transactions.iter(), |mut q, transaction| {
@@ -297,8 +297,15 @@ async fn save_unshielded_utxos(
     if spent {
         for utxo_info_for_spending in utxos {
             let query = indoc! {"
-                INSERT INTO unshielded_utxos
-                (creating_transaction_id, output_index, owner_address, token_type, intent_hash, value, spending_transaction_id)
+                INSERT INTO unshielded_utxos (
+                    creating_transaction_id,
+                    output_index,
+                    owner_address,
+                    token_type,
+                    intent_hash,
+                    value,
+                    spending_transaction_id
+                )
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (intent_hash, output_index)
                 DO UPDATE SET spending_transaction_id = $7
@@ -318,21 +325,28 @@ async fn save_unshielded_utxos(
         }
     } else {
         let query_base = indoc! {"
-            INSERT INTO unshielded_utxos
-             (creating_transaction_id, output_index, owner_address, token_type, intent_hash, value)
+            INSERT INTO unshielded_utxos (
+                creating_transaction_id,
+                output_index,
+                owner_address,
+                token_type,
+                intent_hash,
+                value
+            )
         "};
-        let mut query_builder = QueryBuilder::new(query_base);
-        query_builder.push_values(utxos.iter(), |mut q, utxo| {
-            q.push_bind(transaction_id)
-                .push_bind(utxo.output_index as i32)
-                .push_bind(&utxo.owner_address)
-                .push_bind(utxo.token_type.as_ref())
-                .push_bind(utxo.intent_hash.as_ref())
-                .push_bind(U128BeBytes::from(utxo.value));
-        });
 
-        let query = query_builder.build();
-        query.execute(&mut **tx).await?;
+        QueryBuilder::new(query_base)
+            .push_values(utxos.iter(), |mut q, utxo| {
+                q.push_bind(transaction_id)
+                    .push_bind(utxo.output_index as i32)
+                    .push_bind(&utxo.owner_address)
+                    .push_bind(utxo.token_type.as_ref())
+                    .push_bind(utxo.intent_hash.as_ref())
+                    .push_bind(U128BeBytes::from(utxo.value));
+            })
+            .build()
+            .execute(&mut **tx)
+            .await?;
     }
 
     Ok(())

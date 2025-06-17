@@ -157,7 +157,7 @@ macro_rules! make_block_details {
                 let mut created_unshielded_utxos_info = HashMap::new();
                 let mut spent_unshielded_utxos_info = HashMap::new();
 
-                let mut current_tx_hash = None;
+                let mut tx_hash = None;
 
                 for event in events.iter().flatten() {
                     if let Ok(root_event) = event.as_root_event::<Event>() {
@@ -165,17 +165,20 @@ macro_rules! make_block_details {
                             Event::Session(partner_chains_session::Event::NewSession { .. }) => {
                                 *authorities = None;
                             }
+
                             Event::Midnight(midnight::Event::TxApplied(tx_applied)) => {
-                                current_tx_hash = Some(tx_applied.tx_hash);
+                                tx_hash = Some(tx_applied.tx_hash);
                             }
+
                             Event::Midnight(midnight::Event::TxPartialSuccess(tx_partial)) => {
-                                current_tx_hash = Some(tx_partial.tx_hash);
+                                tx_hash = Some(tx_partial.tx_hash);
                             }
+
                             Event::Midnight(midnight::Event::UnshieldedTokens(event_data)) => {
-                                // Use transaction hash from preceding TxApplied/TxPartialSuccess events,
-                                // or fallback hash [0u8; 32] for system transactions (block rewards, minting)
-                                // that create UTXOs without transaction context.
-                                let tx_hash = current_tx_hash.unwrap_or_else(|| [0u8; 32].into());
+                                // Use transaction hash from preceding TxApplied/TxPartialSuccess
+                                // events or fallback hash [0u8; 32] for system transactions (block
+                                // rewards, minting) that create UTXOs without transaction context.
+                                let transaction_hash = tx_hash.unwrap_or([0u8; 32]).into();
 
                                 if !event_data.created.is_empty() {
                                     let created = event_data.created
@@ -188,8 +191,13 @@ macro_rules! make_block_details {
                                             value: utxo.value,
                                         })
                                         .collect();
-                                    created_unshielded_utxos_info.insert(tx_hash.into(), created);
+
+                                    created_unshielded_utxos_info.insert(
+                                        transaction_hash,
+                                        created
+                                    );
                                 }
+
                                 if !event_data.spent.is_empty() {
                                     let spent = event_data.spent
                                         .into_iter()
@@ -201,12 +209,14 @@ macro_rules! make_block_details {
                                             value: utxo.value,
                                         })
                                         .collect();
-                                    spent_unshielded_utxos_info.insert(tx_hash.into(), spent);
+
+                                    spent_unshielded_utxos_info.insert(transaction_hash, spent);
                                 }
 
-                                // Reset transaction hash to prevent stale hash usage in subsequent events.
-                                current_tx_hash = None;
+                                // Reset to prevent stale hash in subsequent events.
+                                tx_hash = None;
                             }
+
                             _ => {}
                         }
                     }
