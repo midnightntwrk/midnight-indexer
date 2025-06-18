@@ -21,10 +21,7 @@ pub mod sqlite;
 use crate::domain;
 use chacha20poly1305::ChaCha20Poly1305;
 use indexer_common::domain::{DecryptViewingKeyError, ViewingKey};
-use sqlx::{
-    prelude::FromRow,
-    types::{Uuid, time::OffsetDateTime},
-};
+use sqlx::{prelude::FromRow, types::Uuid};
 
 /// Persistent wallet data.
 #[derive(Debug, Clone, FromRow)]
@@ -35,8 +32,6 @@ pub struct Wallet {
 
     #[sqlx(try_from = "i64")]
     pub last_indexed_transaction_id: u64,
-
-    pub last_active: OffsetDateTime,
 }
 
 impl TryFrom<(Wallet, &ChaCha20Poly1305)> for domain::Wallet {

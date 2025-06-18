@@ -12,8 +12,9 @@
 // limitations under the License.
 
 use crate::domain::{Transaction, Wallet};
-use indexer_common::domain::{SessionId, ViewingKey};
+use indexer_common::domain::ViewingKey;
 use std::{num::NonZeroUsize, time::Duration};
+use uuid::Uuid;
 
 /// Storage abstraction. `acquire_lock` tries to acquire an application level lock and, if
 /// successful, returns a transaction which is intended to be used by all the other functions.
@@ -28,7 +29,7 @@ where
     /// and only if possible.
     async fn acquire_lock(
         &mut self,
-        session_id: SessionId,
+        wallet_id: Uuid,
     ) -> Result<Option<sqlx::Transaction<'static, Self::Database>>, sqlx::Error>;
 
     /// Get at most `limit` transactions starting at the given `from` ID; it is supposed that the
@@ -50,6 +51,13 @@ where
         tx: &mut sqlx::Transaction<'static, Self::Database>,
     ) -> Result<(), sqlx::Error>;
 
-    /// Get the active walltes, thereby marking "old" ones inactive.
-    async fn active_wallets(&self, ttl: Duration) -> Result<Vec<Wallet>, sqlx::Error>;
+    /// Get the IDs of active walltes, thereby marking "old" ones inactive.
+    async fn active_wallets(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error>;
+
+    /// Get the wallet with the given session ID.
+    async fn get_wallet_by_id(
+        &self,
+        session_id: Uuid,
+        tx: &mut sqlx::Transaction<'static, Self::Database>,
+    ) -> Result<Wallet, sqlx::Error>;
 }

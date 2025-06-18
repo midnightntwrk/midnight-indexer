@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feat/*
+      - release/*
   workflow_dispatch:
 
 concurrency:

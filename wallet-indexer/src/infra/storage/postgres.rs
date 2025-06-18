@@ -13,13 +13,13 @@
 
 use crate::{
     domain::{Transaction, Wallet, storage::Storage},
-    infra::storage::{self},
+    infra::storage,
 };
 use chacha20poly1305::ChaCha20Poly1305;
 use fastrace::trace;
 use futures::TryStreamExt;
 use indexer_common::{
-    domain::{SessionId, ViewingKey},
+    domain::ViewingKey,
     infra::{pool::postgres::PostgresPool, sqlx::postgres::ignore_deadlock_detected},
 };
 use indoc::indoc;
@@ -27,7 +27,11 @@ use sqlx::{
     Postgres, QueryBuilder, Row,
     types::{Uuid, time::OffsetDateTime},
 };
-use std::{num::NonZeroUsize, time::Duration};
+use std::{
+    hash::{DefaultHasher, Hash, Hasher},
+    num::NonZeroUsize,
+    time::Duration,
+};
 
 type Tx = sqlx::Transaction<'static, Postgres>;
 
@@ -48,16 +52,23 @@ impl PostgresStorage {
 impl Storage for PostgresStorage {
     type Database = sqlx::Postgres;
 
-    #[trace(properties = { "session_id": "{session_id}" })]
-    async fn acquire_lock(&mut self, session_id: SessionId) -> Result<Option<Tx>, sqlx::Error> {
+    #[trace(properties = { "wallet_id": "{wallet_id}" })]
+    async fn acquire_lock(&mut self, wallet_id: Uuid) -> Result<Option<Tx>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
-        let lock_acquired =
-            sqlx::query("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))")
-                .bind(const_hex::encode(session_id))
-                .fetch_one(&mut *tx)
-                .await
-                .and_then(|row| row.try_get::<bool, _>(0))?;
+        // Convert UUID to two i32 values by hashing to u64 and splitting into two.
+        let mut hasher = DefaultHasher::new();
+        wallet_id.hash(&mut hasher);
+        let hash = hasher.finish();
+        let high = (hash >> 32) as i32;
+        let low = hash as i32;
+
+        let lock_acquired = sqlx::query("SELECT pg_try_advisory_xact_lock($1, $2)")
+            .bind(high)
+            .bind(low)
+            .fetch_one(&mut *tx)
+            .await
+            .and_then(|row| row.try_get::<bool, _>(0))?;
 
         Ok(lock_acquired.then_some(tx))
     }
@@ -140,25 +151,24 @@ impl Storage for PostgresStorage {
     }
 
     #[trace]
-    async fn active_wallets(&self, ttl: Duration) -> Result<Vec<Wallet>, sqlx::Error> {
+    async fn active_wallets(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error> {
         // Query wallets.
         let query = indoc! {"
-            SELECT *
+            SELECT id, last_active
             FROM wallets
             WHERE active = TRUE
         "};
 
-        let wallets = sqlx::query_as::<_, storage::Wallet>(query)
+        let wallets = sqlx::query_as::<_, (Uuid, OffsetDateTime)>(query)
             .fetch(&*self.pool)
             .try_collect::<Vec<_>>()
             .await?;
 
-        let now = OffsetDateTime::now_utc();
-
         // Mark inactive wallets.
+        let now = OffsetDateTime::now_utc();
         let outdated_ids = wallets
             .iter()
-            .filter_map(|wallet| (now - wallet.last_active > ttl).then_some(wallet.id))
+            .filter_map(|&(id, last_active)| (now - last_active > ttl).then_some(id))
             .collect::<Vec<_>>();
         if !outdated_ids.is_empty() {
             let query = indoc! {"
@@ -178,24 +188,34 @@ impl Storage for PostgresStorage {
                 .or_else(|error| ignore_deadlock_detected(error, || ()))?;
         }
 
-        // Return active wallets.
-        wallets
+        // Return active wallet IDs.
+        let ids = wallets
             .into_iter()
-            .filter(|wallet| now - wallet.last_active <= ttl)
-            .map(|wallet| {
-                Wallet::try_from((wallet, &self.cipher))
-                    .map_err(|error| sqlx::Error::Decode(error.into()))
-            })
-            .collect::<Result<Vec<_>, _>>()
+            .filter_map(|(id, last_active)| (now - last_active <= ttl).then_some(id))
+            .collect::<Vec<_>>();
+        Ok(ids)
+    }
+
+    #[trace(properties = { "id": "{id}" })]
+    async fn get_wallet_by_id(&self, id: Uuid, tx: &mut Tx) -> Result<Wallet, sqlx::Error> {
+        let query = indoc! {"
+            SELECT id, viewing_key, last_indexed_transaction_id
+            FROM wallets
+            WHERE id = $1
+        "};
+
+        let wallet = sqlx::query_as::<_, storage::Wallet>(query)
+            .bind(id)
+            .fetch_one(&mut **tx)
+            .await?;
+
+        Wallet::try_from((wallet, &self.cipher)).map_err(|error| sqlx::Error::Decode(error.into()))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        domain::{Wallet, storage::Storage},
-        infra::storage::postgres::PostgresStorage,
-    };
+    use crate::{domain::storage::Storage, infra::storage::postgres::PostgresStorage};
     use anyhow::Context;
     use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
     use indexer_common::{
@@ -342,21 +362,9 @@ mod tests {
         let mut storage = PostgresStorage::new(cipher, pool);
 
         let active_wallets = storage.active_wallets(Duration::from_secs(60)).await?;
-        assert_eq!(
-            active_wallets,
-            [
-                Wallet {
-                    viewing_key: viewing_key_a,
-                    last_indexed_transaction_id: 1
-                },
-                Wallet {
-                    viewing_key: viewing_key_b,
-                    last_indexed_transaction_id: 42
-                }
-            ]
-        );
+        assert_eq!(active_wallets, [uuid_a, uuid_b]);
 
-        let tx = storage.acquire_lock(session_id_b).await?;
+        let tx = storage.acquire_lock(uuid_b).await?;
         assert!(tx.is_some());
         let mut tx = tx.unwrap();
 
@@ -374,7 +382,7 @@ mod tests {
 
         tx.commit().await?;
 
-        let tx = storage.acquire_lock(session_id_b).await?;
+        let tx = storage.acquire_lock(uuid_b).await?;
         assert!(tx.is_some());
         let mut tx = tx.unwrap();
 
