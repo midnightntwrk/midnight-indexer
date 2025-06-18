@@ -129,7 +129,7 @@ fn active_wallets(
         .try_flatten()
 }
 
-#[trace]
+#[trace(properties = { "wallet_id": "{wallet_id}" })]
 async fn index_wallet(
     wallet_id: Uuid,
     transaction_batch_size: NonZeroUsize,
@@ -143,66 +143,66 @@ async fn index_wallet(
         .await
         .with_context(|| format!("acquire lock for wallet ID {wallet_id}"))?;
 
-    match tx {
-        Some(mut tx) => {
-            debug!(wallet_id:%; "indexing wallet");
+    let Some(mut tx) = tx else {
+        return Ok(());
+    };
 
-            let wallet = storage
-                .get_wallet_by_id(wallet_id, &mut tx)
-                .await
-                .with_context(|| format!("get wallet for wallet ID {wallet_id}"))?;
+    debug!(wallet_id:%; "indexing wallet");
 
-            // Only continue if possibly needed.
-            if wallet.last_indexed_transaction_id < max_transaction_id.load(Ordering::Acquire) {
-                let from = wallet.last_indexed_transaction_id + 1;
-                let transactions = storage
-                    .get_transactions(from, transaction_batch_size, &mut tx)
-                    .await
-                    .context("get transactions")?;
+    let wallet = storage
+        .get_wallet_by_id(wallet_id, &mut tx)
+        .await
+        .with_context(|| format!("get wallet for wallet ID {wallet_id}"))?;
 
-                let last_indexed_transaction_id = transactions.iter().map(|t| t.id).max();
-                let Some(last_indexed_transaction_id) = last_indexed_transaction_id else {
-                    debug!(wallet_id:%; "no transactions for wallet");
-                    return Ok(());
-                };
+    // Only continue if possibly needed.
+    if wallet.last_indexed_transaction_id < max_transaction_id.load(Ordering::Acquire) {
+        let from = wallet.last_indexed_transaction_id + 1;
+        let transactions = storage
+            .get_transactions(from, transaction_batch_size, &mut tx)
+            .await
+            .context("get transactions")?;
 
-                let relevant_transactions = transactions
-                    .into_iter()
-                    .map(|transaction| {
-                        transaction
-                            .relevant(&wallet, network_id)
-                            .context("check transaction relevance")
-                            .map(|relevant| (relevant, transaction))
+        let last_indexed_transaction_id = transactions.iter().map(|t| t.id).max();
+        let Some(last_indexed_transaction_id) = last_indexed_transaction_id else {
+            debug!(wallet_id:%; "no transactions for wallet");
+            return Ok(());
+        };
+
+        let relevant_transactions = transactions
+            .into_iter()
+            .map(|transaction| {
+                transaction
+                    .relevant(&wallet, network_id)
+                    .with_context(|| {
+                        format!("check transaction relevance for wallet ID {wallet_id}")
                     })
-                    .filter_map_ok(|(relevant, transaction)| relevant.then_some(transaction))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .map(|relevant| (relevant, transaction))
+            })
+            .filter_map_ok(|(relevant, transaction)| relevant.then_some(transaction))
+            .collect::<Result<Vec<_>, _>>()?;
 
-                storage
-                    .save_relevant_transactions(
-                        &wallet.viewing_key,
-                        &relevant_transactions,
-                        last_indexed_transaction_id,
-                        &mut tx,
-                    )
-                    .await
-                    .context("save relevant transactions")?;
+        storage
+            .save_relevant_transactions(
+                &wallet.viewing_key,
+                &relevant_transactions,
+                last_indexed_transaction_id,
+                &mut tx,
+            )
+            .await
+            .with_context(|| format!("save relevant transactions for wallet ID {wallet_id}"))?;
 
-                tx.commit().await.context("commit database transaction")?;
-                debug!(wallet_id:%, from, transaction_batch_size; "wallet indexed");
+        tx.commit().await.context("commit database transaction")?;
+        debug!(wallet_id:%, from, transaction_batch_size; "wallet indexed");
 
-                if !relevant_transactions.is_empty() {
-                    let session_id = wallet.viewing_key.to_session_id();
+        if !relevant_transactions.is_empty() {
+            let session_id = wallet.viewing_key.to_session_id();
 
-                    publisher
-                        .publish(&WalletIndexed { session_id })
-                        .await
-                        .context("cannot publish WalletIndexed event")?;
-                }
-            }
-        }
-
-        None => {
-            debug!(wallet_id:%; "not handling wallet");
+            publisher
+                .publish(&WalletIndexed { session_id })
+                .await
+                .with_context(|| {
+                    format!("publish WalletIndexed event for wallet ID {wallet_id}")
+                })?;
         }
     }
 

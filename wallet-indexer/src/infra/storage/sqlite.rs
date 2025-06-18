@@ -43,6 +43,8 @@ impl Storage for SqliteStorage {
     type Database = sqlx::Sqlite;
 
     async fn acquire_lock(&mut self, _wallet_id: Uuid) -> Result<Option<Tx>, sqlx::Error> {
+        // SQLite doesn't support advisory locks like PostgreSQL. But in standalone mode (single
+        // instance) we need not exclude other, i.e. "locking" is always successful.
         let tx = self.pool.begin().await?;
         Ok(Some(tx))
     }

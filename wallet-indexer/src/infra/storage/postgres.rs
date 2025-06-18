@@ -56,6 +56,7 @@ impl Storage for PostgresStorage {
     async fn acquire_lock(&mut self, wallet_id: Uuid) -> Result<Option<Tx>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
+        // Convert UUID to two i32 values by hashing to u64 and splitting into two.
         let mut hasher = DefaultHasher::new();
         wallet_id.hash(&mut hasher);
         let hash = hasher.finish();
@@ -195,6 +196,7 @@ impl Storage for PostgresStorage {
         Ok(ids)
     }
 
+    #[trace(properties = { "id": "{id}" })]
     async fn get_wallet_by_id(&self, id: Uuid, tx: &mut Tx) -> Result<Wallet, sqlx::Error> {
         let query = indoc! {"
             SELECT id, viewing_key, last_indexed_transaction_id
