@@ -805,10 +805,10 @@ pub enum UnshieldedAddressFormatError {
 /// Progress tracking information for unshielded token synchronization.
 #[derive(SimpleObject, Clone, Debug)]
 pub struct UnshieldedProgress {
-    /// The highest end index of all currently known transactions
-    highest_index: u64,
-    /// The current end index for this address
-    current_index: u64,
+    /// The highest transaction ID of all currently known transactions for this address
+    highest_transaction_id: u64,
+    /// The current transaction ID being processed for this address  
+    current_transaction_id: u64,
 }
 
 /// Payload emitted by `subscription { unshieldedUtxos … }`

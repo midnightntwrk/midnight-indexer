@@ -258,6 +258,8 @@ type Subscription {
 	
 	# Arguments
 	* `address` - The unshielded address to monitor (must be in Bech32m format)
+	* `transaction_id` - Optional transaction ID to start replay from (defaults to genesis if
+	omitted)
 	
 	# Returns
 	A stream of `UnshieldedUtxoEvent`s containing:
@@ -268,7 +270,7 @@ type Subscription {
 	- `spentUtxos`: UTXOs spent in this transaction for the address (None for progress-only
 	events)
 	"""
-	unshieldedUtxos(address: UnshieldedAddress!): UnshieldedUtxoEvent!
+	unshieldedUtxos(address: UnshieldedAddress!, transactionId: Int): UnshieldedUtxoEvent!
 }
 
 """
@@ -382,13 +384,13 @@ Progress tracking information for unshielded token synchronization.
 """
 type UnshieldedProgress {
 	"""
-	The highest end index of all currently known transactions
+	The highest transaction ID of all currently known transactions for this address
 	"""
-	highestIndex: Int!
+	highestTransactionId: Int!
 	"""
-	The current end index for this address
+	The current transaction ID being processed for this address
 	"""
-	currentIndex: Int!
+	currentTransactionId: Int!
 }
 
 """
