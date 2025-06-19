@@ -23,7 +23,7 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, stream::TryStreamExt};
 use indexer_common::domain::{ByteVec, NetworkId, Subscriber, UnshieldedUtxoIndexed};
 use log::{debug, warn};
-use std::{future::ready, marker::PhantomData, pin::pin, time::Duration};
+use std::{collections::HashSet, future::ready, marker::PhantomData, pin::pin, time::Duration};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
 
@@ -52,9 +52,9 @@ where
     B: Subscriber,
 {
     /// Subscribes to unshielded UTXO events for a specific address.
-    ///
-    /// Emits events whenever unshielded UTXOs are created or spent for the given address.
-    /// Each event includes the transaction details and lists of created/spent UTXOs.
+    /// Replays all historical transactions for the address from genesis before switching to live
+    /// events. This ensures clients receive complete transaction history immediately upon
+    /// subscription.
     ///
     /// # Arguments
     /// * `address` - The unshielded address to monitor (must be in Bech32m format)
@@ -81,12 +81,17 @@ where
             .internal("convert address into domain address")?;
 
         let encoded_address_for_update = encoded_address.clone();
-        let update_events = unshielded_updates::<S, B>(cx, address.clone(), network_id)
-            .await?
-            .map_ok(move |event| {
-                debug!(address = encoded_address_for_update; "emitting UPDATE event");
-                event
-            });
+        let update_events = unshielded_updates_with_historical_replay::<S, B>(
+            cx,
+            address.clone(),
+            encoded_address.clone(),
+            network_id,
+        )
+        .await?
+        .map_ok(move |event| {
+            debug!(address = encoded_address_for_update; "emitting UPDATE event");
+            event
+        });
 
         let encoded_address_for_progress = encoded_address.clone();
         let progress_updates = progress_updates::<S>(cx, address)
@@ -102,10 +107,11 @@ where
     }
 }
 
-#[trace(properties = { "address": "{address:?}" })]
-async fn unshielded_updates<'a, S, B>(
+#[trace(properties = { "address": "{api_address}" })]
+async fn unshielded_updates_with_historical_replay<'a, S, B>(
     cx: &'a Context<'a>,
-    address: ByteVec,
+    domain_address: indexer_common::domain::UnshieldedAddress,
+    api_address: String,
     network_id: NetworkId,
 ) -> async_graphql::Result<
     impl Stream<Item = async_graphql::Result<UnshieldedUtxoEvent<S>>> + use<'a, S, B>,
@@ -117,60 +123,145 @@ where
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
 
-    let address_for_filter = address.clone();
+    let address_for_filter = domain_address.clone();
     let utxo_indexed_events = subscriber
         .subscribe::<UnshieldedUtxoIndexed>()
         .try_filter(move |event| ready(event.address == address_for_filter));
 
     let updates = try_stream! {
+        debug!(api_address; "starting historical replay from genesis");
+
+        // Phase 1: Replay all historical transactions for this address
+        let historical_transactions = storage
+            .get_transactions_involving_unshielded(&domain_address)
+            .await
+            .internal("fetch historical transactions for address")?;
+
+        debug!(
+            api_address,
+            transaction_count = historical_transactions.len();
+            "replaying historical transactions"
+        );
+
+        // Track which transactions we've already processed to avoid duplicates
+        // when switching to live events.
+        let mut processed_transaction_ids = HashSet::new();
+
+        for transaction in historical_transactions {
+            let transaction_id = transaction.id;
+            processed_transaction_ids.insert(transaction_id);
+
+            debug!(
+                api_address,
+                transaction_id,
+                transaction_hash:% = transaction.hash;
+                "processing historical transaction"
+            );
+
+            let created = storage
+                .get_unshielded_utxos_created_in_transaction_for_address(&domain_address, transaction_id)
+                .await
+                .internal("fetch created UTXOs for historical transaction")?;
+
+            let spent = storage
+                .get_unshielded_utxos_spent_in_transaction_for_address(&domain_address, transaction_id)
+                .await
+                .internal("fetch spent UTXOs for historical transaction")?;
+
+            // Calculate progress: current transaction's end_index relative to highest known.
+            let (highest_index, _) = storage
+                .get_highest_indices_for_address(&domain_address)
+                .await
+                .internal("fetch highest indices for address")?;
+            let highest_index = highest_index.unwrap_or(0);
+            let current_index = transaction.end_index;
+
+            let progress = UnshieldedProgress {
+                highest_index,
+                current_index,
+            };
+
+            // Only emit events for transactions that actually have UTXOs for this address.
+            if !created.is_empty() || !spent.is_empty() {
+                yield UnshieldedUtxoEvent {
+                    progress,
+                    transaction: Some(transaction.into()),
+                    created_utxos: Some(created.into_iter()
+                        .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                        .collect()),
+                    spent_utxos: Some(spent.into_iter()
+                        .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                        .collect()),
+                };
+            }
+        }
+
+        debug!(
+            api_address,
+            processed_count = processed_transaction_ids.len();
+            "completed historical replay, switching to live events"
+        );
+
+        // Phase 2: Switch to live event streaming.
         let mut utxo_indexed_events = pin!(utxo_indexed_events);
         while let Some(UnshieldedUtxoIndexed { address: _, transaction_id }) = utxo_indexed_events
             .try_next()
             .await
             .internal("get next UnshieldedUtxoIndexed event")?
         {
+            // Skip transactions we've already processed during historical replay.
+            if processed_transaction_ids.contains(&transaction_id) {
+                debug!(
+                    api_address,
+                    transaction_id;
+                    "skipping already processed transaction from live events"
+                );
+                continue;
+            }
+
             debug!(
-                address:?,
+                api_address,
                 transaction_id;
-                "handling UnshieldedUtxoIndexed event"
+                "handling live UnshieldedUtxoIndexed event"
             );
 
             let tx = storage
                 .get_transaction_by_id(transaction_id)
                 .await
-                .internal("fetch tx for subscription event")?;
+                .internal("fetch tx for live subscription event")?;
 
             let tx = match tx {
                 Some(tx) => tx,
                 None => {
-                    warn!(transaction_id; "transaction not found, skipping event");
+                    warn!(transaction_id; "transaction not found in live event, skipping");
                     continue;
                 }
             };
 
             let created = storage
-                .get_unshielded_utxos_created_in_transaction_for_address(&address, transaction_id)
+                .get_unshielded_utxos_created_in_transaction_for_address(&domain_address, transaction_id)
                 .await
-                .internal("fetch created UTXOs")?;
+                .internal("fetch created UTXOs for live event")?;
 
             let spent = storage
-                .get_unshielded_utxos_spent_in_transaction_for_address(&address, transaction_id)
+                .get_unshielded_utxos_spent_in_transaction_for_address(&domain_address, transaction_id)
                 .await
-                .internal("fetch spent UTXOs")?;
+                .internal("fetch spent UTXOs for live event")?;
 
             let (highest_index, _) = storage
-                .get_highest_indices_for_address(&address)
+                .get_highest_indices_for_address(&domain_address)
                 .await
-                .internal("fetch highest indices for address")?
-                ;
+                .internal("fetch highest indices for address in live event")?;
             let highest_index = highest_index.unwrap_or(0);
-
             let current_index = tx.end_index;
 
             let progress = UnshieldedProgress {
                 highest_index,
                 current_index,
             };
+
+            // Track this transaction as processed.
+            processed_transaction_ids.insert(transaction_id);
 
             yield UnshieldedUtxoEvent {
                 progress,
