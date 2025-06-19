@@ -42,26 +42,28 @@ where
         address: &UnshieldedAddress,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
-    /// Get unshielded UTXOs created by a specific transaction.
+    /// Get unshielded UTXOs created by a specific transaction, ordered by output index.
     async fn get_unshielded_utxos_created_by_transaction(
         &self,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
-    /// Get unshielded UTXOs spent by a specific transaction.
+    /// Get unshielded UTXOs spent by a specific transaction, ordered by output index.
     async fn get_unshielded_utxos_spent_by_transaction(
         &self,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
-    /// Get unshielded UTXOs created in a specific transaction for a specific address.
+    /// Get unshielded UTXOs created in a specific transaction for a specific address, ordered by
+    /// output index.
     async fn get_unshielded_utxos_created_in_transaction_for_address(
         &self,
         address: &UnshieldedAddress,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
-    /// Get unshielded UTXOs spent in a specific transaction for a specific address.
+    /// Get unshielded UTXOs spent in a specific transaction for a specific address, ordered by
+    /// output index.
     async fn get_unshielded_utxos_spent_in_transaction_for_address(
         &self,
         address: &UnshieldedAddress,
