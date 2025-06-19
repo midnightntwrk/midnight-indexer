@@ -263,16 +263,19 @@ where
             // Track this transaction as processed.
             processed_transaction_ids.insert(transaction_id);
 
-            yield UnshieldedUtxoEvent {
-                progress,
-                transaction: Some(tx.into()),
-                created_utxos: Some(created.into_iter()
-                    .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                    .collect()),
-                spent_utxos: Some(spent.into_iter()
-                    .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                    .collect()),
-            };
+            // Only emit events for transactions that actually have UTXOs for this address.
+            if !created.is_empty() || !spent.is_empty() {
+                yield UnshieldedUtxoEvent {
+                    progress,
+                    transaction: Some(tx.into()),
+                    created_utxos: Some(created.into_iter()
+                        .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                        .collect()),
+                    spent_utxos: Some(spent.into_iter()
+                        .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                        .collect()),
+                };
+            }
         }
 
         warn!("stream of UnshieldedUtxoIndexed events completed unexpectedly");
