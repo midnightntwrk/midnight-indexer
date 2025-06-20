@@ -30,7 +30,7 @@ use tokio_stream::wrappers::IntervalStream;
 // TODO: Make configurable!
 const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Same skeleton pattern as block / contract / wallet subscriptions
+/// Same skeleton pattern as block / contract / wallet subscriptions.
 pub struct UnshieldedSubscription<S, B> {
     _s: PhantomData<S>,
     _b: PhantomData<B>,
@@ -57,18 +57,18 @@ where
     /// Each event includes the transaction details and lists of created/spent UTXOs.
     ///
     /// # Arguments
-    /// * `address` - The unshielded address to monitor (must be in Bech32m format)
+    /// * `address` - The unshielded address to monitor (must be in Bech32m format).
     /// * `transaction_id` - Optional transaction ID to start replay from (defaults to genesis if
-    ///   omitted)
+    ///   omitted).
     ///
     /// # Returns
     /// A stream of `UnshieldedUtxoEvent`s containing:
-    /// - `progress`: Progress information for wallet synchronization (always present)
-    /// - `transaction`: The transaction that created/spent UTXOs (None for progress-only events)
+    /// - `progress`: Progress information for wallet synchronization (always present).
+    /// - `transaction`: The transaction that created/spent UTXOs (None for progress-only events).
     /// - `createdUtxos`: UTXOs created in this transaction for the address (None for progress-only
-    ///   events)
+    ///   events).
     /// - `spentUtxos`: UTXOs spent in this transaction for the address (None for progress-only
-    ///   events)
+    ///   events).
     #[trace(properties = { "address": "{address:?}", "transaction_id": "{transaction_id:?}" })]
     async fn unshielded_utxos<'a>(
         &self,
@@ -83,20 +83,19 @@ where
             .try_into_domain(network_id)
             .internal("convert address into domain address")?;
 
-        let encoded_address_for_update = encoded_address.clone();
+        let encoded_address_for_logging = encoded_address.clone();
         let update_events =
             unshielded_updates::<S, B>(cx, address.clone(), network_id, transaction_id)
                 .await?
                 .map_ok(move |event| {
-                    debug!(address = encoded_address_for_update; "emitting UPDATE event");
+                    debug!(address = encoded_address_for_logging; "emitting UPDATE event");
                     event
                 });
 
-        let encoded_address_for_progress = encoded_address.clone();
         let progress_updates = progress_updates::<S>(cx, address)
             .await?
             .map_ok(move |event| {
-                debug!(address = encoded_address_for_progress; "emitting PROGRESS event");
+                debug!(address = encoded_address; "emitting PROGRESS event");
                 event
             });
 
@@ -123,18 +122,17 @@ where
     let subscriber = cx.get_subscriber::<B>();
 
     let address_for_filter = address.clone();
+    let from_transaction_id = transaction_id.unwrap_or(1);
+    
     let utxo_indexed_events = subscriber
         .subscribe::<UnshieldedUtxoIndexed>()
-        .try_filter(move |event| ready(event.address == address_for_filter));
+        .try_filter(move |event| ready(event.address == address_for_filter && event.transaction_id >= from_transaction_id));
 
     let updates = try_stream! {
-        // Get the starting transaction ID (default to 1 for genesis if not specified)
-        let from_transaction_id = transaction_id.unwrap_or(1);
-
         debug!(
             address:?,
             from_transaction_id;
-            "starting unshielded subscription from transaction ID"
+            "starting unshielded subscription"
         );
 
         let mut utxo_indexed_events = pin!(utxo_indexed_events);
@@ -143,16 +141,6 @@ where
             .await
             .internal("get next UnshieldedUtxoIndexed event")?
         {
-            // Skip transactions before the specified starting transaction ID
-            if transaction_id < from_transaction_id {
-                debug!(
-                    address:?,
-                    transaction_id,
-                    from_transaction_id;
-                    "skipping transaction before starting transaction ID"
-                );
-                continue;
-            }
 
             debug!(
                 address:?,
@@ -183,7 +171,7 @@ where
                 .await
                 .internal("fetch spent UTXOs")?;
 
-            // Get the highest transaction ID for this address for progress tracking
+            // Get the highest transaction ID for this address for progress tracking.
             let (_, highest_transaction_id) = storage
                 .get_highest_indices_for_address(&address)
                 .await
@@ -199,15 +187,18 @@ where
 
             // Only emit events for transactions that actually have UTXOs for this address.
             if !created.is_empty() || !spent.is_empty() {
+                let created_utxos = Some(created.into_iter()
+                    .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                    .collect());
+                let spent_utxos = Some(spent.into_iter()
+                    .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+                    .collect());
+
                 yield UnshieldedUtxoEvent {
                     progress,
                     transaction: Some(tx.into()),
-                    created_utxos: Some(created.into_iter()
-                        .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                        .collect()),
-                    spent_utxos: Some(spent.into_iter()
-                        .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                        .collect()),
+                    created_utxos,
+                    spent_utxos,
                 };
             }
         }
@@ -242,14 +233,14 @@ async fn progress_update<S>(
 where
     S: Storage,
 {
-    // Calculate progress information using transaction IDs
+    // Calculate progress information using transaction IDs.
     let (_, highest_transaction_id) = storage
         .get_highest_indices_for_address(&address)
         .await
         .internal("fetch highest indices for address")?;
 
     let highest_transaction_id = highest_transaction_id.unwrap_or(0);
-    let current_transaction_id = highest_transaction_id; // For progress-only events, current = highest
+    let current_transaction_id = highest_transaction_id; // For progress-only events, current = highest.
 
     let progress = UnshieldedProgress {
         highest_transaction_id,

@@ -805,9 +805,9 @@ pub enum UnshieldedAddressFormatError {
 /// Progress tracking information for unshielded token synchronization.
 #[derive(SimpleObject, Clone, Debug)]
 pub struct UnshieldedProgress {
-    /// The highest transaction ID of all currently known transactions for this address
+    /// The highest transaction ID of all currently known transactions for a particular address.
     highest_transaction_id: u64,
-    /// The current transaction ID being processed for this address  
+    /// The current transaction ID for a particular address.
     current_transaction_id: u64,
 }
 
