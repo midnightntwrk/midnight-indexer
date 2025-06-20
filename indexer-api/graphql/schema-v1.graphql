@@ -257,18 +257,18 @@ type Subscription {
 	Each event includes the transaction details and lists of created/spent UTXOs.
 	
 	# Arguments
-	* `address` - The unshielded address to monitor (must be in Bech32m format)
+	* `address` - The unshielded address to monitor (must be in Bech32m format).
 	* `transaction_id` - Optional transaction ID to start replay from (defaults to genesis if
-	omitted)
+	omitted).
 	
 	# Returns
 	A stream of `UnshieldedUtxoEvent`s containing:
-	- `progress`: Progress information for wallet synchronization (always present)
-	- `transaction`: The transaction that created/spent UTXOs (None for progress-only events)
+	- `progress`: Progress information for wallet synchronization (always present).
+	- `transaction`: The transaction that created/spent UTXOs (None for progress-only events).
 	- `createdUtxos`: UTXOs created in this transaction for the address (None for progress-only
-	events)
+	events).
 	- `spentUtxos`: UTXOs spent in this transaction for the address (None for progress-only
-	events)
+	events).
 	"""
 	unshieldedUtxos(address: UnshieldedAddress!, transactionId: Int): UnshieldedUtxoEvent!
 }
@@ -384,11 +384,11 @@ Progress tracking information for unshielded token synchronization.
 """
 type UnshieldedProgress {
 	"""
-	The highest transaction ID of all currently known transactions for this address
+	The highest transaction ID of all currently known transactions for a particular address.
 	"""
 	highestTransactionId: Int!
 	"""
-	The current transaction ID being processed for this address
+	The current transaction ID for a particular address.
 	"""
 	currentTransactionId: Int!
 }
