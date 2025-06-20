@@ -20,7 +20,7 @@ use crate::{
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
 use fastrace::trace;
-use futures::{Stream, StreamExt, stream::TryStreamExt};
+use futures::{Stream, StreamExt, future::ok, stream::TryStreamExt};
 use indexer_common::domain::{ByteVec, NetworkId, Subscriber, UnshieldedUtxoIndexed};
 use log::{debug, warn};
 use std::{future::ready, marker::PhantomData, pin::pin, time::Duration};
@@ -120,18 +120,16 @@ where
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
 
-    let address_for_filter = address.clone();
     let from_transaction_id = transaction_id.unwrap_or(1);
 
-    let utxo_indexed_events =
+    let utxo_indexed_events = {
+        let address = address.clone();
+
         subscriber
             .subscribe::<UnshieldedUtxoIndexed>()
-            .try_filter(move |event| {
-                ready(
-                    event.address == address_for_filter
-                        && event.transaction_id >= from_transaction_id,
-                )
-            });
+            .try_skip_while(move |event| ok(event.transaction_id < from_transaction_id))
+            .try_filter(move |event| ready(event.address == address))
+    };
 
     let updates = try_stream! {
         debug!(
