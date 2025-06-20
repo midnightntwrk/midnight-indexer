@@ -48,6 +48,7 @@ impl UnshieldedUtxoStorage for SqliteStorage {
             SELECT *
             FROM unshielded_utxos
             WHERE creating_transaction_id = ?
+            ORDER BY output_index
         "};
 
         let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
@@ -66,6 +67,7 @@ impl UnshieldedUtxoStorage for SqliteStorage {
             SELECT *
             FROM unshielded_utxos
             WHERE spending_transaction_id = ?
+            ORDER BY output_index
         "};
 
         let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
@@ -86,6 +88,7 @@ impl UnshieldedUtxoStorage for SqliteStorage {
             FROM unshielded_utxos
             WHERE creating_transaction_id = ?
             AND owner_address = ?
+            ORDER BY output_index
         "};
 
         let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
@@ -107,6 +110,7 @@ impl UnshieldedUtxoStorage for SqliteStorage {
             FROM unshielded_utxos
             WHERE spending_transaction_id = ?
             AND owner_address = ?
+            ORDER BY output_index
         "};
 
         let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
