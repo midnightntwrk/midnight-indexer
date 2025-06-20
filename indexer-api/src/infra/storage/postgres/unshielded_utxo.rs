@@ -50,7 +50,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
                 creating_transaction_id, spending_transaction_id
             FROM unshielded_utxos
             WHERE creating_transaction_id = $1
-            ORDER BY output_index ASC
+            ORDER BY output_index
         "};
 
         let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
@@ -71,7 +71,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
                 creating_transaction_id, spending_transaction_id
             FROM unshielded_utxos
             WHERE spending_transaction_id = $1
-            ORDER BY output_index ASC
+            ORDER BY output_index
         "};
 
         let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
@@ -94,7 +94,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
             FROM unshielded_utxos
             WHERE creating_transaction_id = $1
             AND owner_address = $2
-            ORDER BY output_index ASC
+            ORDER BY output_index
         "};
 
         let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
@@ -118,7 +118,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
             FROM unshielded_utxos
             WHERE spending_transaction_id = $1
             AND owner_address = $2
-            ORDER BY output_index ASC
+            ORDER BY output_index
         "};
 
         let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
