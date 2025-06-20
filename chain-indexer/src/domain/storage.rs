@@ -29,6 +29,7 @@ where
     async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error>;
 
     /// Save the given [Block], update transaction IDs, and return the max transaction ID.
+    /// Contract balances are pre-extracted in the application layer before storage.
     async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error>;
 
     async fn save_unshielded_utxos(

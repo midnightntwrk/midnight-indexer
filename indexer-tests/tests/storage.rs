@@ -38,6 +38,12 @@ use indexer_common::{
 };
 use std::{convert::Into, sync::LazyLock};
 
+/// Network ID used throughout storage tests.
+/// Required for contract balance extraction during block saving. The NetworkId must match
+/// the network context used when the contract state was originally serialized. Since test
+/// data uses undeployed network format, we use NetworkId::Undeployed for consistency.
+const TEST_NETWORK_ID: NetworkId = NetworkId::Undeployed;
+
 #[cfg(feature = "cloud")]
 type ChainIndexerStorage = chain_indexer::infra::storage::postgres::PostgresStorage;
 #[cfg(feature = "standalone")]
@@ -534,6 +540,8 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
                 state: b"state".as_slice().into(),
                 zswap_state: b"zswap_state".as_slice().into(),
                 attributes: chain_indexer::domain::ContractAttributes::Deploy,
+                // Deploy actions typically start with zero balances
+                extracted_balances: Vec::new(),
             }],
             merkle_tree_root: b"merkle_tree_root".as_slice().into(),
             created_unshielded_utxos: vec![UnshieldedUtxo {
@@ -564,6 +572,11 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
                 attributes: chain_indexer::domain::ContractAttributes::Call {
                     entry_point: b"entry_point".as_slice().into(),
                 },
+                // Call actions may receive tokens and have balances
+                extracted_balances: vec![chain_indexer::domain::ContractBalance {
+                    token_type: *TOKEN_NIGHT,
+                    amount: 1000,
+                }],
             }],
             merkle_tree_root: b"merkle_tree_root".as_slice().into(),
             created_unshielded_utxos: vec![UnshieldedUtxo {
@@ -606,12 +619,28 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
                 attributes: chain_indexer::domain::ContractAttributes::Call {
                     entry_point: b"entry_point".as_slice().into(),
                 },
+                // First call action with Night tokens
+                extracted_balances: vec![chain_indexer::domain::ContractBalance {
+                    token_type: *TOKEN_NIGHT,
+                    amount: 500,
+                }],
             },
             chain_indexer::domain::ContractAction {
                 address: ADDRESS.to_owned(),
                 state: b"state".as_slice().into(),
                 zswap_state: b"zswap_state".as_slice().into(),
                 attributes: chain_indexer::domain::ContractAttributes::Update,
+                // Update action with multiple token types
+                extracted_balances: vec![
+                    chain_indexer::domain::ContractBalance {
+                        token_type: *TOKEN_NIGHT,
+                        amount: 750,
+                    },
+                    chain_indexer::domain::ContractBalance {
+                        token_type: RawTokenType::from([1u8; 32]), // Custom token
+                        amount: 100,
+                    },
+                ],
             },
             chain_indexer::domain::ContractAction {
                 address: ADDRESS.to_owned(),
@@ -620,6 +649,11 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
                 attributes: chain_indexer::domain::ContractAttributes::Call {
                     entry_point: b"entry_point".as_slice().into(),
                 },
+                // Second call action with different amounts
+                extracted_balances: vec![chain_indexer::domain::ContractBalance {
+                    token_type: *TOKEN_NIGHT,
+                    amount: 250,
+                }],
             },
         ],
         merkle_tree_root: b"merkle_tree_root".as_slice().into(),
@@ -659,13 +693,11 @@ static IDENTIFIER_1: LazyLock<Identifier> = LazyLock::new(|| b"identifier-1".as_
 
 static IDENTIFIER_2: LazyLock<Identifier> = LazyLock::new(|| b"identifier-2".as_slice().into());
 
-static RAW_TRANSACTION_1: LazyLock<RawTransaction> = LazyLock::new(|| {
-    create_raw_transaction(NetworkId::Undeployed).expect("create raw transaction")
-});
+static RAW_TRANSACTION_1: LazyLock<RawTransaction> =
+    LazyLock::new(|| create_raw_transaction(TEST_NETWORK_ID).expect("create raw transaction"));
 
-static RAW_TRANSACTION_2: LazyLock<RawTransaction> = LazyLock::new(|| {
-    create_raw_transaction(NetworkId::Undeployed).expect("create raw transaction")
-});
+static RAW_TRANSACTION_2: LazyLock<RawTransaction> =
+    LazyLock::new(|| create_raw_transaction(TEST_NETWORK_ID).expect("create raw transaction"));
 
 static ADDRESS: LazyLock<ContractAddress> = LazyLock::new(|| b"address".as_slice().into());
 

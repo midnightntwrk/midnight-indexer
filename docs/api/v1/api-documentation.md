@@ -18,6 +18,7 @@ The GraphQL schema is defined in [`indexer-api/graphql/schema-v1.graphql`](../..
     - Filter transactions by unshielded address to see token transfers.
     - List all unshielded UTXOs (spent and unspent) for a given address.
     - Inspect the current state of a contract action at a given block or transaction offset.
+    - Query unshielded token balances held by contracts.
 
 - **Mutations**: Manage wallet sessions.
     - `connect(viewingKey: ViewingKey!)`: Creates a session associated with a viewing key.
@@ -122,11 +123,19 @@ query {
         state
         entryPoint
         chainState
+        unshieldedBalances {
+          tokenType
+          amount
+        }
       }
       ... on ContractUpdate {
         address
         state
         chainState
+        unshieldedBalances {
+          tokenType
+          amount
+        }
       }
     }
     fees {
@@ -232,6 +241,21 @@ Contract actions can be one of three types:
 - **ContractUpdate**: State update to an existing contract
 
 Each type implements the ContractAction interface but may have additional fields. For example, ContractCall includes an `entryPoint` field and a reference to its associated `deploy`.
+
+All contract action types include an `unshieldedBalances` field that returns the token balances held by the contract:
+
+- **ContractDeploy**: Always returns empty balances (contracts are deployed with zero balance).
+- **ContractCall**: Returns balances after the call execution (may be modified by `unshielded_inputs`/`unshielded_outputs`).
+- **ContractUpdate**: Returns balances after the maintenance update.
+
+#### UnshieldedBalance Type
+
+```graphql
+type UnshieldedBalance {
+  tokenType: HexEncoded!  # Token type identifier
+  amount: String!         # Balance amount (supports u128 values)
+}
+```
 
 ### unshieldedUtxos(address: UnshieldedAddress!, offset: UnshieldedOffset): [UnshieldedUtxo!]!
 

@@ -59,6 +59,22 @@ input ContractActionOffset @oneOf {
 }
 
 """
+Represents a token balance held by a contract.
+This type is exposed through the GraphQL API to allow clients to query
+unshielded token balances for any contract action (Deploy, Call, Update).
+"""
+type ContractBalance {
+	"""
+	Token type identifier, hex-encoded for GraphQL compatibility.
+	"""
+	tokenType: HexEncoded!
+	"""
+	Balance amount as string to support u128 values.
+	"""
+	amount: String!
+}
+
+"""
 A contract call.
 """
 type ContractCall implements ContractAction {
@@ -68,6 +84,10 @@ type ContractCall implements ContractAction {
 	entryPoint: HexEncoded!
 	transaction: Transaction!
 	deploy: ContractDeploy!
+	"""
+	Unshielded token balances held by this contract.
+	"""
+	unshieldedBalances: [ContractBalance!]!
 }
 
 """
@@ -78,6 +98,11 @@ type ContractDeploy implements ContractAction {
 	state: HexEncoded!
 	chainState: HexEncoded!
 	transaction: Transaction!
+	"""
+	Unshielded token balances held by this contract.
+	According to the architecture, deployed contracts must have zero balance.
+	"""
+	unshieldedBalances: [ContractBalance!]!
 }
 
 """
@@ -88,6 +113,10 @@ type ContractUpdate implements ContractAction {
 	state: HexEncoded!
 	chainState: HexEncoded!
 	transaction: Transaction!
+	"""
+	Unshielded token balances held by this contract after the update.
+	"""
+	unshieldedBalances: [ContractBalance!]!
 }
 
 scalar HexEncoded

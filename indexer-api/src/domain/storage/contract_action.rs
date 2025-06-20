@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ContractAction, storage::NoopStorage};
+use crate::domain::{ContractAction, ContractBalance, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{BlockHash, ContractAddress, Identifier, TransactionHash};
 use std::{fmt::Debug, num::NonZeroU32};
@@ -76,6 +76,12 @@ where
         contract_action_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send;
+
+    /// Get unshielded token balances for a contract action.
+    async fn get_unshielded_balances_by_action_id(
+        &self,
+        contract_action_id: u64,
+    ) -> Result<Vec<ContractBalance>, sqlx::Error>;
 }
 
 #[allow(unused_variables)]
@@ -149,5 +155,13 @@ impl ContractActionStorage for NoopStorage {
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send {
         stream::empty()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_unshielded_balances_by_action_id(
+        &self,
+        contract_action_id: u64,
+    ) -> Result<Vec<ContractBalance>, sqlx::Error> {
+        unimplemented!()
     }
 }

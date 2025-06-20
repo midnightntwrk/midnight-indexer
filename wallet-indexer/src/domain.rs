@@ -90,10 +90,10 @@ impl Transaction {
 #[derive(Debug, Error)]
 pub enum TransactionIsRelevantError {
     #[error("cannot deserialize transaction")]
-    DeserializeTransaction(#[source] std::io::Error),
+    DeserializeTransaction(#[source] io::Error),
 
     #[error("cannot deserialize viewing key`")]
-    DeserializeViewingKey(#[source] std::io::Error),
+    DeserializeViewingKey(#[source] io::Error),
 }
 
 fn can_decrypt(key: &SecretKey, offer: Offer<Proof, DefaultDB>) -> bool {
