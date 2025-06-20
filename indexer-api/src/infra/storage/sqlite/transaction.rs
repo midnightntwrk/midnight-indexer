@@ -257,7 +257,9 @@ impl TransactionStorage for SqliteStorage {
             transactions.raw,
             transactions.merkle_tree_root,
             transactions.start_index,
-            transactions.end_index
+            transactions.end_index,
+            transactions.paid_fees,
+            transactions.estimated_fees
         FROM transactions
         INNER JOIN blocks ON blocks.id = transactions.block_id
         INNER JOIN unshielded_utxos ON
