@@ -83,20 +83,19 @@ where
             .try_into_domain(network_id)
             .internal("convert address into domain address")?;
 
-        let encoded_address_for_logging = encoded_address.clone();
-        let update_events =
+        let update_events = {
+            let encoded_address = encoded_address.clone();
             unshielded_updates::<S, B>(cx, address.clone(), network_id, transaction_id)
                 .await?
-                .map_ok(move |event| {
-                    debug!(address = encoded_address_for_logging; "emitting UPDATE event");
-                    event
-                });
+                .inspect_ok(move |_| {
+                    debug!(address = encoded_address; "emitting UPDATE event");
+                })
+        };
 
         let progress_updates = progress_updates::<S>(cx, address)
             .await?
-            .map_ok(move |event| {
+            .inspect_ok(move |_| {
                 debug!(address = encoded_address; "emitting PROGRESS event");
-                event
             });
 
         let events = tokio_stream::StreamExt::merge(update_events, progress_updates);
@@ -123,10 +122,16 @@ where
 
     let address_for_filter = address.clone();
     let from_transaction_id = transaction_id.unwrap_or(1);
-    
-    let utxo_indexed_events = subscriber
-        .subscribe::<UnshieldedUtxoIndexed>()
-        .try_filter(move |event| ready(event.address == address_for_filter && event.transaction_id >= from_transaction_id));
+
+    let utxo_indexed_events =
+        subscriber
+            .subscribe::<UnshieldedUtxoIndexed>()
+            .try_filter(move |event| {
+                ready(
+                    event.address == address_for_filter
+                        && event.transaction_id >= from_transaction_id,
+                )
+            });
 
     let updates = try_stream! {
         debug!(
