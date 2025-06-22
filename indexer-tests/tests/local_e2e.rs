@@ -325,14 +325,11 @@ fn spawn_child(
     name: &'static str,
     env_vars: HashMap<&'static str, String>,
 ) -> anyhow::Result<Child> {
-    Command::new(format!(
-        "{}/debug/{name}",
-        env!("CARGO_TARGET_DIR")
-    ))
-    .envs(env_vars)
-    .kill_on_drop(true)
-    .spawn()
-    .context(format!("spawn child {name}"))
+    Command::new(format!("{}/debug/{name}", env!("CARGO_TARGET_DIR")))
+        .envs(env_vars)
+        .kill_on_drop(true)
+        .spawn()
+        .context(format!("spawn child {name}"))
 }
 
 async fn wait_for_api_ready(api_port: u16, timeout: Duration) -> anyhow::Result<()> {
