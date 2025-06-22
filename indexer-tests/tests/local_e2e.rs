@@ -326,8 +326,8 @@ fn spawn_child(
     env_vars: HashMap<&'static str, String>,
 ) -> anyhow::Result<Child> {
     Command::new(format!(
-        "{}/../target/debug/{name}",
-        env!("CARGO_MANIFEST_DIR")
+        "{}/debug/{name}",
+        env!("CARGO_TARGET_DIR")
     ))
     .envs(env_vars)
     .kill_on_drop(true)
