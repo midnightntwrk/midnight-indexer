@@ -868,7 +868,7 @@ async fn test_unshielded_utxo_subscription(
                 // Check progress information is always present
                 println!(
                     "Progress: {}/{}",
-                    event.progress.current_index, event.progress.highest_index
+                    event.progress.current_transaction_id, event.progress.highest_transaction_id
                 );
 
                 if let Some(ref created_utxos) = event.created_utxos {

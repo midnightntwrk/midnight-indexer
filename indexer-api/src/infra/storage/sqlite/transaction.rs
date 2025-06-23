@@ -246,6 +246,7 @@ impl TransactionStorage for SqliteStorage {
     async fn get_transactions_involving_unshielded(
         &self,
         address: &UnshieldedAddress,
+        from_transaction_id: u64,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
         let sql = indoc! {"
         SELECT DISTINCT
@@ -257,18 +258,22 @@ impl TransactionStorage for SqliteStorage {
             transactions.raw,
             transactions.merkle_tree_root,
             transactions.start_index,
-            transactions.end_index
+            transactions.end_index,
+            transactions.paid_fees,
+            transactions.estimated_fees
         FROM transactions
         INNER JOIN blocks ON blocks.id = transactions.block_id
         INNER JOIN unshielded_utxos ON
             unshielded_utxos.creating_transaction_id = transactions.id OR
             unshielded_utxos.spending_transaction_id = transactions.id
-        WHERE unshielded_utxos.owner_address = ?
+        WHERE unshielded_utxos.owner_address = $1
+        AND transactions.id >= $2
         ORDER BY transactions.id
     "};
 
         let mut transactions = sqlx::query_as::<_, Transaction>(sql)
             .bind(address.as_ref())
+            .bind(from_transaction_id as i64)
             .fetch_all(&*self.pool)
             .await?;
 
