@@ -60,7 +60,7 @@ CREATE INDEX ON contract_actions(id, address);
 CREATE TABLE wallets(
     id UUID PRIMARY KEY,
     session_id BYTEA NOT NULL UNIQUE,
-    viewing_key BYTEA NOT NULL, -- Ciphertext with nonce, no longer unique!
+    viewing_key BYTEA NOT NULL,
     last_indexed_transaction_id BIGINT NOT NULL DEFAULT 0,
     active BOOLEAN NOT NULL DEFAULT TRUE,
     last_active TIMESTAMPTZ NOT NULL
@@ -98,8 +98,8 @@ CREATE INDEX unshielded_spent_idx ON unshielded_utxos(spending_transaction_id);
 CREATE TABLE contract_balances(
     id BIGSERIAL PRIMARY KEY,
     contract_action_id BIGINT NOT NULL REFERENCES contract_actions(id),
-    token_type BYTEA NOT NULL, -- Serialized TokenType (hex-encoded)
-    amount BYTEA NOT NULL, -- u128 amount as bytes (for large number support)
+    token_type BYTEA NOT NULL,
+    amount BYTEA NOT NULL,
     UNIQUE (contract_action_id, token_type)
 );
 
@@ -108,4 +108,66 @@ CREATE INDEX ON contract_balances(contract_action_id);
 CREATE INDEX ON contract_balances(token_type);
 
 CREATE INDEX ON contract_balances(contract_action_id, token_type);
+
+CREATE TABLE dust_generation_info (
+    id BIGSERIAL PRIMARY KEY,
+    night_utxo_hash BYTEA NOT NULL,
+    value BYTEA NOT NULL,
+    owner BYTEA NOT NULL,
+    nonce BYTEA NOT NULL,
+    ctime BIGINT NOT NULL,
+    dtime BIGINT,
+    merkle_index BIGINT NOT NULL
+);
+
+CREATE TABLE dust_utxos (
+    id BIGSERIAL PRIMARY KEY,
+    commitment BYTEA NOT NULL,
+    nullifier BYTEA,
+    initial_value BYTEA NOT NULL,
+    owner BYTEA NOT NULL,
+    nonce BYTEA NOT NULL,
+    seq INTEGER NOT NULL,
+    ctime BIGINT NOT NULL,
+    generation_info_id BIGINT REFERENCES dust_generation_info(id),
+    spent_at_transaction_id BIGINT REFERENCES transactions(id)
+);
+
+CREATE TABLE cnight_registrations (
+    id BIGSERIAL PRIMARY KEY,
+    night_address BYTEA NOT NULL,
+    dust_address BYTEA NOT NULL,
+    is_valid BOOLEAN NOT NULL,
+    registered_at BIGINT NOT NULL,
+    removed_at BIGINT,
+    UNIQUE(night_address, dust_address)
+);
+
+CREATE TABLE dust_commitment_tree (
+    id BIGSERIAL PRIMARY KEY,
+    block_height BIGINT NOT NULL,
+    root BYTEA NOT NULL,
+    tree_data BYTEA NOT NULL
+);
+
+CREATE TABLE dust_generation_tree (
+    id BIGSERIAL PRIMARY KEY,
+    block_height BIGINT NOT NULL,
+    root BYTEA NOT NULL,
+    tree_data BYTEA NOT NULL
+);
+
+CREATE INDEX ON dust_utxos(owner);
+
+CREATE INDEX ON dust_utxos(generation_info_id);
+
+CREATE INDEX ON dust_utxos(spent_at_transaction_id);
+
+CREATE INDEX ON cnight_registrations(night_address);
+
+CREATE INDEX ON cnight_registrations(dust_address);
+
+CREATE INDEX ON dust_generation_info(owner);
+
+CREATE INDEX ON dust_generation_info(night_utxo_hash);
 
