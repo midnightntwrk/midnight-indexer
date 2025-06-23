@@ -106,18 +106,6 @@ impl Display for ViewingKey {
     }
 }
 
-impl TryFrom<&[u8]> for ViewingKey {
-    type Error = TryFromBytesForViewingKey;
-
-    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let bytes = bytes
-            .try_into()
-            .map_err(|_| TryFromBytesForViewingKey(SecretKey::BYTES, bytes.len()))?;
-
-        Ok(Self(bytes))
-    }
-}
-
 impl From<SecretKey> for ViewingKey {
     fn from(secret_key: SecretKey) -> Self {
         Self(secret_key.repr())
@@ -129,10 +117,6 @@ impl From<ViewingKey> for SecretKey {
         SecretKey::from_repr(&viewing_key.0).expect("SecretKey can be created from repr")
     }
 }
-
-#[derive(Debug, Error)]
-#[error("cannot create viewing key of len {0} from slice of len {1}")]
-pub struct TryFromBytesForViewingKey(usize, usize);
 
 #[derive(Debug, Error)]
 pub enum DecryptViewingKeyError {
