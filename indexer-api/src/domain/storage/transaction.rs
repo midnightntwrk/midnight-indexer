@@ -56,6 +56,7 @@ where
     async fn get_transactions_involving_unshielded(
         &self,
         address: &UnshieldedAddress,
+        from_transaction_id: u64,
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
     /// Get a tuple of end indices:
@@ -112,6 +113,7 @@ impl TransactionStorage for NoopStorage {
     async fn get_transactions_involving_unshielded(
         &self,
         address: &UnshieldedAddress,
+        from_transaction_id: u64,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
         unimplemented!()
     }

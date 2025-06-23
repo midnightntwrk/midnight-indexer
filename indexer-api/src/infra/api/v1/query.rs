@@ -109,7 +109,7 @@ where
                 .try_into_domain(network_id)
                 .internal("convert address into domain address")?;
             let txs = storage
-                .get_transactions_involving_unshielded(&address)
+                .get_transactions_involving_unshielded(&address, 0)
                 .await
                 .internal("get transactions by address")?;
 
