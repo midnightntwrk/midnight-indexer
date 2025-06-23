@@ -266,8 +266,8 @@ impl TransactionStorage for SqliteStorage {
         INNER JOIN unshielded_utxos ON
             unshielded_utxos.creating_transaction_id = transactions.id OR
             unshielded_utxos.spending_transaction_id = transactions.id
-        WHERE unshielded_utxos.owner_address = ?
-        AND transactions.id >= ?
+        WHERE unshielded_utxos.owner_address = $1
+        AND transactions.id >= $2
         ORDER BY transactions.id
     "};
 
