@@ -13,9 +13,7 @@
 
 use async_graphql::scalar;
 use derive_more::derive::From;
-use indexer_common::domain::{
-    NetworkId, TryFromBytesForViewingKey, UnknownNetworkIdError, ViewingKey as CommonViewingKey,
-};
+use indexer_common::domain::{NetworkId, UnknownNetworkIdError, ViewingKey as CommonViewingKey};
 use midnight_serialize::Deserializable;
 use midnight_transient_crypto::encryption::SecretKey;
 use serde::{Deserialize, Serialize};
@@ -52,11 +50,9 @@ impl ViewingKey {
             return Err(ViewingKeyFormatError::UnexpectedNetworkId(n, network_id));
         }
 
-        SecretKey::deserialize(&mut bytes.as_slice(), 0)?
-            .repr()
-            .as_slice()
-            .try_into()
-            .map_err(ViewingKeyFormatError::Array)
+        let secret_key = SecretKey::deserialize(&mut bytes.as_slice(), 0)?;
+
+        Ok(secret_key.into())
     }
 }
 
@@ -76,9 +72,6 @@ pub enum ViewingKeyFormatError {
 
     #[error("cannot deserialize viewing key")]
     Deserialize(#[from] io::Error),
-
-    #[error(transparent)]
-    Array(TryFromBytesForViewingKey),
 }
 
 #[cfg(test)]
