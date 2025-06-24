@@ -134,7 +134,7 @@ mod tests {
     use midnight_zswap::keys::SecretKeys;
 
     #[test]
-    fn test() {
+    fn test_viewing_key_from_roundtrip() {
         let secret_key = SecretKeys::from_rng_seed(&mut OsRng).encryption_secret_key;
         let viewing_key = ViewingKey::from(secret_key);
         assert_eq!(secret_key, viewing_key.into());
