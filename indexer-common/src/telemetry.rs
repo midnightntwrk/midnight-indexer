@@ -36,7 +36,7 @@ use logforth::{
     layout::JsonLayout,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
-use opentelemetry::{InstrumentationScope, trace::SpanKind};
+use opentelemetry::InstrumentationScope;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::Resource;
 use serde::Deserialize;
@@ -174,12 +174,8 @@ pub fn init_tracing(config: TracingConfig) {
             .with_version(instrumentation_scope_version)
             .build();
 
-        let reporter = OpenTelemetryReporter::new(
-            exporter,
-            SpanKind::Server,
-            Cow::Owned(resource),
-            instrumentation_scope,
-        );
+        let reporter =
+            OpenTelemetryReporter::new(exporter, Cow::Owned(resource), instrumentation_scope);
 
         fastrace::set_reporter(reporter, fastrace::collector::Config::default());
     }

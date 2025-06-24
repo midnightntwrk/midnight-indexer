@@ -17,7 +17,6 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 [dependencies]
 anyhow                    = { workspace = true }
 chacha20poly1305          = { workspace = true }
-const-hex                 = { workspace = true }
 fastrace                  = { workspace = true }
 futures                   = { workspace = true }
 humantime-serde           = { workspace = true }
@@ -25,7 +24,6 @@ indexer-common            = { path = "../indexer-common" }
 indoc                     = { workspace = true }
 log                       = { workspace = true, features = [ "kv" ] }
 itertools                 = { workspace = true }
-midnight-base-crypto      = { workspace = true }
 midnight-coin-structure   = { workspace = true }
 midnight-ledger           = { workspace = true }
 midnight-serialize        = { workspace = true }
@@ -42,7 +40,6 @@ trait-variant             = { workspace = true }
 uuid                      = { workspace = true, features = [ "v7" ] }
 
 [dev-dependencies]
-assert_matches         = { workspace = true }
 midnight-ledger        = { workspace = true, features = [ "proving" ] }
 testcontainers         = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }
