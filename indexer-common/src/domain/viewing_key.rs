@@ -126,3 +126,17 @@ pub enum DecryptViewingKeyError {
     #[error("cannot create byte array of len 64 from slice of len {0}")]
     Array(usize),
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::ViewingKey;
+    use chacha20poly1305::aead::OsRng;
+    use midnight_zswap::keys::SecretKeys;
+
+    #[test]
+    fn test_viewing_key_from_roundtrip() {
+        let secret_key = SecretKeys::from_rng_seed(&mut OsRng).encryption_secret_key;
+        let viewing_key = ViewingKey::from(secret_key);
+        assert_eq!(secret_key, viewing_key.into());
+    }
+}
