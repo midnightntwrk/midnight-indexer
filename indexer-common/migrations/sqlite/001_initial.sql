@@ -86,12 +86,12 @@ CREATE TABLE relevant_transactions(
 CREATE TABLE unshielded_utxos(
     id INTEGER PRIMARY KEY,
     creating_transaction_id INTEGER NOT NULL,
+    spending_transaction_id INTEGER,
     output_index INTEGER NOT NULL,
     owner_address BLOB NOT NULL,
     token_type BLOB NOT NULL,
     intent_hash BLOB NOT NULL,
     value BLOB NOT NULL,
-    spending_transaction_id INTEGER,
     FOREIGN KEY (creating_transaction_id) REFERENCES transactions(id),
     FOREIGN KEY (spending_transaction_id) REFERENCES transactions(id),
     UNIQUE (intent_hash, output_index)
@@ -104,7 +104,7 @@ CREATE INDEX unshielded_token_type_idx ON unshielded_utxos(token_type);
 CREATE INDEX unshielded_spent_idx ON unshielded_utxos(spending_transaction_id);
 
 CREATE TABLE zswap_state(
-    id BLOB PRIMARY KEY, -- UUID
+    id BLOB PRIMARY KEY,
     value BLOB NOT NULL,
     last_index INTEGER
 );
@@ -130,24 +130,31 @@ CREATE TABLE dust_generation_info (
     owner BLOB NOT NULL,
     nonce BLOB NOT NULL,
     ctime INTEGER NOT NULL,
-    dtime INTEGER,
-    merkle_index INTEGER NOT NULL
+    merkle_index INTEGER NOT NULL,
+    dtime INTEGER
 );
+
+CREATE INDEX dust_generation_info_owner_idx ON dust_generation_info(owner);
+CREATE INDEX dust_generation_info_utxo_idx ON dust_generation_info(night_utxo_hash);
 
 CREATE TABLE dust_utxos (
     id INTEGER PRIMARY KEY,
+    generation_info_id INTEGER NOT NULL,
+    spent_at_transaction_id INTEGER,
     commitment BLOB NOT NULL,
-    nullifier BLOB,
     initial_value BLOB NOT NULL,
     owner BLOB NOT NULL,
     nonce BLOB NOT NULL,
     seq INTEGER NOT NULL,
     ctime INTEGER NOT NULL,
-    generation_info_id INTEGER,
-    spent_at_transaction_id INTEGER,
+    nullifier BLOB,
     FOREIGN KEY (generation_info_id) REFERENCES dust_generation_info(id),
     FOREIGN KEY (spent_at_transaction_id) REFERENCES transactions(id)
 );
+
+CREATE INDEX dust_utxos_owner_idx ON dust_utxos(owner);
+CREATE INDEX dust_utxos_generation_idx ON dust_utxos(generation_info_id);
+CREATE INDEX dust_utxos_spent_idx ON dust_utxos(spent_at_transaction_id);
 
 CREATE TABLE cnight_registrations (
     id INTEGER PRIMARY KEY,
@@ -158,6 +165,9 @@ CREATE TABLE cnight_registrations (
     removed_at INTEGER,
     UNIQUE(night_address, dust_address)
 );
+
+CREATE INDEX cnight_registrations_night_addr_idx ON cnight_registrations(night_address);
+CREATE INDEX cnight_registrations_dust_addr_idx ON cnight_registrations(dust_address);
 
 CREATE TABLE dust_commitment_tree (
     id INTEGER PRIMARY KEY,
@@ -173,17 +183,4 @@ CREATE TABLE dust_generation_tree (
     tree_data BLOB NOT NULL
 );
 
-CREATE INDEX dust_utxos_owner_idx ON dust_utxos(owner);
-
-CREATE INDEX dust_utxos_generation_idx ON dust_utxos(generation_info_id);
-
-CREATE INDEX dust_utxos_spent_idx ON dust_utxos(spent_at_transaction_id);
-
-CREATE INDEX cnight_registrations_night_addr_idx ON cnight_registrations(night_address);
-
-CREATE INDEX cnight_registrations_dust_addr_idx ON cnight_registrations(dust_address);
-
-CREATE INDEX dust_generation_info_owner_idx ON dust_generation_info(owner);
-
-CREATE INDEX dust_generation_info_utxo_idx ON dust_generation_info(night_utxo_hash);
 

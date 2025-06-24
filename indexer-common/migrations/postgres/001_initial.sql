@@ -80,12 +80,12 @@ CREATE TABLE relevant_transactions(
 CREATE TABLE unshielded_utxos(
     id BIGSERIAL PRIMARY KEY,
     creating_transaction_id BIGINT NOT NULL REFERENCES transactions(id),
+    spending_transaction_id BIGINT REFERENCES transactions(id),
     output_index BIGINT NOT NULL,
     owner_address BYTEA NOT NULL,
     token_type BYTEA NOT NULL,
     intent_hash BYTEA NOT NULL,
     value BYTEA NOT NULL,
-    spending_transaction_id BIGINT REFERENCES transactions(id),
     UNIQUE (intent_hash, output_index)
 );
 
@@ -116,22 +116,29 @@ CREATE TABLE dust_generation_info (
     owner BYTEA NOT NULL,
     nonce BYTEA NOT NULL,
     ctime BIGINT NOT NULL,
-    dtime BIGINT,
-    merkle_index BIGINT NOT NULL
+    merkle_index BIGINT NOT NULL,
+    dtime BIGINT
 );
+
+CREATE INDEX dust_generation_info_owner_idx ON dust_generation_info(owner);
+CREATE INDEX dust_generation_info_utxo_idx ON dust_generation_info(night_utxo_hash);
 
 CREATE TABLE dust_utxos (
     id BIGSERIAL PRIMARY KEY,
+    generation_info_id BIGINT NOT NULL REFERENCES dust_generation_info(id),
+    spent_at_transaction_id BIGINT REFERENCES transactions(id),
     commitment BYTEA NOT NULL,
-    nullifier BYTEA,
     initial_value BYTEA NOT NULL,
     owner BYTEA NOT NULL,
     nonce BYTEA NOT NULL,
     seq INTEGER NOT NULL,
     ctime BIGINT NOT NULL,
-    generation_info_id BIGINT REFERENCES dust_generation_info(id),
-    spent_at_transaction_id BIGINT REFERENCES transactions(id)
+    nullifier BYTEA
 );
+
+CREATE INDEX dust_utxos_owner_idx ON dust_utxos(owner);
+CREATE INDEX dust_utxos_generation_idx ON dust_utxos(generation_info_id);
+CREATE INDEX dust_utxos_spent_idx ON dust_utxos(spent_at_transaction_id);
 
 CREATE TABLE cnight_registrations (
     id BIGSERIAL PRIMARY KEY,
@@ -142,6 +149,9 @@ CREATE TABLE cnight_registrations (
     removed_at BIGINT,
     UNIQUE(night_address, dust_address)
 );
+
+CREATE INDEX cnight_registrations_night_addr_idx ON cnight_registrations(night_address);
+CREATE INDEX cnight_registrations_dust_addr_idx ON cnight_registrations(dust_address);
 
 CREATE TABLE dust_commitment_tree (
     id BIGSERIAL PRIMARY KEY,
@@ -157,17 +167,4 @@ CREATE TABLE dust_generation_tree (
     tree_data BYTEA NOT NULL
 );
 
-CREATE INDEX ON dust_utxos(owner);
-
-CREATE INDEX ON dust_utxos(generation_info_id);
-
-CREATE INDEX ON dust_utxos(spent_at_transaction_id);
-
-CREATE INDEX ON cnight_registrations(night_address);
-
-CREATE INDEX ON cnight_registrations(dust_address);
-
-CREATE INDEX ON dust_generation_info(owner);
-
-CREATE INDEX ON dust_generation_info(night_utxo_hash);
 
