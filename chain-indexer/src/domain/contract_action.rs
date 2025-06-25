@@ -11,36 +11,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::ContractBalance;
 use indexer_common::domain::{
-    ContractActionVariant, ContractAddress, ContractEntryPoint, ContractState, RawLedgerState,
+    ContractAttributes, ContractBalance, RawContractAddress, RawContractState, RawZswapState,
 };
-use serde::Serialize;
 
 /// A contract action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {
-    pub address: ContractAddress,
-    pub state: ContractState,
+    pub address: RawContractAddress,
+    pub state: RawContractState,
     pub attributes: ContractAttributes,
-    pub zswap_state: RawLedgerState,
+    pub zswap_state: RawZswapState,
     pub extracted_balances: Vec<ContractBalance>,
 }
 
-/// Attributes for a specific [ContractAction].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum ContractAttributes {
-    Deploy,
-    Call { entry_point: ContractEntryPoint },
-    Update,
-}
-
-impl From<&ContractAttributes> for ContractActionVariant {
-    fn from(attributes: &ContractAttributes) -> Self {
-        match attributes {
-            ContractAttributes::Deploy => Self::Deploy,
-            ContractAttributes::Call { .. } => Self::Call,
-            ContractAttributes::Update => Self::Update,
+impl From<indexer_common::domain::ContractAction> for ContractAction {
+    fn from(contract_action: indexer_common::domain::ContractAction) -> Self {
+        Self {
+            address: contract_action.address,
+            state: contract_action.state,
+            attributes: contract_action.attributes,
+            zswap_state: Default::default(),
+            extracted_balances: Default::default(),
         }
     }
 }

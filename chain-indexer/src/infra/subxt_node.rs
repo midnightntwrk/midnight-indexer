@@ -15,39 +15,23 @@ mod header;
 mod runtimes;
 
 use crate::{
-    domain::{
-        Block, BlockInfo, ContractAction, ContractAttributes, Node, Transaction, TransactionFees,
-    },
-    infra::node::{
-        header::SubstrateHeaderExt,
-        runtimes::{BlockDetails, UtxoInfo},
-    },
+    domain::{Block, BlockInfo, Node, Transaction, TransactionFees},
+    infra::subxt_node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
 };
 use async_stream::try_stream;
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{
-    LedgerTransaction,
     domain::{
-        BlockAuthor, BlockHash, ByteVec, NetworkId, ProtocolVersion, RawTransaction,
-        ScaleDecodeProtocolVersionError, TransactionHash, UnshieldedAddress,
+        BlockAuthor, BlockHash, NetworkId, ProtocolVersion, ScaleDecodeProtocolVersionError,
+        TransactionHash, UnshieldedUtxo,
+        ledger::{self, ZswapStateRoot},
     },
-    error::{BoxError, StdErrorExt},
-    serialize::SerializableExt,
+    error::BoxError,
 };
 use log::{debug, error, info, warn};
-use midnight_coin_structure::contract::ContractAddress;
-use midnight_ledger::structure::{ContractAction as LedgerContractAction, ProofMarker};
-use midnight_serialize::deserialize;
-use midnight_storage::DefaultDB;
-use midnight_transient_crypto::merkle_tree::MerkleTreeDigest;
 use serde::Deserialize;
-use std::{
-    collections::HashMap,
-    future::ready,
-    io::{self},
-    time::Duration,
-};
+use std::{collections::HashMap, future::ready, time::Duration};
 use subxt::{
     OnlineClient, SubstrateConfig,
     backend::{
@@ -250,37 +234,31 @@ impl SubxtNode {
         let zswap_state_root =
             runtimes::get_zswap_state_root(online_client, hash, protocol_version).await?;
         let zswap_state_root =
-            deserialize::<MerkleTreeDigest, _>(&mut zswap_state_root.as_slice(), network_id.into())
-                .map_err(|error| {
-                    SubxtNodeError::Io("cannot deserialize zswap state root", error)
-                })?;
+            ZswapStateRoot::deserialize(zswap_state_root, protocol_version, network_id)?;
 
         let extrinsics = block.extrinsics().await.map_err(Box::new)?;
         let events = block.events().await.map_err(Box::new)?;
         let BlockDetails {
             timestamp,
             raw_transactions,
-            created_unshielded_utxos_info,
-            spent_unshielded_utxos_info,
+            created_unshielded_utxo_infos,
+            spent_unshielded_utxo_infos,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
 
         let mut transactions = Vec::with_capacity(raw_transactions.len());
-        for (n, raw_transaction) in raw_transactions.into_iter().enumerate() {
-            let tx = make_transaction(
-                n,
+        for raw_transaction in raw_transactions.into_iter() {
+            let transaction = make_transaction(
                 raw_transaction,
                 hash,
                 protocol_version,
-                &created_unshielded_utxos_info,
-                &spent_unshielded_utxos_info,
-                network_id,
+                &created_unshielded_utxo_infos,
+                &spent_unshielded_utxo_infos,
                 online_client,
+                network_id,
             )
             .await?;
 
-            if let Some(tx) = tx {
-                transactions.push(tx);
-            }
+            transactions.push(transaction);
         }
 
         let block = Block {
@@ -325,11 +303,11 @@ impl Node for SubxtNode {
         Ok(highest_blocks)
     }
 
-    fn finalized_blocks(
-        &mut self,
+    fn finalized_blocks<'a>(
+        &'a mut self,
         after: Option<BlockInfo>,
         network_id: NetworkId,
-    ) -> impl Stream<Item = Result<Block, Self::Error>> {
+    ) -> impl Stream<Item = Result<Block, Self::Error>> + use<'a> {
         let (after_hash, after_height) = after
             .map(|BlockInfo { hash, height }| (hash, height))
             .unzip();
@@ -475,8 +453,8 @@ pub enum SubxtNodeError {
     #[error(transparent)]
     DecodeProtocolVersion(#[from] ScaleDecodeProtocolVersionError),
 
-    #[error("{0}")]
-    Io(&'static str, #[source] io::Error),
+    #[error(transparent)]
+    Ledger(#[from] ledger::Error),
 
     #[error("cannot get contract state: {0}")]
     GetContractState(String),
@@ -485,13 +463,16 @@ pub enum SubxtNodeError {
     GetZswapStateRoot(String),
 
     #[error("cannot get transaction cost: {0}")]
-    GetTransactionCost(#[source] Box<subxt::Error>),
+    GetTransactionCost(String),
 
     #[error("block with hash {0} not found")]
     BlockNotFound(BlockHash),
 
     #[error("invalid protocol version {0}")]
     InvalidProtocolVersion(ProtocolVersion),
+
+    #[error("cannot hex-decode transaction")]
+    HexDecodeTransaction(#[source] const_hex::FromHexError),
 }
 
 #[trace]
@@ -533,104 +514,49 @@ where
     Ok(block_author)
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn make_transaction(
-    transaction_idx: usize,
     raw_transaction: Vec<u8>,
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
-    created_info_map: &HashMap<TransactionHash, Vec<UtxoInfo>>,
-    spent_info_map: &HashMap<TransactionHash, Vec<UtxoInfo>>,
-    network_id: NetworkId,
+    created_unshielded_utxo_infos: &HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
+    spent_unshielded_utxo_infos: &HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
     online_client: &OnlineClient<SubstrateConfig>,
-) -> Result<Option<Transaction>, SubxtNodeError> {
-    let raw_transaction = match const_hex::decode(raw_transaction) {
-        Ok(hex_decoded_transaction) => hex_decoded_transaction,
-
-        Err(error) => {
-            warn!(
-                error = error.as_chain(),
-                block_hash:%,
-                transaction_idx;
-                "skipping midnight transaction that cannot be hex-decoded"
-            );
-
-            return Ok(None);
-        }
-    };
-
-    let raw = RawTransaction::from(raw_transaction);
+    network_id: NetworkId,
+) -> Result<Transaction, SubxtNodeError> {
+    let raw_transaction =
+        const_hex::decode(raw_transaction).map_err(SubxtNodeError::HexDecodeTransaction)?;
     let ledger_transaction =
-        deserialize::<LedgerTransaction, _>(&mut raw.as_ref(), network_id.into())
-            .map_err(|error| SubxtNodeError::Io("cannot deserialize ledger transaction", error))?;
+        ledger::Transaction::deserialize(&raw_transaction, network_id, protocol_version)?;
 
-    let hash: TransactionHash = ledger_transaction.transaction_hash().0.0.into();
+    let hash = ledger_transaction.hash();
 
-    let identifiers = ledger_transaction
-        .identifiers()
-        .map(|identifier| {
-            Ok::<_, SubxtNodeError>(
-                identifier
-                    .serialize(network_id)
-                    .map_err(|error| SubxtNodeError::Io("cannot serialize identifier", error))?
-                    .into(),
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let identifiers = ledger_transaction.identifiers(network_id)?;
 
-    let contract_actions = match &ledger_transaction {
-        LedgerTransaction::Standard(standard_transaction) => {
-            let contract_actions = standard_transaction.actions().map(|(_, action)| action);
-
-            futures::stream::iter(contract_actions)
-                .then(|contract_action| async {
-                    ledger_contract_action_into_domain(
-                        contract_action,
-                        block_hash,
-                        network_id,
-                        online_client,
-                        protocol_version,
-                    )
+    let contract_actions = ledger_transaction
+        .contract_actions(
+            |address| async {
+                runtimes::get_contract_state(online_client, address, block_hash, protocol_version)
                     .await
-                })
-                .try_collect::<Vec<_>>()
-                .await?
-        }
-
-        LedgerTransaction::ClaimMint(_) => vec![],
-    };
-
-    let created_unshielded_utxos = created_info_map
-        .get(&hash)
-        .map_or(&[] as &[_], |v| v.as_slice())
-        .iter()
-        .map(|info| crate::domain::UnshieldedUtxo {
-            creating_transaction_id: 0,
-            output_index: info.output_no,
-            owner_address: UnshieldedAddress::from(info.address.as_ref()),
-            token_type: info.token_type,
-            intent_hash: info.intent_hash,
-            value: info.value,
-        })
+            },
+            network_id,
+        )
+        .await?
+        .into_iter()
+        .map(Into::into)
         .collect();
 
-    let spent_unshielded_utxos = spent_info_map
+    let created_unshielded_utxos = created_unshielded_utxo_infos
         .get(&hash)
-        .map_or(&[] as &[_], |v| v.as_slice())
-        .iter()
-        .map(|info| crate::domain::UnshieldedUtxo {
-            creating_transaction_id: 0,
-            output_index: info.output_no,
-            owner_address: UnshieldedAddress::from(info.address.as_ref()),
-            token_type: info.token_type,
-            intent_hash: info.intent_hash,
-            value: info.value,
-        })
-        .collect();
+        .cloned()
+        .unwrap_or_default();
+    let spent_unshielded_utxos = spent_unshielded_utxo_infos
+        .get(&hash)
+        .cloned()
+        .unwrap_or_default();
 
     let fees = match runtimes::get_transaction_cost(
         online_client,
-        raw.as_ref(),
+        raw_transaction.as_ref(),
         block_hash,
         protocol_version,
     )
@@ -643,15 +569,10 @@ async fn make_transaction(
 
         Err(error) => {
             warn!(
-                "runtime API fees calculation failed, using fallback: {}, block_hash = {}, transaction_size = {}",
-                error,
-                block_hash,
-                raw.as_ref().len()
+                error:%, block_hash:%, transaction_size = raw_transaction.len();
+                "cannot get runtime API fees, using fallback"
             );
-            TransactionFees::extract_from_ledger_transaction(
-                &ledger_transaction,
-                raw.as_ref().len(),
-            )
+            TransactionFees::from_ledger_transaction(&ledger_transaction, raw_transaction.len())
         }
     };
 
@@ -662,7 +583,7 @@ async fn make_transaction(
         protocol_version,
         identifiers,
         contract_actions,
-        raw,
+        raw: raw_transaction.into(),
         merkle_tree_root: Default::default(),
         start_index: Default::default(),
         end_index: Default::default(),
@@ -672,89 +593,22 @@ async fn make_transaction(
         estimated_fees: fees.estimated_fees,
     };
 
-    Ok(Some(transaction))
-}
-
-async fn ledger_contract_action_into_domain(
-    contract_action: LedgerContractAction<ProofMarker, DefaultDB>,
-    block_hash: BlockHash,
-    network_id: NetworkId,
-    online_client: &OnlineClient<SubstrateConfig>,
-    protocol_version: ProtocolVersion,
-) -> Result<ContractAction, SubxtNodeError> {
-    match contract_action {
-        LedgerContractAction::Call(call) => {
-            let address = serialize_address(call.address, network_id)?;
-            let state =
-                runtimes::get_contract_state(online_client, &address, block_hash, protocol_version)
-                    .await?;
-            let entry_point = call.entry_point.as_ref().into();
-
-            Ok(ContractAction {
-                address,
-                state,
-                attributes: ContractAttributes::Call { entry_point },
-                zswap_state: Default::default(),
-                extracted_balances: Default::default(),
-            })
-        }
-
-        LedgerContractAction::Deploy(deploy) => {
-            let address = serialize_address(deploy.address(), network_id)?;
-            let state =
-                runtimes::get_contract_state(online_client, &address, block_hash, protocol_version)
-                    .await?;
-
-            Ok(ContractAction {
-                address,
-                state,
-                attributes: ContractAttributes::Deploy,
-                zswap_state: Default::default(),
-                extracted_balances: Default::default(),
-            })
-        }
-
-        LedgerContractAction::Maintain(update) => {
-            let address = serialize_address(update.address, network_id)?;
-            let state =
-                runtimes::get_contract_state(online_client, &address, block_hash, protocol_version)
-                    .await?;
-
-            Ok(ContractAction {
-                address,
-                state,
-                attributes: ContractAttributes::Update,
-                zswap_state: Default::default(),
-                extracted_balances: Default::default(),
-            })
-        }
-    }
-}
-
-fn serialize_address(
-    address: ContractAddress,
-    network_id: NetworkId,
-) -> Result<ByteVec, SubxtNodeError> {
-    let address = address
-        .serialize(network_id)
-        .map_err(|error| SubxtNodeError::Io("cannot serialize address", error))?;
-    Ok(address.into())
+    Ok(transaction)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
         domain::{BlockInfo, Node, Transaction},
-        infra::node::{Config, LedgerTransaction, SubxtNode},
+        infra::subxt_node::{Config, SubxtNode},
     };
     use assert_matches::assert_matches;
     use fs_extra::dir::{CopyOptions, copy};
     use futures::{StreamExt, TryStreamExt};
     use indexer_common::{
-        domain::{NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion},
+        domain::{NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion, ledger},
         error::BoxError,
     };
-    use midnight_serialize::deserialize;
     use std::{env, path::Path, pin::pin, time::Duration};
     use testcontainers::{
         GenericImage, ImageExt,
@@ -891,9 +745,10 @@ mod tests {
                 contract_actions_2.len() == 1 &&
                 contract_actions_3.len() == 1
         );
-        let ledger_transaction = deserialize::<LedgerTransaction, _>(
-            &mut transactions[0].raw.as_ref(),
-            NetworkId::Undeployed.into(),
+        let ledger_transaction = ledger::Transaction::deserialize(
+            transactions[0].raw.clone(),
+            NetworkId::Undeployed,
+            PROTOCOL_VERSION_000_013_000,
         );
         assert!(ledger_transaction.is_ok());
 

@@ -14,31 +14,22 @@
 #[subxt::subxt(runtime_metadata_path = "../.node/0.13.0-alpha.3/metadata.scale")]
 mod runtime_0_13 {}
 
-use crate::infra::node::SubxtNodeError;
+use crate::infra::subxt_node::SubxtNodeError;
 use indexer_common::domain::{
-    BlockHash, ByteArray, ContractAddress, ContractState, IntentHash, PROTOCOL_VERSION_000_013_000,
-    ProtocolVersion, RawTokenType, TransactionHash,
+    BlockHash, PROTOCOL_VERSION_000_013_000, ProtocolVersion, RawContractAddress, RawContractState,
+    TransactionHash, UnshieldedUtxo,
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
 use std::collections::HashMap;
 use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, utils::H256};
 
-/// Abstracted UTXO info that is runtime-agnostic.
-pub struct UtxoInfo {
-    pub output_no: u32,
-    pub address: ByteArray<32>,
-    pub token_type: RawTokenType,
-    pub intent_hash: IntentHash,
-    pub value: u128,
-}
-
 /// Runtime specific block details.
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
     pub raw_transactions: Vec<Vec<u8>>,
-    pub created_unshielded_utxos_info: HashMap<TransactionHash, Vec<UtxoInfo>>,
-    pub spent_unshielded_utxos_info: HashMap<TransactionHash, Vec<UtxoInfo>>,
+    pub created_unshielded_utxo_infos: HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
+    pub spent_unshielded_utxo_infos: HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
 }
 
 /// Make block details depending on the given protocol version.
@@ -79,10 +70,10 @@ pub fn decode_slot(slot: &[u8], protocol_version: ProtocolVersion) -> Result<u64
 /// Get contract state depending on the given protocol version.
 pub async fn get_contract_state(
     online_client: &OnlineClient<SubstrateConfig>,
-    address: &ContractAddress,
+    address: RawContractAddress,
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
-) -> Result<ContractState, SubxtNodeError> {
+) -> Result<RawContractState, SubxtNodeError> {
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
         get_contract_state_runtime_0_13(online_client, address, block_hash).await
     } else {
@@ -148,14 +139,15 @@ macro_rules! make_block_details {
                     .into_iter()
                     .filter_map(|call| match call {
                         Call::Midnight(midnight::Call::send_mn_transaction { midnight_tx }) => {
-                            Some(midnight_tx)
+                            Some(midnight_tx.into())
                         }
+
                         _ => None,
                     })
                     .collect();
 
-                let mut created_unshielded_utxos_info = HashMap::new();
-                let mut spent_unshielded_utxos_info = HashMap::new();
+                let mut created_unshielded_utxo_infos = HashMap::new();
+                let mut spent_unshielded_utxo_infos = HashMap::new();
 
                 let mut tx_hash = None;
 
@@ -183,16 +175,16 @@ macro_rules! make_block_details {
                                 if !event_data.created.is_empty() {
                                     let created = event_data.created
                                         .into_iter()
-                                        .map(|utxo| UtxoInfo {
-                                            output_no: utxo.output_no,
-                                            address: utxo.address.into(),
+                                        .map(|utxo| UnshieldedUtxo {
+                                            value: utxo.value,
+                                            owner_address: utxo.address.into(),
                                             token_type: utxo.token_type.into(),
                                             intent_hash: utxo.intent_hash.into(),
-                                            value: utxo.value,
+                                            output_index: utxo.output_no,
                                         })
                                         .collect();
 
-                                    created_unshielded_utxos_info.insert(
+                                    created_unshielded_utxo_infos.insert(
                                         transaction_hash,
                                         created
                                     );
@@ -201,16 +193,16 @@ macro_rules! make_block_details {
                                 if !event_data.spent.is_empty() {
                                     let spent = event_data.spent
                                         .into_iter()
-                                        .map(|utxo| UtxoInfo {
-                                            output_no: utxo.output_no,
-                                            address: utxo.address.into(),
+                                        .map(|utxo| UnshieldedUtxo {
+                                            value: utxo.value,
+                                            owner_address: utxo.address.into(),
                                             token_type: utxo.token_type.into(),
                                             intent_hash: utxo.intent_hash.into(),
-                                            value: utxo.value,
+                                            output_index: utxo.output_no,
                                         })
                                         .collect();
 
-                                    spent_unshielded_utxos_info.insert(transaction_hash, spent);
+                                    spent_unshielded_utxo_infos.insert(transaction_hash, spent);
                                 }
 
                                 // Reset to prevent stale hash in subsequent events.
@@ -225,8 +217,8 @@ macro_rules! make_block_details {
                 Ok(BlockDetails {
                     timestamp,
                     raw_transactions,
-                    created_unshielded_utxos_info,
-                    spent_unshielded_utxos_info,
+                    created_unshielded_utxo_infos,
+                    spent_unshielded_utxo_infos,
                 })
             }
         }
@@ -244,9 +236,11 @@ macro_rules! fetch_authorities {
                 let authorities = online_client
                     .storage()
                     .at_latest()
-                    .await.map_err(Box::new)?
+                    .await
+                    .map_err(Box::new)?
                     .fetch(&$module::storage().aura().authorities())
-                    .await.map_err(Box::new)?
+                    .await
+                    .map_err(Box::new)?
                     .map(|authorities| authorities.0.into_iter().map(|public| public.0).collect());
 
                 Ok(authorities)
@@ -276,18 +270,19 @@ macro_rules! get_contract_state {
         paste::paste! {
             async fn [<get_contract_state_ $module>](
                 online_client: &OnlineClient<SubstrateConfig>,
-                address: &ContractAddress,
+                address: RawContractAddress,
                 block_hash: BlockHash,
-            ) -> Result<ContractState, SubxtNodeError> {
+            ) -> Result<RawContractState, SubxtNodeError> {
                 let get_state = $module::apis()
                     .midnight_runtime_api()
-                    .get_contract_state(address.as_ref().to_owned());
+                    .get_contract_state(address.into());
 
                 let state = online_client
                     .runtime_api()
                     .at(H256(block_hash.0))
                     .call(get_state)
-                    .await.map_err(Box::new)?
+                    .await
+                    .map_err(Box::new)?
                     .map_err(|error| SubxtNodeError::GetContractState(format!("{error:?}")))?
                     .into();
 
@@ -314,7 +309,8 @@ macro_rules! get_zswap_state_root {
                     .runtime_api()
                     .at(H256(block_hash.0))
                     .call(get_zswap_state_root)
-                    .await.map_err(Box::new)?
+                    .await
+                    .map_err(Box::new)?
                     .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}")))?;
 
                 Ok(root)
@@ -342,9 +338,9 @@ macro_rules! get_transaction_cost {
                     .runtime_api()
                     .at(H256(block_hash.0))
                     .call(get_transaction_cost)
-                    .await.map_err(Box::new)
-                    .map_err(SubxtNodeError::GetTransactionCost)?
-                    .map_err(|_| SubxtNodeError::GetContractState("transaction cost calculation failed".to_string()))?;
+                    .await
+                    .map_err(Box::new)?
+                    .map_err(|error| SubxtNodeError::GetTransactionCost(format!("{error:?}")))?;
 
                 // Combine storage cost and gas cost for total fee
                 // StorageCost = u128, GasCost = u64
@@ -359,10 +355,10 @@ get_transaction_cost!(runtime_0_13);
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::node::runtimes::get_contract_state;
+    use crate::infra::subxt_node::runtimes::get_contract_state;
     use anyhow::Context;
     use indexer_common::{
-        domain::{BlockHash, ContractAddress, ProtocolVersion},
+        domain::{BlockHash, ProtocolVersion, RawContractAddress},
         error::BoxError,
     };
     use subxt::{
@@ -410,9 +406,9 @@ mod tests {
         )?;
 
         let address = "0102006e23ed3a34a8cf08ae9641aa12f86ff65c13e01c39e3057cff28723e9c86bba9";
-        let address = ContractAddress::from(const_hex::decode(address).unwrap());
+        let address = RawContractAddress::from(const_hex::decode(address).unwrap());
 
-        let state = get_contract_state(&client, &address, hash, ProtocolVersion(8000)).await;
+        let state = get_contract_state(&client, address, hash, ProtocolVersion(8000)).await;
         assert!(state.is_ok());
 
         Ok(())

@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, ContractAction, ContractAttributes};
-use indexer_common::domain::RawLedgerState;
+use crate::domain::{Block, ContractAction};
+use indexer_common::domain::{ContractAttributes, RawLedgerState};
 use metrics::{Counter, Gauge, counter, gauge};
 
 pub struct Metrics {
@@ -23,7 +23,7 @@ pub struct Metrics {
     contract_deploy_count: Counter,
     contract_call_count: Counter,
     contract_update_count: Counter,
-    zswap_state_size: Gauge,
+    ledger_state_size: Gauge,
 }
 
 impl Metrics {
@@ -40,7 +40,7 @@ impl Metrics {
             contract_deploy_count: counter!("indexer_contract_deploy_count"),
             contract_call_count: counter!("indexer_contract_call_count"),
             contract_update_count: counter!("indexer_contract_update_count"),
-            zswap_state_size: gauge!("indexer_zswap_state_size"),
+            ledger_state_size: gauge!("indexer_ledger_state_size"),
         };
 
         if let Some(block_height) = block_height {
@@ -61,7 +61,7 @@ impl Metrics {
     pub fn update(
         &self,
         block: &Block,
-        zswap_state: &RawLedgerState,
+        ledger_state: &RawLedgerState,
         node_block_height: u32,
         caught_up: bool,
     ) {
@@ -128,6 +128,7 @@ impl Metrics {
                 .count() as u64,
         );
 
-        self.zswap_state_size.set(zswap_state.as_ref().len() as f64);
+        self.ledger_state_size
+            .set(ledger_state.as_ref().len() as f64);
     }
 }

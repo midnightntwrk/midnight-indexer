@@ -19,7 +19,7 @@ mod subscription;
 use self::contract_balance::ContractBalance;
 use crate::{
     domain::{
-        self, AsBytesExt, HexEncoded, ZswapStateCache,
+        self, AsBytesExt, HexEncoded, LedgerStateCache,
         storage::{NoopStorage, Storage},
     },
     infra::api::{
@@ -38,9 +38,9 @@ use bech32::{Bech32m, Hrp};
 use derive_more::Debug;
 use indexer_common::{
     domain::{
-        BlockHash, ByteVec, LedgerStateStorage, NetworkId, NoopLedgerStateStorage, NoopSubscriber,
-        ProtocolVersion, SessionId, Subscriber, UnknownNetworkIdError,
-        UnshieldedAddress as CommonUnshieldedAddress,
+        BlockHash, ByteArrayLenError, ByteVec, LedgerStateStorage, NetworkId,
+        NoopLedgerStateStorage, NoopSubscriber, ProtocolVersion, RawUnshieldedAddress, SessionId,
+        Subscriber, UnknownNetworkIdError,
     },
     error::NotFoundError,
 };
@@ -756,7 +756,7 @@ impl UnshieldedAddress {
     pub fn try_into_domain(
         &self,
         network_id: NetworkId,
-    ) -> Result<CommonUnshieldedAddress, UnshieldedAddressFormatError> {
+    ) -> Result<RawUnshieldedAddress, UnshieldedAddressFormatError> {
         let (hrp, bytes) = bech32::decode(&self.0).map_err(UnshieldedAddressFormatError::Decode)?;
         let hrp = hrp.to_lowercase();
 
@@ -770,7 +770,8 @@ impl UnshieldedAddress {
             ));
         }
 
-        Ok(CommonUnshieldedAddress::from(bytes))
+        let address = bytes.try_into()?;
+        Ok(address)
     }
 
     /// Encode raw bytes into a Bech32m-encoded address.
@@ -798,10 +799,13 @@ pub enum UnshieldedAddressFormatError {
     InvalidHrp(String),
 
     #[error(transparent)]
-    TryFromStrForNetworkIdError(#[from] UnknownNetworkIdError),
+    UnknownNetworkId(#[from] UnknownNetworkIdError),
 
     #[error("network ID mismatch: got {0}, expected {1}")]
     UnexpectedNetworkId(NetworkId, NetworkId),
+
+    #[error(transparent)]
+    ByteArrayLen(#[from] ByteArrayLenError),
 }
 
 /// Progress tracking information for unshielded token synchronization.
@@ -880,9 +884,6 @@ enum ZswapChainStateUpdate<S: Storage> {
 
 #[derive(Debug, SimpleObject)]
 struct MerkleTreeCollapsedUpdate {
-    /// The protocol version.
-    protocol_version: u32,
-
     /// The start index into the zswap state.
     start: u64,
 
@@ -892,22 +893,25 @@ struct MerkleTreeCollapsedUpdate {
     /// The hex-encoded merkle-tree collapsed update.
     #[debug(skip)]
     update: HexEncoded,
+
+    /// The protocol version.
+    protocol_version: u32,
 }
 
 impl From<domain::MerkleTreeCollapsedUpdate> for MerkleTreeCollapsedUpdate {
     fn from(value: domain::MerkleTreeCollapsedUpdate) -> Self {
         let domain::MerkleTreeCollapsedUpdate {
-            protocol_version,
             start_index,
             end_index,
             update,
+            protocol_version,
         } = value;
 
         Self {
-            protocol_version: protocol_version.0,
             start: start_index,
             end: end_index,
             update: update.hex_encode(),
+            protocol_version: protocol_version.0,
         }
     }
 }
@@ -953,7 +957,7 @@ pub fn export_schema() -> String {
 
 pub fn make_app<S, B, Z>(
     network_id: NetworkId,
-    zswap_state_cache: ZswapStateCache,
+    zswap_state_cache: LedgerStateCache,
     storage: S,
     ledger_state_storage: Z,
     subscriber: B,

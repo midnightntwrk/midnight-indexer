@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{SessionId, UnshieldedAddress};
+use crate::domain::{RawUnshieldedAddress, SessionId};
 use derive_more::derive::From;
 use futures::{Stream, stream};
 use serde::{Deserialize, Serialize};
@@ -58,7 +58,7 @@ message!(WalletIndexed);
 /// has been stored in the DB.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnshieldedUtxoIndexed {
-    pub address: UnshieldedAddress,
+    pub address: RawUnshieldedAddress,
     pub transaction_id: u64,
 }
 message!(UnshieldedUtxoIndexed);

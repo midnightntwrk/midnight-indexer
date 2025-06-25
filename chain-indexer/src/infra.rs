@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod node;
 pub mod storage;
+pub mod subxt_node;
 
 #[cfg(feature = "cloud")]
 use indexer_common::infra::{ledger_state_storage, pool, pub_sub};
@@ -30,5 +30,5 @@ pub struct Config {
     pub ledger_state_storage_config: ledger_state_storage::nats::Config,
 
     #[serde(rename = "node")]
-    pub node_config: node::Config,
+    pub node_config: subxt_node::Config,
 }

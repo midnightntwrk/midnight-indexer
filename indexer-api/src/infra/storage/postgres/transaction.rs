@@ -14,7 +14,7 @@
 use crate::domain::Transaction;
 use fastrace::trace;
 use indexer_common::{
-    domain::{Identifier, SessionId, TransactionHash, UnshieldedAddress},
+    domain::{RawTransactionIdentifier, RawUnshieldedAddress, SessionId, TransactionHash},
     stream::flatten_chunks,
 };
 use indoc::indoc;
@@ -123,7 +123,7 @@ impl TransactionStorage for PostgresStorage {
     #[trace(properties = { "identifier": "{identifier:?}" })]
     async fn get_transactions_by_identifier(
         &self,
-        identifier: &Identifier,
+        identifier: &RawTransactionIdentifier,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -173,7 +173,9 @@ impl TransactionStorage for PostgresStorage {
                         transactions.raw,
                         transactions.merkle_tree_root,
                         transactions.start_index,
-                        transactions.end_index
+                        transactions.end_index,
+                        transactions.paid_fees,
+                        transactions.estimated_fees
                     FROM transactions
                     INNER JOIN blocks ON blocks.id = transactions.block_id
                     INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
@@ -207,7 +209,7 @@ impl TransactionStorage for PostgresStorage {
 
     async fn get_transactions_involving_unshielded(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         from_transaction_id: u64,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
         let sql = indoc! {"

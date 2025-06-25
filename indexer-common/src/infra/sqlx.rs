@@ -18,7 +18,7 @@ pub mod postgres;
 #[cfg(feature = "standalone")]
 mod sqlite;
 
-use crate::domain::{ByteArray, TryFromForByteArrayError};
+use crate::domain::{ByteArray, ByteArrayLenError};
 use serde::{Deserialize, Serialize};
 use sqlx::{Database, Decode, Type, error::BoxDynError};
 
@@ -99,7 +99,7 @@ impl TryFrom<SqlxOption<U128BeBytes>> for Option<u128> {
 }
 
 impl<const N: usize> TryFrom<SqlxOption<&[u8]>> for Option<ByteArray<N>> {
-    type Error = TryFromForByteArrayError;
+    type Error = ByteArrayLenError;
 
     fn try_from(value: SqlxOption<&[u8]>) -> Result<Self, Self::Error> {
         let value = value.0.map(TryInto::try_into).transpose()?;

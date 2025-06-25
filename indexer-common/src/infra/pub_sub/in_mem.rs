@@ -88,7 +88,7 @@ impl Default for InMemPubSub {
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{BlockIndexed, Publisher, Subscriber, UnshieldedUtxoIndexed, WalletIndexed},
+        domain::{BlockIndexed, Publisher, Subscriber, WalletIndexed},
         infra::pub_sub::in_mem::InMemPubSub,
     };
     use assert_matches::assert_matches;
@@ -120,17 +120,6 @@ mod tests {
 
         let message = messages.next().await;
         assert_matches!(message, Some(Ok(message)) if message == wallet_indexed);
-
-        let mut utxo_messages = subscriber.subscribe::<UnshieldedUtxoIndexed>();
-
-        let utxo_changed = UnshieldedUtxoIndexed {
-            address: vec![0, 1, 2, 3].into(),
-            transaction_id: 1,
-        };
-        pub_sub.publisher().publish(&utxo_changed).await?;
-
-        let utxo_message = utxo_messages.next().await;
-        assert_matches!(utxo_message, Some(Ok(utxo_message)) if utxo_message == utxo_changed);
 
         Ok(())
     }

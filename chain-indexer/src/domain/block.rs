@@ -12,8 +12,7 @@
 // limitations under the License.
 
 use crate::domain::Transaction;
-use indexer_common::domain::{BlockAuthor, BlockHash, ProtocolVersion};
-use midnight_transient_crypto::merkle_tree::MerkleTreeDigest;
+use indexer_common::domain::{BlockAuthor, BlockHash, ProtocolVersion, ledger::ZswapStateRoot};
 use std::fmt::Debug;
 
 /// Relevant block data from the perspective of the Chain Indexer.
@@ -25,7 +24,7 @@ pub struct Block {
     pub parent_hash: BlockHash,
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
-    pub zswap_state_root: MerkleTreeDigest,
+    pub zswap_state_root: ZswapStateRoot,
     pub transactions: Vec<Transaction>,
 }
 

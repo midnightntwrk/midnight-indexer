@@ -13,7 +13,9 @@
 
 use crate::domain::{Transaction, storage::NoopStorage};
 use futures::{Stream, stream};
-use indexer_common::domain::{Identifier, SessionId, TransactionHash, UnshieldedAddress};
+use indexer_common::domain::{
+    RawTransactionIdentifier, RawUnshieldedAddress, SessionId, TransactionHash,
+};
 use std::{fmt::Debug, num::NonZeroU32};
 
 /// Storage abstraction.
@@ -39,7 +41,7 @@ where
     /// than one, because identifiers are not unique.
     async fn get_transactions_by_identifier(
         &self,
-        identifier: &Identifier,
+        identifier: &RawTransactionIdentifier,
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
     /// Get a stream of all transactions relevant for a wallet with the given session ID, starting
@@ -55,7 +57,7 @@ where
     /// transaction ID.
     async fn get_transactions_involving_unshielded(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         from_transaction_id: u64,
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
@@ -94,7 +96,7 @@ impl TransactionStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_transactions_by_identifier(
         &self,
-        identifier: &Identifier,
+        identifier: &RawTransactionIdentifier,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
         unimplemented!()
     }
@@ -112,7 +114,7 @@ impl TransactionStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_transactions_involving_unshielded(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         from_transaction_id: u64,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
         unimplemented!()

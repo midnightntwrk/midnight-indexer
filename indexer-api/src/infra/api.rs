@@ -13,7 +13,7 @@
 
 pub mod v1;
 
-use crate::domain::{Api, ZswapStateCache, storage::Storage};
+use crate::domain::{Api, LedgerStateCache, storage::Storage};
 use anyhow::Context as _;
 use async_graphql::Context;
 use axum::{
@@ -150,7 +150,7 @@ where
     B: Subscriber,
     Z: LedgerStateStorage,
 {
-    let zswap_state_cache = ZswapStateCache::default();
+    let zswap_state_cache = LedgerStateCache::default();
 
     let v1_app = v1::make_app(
         network_id,
@@ -237,7 +237,7 @@ trait ContextExt {
     where
         Z: LedgerStateStorage;
 
-    fn get_zswap_state_cache(&self) -> &ZswapStateCache;
+    fn get_zswap_state_cache(&self) -> &LedgerStateCache;
 }
 
 impl ContextExt for Context<'_> {
@@ -269,8 +269,8 @@ impl ContextExt for Context<'_> {
             .expect("ZswapStateStorage is stored in Context")
     }
 
-    fn get_zswap_state_cache(&self) -> &ZswapStateCache {
-        self.data::<ZswapStateCache>()
+    fn get_zswap_state_cache(&self) -> &LedgerStateCache {
+        self.data::<LedgerStateCache>()
             .expect("ZswapStateCache is stored in Context")
     }
 }

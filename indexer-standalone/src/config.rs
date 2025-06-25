@@ -101,7 +101,7 @@ pub struct InfraConfig {
     pub storage_config: pool::sqlite::Config,
 
     #[serde(rename = "node")]
-    pub node_config: chain_indexer::infra::node::Config,
+    pub node_config: chain_indexer::infra::subxt_node::Config,
 
     #[serde(rename = "api")]
     pub api_config: indexer_api::infra::api::Config,

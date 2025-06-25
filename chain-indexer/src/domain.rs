@@ -15,18 +15,14 @@ pub mod storage;
 
 mod block;
 mod contract_action;
-mod contract_balance;
-mod fee;
 mod ledger_state;
 mod node;
 mod transaction;
-mod unshielded;
+mod transaction_fees;
 
 pub use block::*;
 pub use contract_action::*;
-pub use contract_balance::*;
-pub use fee::*;
 pub use ledger_state::*;
 pub use node::*;
 pub use transaction::*;
-pub use unshielded::*;
+pub use transaction_fees::*;

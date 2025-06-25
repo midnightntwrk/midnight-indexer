@@ -56,7 +56,7 @@ impl Storage for SqliteStorage {
         tx: &mut Tx,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
         let query = indoc! {"
-            SELECT id, raw
+            SELECT id, protocol_version, raw
             FROM transactions
             WHERE id >= $1
             ORDER BY id ASC
@@ -275,8 +275,8 @@ mod tests {
         let cipher =
             ChaCha20Poly1305::new(&Key::clone_from_slice(b"01234567890123456789012345678901"));
 
-        let viewing_key_a = ViewingKey::make_for_testing_yes_i_know_what_i_am_doing();
-        let viewing_key_b = ViewingKey::make_for_testing_yes_i_know_what_i_am_doing();
+        let viewing_key_a = ViewingKey::from([0; 32]);
+        let viewing_key_b = ViewingKey::from([1; 32]);
         let session_id_a = viewing_key_a.to_session_id();
         let session_id_b = viewing_key_b.to_session_id();
 

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{HexEncoded, Transaction, ZswapStateCache, storage::Storage},
+    domain::{HexEncoded, LedgerStateCache, Transaction, storage::Storage},
     infra::api::{
         ContextExt, ResultExt,
         v1::{
@@ -226,7 +226,7 @@ async fn viewing_update<S, Z>(
     transaction: Transaction,
     network_id: NetworkId,
     ledger_state_storage: &Z,
-    zswap_state_cache: &ZswapStateCache,
+    zswap_state_cache: &LedgerStateCache,
 ) -> async_graphql::Result<ViewingUpdate<S>>
 where
     S: Storage,
@@ -250,9 +250,9 @@ where
             .collapsed_update(
                 from,
                 transaction.start_index - 1,
+                ledger_state_storage,
                 network_id,
                 transaction.protocol_version,
-                ledger_state_storage,
             )
             .await
             .internal("create collapsed update")?;

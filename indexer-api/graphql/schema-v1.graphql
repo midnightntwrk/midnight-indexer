@@ -123,10 +123,6 @@ scalar HexEncoded
 
 type MerkleTreeCollapsedUpdate {
 	"""
-	The protocol version.
-	"""
-	protocolVersion: Int!
-	"""
 	The start index into the zswap state.
 	"""
 	start: Int!
@@ -138,6 +134,10 @@ type MerkleTreeCollapsedUpdate {
 	The hex-encoded merkle-tree collapsed update.
 	"""
 	update: HexEncoded!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
 }
 
 type Mutation {

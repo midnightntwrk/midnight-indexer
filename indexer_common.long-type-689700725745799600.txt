@@ -1,0 +1,1 @@
+parking_lot::lock_api::RwLockReadGuard<'_, parking_lot::RawRwLock, infra::ledger_state_storage::in_mem::Data>

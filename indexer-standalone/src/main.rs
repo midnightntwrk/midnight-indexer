@@ -39,7 +39,7 @@ async fn main() {
 async fn run() -> anyhow::Result<()> {
     use crate::config::{Config, InfraConfig};
     use anyhow::Context;
-    use chain_indexer::infra::node::SubxtNode;
+    use chain_indexer::infra::subxt_node::SubxtNode;
     use indexer_api::infra::api::AxumApi;
     use indexer_common::{
         cipher::make_cipher,

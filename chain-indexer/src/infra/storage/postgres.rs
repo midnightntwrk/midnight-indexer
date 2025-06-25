@@ -12,13 +12,12 @@
 // limitations under the License.
 
 use crate::domain::{
-    Block, BlockInfo, BlockTransactions, ContractAction, ContractBalance, Transaction,
-    UnshieldedUtxo, storage::Storage,
+    Block, BlockInfo, BlockTransactions, ContractAction, Transaction, storage::Storage,
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
 use indexer_common::{
-    domain::{ByteArray, ByteVec, ContractActionVariant},
+    domain::{ByteArray, ByteVec, ContractActionVariant, ContractBalance, UnshieldedUtxo},
     infra::{pool::postgres::PostgresPool, sqlx::U128BeBytes},
 };
 use indoc::indoc;
@@ -137,20 +136,21 @@ impl Storage for PostgresStorage {
         let sql = indoc! {"
             SELECT
                 id,
+                protocol_version,
                 parent_hash,
                 timestamp
             FROM blocks
             WHERE height = $1
         "};
 
-        let (block_id, block_parent_hash, block_timestamp) =
-            sqlx::query_as::<_, (i64, ByteArray<32>, i64)>(sql)
+        let (block_id, protocol_version, block_parent_hash, block_timestamp) =
+            sqlx::query_as::<_, (i64, i64, ByteArray<32>, i64)>(sql)
                 .bind(block_height as i64)
                 .fetch_one(&*self.pool)
                 .await?;
 
         let sql = indoc! {"
-            SELECT transactions.raw
+            SELECT raw
             FROM transactions
             WHERE block_id = $1
         "};
@@ -164,6 +164,7 @@ impl Storage for PostgresStorage {
 
         Ok(BlockTransactions {
             transactions,
+            protocol_version: (protocol_version as u32).into(),
             block_parent_hash,
             block_timestamp: block_timestamp as u64,
         })
@@ -282,7 +283,7 @@ async fn save_transactions(
                 action
                     .extracted_balances
                     .iter()
-                    .map(move |balance| (action_id, balance.clone()))
+                    .map(move |&balance| (action_id, balance))
             })
             .collect::<Vec<_>>();
         save_contract_balances(contract_balances, tx).await?;
@@ -340,7 +341,7 @@ async fn save_unshielded_utxos(
             sqlx::query(query)
                 .bind(*transaction_id)
                 .bind(utxo_info_for_spending.output_index as i32)
-                .bind(&utxo_info_for_spending.owner_address)
+                .bind(utxo_info_for_spending.owner_address)
                 .bind(utxo_info_for_spending.token_type)
                 .bind(utxo_info_for_spending.intent_hash)
                 .bind(U128BeBytes::from(utxo_info_for_spending.value))
@@ -364,7 +365,7 @@ async fn save_unshielded_utxos(
             .push_values(utxos.iter(), |mut q, utxo| {
                 q.push_bind(transaction_id)
                     .push_bind(utxo.output_index as i32)
-                    .push_bind(&utxo.owner_address)
+                    .push_bind(utxo.owner_address)
                     .push_bind(utxo.token_type)
                     .push_bind(utxo.intent_hash)
                     .push_bind(U128BeBytes::from(utxo.value));
@@ -435,7 +436,7 @@ async fn save_contract_balances(
         QueryBuilder::new(query)
             .push_values(balances.iter(), |mut q, (action_id, balance)| {
                 q.push_bind(*action_id)
-                    .push_bind(balance.token_type.0)
+                    .push_bind(balance.token_type)
                     .push_bind(U128BeBytes::from(balance.amount));
             })
             .build()

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use indexer_common::domain::{
-    ContractAddress, ContractEntryPoint, ContractState, ContractZswapState,
+    ContractEntryPoint, RawContractAddress, RawContractState, RawZswapState,
 };
 use serde::Deserialize;
 use sqlx::FromRow;
@@ -24,14 +24,14 @@ pub struct ContractAction {
     #[sqlx(try_from = "i64")]
     pub id: u64,
 
-    pub address: ContractAddress,
+    pub address: RawContractAddress,
 
-    pub state: ContractState,
+    pub state: RawContractState,
 
     #[sqlx(json)]
     pub attributes: ContractAttributes,
 
-    pub zswap_state: ContractZswapState,
+    pub zswap_state: RawZswapState,
 
     #[sqlx(try_from = "i64")]
     pub transaction_id: u64,
