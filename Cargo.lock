@@ -1007,7 +1007,7 @@ dependencies = [
  "midnight-coin-structure",
  "midnight-ledger",
  "midnight-onchain-runtime",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "midnight-storage",
  "midnight-transient-crypto",
  "midnight-zswap",
@@ -2933,7 +2933,7 @@ dependencies = [
  "indoc",
  "log",
  "metrics",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "midnight-transient-crypto",
  "midnight-zswap",
  "secrecy",
@@ -2969,7 +2969,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "midnight-base-crypto",
  "midnight-ledger",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "midnight-storage",
  "midnight-transient-crypto",
  "midnight-zswap",
@@ -3028,7 +3028,7 @@ dependencies = [
  "indexer-api",
  "indexer-common",
  "itertools 0.14.0",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "midnight-transient-crypto",
  "midnight-zswap",
  "reqwest 0.12.20",
@@ -3653,7 +3653,7 @@ dependencies = [
  "k256",
  "lazy_static",
  "midnight-base-crypto-derive",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.2",
  "paste",
  "rand 0.8.5",
  "reqwest 0.12.20",
@@ -3709,7 +3709,7 @@ dependencies = [
  "fake",
  "lazy_static",
  "midnight-base-crypto",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.2",
  "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
@@ -3731,7 +3731,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-onchain-runtime",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.2",
  "midnight-storage",
  "midnight-transient-crypto",
  "midnight-zswap",
@@ -3759,7 +3759,7 @@ dependencies = [
  "midnight-coin-structure",
  "midnight-onchain-state",
  "midnight-onchain-vm",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.2",
  "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
@@ -3778,7 +3778,7 @@ dependencies = [
  "hex",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.2",
  "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
@@ -3798,7 +3798,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-onchain-state",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.2",
  "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
@@ -3816,9 +3816,33 @@ dependencies = [
  "crypto",
  "konst",
  "lazy_static",
- "midnight-serialize-macros",
+ "midnight-serialize-macros 0.1.0 (git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2)",
  "serde",
  "serde_bytes",
+]
+
+[[package]]
+name = "midnight-serialize"
+version = "0.3.3-alpha.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
+dependencies = [
+ "borsh",
+ "crypto",
+ "konst",
+ "lazy_static",
+ "midnight-serialize-macros 0.1.0 (git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0)",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "midnight-serialize-macros"
+version = "0.1.0"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.40",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -3844,7 +3868,7 @@ dependencies = [
  "konst",
  "lru 0.14.0",
  "midnight-base-crypto",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.2",
  "midnight-storage-macros",
  "parking_lot",
  "rand 0.8.5",
@@ -3884,7 +3908,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-base-crypto-derive",
  "midnight-circuits",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.2",
  "midnight-storage",
  "pasta_curves",
  "paste",
@@ -3910,7 +3934,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-onchain-runtime",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.2",
  "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
@@ -7552,7 +7576,7 @@ dependencies = [
  "log",
  "midnight-coin-structure",
  "midnight-ledger",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "midnight-storage",
  "midnight-transient-crypto",
  "midnight-zswap",
