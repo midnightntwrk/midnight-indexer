@@ -15,7 +15,10 @@ use crate::{
     domain::storage::Storage,
     infra::api::{
         ContextExt, ResultExt,
-        v1::{UnshieldedAddress, UnshieldedProgress, UnshieldedUtxo, UnshieldedUtxoEvent},
+        v1::{
+            UnshieldedAddress, UnshieldedAddressResultExt, UnshieldedProgress, UnshieldedUtxo,
+            UnshieldedUtxoEvent,
+        },
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
@@ -81,7 +84,7 @@ where
         let network_id = cx.get_network_id();
         let address = address
             .try_into_domain(network_id)
-            .internal("convert address into domain address")?;
+            .address_validation("convert address into domain address")?;
 
         // Use 0 as default to include all transactions from genesis.
         // Since transaction IDs start from 1 (BIGSERIAL/AUTOINCREMENT), using >= 0
