@@ -501,6 +501,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "atomic-write-file"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aeb1e2c1d58618bea806ccca5bbe65dc4e868be16f69ff118a39049389687548"
+dependencies = [
+ "nix",
+ "rand 0.8.5",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1003,13 +1013,13 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "metrics",
- "midnight-base-crypto",
+ "midnight-base-crypto 0.4.4-alpha.2",
  "midnight-coin-structure",
  "midnight-ledger",
  "midnight-onchain-runtime",
- "midnight-serialize",
- "midnight-storage",
- "midnight-transient-crypto",
+ "midnight-serialize 0.3.3-alpha.2",
+ "midnight-storage 0.4.1-alpha.2",
+ "midnight-transient-crypto 0.5.1-alpha.3",
  "midnight-zswap",
  "parity-scale-codec",
  "parking_lot",
@@ -2933,8 +2943,8 @@ dependencies = [
  "indoc",
  "log",
  "metrics",
- "midnight-serialize",
- "midnight-transient-crypto",
+ "midnight-serialize 0.3.3-alpha.2",
+ "midnight-transient-crypto 0.5.1-alpha.3",
  "midnight-zswap",
  "secrecy",
  "serde",
@@ -2967,11 +2977,11 @@ dependencies = [
  "log",
  "logforth",
  "metrics-exporter-prometheus",
- "midnight-base-crypto",
+ "midnight-base-crypto 0.4.4-alpha.2",
  "midnight-ledger",
- "midnight-serialize",
- "midnight-storage",
- "midnight-transient-crypto",
+ "midnight-serialize 0.3.3-alpha.2",
+ "midnight-storage 0.4.1-alpha.2",
+ "midnight-transient-crypto 0.5.1-alpha.3",
  "midnight-zswap",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -3028,8 +3038,8 @@ dependencies = [
  "indexer-api",
  "indexer-common",
  "itertools 0.14.0",
- "midnight-serialize",
- "midnight-transient-crypto",
+ "midnight-serialize 0.3.3-alpha.2",
+ "midnight-transient-crypto 0.5.1-alpha.3",
  "midnight-zswap",
  "reqwest 0.12.20",
  "serde",
@@ -3652,8 +3662,8 @@ dependencies = [
  "group",
  "k256",
  "lazy_static",
- "midnight-base-crypto-derive",
- "midnight-serialize",
+ "midnight-base-crypto-derive 0.4.3-rc (git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2)",
+ "midnight-serialize 0.3.3-alpha.2",
  "paste",
  "rand 0.8.5",
  "reqwest 0.12.20",
@@ -3663,6 +3673,45 @@ dependencies = [
  "sha2 0.10.9",
  "signature",
  "tracing",
+]
+
+[[package]]
+name = "midnight-base-crypto"
+version = "0.4.4-alpha.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
+dependencies = [
+ "anyhow",
+ "atomic-write-file",
+ "borsh",
+ "const-hex",
+ "fake",
+ "ff",
+ "flate2",
+ "futures",
+ "group",
+ "k256",
+ "lazy_static",
+ "midnight-base-crypto-derive 0.4.3-rc (git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0)",
+ "midnight-serialize 0.3.3-alpha.3",
+ "paste",
+ "rand 0.8.5",
+ "reqwest 0.12.20",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2 0.10.9",
+ "signature",
+ "tracing",
+]
+
+[[package]]
+name = "midnight-base-crypto-derive"
+version = "0.4.3-rc"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.40",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -3708,10 +3757,10 @@ source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=led
 dependencies = [
  "fake",
  "lazy_static",
- "midnight-base-crypto",
- "midnight-serialize",
- "midnight-storage",
- "midnight-transient-crypto",
+ "midnight-base-crypto 0.4.4-alpha.2",
+ "midnight-serialize 0.3.3-alpha.2",
+ "midnight-storage 0.4.1-alpha.2",
+ "midnight-transient-crypto 0.5.1-alpha.2",
  "rand 0.8.5",
  "serde",
 ]
@@ -3728,12 +3777,12 @@ dependencies = [
  "introspection-derive",
  "is_sorted",
  "lazy_static",
- "midnight-base-crypto",
+ "midnight-base-crypto 0.4.4-alpha.2",
  "midnight-coin-structure",
  "midnight-onchain-runtime",
- "midnight-serialize",
- "midnight-storage",
- "midnight-transient-crypto",
+ "midnight-serialize 0.3.3-alpha.2",
+ "midnight-storage 0.4.1-alpha.2",
+ "midnight-transient-crypto 0.5.1-alpha.2",
  "midnight-zswap",
  "rand 0.8.5",
  "rayon",
@@ -3755,13 +3804,13 @@ dependencies = [
  "hex",
  "konst",
  "lazy_static",
- "midnight-base-crypto",
+ "midnight-base-crypto 0.4.4-alpha.2",
  "midnight-coin-structure",
  "midnight-onchain-state",
  "midnight-onchain-vm",
- "midnight-serialize",
- "midnight-storage",
- "midnight-transient-crypto",
+ "midnight-serialize 0.3.3-alpha.2",
+ "midnight-storage 0.4.1-alpha.2",
+ "midnight-transient-crypto 0.5.1-alpha.2",
  "rand 0.8.5",
  "serde",
  "serde_bytes",
@@ -3776,11 +3825,11 @@ dependencies = [
  "derive-where",
  "fake",
  "hex",
- "midnight-base-crypto",
+ "midnight-base-crypto 0.4.4-alpha.2",
  "midnight-coin-structure",
- "midnight-serialize",
- "midnight-storage",
- "midnight-transient-crypto",
+ "midnight-serialize 0.3.3-alpha.2",
+ "midnight-storage 0.4.1-alpha.2",
+ "midnight-transient-crypto 0.5.1-alpha.2",
  "rand 0.8.5",
  "serde",
  "serde_bytes",
@@ -3795,12 +3844,12 @@ dependencies = [
  "fake",
  "hex",
  "konst",
- "midnight-base-crypto",
+ "midnight-base-crypto 0.4.4-alpha.2",
  "midnight-coin-structure",
  "midnight-onchain-state",
- "midnight-serialize",
- "midnight-storage",
- "midnight-transient-crypto",
+ "midnight-serialize 0.3.3-alpha.2",
+ "midnight-storage 0.4.1-alpha.2",
+ "midnight-transient-crypto 0.5.1-alpha.2",
  "rand 0.8.5",
  "rpds",
  "serde",
@@ -3816,9 +3865,33 @@ dependencies = [
  "crypto",
  "konst",
  "lazy_static",
- "midnight-serialize-macros",
+ "midnight-serialize-macros 0.1.0 (git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2)",
  "serde",
  "serde_bytes",
+]
+
+[[package]]
+name = "midnight-serialize"
+version = "0.3.3-alpha.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
+dependencies = [
+ "borsh",
+ "crypto",
+ "konst",
+ "lazy_static",
+ "midnight-serialize-macros 0.1.0 (git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0)",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "midnight-serialize-macros"
+version = "0.1.0"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.40",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -3843,14 +3916,46 @@ dependencies = [
  "hex",
  "konst",
  "lru 0.14.0",
- "midnight-base-crypto",
- "midnight-serialize",
- "midnight-storage-macros",
+ "midnight-base-crypto 0.4.4-alpha.2",
+ "midnight-serialize 0.3.3-alpha.2",
+ "midnight-storage-macros 0.1.1 (git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2)",
  "parking_lot",
  "rand 0.8.5",
  "serde",
  "sha2 0.10.9",
  "tempfile",
+]
+
+[[package]]
+name = "midnight-storage"
+version = "0.5.0-alpha"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
+dependencies = [
+ "archery",
+ "crypto",
+ "derive-where",
+ "fake",
+ "hex",
+ "konst",
+ "lru 0.14.0",
+ "midnight-base-crypto 0.4.4-alpha.3",
+ "midnight-serialize 0.3.3-alpha.3",
+ "midnight-storage-macros 0.1.1 (git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0)",
+ "parking_lot",
+ "rand 0.8.5",
+ "serde",
+ "sha2 0.10.9",
+ "tempfile",
+]
+
+[[package]]
+name = "midnight-storage-macros"
+version = "0.1.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.40",
+ "syn 2.0.104",
 ]
 
 [[package]]
@@ -3881,11 +3986,45 @@ dependencies = [
  "k256",
  "lazy_static",
  "lru 0.14.0",
- "midnight-base-crypto",
- "midnight-base-crypto-derive",
+ "midnight-base-crypto 0.4.4-alpha.2",
+ "midnight-base-crypto-derive 0.4.3-rc (git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2)",
  "midnight-circuits",
- "midnight-serialize",
- "midnight-storage",
+ "midnight-serialize 0.3.3-alpha.2",
+ "midnight-storage 0.4.1-alpha.2",
+ "pasta_curves",
+ "paste",
+ "rand 0.8.5",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2 0.10.9",
+ "signature",
+ "tracing",
+]
+
+[[package]]
+name = "midnight-transient-crypto"
+version = "0.5.1-alpha.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
+dependencies = [
+ "anyhow",
+ "blstrs",
+ "borsh",
+ "const-hex",
+ "derive-where",
+ "fake",
+ "ff",
+ "flate2",
+ "group",
+ "halo2_proofs",
+ "k256",
+ "lazy_static",
+ "lru 0.14.0",
+ "midnight-base-crypto 0.4.4-alpha.3",
+ "midnight-base-crypto-derive 0.4.3-rc (git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0)",
+ "midnight-circuits",
+ "midnight-serialize 0.3.3-alpha.3",
+ "midnight-storage 0.5.0-alpha",
  "pasta_curves",
  "paste",
  "rand 0.8.5",
@@ -3907,12 +4046,12 @@ dependencies = [
  "futures",
  "is_sorted",
  "lazy_static",
- "midnight-base-crypto",
+ "midnight-base-crypto 0.4.4-alpha.2",
  "midnight-coin-structure",
  "midnight-onchain-runtime",
- "midnight-serialize",
- "midnight-storage",
- "midnight-transient-crypto",
+ "midnight-serialize 0.3.3-alpha.2",
+ "midnight-storage 0.4.1-alpha.2",
+ "midnight-transient-crypto 0.5.1-alpha.2",
  "rand 0.8.5",
  "serde",
  "tracing",
@@ -3966,6 +4105,18 @@ name = "multi-stash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "685a9ac4b61f4e728e1d2c6a7844609c16527aeb5e6c865915c08e619c16410f"
+
+[[package]]
+name = "nix"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.9.1",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
 
 [[package]]
 name = "nkeys"
@@ -7552,9 +7703,9 @@ dependencies = [
  "log",
  "midnight-coin-structure",
  "midnight-ledger",
- "midnight-serialize",
- "midnight-storage",
- "midnight-transient-crypto",
+ "midnight-serialize 0.3.3-alpha.2",
+ "midnight-storage 0.4.1-alpha.2",
+ "midnight-transient-crypto 0.5.1-alpha.3",
  "midnight-zswap",
  "secrecy",
  "serde",
