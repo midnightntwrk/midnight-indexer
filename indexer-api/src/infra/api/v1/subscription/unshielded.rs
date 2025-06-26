@@ -14,7 +14,7 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ContextExt, ResultExt,
+        ContextExt, ResultExt, UnshieldedAddressResultExt,
         v1::{UnshieldedAddress, UnshieldedProgress, UnshieldedUtxo, UnshieldedUtxoEvent},
     },
 };
@@ -81,7 +81,7 @@ where
         let network_id = cx.get_network_id();
         let address = address
             .try_into_domain(network_id)
-            .internal("convert address into domain address")?;
+            .address_validation("convert address into domain address")?;
 
         // Use 0 as default to include all transactions from genesis.
         // Since transaction IDs start from 1 (BIGSERIAL/AUTOINCREMENT), using >= 0

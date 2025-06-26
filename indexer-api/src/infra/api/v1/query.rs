@@ -14,7 +14,7 @@
 use crate::{
     domain::{HexEncoded, storage::Storage},
     infra::api::{
-        ContextExt, ResultExt,
+        ContextExt, ResultExt, UnshieldedAddressResultExt,
         v1::{
             self, Block, BlockOffset, ContractAction, ContractActionOffset, Transaction,
             TransactionOffset, UnshieldedAddress, UnshieldedOffset,
@@ -107,7 +107,7 @@ where
 
             let address = address
                 .try_into_domain(network_id)
-                .internal("convert address into domain address")?;
+                .address_validation("convert address into domain address")?;
             let txs = storage
                 .get_transactions_involving_unshielded(&address, 0)
                 .await
@@ -230,7 +230,7 @@ where
 
         let address = address
             .try_into_domain(network_id)
-            .internal("convert address into domain address")?;
+            .address_validation("convert address into domain address")?;
         let utxos = match offset {
             Some(UnshieldedOffset::BlockOffset(BlockOffset::Height(start))) => storage
                 .get_unshielded_utxos_by_address_from_height(&address, start)
