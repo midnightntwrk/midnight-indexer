@@ -15,7 +15,7 @@ pub mod v1;
 
 use crate::domain::{Api, ZswapStateCache, storage::Storage};
 use anyhow::Context as _;
-use async_graphql::{Context, ErrorExtensions};
+use async_graphql::Context;
 use axum::{
     Router,
     body::Body,
@@ -297,37 +297,6 @@ where
         self.context(context)
             .inspect_err(|error| error!(error = format!("{error:#}"); "API error"))
             .map_err(|_| async_graphql::Error::new("Internal Error"))
-    }
-}
-
-pub(crate) trait UnshieldedAddressResultExt<T> {
-    /// Handle UnshieldedAddressFormatError specifically for network mismatch validation.
-    /// Network mismatch errors are exposed to users, other errors become "Internal Error".
-    fn address_validation<C>(self, context: C) -> async_graphql::Result<T>
-    where
-        C: Display + Send + Sync + 'static;
-}
-
-impl<T> UnshieldedAddressResultExt<T> for Result<T, v1::UnshieldedAddressFormatError> {
-    fn address_validation<C>(self, context: C) -> async_graphql::Result<T>
-    where
-        C: Display + Send + Sync + 'static,
-    {
-        self.map_err(|e| match e {
-            v1::UnshieldedAddressFormatError::UnexpectedNetworkId(got, expected) => {
-                async_graphql::Error::new(format!(
-                    "Invalid address: address is for {} network but indexer is configured for {}",
-                    got, expected
-                ))
-                .extend_with(|_, e| e.set("code", "NETWORK_MISMATCH"))
-            }
-
-            _ => {
-                let error = anyhow::Error::new(e).context(context);
-                error!(error = format!("{error:#}"); "API error");
-                async_graphql::Error::new("Internal Error")
-            }
-        })
     }
 }
 

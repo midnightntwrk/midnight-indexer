@@ -14,10 +14,10 @@
 use crate::{
     domain::{HexEncoded, storage::Storage},
     infra::api::{
-        ContextExt, ResultExt, UnshieldedAddressResultExt,
+        ContextExt, ResultExt,
         v1::{
             self, Block, BlockOffset, ContractAction, ContractActionOffset, Transaction,
-            TransactionOffset, UnshieldedAddress, UnshieldedOffset,
+            TransactionOffset, UnshieldedAddress, UnshieldedAddressResultExt, UnshieldedOffset,
         },
     },
 };

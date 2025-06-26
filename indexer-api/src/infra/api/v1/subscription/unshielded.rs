@@ -14,8 +14,11 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ContextExt, ResultExt, UnshieldedAddressResultExt,
-        v1::{UnshieldedAddress, UnshieldedProgress, UnshieldedUtxo, UnshieldedUtxoEvent},
+        ContextExt, ResultExt,
+        v1::{
+            UnshieldedAddress, UnshieldedAddressResultExt, UnshieldedProgress, UnshieldedUtxo,
+            UnshieldedUtxoEvent,
+        },
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
