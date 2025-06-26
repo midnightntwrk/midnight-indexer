@@ -54,7 +54,7 @@ midnight-coin-structure     = { git = "https://github.com/midnightntwrk/midnight
 midnight-ledger             = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
 midnight-onchain-runtime    = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
 midnight-serialize          = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
-midnight-storage            = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
+midnight-storage            = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0" }
 midnight-transient-crypto   = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
 midnight-zswap              = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.2" }
 opentelemetry               = { version = "0.30" }
