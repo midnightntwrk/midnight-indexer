@@ -1045,8 +1045,8 @@ fn hex_decode_session_id(session_id: HexEncoded) -> async_graphql::Result<Sessio
 }
 
 pub(crate) trait UnshieldedAddressResultExt<T> {
-    /// Handle UnshieldedAddressFormatError specifically for network mismatch validation.
-    /// Network mismatch errors are exposed to users, other errors become "Internal Error".
+    /// Handle UnshieldedAddressFormatError by converting all variants to user-friendly GraphQL
+    /// errors. All address format errors are client errors and should be exposed to users.
     fn address_validation<C>(self, context: C) -> async_graphql::Result<T>
     where
         C: Display + Send + Sync + 'static;
@@ -1057,20 +1057,38 @@ impl<T> UnshieldedAddressResultExt<T> for Result<T, UnshieldedAddressFormatError
     where
         C: Display + Send + Sync + 'static,
     {
-        self.map_err(|e| match e {
-            UnshieldedAddressFormatError::UnexpectedNetworkId(got, expected) => {
-                async_graphql::Error::new(format!(
-                    "Invalid address: address is for {} network but indexer is configured for {}",
-                    got, expected
-                ))
-                .extend_with(|_, e| e.set("code", "NETWORK_MISMATCH"))
-            }
+        self.map_err(|e| {
+            let graphql_error = match &e {
+                UnshieldedAddressFormatError::UnexpectedNetworkId(got, expected) => {
+                    async_graphql::Error::new(format!(
+                        "Invalid address: address is for {} network but indexer is configured for {}",
+                        got, expected
+                    ))
+                    .extend_with(|_, e| e.set("code", "NETWORK_MISMATCH"))
+                }
 
-            _ => {
-                let error = anyhow::Error::new(e).context(context);
-                error!(error = format!("{error:#}"); "API error");
-                async_graphql::Error::new("Internal Error")
-            }
+                UnshieldedAddressFormatError::Decode(_) => {
+                    async_graphql::Error::new("Invalid address: cannot decode bech32m-encoded address")
+                        .extend_with(|_, e| e.set("code", "INVALID_ADDRESS_FORMAT"))
+                }
+
+                UnshieldedAddressFormatError::InvalidHrp(hrp) => async_graphql::Error::new(format!(
+                    "Invalid address: invalid prefix '{}', expected 'mn_addr' prefix",
+                    hrp
+                ))
+                .extend_with(|_, e| e.set("code", "INVALID_ADDRESS_PREFIX")),
+
+                UnshieldedAddressFormatError::TryFromStrForNetworkIdError(_) => {
+                    async_graphql::Error::new("Invalid address: unknown network ID in address")
+                        .extend_with(|_, e| e.set("code", "UNKNOWN_NETWORK_ID"))
+                }
+            };
+
+            // Log the detailed error for debugging
+            let detailed_error = anyhow::Error::new(e).context(context);
+            error!(error = format!("{detailed_error:#}"); "address validation error");
+
+            graphql_error
         })
     }
 }
