@@ -1,7 +1,7 @@
 use anyhow::Context;
 use chain_indexer::{
     domain::Node,
-    infra::node::{Config, SubxtNode},
+    infra::subxt_node::{Config, SubxtNode},
 };
 use futures::{StreamExt, TryStreamExt};
 use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_013_000};

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{AsBytesExt, HexEncoded, ViewingKey, storage::Storage},
+    domain::{AsBytesExt, HexEncoded, PROTOCOL_VERSION, ViewingKey, storage::Storage},
     infra::api::{
         ContextExt, ResultExt,
         v1::{Unit, hex_decode_session_id},
@@ -59,7 +59,7 @@ where
         self.connect_calls.increment(1);
 
         let viewing_key = viewing_key
-            .try_into_domain(cx.get_network_id())
+            .try_into_domain(cx.get_network_id(), PROTOCOL_VERSION)
             .context("decode viewing key")?;
 
         cx.get_storage::<S>()

@@ -15,13 +15,15 @@ use crate::{
     domain::{UnshieldedUtxo, storage::unshielded_utxo::UnshieldedUtxoStorage},
     infra::storage::postgres::PostgresStorage,
 };
-use indexer_common::domain::{BlockHash, Identifier, TransactionHash, UnshieldedAddress};
+use indexer_common::domain::{
+    BlockHash, RawTransactionIdentifier, RawUnshieldedAddress, TransactionHash,
+};
 use indoc::indoc;
 
 impl UnshieldedUtxoStorage for PostgresStorage {
     async fn get_unshielded_utxos_by_address(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -84,7 +86,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
 
     async fn get_unshielded_utxos_created_in_transaction_for_address(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
@@ -108,7 +110,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
 
     async fn get_unshielded_utxos_spent_in_transaction_for_address(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
@@ -132,7 +134,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
 
     async fn get_unshielded_utxos_by_address_from_height(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         height: u32,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
@@ -163,7 +165,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
 
     async fn get_unshielded_utxos_by_address_from_block_hash(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         block_hash: &BlockHash,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
@@ -194,7 +196,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
 
     async fn get_unshielded_utxos_by_address_from_transaction_hash(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         transaction_hash: &TransactionHash,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
@@ -224,8 +226,8 @@ impl UnshieldedUtxoStorage for PostgresStorage {
 
     async fn get_unshielded_utxos_by_address_from_transaction_identifier(
         &self,
-        address: &UnshieldedAddress,
-        identifier: &Identifier,
+        address: &RawUnshieldedAddress,
+        identifier: &RawTransactionIdentifier,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
             SELECT unshielded_utxos.id,
@@ -254,7 +256,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
 
     async fn get_highest_indices_for_address(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
     ) -> Result<(Option<u64>, Option<u64>), sqlx::Error> {
         let query = indoc! {"
             SELECT (

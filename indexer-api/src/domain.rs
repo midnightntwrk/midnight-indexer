@@ -17,26 +17,30 @@ mod api;
 mod block;
 mod contract_action;
 mod contract_balance;
+mod ledger_state;
 mod transaction;
 mod unshielded;
 mod viewing_key;
-mod zswap;
 
 pub use api::*;
 pub use block::*;
 pub use contract_action::*;
 pub use contract_balance::*;
+pub use ledger_state::*;
 pub use transaction::*;
 pub use unshielded::*;
 pub use viewing_key::*;
-pub use zswap::*;
 
 use async_graphql::scalar;
 use const_hex::FromHexError;
 use derive_more::{Debug, Display};
+use indexer_common::domain::{PROTOCOL_VERSION_000_013_000, ProtocolVersion};
 use serde::{Deserialize, Serialize};
 use std::any::type_name;
 use thiserror::Error;
+
+/// This must always point to the latest (highest) supported version.
+pub const PROTOCOL_VERSION: ProtocolVersion = PROTOCOL_VERSION_000_013_000;
 
 /// Wrapper around hex-encoded bytes.
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

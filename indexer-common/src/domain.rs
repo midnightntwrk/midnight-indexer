@@ -11,39 +11,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod ledger;
+
 mod bytes;
+mod ledger_state_storage;
 mod protocol_version;
 mod pub_sub;
 mod viewing_key;
-mod zswap;
 
 pub use bytes::*;
+pub use ledger_state_storage::*;
 pub use protocol_version::*;
 pub use pub_sub::*;
 pub use viewing_key::*;
-pub use zswap::*;
 
 use derive_more::Display;
-use midnight_serialize::NetworkId as LedgerNetworkId;
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
 use std::str::FromStr;
 use thiserror::Error;
 
-pub type BlockHash = ByteArray<32>;
-pub type TransactionHash = ByteArray<32>;
 pub type BlockAuthor = ByteArray<32>;
-pub type ContractAddress = ByteVec;
+pub type BlockHash = ByteArray<32>;
 pub type ContractEntryPoint = ByteVec;
-pub type ContractState = ByteVec;
-pub type ContractZswapState = ByteVec;
-pub type Identifier = ByteVec;
 pub type IntentHash = ByteArray<32>;
-pub type MerkleTreeRoot = ByteVec;
+pub type RawContractAddress = ByteVec;
+pub type RawContractState = ByteVec;
+pub type RawLedgerState = ByteVec;
 pub type RawTokenType = ByteArray<32>;
 pub type RawTransaction = ByteVec;
+pub type RawTransactionIdentifier = ByteVec;
+pub type RawUnshieldedAddress = ByteArray<32>;
+pub type RawZswapState = ByteVec;
+pub type RawZswapStateRoot = ByteVec;
 pub type SessionId = ByteArray<32>;
-pub type UnshieldedAddress = ByteVec;
+pub type TransactionHash = ByteArray<32>;
 
 /// The result of applying a transaction to the ledger state.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +59,22 @@ pub enum TransactionResult {
     /// Guaranteed coins failed.
     #[default]
     Failure,
+}
+
+/// A contract action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractAction {
+    pub address: RawContractAddress,
+    pub state: RawContractState,
+    pub attributes: ContractAttributes,
+}
+
+/// Attributes for a specific contract action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum ContractAttributes {
+    Deploy,
+    Call { entry_point: ContractEntryPoint },
+    Update,
 }
 
 /// The variant of a contract action.
@@ -74,6 +92,46 @@ pub enum ContractActionVariant {
     Update,
 }
 
+impl From<&ContractAttributes> for ContractActionVariant {
+    fn from(attributes: &ContractAttributes) -> Self {
+        match attributes {
+            ContractAttributes::Deploy => Self::Deploy,
+            ContractAttributes::Call { .. } => Self::Call,
+            ContractAttributes::Update => Self::Update,
+        }
+    }
+}
+
+/// An unshielded UTXO.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnshieldedUtxo {
+    pub value: u128,
+    pub owner_address: RawUnshieldedAddress,
+    pub token_type: RawTokenType,
+    pub intent_hash: IntentHash,
+    pub output_index: u32,
+}
+
+/// Transaction structure for fees calculation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransactionStructure {
+    pub segment_count: usize,
+    pub estimated_input_count: usize,
+    pub estimated_output_count: usize,
+    pub has_contract_operations: bool,
+    pub size: usize,
+}
+
+/// Token balance of a contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContractBalance {
+    /// Token type identifier.
+    pub token_type: RawTokenType,
+
+    /// Balance amount as u128.
+    pub amount: u128,
+}
+
 /// Clone of midnight_serialize::NetworkId for the purpose of Serde deserialization.
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum NetworkId {
@@ -81,17 +139,6 @@ pub enum NetworkId {
     DevNet,
     TestNet,
     MainNet,
-}
-
-impl From<NetworkId> for LedgerNetworkId {
-    fn from(network_id: NetworkId) -> Self {
-        match network_id {
-            NetworkId::Undeployed => LedgerNetworkId::Undeployed,
-            NetworkId::DevNet => LedgerNetworkId::DevNet,
-            NetworkId::TestNet => LedgerNetworkId::TestNet,
-            NetworkId::MainNet => LedgerNetworkId::MainNet,
-        }
-    }
 }
 
 impl FromStr for NetworkId {
@@ -123,22 +170,6 @@ pub struct UnknownNetworkIdError(String);
 #[cfg(test)]
 mod tests {
     use crate::domain::NetworkId;
-    use midnight_serialize::NetworkId as LedgerNetworkId;
-
-    #[test]
-    fn test_network_id_from() {
-        let network_id = LedgerNetworkId::from(NetworkId::Undeployed);
-        assert_eq!(network_id, LedgerNetworkId::Undeployed);
-
-        let network_id = LedgerNetworkId::from(NetworkId::DevNet);
-        assert_eq!(network_id, LedgerNetworkId::DevNet);
-
-        let network_id = LedgerNetworkId::from(NetworkId::TestNet);
-        assert_eq!(network_id, LedgerNetworkId::TestNet);
-
-        let network_id = LedgerNetworkId::from(NetworkId::MainNet);
-        assert_eq!(network_id, LedgerNetworkId::MainNet);
-    }
 
     #[test]
     fn test_network_id_deserialize() {

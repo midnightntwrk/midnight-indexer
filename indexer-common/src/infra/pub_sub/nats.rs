@@ -53,7 +53,7 @@ mod tests {
     use tokio::{task, time::sleep};
 
     #[tokio::test]
-    async fn test() -> Result<(), BoxError> {
+    async fn test_publish_subscribe() -> Result<(), BoxError> {
         let nats_container = GenericImage::new("nats", "2.11.1")
             .with_wait_for(WaitFor::message_on_stderr("Server is ready"))
             .with_cmd([

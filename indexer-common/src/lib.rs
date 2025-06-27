@@ -13,19 +13,10 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use midnight_base_crypto::signatures::Signature;
-use midnight_ledger::structure::ProofMarker;
-use midnight_storage::DefaultDB;
-use midnight_transient_crypto::commitment::PedersenRandomness;
-
 pub mod cipher;
 pub mod config;
 pub mod domain;
 pub mod error;
 pub mod infra;
-pub mod serialize;
 pub mod stream;
 pub mod telemetry;
-
-pub type LedgerTransaction =
-    midnight_ledger::structure::Transaction<Signature, ProofMarker, PedersenRandomness, DefaultDB>;

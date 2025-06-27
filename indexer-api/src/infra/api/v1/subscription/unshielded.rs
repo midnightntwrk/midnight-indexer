@@ -15,16 +15,14 @@ use crate::{
     domain::storage::Storage,
     infra::api::{
         ContextExt, ResultExt,
-        v1::{
-            UnshieldedAddress, UnshieldedAddressResultExt, UnshieldedProgress, UnshieldedUtxo,
-            UnshieldedUtxoEvent,
-        },
+        v1::{UnshieldedAddress, UnshieldedProgress, UnshieldedUtxo, UnshieldedUtxoEvent},
     },
 };
+use anyhow::Context as _;
 use async_graphql::{Context, Subscription, async_stream::try_stream};
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
-use indexer_common::domain::{ByteVec, Subscriber, UnshieldedUtxoIndexed};
+use indexer_common::domain::{RawUnshieldedAddress, Subscriber, UnshieldedUtxoIndexed};
 use log::{debug, warn};
 use std::{collections::HashSet, future::ready, marker::PhantomData, pin::pin, time::Duration};
 use tokio::time::interval;
@@ -81,18 +79,17 @@ where
     ) -> async_graphql::Result<
         impl Stream<Item = async_graphql::Result<UnshieldedUtxoEvent<S>>> + use<'a, S, B>,
     > {
-        let network_id = cx.get_network_id();
         let address = address
-            .try_into_domain(network_id)
-            .address_validation("convert address into domain address")?;
+            .try_into_domain(cx.get_network_id())
+            .context("parse address")?;
 
         // Use 0 as default to include all transactions from genesis.
         // Since transaction IDs start from 1 (BIGSERIAL/AUTOINCREMENT), using >= 0
         // ensures we include the genesis transaction (ID 1) and all subsequent ones.
         let from_transaction_id = transaction_id.unwrap_or(0);
-        let utxo_events = utxo_updates::<S, B>(cx, address.clone(), from_transaction_id).await?;
+        let utxo_events = utxo_updates::<S, B>(cx, address, from_transaction_id).await?;
 
-        let progress_updates = progress_updates::<S>(cx, address.clone()).await?;
+        let progress_updates = progress_updates::<S>(cx, address).await?;
 
         let events = tokio_stream::StreamExt::merge(utxo_events, progress_updates);
 
@@ -103,7 +100,7 @@ where
 #[trace(properties = { "address": "{address:?}", "from_transaction_id": "{from_transaction_id}" })]
 async fn utxo_updates<'a, S, B>(
     cx: &'a Context<'a>,
-    address: ByteVec,
+    address: RawUnshieldedAddress,
     from_transaction_id: u64,
 ) -> async_graphql::Result<
     impl Stream<Item = async_graphql::Result<UnshieldedUtxoEvent<S>>> + use<'a, S, B>,
@@ -116,13 +113,9 @@ where
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
 
-    let utxo_indexed_events = {
-        let address = address.clone();
-
-        subscriber
-            .subscribe::<UnshieldedUtxoIndexed>()
-            .try_filter(move |event| ready(event.address == address))
-    };
+    let utxo_indexed_events = subscriber
+        .subscribe::<UnshieldedUtxoIndexed>()
+        .try_filter(move |event| ready(event.address == address));
 
     let utxo_updates = try_stream! {
         debug!(
@@ -266,7 +259,7 @@ where
 
 async fn progress_updates<'a, S>(
     cx: &'a Context<'a>,
-    address: ByteVec,
+    address: RawUnshieldedAddress,
 ) -> async_graphql::Result<
     impl Stream<Item = async_graphql::Result<UnshieldedUtxoEvent<S>>> + use<'a, S>,
 >
@@ -276,13 +269,13 @@ where
     let storage = cx.get_storage::<S>();
 
     let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
-    let updates = intervals.then(move |_| progress_update(address.clone(), storage));
+    let updates = intervals.then(move |_| progress_update(address, storage));
 
     Ok(updates)
 }
 
 async fn progress_update<S>(
-    address: ByteVec,
+    address: RawUnshieldedAddress,
     storage: &S,
 ) -> async_graphql::Result<UnshieldedUtxoEvent<S>>
 where

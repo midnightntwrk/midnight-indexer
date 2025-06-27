@@ -13,7 +13,7 @@
 
 use crate::domain::Transaction;
 use indexer_common::{
-    domain::{IntentHash, RawTokenType, UnshieldedAddress},
+    domain::{IntentHash, RawTokenType, RawUnshieldedAddress},
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
 use sqlx::FromRow;
@@ -22,7 +22,8 @@ use sqlx::FromRow;
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct UnshieldedUtxo {
     /// The unshielded address that owns this UTXO.
-    pub owner_address: UnshieldedAddress,
+    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
+    pub owner_address: RawUnshieldedAddress,
 
     /// Type of token (e.g. NIGHT has all-zero bytes).
     #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]

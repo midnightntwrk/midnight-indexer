@@ -38,7 +38,7 @@ async fn run() -> anyhow::Result<()> {
     use chain_indexer::{
         application,
         config::Config,
-        infra::{self, node::SubxtNode},
+        infra::{self, subxt_node::SubxtNode},
     };
     use indexer_common::{
         config::ConfigExt,

@@ -23,7 +23,8 @@ use byte_unit::{Byte, UnitType};
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{
-    BlockIndexed, LedgerStateStorage, NetworkId, Publisher, UnshieldedUtxoIndexed,
+    BlockIndexed, LedgerStateStorage, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxoIndexed,
+    ledger,
 };
 use log::{info, warn};
 use parking_lot::RwLock;
@@ -83,19 +84,18 @@ pub async fn run(
 
     let metrics = Metrics::new(highest_height, transaction_count, contract_action_count);
 
-    let (ledger_state, mut ledger_state_block_height) = ledger_state_storage
+    let (mut ledger_state, mut ledger_state_block_height) = ledger_state_storage
         .load_ledger_state()
         .await
-        .context("get ledger state")?
-        .unzip();
-    let ledger_state = ledger_state
-        .map(|ledger_state| {
-            indexer_common::domain::LedgerState::deserialize(ledger_state, network_id)
-                .context("deserialize ledger state")
+        .context("load ledger state")?
+        .map(|(ledger_state, block_height, protocol_version)| {
+            let ledger_state =
+                ledger::LedgerState::deserialize(&ledger_state, network_id, protocol_version)
+                    .context("deserialize ledger state")?;
+            Ok::<_, anyhow::Error>((ledger_state.into(), Some(block_height)))
         })
         .transpose()?
         .unwrap_or_default();
-    let mut ledger_state = LedgerState::from(ledger_state);
 
     // Reset ledger state if storage is behind ledger state storage.
     if ledger_state_block_height > highest_height {
@@ -112,11 +112,17 @@ pub async fn run(
         if ledger_state_block_height < highest_height {
             info!(ledger_state_block_height, highest_height; "updating ledger state");
 
+            let mut protocol_version = ProtocolVersion::default();
+
             for block_height in (ledger_state_block_height + 1)..=highest_height {
                 let block_transactions = storage
                     .get_block_transactions(block_height)
                     .await
                     .context("get block transactions")?;
+
+                if block_height == highest_height {
+                    protocol_version = block_transactions.protocol_version;
+                }
 
                 ledger_state
                     .apply_raw_transactions(
@@ -134,7 +140,12 @@ pub async fn run(
                 .serialize(network_id)
                 .context("serialize ledger state")?;
             ledger_state_storage
-                .save(&raw_ledger_state, highest_height, ledger_state.end_index())
+                .save(
+                    &raw_ledger_state,
+                    highest_height,
+                    ledger_state.highest_zswap_state_index(),
+                    protocol_version,
+                )
                 .await
                 .context("save ledger state")?;
         }
@@ -328,7 +339,7 @@ async fn index_block(
         .apply_and_update_transactions(transactions, block.parent_hash, block.timestamp, network_id)
         .context("apply and update transactions")?;
 
-    if ledger_state.zswap.coin_coms.root() != block.zswap_state_root {
+    if ledger_state.zswap_merkle_tree_root() != block.zswap_state_root {
         bail!(
             "zswap state root mismatch for block {} at height {}",
             block.hash,
@@ -338,7 +349,7 @@ async fn index_block(
 
     let raw_ledger_state = ledger_state
         .serialize(network_id)
-        .context("serialize ZswapState")?;
+        .context("serialize ledger state")?;
 
     // Determine whether caught up, also allowing to fall back a little in that state.
     let node_block_height = highest_block_on_node
@@ -360,14 +371,18 @@ async fn index_block(
         info!(caught_up:%; "caught-up status changed")
     }
 
-    // 1) Save the block first (note: block is now mutable)
+    // First save and update the block.
     let max_transaction_id = storage.save_block(&mut block).await.context("save block")?;
 
-    // 2) Then save the ledger state. This order is important to prevent from applying the
-    //    transactions twice.
+    // Then save the ledger state. This order is important to maintain consistency.
     if *caught_up || block.height % save_ledger_state_after == 0 {
         ledger_state_storage
-            .save(&raw_ledger_state, block.height, ledger_state.end_index())
+            .save(
+                &raw_ledger_state,
+                block.height,
+                ledger_state.highest_zswap_state_index(),
+                block.protocol_version,
+            )
             .await
             .context("save ledger state")?;
     }
@@ -404,7 +419,7 @@ async fn index_block(
         for utxo in &transaction.created_unshielded_utxos {
             let address = utxo.owner_address.to_owned();
 
-            if published_addresses.insert(address.clone()) {
+            if published_addresses.insert(address) {
                 publisher
                     .publish(&UnshieldedUtxoIndexed {
                         address,
@@ -419,7 +434,7 @@ async fn index_block(
         for utxo in &transaction.spent_unshielded_utxos {
             let address = utxo.owner_address.to_owned();
 
-            if published_addresses.insert(address.clone()) {
+            if published_addresses.insert(address) {
                 publisher
                     .publish(&UnshieldedUtxoIndexed {
                         address,
@@ -452,7 +467,7 @@ mod tests {
     use fake::{Fake, Faker};
     use futures::{Stream, StreamExt, TryStreamExt, stream};
     use indexer_common::{
-        domain::{BlockHash, ByteArray, NetworkId, ProtocolVersion},
+        domain::{BlockHash, ByteArray, NetworkId, ProtocolVersion, ledger::ZswapStateRoot},
         error::BoxError,
     };
     use std::{convert::Infallible, sync::LazyLock};
@@ -499,7 +514,7 @@ mod tests {
         parent_hash: ZERO_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: Faker.fake(),
+        zswap_state_root: ZswapStateRoot::V5(Faker.fake()),
         transactions: Default::default(),
     });
 
@@ -510,7 +525,7 @@ mod tests {
         parent_hash: BLOCK_0_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: Faker.fake(),
+        zswap_state_root: ZswapStateRoot::V5(Faker.fake()),
         transactions: Default::default(),
     });
 
@@ -521,7 +536,7 @@ mod tests {
         parent_hash: BLOCK_1_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: Faker.fake(),
+        zswap_state_root: ZswapStateRoot::V5(Faker.fake()),
         transactions: Default::default(),
     });
 
@@ -532,7 +547,7 @@ mod tests {
         parent_hash: BLOCK_2_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: Faker.fake(),
+        zswap_state_root: ZswapStateRoot::V5(Faker.fake()),
         transactions: Default::default(),
     });
 
