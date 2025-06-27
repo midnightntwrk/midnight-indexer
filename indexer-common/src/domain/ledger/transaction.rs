@@ -6,7 +6,6 @@ use crate::domain::{
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
-use std::future::Future;
 use midnight_coin_structure::{
     coin::Info as InfoV5, contract::ContractAddress as ContractAddressV5,
 };
@@ -18,7 +17,7 @@ use midnight_serialize::deserialize as deserialize_v5;
 use midnight_storage::{DefaultDB as DefaultDBV5, arena::Sp as SpV5};
 use midnight_transient_crypto::{encryption::SecretKey as SecretKeyV5, proofs::Proof as ProofV5};
 use midnight_zswap::Offer as OfferV5;
-use std::error::Error as StdError;
+use std::{error::Error as StdError, future::Future};
 
 /// Facade for `Transaction` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
@@ -98,8 +97,12 @@ impl Transaction {
                                         .map_err(|error| Error::GetContractState(error.into()))?;
 
                                     // Extract balances from contract state
-                                    let extracted_balances = ContractState::deserialize(&state, network_id, protocol_version)?
-                                        .balances(network_id)?;
+                                    let extracted_balances = ContractState::deserialize(
+                                        &state,
+                                        network_id,
+                                        protocol_version,
+                                    )?
+                                    .balances(network_id)?;
 
                                     Ok::<_, Error>(ContractAction {
                                         address,
@@ -118,8 +121,12 @@ impl Transaction {
                                     let entry_point = call.entry_point.as_ref().into();
 
                                     // Extract balances from contract state
-                                    let extracted_balances = ContractState::deserialize(&state, network_id, protocol_version)?
-                                        .balances(network_id)?;
+                                    let extracted_balances = ContractState::deserialize(
+                                        &state,
+                                        network_id,
+                                        protocol_version,
+                                    )?
+                                    .balances(network_id)?;
 
                                     Ok(ContractAction {
                                         address,
@@ -137,8 +144,12 @@ impl Transaction {
                                         .map_err(|error| Error::GetContractState(error.into()))?;
 
                                     // Extract balances from contract state
-                                    let extracted_balances = ContractState::deserialize(&state, network_id, protocol_version)?
-                                        .balances(network_id)?;
+                                    let extracted_balances = ContractState::deserialize(
+                                        &state,
+                                        network_id,
+                                        protocol_version,
+                                    )?
+                                    .balances(network_id)?;
 
                                     Ok(ContractAction {
                                         address,
