@@ -15,7 +15,9 @@ use crate::{
     domain::storage::Storage,
     infra::api::{
         ContextExt, ResultExt,
-        v1::{UnshieldedAddress, UnshieldedProgress, UnshieldedUtxo, UnshieldedUtxoEvent},
+        v1::unshielded::{
+            UnshieldedAddress, UnshieldedProgress, UnshieldedUtxo, UnshieldedUtxoEvent,
+        },
     },
 };
 use anyhow::Context as _;

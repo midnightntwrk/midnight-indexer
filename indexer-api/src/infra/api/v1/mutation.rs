@@ -13,16 +13,14 @@
 
 use crate::{
     domain::{AsBytesExt, HexEncoded, PROTOCOL_VERSION, ViewingKey, storage::Storage},
-    infra::api::{
-        ContextExt, ResultExt,
-        v1::{Unit, hex_decode_session_id},
-    },
+    infra::api::{ContextExt, ResultExt, v1::decode_session_id},
 };
 use anyhow::Context as _;
-use async_graphql::{Context, Object};
+use async_graphql::{Context, Object, scalar};
 use fastrace::trace;
 use log::debug;
 use metrics::{Counter, counter};
+use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
 pub struct Mutation<S> {
@@ -82,7 +80,7 @@ where
     ) -> async_graphql::Result<Unit> {
         self.disconnect_calls.increment(1);
 
-        let session_id = hex_decode_session_id(session_id)?;
+        let session_id = decode_session_id(session_id)?;
 
         cx.get_storage::<S>()
             .disconnect_wallet(session_id)
@@ -94,3 +92,8 @@ where
         Ok(Unit)
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Unit;
+
+scalar!(Unit);

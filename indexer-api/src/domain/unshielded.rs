@@ -57,3 +57,15 @@ pub struct UnshieldedUtxo {
     #[sqlx(skip)]
     pub spent_at_transaction: Option<Transaction>,
 }
+
+/// Token balance held by a contract.
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+pub struct ContractBalance {
+    /// Token type identifier.
+    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
+    pub token_type: RawTokenType,
+
+    /// Balance amount.
+    #[sqlx(try_from = "U128BeBytes")]
+    pub amount: u128,
+}

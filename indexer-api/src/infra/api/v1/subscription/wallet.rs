@@ -16,8 +16,8 @@ use crate::{
     infra::api::{
         ContextExt, ResultExt,
         v1::{
-            ProgressUpdate, ViewingUpdate, WalletSyncEvent, ZswapChainStateUpdate,
-            hex_decode_session_id,
+            decode_session_id,
+            wallet::{ProgressUpdate, ViewingUpdate, WalletSyncEvent, ZswapChainStateUpdate},
         },
     },
 };
@@ -88,7 +88,7 @@ where
     > {
         self.wallet_calls.increment(1);
 
-        let session_id = hex_decode_session_id(session_id)?;
+        let session_id = decode_session_id(session_id)?;
         let index = index.unwrap_or_default();
         let send_progress_updates = send_progress_updates.unwrap_or(true);
 

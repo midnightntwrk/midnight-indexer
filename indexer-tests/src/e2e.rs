@@ -39,7 +39,7 @@ use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::{
     domain::{AsBytesExt, HexEncoded, ViewingKey},
-    infra::api::v1::{TransactionResultStatus, UnshieldedAddress},
+    infra::api::v1::{transaction::TransactionResultStatus, unshielded::UnshieldedAddress},
 };
 use indexer_common::domain::{ByteArray, NetworkId, PROTOCOL_VERSION_000_013_000};
 use itertools::Itertools;
@@ -188,22 +188,19 @@ impl IndexerData {
             block.transactions.iter().all(|transaction| {
                 match transaction.transaction_result.status {
                     BlockSubscriptionTransactionResultStatus::SUCCESS => {
-                        // Success transactions should have no segment results
-                        transaction.segment_results.is_empty()
+                        transaction.transaction_result.segments.is_none()
                     }
+
                     BlockSubscriptionTransactionResultStatus::FAILURE => {
                         // Failure transactions should have no segment results
-                        transaction.segment_results.is_empty()
+                        transaction.transaction_result.segments.is_none()
                     }
+
                     BlockSubscriptionTransactionResultStatus::PARTIAL_SUCCESS => {
-                        // Partial success transactions should have segment results
-                        !transaction.segment_results.is_empty()
-                            && transaction.segment_results.iter().all(|segment| {
-                                // Segment IDs should be reasonable (not massive numbers)
-                                segment.segment_id < 1000
-                            })
+                        transaction.transaction_result.segments.is_some()
                     }
-                    _ => true, // Unknown status, skip validation
+
+                    _ => true,
                 }
             })
         }));
@@ -424,28 +421,26 @@ async fn test_transactions_query(
             match transaction.transaction_result.status {
                 transactions_query::TransactionResultStatus::SUCCESS => {
                     assert!(
-                        transaction.segment_results.is_empty(),
+                        transaction.transaction_result.segments.is_none(),
                         "SUCCESS transactions should have no segment results"
                     );
                 }
+
                 transactions_query::TransactionResultStatus::FAILURE => {
                     assert!(
-                        transaction.segment_results.is_empty(),
+                        transaction.transaction_result.segments.is_none(),
                         "FAILURE transactions should have no segment results"
                     );
                 }
+
                 transactions_query::TransactionResultStatus::PARTIAL_SUCCESS => {
                     assert!(
-                        !transaction.segment_results.is_empty(),
+                        transaction.transaction_result.segments.is_some(),
                         "PARTIAL_SUCCESS transactions should have segment results"
                     );
-
-                    for segment in &transaction.segment_results {
-                        // Segment IDs should be reasonable
-                        assert!(segment.segment_id < 1000, "segment_id should be reasonable");
-                    }
                 }
-                _ => {} // Skip unknown statuses
+
+                _ => {}
             }
         }
 
@@ -1175,7 +1170,7 @@ mod graphql {
     use graphql_client::GraphQLQuery;
     use indexer_api::{
         domain::{HexEncoded, ViewingKey},
-        infra::api::v1::{Unit, UnshieldedAddress},
+        infra::api::v1::{mutation::Unit, unshielded::UnshieldedAddress},
     };
 
     #[derive(GraphQLQuery)]
@@ -1208,7 +1203,7 @@ mod graphql {
     // customise the derive to return our own error.
     pub mod graphql_types {
         use graphql_client::GraphQLQuery;
-        use indexer_api::{domain::HexEncoded, infra::api::v1::UnshieldedAddress};
+        use indexer_api::{domain::HexEncoded, infra::api::v1::unshielded::UnshieldedAddress};
 
         #[derive(GraphQLQuery)]
         #[graphql(

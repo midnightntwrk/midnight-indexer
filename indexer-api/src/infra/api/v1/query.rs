@@ -16,8 +16,10 @@ use crate::{
     infra::api::{
         ContextExt, ResultExt,
         v1::{
-            self, Block, BlockOffset, ContractAction, ContractActionOffset, Transaction,
-            TransactionOffset, UnshieldedAddress, UnshieldedOffset,
+            block::{Block, BlockOffset},
+            contract_action::{ContractAction, ContractActionOffset},
+            transaction::{Transaction, TransactionOffset},
+            unshielded::{UnshieldedAddress, UnshieldedOffset, UnshieldedUtxo},
         },
     },
 };
@@ -223,7 +225,7 @@ where
         cx: &Context<'_>,
         address: UnshieldedAddress,
         offset: Option<UnshieldedOffset>,
-    ) -> async_graphql::Result<Vec<v1::UnshieldedUtxo<S>>> {
+    ) -> async_graphql::Result<Vec<UnshieldedUtxo<S>>> {
         let network_id = cx.get_network_id();
 
         let address = address
@@ -274,7 +276,7 @@ where
 
         Ok(utxos
             .into_iter()
-            .map(|utxo| v1::UnshieldedUtxo::<S>::from((utxo, network_id)))
+            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
             .collect())
     }
 }

@@ -33,10 +33,16 @@ type Block {
 }
 
 """
-Either a hash or a height to query a block.
+Either a block hash or a block height.
 """
 input BlockOffset @oneOf {
+	"""
+	A hex-encoded block hash.
+	"""
 	hash: HexEncoded
+	"""
+	A block height.
+	"""
 	height: Int
 }
 
@@ -51,10 +57,16 @@ interface ContractAction {
 }
 
 """
-Either a block offset or a transaction offset to query a contract action.
+Either a block offset or a transaction offset.
 """
 input ContractActionOffset @oneOf {
+	"""
+	Either a block hash or a block height.
+	"""
 	blockOffset: BlockOffset
+	"""
+	Either a transaction hash or a transaction identifier.
+	"""
 	transactionOffset: TransactionOffset
 }
 
@@ -65,11 +77,11 @@ unshielded token balances for any contract action (Deploy, Call, Update).
 """
 type ContractBalance {
 	"""
-	Token type identifier, hex-encoded for GraphQL compatibility.
+	Hex-encoded token type identifier.
 	"""
 	tokenType: HexEncoded!
 	"""
-	Balance amount as string to support u128 values.
+	Balance amount as string to larger integer values (up to 16 bytes).
 	"""
 	amount: String!
 }
@@ -220,20 +232,6 @@ type Segment {
 	success: Boolean!
 }
 
-"""
-Result for a specific segment within a transaction.
-"""
-type SegmentResult {
-	"""
-	The segment identifier.
-	"""
-	segmentId: Int!
-	"""
-	Whether this segment was successfully executed.
-	"""
-	success: Boolean!
-}
-
 type Subscription {
 	"""
 	Subscribe to blocks starting at the given offset or at the latest block if the offset is
@@ -294,10 +292,6 @@ type Transaction {
 	"""
 	fees: TransactionFees!
 	"""
-	Segment results for client consumption.
-	"""
-	segmentResults: [SegmentResult!]!
-	"""
 	The transaction identifiers.
 	"""
 	identifiers: [HexEncoded!]!
@@ -342,16 +336,22 @@ type TransactionFees {
 }
 
 """
-Either a hash or an identifier to query transactions.
+Either a transaction hash or a transaction identifier.
 """
 input TransactionOffset @oneOf {
+	"""
+	A hex-encoded transaction hash.
+	"""
 	hash: HexEncoded
+	"""
+	A hex-encoded transaction identifier.
+	"""
 	identifier: HexEncoded
 }
 
 """
-The result of applying a transaction to the ledger state.
-In case of a partial success (status), there will be segments.
+The result of applying a transaction to the ledger state. In case of a partial success (status),
+there will be segments.
 """
 type TransactionResult {
 	status: TransactionResultStatus!
@@ -372,10 +372,16 @@ scalar Unit
 scalar UnshieldedAddress
 
 """
-Either a [BlockOffset] or a [TransactionOffset] to query for a [UnshieldedUtxo].
+Either a block offset or a transaction offset.
 """
 input UnshieldedOffset @oneOf {
+	"""
+	Either a block hash or a block height.
+	"""
 	blockOffset: BlockOffset
+	"""
+	Either a transaction hash or a transaction identifier.
+	"""
 	transactionOffset: TransactionOffset
 }
 
@@ -432,20 +438,19 @@ Payload emitted by `subscription { unshieldedUtxos … }`
 """
 type UnshieldedUtxoEvent {
 	"""
-	Progress information for wallet synchronization (always present)
+	Progress information for wallet synchronization.
 	"""
 	progress: UnshieldedProgress!
 	"""
-	The transaction associated with this event (present for actual updates)
+	The transaction associated with this event.
 	"""
 	transaction: Transaction
 	"""
-	UTXOs created in this transaction for the subscribed address (None for progress-only
-	events)
+	UTXOs created in this transaction for the subscribed address.
 	"""
 	createdUtxos: [UnshieldedUtxo!]
 	"""
-	UTXOs spent in this transaction for the subscribed address (None for progress-only events)
+	UTXOs spent in this transaction for the subscribed address.
 	"""
 	spentUtxos: [UnshieldedUtxo!]
 }
@@ -469,6 +474,9 @@ type ViewingUpdate {
 	update: [ZswapChainStateUpdate!]!
 }
 
+"""
+A wallet synchronization event, either a viewing update or a progress update.
+"""
 union WalletSyncEvent = ViewingUpdate | ProgressUpdate
 
 union ZswapChainStateUpdate = MerkleTreeCollapsedUpdate | RelevantTransaction
