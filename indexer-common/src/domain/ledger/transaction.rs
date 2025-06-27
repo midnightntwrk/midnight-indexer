@@ -180,6 +180,7 @@ impl Transaction {
         }
     }
 
+    // Check if this transaction belongs to the given viewing key.
     pub fn relevant(&self, viewing_key: ViewingKey) -> bool {
         match self {
             Transaction::V5(transaction) => match transaction {

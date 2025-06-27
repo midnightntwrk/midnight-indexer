@@ -39,6 +39,7 @@ pub async fn make_block_details(
     authorities: &mut Option<Vec<[u8; 32]>>,
     protocol_version: ProtocolVersion,
 ) -> Result<BlockDetails, SubxtNodeError> {
+    // TODO Replace this often repeated pattern with a macro?
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
         make_block_details_runtime_0_13(extrinsics, events, authorities).await
     } else {
