@@ -90,7 +90,7 @@ pub enum ViewingKeyFormatError {
     InvalidHrp(String),
 
     #[error(transparent)]
-    TryFromStrForNetworkIdError(#[from] UnknownNetworkIdError),
+    UnknownNetworkId(#[from] UnknownNetworkIdError),
 
     #[error("network ID mismatch: got {0}, expected {1}")]
     UnexpectedNetworkId(NetworkId, NetworkId),
