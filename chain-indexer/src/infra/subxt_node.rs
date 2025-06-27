@@ -539,6 +539,7 @@ async fn make_transaction(
                     .await
             },
             network_id,
+            protocol_version,
         )
         .await?
         .into_iter()

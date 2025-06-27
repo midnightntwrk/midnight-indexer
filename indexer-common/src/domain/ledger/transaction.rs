@@ -2,10 +2,11 @@ use crate::domain::{
     ContractAction, ContractAttributes, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
     RawContractAddress, RawContractState, RawTransactionIdentifier, TransactionHash,
     TransactionStructure, ViewingKey,
-    ledger::{Error, LedgerTransactionV5, NetworkIdExt, SerializableV5Ext},
+    ledger::{ContractState, Error, LedgerTransactionV5, NetworkIdExt, SerializableV5Ext},
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
+use std::future::Future;
 use midnight_coin_structure::{
     coin::Info as InfoV5, contract::ContractAddress as ContractAddressV5,
 };
@@ -77,6 +78,7 @@ impl Transaction {
         &self,
         get_contract_state: impl Fn(RawContractAddress) -> F,
         network_id: NetworkId,
+        protocol_version: ProtocolVersion,
     ) -> Result<Vec<ContractAction>, Error>
     where
         E: StdError + 'static + Send + Sync,
@@ -95,10 +97,15 @@ impl Transaction {
                                         .await
                                         .map_err(|error| Error::GetContractState(error.into()))?;
 
+                                    // Extract balances from contract state
+                                    let extracted_balances = ContractState::deserialize(&state, network_id, protocol_version)?
+                                        .balances(network_id)?;
+
                                     Ok::<_, Error>(ContractAction {
                                         address,
                                         state,
                                         attributes: ContractAttributes::Deploy,
+                                        extracted_balances,
                                     })
                                 }
 
@@ -110,10 +117,15 @@ impl Transaction {
                                         .map_err(|error| Error::GetContractState(error.into()))?;
                                     let entry_point = call.entry_point.as_ref().into();
 
+                                    // Extract balances from contract state
+                                    let extracted_balances = ContractState::deserialize(&state, network_id, protocol_version)?
+                                        .balances(network_id)?;
+
                                     Ok(ContractAction {
                                         address,
                                         state,
                                         attributes: ContractAttributes::Call { entry_point },
+                                        extracted_balances,
                                     })
                                 }
 
@@ -124,10 +136,15 @@ impl Transaction {
                                         .await
                                         .map_err(|error| Error::GetContractState(error.into()))?;
 
+                                    // Extract balances from contract state
+                                    let extracted_balances = ContractState::deserialize(&state, network_id, protocol_version)?
+                                        .balances(network_id)?;
+
                                     Ok(ContractAction {
                                         address,
                                         state,
                                         attributes: ContractAttributes::Update,
+                                        extracted_balances,
                                     })
                                 }
                             }

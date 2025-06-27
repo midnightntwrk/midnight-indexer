@@ -67,6 +67,7 @@ pub struct ContractAction {
     pub address: RawContractAddress,
     pub state: RawContractState,
     pub attributes: ContractAttributes,
+    pub extracted_balances: Vec<ContractBalance>,
 }
 
 /// Attributes for a specific contract action.

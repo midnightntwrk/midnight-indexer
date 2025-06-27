@@ -32,7 +32,7 @@ impl From<indexer_common::domain::ContractAction> for ContractAction {
             state: contract_action.state,
             attributes: contract_action.attributes,
             zswap_state: Default::default(),
-            extracted_balances: Default::default(),
+            extracted_balances: contract_action.extracted_balances,
         }
     }
 }
