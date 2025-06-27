@@ -14,7 +14,7 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ContextExt, ResultExt,
+        ApiError, ApiResult, ContextExt, ResultExt,
         v1::{
             block::{Block, BlockOffset},
             resolve_height,
@@ -63,8 +63,7 @@ where
         &self,
         cx: &'a Context<'a>,
         offset: Option<BlockOffset>,
-    ) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<Block<S>>> + use<'a, S, B>>
-    {
+    ) -> Result<impl Stream<Item = ApiResult<Block<S>>> + use<'a, S, B>, ApiError> {
         self.blocks_calls.increment(1);
 
         let storage = cx.get_storage::<S>();
@@ -78,7 +77,11 @@ where
 
             let blocks = storage.get_blocks(height, BATCH_SIZE);
             let mut blocks = pin!(blocks);
-            while let Some(block) = blocks.try_next().await.internal("get next block")? {
+            while let Some(block) = blocks
+                .try_next()
+                .await
+                .map_err_into_server_error(|| "get next block")?
+            {
                 assert_eq!(block.height, height);
                 height += 1;
 
@@ -90,7 +93,7 @@ where
             while block_indexed_stream
                 .try_next()
                 .await
-                .internal("get next BlockIndexed event")?
+                .map_err_into_server_error(|| "get next BlockIndexed event")?
                 .is_some()
             {
                 debug!(height; "streaming next blocks");
@@ -98,7 +101,11 @@ where
                 let blocks = storage.get_blocks(height, BATCH_SIZE);
                 let mut blocks = pin!(blocks);
 
-                while let Some(block) = blocks.try_next().await.internal("get next block")? {
+                while let Some(block) = blocks
+                    .try_next()
+                    .await
+                    .map_err_into_server_error(|| "get next block")?
+                {
                     assert_eq!(block.height, height);
                     height += 1;
 

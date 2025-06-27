@@ -1,7 +1,7 @@
 use crate::{
-    domain::{self, AsBytesExt, HexEncoded, storage::Storage},
+    domain::{self, storage::Storage},
     infra::api::{
-        ContextExt, OptionExt, ResultExt,
+        ApiError, ApiResult, AsBytesExt, ContextExt, HexEncoded, OptionExt, ResultExt,
         v1::{block::Block, contract_action::ContractAction, unshielded::UnshieldedUtxo},
     },
 };
@@ -53,35 +53,42 @@ where
     _s: PhantomData<S>,
 }
 
+// Needed to derive `Interface` for `ContractAction`. Weird!
+impl<S> From<Result<Transaction<S>, ApiError>> for Transaction<S>
+where
+    S: Storage,
+{
+    fn from(_value: Result<Transaction<S>, ApiError>) -> Self {
+        unimplemented!()
+    }
+}
+
 #[ComplexObject]
 impl<S> Transaction<S>
 where
     S: Storage,
 {
     /// The block for this transaction.
-    async fn block(&self, cx: &Context<'_>) -> async_graphql::Result<Block<S>> {
+    async fn block(&self, cx: &Context<'_>) -> ApiResult<Block<S>> {
         let block = cx
             .get_storage::<S>()
             .get_block_by_hash(self.block_hash)
-            .await?
-            .internal(format!(
-                "no block for tx {:?} with block hash {:?}",
-                self.hash, self.block_hash
-            ))?;
+            .await
+            .map_err_into_server_error(|| format!("get block by hash {}", self.block_hash))?
+            .ok_or_server_error(|| format!("block with hash {} not found", self.block_hash))?;
 
         Ok(block.into())
     }
 
     /// The contract actions.
-    async fn contract_actions(
-        &self,
-        cx: &Context<'_>,
-    ) -> async_graphql::Result<Vec<ContractAction<S>>> {
+    async fn contract_actions(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractAction<S>>> {
         let contract_actions = cx
             .get_storage::<S>()
             .get_contract_actions_by_transaction_id(self.id)
             .await
-            .internal("cannot get contract actions by transactions id")?;
+            .map_err_into_server_error(|| {
+                format!("cannot get contract actions by transaction ID {}", self.id)
+            })?;
 
         Ok(contract_actions.into_iter().map(Into::into).collect())
     }
@@ -90,14 +97,19 @@ where
     async fn unshielded_created_outputs(
         &self,
         cx: &Context<'_>,
-    ) -> async_graphql::Result<Vec<UnshieldedUtxo<S>>> {
+    ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
         let storage = cx.get_storage::<S>();
         let network_id = cx.get_network_id();
 
         let utxos = storage
             .get_unshielded_utxos_created_by_transaction(self.id)
             .await
-            .internal("cannot get unshielded UTXOs created by transaction")?;
+            .map_err_into_server_error(|| {
+                format!(
+                    "cannot get unshielded UTXOs created by transaction with ID {}",
+                    self.id
+                )
+            })?;
 
         Ok(utxos
             .into_iter()
@@ -109,14 +121,19 @@ where
     async fn unshielded_spent_outputs(
         &self,
         cx: &Context<'_>,
-    ) -> async_graphql::Result<Vec<UnshieldedUtxo<S>>> {
+    ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
         let storage = cx.get_storage::<S>();
         let network_id = cx.get_network_id();
 
         let utxos = storage
             .get_unshielded_utxos_spent_by_transaction(self.id)
             .await
-            .internal("cannot get unshielded UTXOs spent by transaction")?;
+            .map_err_into_server_error(|| {
+                format!(
+                    "cannot get unshielded UTXOs spent by transaction with ID {}",
+                    self.id
+                )
+            })?;
 
         Ok(utxos
             .into_iter()

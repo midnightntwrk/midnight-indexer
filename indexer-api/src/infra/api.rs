@@ -14,8 +14,7 @@
 pub mod v1;
 
 use crate::domain::{Api, LedgerStateCache, storage::Storage};
-use anyhow::Context as _;
-use async_graphql::Context;
+use async_graphql::{Context, scalar};
 use axum::{
     Router,
     body::Body,
@@ -24,14 +23,20 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
+use const_hex::FromHexError;
+use derive_more::{Debug, Display};
 use fastrace_axum::FastraceLayer;
-use indexer_common::domain::{LedgerStateStorage, NetworkId, Subscriber};
+use indexer_common::{
+    domain::{LedgerStateStorage, NetworkId, Subscriber},
+    error::StdErrorExt as _,
+};
 use log::{error, info, warn};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
+    any::type_name,
     convert::Infallible,
     error::Error as StdError,
-    fmt::Display,
+    fmt::{self, Display},
     io,
     net::IpAddr,
     sync::{
@@ -222,6 +227,73 @@ async fn shutdown_signal() {
         .await;
 }
 
+/// Wrapper around hex-encoded bytes.
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[debug("{_0}")]
+pub struct HexEncoded(String);
+
+scalar!(HexEncoded);
+
+impl HexEncoded {
+    /// Hex-decode this [HexEncoded] into some type that can be made from bytes.
+    pub fn hex_decode<T>(&self) -> Result<T, HexDecodeError>
+    where
+        T: TryFrom<Vec<u8>>,
+    {
+        let bytes = const_hex::decode(&self.0)?;
+        let decoded = bytes
+            .try_into()
+            .map_err(|_| HexDecodeError::Convert(type_name::<T>()))?;
+        Ok(decoded)
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum HexDecodeError {
+    #[error("cannot hex-decode")]
+    Decode(#[from] FromHexError),
+
+    #[error("cannot convert to {0}")]
+    Convert(&'static str),
+}
+
+// Needed to derive `Interface` for `ContractAction`. Weird!
+impl From<&HexEncoded> for HexEncoded {
+    fn from(value: &HexEncoded) -> Self {
+        value.to_owned()
+    }
+}
+
+impl TryFrom<String> for HexEncoded {
+    type Error = FromHexError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        const_hex::decode(&s)?;
+        Ok(Self(s))
+    }
+}
+
+impl TryFrom<&str> for HexEncoded {
+    type Error = FromHexError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        const_hex::decode(s)?;
+        Ok(Self(s.to_owned()))
+    }
+}
+
+pub trait AsBytesExt
+where
+    Self: AsRef<[u8]>,
+{
+    /// Hex-encode these bytes.
+    fn hex_encode(&self) -> HexEncoded {
+        HexEncoded(const_hex::encode(self.as_ref()))
+    }
+}
+
+impl<T> AsBytesExt for T where T: AsRef<[u8]> {}
+
 trait ContextExt {
     fn get_network_id(&self) -> NetworkId;
 
@@ -275,46 +347,80 @@ impl ContextExt for Context<'_> {
     }
 }
 
-trait ResultExt<T, E>
-where
-    E: StdError + Send + Sync + 'static,
-{
-    /// In case of an `Err`, log an error with the given context and return just "Internal Error"
-    /// without further details.
-    fn internal<C>(self, context: C) -> async_graphql::Result<T>
+trait ResultExt<T> {
+    fn map_err_into_client_error<S>(self, message: impl Fn() -> S) -> ApiResult<T>
     where
-        C: Display + Send + Sync + 'static;
+        S: ToString;
+
+    fn map_err_into_server_error<S>(self, message: impl Fn() -> S) -> ApiResult<T>
+    where
+        S: ToString;
 }
 
-impl<T, E> ResultExt<T, E> for Result<T, E>
+impl<T, E> ResultExt<T> for Result<T, E>
 where
     E: StdError + Send + Sync + 'static,
 {
-    fn internal<C>(self, context: C) -> async_graphql::Result<T>
+    fn map_err_into_client_error<S>(self, message: impl Fn() -> S) -> ApiResult<T>
     where
-        C: Display + Send + Sync + 'static,
+        S: ToString,
     {
-        self.context(context)
-            .inspect_err(|error| error!(error = format!("{error:#}"); "API error"))
-            .map_err(|_| async_graphql::Error::new("Internal Error"))
+        self.map_err(|error| {
+            ApiError::Client(InnerApiError(message().to_string(), Some(Arc::new(error))))
+        })
+    }
+
+    fn map_err_into_server_error<S>(self, message: impl Fn() -> S) -> ApiResult<T>
+    where
+        S: ToString,
+    {
+        self.map_err(|error| {
+            ApiError::Server(InnerApiError(message().to_string(), Some(Arc::new(error))))
+        })
     }
 }
 
 trait OptionExt<T> {
-    /// In case of `None`, log an error with the given context and return just "Internal Error"
-    /// without further details.
-    fn internal<C>(self, context: C) -> async_graphql::Result<T>
+    fn ok_or_server_error<S>(self, message: impl Fn() -> S) -> Result<T, ApiError>
     where
-        C: Display + Send + Sync + 'static;
+        S: ToString;
 }
 
 impl<T> OptionExt<T> for Option<T> {
-    fn internal<C>(self, context: C) -> async_graphql::Result<T>
+    fn ok_or_server_error<S>(self, message: impl Fn() -> S) -> Result<T, ApiError>
     where
-        C: Display + Send + Sync + 'static,
+        S: ToString,
     {
-        self.context(context)
-            .inspect_err(|error| error!(error = format!("{error:#}"); "API error"))
-            .map_err(|_| async_graphql::Error::new("Internal Error"))
+        self.ok_or_else(|| ApiError::Server(InnerApiError(message().to_string(), None)))
     }
 }
+
+type ApiResult<T> = Result<T, ApiError>;
+
+/// The error type all API handlers must return.
+#[derive(Debug, Clone)]
+enum ApiError {
+    Client(InnerApiError),
+    Server(InnerApiError),
+}
+
+/// For client errors, write the full error chain and for server errors, log the full error chain
+/// and write "Internal Server Error".
+impl Display for ApiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ApiError::Client(error) => write!(f, "{}", error.as_chain()),
+
+            ApiError::Server(error) => {
+                error!(error = error.as_chain(); "Internal Server Error");
+                write!(f, "Internal Server Error")
+            }
+        }
+    }
+}
+
+impl StdError for ApiError {}
+
+#[derive(Debug, Clone, Error)]
+#[error("{0}")]
+struct InnerApiError(String, #[source] Option<Arc<dyn StdError + Send + Sync>>);

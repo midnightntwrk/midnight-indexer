@@ -1,7 +1,7 @@
 use crate::{
-    domain::{self, AsBytesExt, HexEncoded, storage::Storage},
+    domain::{self, storage::Storage},
     infra::api::{
-        ContextExt, ResultExt,
+        ApiResult, AsBytesExt, ContextExt, HexEncoded, OptionExt, ResultExt,
         v1::{
             block::BlockOffset,
             transaction::{Transaction, TransactionOffset},
@@ -11,7 +11,7 @@ use crate::{
 };
 use async_graphql::{ComplexObject, Context, Interface, OneofObject, SimpleObject};
 use derive_more::Debug;
-use indexer_common::{domain::ByteVec, error::NotFoundError};
+use indexer_common::domain::ByteVec;
 use std::marker::PhantomData;
 
 /// A contract action.
@@ -106,21 +106,23 @@ pub struct ContractDeploy<S: Storage> {
 
 #[ComplexObject]
 impl<S: Storage> ContractDeploy<S> {
-    async fn transaction(&self, cx: &Context<'_>) -> async_graphql::Result<Transaction<S>> {
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
     }
 
     /// Unshielded token balances held by this contract.
     /// According to the architecture, deployed contracts must have zero balance.
-    async fn unshielded_balances(
-        &self,
-        cx: &Context<'_>,
-    ) -> async_graphql::Result<Vec<ContractBalance>> {
+    async fn unshielded_balances(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractBalance>> {
         let storage = cx.get_storage::<S>();
         let balances = storage
             .get_unshielded_balances_by_action_id(self.contract_action_id)
             .await
-            .internal("get contract balances by action id")?;
+            .map_err_into_server_error(|| {
+                format!(
+                    "get contract balances by action id {}",
+                    self.contract_action_id
+                )
+            })?;
 
         Ok(balances.into_iter().map(Into::into).collect())
     }
@@ -153,16 +155,18 @@ pub struct ContractCall<S: Storage> {
 
 #[ComplexObject]
 impl<S: Storage> ContractCall<S> {
-    async fn transaction(&self, cx: &Context<'_>) -> async_graphql::Result<Transaction<S>> {
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
     }
 
-    async fn deploy(&self, cx: &Context<'_>) -> async_graphql::Result<ContractDeploy<S>> {
+    async fn deploy(&self, cx: &Context<'_>) -> ApiResult<ContractDeploy<S>> {
         let action = cx
             .get_storage::<S>()
             .get_contract_deploy_by_address(&self.raw_address)
             .await
-            .internal("cannot get contract deploy by address")?
+            .map_err_into_server_error(|| {
+                format!("get contract deploy by address {}", self.raw_address)
+            })?
             .expect("contract call has contract deploy");
 
         let deploy = match ContractAction::from(action) {
@@ -174,15 +178,17 @@ impl<S: Storage> ContractCall<S> {
     }
 
     /// Unshielded token balances held by this contract.
-    async fn unshielded_balances(
-        &self,
-        cx: &Context<'_>,
-    ) -> async_graphql::Result<Vec<ContractBalance>> {
+    async fn unshielded_balances(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractBalance>> {
         let storage = cx.get_storage::<S>();
         let balances = storage
             .get_unshielded_balances_by_action_id(self.contract_action_id)
             .await
-            .internal("get contract balances by action id")?;
+            .map_err_into_server_error(|| {
+                format!(
+                    "get contract balances by action id {}",
+                    self.contract_action_id
+                )
+            })?;
 
         Ok(balances.into_iter().map(Into::into).collect())
     }
@@ -210,20 +216,22 @@ pub struct ContractUpdate<S: Storage> {
 
 #[ComplexObject]
 impl<S: Storage> ContractUpdate<S> {
-    async fn transaction(&self, cx: &Context<'_>) -> async_graphql::Result<Transaction<S>> {
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
     }
 
     /// Unshielded token balances held by this contract after the update.
-    async fn unshielded_balances(
-        &self,
-        cx: &Context<'_>,
-    ) -> async_graphql::Result<Vec<ContractBalance>> {
+    async fn unshielded_balances(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractBalance>> {
         let storage = cx.get_storage::<S>();
         let balances = storage
             .get_unshielded_balances_by_action_id(self.contract_action_id)
             .await
-            .internal("get contract balances by action id")?;
+            .map_err_into_server_error(|| {
+                format!(
+                    "get contract balances by action id {}",
+                    self.contract_action_id
+                )
+            })?;
 
         Ok(balances.into_iter().map(Into::into).collect())
     }
@@ -239,10 +247,7 @@ pub enum ContractActionOffset {
     TransactionOffset(TransactionOffset),
 }
 
-async fn get_transaction_by_id<S>(
-    id: u64,
-    cx: &Context<'_>,
-) -> async_graphql::Result<Transaction<S>>
+async fn get_transaction_by_id<S>(id: u64, cx: &Context<'_>) -> ApiResult<Transaction<S>>
 where
     S: Storage,
 {
@@ -250,9 +255,8 @@ where
         .get_storage::<S>()
         .get_transaction_by_id(id)
         .await
-        .internal("cannot get transaction by ID")?
-        .ok_or_else(|| NotFoundError(format!("transaction with ID {id}")))
-        .internal("cannot get transaction by ID")?;
+        .map_err_into_server_error(|| format!("get transaction by ID {id})"))?
+        .ok_or_server_error(|| format!("transaction with ID {id} not found"))?;
 
     Ok(transaction.into())
 }

@@ -1,6 +1,8 @@
 use crate::{
-    domain::{self, AsBytesExt, HexEncoded, storage::Storage},
-    infra::api::{ContextExt, ResultExt, v1::transaction::Transaction},
+    domain::{self, storage::Storage},
+    infra::api::{
+        ApiResult, AsBytesExt, ContextExt, HexEncoded, ResultExt, v1::transaction::Transaction,
+    },
 };
 use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject};
 use derive_more::Debug;
@@ -45,23 +47,23 @@ where
     S: Storage,
 {
     /// The parent of this block.
-    async fn parent(&self, cx: &Context<'_>) -> async_graphql::Result<Option<Block<S>>> {
+    async fn parent(&self, cx: &Context<'_>) -> ApiResult<Option<Block<S>>> {
         let block = cx
             .get_storage::<S>()
             .get_block_by_hash(self.parent_hash)
             .await
-            .internal("cannot get block by hash")?;
+            .map_err_into_server_error(|| format!("get block by hash {}", self.parent_hash))?;
 
         Ok(block.map(Into::into))
     }
 
     /// The transactions within this block.
-    async fn transactions(&self, cx: &Context<'_>) -> async_graphql::Result<Vec<Transaction<S>>> {
+    async fn transactions(&self, cx: &Context<'_>) -> ApiResult<Vec<Transaction<S>>> {
         let transactions = cx
             .get_storage::<S>()
             .get_transactions_by_block_id(self.id)
             .await
-            .internal("cannot get transactions by block id")?;
+            .map_err_into_server_error(|| format!("get transactions by block id {}", self.id))?;
 
         Ok(transactions.into_iter().map(Into::into).collect())
     }

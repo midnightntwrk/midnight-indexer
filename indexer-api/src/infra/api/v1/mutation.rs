@@ -12,10 +12,9 @@
 // limitations under the License.
 
 use crate::{
-    domain::{AsBytesExt, HexEncoded, PROTOCOL_VERSION, ViewingKey, storage::Storage},
-    infra::api::{ContextExt, ResultExt, v1::decode_session_id},
+    domain::{PROTOCOL_VERSION, ViewingKey, storage::Storage},
+    infra::api::{ApiResult, AsBytesExt, ContextExt, HexEncoded, ResultExt, v1::decode_session_id},
 };
-use anyhow::Context as _;
 use async_graphql::{Context, Object, scalar};
 use fastrace::trace;
 use log::debug;
@@ -49,21 +48,17 @@ where
 {
     /// Connect the wallet with the given viewing key and return a session ID.
     #[trace]
-    async fn connect(
-        &self,
-        cx: &Context<'_>,
-        viewing_key: ViewingKey,
-    ) -> async_graphql::Result<HexEncoded> {
+    async fn connect(&self, cx: &Context<'_>, viewing_key: ViewingKey) -> ApiResult<HexEncoded> {
         self.connect_calls.increment(1);
 
         let viewing_key = viewing_key
             .try_into_domain(cx.get_network_id(), PROTOCOL_VERSION)
-            .context("decode viewing key")?;
+            .map_err_into_client_error(|| "invalid viewing key")?;
 
         cx.get_storage::<S>()
             .connect_wallet(&viewing_key)
             .await
-            .internal("connect wallet")?;
+            .map_err_into_server_error(|| "connect wallet")?;
 
         let session_id = viewing_key.to_session_id();
         debug!(session_id:%; "wallet connected");
@@ -73,19 +68,18 @@ where
 
     /// Disconnect the wallet with the given session ID.
     #[trace(properties = { "session_id": "{session_id}" })]
-    async fn disconnect(
-        &self,
-        cx: &Context<'_>,
-        session_id: HexEncoded,
-    ) -> async_graphql::Result<Unit> {
+    async fn disconnect(&self, cx: &Context<'_>, session_id: HexEncoded) -> ApiResult<Unit> {
         self.disconnect_calls.increment(1);
 
-        let session_id = decode_session_id(session_id)?;
+        let session_id =
+            decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
 
         cx.get_storage::<S>()
             .disconnect_wallet(session_id)
             .await
-            .internal("disconnect wallet")?;
+            .map_err_into_server_error(|| {
+                format!("disconnect wallet with session ID {session_id}")
+            })?;
 
         debug!(session_id:%; "wallet disconnected");
 

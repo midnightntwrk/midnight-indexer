@@ -12,13 +12,12 @@
 // limitations under the License.
 
 use crate::{
-    domain::{HexEncoded, storage::Storage},
+    domain::storage::Storage,
     infra::api::{
-        ContextExt, ResultExt,
+        ApiError, ApiResult, ContextExt, HexEncoded, ResultExt,
         v1::{block::BlockOffset, contract_action::ContractAction, resolve_height},
     },
 };
-use anyhow::Context as AnyhowContext;
 use async_graphql::{Context, Subscription, async_stream::try_stream};
 use fastrace::trace;
 use futures::{Stream, TryStreamExt};
@@ -62,16 +61,17 @@ where
         cx: &'a Context<'a>,
         address: HexEncoded,
         offset: Option<BlockOffset>,
-    ) -> async_graphql::Result<
-        impl Stream<Item = async_graphql::Result<ContractAction<S>>> + use<'a, S, B>,
-    > {
+    ) -> Result<impl Stream<Item = ApiResult<ContractAction<S>>> + use<'a, S, B>, ApiError> {
         self.contract_actions_calls.increment(1);
+
+        let address = address
+            .hex_decode()
+            .map_err_into_client_error(|| "invalid address")?;
 
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
-        let address = address.hex_decode().context("hex-decode address")?;
         let height = resolve_height(offset, storage).await?;
         let mut next_contract_action_id = 0;
 
@@ -88,7 +88,7 @@ where
             while let Some(contract_action) = contract_actions
                 .try_next()
                 .await
-                .internal("get next contract action")?
+                .map_err_into_server_error(|| "get next contract action")?
             {
                 next_contract_action_id = contract_action.id + 1;
 
@@ -100,7 +100,7 @@ where
             while let Some(BlockIndexed { height, .. }) = block_indexed_stream
                 .try_next()
                 .await
-                .internal("get next BlockIndexed event")?
+                .map_err_into_server_error(|| "get next BlockIndexed event")?
             {
                 debug!(height; "streaming next contract actions");
 
@@ -115,7 +115,7 @@ where
                 while let Some(contract_action) = contract_actions
                     .try_next()
                     .await
-                    .internal("get next contract action")?
+                    .map_err_into_server_error(|| "get next contract action")?
                 {
                     next_contract_action_id = contract_action.id + 1;
 
