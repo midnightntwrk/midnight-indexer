@@ -17,7 +17,7 @@ use crate::{
         ContextExt, ResultExt,
         v1::{
             self, Block, BlockOffset, ContractAction, ContractActionOffset, Transaction,
-            TransactionOffset, UnshieldedAddress, UnshieldedAddressResultExt, UnshieldedOffset,
+            TransactionOffset, UnshieldedAddress, UnshieldedOffset,
         },
     },
 };
@@ -103,11 +103,10 @@ where
         let storage = cx.get_storage::<S>();
 
         if let Some(address) = address {
-            let network_id = cx.get_network_id();
-
             let address = address
-                .try_into_domain(network_id)
-                .address_validation("convert address into domain address")?;
+                .try_into_domain(cx.get_network_id())
+                .context("decode address")?;
+
             let txs = storage
                 .get_transactions_involving_unshielded(&address, 0)
                 .await
@@ -225,12 +224,14 @@ where
         address: UnshieldedAddress,
         offset: Option<UnshieldedOffset>,
     ) -> async_graphql::Result<Vec<v1::UnshieldedUtxo<S>>> {
-        let storage = cx.get_storage::<S>();
         let network_id = cx.get_network_id();
 
         let address = address
             .try_into_domain(network_id)
-            .address_validation("convert address into domain address")?;
+            .context("decode address")?;
+
+        let storage = cx.get_storage::<S>();
+
         let utxos = match offset {
             Some(UnshieldedOffset::BlockOffset(BlockOffset::Height(start))) => storage
                 .get_unshielded_utxos_by_address_from_height(&address, start)

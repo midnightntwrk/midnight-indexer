@@ -15,12 +15,10 @@ use crate::{
     domain::storage::Storage,
     infra::api::{
         ContextExt, ResultExt,
-        v1::{
-            UnshieldedAddress, UnshieldedAddressResultExt, UnshieldedProgress, UnshieldedUtxo,
-            UnshieldedUtxoEvent,
-        },
+        v1::{UnshieldedAddress, UnshieldedProgress, UnshieldedUtxo, UnshieldedUtxoEvent},
     },
 };
+use anyhow::Context as _;
 use async_graphql::{Context, Subscription, async_stream::try_stream};
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -81,10 +79,9 @@ where
     ) -> async_graphql::Result<
         impl Stream<Item = async_graphql::Result<UnshieldedUtxoEvent<S>>> + use<'a, S, B>,
     > {
-        let network_id = cx.get_network_id();
         let address = address
-            .try_into_domain(network_id)
-            .address_validation("convert address into domain address")?;
+            .try_into_domain(cx.get_network_id())
+            .context("parse address")?;
 
         // Use 0 as default to include all transactions from genesis.
         // Since transaction IDs start from 1 (BIGSERIAL/AUTOINCREMENT), using >= 0
