@@ -16,7 +16,6 @@ pub mod storage;
 mod api;
 mod block;
 mod contract_action;
-mod contract_balance;
 mod ledger_state;
 mod transaction;
 mod unshielded;
@@ -25,7 +24,6 @@ mod viewing_key;
 pub use api::*;
 pub use block::*;
 pub use contract_action::*;
-pub use contract_balance::*;
 pub use ledger_state::*;
 pub use transaction::*;
 pub use unshielded::*;
@@ -102,6 +100,7 @@ pub trait AsBytesExt
 where
     Self: AsRef<[u8]>,
 {
+    /// Hex-encode these bytes.
     fn hex_encode(&self) -> HexEncoded {
         HexEncoded(const_hex::encode(self.as_ref()))
     }

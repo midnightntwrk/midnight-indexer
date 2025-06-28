@@ -15,7 +15,10 @@ use crate::{
     domain::storage::Storage,
     infra::api::{
         ContextExt, ResultExt,
-        v1::{Block, BlockOffset, resolve_height},
+        v1::{
+            block::{Block, BlockOffset},
+            resolve_height,
+        },
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};

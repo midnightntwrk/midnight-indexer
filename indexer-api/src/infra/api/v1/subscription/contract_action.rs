@@ -15,7 +15,7 @@ use crate::{
     domain::{HexEncoded, storage::Storage},
     infra::api::{
         ContextExt, ResultExt,
-        v1::{BlockOffset, ContractAction, resolve_height},
+        v1::{block::BlockOffset, contract_action::ContractAction, resolve_height},
     },
 };
 use anyhow::Context as AnyhowContext;
