@@ -14,13 +14,12 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ContextExt, ResultExt,
+        ApiError, ApiResult, ContextExt, ResultExt,
         v1::unshielded::{
             UnshieldedAddress, UnshieldedProgress, UnshieldedUtxo, UnshieldedUtxoEvent,
         },
     },
 };
-use anyhow::Context as _;
 use async_graphql::{Context, Subscription, async_stream::try_stream};
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -78,12 +77,11 @@ where
         cx: &'a Context<'a>,
         address: UnshieldedAddress,
         transaction_id: Option<u64>,
-    ) -> async_graphql::Result<
-        impl Stream<Item = async_graphql::Result<UnshieldedUtxoEvent<S>>> + use<'a, S, B>,
-    > {
+    ) -> Result<impl Stream<Item = ApiResult<UnshieldedUtxoEvent<S>>> + use<'a, S, B>, ApiError>
+    {
         let address = address
             .try_into_domain(cx.get_network_id())
-            .context("parse address")?;
+            .map_err_into_client_error(|| "invalid address")?;
 
         // Use 0 as default to include all transactions from genesis.
         // Since transaction IDs start from 1 (BIGSERIAL/AUTOINCREMENT), using >= 0
@@ -104,9 +102,7 @@ async fn utxo_updates<'a, S, B>(
     cx: &'a Context<'a>,
     address: RawUnshieldedAddress,
     from_transaction_id: u64,
-) -> async_graphql::Result<
-    impl Stream<Item = async_graphql::Result<UnshieldedUtxoEvent<S>>> + use<'a, S, B>,
->
+) -> ApiResult<impl Stream<Item = ApiResult<UnshieldedUtxoEvent<S>>> + use<'a, S, B>>
 where
     S: Storage,
     B: Subscriber,
@@ -130,7 +126,7 @@ where
         let historical_transactions = storage
             .get_transactions_involving_unshielded(&address, from_transaction_id)
             .await
-            .internal("fetch historical transactions for address")?;
+            .map_err_into_server_error(|| "fetch historical transactions for address")?;
 
         let mut processed_transaction_ids = HashSet::new();
 
@@ -146,19 +142,19 @@ where
             let created = storage
                 .get_unshielded_utxos_created_in_transaction_for_address(&address, transaction.id)
                 .await
-                .internal("fetch created UTXOs for historical transaction")?;
+                .map_err_into_server_error(|| "fetch created UTXOs for historical transaction")?;
 
             let spent = storage
                 .get_unshielded_utxos_spent_in_transaction_for_address(&address, transaction.id)
                 .await
-                .internal("fetch spent UTXOs for historical transaction")?;
+                .map_err_into_server_error(|| "fetch spent UTXOs for historical transaction")?;
 
             // Only emit events for transactions that actually have UTXOs for this address.
             if !created.is_empty() || !spent.is_empty() {
                 let (_, highest_transaction_id) = storage
                     .get_highest_indices_for_address(&address)
                     .await
-                    .internal("fetch highest indices for address")?;
+                    .map_err_into_server_error(|| "fetch highest indices for address")?;
                 let highest_transaction_id = highest_transaction_id.unwrap_or(0);
 
                 let progress = UnshieldedProgress {
@@ -187,7 +183,7 @@ where
         while let Some(UnshieldedUtxoIndexed { transaction_id, .. }) = utxo_indexed_events
             .try_next()
             .await
-            .internal("get next UnshieldedUtxoIndexed event")?
+            .map_err_into_server_error(|| "get next UnshieldedUtxoIndexed event")?
         {
             // Skip transactions we already processed in the historical phase.
             if processed_transaction_ids.contains(&transaction_id) {
@@ -203,7 +199,7 @@ where
             let transaction = storage
                 .get_transaction_by_id(transaction_id)
                 .await
-                .internal("fetch transaction for live subscription event")?;
+                .map_err_into_server_error(|| "fetch transaction for live subscription event")?;
 
             let transaction = match transaction {
                 Some(transaction) => transaction,
@@ -217,19 +213,19 @@ where
             let created = storage
                 .get_unshielded_utxos_created_in_transaction_for_address(&address, transaction_id)
                 .await
-                .internal("fetch created UTXOs for live event")?;
+                .map_err_into_server_error(|| "fetch created UTXOs for live event")?;
 
             let spent = storage
                 .get_unshielded_utxos_spent_in_transaction_for_address(&address, transaction_id)
                 .await
-                .internal("fetch spent UTXOs for live event")?;
+                .map_err_into_server_error(|| "fetch spent UTXOs for live event")?;
 
             // Only emit events for transactions that actually have UTXOs for this address.
             if !created.is_empty() || !spent.is_empty() {
                 let (_, highest_transaction_id) = storage
                     .get_highest_indices_for_address(&address)
                     .await
-                    .internal("fetch highest indices for address")?;
+                    .map_err_into_server_error(|| "fetch highest indices for address")?;
                 let highest_transaction_id = highest_transaction_id.unwrap_or(0);
 
                 let progress = UnshieldedProgress {
@@ -262,9 +258,7 @@ where
 async fn progress_updates<'a, S>(
     cx: &'a Context<'a>,
     address: RawUnshieldedAddress,
-) -> async_graphql::Result<
-    impl Stream<Item = async_graphql::Result<UnshieldedUtxoEvent<S>>> + use<'a, S>,
->
+) -> ApiResult<impl Stream<Item = ApiResult<UnshieldedUtxoEvent<S>>> + use<'a, S>>
 where
     S: Storage,
 {
@@ -279,7 +273,7 @@ where
 async fn progress_update<S>(
     address: RawUnshieldedAddress,
     storage: &S,
-) -> async_graphql::Result<UnshieldedUtxoEvent<S>>
+) -> ApiResult<UnshieldedUtxoEvent<S>>
 where
     S: Storage,
 {
@@ -287,7 +281,7 @@ where
     let (_, highest_transaction_id) = storage
         .get_highest_indices_for_address(&address)
         .await
-        .internal("fetch highest indices for address")?;
+        .map_err_into_server_error(|| "fetch highest indices for address")?;
 
     let highest_transaction_id = highest_transaction_id.unwrap_or(0);
     let current_transaction_id = highest_transaction_id; // For progress-only events, current = highest.

@@ -12,7 +12,6 @@
 // limitations under the License.
 
 use std::error::Error as StdError;
-use thiserror::Error;
 
 /// Alias for `async` and `anyhow` friendly dynamic error
 /// `Box<dyn std::error::Error + Send + Sync + 'static>`.
@@ -44,10 +43,6 @@ where
 }
 
 impl<T> StdErrorExt for T where T: StdError {}
-
-#[derive(Debug, Error)]
-#[error("{0} not found")]
-pub struct NotFoundError(pub String);
 
 #[cfg(test)]
 mod tests {

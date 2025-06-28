@@ -13,10 +13,13 @@
 
 //! GraphQL types for contract unshielded token balances.
 use crate::{
-    domain::{self, AsBytesExt, HexEncoded, storage::Storage},
-    infra::api::v1::{
-        block::BlockOffset,
-        transaction::{Transaction, TransactionOffset},
+    domain::{self, storage::Storage},
+    infra::api::{
+        ApiResult, AsBytesExt, HexEncoded,
+        v1::{
+            block::BlockOffset,
+            transaction::{Transaction, TransactionOffset},
+        },
     },
 };
 use async_graphql::{ComplexObject, OneofObject, SimpleObject, scalar};
@@ -64,7 +67,7 @@ pub struct UnshieldedUtxo<S: Storage> {
 #[ComplexObject]
 impl<S: Storage> UnshieldedUtxo<S> {
     /// Transaction that created this UTXO
-    async fn created_at_transaction(&self) -> async_graphql::Result<Option<Transaction<S>>> {
+    async fn created_at_transaction(&self) -> ApiResult<Option<Transaction<S>>> {
         //can't change the return type to be non-optional because the node ut data is mocked and
         // the test fails
         Ok(self
@@ -74,7 +77,7 @@ impl<S: Storage> UnshieldedUtxo<S> {
     }
 
     /// Transaction that spent this UTXO, if spent
-    async fn spent_at_transaction(&self) -> async_graphql::Result<Option<Transaction<S>>> {
+    async fn spent_at_transaction(&self) -> ApiResult<Option<Transaction<S>>> {
         Ok(self
             .spent_at_transaction_data
             .clone()
