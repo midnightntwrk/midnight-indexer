@@ -221,7 +221,7 @@ pub struct ContractBalance {
     /// Hex-encoded token type identifier.
     pub token_type: HexEncoded,
 
-    /// Balance amount as string to larger integer values (up to 16 bytes).
+    /// Balance amount as string to support larger integer values (up to 16 bytes).
     pub amount: String,
 }
 

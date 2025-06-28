@@ -39,7 +39,6 @@ use indexer_common::domain::{
     ByteArrayLenError, LedgerStateStorage, NetworkId, NoopLedgerStateStorage, NoopSubscriber,
     SessionId, Subscriber,
 };
-use log::error;
 use std::sync::{Arc, atomic::AtomicBool};
 use thiserror::Error;
 

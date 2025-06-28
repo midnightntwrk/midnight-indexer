@@ -81,7 +81,7 @@ type ContractBalance {
 	"""
 	tokenType: HexEncoded!
 	"""
-	Balance amount as string to larger integer values (up to 16 bytes).
+	Balance amount as string to support larger integer values (up to 16 bytes).
 	"""
 	amount: String!
 }
