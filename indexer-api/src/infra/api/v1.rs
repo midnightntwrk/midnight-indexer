@@ -132,7 +132,7 @@ async fn resolve_height(
                     .get_block_by_height(height)
                     .await
                     .internal("get block by height")?
-                    .with_context(|| format!("block with height {} not found", height))?;
+                    .with_context(|| format!("block with height {height} not found"))?;
 
                 Ok(height)
             }
