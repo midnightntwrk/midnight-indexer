@@ -186,9 +186,9 @@ impl UnshieldedAddress {
     pub fn bech32m_encode(bytes: impl AsRef<[u8]>, network_id: NetworkId) -> Self {
         let hrp = match network_id {
             NetworkId::MainNet => HRP_UNSHIELDED_BASE.to_string(),
-            NetworkId::DevNet => format!("{}_dev", HRP_UNSHIELDED_BASE),
-            NetworkId::TestNet => format!("{}_test", HRP_UNSHIELDED_BASE),
-            NetworkId::Undeployed => format!("{}_undeployed", HRP_UNSHIELDED_BASE),
+            NetworkId::DevNet => format!("{HRP_UNSHIELDED_BASE}_dev"),
+            NetworkId::TestNet => format!("{HRP_UNSHIELDED_BASE}_test"),
+            NetworkId::Undeployed => format!("{HRP_UNSHIELDED_BASE}_undeployed"),
         };
         let hrp = Hrp::parse(&hrp).expect("unshielded address HRP can be parsed");
 

@@ -52,6 +52,18 @@ generate-indexer-api-schema:
 fix:
     cargo fix --allow-dirty --allow-staged --features {{feature}}
 
+lint-fix:
+    cargo clippy -p indexer-common       --no-deps --tests                        --fix --allow-dirty --allow-staged
+    cargo clippy -p indexer-common       --no-deps --tests --features {{feature}} --fix --allow-dirty --allow-staged
+    cargo clippy -p chain-indexer        --no-deps --tests                        --fix --allow-dirty --allow-staged
+    cargo clippy -p chain-indexer        --no-deps --tests --features {{feature}} --fix --allow-dirty --allow-staged
+    cargo clippy -p wallet-indexer       --no-deps --tests                        --fix --allow-dirty --allow-staged
+    cargo clippy -p wallet-indexer       --no-deps --tests --features {{feature}} --fix --allow-dirty --allow-staged
+    cargo clippy -p indexer-api          --no-deps --tests                        --fix --allow-dirty --allow-staged
+    cargo clippy -p indexer-api          --no-deps --tests --features {{feature}} --fix --allow-dirty --allow-staged
+    cargo clippy -p indexer-tests        --no-deps --tests --features {{feature}} --fix --allow-dirty --allow-staged
+    if [ "{{feature}}" = "standalone" ]; then cargo clippy -p indexer-standalone --no-deps --tests --features standalone --fix --allow-dirty --allow-staged; fi
+
 doc:
     RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +nightly-2025-04-16 doc -p indexer-common       --no-deps --all-features
     RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +nightly-2025-04-16 doc -p chain-indexer        --no-deps --features {{feature}}
