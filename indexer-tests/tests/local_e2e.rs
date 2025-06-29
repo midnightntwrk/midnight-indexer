@@ -338,7 +338,7 @@ fn spawn_child(
 
 async fn wait_for_api_ready(api_port: u16, timeout: Duration) -> anyhow::Result<()> {
     let client = reqwest::Client::new();
-    let ready_url = format!("http://localhost:{}/ready", api_port);
+    let ready_url = format!("http://localhost:{api_port}/ready");
 
     let start_time = Instant::now();
     while start_time.elapsed() < timeout {

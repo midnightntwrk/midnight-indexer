@@ -99,7 +99,7 @@ mod tests {
         assert!(!Path::new(db_path).exists());
 
         let pool = SqlitePool::new(Config {
-            cnn_url: format!("sqlite://{}", db_path),
+            cnn_url: format!("sqlite://{db_path}"),
         })
         .await;
 

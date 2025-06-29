@@ -43,14 +43,11 @@ async fn main() -> anyhow::Result<()> {
 
             let utxo_count = block
                 .transactions
-                .get(0)
+                .first()
                 .map(|t| t.created_unshielded_utxos.len())
                 .unwrap_or(0);
 
-            println!(
-                "*** UTXOs: {} (extraction requires full indexing pipeline) ***",
-                utxo_count
-            );
+            println!("*** UTXOs: {utxo_count} (extraction requires full indexing pipeline) ***");
         }
 
         for transaction in &block.transactions {
