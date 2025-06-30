@@ -872,7 +872,7 @@ async fn test_unshielded_utxo_subscription(
             println!("No events received within 400ms timeout");
         }
         Result::Ok(Err(e)) => {
-            println!("Error collecting events: {:?}", e);
+            println!("Error collecting events: {e:?}");
         }
         Err(_) => {
             println!("Timeout waiting for events - this is expected if no recent activity");
