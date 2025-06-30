@@ -25,29 +25,16 @@ use crate::{
 };
 use async_graphql::{Context, Object};
 use fastrace::trace;
-use metrics::{Counter, counter};
 use std::marker::PhantomData;
 
 /// GraphQL queries.
 pub struct Query<S> {
-    block_calls: Counter,
-    transactions_calls: Counter,
-    contract_action_calls: Counter,
     _s: PhantomData<S>,
 }
 
 impl<S> Default for Query<S> {
     fn default() -> Self {
-        let block_calls = counter!("indexer_api_calls_query_block");
-        let transactions_calls = counter!("indexer_api_calls_query_transactions");
-        let contract_action_calls = counter!("indexer_api_calls_query_contract_action");
-
-        Self {
-            block_calls,
-            transactions_calls,
-            contract_action_calls,
-            _s: PhantomData,
-        }
+        Self { _s: PhantomData }
     }
 }
 
@@ -63,8 +50,6 @@ where
         cx: &Context<'_>,
         offset: Option<BlockOffset>,
     ) -> ApiResult<Option<Block<S>>> {
-        self.block_calls.increment(1);
-
         let storage = cx.get_storage::<S>();
 
         let block = match offset {
@@ -101,8 +86,6 @@ where
         offset: TransactionOffset,
         address: Option<UnshieldedAddress>,
     ) -> ApiResult<Vec<Transaction<S>>> {
-        self.transactions_calls.increment(1);
-
         let storage = cx.get_storage::<S>();
 
         if let Some(address) = address {
@@ -163,8 +146,6 @@ where
         address: HexEncoded,
         offset: Option<ContractActionOffset>,
     ) -> ApiResult<Option<ContractAction<S>>> {
-        self.contract_action_calls.increment(1);
-
         let storage = cx.get_storage::<S>();
 
         let address = address

@@ -23,24 +23,19 @@ use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};
 use log::{debug, warn};
-use metrics::{Counter, counter};
 use std::{num::NonZeroU32, pin::pin};
 
 // TODO: Make configurable!
 const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
 
 pub struct ContractActionSubscription<S, B> {
-    contract_actions_calls: Counter,
     _storage: std::marker::PhantomData<S>,
     _subscriber: std::marker::PhantomData<B>,
 }
 
 impl<S, B> Default for ContractActionSubscription<S, B> {
     fn default() -> Self {
-        let contract_actions_calls = counter!("indexer_api_calls_subscription_contract_actions");
-
         Self {
-            contract_actions_calls,
             _storage: std::marker::PhantomData,
             _subscriber: std::marker::PhantomData,
         }
@@ -62,8 +57,6 @@ where
         address: HexEncoded,
         offset: Option<BlockOffset>,
     ) -> Result<impl Stream<Item = ApiResult<ContractAction<S>>> + use<'a, S, B>, ApiError> {
-        self.contract_actions_calls.increment(1);
-
         let address = address
             .hex_decode()
             .map_err_into_client_error(|| "invalid address")?;

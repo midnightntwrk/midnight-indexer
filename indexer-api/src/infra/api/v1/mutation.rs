@@ -18,26 +18,16 @@ use crate::{
 use async_graphql::{Context, Object, scalar};
 use fastrace::trace;
 use log::debug;
-use metrics::{Counter, counter};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
 pub struct Mutation<S> {
-    connect_calls: Counter,
-    disconnect_calls: Counter,
     _s: PhantomData<S>,
 }
 
 impl<S> Default for Mutation<S> {
     fn default() -> Self {
-        let connect_calls = counter!("indexer_api_calls_mutation_connect");
-        let disconnect_calls = counter!("indexer_api_calls_mutation_disconnect");
-
-        Self {
-            connect_calls,
-            disconnect_calls,
-            _s: PhantomData,
-        }
+        Self { _s: PhantomData }
     }
 }
 
@@ -49,8 +39,6 @@ where
     /// Connect the wallet with the given viewing key and return a session ID.
     #[trace]
     async fn connect(&self, cx: &Context<'_>, viewing_key: ViewingKey) -> ApiResult<HexEncoded> {
-        self.connect_calls.increment(1);
-
         let viewing_key = viewing_key
             .try_into_domain(cx.get_network_id(), PROTOCOL_VERSION)
             .map_err_into_client_error(|| "invalid viewing key")?;
@@ -69,8 +57,6 @@ where
     /// Disconnect the wallet with the given session ID.
     #[trace(properties = { "session_id": "{session_id}" })]
     async fn disconnect(&self, cx: &Context<'_>, session_id: HexEncoded) -> ApiResult<Unit> {
-        self.disconnect_calls.increment(1);
-
         let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
 

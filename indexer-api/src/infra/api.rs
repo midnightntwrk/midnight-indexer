@@ -31,6 +31,7 @@ use indexer_common::{
     error::StdErrorExt as _,
 };
 use log::{error, info, warn};
+use metrics::{Gauge, gauge};
 use serde::{Deserialize, Serialize};
 use std::{
     any::type_name,
@@ -137,6 +138,18 @@ pub enum AxumApiError {
 
     #[error("cannot serve API")]
     Serve(#[source] io::Error),
+}
+
+struct Metrics {
+    wallets_connected: Gauge,
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self {
+            wallets_connected: gauge!("indexer_wallets_connected"),
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -309,7 +322,9 @@ trait ContextExt {
     where
         Z: LedgerStateStorage;
 
-    fn get_zswap_state_cache(&self) -> &LedgerStateCache;
+    fn get_ledger_state_cache(&self) -> &LedgerStateCache;
+
+    fn get_metrics(&self) -> &Metrics;
 }
 
 impl ContextExt for Context<'_> {
@@ -341,9 +356,14 @@ impl ContextExt for Context<'_> {
             .expect("ZswapStateStorage is stored in Context")
     }
 
-    fn get_zswap_state_cache(&self) -> &LedgerStateCache {
+    fn get_ledger_state_cache(&self) -> &LedgerStateCache {
         self.data::<LedgerStateCache>()
-            .expect("ZswapStateCache is stored in Context")
+            .expect("LedgerStateStorage is stored in Context")
+    }
+
+    fn get_metrics(&self) -> &Metrics {
+        self.data::<Metrics>()
+            .expect("Metrics is stored in Context")
     }
 }
 
