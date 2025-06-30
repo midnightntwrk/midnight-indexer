@@ -1,6 +1,6 @@
 use crate::{
-    domain::{self, AsBytesExt, HexEncoded, storage::Storage},
-    infra::api::v1::transaction::Transaction,
+    domain::{self, storage::Storage},
+    infra::api::{AsBytesExt, HexEncoded, v1::transaction::Transaction},
 };
 use async_graphql::{SimpleObject, Union};
 use derive_more::Debug;

@@ -22,15 +22,14 @@ pub mod wallet;
 
 use crate::{
     domain::{
-        HexDecodeError, HexEncoded, LedgerStateCache,
+        LedgerStateCache,
         storage::{NoopStorage, Storage},
     },
     infra::api::{
-        ResultExt,
+        ApiResult, HexDecodeError, HexEncoded, OptionExt, ResultExt,
         v1::{block::BlockOffset, mutation::Mutation, query::Query, subscription::Subscription},
     },
 };
-use anyhow::Context as AnyhowContext;
 use async_graphql::{Schema, SchemaBuilder};
 use async_graphql_axum::{GraphQL, GraphQLSubscription};
 use axum::{Router, routing::post_service};
@@ -109,20 +108,19 @@ enum DecodeSessionIdError {
     ByteArrayLen(#[from] ByteArrayLenError),
 }
 
-async fn resolve_height(
-    offset: Option<BlockOffset>,
-    storage: &impl Storage,
-) -> async_graphql::Result<u32> {
+async fn resolve_height(offset: Option<BlockOffset>, storage: &impl Storage) -> ApiResult<u32> {
     match offset {
         Some(offset) => match offset {
             BlockOffset::Hash(hash) => {
-                let hash = hash.hex_decode().context("hex-decode hash")?;
+                let hash = hash
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid block hash")?;
 
                 let block = storage
                     .get_block_by_hash(hash)
                     .await
-                    .internal("get block by hash")?
-                    .with_context(|| format!("block with hash {hash:?} not found"))?;
+                    .map_err_into_server_error(|| format!("get block by hash {hash}"))?
+                    .ok_or_server_error(|| format!("block with hash {hash} not found"))?;
 
                 Ok(block.height)
             }
@@ -131,8 +129,8 @@ async fn resolve_height(
                 storage
                     .get_block_by_height(height)
                     .await
-                    .internal("get block by height")?
-                    .with_context(|| format!("block with height {} not found", height))?;
+                    .map_err_into_server_error(|| "get block by height")?
+                    .ok_or_server_error(|| format!("block with height {height} not found"))?;
 
                 Ok(height)
             }
@@ -142,7 +140,7 @@ async fn resolve_height(
             let latest_block = storage
                 .get_latest_block()
                 .await
-                .internal("get latest block")?;
+                .map_err_into_server_error(|| "get latest block")?;
             let height = latest_block.map(|block| block.height).unwrap_or_default();
 
             Ok(height)

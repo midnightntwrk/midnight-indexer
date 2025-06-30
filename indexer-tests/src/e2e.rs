@@ -38,8 +38,11 @@ use anyhow::{Context, Ok, bail};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::{
-    domain::{AsBytesExt, HexEncoded, ViewingKey},
-    infra::api::v1::{transaction::TransactionResultStatus, unshielded::UnshieldedAddress},
+    domain::ViewingKey,
+    infra::api::{
+        AsBytesExt, HexEncoded,
+        v1::{transaction::TransactionResultStatus, unshielded::UnshieldedAddress},
+    },
 };
 use indexer_common::domain::{ByteArray, NetworkId, PROTOCOL_VERSION_000_013_000};
 use itertools::Itertools;
@@ -1169,8 +1172,11 @@ fn seed(n: u8) -> ByteArray<32> {
 mod graphql {
     use graphql_client::GraphQLQuery;
     use indexer_api::{
-        domain::{HexEncoded, ViewingKey},
-        infra::api::v1::{mutation::Unit, unshielded::UnshieldedAddress},
+        domain::ViewingKey,
+        infra::api::{
+            HexEncoded,
+            v1::{mutation::Unit, unshielded::UnshieldedAddress},
+        },
     };
 
     #[derive(GraphQLQuery)]
@@ -1203,7 +1209,7 @@ mod graphql {
     // customise the derive to return our own error.
     pub mod graphql_types {
         use graphql_client::GraphQLQuery;
-        use indexer_api::{domain::HexEncoded, infra::api::v1::unshielded::UnshieldedAddress};
+        use indexer_api::infra::api::{HexEncoded, v1::unshielded::UnshieldedAddress};
 
         #[derive(GraphQLQuery)]
         #[graphql(
