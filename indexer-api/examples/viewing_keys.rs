@@ -1,11 +1,12 @@
 use indexer_api::domain::ViewingKey;
 use indexer_common::domain::{ByteArray, NetworkId, PROTOCOL_VERSION_000_013_000};
 
+/// Print the Bech32m-encoded viewing keys and their session IDs for the prefunded wallets (root
+/// seeds) for all network IDs except MainNet.
 fn main() {
     print_viewing_keys(NetworkId::Undeployed);
     print_viewing_keys(NetworkId::DevNet);
     print_viewing_keys(NetworkId::TestNet);
-    print_viewing_keys(NetworkId::MainNet);
 }
 
 fn print_viewing_keys(network_id: NetworkId) {

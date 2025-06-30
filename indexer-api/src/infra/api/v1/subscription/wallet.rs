@@ -84,6 +84,7 @@ where
     ) -> Result<impl Stream<Item = ApiResult<WalletSyncEvent<S>>> + use<'a, S, B, Z>, ApiError>
     {
         cx.get_metrics().wallets_connected.increment(1);
+        debug!(session_id:%; "wallet subscription started");
 
         let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
@@ -129,8 +130,9 @@ where
             });
         let events = stream::select(events.map_ok(Some), set_wallet_active.map_ok(|_| None))
             .try_filter_map(ok)
-            .on_drop(|| {
+            .on_drop(move || {
                 cx.get_metrics().wallets_connected.decrement(1);
+                debug!(session_id:%; "wallet subscription ended");
             });
 
         Ok(events)

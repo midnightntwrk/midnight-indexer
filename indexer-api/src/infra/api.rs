@@ -140,7 +140,10 @@ pub enum AxumApiError {
     Serve(#[source] io::Error),
 }
 
+/// API related metrics.
 struct Metrics {
+    /// Number of currently connected wallets via the wallet subscription. Incremented when a
+    /// wallet subscription starts, decremented when it ends.
     wallets_connected: Gauge,
 }
 
@@ -353,12 +356,12 @@ impl ContextExt for Context<'_> {
         Z: LedgerStateStorage,
     {
         self.data::<Z>()
-            .expect("ZswapStateStorage is stored in Context")
+            .expect("LedgerStateStorage is stored in Context")
     }
 
     fn get_ledger_state_cache(&self) -> &LedgerStateCache {
         self.data::<LedgerStateCache>()
-            .expect("LedgerStateStorage is stored in Context")
+            .expect("LedgerStateCache is stored in Context")
     }
 
     fn get_metrics(&self) -> &Metrics {
