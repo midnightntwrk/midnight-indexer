@@ -80,7 +80,7 @@ where
             while let Some(block) = blocks
                 .try_next()
                 .await
-                .map_err_into_server_error(|| "get next block")?
+                .map_err_into_server_error(|| format!("get next block at height {height}"))?
             {
                 assert_eq!(block.height, height);
                 height += 1;

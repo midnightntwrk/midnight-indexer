@@ -400,7 +400,10 @@ type ApiResult<T> = Result<T, ApiError>;
 /// The error type all API handlers must return.
 #[derive(Debug, Clone)]
 enum ApiError {
+    /// A client error, caused by invalid input.
     Client(InnerApiError),
+
+    /// An internal server error.
     Server(InnerApiError),
 }
 
@@ -412,7 +415,7 @@ impl Display for ApiError {
             ApiError::Client(error) => write!(f, "{}", error.as_chain()),
 
             ApiError::Server(error) => {
-                error!(error = error.as_chain(); "Internal Server Error");
+                error!(error = error.as_chain(); "internal server error");
                 write!(f, "Internal Server Error")
             }
         }

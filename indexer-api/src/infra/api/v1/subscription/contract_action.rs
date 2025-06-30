@@ -88,7 +88,9 @@ where
             while let Some(contract_action) = contract_actions
                 .try_next()
                 .await
-                .map_err_into_server_error(|| "get next contract action")?
+                .map_err_into_server_error(|| {
+                    format!("get next contract action for ID {next_contract_action_id}")
+                })?
             {
                 next_contract_action_id = contract_action.id + 1;
 
@@ -115,7 +117,9 @@ where
                 while let Some(contract_action) = contract_actions
                     .try_next()
                     .await
-                    .map_err_into_server_error(|| "get next contract action")?
+                    .map_err_into_server_error(|| {
+                        format!("get next contract action for ID {next_contract_action_id}")
+                    })?
                 {
                     next_contract_action_id = contract_action.id + 1;
 
