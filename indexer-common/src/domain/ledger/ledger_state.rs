@@ -222,6 +222,10 @@ pub enum ZswapStateRoot {
 
 impl ZswapStateRoot {
     /// Deserialize the given raw zswap state root using the given protocol version and network ID.
+    #[trace(properties = {
+        "network_id": "{network_id}",
+        "protocol_version": "{protocol_version}"
+    })]
     pub fn deserialize(
         raw: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
@@ -237,6 +241,7 @@ impl ZswapStateRoot {
     }
 
     /// Serialize this zswap state root using the given network ID.
+    #[trace(properties = { "network_id": "{network_id}" })]
     pub fn serialize(&self, network_id: NetworkId) -> Result<RawZswapStateRoot, Error> {
         match self {
             ZswapStateRoot::V5(digest) => {

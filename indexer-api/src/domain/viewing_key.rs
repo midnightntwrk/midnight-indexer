@@ -14,6 +14,7 @@
 use async_graphql::scalar;
 use bech32::{Bech32m, Hrp};
 use derive_more::{Display, derive::From};
+use fastrace::trace;
 use indexer_common::domain::{
     ByteArray, NetworkId, ProtocolVersion, UnknownNetworkIdError, ViewingKey as CommonViewingKey,
     ledger,
@@ -36,6 +37,10 @@ impl ViewingKey {
     /// - For mainnet: "mn_shield-esk" + bech32m data
     /// - For other networks: "mn_shield-esk_" + network-id + bech32m data where network-id is one
     ///   of: "dev", "test", "undeployed"
+    #[trace(properties = {
+        "network_id": "{network_id}",
+        "protocol_version": "{protocol_version}"
+    })]
     pub fn try_into_domain(
         self,
         network_id: NetworkId,

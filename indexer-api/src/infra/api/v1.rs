@@ -26,7 +26,7 @@ use crate::{
         storage::{NoopStorage, Storage},
     },
     infra::api::{
-        ApiResult, HexDecodeError, HexEncoded, OptionExt, ResultExt,
+        ApiResult, HexDecodeError, HexEncoded, Metrics, OptionExt, ResultExt,
         v1::{block::BlockOffset, mutation::Mutation, query::Query, subscription::Subscription},
     },
 };
@@ -64,12 +64,15 @@ where
     B: Subscriber,
     Z: LedgerStateStorage,
 {
+    let metrics = Metrics::default();
+
     let schema = schema_builder::<S, B, Z>()
         .data(network_id)
         .data(zswap_state_cache)
         .data(storage)
         .data(ledger_state_storage)
         .data(subscriber)
+        .data(metrics)
         .limit_complexity(max_complexity)
         .limit_depth(max_depth)
         .limit_recursive_depth(max_depth)

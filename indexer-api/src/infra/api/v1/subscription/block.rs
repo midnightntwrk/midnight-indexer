@@ -26,24 +26,19 @@ use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};
 use log::{debug, warn};
-use metrics::{Counter, counter};
 use std::{marker::PhantomData, num::NonZeroU32, pin::pin};
 
 // TODO: Make configurable!
 const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
 
 pub struct BlockSubscription<S, B> {
-    blocks_calls: Counter,
     _s: PhantomData<S>,
     _b: PhantomData<B>,
 }
 
 impl<S, B> Default for BlockSubscription<S, B> {
     fn default() -> Self {
-        let blocks_calls = counter!("indexer_api_calls_subscription_blocks");
-
         Self {
-            blocks_calls,
             _s: PhantomData,
             _b: PhantomData,
         }
@@ -64,8 +59,6 @@ where
         cx: &'a Context<'a>,
         offset: Option<BlockOffset>,
     ) -> Result<impl Stream<Item = ApiResult<Block<S>>> + use<'a, S, B>, ApiError> {
-        self.blocks_calls.increment(1);
-
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
 

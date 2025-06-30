@@ -22,6 +22,7 @@ use crate::{
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
+use drop_stream::DropStreamExt;
 use fastrace::trace;
 use futures::{
     Stream, StreamExt,
@@ -32,7 +33,6 @@ use indexer_common::domain::{
     LedgerStateStorage, NetworkId, SessionId, Subscriber, TransactionResult, WalletIndexed,
 };
 use log::{debug, warn};
-use metrics::{Counter, counter};
 use std::{
     future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, sync::Arc, time::Duration,
 };
@@ -50,7 +50,6 @@ const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(3);
 const ACTIVATE_WALLET_INTERVAL: Duration = Duration::from_secs(60);
 
 pub struct WalletSubscription<S, B, Z> {
-    wallet_calls: Counter,
     _s: PhantomData<S>,
     _b: PhantomData<B>,
     _z: PhantomData<Z>,
@@ -58,10 +57,7 @@ pub struct WalletSubscription<S, B, Z> {
 
 impl<S, B, Z> Default for WalletSubscription<S, B, Z> {
     fn default() -> Self {
-        let wallet_calls = counter!("indexer_api_calls_subscription_wallet");
-
         Self {
-            wallet_calls,
             _s: PhantomData,
             _b: PhantomData,
             _z: PhantomData,
@@ -87,7 +83,8 @@ where
         send_progress_updates: Option<bool>,
     ) -> Result<impl Stream<Item = ApiResult<WalletSyncEvent<S>>> + use<'a, S, B, Z>, ApiError>
     {
-        self.wallet_calls.increment(1);
+        cx.get_metrics().wallets_connected.increment(1);
+        debug!(session_id:%; "wallet subscription started");
 
         let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
@@ -132,7 +129,11 @@ where
                 ))
             });
         let events = stream::select(events.map_ok(Some), set_wallet_active.map_ok(|_| None))
-            .try_filter_map(ok);
+            .try_filter_map(ok)
+            .on_drop(move || {
+                cx.get_metrics().wallets_connected.decrement(1);
+                debug!(session_id:%; "wallet subscription ended");
+            });
 
         Ok(events)
     }
@@ -154,7 +155,7 @@ where
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
     let ledger_state_storage = cx.get_ledger_state_storage::<Z>();
-    let zswap_state_cache = cx.get_zswap_state_cache();
+    let zswap_state_cache = cx.get_ledger_state_cache();
 
     let wallet_indexed_events = subscriber
         .subscribe::<WalletIndexed>()
