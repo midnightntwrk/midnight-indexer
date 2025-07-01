@@ -111,7 +111,6 @@ CREATE INDEX ON contract_balances(contract_action_id, token_type);
 
 CREATE TABLE dust_generation_info (
     id BIGSERIAL PRIMARY KEY,
-    night_utxo_hash BYTEA NOT NULL,
     value BYTEA NOT NULL,
     owner BYTEA NOT NULL,
     nonce BYTEA NOT NULL,
@@ -121,7 +120,6 @@ CREATE TABLE dust_generation_info (
 );
 
 CREATE INDEX dust_generation_info_owner_idx ON dust_generation_info(owner);
-CREATE INDEX dust_generation_info_utxo_idx ON dust_generation_info(night_utxo_hash);
 
 CREATE TABLE dust_utxos (
     id BIGSERIAL PRIMARY KEY,
@@ -143,17 +141,18 @@ CREATE INDEX dust_utxos_nullifier_prefix_idx ON dust_utxos(substring(nullifier::
 
 CREATE TABLE cnight_registrations (
     id BIGSERIAL PRIMARY KEY,
-    night_address BYTEA NOT NULL,
+    cardano_address BYTEA NOT NULL,
     dust_address BYTEA NOT NULL,
     is_valid BOOLEAN NOT NULL,
     registered_at BIGINT NOT NULL,
     removed_at BIGINT,
-    UNIQUE(night_address, dust_address)
+    UNIQUE(cardano_address, dust_address)
 );
 
-CREATE INDEX cnight_registrations_cardano_addr_idx ON cnight_registrations(night_address);
+CREATE INDEX cnight_registrations_cardano_addr_idx ON cnight_registrations(cardano_address);
 CREATE INDEX cnight_registrations_dust_addr_idx ON cnight_registrations(dust_address);
 
+-- TODO: These tables are for future merkle tree storage once ledger integration is complete.
 CREATE TABLE dust_commitment_tree (
     id BIGSERIAL PRIMARY KEY,
     block_height BIGINT NOT NULL,
