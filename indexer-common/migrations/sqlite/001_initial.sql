@@ -186,14 +186,14 @@ CREATE TABLE dust_generation_tree (
 );
 
 CREATE TABLE dust_events (
-                             id INTEGER PRIMARY KEY,
-                             transaction_id INTEGER NOT NULL,
-                             transaction_hash BLOB NOT NULL,
-                             logical_segment INTEGER NOT NULL,
-                             physical_segment INTEGER NOT NULL,
-                             event_type TEXT NOT NULL,
-                             event_data TEXT NOT NULL,
-                             FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+    id INTEGER PRIMARY KEY,
+    transaction_id INTEGER NOT NULL,
+    transaction_hash BLOB NOT NULL,
+    logical_segment INTEGER NOT NULL,
+    physical_segment INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    event_data TEXT NOT NULL,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id)
 );
 
 CREATE INDEX dust_events_transaction_idx ON dust_events(transaction_id);

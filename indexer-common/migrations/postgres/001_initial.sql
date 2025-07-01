@@ -169,13 +169,13 @@ CREATE TABLE dust_generation_tree (
 );
 
 CREATE TABLE dust_events (
-                             id BIGSERIAL PRIMARY KEY,
-                             transaction_id BIGINT NOT NULL REFERENCES transactions(id),
-                             transaction_hash BYTEA NOT NULL,
-                             logical_segment INTEGER NOT NULL,
-                             physical_segment INTEGER NOT NULL,
-                             event_type TEXT NOT NULL,
-                             event_data JSONB NOT NULL
+    id BIGSERIAL PRIMARY KEY,
+    transaction_id BIGINT NOT NULL REFERENCES transactions(id),
+    transaction_hash BYTEA NOT NULL,
+    logical_segment INTEGER NOT NULL,
+    physical_segment INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    event_data JSONB NOT NULL
 );
 
 CREATE INDEX dust_events_transaction_idx ON dust_events(transaction_id);
