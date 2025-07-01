@@ -11,10 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ContractAction, UnshieldedUtxo};
+use crate::domain::ContractAction;
 use indexer_common::domain::{
-    ByteArray, Identifier, MerkleTreeRoot, ProtocolVersion, RawTransaction, TransactionHash,
-    TransactionResult,
+    ByteArray, ProtocolVersion, RawTransaction, RawTransactionIdentifier, RawZswapStateRoot,
+    TransactionHash, TransactionResult, UnshieldedUtxo,
 };
 use sqlx::FromRow;
 use std::fmt::Debug;
@@ -26,12 +26,12 @@ pub struct Transaction {
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
     pub transaction_result: TransactionResult,
-    pub identifiers: Vec<Identifier>,
+    pub identifiers: Vec<RawTransactionIdentifier>,
     pub raw: RawTransaction,
     pub contract_actions: Vec<ContractAction>,
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
-    pub merkle_tree_root: MerkleTreeRoot,
+    pub merkle_tree_root: RawZswapStateRoot,
     pub start_index: u64,
     pub end_index: u64,
     pub paid_fees: u128,
@@ -43,6 +43,9 @@ pub struct Transaction {
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct BlockTransactions {
     pub transactions: Vec<RawTransaction>,
+
+    #[sqlx(try_from = "i64")]
+    pub protocol_version: ProtocolVersion,
 
     pub block_parent_hash: ByteArray<32>,
 

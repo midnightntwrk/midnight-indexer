@@ -18,7 +18,7 @@ use crate::{
 use async_stream::try_stream;
 use futures::{Stream, stream::TryStreamExt};
 use indexer_common::{
-    domain::{BlockHash, ContractAddress, Identifier, TransactionHash},
+    domain::{BlockHash, RawContractAddress, RawTransactionIdentifier, TransactionHash},
     stream::flatten_chunks,
 };
 use indoc::indoc;
@@ -27,7 +27,7 @@ use std::num::NonZeroU32;
 impl ContractActionStorage for SqliteStorage {
     async fn get_contract_deploy_by_address(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         // For any address the first contract action is always a deploy.
         let query = indoc! {"
@@ -58,7 +58,7 @@ impl ContractActionStorage for SqliteStorage {
 
     async fn get_contract_action_by_address(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -82,7 +82,7 @@ impl ContractActionStorage for SqliteStorage {
 
     async fn get_contract_action_by_address_and_block_hash(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
         hash: BlockHash,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
@@ -110,7 +110,7 @@ impl ContractActionStorage for SqliteStorage {
 
     async fn get_contract_action_by_address_and_block_height(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
         height: u32,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
@@ -139,7 +139,7 @@ impl ContractActionStorage for SqliteStorage {
 
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
         hash: TransactionHash,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
@@ -171,8 +171,8 @@ impl ContractActionStorage for SqliteStorage {
 
     async fn get_contract_action_by_address_and_transaction_identifier(
         &self,
-        address: &ContractAddress,
-        identifier: &Identifier,
+        address: &RawContractAddress,
+        identifier: &RawTransactionIdentifier,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -223,7 +223,7 @@ impl ContractActionStorage for SqliteStorage {
 
     fn get_contract_actions_by_address(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
         height: u32,
         mut contract_action_id: u64,
         batch_size: NonZeroU32,

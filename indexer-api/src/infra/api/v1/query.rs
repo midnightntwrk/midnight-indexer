@@ -12,41 +12,29 @@
 // limitations under the License.
 
 use crate::{
-    domain::{HexEncoded, storage::Storage},
+    domain::storage::Storage,
     infra::api::{
-        ContextExt, ResultExt,
+        ApiResult, ContextExt, HexEncoded, ResultExt,
         v1::{
-            self, Block, BlockOffset, ContractAction, ContractActionOffset, Transaction,
-            TransactionOffset, UnshieldedAddress, UnshieldedOffset,
+            block::{Block, BlockOffset},
+            contract_action::{ContractAction, ContractActionOffset},
+            transaction::{Transaction, TransactionOffset},
+            unshielded::{UnshieldedAddress, UnshieldedOffset, UnshieldedUtxo},
         },
     },
 };
-use anyhow::Context as AnyhowContext;
 use async_graphql::{Context, Object};
 use fastrace::trace;
-use metrics::{Counter, counter};
 use std::marker::PhantomData;
 
 /// GraphQL queries.
 pub struct Query<S> {
-    block_calls: Counter,
-    transactions_calls: Counter,
-    contract_action_calls: Counter,
     _s: PhantomData<S>,
 }
 
 impl<S> Default for Query<S> {
     fn default() -> Self {
-        let block_calls = counter!("indexer_api_calls_query_block");
-        let transactions_calls = counter!("indexer_api_calls_query_transactions");
-        let contract_action_calls = counter!("indexer_api_calls_query_contract_action");
-
-        Self {
-            block_calls,
-            transactions_calls,
-            contract_action_calls,
-            _s: PhantomData,
-        }
+        Self { _s: PhantomData }
     }
 }
 
@@ -61,30 +49,30 @@ where
         &self,
         cx: &Context<'_>,
         offset: Option<BlockOffset>,
-    ) -> async_graphql::Result<Option<Block<S>>> {
-        self.block_calls.increment(1);
-
+    ) -> ApiResult<Option<Block<S>>> {
         let storage = cx.get_storage::<S>();
 
         let block = match offset {
             Some(BlockOffset::Hash(hash)) => {
-                let hash = hash.hex_decode().context("hex-decode hash")?;
+                let hash = hash
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid block hash")?;
 
                 storage
                     .get_block_by_hash(hash)
                     .await
-                    .internal("get block by hash")?
+                    .map_err_into_server_error(|| format!("get block by hash {hash}"))?
             }
 
             Some(BlockOffset::Height(height)) => storage
                 .get_block_by_height(height)
                 .await
-                .internal("get block by height")?,
+                .map_err_into_server_error(|| format!("get block by height {height}"))?,
 
             None => storage
                 .get_latest_block()
                 .await
-                .internal("get latest block")?,
+                .map_err_into_server_error(|| "get latest block")?,
         };
 
         Ok(block.map(Into::into))
@@ -97,33 +85,32 @@ where
         cx: &Context<'_>,
         offset: TransactionOffset,
         address: Option<UnshieldedAddress>,
-    ) -> async_graphql::Result<Vec<Transaction<S>>> {
-        self.transactions_calls.increment(1);
-
+    ) -> ApiResult<Vec<Transaction<S>>> {
         let storage = cx.get_storage::<S>();
 
         if let Some(address) = address {
-            let network_id = cx.get_network_id();
-
             let address = address
-                .try_into_domain(network_id)
-                .internal("convert address into domain address")?;
+                .try_into_domain(cx.get_network_id())
+                .map_err_into_client_error(|| "invalid address")?;
+
             let txs = storage
                 .get_transactions_involving_unshielded(&address, 0)
                 .await
-                .internal("get transactions by address")?;
+                .map_err_into_server_error(|| format!("get transactions by address {address}"))?;
 
             return Ok(txs.into_iter().map(Transaction::<S>::from).collect());
         }
 
         match offset {
             TransactionOffset::Hash(hash) => {
-                let hash = hash.hex_decode().context("hex-decode hash")?;
+                let hash = hash
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid transaction hash")?;
 
                 let transactions = storage
                     .get_transactions_by_hash(hash)
                     .await
-                    .internal("get transaction by hash")?
+                    .map_err_into_server_error(|| format!("get transaction by hash {hash}"))?
                     .into_iter()
                     .map(Into::into)
                     .collect::<Vec<_>>();
@@ -132,12 +119,16 @@ where
             }
 
             TransactionOffset::Identifier(identifier) => {
-                let identifier = identifier.hex_decode().context("hex-decode identifier")?;
+                let identifier = identifier
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid transaction identifier")?;
 
                 let transactions = storage
                     .get_transactions_by_identifier(&identifier)
                     .await
-                    .internal("get transactions by identifier")?
+                    .map_err_into_server_error(|| {
+                        format!("get transactions by identifier {identifier}")
+                    })?
                     .into_iter()
                     .map(Into::into)
                     .collect::<Vec<_>>();
@@ -154,46 +145,55 @@ where
         cx: &Context<'_>,
         address: HexEncoded,
         offset: Option<ContractActionOffset>,
-    ) -> async_graphql::Result<Option<ContractAction<S>>> {
-        self.contract_action_calls.increment(1);
-
+    ) -> ApiResult<Option<ContractAction<S>>> {
         let storage = cx.get_storage::<S>();
+
+        let address = address
+            .hex_decode()
+            .map_err_into_client_error(|| "invalid address")?;
 
         let contract_action = match offset {
             Some(ContractActionOffset::BlockOffset(BlockOffset::Hash(hash))) => {
-                let address = address.hex_decode().context("hex-decode address")?;
-                let hash = hash.hex_decode().context("hex-decode hash")?;
+                let hash = hash
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid offset")?;
 
                 storage
                     .get_contract_action_by_address_and_block_hash(&address, hash)
                     .await
-                    .internal("get contract action by address and block hash")?
+                    .map_err_into_server_error(|| {
+                        format!("get contract action by address {address} and block hash {hash}")
+                    })?
             }
 
-            Some(ContractActionOffset::BlockOffset(BlockOffset::Height(height))) => {
-                let address = address.hex_decode().context("hex-decode address")?;
-
-                storage
-                    .get_contract_action_by_address_and_block_height(&address, height)
-                    .await
-                    .internal("get contract action by address and block height")?
-            }
+            Some(ContractActionOffset::BlockOffset(BlockOffset::Height(height))) => storage
+                .get_contract_action_by_address_and_block_height(&address, height)
+                .await
+                .map_err_into_server_error(|| {
+                    format!("get contract action by address {address} and block height {height}")
+                })?,
 
             Some(ContractActionOffset::TransactionOffset(TransactionOffset::Hash(hash))) => {
-                let address = address.hex_decode().context("hex-decode address")?;
-                let hash = hash.hex_decode().context("hex-decode hash")?;
+                let hash = hash
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid offset")?;
 
                 storage
                     .get_contract_action_by_address_and_transaction_hash(&address, hash)
                     .await
-                    .internal("get contract action by address and transaction hash")?
+                    .map_err_into_server_error(|| {
+                        format!(
+                            "get contract action by address {address} and transaction hash {hash}"
+                        )
+                    })?
             }
 
             Some(ContractActionOffset::TransactionOffset(TransactionOffset::Identifier(
                 identifier,
             ))) => {
-                let address = address.hex_decode().context("hex-decode address")?;
-                let identifier = identifier.hex_decode().context("hex-decode identifier")?;
+                let identifier = identifier
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid identifier")?;
 
                 storage
                     .get_contract_action_by_address_and_transaction_identifier(
@@ -201,17 +201,15 @@ where
                         &identifier,
                     )
                     .await
-                    .internal("get contract action by address and transaction identifier")?
+                    .map_err_into_server_error(|| format!("get contract action by address {address} and transaction identifier {identifier}"))?
             }
 
-            None => {
-                let address = address.hex_decode().context("hex-decode address")?;
-
-                storage
-                    .get_contract_action_by_address(&address)
-                    .await
-                    .internal("get latest contract action by address")?
-            }
+            None => storage
+                .get_contract_action_by_address(&address)
+                .await
+                .map_err_into_server_error(|| {
+                    format!("get latest contract action by address {address}")
+                })?,
         };
 
         Ok(contract_action.map(Into::into))
@@ -224,56 +222,74 @@ where
         cx: &Context<'_>,
         address: UnshieldedAddress,
         offset: Option<UnshieldedOffset>,
-    ) -> async_graphql::Result<Vec<v1::UnshieldedUtxo<S>>> {
-        let storage = cx.get_storage::<S>();
+    ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
         let network_id = cx.get_network_id();
 
         let address = address
             .try_into_domain(network_id)
-            .internal("convert address into domain address")?;
+            .map_err_into_client_error(|| "invalid address")?;
+
+        let storage = cx.get_storage::<S>();
+
         let utxos = match offset {
-            Some(UnshieldedOffset::BlockOffset(BlockOffset::Height(start))) => storage
-                .get_unshielded_utxos_by_address_from_height(&address, start)
+            Some(UnshieldedOffset::BlockOffset(BlockOffset::Height(height))) => storage
+                .get_unshielded_utxos_by_address_from_height(&address, height)
                 .await
-                .internal("get unshielded UTXOs by address from height")?,
+                .map_err_into_server_error(|| {
+                    format!("get unshielded UTXOs by address {address} and block height {height}")
+                })?,
 
             Some(UnshieldedOffset::BlockOffset(BlockOffset::Hash(hash))) => {
-                let block_hash = hash.hex_decode().context("decode block hash")?;
+                let block_hash = hash
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid offset")?;
                 storage
                     .get_unshielded_utxos_by_address_from_block_hash(&address, &block_hash)
                     .await
-                    .internal("get unshielded UTXOs by address from block hash")?
+                    .map_err_into_server_error(|| {
+                        format!("get unshielded UTXOs by address {address} and block hash {hash}")
+                    })?
             }
 
             Some(UnshieldedOffset::TransactionOffset(TransactionOffset::Hash(hash))) => {
-                let tx_hash = hash.hex_decode().context("decode tx hash")?;
+                let tx_hash = hash
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid offset")?;
                 storage
                     .get_unshielded_utxos_by_address_from_transaction_hash(&address, &tx_hash)
                     .await
-                    .internal("get unshielded UTXOs by address from transaction hash")?
+                    .map_err_into_server_error(|| {
+                        format!(
+                            "get unshielded UTXOs by address {address} and transaction hash {hash}"
+                        )
+                    })?
             }
 
             Some(UnshieldedOffset::TransactionOffset(TransactionOffset::Identifier(id))) => {
-                let identifier = id.hex_decode().context("decode tx identifier")?;
+                let identifier = id
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid offset")?;
                 storage
                     .get_unshielded_utxos_by_address_from_transaction_identifier(
                         &address,
                         &identifier,
                     )
                     .await
-                    .internal("get unshielded UTXOs by address from transaction identifier")?
+                    .map_err_into_server_error(|| format!("get unshielded UTXOs by address {address} from transaction identifier {identifier}"))?
             }
 
             // no offset -> full list
             None => storage
                 .get_unshielded_utxos_by_address(&address)
                 .await
-                .internal("get all unshielded UTXOs by address")?,
+                .map_err_into_server_error(|| {
+                    format!("get all unshielded UTXOs by address {address}")
+                })?,
         };
 
         Ok(utxos
             .into_iter()
-            .map(|utxo| v1::UnshieldedUtxo::<S>::from((utxo, network_id)))
+            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
             .collect())
     }
 }

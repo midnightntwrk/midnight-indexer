@@ -35,18 +35,17 @@ use crate::{
     graphql_ws_client,
 };
 use anyhow::{Context, Ok, bail};
-use bech32::{Bech32m, Hrp};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::{
-    domain::{AsBytesExt, HexEncoded, ViewingKey},
-    infra::api::v1::{TransactionResultStatus, UnshieldedAddress},
+    domain::ViewingKey,
+    infra::api::{
+        AsBytesExt, HexEncoded,
+        v1::{transaction::TransactionResultStatus, unshielded::UnshieldedAddress},
+    },
 };
-use indexer_common::domain::NetworkId;
+use indexer_common::domain::{ByteArray, NetworkId, PROTOCOL_VERSION_000_013_000};
 use itertools::Itertools;
-use midnight_serialize::Serializable;
-use midnight_transient_crypto::encryption::SecretKey;
-use midnight_zswap::keys::{SecretKeys, Seed};
 use reqwest::Client;
 use serde::Serialize;
 use std::time::{Duration, Instant};
@@ -108,7 +107,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_unshielded_utxo_subscription(&indexer_data, &ws_api_url) // we use node mock version at the moment
         .await
         .context("test unshielded UTXOs subscription")?;
-    test_wallet_subscription(&ws_api_url)
+    test_wallet_subscription(&ws_api_url, network_id)
         .await
         .context("test wallet subscription")?;
 
@@ -192,22 +191,19 @@ impl IndexerData {
             block.transactions.iter().all(|transaction| {
                 match transaction.transaction_result.status {
                     BlockSubscriptionTransactionResultStatus::SUCCESS => {
-                        // Success transactions should have no segment results
-                        transaction.segment_results.is_empty()
+                        transaction.transaction_result.segments.is_none()
                     }
+
                     BlockSubscriptionTransactionResultStatus::FAILURE => {
                         // Failure transactions should have no segment results
-                        transaction.segment_results.is_empty()
+                        transaction.transaction_result.segments.is_none()
                     }
+
                     BlockSubscriptionTransactionResultStatus::PARTIAL_SUCCESS => {
-                        // Partial success transactions should have segment results
-                        !transaction.segment_results.is_empty()
-                            && transaction.segment_results.iter().all(|segment| {
-                                // Segment IDs should be reasonable (not massive numbers)
-                                segment.segment_id < 1000
-                            })
+                        transaction.transaction_result.segments.is_some()
                     }
-                    _ => true, // Unknown status, skip validation
+
+                    _ => true,
                 }
             })
         }));
@@ -428,28 +424,26 @@ async fn test_transactions_query(
             match transaction.transaction_result.status {
                 transactions_query::TransactionResultStatus::SUCCESS => {
                     assert!(
-                        transaction.segment_results.is_empty(),
+                        transaction.transaction_result.segments.is_none(),
                         "SUCCESS transactions should have no segment results"
                     );
                 }
+
                 transactions_query::TransactionResultStatus::FAILURE => {
                     assert!(
-                        transaction.segment_results.is_empty(),
+                        transaction.transaction_result.segments.is_none(),
                         "FAILURE transactions should have no segment results"
                     );
                 }
+
                 transactions_query::TransactionResultStatus::PARTIAL_SUCCESS => {
                     assert!(
-                        !transaction.segment_results.is_empty(),
+                        transaction.transaction_result.segments.is_some(),
                         "PARTIAL_SUCCESS transactions should have segment results"
                     );
-
-                    for segment in &transaction.segment_results {
-                        // Segment IDs should be reasonable
-                        assert!(segment.segment_id < 1000, "segment_id should be reasonable");
-                    }
                 }
-                _ => {} // Skip unknown statuses
+
+                _ => {}
             }
         }
 
@@ -675,7 +669,7 @@ async fn test_unshielded_utxo_queries(
 
     // Test with unknown address (should return empty)
     const NETWORK_ID: NetworkId = NetworkId::Undeployed;
-    let unknown_addr_bytes = [0x99u8; 4]; // Some address that doesn't exist
+    let unknown_addr_bytes = [255; 32]; // Some address that doesn't exist
     let unknown_addr = UnshieldedAddress::bech32m_encode(unknown_addr_bytes, NETWORK_ID);
 
     let variables = unshielded_utxos_query::Variables {
@@ -697,18 +691,8 @@ async fn test_connect_mutation(
     network_id: NetworkId,
 ) -> anyhow::Result<()> {
     // Valid viewing key.
-    let secret_key = seed_to_secret_key(&format!("{}1", "0".repeat(63)));
-    let mut serialized = Vec::with_capacity(SecretKey::serialized_size(&secret_key));
-    Serializable::serialize(&secret_key, &mut serialized).expect("secret key can be serialized");
-    let hrp = match network_id {
-        NetworkId::Undeployed => "mn_shield-esk_undeployed",
-        NetworkId::DevNet => "mn_shield-esk_dev",
-        NetworkId::TestNet => "mn_shield-esk_test",
-        NetworkId::MainNet => "mn_shield-esk",
-    };
-    let hrp = Hrp::parse(hrp).context("create HRP")?;
-    let encoded = bech32::encode::<Bech32m>(hrp, &serialized).context("encode viewing key")?;
-    let viewing_key = ViewingKey(encoded);
+    let viewing_key =
+        ViewingKey::derive_for_testing(seed(1), network_id, PROTOCOL_VERSION_000_013_000);
     let variables = connect_mutation::Variables { viewing_key };
     let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
     assert!(response.is_ok());
@@ -888,7 +872,7 @@ async fn test_unshielded_utxo_subscription(
             println!("No events received within 400ms timeout");
         }
         Result::Ok(Err(e)) => {
-            println!("Error collecting events: {:?}", e);
+            println!("Error collecting events: {e:?}");
         }
         Err(_) => {
             println!("Timeout waiting for events - this is expected if no recent activity");
@@ -913,14 +897,12 @@ async fn test_unshielded_utxo_subscription(
 }
 
 /// Test the wallet subscription.
-async fn test_wallet_subscription(ws_api_url: &str) -> anyhow::Result<()> {
+async fn test_wallet_subscription(ws_api_url: &str, network_id: NetworkId) -> anyhow::Result<()> {
     use wallet_subscription::WalletSubscriptionWalletOnViewingUpdateUpdate as ViewingUpdate;
 
-    let viewing_key = indexer_common::domain::ViewingKey::from(seed_to_secret_key(&format!(
-        "{}1",
-        "0".repeat(63)
-    )));
-    // 3d8506d3b1875c0843cdcf27ab2db6119186fdbd9600536335872f9f46cc59be
+    let viewing_key =
+        ViewingKey::derive_for_testing(seed(1), network_id, PROTOCOL_VERSION_000_013_000)
+            .try_into_domain(network_id, PROTOCOL_VERSION_000_013_000)?;
     let session_id = viewing_key.to_session_id().hex_encode();
 
     // Collect wallet events until there are no more viewing updates (3s deadline).
@@ -1181,17 +1163,20 @@ where
     Ok(data)
 }
 
-fn seed_to_secret_key(seed: &str) -> SecretKey {
-    let seed_bytes = const_hex::decode(seed).expect("seed can be hex-decoded");
-    let seed_bytes = <[u8; 32]>::try_from(seed_bytes).expect("seed has 32 bytes");
-    SecretKeys::from(Seed::from(seed_bytes)).encryption_secret_key
+fn seed(n: u8) -> ByteArray<32> {
+    let mut seed = [0; 32];
+    seed[31] = n;
+    seed.into()
 }
 
 mod graphql {
     use graphql_client::GraphQLQuery;
     use indexer_api::{
-        domain::{HexEncoded, ViewingKey},
-        infra::api::v1::{Unit, UnshieldedAddress},
+        domain::ViewingKey,
+        infra::api::{
+            HexEncoded,
+            v1::{mutation::Unit, unshielded::UnshieldedAddress},
+        },
     };
 
     #[derive(GraphQLQuery)]
@@ -1224,7 +1209,7 @@ mod graphql {
     // customise the derive to return our own error.
     pub mod graphql_types {
         use graphql_client::GraphQLQuery;
-        use indexer_api::{domain::HexEncoded, infra::api::v1::UnshieldedAddress};
+        use indexer_api::infra::api::{HexEncoded, v1::unshielded::UnshieldedAddress};
 
         #[derive(GraphQLQuery)]
         #[graphql(

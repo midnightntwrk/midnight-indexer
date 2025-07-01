@@ -14,8 +14,11 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ContextExt, ResultExt,
-        v1::{Block, BlockOffset, resolve_height},
+        ApiError, ApiResult, ContextExt, ResultExt,
+        v1::{
+            block::{Block, BlockOffset},
+            resolve_height,
+        },
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
@@ -23,24 +26,19 @@ use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};
 use log::{debug, warn};
-use metrics::{Counter, counter};
 use std::{marker::PhantomData, num::NonZeroU32, pin::pin};
 
 // TODO: Make configurable!
 const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
 
 pub struct BlockSubscription<S, B> {
-    blocks_calls: Counter,
     _s: PhantomData<S>,
     _b: PhantomData<B>,
 }
 
 impl<S, B> Default for BlockSubscription<S, B> {
     fn default() -> Self {
-        let blocks_calls = counter!("indexer_api_calls_subscription_blocks");
-
         Self {
-            blocks_calls,
             _s: PhantomData,
             _b: PhantomData,
         }
@@ -60,10 +58,7 @@ where
         &self,
         cx: &'a Context<'a>,
         offset: Option<BlockOffset>,
-    ) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<Block<S>>> + use<'a, S, B>>
-    {
-        self.blocks_calls.increment(1);
-
+    ) -> Result<impl Stream<Item = ApiResult<Block<S>>> + use<'a, S, B>, ApiError> {
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
 
@@ -75,7 +70,11 @@ where
 
             let blocks = storage.get_blocks(height, BATCH_SIZE);
             let mut blocks = pin!(blocks);
-            while let Some(block) = blocks.try_next().await.internal("get next block")? {
+            while let Some(block) = blocks
+                .try_next()
+                .await
+                .map_err_into_server_error(|| format!("get next block at height {height}"))?
+            {
                 assert_eq!(block.height, height);
                 height += 1;
 
@@ -87,7 +86,7 @@ where
             while block_indexed_stream
                 .try_next()
                 .await
-                .internal("get next BlockIndexed event")?
+                .map_err_into_server_error(|| "get next BlockIndexed event")?
                 .is_some()
             {
                 debug!(height; "streaming next blocks");
@@ -95,7 +94,11 @@ where
                 let blocks = storage.get_blocks(height, BATCH_SIZE);
                 let mut blocks = pin!(blocks);
 
-                while let Some(block) = blocks.try_next().await.internal("get next block")? {
+                while let Some(block) = blocks
+                    .try_next()
+                    .await
+                    .map_err_into_server_error(|| "get next block")?
+                {
                     assert_eq!(block.height, height);
                     height += 1;
 

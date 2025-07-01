@@ -16,6 +16,7 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 
 [dependencies]
 async-nats                  = { workspace = true, optional = true }
+bip32                       = { workspace = true }
 chacha20poly1305            = { workspace = true, features = [ "std" ] }
 const-hex                   = { workspace = true, features = [ "serde" ] }
 derive_more                 = { workspace = true, features = [ "as_ref", "deref", "display", "from", "into" ] }
@@ -24,11 +25,14 @@ fastrace-opentelemetry      = { workspace = true }
 figment                     = { workspace = true, features = [ "env", "yaml" ] }
 futures                     = { workspace = true }
 humantime-serde             = { workspace = true }
+k256                        = { workspace = true }
 log                         = { workspace = true, features = [ "kv_std" ] }
 logforth                    = { workspace = true, features = [ "append-fastrace", "diagnostic-fastrace", "layout-json" ] }
 metrics-exporter-prometheus = { workspace = true, features = [ "http-listener" ] }
 midnight-base-crypto        = { workspace = true }
+midnight-coin-structure     = { workspace = true }
 midnight-ledger             = { workspace = true }
+midnight-onchain-runtime    = { workspace = true }
 midnight-serialize          = { workspace = true }
 midnight-storage            = { workspace = true }
 midnight-transient-crypto   = { workspace = true }

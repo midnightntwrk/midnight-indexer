@@ -1,7 +1,7 @@
 use anyhow::Context;
 use chain_indexer::{
     domain::Node,
-    infra::node::{Config, SubxtNode},
+    infra::subxt_node::{Config, SubxtNode},
 };
 use futures::{StreamExt, TryStreamExt};
 use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_013_000};
@@ -43,14 +43,11 @@ async fn main() -> anyhow::Result<()> {
 
             let utxo_count = block
                 .transactions
-                .get(0)
+                .first()
                 .map(|t| t.created_unshielded_utxos.len())
                 .unwrap_or(0);
 
-            println!(
-                "*** UTXOs: {} (extraction requires full indexing pipeline) ***",
-                utxo_count
-            );
+            println!("*** UTXOs: {utxo_count} (extraction requires full indexing pipeline) ***");
         }
 
         for transaction in &block.transactions {

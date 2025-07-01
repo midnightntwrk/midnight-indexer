@@ -11,20 +11,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::NetworkId;
-use midnight_serialize::{Serializable, serialize};
-use std::io;
-
 /// Extension methods for `Serializable` implementations.
 pub trait SerializableExt
 where
     Self: Serializable,
 {
     /// Serialize this `Serializable` implementation.
-    fn serialize(&self, network_id: NetworkId) -> Result<Vec<u8>, io::Error> {
-        let mut bytes = Vec::with_capacity(Self::serialized_size(self) + 1);
-        serialize(self, &mut bytes, network_id.into())?;
-        Ok(bytes)
+    #[trace(properties = {
+        "network_id": "{network_id}",
+        "protocol_version": "{protocol_version}"
+    })]
+    fn serialize(
+        &self,
+        network_id: NetworkId,
+        protocol_version: ProtocolVersion,
+    ) -> Result<Vec<u8>, io::Error> {
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
+            let mut bytes = Vec::with_capacity(Self::serialized_size(self) + 1);
+            serialize(self, &mut bytes, network_id.into())?;
+
+            Ok(bytes)
+        } else {
+            Err(Error::InvalidProtocolVersion(protocol_version))
+        }
     }
 }
 

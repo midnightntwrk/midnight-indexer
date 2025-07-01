@@ -52,18 +52,18 @@ impl<const N: usize> Default for ByteArray<N> {
 }
 
 impl<const N: usize> TryFrom<&[u8]> for ByteArray<N> {
-    type Error = TryFromForByteArrayError;
+    type Error = ByteArrayLenError;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         bytes
             .try_into()
-            .map_err(|_| TryFromForByteArrayError(N, bytes.len()))
+            .map_err(|_| ByteArrayLenError(N, bytes.len()))
             .map(Self)
     }
 }
 
 impl<const N: usize> TryFrom<Vec<u8>> for ByteArray<N> {
-    type Error = TryFromForByteArrayError;
+    type Error = ByteArrayLenError;
 
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
         bytes.as_slice().try_into()
@@ -83,8 +83,8 @@ impl<const N: usize> Display for ByteArray<N> {
 }
 
 #[derive(Debug, Error)]
-#[error("cannot create array of len {0} from slice of len {1}")]
-pub struct TryFromForByteArrayError(usize, usize);
+#[error("cannot create byte array of len {0} from input of len {1}")]
+pub struct ByteArrayLenError(usize, usize);
 
 fn debug<T>(bytes: &T, f: &mut fmt::Formatter<'_>) -> fmt::Result
 where

@@ -87,7 +87,7 @@ query {
 
 ### transactions(offset: TransactionOffset!, address: UnshieldedAddress): [Transaction!]!
 
-**Note:** The `fees` field is now available on transactions, providing both `paidFees` and `estimatedFees` information. The `segmentResults` field provides detailed execution results for partially successful transactions.
+**Note:** The `fees` field is now available on transactions, providing both `paidFees` and `estimatedFees` information.
 
 Fetch transactions by hash or by identifier using a TransactionOffset object. The offset must include either a hash or an identifier, but not both.
 
@@ -141,10 +141,6 @@ query {
     fees {
       paidFees
       estimatedFees
-    }
-    segmentResults {
-      segmentId
-      success
     }
     transactionResult {
       status

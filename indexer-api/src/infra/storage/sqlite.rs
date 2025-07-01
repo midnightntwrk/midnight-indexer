@@ -21,7 +21,7 @@ use crate::domain::storage::Storage;
 use chacha20poly1305::ChaCha20Poly1305;
 use derive_more::Debug;
 use futures::stream::TryStreamExt;
-use indexer_common::{domain::Identifier, infra::pool::sqlite::SqlitePool};
+use indexer_common::{domain::RawTransactionIdentifier, infra::pool::sqlite::SqlitePool};
 use indoc::indoc;
 use sqlx::{Database, Row, Sqlite};
 
@@ -42,7 +42,7 @@ impl SqliteStorage {
     async fn get_identifiers_by_transaction_id(
         &self,
         id: u64,
-    ) -> Result<Vec<Identifier>, sqlx::Error> {
+    ) -> Result<Vec<RawTransactionIdentifier>, sqlx::Error> {
         let query = indoc! {"
             SELECT identifier
             FROM transaction_identifiers
@@ -62,7 +62,7 @@ impl SqliteStorage {
     async fn get_identifiers_for_transactions(
         &self,
         transaction_ids: &[u64],
-    ) -> Result<std::collections::HashMap<u64, Vec<Identifier>>, sqlx::Error> {
+    ) -> Result<std::collections::HashMap<u64, Vec<RawTransactionIdentifier>>, sqlx::Error> {
         if transaction_ids.is_empty() {
             return Ok(std::collections::HashMap::new());
         }

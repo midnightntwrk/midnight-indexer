@@ -13,7 +13,9 @@
 
 use crate::domain::{ContractAction, ContractBalance, storage::NoopStorage};
 use futures::{Stream, stream};
-use indexer_common::domain::{BlockHash, ContractAddress, Identifier, TransactionHash};
+use indexer_common::domain::{
+    BlockHash, RawContractAddress, RawTransactionIdentifier, TransactionHash,
+};
 use std::{fmt::Debug, num::NonZeroU32};
 
 #[trait_variant::make(Send)]
@@ -24,41 +26,41 @@ where
     /// Get the contract deploy for the given address.
     async fn get_contract_deploy_by_address(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
     /// Get the latest contract action for the given address.
     async fn get_contract_action_by_address(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
     /// Get the latest contract action for the given address and block hash.
     async fn get_contract_action_by_address_and_block_hash(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
         hash: BlockHash,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
     /// Get the latest contract action for the given address and block height.
     async fn get_contract_action_by_address_and_block_height(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
         height: u32,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
     /// Get the latest contract action for the given address and transaction hash.
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
         hash: TransactionHash,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
     /// Get the latest contract action for the given address and transaction identifier.
     async fn get_contract_action_by_address_and_transaction_identifier(
         &self,
-        address: &ContractAddress,
-        identifier: &Identifier,
+        address: &RawContractAddress,
+        identifier: &RawTransactionIdentifier,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
     /// Get the contract actions for the transaction with the given id, ordered by transaction ID.
@@ -71,7 +73,7 @@ where
     /// and contract_action ID, ordered by transaction ID.
     fn get_contract_actions_by_address(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
         height: u32,
         contract_action_id: u64,
         batch_size: NonZeroU32,
@@ -89,7 +91,7 @@ impl ContractActionStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_contract_deploy_by_address(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         unimplemented!()
     }
@@ -97,7 +99,7 @@ impl ContractActionStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_contract_action_by_address(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         unimplemented!()
     }
@@ -105,7 +107,7 @@ impl ContractActionStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_contract_action_by_address_and_block_hash(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
         hash: BlockHash,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         unimplemented!()
@@ -114,7 +116,7 @@ impl ContractActionStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_contract_action_by_address_and_block_height(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
         height: u32,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         unimplemented!()
@@ -123,7 +125,7 @@ impl ContractActionStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
         hash: TransactionHash,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         unimplemented!()
@@ -132,8 +134,8 @@ impl ContractActionStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_contract_action_by_address_and_transaction_identifier(
         &self,
-        address: &ContractAddress,
-        identifier: &Identifier,
+        address: &RawContractAddress,
+        identifier: &RawTransactionIdentifier,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         unimplemented!()
     }
@@ -149,7 +151,7 @@ impl ContractActionStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     fn get_contract_actions_by_address(
         &self,
-        address: &ContractAddress,
+        address: &RawContractAddress,
         block_height: u32,
         contract_action_id: u64,
         batch_size: NonZeroU32,

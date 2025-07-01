@@ -12,16 +12,17 @@
 // limitations under the License.
 
 use crate::{
-    domain::{HexEncoded, Transaction, ZswapStateCache, storage::Storage},
+    domain::{LedgerStateCache, Transaction, storage::Storage},
     infra::api::{
-        ContextExt, ResultExt,
+        ApiError, ApiResult, ContextExt, HexEncoded, InnerApiError, ResultExt,
         v1::{
-            ProgressUpdate, ViewingUpdate, WalletSyncEvent, ZswapChainStateUpdate,
-            hex_decode_session_id,
+            decode_session_id,
+            wallet::{ProgressUpdate, ViewingUpdate, WalletSyncEvent, ZswapChainStateUpdate},
         },
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
+use drop_stream::DropStreamExt;
 use fastrace::trace;
 use futures::{
     Stream, StreamExt,
@@ -32,8 +33,9 @@ use indexer_common::domain::{
     LedgerStateStorage, NetworkId, SessionId, Subscriber, TransactionResult, WalletIndexed,
 };
 use log::{debug, warn};
-use metrics::{Counter, counter};
-use std::{future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
+use std::{
+    future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, sync::Arc, time::Duration,
+};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
@@ -48,7 +50,6 @@ const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(3);
 const ACTIVATE_WALLET_INTERVAL: Duration = Duration::from_secs(60);
 
 pub struct WalletSubscription<S, B, Z> {
-    wallet_calls: Counter,
     _s: PhantomData<S>,
     _b: PhantomData<B>,
     _z: PhantomData<Z>,
@@ -56,10 +57,7 @@ pub struct WalletSubscription<S, B, Z> {
 
 impl<S, B, Z> Default for WalletSubscription<S, B, Z> {
     fn default() -> Self {
-        let wallet_calls = counter!("indexer_api_calls_subscription_wallet");
-
         Self {
-            wallet_calls,
             _s: PhantomData,
             _b: PhantomData,
             _z: PhantomData,
@@ -83,12 +81,13 @@ where
         session_id: HexEncoded,
         index: Option<u64>,
         send_progress_updates: Option<bool>,
-    ) -> async_graphql::Result<
-        impl Stream<Item = async_graphql::Result<WalletSyncEvent<S>>> + use<'a, S, B, Z>,
-    > {
-        self.wallet_calls.increment(1);
+    ) -> Result<impl Stream<Item = ApiResult<WalletSyncEvent<S>>> + use<'a, S, B, Z>, ApiError>
+    {
+        cx.get_metrics().wallets_connected.increment(1);
+        debug!(session_id:%; "wallet subscription started");
 
-        let session_id = hex_decode_session_id(session_id)?;
+        let session_id =
+            decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
         let index = index.unwrap_or_default();
         let send_progress_updates = send_progress_updates.unwrap_or(true);
 
@@ -123,9 +122,18 @@ where
         let storage = cx.get_storage::<S>();
         let set_wallet_active = IntervalStream::new(interval(ACTIVATE_WALLET_INTERVAL))
             .then(move |_| async move { storage.set_wallet_active(session_id).await })
-            .map_err(Into::into);
+            .map_err(|error| {
+                ApiError::Server(InnerApiError(
+                    "set wallet active".to_string(),
+                    Some(Arc::new(error)),
+                ))
+            });
         let events = stream::select(events.map_ok(Some), set_wallet_active.map_ok(|_| None))
-            .try_filter_map(ok);
+            .try_filter_map(ok)
+            .on_drop(move || {
+                cx.get_metrics().wallets_connected.decrement(1);
+                debug!(session_id:%; "wallet subscription ended");
+            });
 
         Ok(events)
     }
@@ -137,9 +145,7 @@ async fn viewing_updates<'a, S, B, Z>(
     session_id: SessionId,
     index: u64,
     trigger: Trigger,
-) -> async_graphql::Result<
-    impl Stream<Item = async_graphql::Result<ViewingUpdate<S>>> + use<'a, S, B, Z>,
->
+) -> Result<impl Stream<Item = ApiResult<ViewingUpdate<S>>> + use<'a, S, B, Z>, ApiError>
 where
     S: Storage,
     B: Subscriber,
@@ -149,7 +155,7 @@ where
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
     let ledger_state_storage = cx.get_ledger_state_storage::<Z>();
-    let zswap_state_cache = cx.get_zswap_state_cache();
+    let zswap_state_cache = cx.get_ledger_state_cache();
 
     let wallet_indexed_events = subscriber
         .subscribe::<WalletIndexed>()
@@ -164,7 +170,7 @@ where
         while let Some(transaction) = transactions
             .try_next()
             .await
-            .internal("get next transaction")?
+            .map_err_into_server_error(|| "get next transaction")?
         {
             let viewing_update = viewing_update(
                 next_index,
@@ -185,7 +191,7 @@ where
         while wallet_indexed_events
             .try_next()
             .await
-            .internal("get next WalletIndexed event")?
+            .map_err_into_server_error(|| "get next WalletIndexed event")?
             .is_some()
         {
             debug!(next_index; "streaming next transactions");
@@ -197,7 +203,7 @@ where
             while let Some(transaction) = transactions
                 .try_next()
                 .await
-                .internal("get next transaction")?
+                .map_err_into_server_error(|| "get next transaction")?
             {
                 let viewing_update = viewing_update(
                     next_index,
@@ -226,8 +232,8 @@ async fn viewing_update<S, Z>(
     transaction: Transaction,
     network_id: NetworkId,
     ledger_state_storage: &Z,
-    zswap_state_cache: &ZswapStateCache,
-) -> async_graphql::Result<ViewingUpdate<S>>
+    zswap_state_cache: &LedgerStateCache,
+) -> ApiResult<ViewingUpdate<S>>
 where
     S: Storage,
     Z: LedgerStateStorage,
@@ -250,12 +256,12 @@ where
             .collapsed_update(
                 from,
                 transaction.start_index - 1,
+                ledger_state_storage,
                 network_id,
                 transaction.protocol_version,
-                ledger_state_storage,
             )
             .await
-            .internal("create collapsed update")?;
+            .map_err_into_server_error(|| "create collapsed update")?;
 
         vec![
             ZswapChainStateUpdate::MerkleTreeCollapsedUpdate(collapsed_update.into()),
@@ -272,7 +278,7 @@ where
 async fn progress_updates<'a, S>(
     cx: &'a Context<'a>,
     session_id: SessionId,
-) -> async_graphql::Result<impl Stream<Item = async_graphql::Result<ProgressUpdate>> + use<'a, S>>
+) -> ApiResult<impl Stream<Item = ApiResult<ProgressUpdate>> + use<'a, S>>
 where
     S: Storage,
 {
@@ -284,15 +290,14 @@ where
     Ok(updates)
 }
 
-async fn progress_update<S>(
-    session_id: SessionId,
-    storage: &S,
-) -> async_graphql::Result<ProgressUpdate>
+async fn progress_update<S>(session_id: SessionId, storage: &S) -> ApiResult<ProgressUpdate>
 where
     S: Storage,
 {
-    let (highest_index, highest_relevant_index, highest_relevant_wallet_index) =
-        storage.get_highest_indices(session_id).await?;
+    let (highest_index, highest_relevant_index, highest_relevant_wallet_index) = storage
+        .get_highest_indices(session_id)
+        .await
+        .map_err_into_server_error(|| "get highest indices")?;
 
     let highest_index = highest_index.unwrap_or_default();
     let highest_relevant_index = highest_relevant_index.unwrap_or_default();

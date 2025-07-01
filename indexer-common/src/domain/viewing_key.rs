@@ -11,26 +11,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::SessionId;
+use crate::domain::{ByteArray, ByteArrayLenError, SessionId};
 use chacha20poly1305::{
     AeadCore, ChaCha20Poly1305,
     aead::{Aead, OsRng, Payload},
 };
 use derive_more::From;
-use midnight_transient_crypto::encryption::SecretKey;
-use midnight_zswap::keys::SecretKeys;
 use sha2::{Digest, Sha256};
 use sqlx::types::Uuid;
 use std::fmt::{self, Debug, Display};
 use thiserror::Error;
 
+pub const VIEWING_KEY_LEN: usize = 32;
+
 /// A secret key that is encrypted at rest.
-/// Attention: Do not leak the secret! The implementation must make sure that the secret cannot
-/// accidentally be accessed. The only access must be via the decrypt and encrypt methods.
+/// Attention: Do not accidentally leak the secret!
 #[derive(Clone, Copy, PartialEq, Eq, Hash, From)]
-pub struct ViewingKey([u8; SecretKey::BYTES]);
+#[from(forward)]
+pub struct ViewingKey(ByteArray<VIEWING_KEY_LEN>);
 
 impl ViewingKey {
+    /// Expose the sercret.
+    pub fn expose_secret(&self) -> ByteArray<VIEWING_KEY_LEN> {
+        self.0
+    }
+
     /// Try to decrypt the given bytes as viewing key using ChaCha20Poly1305 AEAD with the given
     /// nonce and ciphertext and the given wallet ID.
     pub fn decrypt(
@@ -49,7 +54,7 @@ impl ViewingKey {
 
         let bytes = bytes
             .try_into()
-            .map_err(|bytes: Vec<u8>| DecryptViewingKeyError::Array(bytes.len()))?;
+            .map_err(DecryptViewingKeyError::ByteArrayLen)?;
 
         Ok(Self(bytes))
     }
@@ -63,7 +68,7 @@ impl ViewingKey {
         let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
 
         let payload = Payload {
-            msg: &self.0,
+            msg: &self.0.0,
             aad: id.as_bytes(),
         };
         let mut ciphertext = cipher.encrypt(&nonce, payload)?;
@@ -82,14 +87,6 @@ impl ViewingKey {
 
         <[u8; 32]>::from(session_id).into()
     }
-
-    /// For testing purposes only!
-    pub fn make_for_testing_yes_i_know_what_i_am_doing() -> Self {
-        let bytes = SecretKeys::from_rng_seed(&mut OsRng)
-            .encryption_secret_key
-            .repr();
-        Self(bytes)
-    }
 }
 
 impl Debug for ViewingKey {
@@ -106,37 +103,11 @@ impl Display for ViewingKey {
     }
 }
 
-impl From<SecretKey> for ViewingKey {
-    fn from(secret_key: SecretKey) -> Self {
-        Self(secret_key.repr())
-    }
-}
-
-impl From<ViewingKey> for SecretKey {
-    fn from(viewing_key: ViewingKey) -> Self {
-        SecretKey::from_repr(&viewing_key.0).expect("SecretKey can be created from repr")
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum DecryptViewingKeyError {
     #[error("cannot decrypt secret")]
     DecryptViewingKeyError(#[from] chacha20poly1305::Error),
 
-    #[error("cannot create byte array of len 64 from slice of len {0}")]
-    Array(usize),
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::domain::ViewingKey;
-    use chacha20poly1305::aead::OsRng;
-    use midnight_zswap::keys::SecretKeys;
-
-    #[test]
-    fn test_viewing_key_from_roundtrip() {
-        let secret_key = SecretKeys::from_rng_seed(&mut OsRng).encryption_secret_key;
-        let viewing_key = ViewingKey::from(secret_key);
-        assert_eq!(secret_key, viewing_key.into());
-    }
+    #[error(transparent)]
+    ByteArrayLen(ByteArrayLenError),
 }

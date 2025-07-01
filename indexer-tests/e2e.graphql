@@ -14,14 +14,14 @@ query BlockQuery($block_offset: BlockOffset) {
             protocolVersion
             transactionResult {
                 status
+                segments {
+                    id
+                    success
+                }
             }
             fees {
                 paidFees
                 estimatedFees
-            }
-            segmentResults {
-                segmentId
-                success
             }
             identifiers
             block {
@@ -93,15 +93,15 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
         hash
         protocolVersion
         transactionResult {
-                status
+            status
+            segments {
+                id
+                success
             }
+        }
         fees {
             paidFees
             estimatedFees
-        }
-        segmentResults {
-            segmentId
-            success
         }
         identifiers
         block {
@@ -267,14 +267,14 @@ subscription BlockSubscription($block_offset: BlockOffset) {
             protocolVersion
             transactionResult {
                 status
+                segments {
+                    id
+                    success
+                }
             }
             fees {
                 paidFees
                 estimatedFees
-            }
-            segmentResults {
-                segmentId
-                success
             }
             identifiers
             block {

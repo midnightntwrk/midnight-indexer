@@ -12,16 +12,18 @@
 // limitations under the License.
 
 use async_graphql::scalar;
-use derive_more::derive::From;
-use indexer_common::domain::{NetworkId, UnknownNetworkIdError, ViewingKey as CommonViewingKey};
-use midnight_serialize::Deserializable;
-use midnight_transient_crypto::encryption::SecretKey;
+use bech32::{Bech32m, Hrp};
+use derive_more::{Display, derive::From};
+use fastrace::trace;
+use indexer_common::domain::{
+    ByteArray, NetworkId, ProtocolVersion, UnknownNetworkIdError, ViewingKey as CommonViewingKey,
+    ledger,
+};
 use serde::{Deserialize, Serialize};
-use std::io;
 use thiserror::Error;
 
 /// Bech32m-encoded viewing key.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, From)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, Serialize, Deserialize, From)]
 #[from(String, &str)]
 pub struct ViewingKey(pub String);
 
@@ -35,9 +37,14 @@ impl ViewingKey {
     /// - For mainnet: "mn_shield-esk" + bech32m data
     /// - For other networks: "mn_shield-esk_" + network-id + bech32m data where network-id is one
     ///   of: "dev", "test", "undeployed"
+    #[trace(properties = {
+        "network_id": "{network_id}",
+        "protocol_version": "{protocol_version}"
+    })]
     pub fn try_into_domain(
         self,
         network_id: NetworkId,
+        protocol_version: ProtocolVersion,
     ) -> Result<CommonViewingKey, ViewingKeyFormatError> {
         let (hrp, bytes) = bech32::decode(&self.0).map_err(ViewingKeyFormatError::Decode)?;
         let hrp = hrp.to_lowercase();
@@ -50,9 +57,32 @@ impl ViewingKey {
             return Err(ViewingKeyFormatError::UnexpectedNetworkId(n, network_id));
         }
 
-        let secret_key = SecretKey::deserialize(&mut bytes.as_slice(), 0)?;
+        let secret_key = ledger::SecretKey::deserialize(bytes, network_id, protocol_version)?;
 
-        Ok(secret_key.into())
+        Ok(secret_key.expose_secret().into())
+    }
+
+    /// Derive a bech32m-encoded secret key for testing from the given root seed.
+    pub fn derive_for_testing(
+        seed: ByteArray<32>,
+        network_id: NetworkId,
+        protocol_version: ProtocolVersion,
+    ) -> Self {
+        let key = ledger::SecretKey::derive_for_testing(seed, network_id, protocol_version)
+            .expect("secret key can be derived");
+
+        let hrp = match network_id {
+            NetworkId::Undeployed => "mn_shield-esk_undeployed",
+            NetworkId::DevNet => "mn_shield-esk_dev",
+            NetworkId::TestNet => "mn_shield-esk_test",
+            NetworkId::MainNet => "mn_shield-esk",
+        };
+        let hrp = Hrp::parse(hrp).expect("HRP can be parsed");
+
+        let encoded = bech32::encode::<Bech32m>(hrp, key.as_ref())
+            .expect("viewing key can be bech32m-encoded");
+
+        Self(encoded)
     }
 }
 
@@ -65,54 +95,46 @@ pub enum ViewingKeyFormatError {
     InvalidHrp(String),
 
     #[error(transparent)]
-    TryFromStrForNetworkIdError(#[from] UnknownNetworkIdError),
+    UnknownNetworkId(#[from] UnknownNetworkIdError),
 
     #[error("network ID mismatch: got {0}, expected {1}")]
     UnexpectedNetworkId(NetworkId, NetworkId),
 
-    #[error("cannot deserialize viewing key")]
-    Deserialize(#[from] io::Error),
+    #[error(transparent)]
+    Ledger(#[from] ledger::Error),
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{ViewingKey, ViewingKeyFormatError};
-    use assert_matches::assert_matches;
-    use indexer_common::domain::{NetworkId, ViewingKey as CommonViewingKey};
-    use midnight_zswap::keys::{SecretKeys, Seed};
+    use crate::domain::ViewingKey;
+    use indexer_common::domain::{ByteArray, NetworkId, PROTOCOL_VERSION_000_013_000, ledger};
 
     #[test]
-    fn test() {
-        let viewing_key = ViewingKey::from(
-            "mn_shield-esk1qvqzq76fwwf9jqlv0uqywd9jk0q4klqk44qyc809que8q0v309z8u7qzzyn2qx",
-        )
-        .try_into_domain(NetworkId::MainNet);
-        assert_matches!(viewing_key, Ok(key) if key == seed_to_viewing_key("0000000000000000000000000000000000000000000000000000000000000000"));
+    fn test_try_into_domain() {
+        let network_id = NetworkId::Undeployed;
+        let protocol_version = PROTOCOL_VERSION_000_013_000;
+        let seed = seed(1);
 
-        let viewing_key = ViewingKey::from(
-            "mn_shield-esk1qvqzq76fwwf9jqlv0uqywd9jk0q4klqk44qyc809que8q0v309z8u7qzzyn2qx",
-        )
-        .try_into_domain(NetworkId::DevNet);
-        assert_matches!(
-            viewing_key,
-            Err(ViewingKeyFormatError::UnexpectedNetworkId(
-                NetworkId::MainNet,
-                NetworkId::DevNet
-            ))
-        );
+        // mn_shield-esk_undeployed1qqpsq87f9ac09e95wjm2rp8vp0yd0z4pns7p2w7c9qus0vm20fj4dl93nu709t
+        let viewing_key = ViewingKey::derive_for_testing(seed, network_id, protocol_version);
 
-        let viewing_key = ViewingKey::from(
-            "mn_shield-esk_dev1qvqzq76fwwf9jqlv0uqywd9jk0q4klqk44qyc809que8q0v309z8u7qz7pax9d",
-        )
-        .try_into_domain(NetworkId::DevNet);
-        assert_matches!(viewing_key, Ok(key) if key == seed_to_viewing_key("0000000000000000000000000000000000000000000000000000000000000000"));
+        let domain_viewing_key = viewing_key.try_into_domain(network_id, protocol_version);
+        assert!(domain_viewing_key.is_ok());
+        let viewing_key = domain_viewing_key.unwrap();
+
+        let secret_key = ledger::SecretKey::derive_for_testing(seed, network_id, protocol_version)
+            .expect("secret key can be derived");
+        let secret_key = ledger::SecretKey::deserialize(secret_key, network_id, protocol_version)
+            .expect("secret key can be deserialized");
+        let expected_viewing_key =
+            indexer_common::domain::ViewingKey::from(secret_key.expose_secret());
+
+        assert_eq!(viewing_key, expected_viewing_key);
     }
 
-    fn seed_to_viewing_key(seed: &str) -> CommonViewingKey {
-        let seed_bytes = const_hex::decode(seed).expect("seed can be hex-decoded");
-        let seed_bytes = <[u8; 32]>::try_from(seed_bytes).expect("seed has 32 bytes");
-        SecretKeys::from(Seed::from(seed_bytes))
-            .encryption_secret_key
-            .into()
+    fn seed(n: u8) -> ByteArray<32> {
+        let mut seed = [0; 32];
+        seed[31] = n;
+        seed.into()
     }
 }

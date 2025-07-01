@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{LedgerStateStorage, RawLedgerState};
+use crate::domain::{LedgerStateStorage, ProtocolVersion, RawLedgerState};
 use parking_lot::RwLock;
 use std::{convert::Infallible, sync::Arc};
 
@@ -25,23 +25,26 @@ impl LedgerStateStorage for InMemZswapStateStorage {
     type Error = Infallible;
 
     async fn load_last_index(&self) -> Result<Option<u64>, Self::Error> {
-        Ok(self.data.read().last_index)
+        Ok(self.data.read().highest_zswap_state_index)
     }
 
-    async fn load_ledger_state(&self) -> Result<Option<(RawLedgerState, u32)>, Self::Error> {
-        Ok(self.data.read().zswap_state.clone())
+    async fn load_ledger_state(
+        &self,
+    ) -> Result<Option<(RawLedgerState, u32, ProtocolVersion)>, Self::Error> {
+        Ok(self.data.read().ledger_state.clone())
     }
 
     async fn save(
         &mut self,
-        zswap_state: &RawLedgerState,
+        ledger_state: &RawLedgerState,
         block_height: u32,
-        last_index: Option<u64>,
+        highest_zswap_state_index: Option<u64>,
+        protocol_version: ProtocolVersion,
     ) -> Result<(), Self::Error> {
         let mut data = self.data.write();
 
-        data.zswap_state = Some((zswap_state.to_owned(), block_height));
-        data.last_index = last_index;
+        data.ledger_state = Some((ledger_state.to_owned(), block_height, protocol_version));
+        data.highest_zswap_state_index = highest_zswap_state_index;
 
         Ok(())
     }
@@ -49,6 +52,6 @@ impl LedgerStateStorage for InMemZswapStateStorage {
 
 #[derive(Default)]
 struct Data {
-    zswap_state: Option<(RawLedgerState, u32)>,
-    last_index: Option<u64>,
+    ledger_state: Option<(RawLedgerState, u32, ProtocolVersion)>,
+    highest_zswap_state_index: Option<u64>,
 }

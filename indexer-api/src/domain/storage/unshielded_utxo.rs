@@ -18,7 +18,9 @@ use crate::domain::{
         transaction::TransactionStorage, wallet::WalletStorage,
     },
 };
-use indexer_common::domain::{BlockHash, Identifier, TransactionHash, UnshieldedAddress};
+use indexer_common::domain::{
+    BlockHash, RawTransactionIdentifier, RawUnshieldedAddress, TransactionHash,
+};
 use sqlx::Error;
 use std::fmt::Debug;
 
@@ -39,7 +41,7 @@ where
     /// Get all unshielded UTXOs for a given address.
     async fn get_unshielded_utxos_by_address(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
     /// Get unshielded UTXOs created by a specific transaction, ordered by output index.
@@ -58,7 +60,7 @@ where
     /// output index.
     async fn get_unshielded_utxos_created_in_transaction_for_address(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
@@ -66,14 +68,14 @@ where
     /// output index.
     async fn get_unshielded_utxos_spent_in_transaction_for_address(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
     /// Get unshielded UTXOs for an address from blocks with height >= the given value.
     async fn get_unshielded_utxos_by_address_from_height(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         height: u32,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
@@ -81,22 +83,22 @@ where
     /// hash.
     async fn get_unshielded_utxos_by_address_from_block_hash(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         block_hash: &BlockHash,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
     /// Get unshielded UTXOs for an address from a transaction with the given hash.
     async fn get_unshielded_utxos_by_address_from_transaction_hash(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         transaction_hash: &TransactionHash,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
     /// Get unshielded UTXOs for an address from a transaction with the given identifier.
     async fn get_unshielded_utxos_by_address_from_transaction_identifier(
         &self,
-        address: &UnshieldedAddress,
-        identifier: &Identifier,
+        address: &RawUnshieldedAddress,
+        identifier: &RawTransactionIdentifier,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
     /// Get the highest end indices for unshielded address progress calculation.
@@ -105,7 +107,7 @@ where
     /// - the highest end index for transactions involving the given unshielded address
     async fn get_highest_indices_for_address(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
     ) -> Result<(Option<u64>, Option<u64>), sqlx::Error>;
 }
 
@@ -114,7 +116,7 @@ impl UnshieldedUtxoStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_unshielded_utxos_by_address(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
     }
@@ -138,7 +140,7 @@ impl UnshieldedUtxoStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_unshielded_utxos_created_in_transaction_for_address(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
@@ -147,7 +149,7 @@ impl UnshieldedUtxoStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_unshielded_utxos_spent_in_transaction_for_address(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
@@ -156,7 +158,7 @@ impl UnshieldedUtxoStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_unshielded_utxos_by_address_from_height(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         height: u32,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
@@ -165,7 +167,7 @@ impl UnshieldedUtxoStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_unshielded_utxos_by_address_from_block_hash(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         block_hash: &BlockHash,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
@@ -174,7 +176,7 @@ impl UnshieldedUtxoStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_unshielded_utxos_by_address_from_transaction_hash(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
         transaction_hash: &TransactionHash,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
@@ -183,8 +185,8 @@ impl UnshieldedUtxoStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_unshielded_utxos_by_address_from_transaction_identifier(
         &self,
-        address: &UnshieldedAddress,
-        identifier: &Identifier,
+        address: &RawUnshieldedAddress,
+        identifier: &RawTransactionIdentifier,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
     }
@@ -192,7 +194,7 @@ impl UnshieldedUtxoStorage for NoopStorage {
     #[cfg_attr(coverage, coverage(off))]
     async fn get_highest_indices_for_address(
         &self,
-        address: &UnshieldedAddress,
+        address: &RawUnshieldedAddress,
     ) -> Result<(Option<u64>, Option<u64>), Error> {
         unimplemented!()
     }

@@ -14,7 +14,7 @@
 use anyhow::Context;
 use assert_matches::assert_matches;
 use chain_indexer::domain::{
-    Block, BlockInfo, BlockTransactions, Transaction, UnshieldedUtxo, storage::Storage as _,
+    Block, BlockInfo, BlockTransactions, Transaction, storage::Storage as _,
 };
 use fake::{Fake, Faker};
 use futures::{StreamExt, TryStreamExt};
@@ -29,9 +29,10 @@ use indexer_common::{
     self,
     cipher::make_cipher,
     domain::{
-        BlockAuthor, BlockHash, ByteArray, ByteVec, ContractAddress, Identifier, IntentHash,
-        NetworkId, ProtocolVersion, RawTokenType, RawTransaction, TransactionHash,
-        TransactionResult, UnshieldedAddress,
+        BlockAuthor, BlockHash, ByteArray, ByteVec, IntentHash, NetworkId,
+        PROTOCOL_VERSION_000_013_000, RawContractAddress, RawTokenType, RawTransaction,
+        RawTransactionIdentifier, RawUnshieldedAddress, TransactionHash, TransactionResult,
+        UnshieldedUtxo, ledger::ZswapStateRoot,
     },
     error::BoxError,
     infra::{migrations, pool},
@@ -187,6 +188,7 @@ async fn run_tests(
         block_transactions,
         BlockTransactions {
             transactions: vec![],
+            protocol_version: PROTOCOL_VERSION_000_013_000,
             block_parent_hash: BLOCK_0.parent_hash,
             block_timestamp: BLOCK_0.timestamp
         }
@@ -204,6 +206,7 @@ async fn run_tests(
                 .iter()
                 .map(|t| t.raw.to_owned())
                 .collect::<Vec<_>>(),
+            protocol_version: PROTOCOL_VERSION_000_013_000,
             block_parent_hash: BLOCK_1.parent_hash,
             block_timestamp: BLOCK_1.timestamp
         }
@@ -224,7 +227,7 @@ async fn run_tests(
     let block = block.unwrap();
     assert_eq!(block.hash, BLOCK_0_HASH);
     assert_eq!(block.height, 0);
-    assert_eq!(block.protocol_version, PROTOCOL_VERSION_0_1);
+    assert_eq!(block.protocol_version, PROTOCOL_VERSION_000_013_000);
     assert_eq!(block.parent_hash, ZERO_HASH);
     assert!(block.author.is_none());
     assert_eq!(block.timestamp, 0);
@@ -242,7 +245,7 @@ async fn run_tests(
     let block = block.unwrap();
     assert_eq!(block.hash, BLOCK_1_HASH);
     assert_eq!(block.height, 1);
-    assert_eq!(block.protocol_version, PROTOCOL_VERSION_0_1);
+    assert_eq!(block.protocol_version, PROTOCOL_VERSION_000_013_000);
     assert_eq!(block.parent_hash, BLOCK_0_HASH);
     assert_matches!(block.author, Some(author) if author == *BLOCK_1_AUTHOR);
     assert_eq!(block.timestamp, 1);
@@ -255,7 +258,7 @@ async fn run_tests(
     let transaction = &transactions[0];
     assert_eq!(transaction.hash, TRANSACTION_1_HASH);
     assert_eq!(transaction.block_hash, BLOCK_1_HASH);
-    assert_eq!(transaction.protocol_version, PROTOCOL_VERSION_0_1);
+    assert_eq!(transaction.protocol_version, PROTOCOL_VERSION_000_013_000);
     assert_eq!(transaction.transaction_result, TransactionResult::Success);
     assert_eq!(transaction.identifiers, vec![IDENTIFIER_1.to_owned()]);
     assert_eq!(&transaction.raw, &*RAW_TRANSACTION_1);
@@ -284,7 +287,7 @@ async fn run_tests(
     let block = block.unwrap();
     assert_eq!(block.hash, BLOCK_2_HASH);
     assert_eq!(block.height, 2);
-    assert_eq!(block.protocol_version, PROTOCOL_VERSION_0_1);
+    assert_eq!(block.protocol_version, PROTOCOL_VERSION_000_013_000);
     assert_eq!(block.parent_hash, BLOCK_1_HASH);
     assert_eq!(block.timestamp, 2);
     let transactions = indexer_api_storage
@@ -295,7 +298,7 @@ async fn run_tests(
     let transaction = &transactions[0];
     assert_eq!(transaction.hash, TRANSACTION_2_HASH);
     assert_eq!(transaction.block_hash, BLOCK_2_HASH);
-    assert_eq!(transaction.protocol_version, PROTOCOL_VERSION_0_1);
+    assert_eq!(transaction.protocol_version, PROTOCOL_VERSION_000_013_000);
     assert_eq!(transaction.transaction_result, TransactionResult::Success);
     assert_eq!(transaction.identifiers, vec![IDENTIFIER_2.to_owned()]);
     assert_eq!(&transaction.raw, &*RAW_TRANSACTION_2);
@@ -511,27 +514,27 @@ async fn run_tests(
 static BLOCK_0: LazyLock<Block> = LazyLock::new(|| Block {
     hash: BLOCK_0_HASH,
     height: 0,
-    protocol_version: PROTOCOL_VERSION_0_1,
+    protocol_version: PROTOCOL_VERSION_000_013_000,
     parent_hash: ZERO_HASH,
     author: None,
     timestamp: 0,
-    zswap_state_root: Faker.fake(),
+    zswap_state_root: ZswapStateRoot::V5(Faker.fake()),
     transactions: vec![],
 });
 
 static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
     hash: BLOCK_1_HASH,
     height: 1,
-    protocol_version: PROTOCOL_VERSION_0_1,
+    protocol_version: PROTOCOL_VERSION_000_013_000,
     parent_hash: BLOCK_0_HASH,
     author: Some(BLOCK_1_AUTHOR.to_owned()),
     timestamp: 1,
-    zswap_state_root: Faker.fake(),
+    zswap_state_root: ZswapStateRoot::V5(Faker.fake()),
     transactions: vec![
         Transaction {
             id: 0, //they are not saved in the db yet
             hash: TRANSACTION_1_HASH,
-            protocol_version: PROTOCOL_VERSION_0_1,
+            protocol_version: PROTOCOL_VERSION_000_013_000,
             transaction_result: TransactionResult::Success,
             identifiers: vec![IDENTIFIER_1.to_owned()],
             raw: RAW_TRANSACTION_1.to_owned(),
@@ -539,18 +542,17 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
                 address: ADDRESS.to_owned(),
                 state: b"state".as_slice().into(),
                 zswap_state: b"zswap_state".as_slice().into(),
-                attributes: chain_indexer::domain::ContractAttributes::Deploy,
+                attributes: indexer_common::domain::ContractAttributes::Deploy,
                 // Deploy actions typically start with zero balances
                 extracted_balances: Vec::new(),
             }],
             merkle_tree_root: b"merkle_tree_root".as_slice().into(),
             created_unshielded_utxos: vec![UnshieldedUtxo {
-                creating_transaction_id: 1,
-                output_index: 0,
-                owner_address: OWNER_ADDR_1.clone(),
+                value: 100,
+                owner_address: OWNER_ADDR_1,
                 token_type: *TOKEN_NIGHT,
                 intent_hash: *INTENT_HASH,
-                value: 100,
+                output_index: 0,
             }],
             spent_unshielded_utxos: vec![],
             start_index: 0,
@@ -561,7 +563,7 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
         Transaction {
             id: 0,
             hash: TRANSACTION_1_HASH,
-            protocol_version: PROTOCOL_VERSION_0_1,
+            protocol_version: PROTOCOL_VERSION_000_013_000,
             transaction_result: TransactionResult::Failure,
             identifiers: vec![IDENTIFIER_1.to_owned()],
             raw: RAW_TRANSACTION_1.to_owned(),
@@ -569,23 +571,22 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
                 address: ADDRESS.to_owned(),
                 state: b"state".as_slice().into(),
                 zswap_state: b"zswap_state".as_slice().into(),
-                attributes: chain_indexer::domain::ContractAttributes::Call {
+                attributes: indexer_common::domain::ContractAttributes::Call {
                     entry_point: b"entry_point".as_slice().into(),
                 },
                 // Call actions may receive tokens and have balances
-                extracted_balances: vec![chain_indexer::domain::ContractBalance {
+                extracted_balances: vec![indexer_common::domain::ContractBalance {
                     token_type: *TOKEN_NIGHT,
                     amount: 1000,
                 }],
             }],
             merkle_tree_root: b"merkle_tree_root".as_slice().into(),
             created_unshielded_utxos: vec![UnshieldedUtxo {
-                creating_transaction_id: 1,
-                output_index: 0,
-                owner_address: OWNER_ADDR_1.clone(),
+                value: 100,
+                owner_address: OWNER_ADDR_1,
                 token_type: *TOKEN_NIGHT,
                 intent_hash: *INTENT_HASH_2,
-                value: 100,
+                output_index: 0,
             }],
             spent_unshielded_utxos: vec![],
             start_index: 0,
@@ -599,15 +600,15 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
 static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
     hash: BLOCK_2_HASH,
     height: 2,
-    protocol_version: PROTOCOL_VERSION_0_1,
+    protocol_version: PROTOCOL_VERSION_000_013_000,
     parent_hash: BLOCK_1_HASH,
     author: Some(BLOCK_2_AUTHOR.to_owned()),
     timestamp: 2,
-    zswap_state_root: Faker.fake(),
+    zswap_state_root: ZswapStateRoot::V5(Faker.fake()),
     transactions: vec![Transaction {
         id: 0,
         hash: TRANSACTION_2_HASH,
-        protocol_version: PROTOCOL_VERSION_0_1,
+        protocol_version: PROTOCOL_VERSION_000_013_000,
         transaction_result: TransactionResult::Success,
         identifiers: vec![IDENTIFIER_2.to_owned()],
         raw: RAW_TRANSACTION_2.to_owned(),
@@ -616,11 +617,11 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
                 address: ADDRESS.to_owned(),
                 state: b"state".as_slice().into(),
                 zswap_state: b"zswap_state".as_slice().into(),
-                attributes: chain_indexer::domain::ContractAttributes::Call {
+                attributes: indexer_common::domain::ContractAttributes::Call {
                     entry_point: b"entry_point".as_slice().into(),
                 },
                 // First call action with Night tokens
-                extracted_balances: vec![chain_indexer::domain::ContractBalance {
+                extracted_balances: vec![indexer_common::domain::ContractBalance {
                     token_type: *TOKEN_NIGHT,
                     amount: 500,
                 }],
@@ -629,14 +630,14 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
                 address: ADDRESS.to_owned(),
                 state: b"state".as_slice().into(),
                 zswap_state: b"zswap_state".as_slice().into(),
-                attributes: chain_indexer::domain::ContractAttributes::Update,
+                attributes: indexer_common::domain::ContractAttributes::Update,
                 // Update action with multiple token types
                 extracted_balances: vec![
-                    chain_indexer::domain::ContractBalance {
+                    indexer_common::domain::ContractBalance {
                         token_type: *TOKEN_NIGHT,
                         amount: 750,
                     },
-                    chain_indexer::domain::ContractBalance {
+                    indexer_common::domain::ContractBalance {
                         token_type: RawTokenType::from([1u8; 32]), // Custom token
                         amount: 100,
                     },
@@ -646,11 +647,11 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
                 address: ADDRESS.to_owned(),
                 state: b"state".as_slice().into(),
                 zswap_state: b"zswap_state".as_slice().into(),
-                attributes: chain_indexer::domain::ContractAttributes::Call {
+                attributes: indexer_common::domain::ContractAttributes::Call {
                     entry_point: b"entry_point".as_slice().into(),
                 },
                 // Second call action with different amounts
-                extracted_balances: vec![chain_indexer::domain::ContractBalance {
+                extracted_balances: vec![indexer_common::domain::ContractBalance {
                     token_type: *TOKEN_NIGHT,
                     amount: 250,
                 }],
@@ -658,14 +659,19 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
         ],
         merkle_tree_root: b"merkle_tree_root".as_slice().into(),
         created_unshielded_utxos: vec![UnshieldedUtxo {
-            creating_transaction_id: 2,
-            output_index: 0,
-            owner_address: OWNER_ADDR_2.clone(),
+            value: 50,
+            owner_address: OWNER_ADDR_2,
             token_type: *TOKEN_NIGHT,
             intent_hash: *INTENT_HASH_3,
-            value: 50,
+            output_index: 0,
         }],
-        spent_unshielded_utxos: vec![sample_spent_utxo()],
+        spent_unshielded_utxos: vec![UnshieldedUtxo {
+            value: 0,
+            owner_address: OWNER_ADDR_1,
+            token_type: *TOKEN_NIGHT,
+            intent_hash: *INTENT_HASH,
+            output_index: 0,
+        }],
         start_index: 2,
         end_index: 3,
         paid_fees: 0,
@@ -689,9 +695,11 @@ static BLOCK_2_AUTHOR: LazyLock<BlockAuthor> = LazyLock::new(|| [2; 32].into());
 const TRANSACTION_1_HASH: TransactionHash = ByteArray::<32>([1; 32]);
 const TRANSACTION_2_HASH: TransactionHash = ByteArray::<32>([2; 32]);
 
-static IDENTIFIER_1: LazyLock<Identifier> = LazyLock::new(|| b"identifier-1".as_slice().into());
+static IDENTIFIER_1: LazyLock<RawTransactionIdentifier> =
+    LazyLock::new(|| b"identifier-1".as_slice().into());
 
-static IDENTIFIER_2: LazyLock<Identifier> = LazyLock::new(|| b"identifier-2".as_slice().into());
+static IDENTIFIER_2: LazyLock<RawTransactionIdentifier> =
+    LazyLock::new(|| b"identifier-2".as_slice().into());
 
 static RAW_TRANSACTION_1: LazyLock<RawTransaction> =
     LazyLock::new(|| create_raw_transaction(TEST_NETWORK_ID).expect("create raw transaction"));
@@ -699,22 +707,16 @@ static RAW_TRANSACTION_1: LazyLock<RawTransaction> =
 static RAW_TRANSACTION_2: LazyLock<RawTransaction> =
     LazyLock::new(|| create_raw_transaction(TEST_NETWORK_ID).expect("create raw transaction"));
 
-static ADDRESS: LazyLock<ContractAddress> = LazyLock::new(|| b"address".as_slice().into());
+static ADDRESS: LazyLock<RawContractAddress> = LazyLock::new(|| b"address".as_slice().into());
 
-static UNKNOWN_ADDRESS: LazyLock<ContractAddress> =
+static UNKNOWN_ADDRESS: LazyLock<RawContractAddress> =
     LazyLock::new(|| b"unknown-address".as_slice().into());
 
-pub const PROTOCOL_VERSION_0_1: ProtocolVersion = ProtocolVersion(1_000);
-pub const UT_ADDR_1_HEX: &str = "01020304";
-pub const UT_ADDR_2_HEX: &str = "05060708";
 pub const UT_ADDR_EMPTY_HEX: &str = "11223344"; // Address with no UTXOs for testing
 
-pub static OWNER_ADDR_1: LazyLock<UnshieldedAddress> =
-    LazyLock::new(|| const_hex::decode(UT_ADDR_1_HEX).unwrap().into());
-pub static OWNER_ADDR_2: LazyLock<UnshieldedAddress> =
-    LazyLock::new(|| const_hex::decode(UT_ADDR_2_HEX).unwrap().into());
-pub static OWNER_ADDR_EMPTY: LazyLock<UnshieldedAddress> =
-    LazyLock::new(|| const_hex::decode(UT_ADDR_EMPTY_HEX).unwrap().into());
+pub static OWNER_ADDR_1: RawUnshieldedAddress = ByteArray([1; 32]);
+pub static OWNER_ADDR_2: RawUnshieldedAddress = ByteArray([2; 32]);
+pub static OWNER_ADDR_EMPTY: RawUnshieldedAddress = ByteArray([3; 32]);
 
 pub static INTENT_HASH: LazyLock<IntentHash> = LazyLock::new(|| [0x11u8; 32].into());
 pub static INTENT_HASH_2: LazyLock<IntentHash> = LazyLock::new(|| [0x22u8; 32].into());
@@ -743,15 +745,4 @@ pub fn create_raw_transaction(_network_id: NetworkId) -> Result<RawTransaction, 
     // let raw_transaction = transaction.serialize(network_id)?.into();
 
     Ok(ByteVec::default())
-}
-
-pub fn sample_spent_utxo() -> UnshieldedUtxo {
-    UnshieldedUtxo {
-        creating_transaction_id: 0,
-        output_index: 0,
-        owner_address: OWNER_ADDR_1.clone(),
-        token_type: *TOKEN_NIGHT,
-        intent_hash: *INTENT_HASH,
-        value: 0,
-    }
 }
