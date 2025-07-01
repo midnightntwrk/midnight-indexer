@@ -137,18 +137,19 @@ impl LedgerState {
         // For now, just apply the transaction normally and return empty events.
         // The actual event conversion will be implemented when the ledger
         // abstraction is extended to handle events properly.
-        // 
+        //
         // Currently blocked by:
         // - The midnight-ledger library needs to expose DUST events through its API
         // - TransactionResultV5 from the ledger only provides limited event information
-        // - We need structured DUST event data from the ledger before we can extract
-        //   and convert them to our domain model
+        // - We need structured DUST event data from the ledger before we can extract and convert
+        //   them to our domain model
         let result =
             self.apply_transaction(transaction, block_parent_hash, block_timestamp, network_id)?;
 
         Ok(TransactionResultWithEvents {
             result,
-            dust_events: Vec::new(), // TODO: Implement event extraction once ledger support is available.
+            dust_events: Vec::new(), /* TODO: Implement event extraction once ledger support is
+                                      * available. */
         })
     }
 
