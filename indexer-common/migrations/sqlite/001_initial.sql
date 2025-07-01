@@ -155,18 +155,19 @@ CREATE TABLE dust_utxos (
 CREATE INDEX dust_utxos_owner_idx ON dust_utxos(owner);
 CREATE INDEX dust_utxos_generation_idx ON dust_utxos(generation_info_id);
 CREATE INDEX dust_utxos_spent_idx ON dust_utxos(spent_at_transaction_id);
+CREATE INDEX dust_utxos_nullifier_prefix_idx ON dust_utxos(substr(hex(nullifier), 1, 8)) WHERE nullifier IS NOT NULL;
 
 CREATE TABLE cnight_registrations (
     id INTEGER PRIMARY KEY,
-    night_address BLOB NOT NULL,
+    cardano_address BLOB NOT NULL,
     dust_address BLOB NOT NULL,
     is_valid BOOLEAN NOT NULL,
     registered_at INTEGER NOT NULL,
     removed_at INTEGER,
-    UNIQUE(night_address, dust_address)
+    UNIQUE(cardano_address, dust_address)
 );
 
-CREATE INDEX cnight_registrations_night_addr_idx ON cnight_registrations(night_address);
+CREATE INDEX cnight_registrations_cardano_addr_idx ON cnight_registrations(cardano_address);
 CREATE INDEX cnight_registrations_dust_addr_idx ON cnight_registrations(dust_address);
 
 CREATE TABLE dust_commitment_tree (
@@ -182,5 +183,19 @@ CREATE TABLE dust_generation_tree (
     root BLOB NOT NULL,
     tree_data BLOB NOT NULL
 );
+
+CREATE TABLE dust_events (
+    id INTEGER PRIMARY KEY,
+    transaction_id INTEGER NOT NULL,
+    transaction_hash BLOB NOT NULL,
+    logical_segment INTEGER NOT NULL,
+    physical_segment INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    event_data TEXT NOT NULL,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+);
+
+CREATE INDEX dust_events_transaction_idx ON dust_events(transaction_id);
+CREATE INDEX dust_events_type_idx ON dust_events(event_type);
 
 
