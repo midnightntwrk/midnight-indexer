@@ -1,7 +1,7 @@
 use crate::domain::{
     ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
     RawContractAddress, RawLedgerState, RawTransaction, RawZswapState, RawZswapStateRoot,
-    TransactionResult, UnshieldedUtxo,
+    TransactionResult, TransactionResultWithEvents, UnshieldedUtxo,
     ledger::{Error, LedgerTransactionV5, NetworkIdExt, SerializableV5Ext},
 };
 use fastrace::trace;
@@ -94,9 +94,9 @@ impl LedgerState {
                 *self = LedgerState::V5(ledger_state);
 
                 let transaction_result = match transaction_result {
-                    TransactionResultV5::Success => TransactionResult::Success,
+                    TransactionResultV5::Success(_events) => TransactionResult::Success,
 
-                    TransactionResultV5::PartialSuccess(segments) => {
+                    TransactionResultV5::PartialSuccess(segments, _events) => {
                         let segments = segments
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
@@ -110,6 +110,33 @@ impl LedgerState {
                 Ok(transaction_result)
             }
         }
+    }
+
+    /// Apply the given raw transaction and capture any DUST events emitted.
+    #[trace(properties = { "network_id": "{network_id}" })]
+    pub fn apply_transaction_with_events(
+        &mut self,
+        transaction: &RawTransaction,
+        block_parent_hash: ByteArray<32>,
+        block_timestamp: u64,
+        network_id: NetworkId,
+    ) -> Result<TransactionResultWithEvents, Error> {
+        // For now, just apply the transaction normally and return empty events.
+        // The actual event conversion will be implemented when the ledger
+        // abstraction is extended to handle events properly.
+        // 
+        // Currently blocked by:
+        // - The midnight-ledger library needs to expose DUST events through its API
+        // - TransactionResultV5 from the ledger only provides limited event information
+        // - We need structured DUST event data from the ledger before we can extract
+        //   and convert them to our domain model
+        let result =
+            self.apply_transaction(transaction, block_parent_hash, block_timestamp, network_id)?;
+
+        Ok(TransactionResultWithEvents {
+            result,
+            dust_events: Vec::new(), // TODO: Implement event extraction once ledger support is available.
+        })
     }
 
     /// Get the first free index of the zswap state.
@@ -161,12 +188,18 @@ impl LedgerState {
                 .utxo
                 .utxos
                 .iter()
-                .map(|utxo| UnshieldedUtxo {
-                    value: utxo.value,
-                    owner_address: utxo.owner.0.0.into(),
-                    token_type: utxo.type_.0.0.into(),
-                    intent_hash: utxo.intent_hash.0.0.into(),
-                    output_index: utxo.output_no,
+                .map(|entry| {
+                    // With dust feature, utxos is HashMap<Utxo, UtxoMeta, D>
+                    // and iter returns Sp<(Sp<Utxo>, Sp<UtxoMeta>)>
+                    let utxo_tuple = &*entry;
+                    let utxo = &*utxo_tuple.0;
+                    UnshieldedUtxo {
+                        value: utxo.value,
+                        owner_address: utxo.owner.0.0.into(),
+                        token_type: utxo.type_.0.0.into(),
+                        intent_hash: utxo.intent_hash.0.0.into(),
+                        output_index: utxo.output_no,
+                    }
                 })
                 .collect(),
         }

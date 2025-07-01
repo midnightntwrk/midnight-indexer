@@ -559,6 +559,7 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
             end_index: 1,
             paid_fees: 0,
             estimated_fees: 0,
+            dust_events: vec![],
         },
         Transaction {
             id: 0,
@@ -593,6 +594,7 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
             end_index: 1,
             paid_fees: 0,
             estimated_fees: 0,
+            dust_events: vec![],
         },
     ],
 });
@@ -676,6 +678,7 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
         end_index: 3,
         paid_fees: 0,
         estimated_fees: 0,
+        dust_events: vec![],
     }],
 });
 

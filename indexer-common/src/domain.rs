@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod dust;
 pub mod ledger;
 
 mod bytes;
@@ -59,6 +60,15 @@ pub enum TransactionResult {
     /// Guaranteed coins failed.
     #[default]
     Failure,
+}
+
+/// Extended transaction result that includes events when available
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransactionResultWithEvents {
+    /// The basic transaction result
+    pub result: TransactionResult,
+    /// DUST events emitted during transaction processing (if available)
+    pub dust_events: Vec<dust::DustEvent>,
 }
 
 /// A contract action.

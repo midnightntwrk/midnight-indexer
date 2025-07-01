@@ -12,7 +12,10 @@
 // limitations under the License.
 
 use crate::domain::{Block, BlockInfo, BlockTransactions};
-use indexer_common::domain::UnshieldedUtxo;
+use indexer_common::domain::{
+    UnshieldedUtxo,
+    dust::{DustEvent, DustGenerationInfo, DustRegistration, DustUtxo},
+};
 
 /// Storage abstraction.
 #[trait_variant::make(Send)]
@@ -45,4 +48,58 @@ where
         &self,
         block_height: u32,
     ) -> Result<BlockTransactions, sqlx::Error>;
+
+    // DUST-specific storage methods
+    /// Save DUST events from transaction processing
+    async fn save_dust_events(
+        &self,
+        events: &[DustEvent],
+        transaction_id: i64,
+    ) -> Result<(), sqlx::Error>;
+
+    /// Save DUST UTXOs
+    async fn save_dust_utxos(&self, utxos: &[DustUtxo]) -> Result<(), sqlx::Error>;
+
+    /// Save DUST generation information
+    async fn save_dust_generation_info(
+        &self,
+        generation_info: &[DustGenerationInfo],
+    ) -> Result<(), sqlx::Error>;
+
+    /// Save cNIGHT registrations
+    async fn save_cnight_registrations(
+        &self,
+        registrations: &[DustRegistration],
+    ) -> Result<(), sqlx::Error>;
+
+    /// Get DUST generation info by owner address
+    async fn get_dust_generation_info_by_owner(
+        &self,
+        owner: &[u8],
+    ) -> Result<Vec<DustGenerationInfo>, sqlx::Error>;
+
+    /// Get DUST UTXOs by owner address  
+    async fn get_dust_utxos_by_owner(&self, owner: &[u8]) -> Result<Vec<DustUtxo>, sqlx::Error>;
+
+    /// Search for transactions by nullifier prefix (privacy-preserving)
+    async fn search_transactions_by_nullifier_prefix(
+        &self,
+        prefix: &str,
+        after_block: Option<u32>,
+    ) -> Result<Vec<(i64, Vec<u8>)>, sqlx::Error>; // (transaction_id, nullifier)
+
+    /// Update DUST generation dtime when Night UTXO is spent
+    async fn update_dust_generation_dtime(
+        &self,
+        generation_index: u64,
+        dtime: u64,
+    ) -> Result<(), sqlx::Error>;
+
+    /// Mark DUST UTXO as spent
+    async fn mark_dust_utxo_spent(
+        &self,
+        commitment: &[u8],
+        nullifier: &[u8],
+        transaction_id: i64,
+    ) -> Result<(), sqlx::Error>;
 }

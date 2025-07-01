@@ -15,6 +15,7 @@ pub mod storage;
 
 mod block;
 mod contract_action;
+mod dust_processor;
 mod ledger_state;
 mod node;
 mod transaction;
@@ -22,6 +23,7 @@ mod transaction_fees;
 
 pub use block::*;
 pub use contract_action::*;
+pub use dust_processor::*;
 pub use ledger_state::*;
 pub use node::*;
 pub use transaction::*;
