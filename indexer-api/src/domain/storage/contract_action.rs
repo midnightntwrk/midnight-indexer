@@ -30,7 +30,7 @@ where
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
     /// Get the latest contract action for the given address.
-    async fn get_contract_action_by_address(
+    async fn get_latest_contract_action_by_address(
         &self,
         address: &RawContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
@@ -97,7 +97,7 @@ impl ContractActionStorage for NoopStorage {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn get_contract_action_by_address(
+    async fn get_latest_contract_action_by_address(
         &self,
         address: &RawContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error> {

@@ -101,10 +101,10 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
         .context("test disconnect mutation query")?;
 
     // Test subscriptions (the block subscription has already been tested above).
-    test_contract_action_subscription(&indexer_data, &ws_api_url)
+    test_contract_actions_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test contract action subscription")?;
-    test_unshielded_utxo_subscription(&indexer_data, &ws_api_url) // we use node mock version at the moment
+    test_unshielded_utxos_subscription(&indexer_data, &ws_api_url) // we use node mock version at the moment
         .await
         .context("test unshielded UTXOs subscription")?;
     test_wallet_subscription(&ws_api_url, network_id)
@@ -249,12 +249,11 @@ impl IndexerData {
             })
             .all(|(a1, a2)| a1 == a2);
 
+        // Collect unshielded UTXOs.
         let unshielded_utxos = transactions
             .iter()
             .flat_map(|transaction| transaction.unshielded_created_outputs.to_owned())
             .collect::<Vec<_>>();
-
-        assert!(!unshielded_utxos.is_empty());
 
         // Test genesis UTXOs for non-MainNet networks.
         // MainNet has no pre-funded accounts (clean genesis), while test/dev networks
@@ -647,17 +646,16 @@ async fn test_unshielded_utxo_queries(
 ) -> anyhow::Result<()> {
     use graphql::graphql_types::*;
 
-    // Test with addresses that have UTXOs
+    // Addresses that have UTXOs.
     for expected_utxo in &indexer_data.unshielded_utxos {
         let variables = unshielded_utxos_query::Variables {
-            address: expected_utxo.owner.clone(),
+            address: expected_utxo.owner.to_owned(),
         };
         let utxos = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables)
             .await?
             .unshielded_utxos;
 
         assert!(!utxos.is_empty());
-        // Verify that the expected UTXO is in the results
         assert!(utxos.iter().any(|utxo| {
             utxo.owner == expected_utxo.owner
                 && utxo.value == expected_utxo.value
@@ -667,18 +665,13 @@ async fn test_unshielded_utxo_queries(
         }));
     }
 
-    // Test with unknown address (should return empty)
-    const NETWORK_ID: NetworkId = NetworkId::Undeployed;
-    let unknown_addr_bytes = [255; 32]; // Some address that doesn't exist
-    let unknown_addr = UnshieldedAddress::bech32m_encode(unknown_addr_bytes, NETWORK_ID);
-
+    // Addresses that do not have UTXOs.
     let variables = unshielded_utxos_query::Variables {
-        address: unknown_addr,
+        address: UnshieldedAddress::bech32m_encode([255; 32], NetworkId::Undeployed),
     };
     let utxos = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables)
         .await?
         .unshielded_utxos;
-
     assert!(utxos.is_empty());
 
     Ok(())
@@ -728,7 +721,7 @@ async fn test_disconnect_mutation(api_client: &Client, api_url: &str) -> anyhow:
 }
 
 /// Test the contract action subscription.
-async fn test_contract_action_subscription(
+async fn test_contract_actions_subscription(
     indexer_data: &IndexerData,
     ws_api_url: &str,
 ) -> anyhow::Result<()> {
@@ -801,97 +794,42 @@ async fn test_contract_action_subscription(
     Ok(())
 }
 
-async fn test_unshielded_utxo_subscription(
+async fn test_unshielded_utxos_subscription(
     indexer_data: &IndexerData,
     ws_api_url: &str,
 ) -> anyhow::Result<()> {
     use graphql::graphql_types::*;
-    use tokio::time::{Duration, timeout};
+    use unshielded_utxos_subscription::UnshieldedUtxosSubscriptionUnshieldedUtxos as UnshieldedUtxos;
 
-    let utxo_addresses = indexer_data
+    let unshielded_address = indexer_data
         .unshielded_utxos
-        .iter()
-        .map(|utxo| utxo.owner.clone())
-        .collect::<Vec<_>>();
-
-    assert!(!utxo_addresses.is_empty());
-
-    let unshielded_address = UnshieldedAddress(utxo_addresses[0].clone().0);
+        .first()
+        .cloned()
+        .unwrap()
+        .owner;
 
     let variables = unshielded_utxos_subscription::Variables {
         address: unshielded_address.clone(),
     };
-
-    let subscription_stream =
+    let unshielded_utxos_updates =
         graphql_ws_client::subscribe::<UnshieldedUtxosSubscription>(ws_api_url, variables)
             .await
-            .context("subscribe to unshielded UTXOs")?;
-
-    // Wait for events with a short timeout to check for PROGRESS events
-    let events = timeout(Duration::from_millis(400), async {
-        subscription_stream
-            .take(1) // Take just 1 event to check for PROGRESS
+            .context("subscribe to unshielded UTXOs")?
+            .take(3)
             .map_ok(|data| data.unshielded_utxos)
+            .try_filter_map(|event| match event {
+                UnshieldedUtxos::UnshieldedUtxoUpdate(update) => ok(Some(update)),
+                _ => ok(None),
+            })
             .try_collect::<Vec<_>>()
             .await
-    })
-    .await;
-
-    match events {
-        Result::Ok(Result::Ok(events)) if !events.is_empty() => {
-            let has_progress = events.iter().any(|event| {
-                // Progress-only events have no transaction
-                event.transaction.is_none()
-            });
-
-            if has_progress {
-                println!("Received PROGRESS event as expected");
-            }
-
-            for event in &events {
-                // Check progress information is always present
-                println!(
-                    "Progress: {}/{}",
-                    event.progress.current_transaction_id, event.progress.highest_transaction_id
-                );
-
-                if let Some(ref created_utxos) = event.created_utxos {
-                    if !created_utxos.is_empty() {
-                        assert_eq!(created_utxos[0].owner, unshielded_address);
-                    }
-                }
-
-                if let Some(ref spent_utxos) = event.spent_utxos {
-                    if !spent_utxos.is_empty() {
-                        assert_eq!(spent_utxos[0].owner, unshielded_address);
-                    }
-                }
-            }
-        }
-        Result::Ok(Result::Ok(_)) => {
-            println!("No events received within 400ms timeout");
-        }
-        Result::Ok(Err(e)) => {
-            println!("Error collecting events: {e:?}");
-        }
-        Err(_) => {
-            println!("Timeout waiting for events - this is expected if no recent activity");
-        }
-    }
-
-    // Additional test with address that has no UTXOs
-    const NETWORK_ID: NetworkId = NetworkId::Undeployed;
-    let empty_addr_bytes = [0x11, 0x22, 0x33, 0x44]; // Raw bytes for a non-existent address
-    let empty_address = UnshieldedAddress::bech32m_encode(empty_addr_bytes, NETWORK_ID);
-
-    let empty_variables = unshielded_utxos_subscription::Variables {
-        address: empty_address,
-    };
-
-    let _empty_subscription =
-        graphql_ws_client::subscribe::<UnshieldedUtxosSubscription>(ws_api_url, empty_variables)
-            .await
-            .context("subscribe to unshielded UTXOs for empty address")?;
+            .context("collect unshielded UTXO events")?;
+    assert!(unshielded_utxos_updates.iter().any(move |update| {
+        update
+            .created_utxos
+            .iter()
+            .any(|u| u.owner == unshielded_address)
+    }));
 
     Ok(())
 }

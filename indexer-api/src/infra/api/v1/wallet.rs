@@ -9,22 +9,7 @@ use derive_more::Debug;
 #[derive(Debug, Union)]
 pub enum WalletSyncEvent<S: Storage> {
     ViewingUpdate(ViewingUpdate<S>),
-    ProgressUpdate(ProgressUpdate),
-}
-
-/// Aggregates information about the wallet indexing progress.
-#[derive(Debug, SimpleObject)]
-pub struct ProgressUpdate {
-    /// The highest end index into the zswap state of all currently known transactions.
-    pub highest_index: u64,
-
-    /// The highest end index into the zswap state of all currently known relevant transactions,
-    /// i.e. those that belong to any known wallet. Less or equal `highest_index`.
-    pub highest_relevant_index: u64,
-
-    /// The highest end index into the zswap state of all currently known relevant transactions for
-    /// a particular wallet. Less or equal `highest_relevant_index`.
-    pub highest_relevant_wallet_index: u64,
+    ProgressUpdate(WalletProgressUpdate),
 }
 
 /// Aggregates a relevant transaction with the next start index and an optional collapsed
@@ -38,6 +23,21 @@ pub struct ViewingUpdate<S: Storage> {
 
     /// Relevant transaction for the wallet and maybe a collapsed Merkle-Tree update.
     pub update: Vec<ZswapChainStateUpdate<S>>,
+}
+
+/// Aggregates information about the wallet indexing progress.
+#[derive(Debug, SimpleObject)]
+pub struct WalletProgressUpdate {
+    /// The highest end index into the zswap state of all currently known transactions.
+    pub highest_index: u64,
+
+    /// The highest end index into the zswap state of all currently known relevant transactions,
+    /// i.e. those that belong to any known wallet. Less or equal `highest_index`.
+    pub highest_relevant_index: u64,
+
+    /// The highest end index into the zswap state of all currently known relevant transactions for
+    /// a particular wallet. Less or equal `highest_relevant_index`.
+    pub highest_relevant_wallet_index: u64,
 }
 
 #[derive(Debug, Union)]

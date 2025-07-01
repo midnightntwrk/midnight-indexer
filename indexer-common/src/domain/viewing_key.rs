@@ -50,11 +50,7 @@ impl ViewingKey {
             msg: ciphertext,
             aad: wallet_id.as_bytes(),
         };
-        let bytes = cipher.decrypt(nonce.into(), payload)?;
-
-        let bytes = bytes
-            .try_into()
-            .map_err(DecryptViewingKeyError::ByteArrayLen)?;
+        let bytes = cipher.decrypt(nonce.into(), payload)?.try_into()?;
 
         Ok(Self(bytes))
     }
@@ -108,6 +104,6 @@ pub enum DecryptViewingKeyError {
     #[error("cannot decrypt secret")]
     DecryptViewingKeyError(#[from] chacha20poly1305::Error),
 
-    #[error(transparent)]
-    ByteArrayLen(ByteArrayLenError),
+    #[error("cannot convert into viewing key")]
+    ByteArrayLen(#[from] ByteArrayLenError),
 }

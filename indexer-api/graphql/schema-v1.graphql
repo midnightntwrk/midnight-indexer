@@ -163,26 +163,6 @@ type Mutation {
 	disconnect(sessionId: HexEncoded!): Unit!
 }
 
-"""
-Aggregates information about the wallet indexing progress.
-"""
-type ProgressUpdate {
-	"""
-	The highest end index into the zswap state of all currently known transactions.
-	"""
-	highestIndex: Int!
-	"""
-	The highest end index into the zswap state of all currently known relevant transactions,
-	i.e. those that belong to any known wallet. Less or equal `highest_index`.
-	"""
-	highestRelevantIndex: Int!
-	"""
-	The highest end index into the zswap state of all currently known relevant transactions for
-	a particular wallet. Less or equal `highest_relevant_index`.
-	"""
-	highestRelevantWalletIndex: Int!
-}
-
 type Query {
 	"""
 	Find a block for the given optional offset; if not present, the latest block is returned.
@@ -191,7 +171,7 @@ type Query {
 	"""
 	Find transactions for the given offset.
 	"""
-	transactions(offset: TransactionOffset!, address: UnshieldedAddress): [Transaction!]!
+	transactions(offset: TransactionOffset!): [Transaction!]!
 	"""
 	Find a contract action for the given address and optional offset.
 	"""
@@ -244,31 +224,16 @@ type Subscription {
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
 	"""
-	Subscribe to wallet events for the given session ID starting at the given index or at zero
-	if the index is omitted. Wallet events are either a ViewingUpdate or a ProgressUpdate.
+	Subscribe to wallet synchronization events for the given session ID starting at the given
+	index or at zero if omitted. The events are either viewing updates or progress updates.
 	"""
 	wallet(sessionId: HexEncoded!, index: Int, sendProgressUpdates: Boolean): WalletSyncEvent!
 	"""
-	Subscribes to unshielded UTXO events for a specific address.
-	
-	Emits events whenever unshielded UTXOs are created or spent for the given address.
-	Each event includes the transaction details and lists of created/spent UTXOs.
-	
-	# Arguments
-	* `address` - The unshielded address to monitor (must be in Bech32m format).
-	* `transaction_id` - Optional transaction ID to start replay from (defaults to genesis if
-	omitted).
-	
-	# Returns
-	A stream of `UnshieldedUtxoEvent`s containing:
-	- `progress`: Progress information for wallet synchronization (always present).
-	- `transaction`: The transaction that created/spent UTXOs (None for progress-only events).
-	- `createdUtxos`: UTXOs created in this transaction for the address (None for progress-only
-	events).
-	- `spentUtxos`: UTXOs spent in this transaction for the address (None for progress-only
-	events).
+	Subscribes to unshielded synchronization events for a specific address and the given
+	transaction ID or 0 if omitted. The events are either unshielded UTXO updates or progress
+	updates.
 	"""
-	unshieldedUtxos(address: UnshieldedAddress!, transactionId: Int): UnshieldedUtxoEvent!
+	unshieldedUtxos(address: UnshieldedAddress!, transactionId: Int): UnshieldedSyncEvent!
 }
 
 """
@@ -386,18 +351,19 @@ input UnshieldedOffset @oneOf {
 }
 
 """
-Progress tracking information for unshielded token synchronization.
+Aggregates information about the unshielded indexing progress.
 """
-type UnshieldedProgress {
+type UnshieldedProgressUpdate {
 	"""
 	The highest transaction ID of all currently known transactions for a particular address.
 	"""
 	highestTransactionId: Int!
-	"""
-	The current transaction ID for a particular address.
-	"""
-	currentTransactionId: Int!
 }
+
+"""
+A viewing synchronization event, either a unshielded UTXO update or a progress update.
+"""
+union UnshieldedSyncEvent = UnshieldedUtxoUpdate | UnshieldedProgressUpdate
 
 """
 Represents an unshielded UTXO.
@@ -408,51 +374,44 @@ type UnshieldedUtxo {
 	"""
 	owner: UnshieldedAddress!
 	"""
-	The hash of the intent that created this output (hex-encoded)
+	Token type (hex-encoded)
 	"""
-	intentHash: HexEncoded!
+	tokenType: HexEncoded!
 	"""
 	UTXO value (quantity) as a string to support u128
 	"""
 	value: String!
 	"""
-	Token type (hex-encoded)
-	"""
-	tokenType: HexEncoded!
-	"""
 	Index of this output within its creating transaction
 	"""
 	outputIndex: Int!
 	"""
-	Transaction that created this UTXO
+	The hash of the intent that created this output (hex-encoded)
 	"""
-	createdAtTransaction: Transaction
+	intentHash: HexEncoded!
 	"""
-	Transaction that spent this UTXO, if spent
+	Transaction that created this UTXO.
+	"""
+	createdAtTransaction: Transaction!
+	"""
+	Transaction that spent this UTXO.
 	"""
 	spentAtTransaction: Transaction
 }
 
-"""
-Payload emitted by `subscription { unshieldedUtxos … }`
-"""
-type UnshieldedUtxoEvent {
-	"""
-	Progress information for wallet synchronization.
-	"""
-	progress: UnshieldedProgress!
+type UnshieldedUtxoUpdate {
 	"""
 	The transaction associated with this event.
 	"""
-	transaction: Transaction
+	transaction: Transaction!
 	"""
-	UTXOs created in this transaction for the subscribed address.
+	UTXOs created in the above transaction for the subscribed address.
 	"""
-	createdUtxos: [UnshieldedUtxo!]
+	createdUtxos: [UnshieldedUtxo!]!
 	"""
-	UTXOs spent in this transaction for the subscribed address.
+	UTXOs spent in the above transaction for the subscribed address.
 	"""
-	spentUtxos: [UnshieldedUtxo!]
+	spentUtxos: [UnshieldedUtxo!]!
 }
 
 scalar ViewingKey
@@ -475,9 +434,29 @@ type ViewingUpdate {
 }
 
 """
+Aggregates information about the wallet indexing progress.
+"""
+type WalletProgressUpdate {
+	"""
+	The highest end index into the zswap state of all currently known transactions.
+	"""
+	highestIndex: Int!
+	"""
+	The highest end index into the zswap state of all currently known relevant transactions,
+	i.e. those that belong to any known wallet. Less or equal `highest_index`.
+	"""
+	highestRelevantIndex: Int!
+	"""
+	The highest end index into the zswap state of all currently known relevant transactions for
+	a particular wallet. Less or equal `highest_relevant_index`.
+	"""
+	highestRelevantWalletIndex: Int!
+}
+
+"""
 A wallet synchronization event, either a viewing update or a progress update.
 """
-union WalletSyncEvent = ViewingUpdate | ProgressUpdate
+union WalletSyncEvent = ViewingUpdate | WalletProgressUpdate
 
 union ZswapChainStateUpdate = MerkleTreeCollapsedUpdate | RelevantTransaction
 

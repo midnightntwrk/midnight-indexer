@@ -24,7 +24,6 @@ use crate::{
 };
 use async_stream::try_stream;
 use futures::Stream;
-use log::debug;
 use std::num::NonZeroU32;
 
 impl TransactionStorage for PostgresStorage {
@@ -193,10 +192,60 @@ impl TransactionStorage for PostgresStorage {
                     .fetch_all(&*self.pool)
                     .await?;
 
-                debug!(index, batch_size, len = transactions.len(); "fetched transactions");
+                match transactions.iter().map(|t| t.end_index).max() {
+                    Some(end_index) => index = end_index + 1,
+                    None => break,
+                }
 
-                index = match transactions.iter().map(|t| t.end_index).max() {
-                    Some(end_index) => end_index + 1,
+                yield transactions;
+            }
+        };
+
+        flatten_chunks(chunks)
+    }
+
+    fn get_transactions_involving_unshielded(
+        &self,
+        address: RawUnshieldedAddress,
+        mut transaction_id: u64,
+        batch_size: NonZeroU32,
+    ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send {
+        let chunks = try_stream! {
+            loop {
+                let query = indoc! {"
+                    SELECT DISTINCT
+                        transactions.id,
+                        transactions.hash,
+                        blocks.hash AS block_hash,
+                        transactions.protocol_version,
+                        transactions.transaction_result,
+                        transactions.identifiers,
+                        transactions.raw,
+                        transactions.merkle_tree_root,
+                        transactions.start_index,
+                        transactions.end_index,
+                        transactions.paid_fees,
+                        transactions.estimated_fees
+                    FROM transactions
+                    INNER JOIN blocks ON blocks.id = transactions.block_id
+                    INNER JOIN unshielded_utxos ON
+                        unshielded_utxos.creating_transaction_id = transactions.id OR
+                        unshielded_utxos.spending_transaction_id = transactions.id
+                    WHERE unshielded_utxos.owner = $1
+                    AND transactions.id >= $2
+                    ORDER BY transactions.id
+                    LIMIT $3
+                "};
+
+                let transactions = sqlx::query_as::<_, Transaction>(query)
+                    .bind(address.as_ref())
+                    .bind(transaction_id as i64)
+                    .bind(batch_size.get() as i64)
+                    .fetch_all(&*self.pool)
+                    .await?;
+
+                match transactions.last() {
+                    Some(transaction) => transaction_id = transaction.id + 1,
                     None => break,
                 };
 
@@ -207,46 +256,30 @@ impl TransactionStorage for PostgresStorage {
         flatten_chunks(chunks)
     }
 
-    async fn get_transactions_involving_unshielded(
+    #[trace(properties = { "address": "{address}" })]
+    async fn get_highest_transaction_id_for_unshielded_address(
         &self,
-        address: &RawUnshieldedAddress,
-        from_transaction_id: u64,
-    ) -> Result<Vec<Transaction>, sqlx::Error> {
-        let sql = indoc! {"
-            SELECT DISTINCT
-                transactions.id,
-                transactions.hash,
-                blocks.hash AS block_hash,
-                transactions.protocol_version,
-                transactions.transaction_result,
-                transactions.identifiers,
-                transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                transactions.paid_fees,
-                transactions.estimated_fees
+        address: RawUnshieldedAddress,
+    ) -> Result<Option<u64>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT MAX(transactions.id)
             FROM transactions
-            INNER JOIN blocks ON blocks.id = transactions.block_id
-            INNER JOIN unshielded_utxos ON
+            INNER JOIN unshielded_utxos ON 
                 unshielded_utxos.creating_transaction_id = transactions.id OR
                 unshielded_utxos.spending_transaction_id = transactions.id
-            WHERE unshielded_utxos.owner_address = $1
-            AND transactions.id >= $2
-            ORDER BY transactions.id
+            WHERE unshielded_utxos.owner = $1
         "};
 
-        let transactions = sqlx::query_as::<_, Transaction>(sql)
-            .bind(address.as_ref())
-            .bind(from_transaction_id as i64)
-            .fetch_all(&*self.pool)
+        let (id,) = sqlx::query_as::<_, (Option<i64>,)>(query)
+            .bind(address)
+            .fetch_one(&*self.pool)
             .await?;
 
-        Ok(transactions)
+        Ok(id.map(|id| id as u64))
     }
 
     #[trace(properties = { "session_id": "{session_id}" })]
-    async fn get_highest_indices(
+    async fn get_highest_end_indices(
         &self,
         session_id: SessionId,
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error> {

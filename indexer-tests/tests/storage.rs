@@ -376,11 +376,11 @@ async fn run_tests(
     assert_eq!(transactions[1].hash, TRANSACTION_1_HASH);
 
     let contract_action = indexer_api_storage
-        .get_contract_action_by_address(&b"unknown".as_slice().into())
+        .get_latest_contract_action_by_address(&b"unknown".as_slice().into())
         .await?;
     assert!(contract_action.is_none());
     let contract_action = indexer_api_storage
-        .get_contract_action_by_address(&ADDRESS)
+        .get_latest_contract_action_by_address(&ADDRESS)
         .await?;
     assert_matches!(
         contract_action,
@@ -504,9 +504,19 @@ async fn run_tests(
     assert_eq!(contract_actions.len(), 2);
 
     let end_indices = indexer_api_storage
-        .get_highest_indices([0; 32].into())
+        .get_highest_end_indices([0; 32].into())
         .await?;
     assert_eq!(end_indices, (Some(3), None, None));
+
+    let id = indexer_api_storage
+        .get_highest_transaction_id_for_unshielded_address(OWNER_0)
+        .await?;
+    assert!(id.is_none());
+
+    let id = indexer_api_storage
+        .get_highest_transaction_id_for_unshielded_address(OWNER_1)
+        .await?;
+    assert_eq!(id, Some(3));
 
     Ok(())
 }
@@ -549,7 +559,7 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
             merkle_tree_root: b"merkle_tree_root".as_slice().into(),
             created_unshielded_utxos: vec![UnshieldedUtxo {
                 value: 100,
-                owner_address: OWNER_ADDR_1,
+                owner: OWNER_1,
                 token_type: *TOKEN_NIGHT,
                 intent_hash: *INTENT_HASH,
                 output_index: 0,
@@ -583,7 +593,7 @@ static BLOCK_1: LazyLock<Block> = LazyLock::new(|| Block {
             merkle_tree_root: b"merkle_tree_root".as_slice().into(),
             created_unshielded_utxos: vec![UnshieldedUtxo {
                 value: 100,
-                owner_address: OWNER_ADDR_1,
+                owner: OWNER_1,
                 token_type: *TOKEN_NIGHT,
                 intent_hash: *INTENT_HASH_2,
                 output_index: 0,
@@ -660,14 +670,14 @@ static BLOCK_2: LazyLock<Block> = LazyLock::new(|| Block {
         merkle_tree_root: b"merkle_tree_root".as_slice().into(),
         created_unshielded_utxos: vec![UnshieldedUtxo {
             value: 50,
-            owner_address: OWNER_ADDR_2,
+            owner: OWNER_2,
             token_type: *TOKEN_NIGHT,
             intent_hash: *INTENT_HASH_3,
             output_index: 0,
         }],
         spent_unshielded_utxos: vec![UnshieldedUtxo {
             value: 0,
-            owner_address: OWNER_ADDR_1,
+            owner: OWNER_1,
             token_type: *TOKEN_NIGHT,
             intent_hash: *INTENT_HASH,
             output_index: 0,
@@ -714,9 +724,9 @@ static UNKNOWN_ADDRESS: LazyLock<RawContractAddress> =
 
 pub const UT_ADDR_EMPTY_HEX: &str = "11223344"; // Address with no UTXOs for testing
 
-pub static OWNER_ADDR_1: RawUnshieldedAddress = ByteArray([1; 32]);
-pub static OWNER_ADDR_2: RawUnshieldedAddress = ByteArray([2; 32]);
-pub static OWNER_ADDR_EMPTY: RawUnshieldedAddress = ByteArray([3; 32]);
+pub static OWNER_0: RawUnshieldedAddress = ByteArray([0; 32]);
+pub static OWNER_1: RawUnshieldedAddress = ByteArray([1; 32]);
+pub static OWNER_2: RawUnshieldedAddress = ByteArray([2; 32]);
 
 pub static INTENT_HASH: LazyLock<IntentHash> = LazyLock::new(|| [0x11u8; 32].into());
 pub static INTENT_HASH_2: LazyLock<IntentHash> = LazyLock::new(|| [0x22u8; 32].into());

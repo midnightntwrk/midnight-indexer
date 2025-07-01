@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::Transaction;
 use indexer_common::{
     domain::{IntentHash, RawTokenType, RawUnshieldedAddress},
     infra::sqlx::{SqlxOption, U128BeBytes},
@@ -21,17 +20,21 @@ use sqlx::FromRow;
 /// Represents an unshielded UTXO at the API-domain level.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct UnshieldedUtxo {
+    /// Database ID of the transaction that created this UTXO.
+    #[sqlx(try_from = "i64")]
+    pub creating_transaction_id: u64,
+
+    /// Database ID of the transaction that spent this UTXO, if any.
+    #[sqlx(try_from = "SqlxOption<i64>")]
+    pub spending_transaction_id: Option<u64>,
+
     /// The unshielded address that owns this UTXO.
     #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
-    pub owner_address: RawUnshieldedAddress,
+    pub owner: RawUnshieldedAddress,
 
     /// Type of token (e.g. NIGHT has all-zero bytes).
     #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     pub token_type: RawTokenType,
-
-    /// Hash of the intent that created this UTXO.
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
-    pub intent_hash: IntentHash,
 
     /// Amount (big-endian bytes in DB -> u128 here).
     #[sqlx(try_from = "U128BeBytes")]
@@ -41,21 +44,9 @@ pub struct UnshieldedUtxo {
     #[sqlx(try_from = "i64")]
     pub output_index: u32,
 
-    /// Database ID of the transaction that created this UTXO.
-    #[sqlx(try_from = "i64")]
-    pub creating_transaction_id: u64,
-
-    /// Database ID of the transaction that spent this UTXO, if any.
-    #[sqlx(try_from = "SqlxOption<i64>")]
-    pub spending_transaction_id: Option<u64>,
-
-    /// Full transaction data for the creating transaction (populated by queries).
-    #[sqlx(skip)]
-    pub created_at_transaction: Option<Transaction>,
-
-    /// Full transaction data for the spending transaction (populated by queries).
-    #[sqlx(skip)]
-    pub spent_at_transaction: Option<Transaction>,
+    /// Hash of the intent that created this UTXO.
+    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
+    pub intent_hash: IntentHash,
 }
 
 /// Token balance held by a contract.

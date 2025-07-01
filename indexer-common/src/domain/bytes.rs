@@ -41,6 +41,7 @@ impl Display for ByteVec {
 /// returning a hex-encoded string, the former no longer than nine characters.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, AsRef, From, Into, Serialize, Deserialize, Type)]
 #[as_ref([u8])]
+#[into([u8; N], Vec<u8>)]
 #[sqlx(transparent)]
 pub struct ByteArray<const N: usize>(#[serde(with = "const_hex")] pub [u8; N]);
 

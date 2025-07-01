@@ -17,7 +17,7 @@ use crate::{
         ApiError, ApiResult, ContextExt, HexEncoded, InnerApiError, ResultExt,
         v1::{
             decode_session_id,
-            wallet::{ProgressUpdate, ViewingUpdate, WalletSyncEvent, ZswapChainStateUpdate},
+            wallet::{ViewingUpdate, WalletProgressUpdate, WalletSyncEvent, ZswapChainStateUpdate},
         },
     },
 };
@@ -72,8 +72,8 @@ where
     B: Subscriber,
     Z: LedgerStateStorage,
 {
-    /// Subscribe to wallet events for the given session ID starting at the given index or at zero
-    /// if the index is omitted. Wallet events are either a ViewingUpdate or a ProgressUpdate.
+    /// Subscribe to wallet synchronization events for the given session ID starting at the given
+    /// index or at zero if omitted. The events are either viewing updates or progress updates.
     #[trace(properties = { "session_id": "{session_id:?}", "index": "{index:?}" })]
     pub async fn wallet<'a>(
         &self,
@@ -99,15 +99,10 @@ where
         let (trigger, tripwire) = Tripwire::new();
 
         let viewing_updates = viewing_updates::<S, B, Z>(cx, session_id, index, trigger)
-            .await?
-            .map_ok(|viewing_update| {
-                debug!(viewing_update:?; "emitting viewing update");
-                WalletSyncEvent::ViewingUpdate(viewing_update)
-            });
+            .map_ok(WalletSyncEvent::ViewingUpdate);
 
         let progress_updates = if send_progress_updates {
             progress_updates::<S>(cx, session_id)
-                .await?
                 .take_until_if(tripwire)
                 .map_ok(WalletSyncEvent::ProgressUpdate)
                 .boxed()
@@ -140,12 +135,12 @@ where
 }
 
 #[trace(properties = { "session_id": "{session_id:?}", "index": "{index}" })]
-async fn viewing_updates<'a, S, B, Z>(
+fn viewing_updates<'a, S, B, Z>(
     cx: &'a Context<'a>,
     session_id: SessionId,
-    index: u64,
+    mut index: u64,
     trigger: Trigger,
-) -> Result<impl Stream<Item = ApiResult<ViewingUpdate<S>>> + use<'a, S, B, Z>, ApiError>
+) -> impl Stream<Item = ApiResult<ViewingUpdate<S>>> + use<'a, S, B, Z>
 where
     S: Storage,
     B: Subscriber,
@@ -160,10 +155,10 @@ where
     let wallet_indexed_events = subscriber
         .subscribe::<WalletIndexed>()
         .try_filter(move |wallet_indexed| ready(wallet_indexed.session_id == session_id));
-    let mut next_index = index;
 
-    let viewing_updates = try_stream! {
-        debug!(session_id:%, index; "streaming so far stored transactions");
+    try_stream! {
+        // Stream exiting transactions.
+        debug!(session_id:%, index; "streaming existing transactions");
 
         let transactions = storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
         let mut transactions = pin!(transactions);
@@ -173,20 +168,20 @@ where
             .map_err_into_server_error(|| "get next transaction")?
         {
             let viewing_update = viewing_update(
-                next_index,
+                index,
                 transaction,
-                network_id,
                 ledger_state_storage,
                 zswap_state_cache,
+                network_id,
             )
             .await?;
 
-            next_index = viewing_update.index;
+            index = viewing_update.index;
 
             yield viewing_update;
         }
 
-        // Yield "future" transactions.
+        // Stream live transactions.
         let mut wallet_indexed_events = pin!(wallet_indexed_events);
         while wallet_indexed_events
             .try_next()
@@ -194,10 +189,10 @@ where
             .map_err_into_server_error(|| "get next WalletIndexed event")?
             .is_some()
         {
-            debug!(next_index; "streaming next transactions");
+            debug!(index; "streaming next transactions");
 
             let transactions =
-                storage.get_relevant_transactions(session_id, next_index, BATCH_SIZE);
+                storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
             let mut transactions = pin!(transactions);
 
             while let Some(transaction) = transactions
@@ -206,14 +201,15 @@ where
                 .map_err_into_server_error(|| "get next transaction")?
             {
                 let viewing_update = viewing_update(
-                    next_index,
+                    index,
                     transaction,
-                    network_id,
                     ledger_state_storage,
                     zswap_state_cache,
+                    network_id,
                 )
                 .await?;
-                next_index = viewing_update.index;
+
+                index = viewing_update.index;
 
                 yield viewing_update;
             }
@@ -221,18 +217,16 @@ where
 
         warn!("stream of WalletIndexed events completed unexpectedly");
         trigger.cancel();
-    };
-
-    Ok(viewing_updates)
+    }
 }
 
 #[trace(properties = { "from": "{from:?}" })]
 async fn viewing_update<S, Z>(
     from: u64,
     transaction: Transaction,
-    network_id: NetworkId,
     ledger_state_storage: &Z,
     zswap_state_cache: &LedgerStateCache,
+    network_id: NetworkId,
 ) -> ApiResult<ViewingUpdate<S>>
 where
     S: Storage,
@@ -275,27 +269,23 @@ where
     Ok(viewing_update)
 }
 
-async fn progress_updates<'a, S>(
+fn progress_updates<'a, S>(
     cx: &'a Context<'a>,
     session_id: SessionId,
-) -> ApiResult<impl Stream<Item = ApiResult<ProgressUpdate>> + use<'a, S>>
+) -> impl Stream<Item = ApiResult<WalletProgressUpdate>> + use<'a, S>
 where
     S: Storage,
 {
-    let storage = cx.get_storage::<S>();
-
     let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
-    let updates = intervals.then(move |_| progress_update(session_id, storage));
-
-    Ok(updates)
+    intervals.then(move |_| progress_update(session_id, cx.get_storage::<S>()))
 }
 
-async fn progress_update<S>(session_id: SessionId, storage: &S) -> ApiResult<ProgressUpdate>
+async fn progress_update<S>(session_id: SessionId, storage: &S) -> ApiResult<WalletProgressUpdate>
 where
     S: Storage,
 {
     let (highest_index, highest_relevant_index, highest_relevant_wallet_index) = storage
-        .get_highest_indices(session_id)
+        .get_highest_end_indices(session_id)
         .await
         .map_err_into_server_error(|| "get highest indices")?;
 
@@ -303,7 +293,7 @@ where
     let highest_relevant_index = highest_relevant_index.unwrap_or_default();
     let highest_relevant_wallet_index = highest_relevant_wallet_index.unwrap_or_default();
 
-    Ok(ProgressUpdate {
+    Ok(WalletProgressUpdate {
         highest_index,
         highest_relevant_index,
         highest_relevant_wallet_index,

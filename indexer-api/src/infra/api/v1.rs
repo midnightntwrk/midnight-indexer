@@ -107,7 +107,7 @@ enum DecodeSessionIdError {
     #[error("cannot hex-decode session ID")]
     HexDecode(#[from] HexDecodeError),
 
-    #[error(transparent)]
+    #[error("cannot convert into session ID")]
     ByteArrayLen(#[from] ByteArrayLenError),
 }
 

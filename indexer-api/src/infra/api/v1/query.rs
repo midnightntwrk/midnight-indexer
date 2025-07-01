@@ -84,22 +84,8 @@ where
         &self,
         cx: &Context<'_>,
         offset: TransactionOffset,
-        address: Option<UnshieldedAddress>,
     ) -> ApiResult<Vec<Transaction<S>>> {
         let storage = cx.get_storage::<S>();
-
-        if let Some(address) = address {
-            let address = address
-                .try_into_domain(cx.get_network_id())
-                .map_err_into_client_error(|| "invalid address")?;
-
-            let txs = storage
-                .get_transactions_involving_unshielded(&address, 0)
-                .await
-                .map_err_into_server_error(|| format!("get transactions by address {address}"))?;
-
-            return Ok(txs.into_iter().map(Transaction::<S>::from).collect());
-        }
 
         match offset {
             TransactionOffset::Hash(hash) => {
@@ -148,7 +134,7 @@ where
     ) -> ApiResult<Option<ContractAction<S>>> {
         let storage = cx.get_storage::<S>();
 
-        let address = address
+        let address = &address
             .hex_decode()
             .map_err_into_client_error(|| "invalid address")?;
 
@@ -159,7 +145,7 @@ where
                     .map_err_into_client_error(|| "invalid offset")?;
 
                 storage
-                    .get_contract_action_by_address_and_block_hash(&address, hash)
+                    .get_contract_action_by_address_and_block_hash(address, hash)
                     .await
                     .map_err_into_server_error(|| {
                         format!("get contract action by address {address} and block hash {hash}")
@@ -167,7 +153,7 @@ where
             }
 
             Some(ContractActionOffset::BlockOffset(BlockOffset::Height(height))) => storage
-                .get_contract_action_by_address_and_block_height(&address, height)
+                .get_contract_action_by_address_and_block_height(address, height)
                 .await
                 .map_err_into_server_error(|| {
                     format!("get contract action by address {address} and block height {height}")
@@ -179,7 +165,7 @@ where
                     .map_err_into_client_error(|| "invalid offset")?;
 
                 storage
-                    .get_contract_action_by_address_and_transaction_hash(&address, hash)
+                    .get_contract_action_by_address_and_transaction_hash(address, hash)
                     .await
                     .map_err_into_server_error(|| {
                         format!(
@@ -197,7 +183,7 @@ where
 
                 storage
                     .get_contract_action_by_address_and_transaction_identifier(
-                        &address,
+                        address,
                         &identifier,
                     )
                     .await
@@ -205,7 +191,7 @@ where
             }
 
             None => storage
-                .get_contract_action_by_address(&address)
+                .get_latest_contract_action_by_address(address)
                 .await
                 .map_err_into_server_error(|| {
                     format!("get latest contract action by address {address}")
@@ -233,18 +219,18 @@ where
 
         let utxos = match offset {
             Some(UnshieldedOffset::BlockOffset(BlockOffset::Height(height))) => storage
-                .get_unshielded_utxos_by_address_from_height(&address, height)
+                .get_unshielded_utxos_by_address_from_height(address, height)
                 .await
                 .map_err_into_server_error(|| {
                     format!("get unshielded UTXOs by address {address} and block height {height}")
                 })?,
 
             Some(UnshieldedOffset::BlockOffset(BlockOffset::Hash(hash))) => {
-                let block_hash = hash
+                let hash = hash
                     .hex_decode()
                     .map_err_into_client_error(|| "invalid offset")?;
                 storage
-                    .get_unshielded_utxos_by_address_from_block_hash(&address, &block_hash)
+                    .get_unshielded_utxos_by_address_from_block_hash(address, hash)
                     .await
                     .map_err_into_server_error(|| {
                         format!("get unshielded UTXOs by address {address} and block hash {hash}")
@@ -252,11 +238,11 @@ where
             }
 
             Some(UnshieldedOffset::TransactionOffset(TransactionOffset::Hash(hash))) => {
-                let tx_hash = hash
+                let hash = hash
                     .hex_decode()
                     .map_err_into_client_error(|| "invalid offset")?;
                 storage
-                    .get_unshielded_utxos_by_address_from_transaction_hash(&address, &tx_hash)
+                    .get_unshielded_utxos_by_address_from_transaction_hash(address, hash)
                     .await
                     .map_err_into_server_error(|| {
                         format!(
@@ -271,7 +257,7 @@ where
                     .map_err_into_client_error(|| "invalid offset")?;
                 storage
                     .get_unshielded_utxos_by_address_from_transaction_identifier(
-                        &address,
+                        address,
                         &identifier,
                     )
                     .await
@@ -280,7 +266,7 @@ where
 
             // no offset -> full list
             None => storage
-                .get_unshielded_utxos_by_address(&address)
+                .get_unshielded_utxos_by_address(address)
                 .await
                 .map_err_into_server_error(|| {
                     format!("get all unshielded UTXOs by address {address}")

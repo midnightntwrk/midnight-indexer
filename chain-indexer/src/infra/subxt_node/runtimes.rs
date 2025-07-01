@@ -28,8 +28,8 @@ use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, u
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
     pub raw_transactions: Vec<Vec<u8>>,
-    pub created_unshielded_utxo_infos: HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
-    pub spent_unshielded_utxo_infos: HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
+    pub created_unshielded_utxos_by_hash: HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
+    pub spent_unshielded_utxos_by_hash: HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
 }
 
 /// Make block details depending on the given protocol version.
@@ -147,8 +147,8 @@ macro_rules! make_block_details {
                     })
                     .collect();
 
-                let mut created_unshielded_utxo_infos = HashMap::new();
-                let mut spent_unshielded_utxo_infos = HashMap::new();
+                let mut created_unshielded_utxos_by_hash = HashMap::new();
+                let mut spent_unshielded_utxos_by_hash = HashMap::new();
 
                 let mut tx_hash = None;
 
@@ -178,14 +178,14 @@ macro_rules! make_block_details {
                                         .into_iter()
                                         .map(|utxo| UnshieldedUtxo {
                                             value: utxo.value,
-                                            owner_address: utxo.address.into(),
+                                            owner: utxo.address.into(),
                                             token_type: utxo.token_type.into(),
                                             intent_hash: utxo.intent_hash.into(),
                                             output_index: utxo.output_no,
                                         })
                                         .collect();
 
-                                    created_unshielded_utxo_infos.insert(
+                                    created_unshielded_utxos_by_hash.insert(
                                         transaction_hash,
                                         created
                                     );
@@ -196,14 +196,14 @@ macro_rules! make_block_details {
                                         .into_iter()
                                         .map(|utxo| UnshieldedUtxo {
                                             value: utxo.value,
-                                            owner_address: utxo.address.into(),
+                                            owner: utxo.address.into(),
                                             token_type: utxo.token_type.into(),
                                             intent_hash: utxo.intent_hash.into(),
                                             output_index: utxo.output_no,
                                         })
                                         .collect();
 
-                                    spent_unshielded_utxo_infos.insert(transaction_hash, spent);
+                                    spent_unshielded_utxos_by_hash.insert(transaction_hash, spent);
                                 }
 
                                 // Reset to prevent stale hash in subsequent events.
@@ -218,8 +218,8 @@ macro_rules! make_block_details {
                 Ok(BlockDetails {
                     timestamp,
                     raw_transactions,
-                    created_unshielded_utxo_infos,
-                    spent_unshielded_utxo_infos,
+                    created_unshielded_utxos_by_hash,
+                    spent_unshielded_utxos_by_hash,
                 })
             }
         }
@@ -353,65 +353,3 @@ macro_rules! get_transaction_cost {
 }
 
 get_transaction_cost!(runtime_0_13);
-
-#[cfg(test)]
-mod tests {
-    use crate::infra::subxt_node::runtimes::get_contract_state;
-    use anyhow::Context;
-    use indexer_common::{
-        domain::{BlockHash, ProtocolVersion, RawContractAddress},
-        error::BoxError,
-    };
-    use subxt::{
-        OnlineClient, SubstrateConfig,
-        backend::{BackendExt, legacy::LegacyRpcMethods, rpc::RpcClient},
-        utils::H256,
-    };
-
-    #[tokio::test]
-    #[ignore = "only to be run manually"]
-    async fn test() -> Result<(), BoxError> {
-        // wss://rpc.qanet.dev.midnight.network:443
-        // wss://rpc.testnet-02.midnight.network:443
-        let rpc_client = RpcClient::from_url("wss://rpc.qanet.dev.midnight.network:443").await?;
-        let online_client =
-            OnlineClient::<SubstrateConfig>::from_rpc_client(rpc_client.clone()).await?;
-
-        let hash = "50457371e70aa856742ea94de650b00d58501629c290666eb3b561dc205c4541";
-        let hash = BlockHash::try_from(const_hex::decode(hash).unwrap()).unwrap();
-
-        let genesis_hash = online_client.genesis_hash();
-
-        // Version must be greater or equal 15.
-        let metadata = online_client
-            .backend()
-            .metadata_at_version(15, H256(hash.0))
-            .await
-            .context("get metadata")?;
-
-        let legacy_rpc_methods = LegacyRpcMethods::<SubstrateConfig>::new(rpc_client.clone());
-        let runtime_version = legacy_rpc_methods
-            .state_get_runtime_version(Some(H256(hash.0)))
-            .await
-            .context("get runtime version")?;
-        let runtime_version = subxt::client::RuntimeVersion {
-            spec_version: runtime_version.spec_version,
-            transaction_version: runtime_version.transaction_version,
-        };
-
-        let client = OnlineClient::<SubstrateConfig>::from_rpc_client_with(
-            genesis_hash,
-            runtime_version,
-            metadata,
-            rpc_client,
-        )?;
-
-        let address = "0102006e23ed3a34a8cf08ae9641aa12f86ff65c13e01c39e3057cff28723e9c86bba9";
-        let address = RawContractAddress::from(const_hex::decode(address).unwrap());
-
-        let state = get_contract_state(&client, address, hash, ProtocolVersion(8000)).await;
-        assert!(state.is_ok());
-
-        Ok(())
-    }
-}

@@ -59,7 +59,7 @@ impl ContractActionStorage for PostgresStorage {
     }
 
     #[trace(properties = { "address": "{address:?}" })]
-    async fn get_contract_action_by_address(
+    async fn get_latest_contract_action_by_address(
         &self,
         address: &RawContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
@@ -268,9 +268,8 @@ impl ContractActionStorage for PostgresStorage {
                     .try_collect::<Vec<_>>()
                     .await?;
 
-                let max_id = actions.iter().map(|action| action.id).max();
-                match max_id {
-                    Some(max_id) => contract_action_id = max_id + 1,
+                match actions.last() {
+                    Some(action) => contract_action_id = action.id + 1,
                     None => break,
                 }
 

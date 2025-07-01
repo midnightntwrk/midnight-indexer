@@ -84,7 +84,7 @@ impl Storage for PostgresStorage {
             SELECT id, protocol_version, raw
             FROM transactions
             WHERE id >= $1
-            ORDER BY id ASC
+            ORDER BY id
             LIMIT $2
         "};
 

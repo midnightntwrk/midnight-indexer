@@ -12,22 +12,27 @@
 // limitations under the License.
 
 use crate::{
-    domain::storage::Storage,
+    domain::{Transaction, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
         v1::unshielded::{
-            UnshieldedAddress, UnshieldedProgress, UnshieldedUtxo, UnshieldedUtxoEvent,
+            UnshieldedAddress, UnshieldedProgressUpdate, UnshieldedSyncEvent, UnshieldedUtxo,
+            UnshieldedUtxoUpdate,
         },
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
-use indexer_common::domain::{RawUnshieldedAddress, Subscriber, UnshieldedUtxoIndexed};
+use indexer_common::domain::{NetworkId, RawUnshieldedAddress, Subscriber, UnshieldedUtxoIndexed};
 use log::{debug, warn};
-use std::{collections::HashSet, future::ready, marker::PhantomData, pin::pin, time::Duration};
+use std::{future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
+use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
+
+// TODO: Make configurable!
+const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
 
 // TODO: Make configurable!
 const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(30);
@@ -53,56 +58,49 @@ where
     S: Storage,
     B: Subscriber,
 {
-    /// Subscribes to unshielded UTXO events for a specific address.
-    ///
-    /// Emits events whenever unshielded UTXOs are created or spent for the given address.
-    /// Each event includes the transaction details and lists of created/spent UTXOs.
-    ///
-    /// # Arguments
-    /// * `address` - The unshielded address to monitor (must be in Bech32m format).
-    /// * `transaction_id` - Optional transaction ID to start replay from (defaults to genesis if
-    ///   omitted).
-    ///
-    /// # Returns
-    /// A stream of `UnshieldedUtxoEvent`s containing:
-    /// - `progress`: Progress information for wallet synchronization (always present).
-    /// - `transaction`: The transaction that created/spent UTXOs (None for progress-only events).
-    /// - `createdUtxos`: UTXOs created in this transaction for the address (None for progress-only
-    ///   events).
-    /// - `spentUtxos`: UTXOs spent in this transaction for the address (None for progress-only
-    ///   events).
+    /// Subscribes to unshielded synchronization events for a specific address and the given
+    /// transaction ID or 0 if omitted. The events are either unshielded UTXO updates or progress
+    /// updates.
     #[trace(properties = { "address": "{address:?}", "transaction_id": "{transaction_id:?}" })]
     async fn unshielded_utxos<'a>(
         &self,
         cx: &'a Context<'a>,
         address: UnshieldedAddress,
         transaction_id: Option<u64>,
-    ) -> Result<impl Stream<Item = ApiResult<UnshieldedUtxoEvent<S>>> + use<'a, S, B>, ApiError>
+    ) -> Result<impl Stream<Item = ApiResult<UnshieldedSyncEvent<S>>> + use<'a, S, B>, ApiError>
     {
         let address = address
             .try_into_domain(cx.get_network_id())
             .map_err_into_client_error(|| "invalid address")?;
 
-        // Use 0 as default to include all transactions from genesis.
-        // Since transaction IDs start from 1 (BIGSERIAL/AUTOINCREMENT), using >= 0
-        // ensures we include the genesis transaction (ID 1) and all subsequent ones.
-        let from_transaction_id = transaction_id.unwrap_or(0);
-        let utxo_events = utxo_updates::<S, B>(cx, address, from_transaction_id).await?;
+        // Build a stream of WalletSyncEvents by merging ViewingUpdates and ProgressUpdates. The
+        // ViewingUpdates stream should be infinite by definition (see the trait). However, if it
+        // nevertheless completes, we use a Tripwire to ensure the ProgressUpdates stream also
+        // completes, preventing the merged stream from hanging indefinitely waiting for both
+        // streams to complete.
+        let (trigger, tripwire) = Tripwire::new();
 
-        let progress_updates = progress_updates::<S>(cx, address).await?;
+        let unshielded_utxo_updates =
+            unshielded_utxo_updates::<S, B>(cx, address, transaction_id.unwrap_or(0), trigger)
+                .map_ok(|update| UnshieldedSyncEvent::UnshieldedUtxoUpdate(update.into()));
 
-        let events = tokio_stream::StreamExt::merge(utxo_events, progress_updates);
+        let progress_updates = progress_updates::<S>(cx, address)
+            .take_until_if(tripwire)
+            .map_ok(UnshieldedSyncEvent::ProgressUpdate);
+
+        let events = tokio_stream::StreamExt::merge(unshielded_utxo_updates, progress_updates);
 
         Ok(events)
     }
 }
 
-#[trace(properties = { "address": "{address:?}", "from_transaction_id": "{from_transaction_id}" })]
-async fn utxo_updates<'a, S, B>(
+#[trace(properties = { "address": "{address:?}", "transaction_id": "{transaction_id}" })]
+fn unshielded_utxo_updates<'a, S, B>(
     cx: &'a Context<'a>,
     address: RawUnshieldedAddress,
-    from_transaction_id: u64,
-) -> ApiResult<impl Stream<Item = ApiResult<UnshieldedUtxoEvent<S>>> + use<'a, S, B>>
+    mut transaction_id: u64,
+    trigger: Trigger,
+) -> impl Stream<Item = ApiResult<UnshieldedUtxoUpdate<S>>> + use<'a, S, B>
 where
     S: Storage,
     B: Subscriber,
@@ -115,186 +113,152 @@ where
         .subscribe::<UnshieldedUtxoIndexed>()
         .try_filter(move |event| ready(event.address == address));
 
-    let utxo_updates = try_stream! {
-        debug!(
-            address:?,
-            from_transaction_id;
-            "starting unshielded subscription with historical replay"
-        );
+    try_stream! {
+        // Stream UTXO events for existing transactions.
+        debug!(address:?, transaction_id; "streaming existing UTXO events");
 
-        // Phase 1: Replay all historical transactions for this address.
-        let historical_transactions = storage
-            .get_transactions_involving_unshielded(&address, from_transaction_id)
+        let transactions =
+            storage.get_transactions_involving_unshielded(address, transaction_id, BATCH_SIZE);
+
+        let mut transactions = pin!(transactions);
+        while let Some(transaction) = transactions
+            .try_next()
             .await
-            .map_err_into_server_error(|| "fetch historical transactions for address")?;
-
-        let mut processed_transaction_ids = HashSet::new();
-
-        for transaction in historical_transactions {
-            processed_transaction_ids.insert(transaction.id);
-
-            debug!(
-                address:?,
-                transaction_id = transaction.id;
-                "processing historical transaction"
-            );
-
-            let created = storage
-                .get_unshielded_utxos_created_in_transaction_for_address(&address, transaction.id)
-                .await
-                .map_err_into_server_error(|| "fetch created UTXOs for historical transaction")?;
-
-            let spent = storage
-                .get_unshielded_utxos_spent_in_transaction_for_address(&address, transaction.id)
-                .await
-                .map_err_into_server_error(|| "fetch spent UTXOs for historical transaction")?;
-
-            // Only emit events for transactions that actually have UTXOs for this address.
-            if !created.is_empty() || !spent.is_empty() {
-                let (_, highest_transaction_id) = storage
-                    .get_highest_indices_for_address(&address)
-                    .await
-                    .map_err_into_server_error(|| "fetch highest indices for address")?;
-                let highest_transaction_id = highest_transaction_id.unwrap_or(0);
-
-                let progress = UnshieldedProgress {
-                    highest_transaction_id,
-                    current_transaction_id: transaction.id,
-                };
-
-                let created_utxos = Some(created.into_iter()
-                    .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                    .collect());
-                let spent_utxos = Some(spent.into_iter()
-                    .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                    .collect());
-
-                yield UnshieldedUtxoEvent {
-                    progress,
-                    transaction: Some(transaction.into()),
-                    created_utxos,
-                    spent_utxos,
-                };
+            .map_err_into_server_error(|| format!("get next transaction for address {address}"))?
+        {
+            if let Some(utxo_update) = unshielded_utxo_update(
+                &mut transaction_id,
+                storage,
+                address,
+                transaction,
+                network_id,
+            )
+            .await?
+            {
+                yield utxo_update;
             }
         }
 
-        // Phase 2: Stream live events, skipping any already processed.
+        // Stream UTXO events for live transactions.
         let mut utxo_indexed_events = pin!(utxo_indexed_events);
-        while let Some(UnshieldedUtxoIndexed { transaction_id, .. }) = utxo_indexed_events
+        while utxo_indexed_events
             .try_next()
             .await
             .map_err_into_server_error(|| "get next UnshieldedUtxoIndexed event")?
+            .is_some()
         {
-            // Skip transactions we already processed in the historical phase.
-            if processed_transaction_ids.contains(&transaction_id) {
-                continue;
-            }
+            let transactions =
+                storage.get_transactions_involving_unshielded(address, transaction_id, BATCH_SIZE);
 
-            debug!(
-                address:?,
-                transaction_id;
-                "handling live UnshieldedUtxoIndexed event"
-            );
-
-            let transaction = storage
-                .get_transaction_by_id(transaction_id)
-                .await
-                .map_err_into_server_error(|| "fetch transaction for live subscription event")?;
-
-            let transaction = match transaction {
-                Some(transaction) => transaction,
-
-                None => {
-                    warn!(transaction_id; "transaction not found, skipping live event");
-                    continue;
-                }
-            };
-
-            let created = storage
-                .get_unshielded_utxos_created_in_transaction_for_address(&address, transaction_id)
-                .await
-                .map_err_into_server_error(|| "fetch created UTXOs for live event")?;
-
-            let spent = storage
-                .get_unshielded_utxos_spent_in_transaction_for_address(&address, transaction_id)
-                .await
-                .map_err_into_server_error(|| "fetch spent UTXOs for live event")?;
-
-            // Only emit events for transactions that actually have UTXOs for this address.
-            if !created.is_empty() || !spent.is_empty() {
-                let (_, highest_transaction_id) = storage
-                    .get_highest_indices_for_address(&address)
+            let mut transactions = pin!(transactions);
+            while let Some(transaction) =
+                transactions
+                    .try_next()
                     .await
-                    .map_err_into_server_error(|| "fetch highest indices for address")?;
-                let highest_transaction_id = highest_transaction_id.unwrap_or(0);
-
-                let progress = UnshieldedProgress {
-                    highest_transaction_id,
-                    current_transaction_id: transaction.id,
-                };
-
-                let created_utxos = Some(created.into_iter()
-                    .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                    .collect());
-                let spent_utxos = Some(spent.into_iter()
-                    .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-                    .collect());
-
-                yield UnshieldedUtxoEvent {
-                    progress,
-                    transaction: Some(transaction.into()),
-                    created_utxos,
-                    spent_utxos,
-                };
+                    .map_err_into_server_error(|| {
+                        format!("get next transaction for address {address}")
+                    })?
+            {
+                if let Some(utxo_update) = unshielded_utxo_update(
+                    &mut transaction_id,
+                    storage,
+                    address,
+                    transaction,
+                    network_id,
+                )
+                .await?
+                {
+                    yield utxo_update;
+                }
             }
         }
 
         warn!("stream of UnshieldedUtxoIndexed events completed unexpectedly");
-    };
-
-    Ok(utxo_updates)
+        trigger.cancel();
+    }
 }
 
-async fn progress_updates<'a, S>(
-    cx: &'a Context<'a>,
+async fn unshielded_utxo_update<S>(
+    transaction_id: &mut u64,
+    storage: &S,
     address: RawUnshieldedAddress,
-) -> ApiResult<impl Stream<Item = ApiResult<UnshieldedUtxoEvent<S>>> + use<'a, S>>
+    transaction: Transaction,
+    network_id: NetworkId,
+) -> ApiResult<Option<UnshieldedUtxoUpdate<S>>>
 where
     S: Storage,
 {
-    let storage = cx.get_storage::<S>();
+    *transaction_id = transaction.id;
 
+    let created = storage
+        .get_unshielded_utxos_created_in_transaction_for_address(address, transaction.id)
+        .await
+        .map_err_into_server_error(|| {
+            format!(
+                "get created UTXOs for existing transaction with ID {}",
+                transaction.id
+            )
+        })?;
+
+    let spent = storage
+        .get_unshielded_utxos_spent_in_transaction_for_address(address, transaction.id)
+        .await
+        .map_err_into_server_error(|| {
+            format!(
+                "get spent UTXOs for existing transaction with ID {}",
+                transaction.id
+            )
+        })?;
+
+    // Only emit events for transactions that actually have UTXOs for this address.
+    let unshielded_utxo_update = (!created.is_empty() || !spent.is_empty()).then(|| {
+        let created_utxos = created
+            .into_iter()
+            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+            .collect();
+
+        let spent_utxos = spent
+            .into_iter()
+            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
+            .collect();
+
+        UnshieldedUtxoUpdate {
+            transaction: transaction.into(),
+            created_utxos,
+            spent_utxos,
+        }
+    });
+
+    Ok(unshielded_utxo_update)
+}
+
+fn progress_updates<'a, S>(
+    cx: &'a Context<'a>,
+    address: RawUnshieldedAddress,
+) -> impl Stream<Item = ApiResult<UnshieldedProgressUpdate>> + use<'a, S>
+where
+    S: Storage,
+{
     let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
-    let updates = intervals.then(move |_| progress_update(address, storage));
-
-    Ok(updates)
+    intervals.then(move |_| progress_update(address, cx.get_storage::<S>()))
 }
 
 async fn progress_update<S>(
     address: RawUnshieldedAddress,
     storage: &S,
-) -> ApiResult<UnshieldedUtxoEvent<S>>
+) -> ApiResult<UnshieldedProgressUpdate>
 where
     S: Storage,
 {
     // Calculate progress information using transaction IDs.
-    let (_, highest_transaction_id) = storage
-        .get_highest_indices_for_address(&address)
+    let highest_transaction_id = storage
+        .get_highest_transaction_id_for_unshielded_address(address)
         .await
-        .map_err_into_server_error(|| "fetch highest indices for address")?;
+        .map_err_into_server_error(|| "get highest transaction ID for address")?;
 
     let highest_transaction_id = highest_transaction_id.unwrap_or(0);
-    let current_transaction_id = highest_transaction_id; // For progress-only events, current = highest.
 
-    let progress = UnshieldedProgress {
+    Ok(UnshieldedProgressUpdate {
         highest_transaction_id,
-        current_transaction_id,
-    };
-
-    Ok(UnshieldedUtxoEvent {
-        progress,
-        transaction: None,
-        created_utxos: None,
-        spent_utxos: None,
     })
 }

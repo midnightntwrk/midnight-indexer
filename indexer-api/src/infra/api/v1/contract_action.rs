@@ -11,7 +11,7 @@ use crate::{
 };
 use async_graphql::{ComplexObject, Context, Interface, OneofObject, SimpleObject};
 use derive_more::Debug;
-use indexer_common::domain::ByteVec;
+use indexer_common::domain::RawContractAddress;
 use std::marker::PhantomData;
 
 /// A contract action.
@@ -147,7 +147,7 @@ pub struct ContractCall<S: Storage> {
     contract_action_id: u64,
 
     #[graphql(skip)]
-    raw_address: ByteVec,
+    raw_address: RawContractAddress,
 
     #[graphql(skip)]
     _s: PhantomData<S>,
