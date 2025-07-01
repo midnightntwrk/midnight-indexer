@@ -92,6 +92,7 @@ CREATE TABLE unshielded_utxos(
     token_type BLOB NOT NULL,
     intent_hash BLOB NOT NULL,
     value BLOB NOT NULL,
+    spending_transaction_id INTEGER,
     FOREIGN KEY (creating_transaction_id) REFERENCES transactions(id),
     FOREIGN KEY (spending_transaction_id) REFERENCES transactions(id),
     UNIQUE (intent_hash, output_index)
@@ -167,7 +168,7 @@ CREATE TABLE cnight_registrations (
     UNIQUE(cardano_address, dust_address)
 );
 
-CREATE INDEX cnight_registrations_cardano_addr_idx ON cnight_registrations(cardano_address);
+CREATE INDEX cnight_registrations_night_addr_idx ON cnight_registrations(night_address);
 CREATE INDEX cnight_registrations_dust_addr_idx ON cnight_registrations(dust_address);
 
 CREATE TABLE dust_commitment_tree (
@@ -185,17 +186,16 @@ CREATE TABLE dust_generation_tree (
 );
 
 CREATE TABLE dust_events (
-    id INTEGER PRIMARY KEY,
-    transaction_id INTEGER NOT NULL,
-    transaction_hash BLOB NOT NULL,
-    logical_segment INTEGER NOT NULL,
-    physical_segment INTEGER NOT NULL,
-    event_type TEXT NOT NULL,
-    event_data TEXT NOT NULL,
-    FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+                             id INTEGER PRIMARY KEY,
+                             transaction_id INTEGER NOT NULL,
+                             transaction_hash BLOB NOT NULL,
+                             logical_segment INTEGER NOT NULL,
+                             physical_segment INTEGER NOT NULL,
+                             event_type TEXT NOT NULL,
+                             event_data TEXT NOT NULL,
+                             FOREIGN KEY (transaction_id) REFERENCES transactions(id)
 );
 
 CREATE INDEX dust_events_transaction_idx ON dust_events(transaction_id);
 CREATE INDEX dust_events_type_idx ON dust_events(event_type);
-
 

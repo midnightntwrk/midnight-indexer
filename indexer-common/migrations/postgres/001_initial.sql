@@ -143,15 +143,15 @@ CREATE INDEX dust_utxos_nullifier_prefix_idx ON dust_utxos(substring(nullifier::
 
 CREATE TABLE cnight_registrations (
     id BIGSERIAL PRIMARY KEY,
-    cardano_address BYTEA NOT NULL,
+    night_address BYTEA NOT NULL,
     dust_address BYTEA NOT NULL,
     is_valid BOOLEAN NOT NULL,
     registered_at BIGINT NOT NULL,
     removed_at BIGINT,
-    UNIQUE(cardano_address, dust_address)
+    UNIQUE(night_address, dust_address)
 );
 
-CREATE INDEX cnight_registrations_cardano_addr_idx ON cnight_registrations(cardano_address);
+CREATE INDEX cnight_registrations_cardano_addr_idx ON cnight_registrations(night_address);
 CREATE INDEX cnight_registrations_dust_addr_idx ON cnight_registrations(dust_address);
 
 CREATE TABLE dust_commitment_tree (
@@ -169,16 +169,15 @@ CREATE TABLE dust_generation_tree (
 );
 
 CREATE TABLE dust_events (
-    id BIGSERIAL PRIMARY KEY,
-    transaction_id BIGINT NOT NULL REFERENCES transactions(id),
-    transaction_hash BYTEA NOT NULL,
-    logical_segment INTEGER NOT NULL,
-    physical_segment INTEGER NOT NULL,
-    event_type TEXT NOT NULL,
-    event_data JSONB NOT NULL
+                             id BIGSERIAL PRIMARY KEY,
+                             transaction_id BIGINT NOT NULL REFERENCES transactions(id),
+                             transaction_hash BYTEA NOT NULL,
+                             logical_segment INTEGER NOT NULL,
+                             physical_segment INTEGER NOT NULL,
+                             event_type TEXT NOT NULL,
+                             event_data JSONB NOT NULL
 );
 
 CREATE INDEX dust_events_transaction_idx ON dust_events(transaction_id);
 CREATE INDEX dust_events_type_idx ON dust_events(event_type);
-
 
