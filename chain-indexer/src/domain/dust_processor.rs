@@ -133,8 +133,9 @@ impl DustEventProcessor {
 
             // Create DUST UTXO entry
             let dust_utxo = DustUtxo {
-                commitment: indexer_common::domain::ByteArray(output.owner.0), /* Use commitment
-                                                                                * from output */
+                // TODO: Calculate proper commitment from output fields once ledger API provides it.
+                // For now using owner as placeholder which is incorrect.
+                commitment: indexer_common::domain::ByteArray(output.owner.0),
                 nullifier: None, // Not spent yet
                 initial_value: output.initial_value,
                 owner: output.owner,
@@ -149,7 +150,8 @@ impl DustEventProcessor {
 
         // Save generation info first
         if !generation_infos.is_empty() {
-            storage.save_dust_generation_info(&generation_infos).await?;
+            let generation_refs: Vec<&DustGenerationInfo> = generation_infos.iter().collect();
+            storage.save_dust_generation_info(&generation_refs).await?;
         }
 
         // Then save DUST UTXOs
@@ -209,29 +211,5 @@ impl DustEventProcessor {
         warn!("System transaction registration processing not yet implemented");
 
         Ok(())
-    }
-}
-
-/// Configuration for DUST processing
-#[derive(Debug, Clone)]
-pub struct DustConfig {
-    /// Enable DUST processing (default: true)
-    pub enabled: bool,
-    /// Merkle tree batch update size (default: 1000)
-    pub merkle_tree_batch_size: usize,
-    /// Privacy prefix length for nullifier queries (default: 8)
-    pub privacy_prefix_length: usize,
-    /// Maximum registrations per DUST address (default: 10)
-    pub max_registrations_per_address: usize,
-}
-
-impl Default for DustConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            merkle_tree_batch_size: 1000,
-            privacy_prefix_length: 8,
-            max_registrations_per_address: 10,
-        }
     }
 }

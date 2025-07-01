@@ -261,7 +261,7 @@ impl Storage for SqliteStorage {
 
     async fn save_dust_generation_info(
         &self,
-        generation_info: &[DustGenerationInfo],
+        generation_info: &[&DustGenerationInfo],
     ) -> Result<(), sqlx::Error> {
         if generation_info.is_empty() {
             return Ok(());
@@ -292,7 +292,8 @@ impl Storage for SqliteStorage {
                 } else {
                     Some(info.dtime as i64)
                 })
-                .bind(0i64) // TODO: merkle_index should come from somewhere.
+                .bind(0i64) // TODO(sean): merkle_index should come from somewhere.
+                // TEMPORARY: Mock placeholder - will be replaced with real merkle_index from ledger.
                 .execute(&mut *tx)
                 .await?;
         }
@@ -569,6 +570,43 @@ impl Storage for SqliteStorage {
         }
 
         Ok(())
+    }
+
+    async fn update_merkle_tree_state(
+        &self,
+        _tree_type: crate::domain::MerkleTreeType,
+        block_height: u32,
+        root: &[u8],
+        tree_data: &[u8],
+    ) -> Result<(), sqlx::Error> {
+        let table_name = match _tree_type {
+            crate::domain::MerkleTreeType::Commitment => "dust_commitment_tree",
+            crate::domain::MerkleTreeType::Generation => "dust_generation_tree",
+        };
+
+        let query =
+            format!("INSERT INTO {table_name} (block_height, root, tree_data) VALUES ($1, $2, $3)");
+
+        sqlx::query(&query)
+            .bind(block_height as i32)
+            .bind(root)
+            .bind(tree_data)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn get_merkle_tree_collapsed_update(
+        &self,
+        _tree_type: crate::domain::MerkleTreeType,
+        _start_index: u64,
+        _end_index: u64,
+    ) -> Result<Vec<u8>, sqlx::Error> {
+        // TODO(sean): Implement collapsed update generation once ledger provides the format.
+        // TEMPORARY: Mock placeholder - will be replaced with real collapsed update data from ledger-5.0.0-alpha.3+.
+        // This mock return value will be deleted once we have a node image with proper DUST support.
+        Ok(vec![0u8; 32])
     }
 }
 

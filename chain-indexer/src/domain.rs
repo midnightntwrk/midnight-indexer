@@ -15,6 +15,11 @@ pub mod storage;
 
 mod block;
 mod contract_action;
+mod dust_event_handler;
+mod dust_lifecycle;
+mod dust_merkle_tree;
+// TEMPORARY: Mock module will be removed once node image with ledger-5.0.0-alpha.3+ is available.
+mod dust_mock_events;
 mod dust_processor;
 mod ledger_state;
 mod node;
@@ -23,6 +28,11 @@ mod transaction_fees;
 
 pub use block::*;
 pub use contract_action::*;
+pub use dust_event_handler::*;
+pub use dust_lifecycle::*;
+pub use dust_merkle_tree::*;
+// TEMPORARY: Mock exports will be removed once node image with ledger-5.0.0-alpha.3+ is available.
+pub use dust_mock_events::*;
 pub use dust_processor::*;
 pub use ledger_state::*;
 pub use node::*;
