@@ -138,8 +138,9 @@ impl<S: Storage> DustMerkleTreeManager<S> {
         );
 
         // TODO(sean): Implement actual collapsed tree generation once ledger API provides it.
-        // TEMPORARY: Mock placeholder - will be replaced with real collapsed tree data from ledger-5.0.0-alpha.3+.
-        // This mock return value will be deleted once we have a node image with proper DUST support.
+        // TEMPORARY: Mock placeholder - will be replaced with real collapsed tree data from
+        // ledger-5.0.0-alpha.3+. This mock return value will be deleted once we have a node
+        // image with proper DUST support.
         Ok(ByteVec::from(vec![0u8; 32]))
     }
 

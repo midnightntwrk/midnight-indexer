@@ -293,7 +293,8 @@ impl Storage for PostgresStorage {
                         Some(info.dtime as i64)
                     })
                     .push_bind(0i64); // TODO(sean): merkle_index should come from somewhere.
-                    // TEMPORARY: Mock placeholder - will be replaced with real merkle_index from ledger.
+                // TEMPORARY: Mock placeholder - will be replaced with real merkle_index from
+                // ledger.
             })
             .build()
             .execute(&mut *tx)
@@ -605,8 +606,9 @@ impl Storage for PostgresStorage {
         _end_index: u64,
     ) -> Result<Vec<u8>, sqlx::Error> {
         // TODO(sean): Implement collapsed update generation once ledger provides the format.
-        // TEMPORARY: Mock placeholder - will be replaced with real collapsed update data from ledger-5.0.0-alpha.3+.
-        // This mock return value will be deleted once we have a node image with proper DUST support.
+        // TEMPORARY: Mock placeholder - will be replaced with real collapsed update data from
+        // ledger-5.0.0-alpha.3+. This mock return value will be deleted once we have a node
+        // image with proper DUST support.
         Ok(vec![0u8; 32])
     }
 }

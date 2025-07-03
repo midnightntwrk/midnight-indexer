@@ -2,7 +2,7 @@
 // Copyright (C) 2025 Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
+// You may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 // http://www.apache.org/licenses/LICENSE-2.0
 // Unless required by applicable law or agreed to in writing, software
@@ -17,17 +17,19 @@
 //!
 //! Run with: cargo run --example dust_processing --features cloud
 
-use chain_indexer::domain::{Block, DustEventHandler, Transaction};
+use chain_indexer::domain::{Block, Transaction};
 use indexer_common::domain::{
     BlockHash, ByteArray, ProtocolVersion, TransactionHash,
     dust::{DustEvent, DustEventDetails, DustGenerationInfo, DustParameters, QualifiedDustOutput},
+    ledger::ZswapStateRoot,
 };
 use log::info;
 
 /// Generate mock DUST events for testing.
 /// TEMPORARY: Will be replaced with real events from node.
 fn generate_mock_dust_events() -> Vec<DustEvent> {
-    let tx_hash = TransactionHash([1u8; 32]);
+    // Note: TransactionHash is a type alias for ByteArray<32>
+    let tx_hash: TransactionHash = ByteArray([1u8; 32]);
     let owner = ByteArray([10u8; 32]);
 
     vec![
@@ -80,9 +82,9 @@ fn generate_mock_dust_events() -> Vec<DustEvent> {
 /// Create a mock block with DUST events.
 /// TEMPORARY: Will be replaced with real blocks from node.
 fn create_mock_block_with_dust() -> Block {
-    let mut transaction = Transaction {
+    let transaction = Transaction {
         id: 1,
-        hash: TransactionHash([1u8; 32]),
+        hash: ByteArray([1u8; 32]), // TransactionHash type
         transaction_result: Default::default(),
         protocol_version: ProtocolVersion(0x000D0000),
         identifiers: vec![],
@@ -99,20 +101,21 @@ fn create_mock_block_with_dust() -> Block {
     };
 
     Block {
-        hash: BlockHash([100u8; 32]),
+        hash: ByteArray([100u8; 32]) as BlockHash,
         height: 1000,
-        parent_hash: BlockHash([99u8; 32]),
+        parent_hash: ByteArray([99u8; 32]) as BlockHash,
         protocol_version: ProtocolVersion(0x000D0000),
         author: None,
         timestamp: 1000,
-        zswap_state_root: Default::default(),
+        zswap_state_root: ZswapStateRoot::V5(Default::default()),
         transactions: vec![transaction],
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+    // Initialize logging if needed
+    // env_logger::init();
 
     info!("DUST Processing Example");
     info!("========================");

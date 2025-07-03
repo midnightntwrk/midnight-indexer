@@ -67,7 +67,7 @@ impl<S: Storage> DustEventHandler<S> {
         // as per midnight-architecture/specification/dust.md.
         let dust_parameters = DustParameters {
             night_dust_ratio: 10,
-            generation_decay_rate: 3,  // TEMPORARY: Should be ~8267 for production.
+            generation_decay_rate: 3, // TEMPORARY: Should be ~8267 for production.
             dust_grace_period: 300,
         };
 
@@ -131,13 +131,15 @@ impl<S: Storage> DustEventHandler<S> {
 
                         // Track for Merkle tree updates.
                         // Assumes ledger provides proper commitment calculation.
-                        // TEMPORARY: Mock placeholder - will be replaced with real data from ledger-5.0.0-alpha.3+.
-                        // This mock commitment will be deleted once we have a node image with proper DUST events.
+                        // TEMPORARY: Mock placeholder - will be replaced with real data from
+                        // ledger-5.0.0-alpha.3+. This mock commitment will
+                        // be deleted once we have a node image with proper DUST events.
                         let commitment = ByteVec::from(vec![0u8; 32]); // TODO(sean): Get from event.
                         commitment_updates.push((*generation_index, commitment.clone()));
 
-                        // TEMPORARY: Mock placeholder - will be replaced with real serialization from ledger-5.0.0-alpha.3+.
-                        // This mock generation data will be deleted once we have a node image with proper DUST events.
+                        // TEMPORARY: Mock placeholder - will be replaced with real serialization
+                        // from ledger-5.0.0-alpha.3+. This mock generation
+                        // data will be deleted once we have a node image with proper DUST events.
                         let generation_data = ByteVec::from(vec![0u8; 64]); // TODO(sean): Serialize generation.
                         generation_tree_updates.push((*generation_index, generation_data));
                     }
@@ -199,8 +201,9 @@ impl<S: Storage> DustEventHandler<S> {
         // 4. Update Merkle trees.
         if !commitment_updates.is_empty() {
             // Assumes ledger provides tree root for this block.
-            // TEMPORARY: Mock placeholder - will be replaced with real root from block in ledger-5.0.0-alpha.3+.
-            // This mock root will be deleted once we have a node image with proper DUST support.
+            // TEMPORARY: Mock placeholder - will be replaced with real root from block in
+            // ledger-5.0.0-alpha.3+. This mock root will be deleted once we have a node
+            // image with proper DUST support.
             let commitment_root = ByteVec::from(vec![0u8; 32]); // TODO(sean): Get from block.
             self.merkle_tree_manager
                 .update_commitment_tree(commitment_updates, block.height, commitment_root)
@@ -209,8 +212,9 @@ impl<S: Storage> DustEventHandler<S> {
 
         if !generation_tree_updates.is_empty() {
             // Assumes ledger provides tree root for this block.
-            // TEMPORARY: Mock placeholder - will be replaced with real root from block in ledger-5.0.0-alpha.3+.
-            // This mock root will be deleted once we have a node image with proper DUST support.
+            // TEMPORARY: Mock placeholder - will be replaced with real root from block in
+            // ledger-5.0.0-alpha.3+. This mock root will be deleted once we have a node
+            // image with proper DUST support.
             let generation_root = ByteVec::from(vec![0u8; 32]); // TODO(sean): Get from block.
             self.merkle_tree_manager
                 .update_generation_tree(generation_tree_updates, block.height, generation_root)

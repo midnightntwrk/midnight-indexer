@@ -17,8 +17,10 @@
 
 use indexer_common::domain::{
     ByteArray, ByteVec, TransactionHash,
-    dust::{DustEvent, DustEventDetails, DustGenerationInfo, DustParameters,
-        DustRegistration, QualifiedDustOutput},
+    dust::{
+        DustEvent, DustEventDetails, DustGenerationInfo, DustParameters, DustRegistration,
+        QualifiedDustOutput,
+    },
 };
 
 /// Mock DUST event generator for testing while ledger integration is pending.
@@ -147,7 +149,11 @@ impl DustMockEventGenerator {
             dust_address,
             is_valid,
             registered_at: self.current_time,
-            removed_at: if is_valid { None } else { Some(self.current_time) },
+            removed_at: if is_valid {
+                None
+            } else {
+                Some(self.current_time)
+            },
         }
     }
 
@@ -179,10 +185,10 @@ mod tests {
     fn test_mock_event_generation() {
         let mut generator = DustMockEventGenerator::new(1000);
         let tx_hash = ByteArray([5u8; 32]);
-        
+
         let events = generator.generate_test_scenario(tx_hash);
         assert_eq!(events.len(), 5);
-        
+
         // Check first event is initial UTXO.
         matches!(
             &events[0].event_details,
