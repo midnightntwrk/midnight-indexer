@@ -15,9 +15,7 @@ use crate::{
     domain::{UnshieldedUtxo, storage::unshielded::UnshieldedUtxoStorage},
     infra::storage::sqlite::SqliteStorage,
 };
-use indexer_common::domain::{
-    BlockHash, RawTransactionIdentifier, RawUnshieldedAddress, TransactionHash,
-};
+use indexer_common::domain::RawUnshieldedAddress;
 use indoc::indoc;
 
 impl UnshieldedUtxoStorage for SqliteStorage {
@@ -102,7 +100,7 @@ impl UnshieldedUtxoStorage for SqliteStorage {
         Ok(utxos)
     }
 
-    async fn get_unshielded_utxos_created_in_transaction_for_address(
+    async fn get_unshielded_utxos_by_address_created_by_transaction(
         &self,
         address: RawUnshieldedAddress,
         transaction_id: u64,
@@ -132,7 +130,7 @@ impl UnshieldedUtxoStorage for SqliteStorage {
         Ok(utxos)
     }
 
-    async fn get_unshielded_utxos_spent_in_transaction_for_address(
+    async fn get_unshielded_utxos_by_address_spent_by_transaction(
         &self,
         address: RawUnshieldedAddress,
         transaction_id: u64,
@@ -156,132 +154,6 @@ impl UnshieldedUtxoStorage for SqliteStorage {
         let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
             .bind(transaction_id as i64)
             .bind(address.as_ref())
-            .fetch_all(&*self.pool)
-            .await?;
-
-        Ok(utxos)
-    }
-
-    async fn get_unshielded_utxos_by_address_from_height(
-        &self,
-        address: RawUnshieldedAddress,
-        height: u32,
-    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT 
-                id,
-                creating_transaction_id,
-                spending_transaction_id,
-                owner,
-                token_type,
-                value,
-                output_index,
-                intent_hash
-            FROM unshielded_utxos
-            JOIN transactions ON transactions.id = creating_transaction_id
-            JOIN blocks ON blocks.id = transactions.block_id
-            WHERE owner = $1
-            AND blocks.height >= $2
-            ORDER BY id
-        "};
-
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
-            .bind(address.as_ref())
-            .bind(height as i64)
-            .fetch_all(&*self.pool)
-            .await?;
-
-        Ok(utxos)
-    }
-
-    async fn get_unshielded_utxos_by_address_from_block_hash(
-        &self,
-        address: RawUnshieldedAddress,
-        hash: BlockHash,
-    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT
-                id,
-                creating_transaction_id,
-                spending_transaction_id,
-                owner,
-                token_type,
-                value,
-                output_index,
-                intent_hash
-            FROM unshielded_utxos
-            JOIN transactions ON transactions.id = creating_transaction_id
-            JOIN blocks ON blocks.id = transactions.block_id
-            WHERE owner = $1
-            AND blocks.hash = $2
-            ORDER BY id
-        "};
-
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
-            .bind(address.as_ref())
-            .bind(hash.as_ref())
-            .fetch_all(&*self.pool)
-            .await?;
-
-        Ok(utxos)
-    }
-
-    async fn get_unshielded_utxos_by_address_from_transaction_hash(
-        &self,
-        address: RawUnshieldedAddress,
-        hash: TransactionHash,
-    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT 
-                id,
-                creating_transaction_id,
-                spending_transaction_id,
-                owner,
-                token_type,
-                value,
-                output_index,
-                intent_hash
-            FROM unshielded_utxos
-            JOIN transactions ON transactions.id = creating_transaction_id
-            WHERE owner = $1
-            AND transactions.hash = $2
-            ORDER BY id
-        "};
-
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
-            .bind(address.as_ref())
-            .bind(hash.as_ref())
-            .fetch_all(&*self.pool)
-            .await?;
-
-        Ok(utxos)
-    }
-
-    async fn get_unshielded_utxos_by_address_from_transaction_identifier(
-        &self,
-        address: RawUnshieldedAddress,
-        identifier: &RawTransactionIdentifier,
-    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT 
-                id,
-                creating_transaction_id,
-                spending_transaction_id,
-                owner,
-                token_type,
-                value,
-                output_index,
-                intent_hash
-            FROM unshielded_utxos
-            JOIN transactions ON transactions.id = creating_transaction_id
-            WHERE owner = $1
-            AND $2 = ANY(transactions.identifiers)
-            ORDER BY id
-        "};
-
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
-            .bind(address.as_ref())
-            .bind(identifier)
             .fetch_all(&*self.pool)
             .await?;
 

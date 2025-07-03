@@ -176,10 +176,6 @@ type Query {
 	Find a contract action for the given address and optional offset.
 	"""
 	contractAction(address: HexEncoded!, offset: ContractActionOffset): ContractAction
-	"""
-	Retrieve all unshielded UTXOs (both spent and unspent) associated with a given address.
-	"""
-	unshieldedUtxos(address: UnshieldedAddress!, offset: UnshieldedOffset): [UnshieldedUtxo!]!
 }
 
 type RelevantTransaction {
@@ -335,20 +331,6 @@ enum TransactionResultStatus {
 scalar Unit
 
 scalar UnshieldedAddress
-
-"""
-Either a block offset or a transaction offset.
-"""
-input UnshieldedOffset @oneOf {
-	"""
-	Either a block hash or a block height.
-	"""
-	blockOffset: BlockOffset
-	"""
-	Either a transaction hash or a transaction identifier.
-	"""
-	transactionOffset: TransactionOffset
-}
 
 """
 Aggregates information about the unshielded indexing progress.

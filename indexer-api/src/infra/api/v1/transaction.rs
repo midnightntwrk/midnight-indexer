@@ -82,12 +82,14 @@ where
 
     /// The contract actions.
     async fn contract_actions(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractAction<S>>> {
+        let id = self.id;
+
         let contract_actions = cx
             .get_storage::<S>()
-            .get_contract_actions_by_transaction_id(self.id)
+            .get_contract_actions_by_transaction_id(id)
             .await
             .map_err_into_server_error(|| {
-                format!("cannot get contract actions by transaction ID {}", self.id)
+                format!("cannot get contract actions by transaction ID {id}")
             })?;
 
         Ok(contract_actions.into_iter().map(Into::into).collect())
@@ -98,23 +100,20 @@ where
         &self,
         cx: &Context<'_>,
     ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
-        let storage = cx.get_storage::<S>();
-        let network_id = cx.get_network_id();
+        let id = self.id;
 
-        let utxos = storage
-            .get_unshielded_utxos_created_by_transaction(self.id)
+        let utxos = cx
+            .get_storage::<S>()
+            .get_unshielded_utxos_created_by_transaction(id)
             .await
             .map_err_into_server_error(|| {
-                format!(
-                    "cannot get unshielded UTXOs created by transaction with ID {}",
-                    self.id
-                )
-            })?;
-
-        Ok(utxos
+                format!("cannot get unshielded UTXOs created by transaction with ID {id}")
+            })?
             .into_iter()
-            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-            .collect())
+            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, cx.get_network_id())))
+            .collect();
+
+        Ok(utxos)
     }
 
     /// Unshielded UTXOs spent (consumed) by this transaction.
@@ -122,23 +121,20 @@ where
         &self,
         cx: &Context<'_>,
     ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
-        let storage = cx.get_storage::<S>();
-        let network_id = cx.get_network_id();
+        let id = self.id;
 
-        let utxos = storage
-            .get_unshielded_utxos_spent_by_transaction(self.id)
+        let utxos = cx
+            .get_storage::<S>()
+            .get_unshielded_utxos_spent_by_transaction(id)
             .await
             .map_err_into_server_error(|| {
-                format!(
-                    "cannot get unshielded UTXOs spent by transaction with ID {}",
-                    self.id
-                )
-            })?;
-
-        Ok(utxos
+                format!("cannot get unshielded UTXOs spent by transaction with ID {id}")
+            })?
             .into_iter()
-            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-            .collect())
+            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, cx.get_network_id())))
+            .collect();
+
+        Ok(utxos)
     }
 }
 

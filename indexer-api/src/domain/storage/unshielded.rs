@@ -18,9 +18,7 @@ use crate::domain::{
         transaction::TransactionStorage, wallet::WalletStorage,
     },
 };
-use indexer_common::domain::{
-    BlockHash, RawTransactionIdentifier, RawUnshieldedAddress, TransactionHash,
-};
+use indexer_common::domain::RawUnshieldedAddress;
 use sqlx::Error;
 use std::fmt::Debug;
 
@@ -58,7 +56,7 @@ where
 
     /// Get unshielded UTXOs created in a specific transaction for a specific address, ordered by
     /// output index.
-    async fn get_unshielded_utxos_created_in_transaction_for_address(
+    async fn get_unshielded_utxos_by_address_created_by_transaction(
         &self,
         address: RawUnshieldedAddress,
         transaction_id: u64,
@@ -66,39 +64,10 @@ where
 
     /// Get unshielded UTXOs spent in a specific transaction for a specific address, ordered by
     /// output index.
-    async fn get_unshielded_utxos_spent_in_transaction_for_address(
+    async fn get_unshielded_utxos_by_address_spent_by_transaction(
         &self,
         address: RawUnshieldedAddress,
         transaction_id: u64,
-    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
-
-    /// Get unshielded UTXOs for an address from blocks with height >= the given value.
-    async fn get_unshielded_utxos_by_address_from_height(
-        &self,
-        address: RawUnshieldedAddress,
-        height: u32,
-    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
-
-    /// Get unshielded UTXOs for an address created in the specific block identified by the given
-    /// hash.
-    async fn get_unshielded_utxos_by_address_from_block_hash(
-        &self,
-        address: RawUnshieldedAddress,
-        hash: BlockHash,
-    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
-
-    /// Get unshielded UTXOs for an address from a transaction with the given hash.
-    async fn get_unshielded_utxos_by_address_from_transaction_hash(
-        &self,
-        address: RawUnshieldedAddress,
-        hash: TransactionHash,
-    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
-
-    /// Get unshielded UTXOs for an address from a transaction with the given identifier.
-    async fn get_unshielded_utxos_by_address_from_transaction_identifier(
-        &self,
-        address: RawUnshieldedAddress,
-        identifier: &RawTransactionIdentifier,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 }
 
@@ -129,7 +98,7 @@ impl UnshieldedUtxoStorage for NoopStorage {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn get_unshielded_utxos_created_in_transaction_for_address(
+    async fn get_unshielded_utxos_by_address_created_by_transaction(
         &self,
         address: RawUnshieldedAddress,
         transaction_id: u64,
@@ -138,46 +107,10 @@ impl UnshieldedUtxoStorage for NoopStorage {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn get_unshielded_utxos_spent_in_transaction_for_address(
+    async fn get_unshielded_utxos_by_address_spent_by_transaction(
         &self,
         address: RawUnshieldedAddress,
         transaction_id: u64,
-    ) -> Result<Vec<UnshieldedUtxo>, Error> {
-        unimplemented!()
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn get_unshielded_utxos_by_address_from_height(
-        &self,
-        address: RawUnshieldedAddress,
-        height: u32,
-    ) -> Result<Vec<UnshieldedUtxo>, Error> {
-        unimplemented!()
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn get_unshielded_utxos_by_address_from_block_hash(
-        &self,
-        address: RawUnshieldedAddress,
-        hash: BlockHash,
-    ) -> Result<Vec<UnshieldedUtxo>, Error> {
-        unimplemented!()
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn get_unshielded_utxos_by_address_from_transaction_hash(
-        &self,
-        address: RawUnshieldedAddress,
-        hash: TransactionHash,
-    ) -> Result<Vec<UnshieldedUtxo>, Error> {
-        unimplemented!()
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn get_unshielded_utxos_by_address_from_transaction_identifier(
-        &self,
-        address: RawUnshieldedAddress,
-        identifier: &RawTransactionIdentifier,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
     }

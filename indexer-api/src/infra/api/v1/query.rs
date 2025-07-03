@@ -19,7 +19,6 @@ use crate::{
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
             transaction::{Transaction, TransactionOffset},
-            unshielded::{UnshieldedAddress, UnshieldedOffset, UnshieldedUtxo},
         },
     },
 };
@@ -199,83 +198,5 @@ where
         };
 
         Ok(contract_action.map(Into::into))
-    }
-
-    /// Retrieve all unshielded UTXOs (both spent and unspent) associated with a given address.
-    #[trace(properties = { "address": "{address:?}" })]
-    async fn unshielded_utxos(
-        &self,
-        cx: &Context<'_>,
-        address: UnshieldedAddress,
-        offset: Option<UnshieldedOffset>,
-    ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
-        let network_id = cx.get_network_id();
-
-        let address = address
-            .try_into_domain(network_id)
-            .map_err_into_client_error(|| "invalid address")?;
-
-        let storage = cx.get_storage::<S>();
-
-        let utxos = match offset {
-            Some(UnshieldedOffset::BlockOffset(BlockOffset::Height(height))) => storage
-                .get_unshielded_utxos_by_address_from_height(address, height)
-                .await
-                .map_err_into_server_error(|| {
-                    format!("get unshielded UTXOs by address {address} and block height {height}")
-                })?,
-
-            Some(UnshieldedOffset::BlockOffset(BlockOffset::Hash(hash))) => {
-                let hash = hash
-                    .hex_decode()
-                    .map_err_into_client_error(|| "invalid offset")?;
-                storage
-                    .get_unshielded_utxos_by_address_from_block_hash(address, hash)
-                    .await
-                    .map_err_into_server_error(|| {
-                        format!("get unshielded UTXOs by address {address} and block hash {hash}")
-                    })?
-            }
-
-            Some(UnshieldedOffset::TransactionOffset(TransactionOffset::Hash(hash))) => {
-                let hash = hash
-                    .hex_decode()
-                    .map_err_into_client_error(|| "invalid offset")?;
-                storage
-                    .get_unshielded_utxos_by_address_from_transaction_hash(address, hash)
-                    .await
-                    .map_err_into_server_error(|| {
-                        format!(
-                            "get unshielded UTXOs by address {address} and transaction hash {hash}"
-                        )
-                    })?
-            }
-
-            Some(UnshieldedOffset::TransactionOffset(TransactionOffset::Identifier(id))) => {
-                let identifier = id
-                    .hex_decode()
-                    .map_err_into_client_error(|| "invalid offset")?;
-                storage
-                    .get_unshielded_utxos_by_address_from_transaction_identifier(
-                        address,
-                        &identifier,
-                    )
-                    .await
-                    .map_err_into_server_error(|| format!("get unshielded UTXOs by address {address} from transaction identifier {identifier}"))?
-            }
-
-            // no offset -> full list
-            None => storage
-                .get_unshielded_utxos_by_address(address)
-                .await
-                .map_err_into_server_error(|| {
-                    format!("get all unshielded UTXOs by address {address}")
-                })?,
-        };
-
-        Ok(utxos
-            .into_iter()
-            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, network_id)))
-            .collect())
     }
 }

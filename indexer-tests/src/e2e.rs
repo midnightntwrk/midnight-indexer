@@ -39,10 +39,7 @@ use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::{
     domain::ViewingKey,
-    infra::api::{
-        AsBytesExt, HexEncoded,
-        v1::{transaction::TransactionResultStatus, unshielded::UnshieldedAddress},
-    },
+    infra::api::{AsBytesExt, HexEncoded, v1::transaction::TransactionResultStatus},
 };
 use indexer_common::domain::{ByteArray, NetworkId, PROTOCOL_VERSION_000_013_000};
 use itertools::Itertools;
@@ -88,9 +85,6 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_contract_action_query(&indexer_data, &api_client, &api_url)
         .await
         .context("test contract action query")?;
-    test_unshielded_utxo_queries(&indexer_data, &api_client, &api_url)
-        .await
-        .context("test unshielded UTXOs query")?;
 
     // Test mutations.
     test_connect_mutation(&api_client, &api_url, network_id)
@@ -314,7 +308,7 @@ async fn test_block_query(
             .await?
             .block
             .expect("there is a block");
-        assert_eq!(block.to_value(), expected_block.to_value());
+        assert_eq!(block.to_json_value(), expected_block.to_json_value());
 
         // Existing height.
         let variables = block_query::Variables {
@@ -324,7 +318,7 @@ async fn test_block_query(
             .await?
             .block
             .expect("there is a block");
-        assert_eq!(block.to_value(), expected_block.to_value());
+        assert_eq!(block.to_json_value(), expected_block.to_json_value());
     }
 
     // No offset which yields the last block; as the node proceeds, that is unknown an only its
@@ -381,9 +375,9 @@ async fn test_transactions_query(
         // Verify expected transaction is in results
         let transaction_values = transactions
             .iter()
-            .map(|t| t.to_value())
+            .map(|t| t.to_json_value())
             .collect::<Vec<_>>();
-        assert!(transaction_values.contains(&expected_transaction.to_value()));
+        assert!(transaction_values.contains(&expected_transaction.to_json_value()));
 
         // Validate fee metadata and segment results for all returned transactions
         for transaction in &transactions {
@@ -460,9 +454,9 @@ async fn test_transactions_query(
             // Verify expected transaction is in results
             let transaction_values = transactions
                 .iter()
-                .map(|t| t.to_value())
+                .map(|t| t.to_json_value())
                 .collect::<Vec<_>>();
-            assert!(transaction_values.contains(&expected_transaction.to_value()));
+            assert!(transaction_values.contains(&expected_transaction.to_json_value()));
 
             // Also validate fee metadata for identifier queries
             for transaction in &transactions {
@@ -520,8 +514,8 @@ async fn test_contract_action_query(
             .contract_action
             .expect("there is a contract action");
         assert_eq!(
-            contract_action.to_value(),
-            expected_contract_action.to_value()
+            contract_action.to_json_value(),
+            expected_contract_action.to_json_value()
         );
 
         // Existing block height.
@@ -536,8 +530,8 @@ async fn test_contract_action_query(
             .contract_action
             .expect("there is a contract action");
         assert_eq!(
-            contract_action.to_value(),
-            expected_contract_action.to_value()
+            contract_action.to_json_value(),
+            expected_contract_action.to_json_value()
         );
 
         // Existing transaction hash.
@@ -556,8 +550,8 @@ async fn test_contract_action_query(
             .contract_action
             .expect("there is a contract action");
         assert_eq!(
-            contract_action.to_value(),
-            expected_contract_action.to_value()
+            contract_action.to_json_value(),
+            expected_contract_action.to_json_value()
         );
 
         // Existing transaction identifier.
@@ -638,45 +632,6 @@ async fn test_contract_action_query(
     Ok(())
 }
 
-/// Test the unshielded UTXOs query.
-async fn test_unshielded_utxo_queries(
-    indexer_data: &IndexerData,
-    api_client: &Client,
-    api_url: &str,
-) -> anyhow::Result<()> {
-    use graphql::graphql_types::*;
-
-    // Addresses that have UTXOs.
-    for expected_utxo in &indexer_data.unshielded_utxos {
-        let variables = unshielded_utxos_query::Variables {
-            address: expected_utxo.owner.to_owned(),
-        };
-        let utxos = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables)
-            .await?
-            .unshielded_utxos;
-
-        assert!(!utxos.is_empty());
-        assert!(utxos.iter().any(|utxo| {
-            utxo.owner == expected_utxo.owner
-                && utxo.value == expected_utxo.value
-                && utxo.token_type == expected_utxo.token_type
-                && utxo.intent_hash == expected_utxo.intent_hash
-                && utxo.output_index == expected_utxo.output_index
-        }));
-    }
-
-    // Addresses that do not have UTXOs.
-    let variables = unshielded_utxos_query::Variables {
-        address: UnshieldedAddress::bech32m_encode([255; 32], NetworkId::Undeployed),
-    };
-    let utxos = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables)
-        .await?
-        .unshielded_utxos;
-    assert!(utxos.is_empty());
-
-    Ok(())
-}
-
 /// Test the connect mutation.
 async fn test_connect_mutation(
     api_client: &Client,
@@ -729,7 +684,7 @@ async fn test_contract_actions_subscription(
     let contract_actions_by_address = indexer_data
         .contract_actions
         .iter()
-        .map(|c| (c.address(), c.to_value()))
+        .map(|c| (c.address(), c.to_json_value()))
         .into_group_map();
 
     for (address, expected_contract_actions) in contract_actions_by_address {
@@ -743,7 +698,7 @@ async fn test_contract_actions_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_value())
+                .map_ok(|data| data.contract_actions.to_json_value())
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
@@ -766,7 +721,7 @@ async fn test_contract_actions_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_value())
+                .map_ok(|data| data.contract_actions.to_json_value())
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
@@ -784,7 +739,7 @@ async fn test_contract_actions_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_value())
+                .map_ok(|data| data.contract_actions.to_json_value())
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
@@ -905,7 +860,7 @@ trait SerializeExt
 where
     Self: Serialize,
 {
-    fn to_value(&self) -> serde_json::Value {
+    fn to_json_value(&self) -> serde_json::Value {
         serde_json::to_value(self).expect("can be JSON-serialized")
     }
 }
@@ -1148,14 +1103,6 @@ mod graphql {
     pub mod graphql_types {
         use graphql_client::GraphQLQuery;
         use indexer_api::infra::api::{HexEncoded, v1::unshielded::UnshieldedAddress};
-
-        #[derive(GraphQLQuery)]
-        #[graphql(
-            schema_path = "../indexer-api/graphql/schema-v1.graphql",
-            query_path = "./e2e.graphql",
-            response_derives = "Debug, Clone, Serialize"
-        )]
-        pub struct UnshieldedUtxosQuery;
 
         #[derive(GraphQLQuery)]
         #[graphql(

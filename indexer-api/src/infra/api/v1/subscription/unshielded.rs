@@ -191,7 +191,7 @@ where
     *transaction_id = transaction.id;
 
     let created = storage
-        .get_unshielded_utxos_created_in_transaction_for_address(address, transaction.id)
+        .get_unshielded_utxos_by_address_created_by_transaction(address, transaction.id)
         .await
         .map_err_into_server_error(|| {
             format!(
@@ -201,7 +201,7 @@ where
         })?;
 
     let spent = storage
-        .get_unshielded_utxos_spent_in_transaction_for_address(address, transaction.id)
+        .get_unshielded_utxos_by_address_spent_by_transaction(address, transaction.id)
         .await
         .map_err_into_server_error(|| {
             format!(
