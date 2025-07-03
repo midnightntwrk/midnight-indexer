@@ -46,10 +46,6 @@ tower-http         = { workspace = true, features = [ "cors", "limit" ] }
 trait-variant      = { workspace = true }
 uuid               = { workspace = true, features = [ "v7" ], optional = true }
 
-[dev-dependencies]
-assert_matches = { workspace = true }
-midnight-zswap = { workspace = true }
-
 [features]
 cloud      = [ "indexer-common/cloud", "uuid" ]
 standalone = [ "indexer-common/standalone", "uuid" ]
