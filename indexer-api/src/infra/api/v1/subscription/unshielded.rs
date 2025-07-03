@@ -48,6 +48,9 @@ pub enum UnshieldedTransactionsEvent<S: Storage> {
 /// A transaction and its created and spent UTXOs.
 #[derive(Debug, SimpleObject)]
 pub struct UnshieldedTransaction<S: Storage> {
+    /// The transaction ID.
+    pub transaction_id: u64,
+
     /// The transaction.
     pub transaction: Transaction<S>,
 
@@ -217,25 +220,20 @@ where
     S: Storage,
 {
     *transaction_id = transaction.id;
+    let transaction_id = *transaction_id;
 
     let created = storage
-        .get_unshielded_utxos_by_address_created_by_transaction(address, transaction.id)
+        .get_unshielded_utxos_by_address_created_by_transaction(address, transaction_id)
         .await
         .map_err_into_server_error(|| {
-            format!(
-                "get created UTXOs for existing transaction with ID {}",
-                transaction.id
-            )
+            format!("get created UTXOs for existing transaction with ID {transaction_id}")
         })?;
 
     let spent = storage
-        .get_unshielded_utxos_by_address_spent_by_transaction(address, transaction.id)
+        .get_unshielded_utxos_by_address_spent_by_transaction(address, transaction_id)
         .await
         .map_err_into_server_error(|| {
-            format!(
-                "get spent UTXOs for existing transaction with ID {}",
-                transaction.id
-            )
+            format!("get spent UTXOs for existing transaction with ID {transaction_id}")
         })?;
 
     // Only emit an event for transactions that have UTXOs for this address.
@@ -251,6 +249,7 @@ where
             .collect();
 
         UnshieldedTransaction {
+            transaction_id,
             transaction: transaction.into(),
             created_utxos,
             spent_utxos,

@@ -361,6 +361,10 @@ A transaction and its created and spent UTXOs.
 """
 type UnshieldedTransaction {
 	"""
+	The transaction ID.
+	"""
+	transactionId: Int!
+	"""
 	The transaction.
 	"""
 	transaction: Transaction!
