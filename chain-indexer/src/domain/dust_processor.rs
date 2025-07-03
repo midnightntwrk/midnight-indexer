@@ -150,7 +150,8 @@ impl DustEventProcessor {
 
         // Save generation info first
         if !generation_infos.is_empty() {
-            storage.save_dust_generation_info(&generation_infos).await?;
+            let generation_refs: Vec<&DustGenerationInfo> = generation_infos.iter().collect();
+            storage.save_dust_generation_info(&generation_refs).await?;
         }
 
         // Then save DUST UTXOs
@@ -212,4 +213,3 @@ impl DustEventProcessor {
         Ok(())
     }
 }
-
