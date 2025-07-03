@@ -501,6 +501,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "atomic-write-file"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aeb1e2c1d58618bea806ccca5bbe65dc4e868be16f69ff118a39049389687548"
+dependencies = [
+ "nix",
+ "rand 0.8.5",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3673,10 +3683,11 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto"
-version = "0.4.4-alpha.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2#7753f0ae988868ab82635ce7f7a56df761e09689"
+version = "0.4.4-alpha.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
 dependencies = [
  "anyhow",
+ "atomic-write-file",
  "borsh",
  "const-hex",
  "fake",
@@ -3702,7 +3713,7 @@ dependencies = [
 [[package]]
 name = "midnight-base-crypto-derive"
 version = "0.4.3-rc"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2#7753f0ae988868ab82635ce7f7a56df761e09689"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
 dependencies = [
  "proc-macro2",
  "quote 1.0.40",
@@ -3737,8 +3748,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-coin-structure"
-version = "0.5.0-alpha.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2#7753f0ae988868ab82635ce7f7a56df761e09689"
+version = "0.5.0-alpha.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
 dependencies = [
  "fake",
  "lazy_static",
@@ -3752,8 +3763,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "5.0.0-alpha.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2#7753f0ae988868ab82635ce7f7a56df761e09689"
+version = "5.0.0-alpha.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
 dependencies = [
  "derive-where",
  "fake",
@@ -3761,6 +3772,7 @@ dependencies = [
  "introspection",
  "introspection-derive",
  "is_sorted",
+ "itertools 0.13.0",
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure",
@@ -3779,8 +3791,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "0.4.0-alpha.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2#7753f0ae988868ab82635ce7f7a56df761e09689"
+version = "0.4.0-alpha.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
 dependencies = [
  "derive-where",
  "enum_index",
@@ -3804,8 +3816,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "0.4.0-alpha.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2#7753f0ae988868ab82635ce7f7a56df761e09689"
+version = "0.4.0-alpha.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
 dependencies = [
  "derive-where",
  "fake",
@@ -3822,8 +3834,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "0.4.0-alpha.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2#7753f0ae988868ab82635ce7f7a56df761e09689"
+version = "0.4.0-alpha.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
 dependencies = [
  "derive-where",
  "fake",
@@ -3843,8 +3855,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize"
-version = "0.3.3-alpha.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2#7753f0ae988868ab82635ce7f7a56df761e09689"
+version = "0.3.3-alpha.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
 dependencies = [
  "borsh",
  "crypto",
@@ -3858,7 +3870,7 @@ dependencies = [
 [[package]]
 name = "midnight-serialize-macros"
 version = "0.1.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2#7753f0ae988868ab82635ce7f7a56df761e09689"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
 dependencies = [
  "proc-macro2",
  "quote 1.0.40",
@@ -3867,8 +3879,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "0.4.1-alpha.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2#7753f0ae988868ab82635ce7f7a56df761e09689"
+version = "0.5.0-alpha"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
 dependencies = [
  "archery",
  "crypto",
@@ -3890,7 +3902,7 @@ dependencies = [
 [[package]]
 name = "midnight-storage-macros"
 version = "0.1.1"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2#7753f0ae988868ab82635ce7f7a56df761e09689"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
 dependencies = [
  "proc-macro2",
  "quote 1.0.40",
@@ -3899,8 +3911,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "0.5.1-alpha.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2#7753f0ae988868ab82635ce7f7a56df761e09689"
+version = "0.5.1-alpha.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
 dependencies = [
  "anyhow",
  "blstrs",
@@ -3933,13 +3945,14 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "4.1.0-alpha.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.2#7753f0ae988868ab82635ce7f7a56df761e09689"
+version = "4.1.0-alpha.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
 dependencies = [
  "derive-where",
  "fake",
  "futures",
  "is_sorted",
+ "itertools 0.13.0",
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure",
@@ -4000,6 +4013,18 @@ name = "multi-stash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "685a9ac4b61f4e728e1d2c6a7844609c16527aeb5e6c865915c08e619c16410f"
+
+[[package]]
+name = "nix"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.9.1",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
 
 [[package]]
 name = "nkeys"

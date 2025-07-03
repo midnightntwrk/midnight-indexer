@@ -14,7 +14,9 @@
 use crate::domain::Transaction;
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
-use indexer_common::domain::{ByteArray, NetworkId, RawTransaction, ledger::ContractState};
+use indexer_common::domain::{
+    ByteArray, NetworkId, RawTransaction, TransactionResultWithEvents, ledger::ContractState,
+};
 use std::ops::DerefMut;
 use thiserror::Error;
 
@@ -96,7 +98,11 @@ impl LedgerState {
         let start_index = self.zswap_first_free();
         let mut end_index = self.zswap_first_free();
 
-        let transaction_result = self.apply_transaction(
+        // Apply transaction with DUST event capture
+        let TransactionResultWithEvents {
+            result: transaction_result,
+            dust_events,
+        } = self.apply_transaction_with_events(
             &transaction.raw,
             block_parent_hash,
             block_timestamp,
@@ -122,6 +128,9 @@ impl LedgerState {
         transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize(network_id)?;
         transaction.start_index = start_index;
         transaction.end_index = end_index;
+
+        // Store DUST events
+        transaction.dust_events = dust_events;
 
         // Update extracted balances of contract actions.
         for contract_action in &mut transaction.contract_actions {

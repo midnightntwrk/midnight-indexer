@@ -591,6 +591,7 @@ async fn make_transaction(
         spent_unshielded_utxos,
         paid_fees: fees.paid_fees,
         estimated_fees: fees.estimated_fees,
+        dust_events: Vec::new(), // Events extracted later via ledger state processing.
     };
 
     Ok(transaction)
