@@ -91,7 +91,7 @@ impl DustMockEventGenerator {
             value: night_value,
             owner,
             nonce: ByteArray([3u8; 32]),
-            ctime: self.current_time - 3600,
+            ctime: self.current_time.saturating_sub(3600),
             dtime: self.current_time, // Night spent now.
         };
 
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn test_mock_event_generation() {
         let mut generator = DustMockEventGenerator::new(1000);
-        let tx_hash = TransactionHash([5u8; 32]);
+        let tx_hash = ByteArray([5u8; 32]);
         
         let events = generator.generate_test_scenario(tx_hash);
         assert_eq!(events.len(), 5);

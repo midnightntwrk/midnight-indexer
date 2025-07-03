@@ -16,6 +16,24 @@ use indexer_common::domain::{
     dust::{DustGenerationInfo, DustParameters},
 };
 
+/// Clamp a value between min and max bounds.
+/// From midnight-architecture/specification/dust.md.
+fn clamp(value: u128, min: u128, max: u128) -> u128 {
+    value.max(min).min(max)
+}
+
+/// Validate that a DUST spend transaction time is within the grace period.
+/// From midnight-architecture/specification/dust.md lines 113-120.
+pub fn validate_dust_spend_time(
+    transaction_time: u64,
+    current_time: u64,
+    grace_period: u64,
+) -> bool {
+    // Transaction can be backdated up to grace_period
+    // but cannot be future-dated
+    transaction_time >= current_time.saturating_sub(grace_period) && transaction_time <= current_time
+}
+
 /// DUST lifecycle manager that handles value calculations, generation, and decay.
 pub struct DustLifecycleManager {
     /// Current block timestamp for calculations
@@ -47,6 +65,7 @@ impl DustLifecycleManager {
     }
 
     /// Calculate DUST value during generation phase.
+    /// Based on midnight-architecture/specification/dust.md lines 408-443.
     fn calculate_generation_value(
         &self,
         initial_value: u128,
@@ -54,28 +73,23 @@ impl DustLifecycleManager {
         utxo_ctime: u64,
         params: &DustParameters,
     ) -> u128 {
-        // Generation rate: θ = N × ρ / Δ
-        // where N = Night value, ρ = ratio, Δ = time to cap
-
-        let night_value = generation_info.value;
-        let max_dust = night_value.saturating_mul(params.night_dust_ratio as u128);
-
+        // From spec: The maximum capacity is gen.value * night_dust_ratio.
+        let vfull = generation_info.value.saturating_mul(params.night_dust_ratio as u128);
+        
+        // From spec: The slope of generation and decay for a specific dust UTXO
+        // is proportional to the value of its backing night.
+        // rate = gen.value * params.generation_decay_rate
+        let rate = generation_info.value.saturating_mul(params.generation_decay_rate as u128);
+        
         // Time since DUST UTXO creation
         let elapsed = self.current_time.saturating_sub(utxo_ctime);
-
-        // Linear generation up to cap
-        let generation_rate = if params.generation_decay_rate > 0 {
-            night_value.saturating_mul(params.night_dust_ratio as u128)
-                / params.generation_decay_rate as u128
-        } else {
-            0
-        };
-
-        let generated = generation_rate.saturating_mul(elapsed as u128);
+        
+        // Calculate generated value
+        let generated = rate.saturating_mul(elapsed as u128);
         let total_value = initial_value.saturating_add(generated);
-
-        // Cap at maximum
-        total_value.min(max_dust)
+        
+        // Clamp to reasonable bounds as per spec
+        clamp(total_value, initial_value, vfull)
     }
 
     /// Calculate DUST value with decay after backing Night is spent.
@@ -91,14 +105,13 @@ impl DustLifecycleManager {
             // Was still generating when Night was spent
             let generation_time = generation_info.dtime.saturating_sub(utxo_ctime);
             let night_value = generation_info.value;
-            let generation_rate = if params.generation_decay_rate > 0 {
-                night_value.saturating_mul(params.night_dust_ratio as u128)
-                    / params.generation_decay_rate as u128
-            } else {
-                0
-            };
-            let generated = generation_rate.saturating_mul(generation_time as u128);
-            initial_value.saturating_add(generated)
+            // From spec: rate = gen.value * params.generation_decay_rate
+            let rate = night_value.saturating_mul(params.generation_decay_rate as u128);
+            let generated = rate.saturating_mul(generation_time as u128);
+            let value_with_generation = initial_value.saturating_add(generated);
+            // Clamp to reasonable bounds as per spec
+            let vfull = night_value.saturating_mul(params.night_dust_ratio as u128);
+            clamp(value_with_generation, initial_value, vfull)
         } else {
             // Night was spent before this DUST UTXO was created
             initial_value
@@ -114,14 +127,11 @@ impl DustLifecycleManager {
             value_at_dtime
         } else {
             // Apply linear decay
+            // From spec: same rate as generation
             let decay_elapsed = self.current_time.saturating_sub(decay_start);
-            let decay_rate = if params.generation_decay_rate > 0 {
-                value_at_dtime / params.generation_decay_rate as u128
-            } else {
-                0
-            };
-            let decayed = decay_rate.saturating_mul(decay_elapsed as u128);
-            value_at_dtime.saturating_sub(decayed)
+            let rate = generation_info.value.saturating_mul(params.generation_decay_rate as u128);
+            let decayed = rate.saturating_mul(decay_elapsed as u128);
+            clamp(value_at_dtime.saturating_sub(decayed), 0, value_at_dtime)
         }
     }
 
@@ -153,14 +163,14 @@ impl DustLifecycleManager {
         if generation_info.dtime == 0 {
             // Still generating
             true
+        } else if dust_value == 0 {
+            // Already fully decayed
+            false
         } else {
-            // Check if fully decayed
-            let decay_end = generation_info
-                .dtime
-                .saturating_add(params.dust_grace_period)
-                .saturating_add(params.generation_decay_rate as u64);
-
-            self.current_time < decay_end && dust_value > 0
+            // Check if within grace period or still has value
+            // Grace period starts after backing Night is spent
+            let grace_end = generation_info.dtime.saturating_add(params.dust_grace_period);
+            self.current_time <= grace_end || dust_value > 0
         }
     }
 }
@@ -177,13 +187,12 @@ pub fn calculate_registration_fees(
         .iter()
         .map(|(_, value, ctime)| {
             let elapsed = current_time.saturating_sub(*ctime);
-            let generation_rate = if params.generation_decay_rate > 0 {
-                value.saturating_mul(params.night_dust_ratio as u128)
-                    / params.generation_decay_rate as u128
-            } else {
-                0
-            };
-            generation_rate.saturating_mul(elapsed as u128)
+            // From spec: rate = gen.value * params.generation_decay_rate
+            let rate = value.saturating_mul(params.generation_decay_rate as u128);
+            let generated = rate.saturating_mul(elapsed as u128);
+            // Cap at maximum
+            let vfull = value.saturating_mul(params.night_dust_ratio as u128);
+            generated.min(vfull)
         })
         .sum()
 }
@@ -193,9 +202,11 @@ mod tests {
     use super::*;
 
     fn test_params() -> DustParameters {
+        // Note: Using simplified test values.
+        // In production, generation_decay_rate would be ~8267 for 1 week to cap.
         DustParameters {
             night_dust_ratio: 10,        // 10:1 DUST to Night
-            generation_decay_rate: 3600, // 1 hour to full generation/decay
+            generation_decay_rate: 3,    // 3 atomic units per Night per second (for testing)
             dust_grace_period: 300,      // 5 minute grace period
         }
     }
@@ -216,8 +227,10 @@ mod tests {
         // After 1000 seconds, should have generated some DUST
         let value = manager.calculate_dust_value(0, &generation_info, 0, &params);
 
-        // Expected: 1000 * 10 / 3600 * 1000 = ~2777
-        assert!(value > 2700 && value < 2800);
+        // Expected: rate = 1000 * 3 = 3000 per second
+        // After 1000 seconds: 3000 * 1000 = 3,000,000
+        // But capped at: 1000 * 10 = 10,000
+        assert_eq!(value, 10_000); // Should be at cap
     }
 
     #[test]
@@ -238,5 +251,24 @@ mod tests {
 
         // After grace period + some decay
         assert!(value < 10000);
+    }
+
+    #[test]
+    fn test_grace_period_validation() {
+        let current_time = 1000;
+        let grace_period = 300; // 5 minutes
+
+        // Valid: within grace period (backdated)
+        assert!(validate_dust_spend_time(800, current_time, grace_period));
+        assert!(validate_dust_spend_time(700, current_time, grace_period));
+        assert!(validate_dust_spend_time(current_time, current_time, grace_period));
+
+        // Invalid: too far in the past
+        assert!(!validate_dust_spend_time(600, current_time, grace_period));
+        assert!(!validate_dust_spend_time(0, current_time, grace_period));
+
+        // Invalid: future dated
+        assert!(!validate_dust_spend_time(1001, current_time, grace_period));
+        assert!(!validate_dust_spend_time(2000, current_time, grace_period));
     }
 }

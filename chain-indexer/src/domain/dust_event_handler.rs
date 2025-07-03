@@ -62,9 +62,12 @@ impl<S: Storage> DustEventHandler<S> {
             DustMerkleTreeManager::new(storage.clone(), merkle_tree_batch_size);
 
         // TODO(sean): Load parameters from configuration or chain state.
+        // TEMPORARY: Using test values until proper parameters are provided.
+        // Note: generation_decay_rate is in atomic units per Night per second,
+        // as per midnight-architecture/specification/dust.md.
         let dust_parameters = DustParameters {
             night_dust_ratio: 10,
-            generation_decay_rate: 3600,
+            generation_decay_rate: 3,  // TEMPORARY: Should be ~8267 for production.
             dust_grace_period: 300,
         };
 
