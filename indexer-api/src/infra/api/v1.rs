@@ -18,7 +18,6 @@ pub mod query;
 pub mod subscription;
 pub mod transaction;
 pub mod unshielded;
-pub mod wallet;
 
 use crate::{
     domain::{

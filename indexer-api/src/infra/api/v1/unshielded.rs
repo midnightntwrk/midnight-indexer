@@ -22,7 +22,7 @@ use crate::{
         },
     },
 };
-use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject, Union, scalar};
+use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject, scalar};
 use bech32::{Bech32m, Hrp};
 use derive_more::Debug;
 use indexer_common::domain::{
@@ -110,32 +110,6 @@ impl<S: Storage> From<(domain::UnshieldedUtxo, NetworkId)> for UnshieldedUtxo<S>
             _s: PhantomData,
         }
     }
-}
-
-/// A viewing synchronization event, either a unshielded UTXO update or a progress update.
-#[derive(Debug, Union)]
-pub enum UnshieldedSyncEvent<S: Storage> {
-    UnshieldedUtxoUpdate(Box<UnshieldedUtxoUpdate<S>>),
-    ProgressUpdate(UnshieldedProgressUpdate),
-}
-
-#[derive(Debug, SimpleObject)]
-pub struct UnshieldedUtxoUpdate<S: Storage> {
-    /// The transaction associated with this event.
-    pub transaction: Transaction<S>,
-
-    /// UTXOs created in the above transaction for the subscribed address.
-    pub created_utxos: Vec<UnshieldedUtxo<S>>,
-
-    /// UTXOs spent in the above transaction for the subscribed address.
-    pub spent_utxos: Vec<UnshieldedUtxo<S>>,
-}
-
-/// Aggregates information about the unshielded indexing progress.
-#[derive(Debug, SimpleObject)]
-pub struct UnshieldedProgressUpdate {
-    /// The highest transaction ID of all currently known transactions for a particular address.
-    pub highest_transaction_id: u64,
 }
 
 /// Either a block offset or a transaction offset.

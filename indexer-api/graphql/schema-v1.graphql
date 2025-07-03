@@ -208,6 +208,31 @@ type Segment {
 	success: Boolean!
 }
 
+"""
+An event of the shielded transactions subscription.
+"""
+union ShieldedTransactionsEvent = ViewingUpdate | ShieldedTransactionsProgress
+
+"""
+Aggregates information about the shielded transactions indexing progress.
+"""
+type ShieldedTransactionsProgress {
+	"""
+	The highest end index into the zswap state of all currently known transactions.
+	"""
+	highestIndex: Int!
+	"""
+	The highest end index into the zswap state of all currently known relevant transactions,
+	i.e. those that belong to any known wallet. Less or equal `highest_index`.
+	"""
+	highestRelevantIndex: Int!
+	"""
+	The highest end index into the zswap state of all currently known relevant transactions for
+	a particular wallet. Less or equal `highest_relevant_index`.
+	"""
+	highestRelevantWalletIndex: Int!
+}
+
 type Subscription {
 	"""
 	Subscribe to blocks starting at the given offset or at the latest block if the offset is
@@ -220,16 +245,15 @@ type Subscription {
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
 	"""
-	Subscribe to wallet synchronization events for the given session ID starting at the given
-	index or at zero if omitted. The events are either viewing updates or progress updates.
+	Subscribe shielded transaction events for the given session ID starting at the given index
+	or at zero if omitted.
 	"""
-	wallet(sessionId: HexEncoded!, index: Int, sendProgressUpdates: Boolean): WalletSyncEvent!
+	shieldedTransactions(sessionId: HexEncoded!, index: Int, sendProgressUpdates: Boolean): ShieldedTransactionsEvent!
 	"""
-	Subscribes to unshielded synchronization events for a specific address and the given
-	transaction ID or 0 if omitted. The events are either unshielded UTXO updates or progress
-	updates.
+	Subscribe unshielded transaction events for the given address and the given transaction ID
+	or zero if omitted.
 	"""
-	unshieldedUtxos(address: UnshieldedAddress!, transactionId: Int): UnshieldedSyncEvent!
+	unshieldedTransactions(address: UnshieldedAddress!, transactionId: Int): UnshieldedTransactionsEvent!
 }
 
 """
@@ -333,19 +357,37 @@ scalar Unit
 scalar UnshieldedAddress
 
 """
-Aggregates information about the unshielded indexing progress.
+A transaction and its created and spent UTXOs.
 """
-type UnshieldedProgressUpdate {
+type UnshieldedTransaction {
 	"""
-	The highest transaction ID of all currently known transactions for a particular address.
+	The transaction.
 	"""
-	highestTransactionId: Int!
+	transaction: Transaction!
+	"""
+	UTXOs created in the above transaction.
+	"""
+	createdUtxos: [UnshieldedUtxo!]!
+	"""
+	UTXOs spent in the above transaction.
+	"""
+	spentUtxos: [UnshieldedUtxo!]!
 }
 
 """
-A viewing synchronization event, either a unshielded UTXO update or a progress update.
+An event of the unshielded transactions subscription.
 """
-union UnshieldedSyncEvent = UnshieldedUtxoUpdate | UnshieldedProgressUpdate
+union UnshieldedTransactionsEvent = UnshieldedTransaction | UnshieldedTransactionsProgress
+
+"""
+Information about the unshielded indexing progress.
+"""
+type UnshieldedTransactionsProgress {
+	"""
+	The highest transaction ID of all currently known transactions for a subscribed address.
+	"""
+	highestTransactionId: Int!
+}
 
 """
 Represents an unshielded UTXO.
@@ -381,21 +423,6 @@ type UnshieldedUtxo {
 	spentAtTransaction: Transaction
 }
 
-type UnshieldedUtxoUpdate {
-	"""
-	The transaction associated with this event.
-	"""
-	transaction: Transaction!
-	"""
-	UTXOs created in the above transaction for the subscribed address.
-	"""
-	createdUtxos: [UnshieldedUtxo!]!
-	"""
-	UTXOs spent in the above transaction for the subscribed address.
-	"""
-	spentUtxos: [UnshieldedUtxo!]!
-}
-
 scalar ViewingKey
 
 """
@@ -414,31 +441,6 @@ type ViewingUpdate {
 	"""
 	update: [ZswapChainStateUpdate!]!
 }
-
-"""
-Aggregates information about the wallet indexing progress.
-"""
-type WalletProgressUpdate {
-	"""
-	The highest end index into the zswap state of all currently known transactions.
-	"""
-	highestIndex: Int!
-	"""
-	The highest end index into the zswap state of all currently known relevant transactions,
-	i.e. those that belong to any known wallet. Less or equal `highest_index`.
-	"""
-	highestRelevantIndex: Int!
-	"""
-	The highest end index into the zswap state of all currently known relevant transactions for
-	a particular wallet. Less or equal `highest_relevant_index`.
-	"""
-	highestRelevantWalletIndex: Int!
-}
-
-"""
-A wallet synchronization event, either a viewing update or a progress update.
-"""
-union WalletSyncEvent = ViewingUpdate | WalletProgressUpdate
 
 union ZswapChainStateUpdate = MerkleTreeCollapsedUpdate | RelevantTransaction
 

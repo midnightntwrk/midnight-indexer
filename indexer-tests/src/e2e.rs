@@ -16,8 +16,8 @@
 use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
-        ContractActionSubscription, DisconnectMutation, TransactionsQuery, WalletSubscription,
-        block_query,
+        ContractActionSubscription, DisconnectMutation, ShieldedTransactionsSubscription,
+        TransactionsQuery, UnshieldedTransactionsSubscription, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks as BlockSubscriptionBlock,
             BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
@@ -30,7 +30,8 @@ use crate::{
             self, ContractActionQueryContractAction,
             TransactionResultStatus as ContractActionQueryTransactionResultStatus,
         },
-        contract_action_subscription, disconnect_mutation, transactions_query, wallet_subscription,
+        contract_action_subscription, disconnect_mutation, shielded_transactions_subscription,
+        transactions_query, unshielded_transactions_subscription,
     },
     graphql_ws_client,
 };
@@ -98,10 +99,10 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_contract_actions_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test contract action subscription")?;
-    test_unshielded_utxos_subscription(&indexer_data, &ws_api_url) // we use node mock version at the moment
+    test_unshielded_transactions_subscription(&indexer_data, &ws_api_url) // we use node mock version at the moment
         .await
         .context("test unshielded UTXOs subscription")?;
-    test_wallet_subscription(&ws_api_url, network_id)
+    test_shielded_transactions_subscription(&ws_api_url, network_id)
         .await
         .context("test wallet subscription")?;
 
@@ -749,12 +750,11 @@ async fn test_contract_actions_subscription(
     Ok(())
 }
 
-async fn test_unshielded_utxos_subscription(
+async fn test_unshielded_transactions_subscription(
     indexer_data: &IndexerData,
     ws_api_url: &str,
 ) -> anyhow::Result<()> {
-    use graphql::graphql_types::*;
-    use unshielded_utxos_subscription::UnshieldedUtxosSubscriptionUnshieldedUtxos as UnshieldedUtxos;
+    use unshielded_transactions_subscription::UnshieldedTransactionsSubscriptionUnshieldedTransactions as UnshieldedTransactions;
 
     let unshielded_address = indexer_data
         .unshielded_utxos
@@ -763,17 +763,17 @@ async fn test_unshielded_utxos_subscription(
         .unwrap()
         .owner;
 
-    let variables = unshielded_utxos_subscription::Variables {
+    let variables = unshielded_transactions_subscription::Variables {
         address: unshielded_address.clone(),
     };
     let unshielded_utxos_updates =
-        graphql_ws_client::subscribe::<UnshieldedUtxosSubscription>(ws_api_url, variables)
+        graphql_ws_client::subscribe::<UnshieldedTransactionsSubscription>(ws_api_url, variables)
             .await
             .context("subscribe to unshielded UTXOs")?
             .take(3)
-            .map_ok(|data| data.unshielded_utxos)
+            .map_ok(|data| data.unshielded_transactions)
             .try_filter_map(|event| match event {
-                UnshieldedUtxos::UnshieldedUtxoUpdate(update) => ok(Some(update)),
+                UnshieldedTransactions::UnshieldedTransaction(t) => ok(Some(t)),
                 _ => ok(None),
             })
             .try_collect::<Vec<_>>()
@@ -790,8 +790,14 @@ async fn test_unshielded_utxos_subscription(
 }
 
 /// Test the wallet subscription.
-async fn test_wallet_subscription(ws_api_url: &str, network_id: NetworkId) -> anyhow::Result<()> {
-    use wallet_subscription::WalletSubscriptionWalletOnViewingUpdateUpdate as ViewingUpdate;
+async fn test_shielded_transactions_subscription(
+    ws_api_url: &str,
+    network_id: NetworkId,
+) -> anyhow::Result<()> {
+    use shielded_transactions_subscription::{
+        ShieldedTransactionsSubscriptionShieldedTransactions as ShieldedTransactions,
+        ShieldedTransactionsSubscriptionShieldedTransactionsOnViewingUpdateUpdate as ViewingUpdate,
+    };
 
     let viewing_key =
         ViewingKey::derive_for_testing(seed(1), network_id, PROTOCOL_VERSION_000_013_000)
@@ -800,30 +806,28 @@ async fn test_wallet_subscription(ws_api_url: &str, network_id: NetworkId) -> an
 
     // Collect wallet events until there are no more viewing updates (3s deadline).
     let mut viewing_update_timestamp = Instant::now();
-    let variables = wallet_subscription::Variables { session_id };
-    let events = graphql_ws_client::subscribe::<WalletSubscription>(ws_api_url, variables)
-        .await
-        .context("subscribe to wallet")?
-        .map_ok(|data| data.wallet)
-        .try_take_while(|event| {
-            let duration = Instant::now() - viewing_update_timestamp;
+    let variables = shielded_transactions_subscription::Variables { session_id };
+    let events =
+        graphql_ws_client::subscribe::<ShieldedTransactionsSubscription>(ws_api_url, variables)
+            .await
+            .context("subscribe to wallet")?
+            .map_ok(|data| data.shielded_transactions)
+            .try_take_while(|event| {
+                let duration = Instant::now() - viewing_update_timestamp;
 
-            if let wallet_subscription::WalletSubscriptionWallet::ViewingUpdate(_) = event {
-                viewing_update_timestamp = Instant::now()
-            }
+                if let ShieldedTransactions::ViewingUpdate(_) = event {
+                    viewing_update_timestamp = Instant::now()
+                }
 
-            ok(duration < Duration::from_secs(3))
-        })
-        .try_collect::<Vec<_>>()
-        .await
-        .context("collect wallet events")?;
+                ok(duration < Duration::from_secs(3))
+            })
+            .try_collect::<Vec<_>>()
+            .await
+            .context("collect wallet events")?;
 
     // Filter viewing updates only.
     let viewing_updates = events.into_iter().filter_map(|event| match event {
-        wallet_subscription::WalletSubscriptionWallet::ViewingUpdate(viewing_update) => {
-            Some(viewing_update)
-        }
-
+        ShieldedTransactions::ViewingUpdate(viewing_update) => Some(viewing_update),
         _ => None,
     });
 
@@ -1096,22 +1100,13 @@ mod graphql {
     )]
     pub struct ContractActionQuery;
 
-    // TODO(midnight-indexer/PR #23): Temporary wrapper to dodge the
-    // GraphQLQuery error-type mismatch (anyhow::Error vs serde::de::Error).
-    // Delete this `mod graphql_types` once we align the error types or
-    // customise the derive to return our own error.
-    pub mod graphql_types {
-        use graphql_client::GraphQLQuery;
-        use indexer_api::infra::api::{HexEncoded, v1::unshielded::UnshieldedAddress};
-
-        #[derive(GraphQLQuery)]
-        #[graphql(
-            schema_path = "../indexer-api/graphql/schema-v1.graphql",
-            query_path = "./e2e.graphql",
-            response_derives = "Debug, Clone, Serialize"
-        )]
-        pub struct UnshieldedUtxosSubscription;
-    }
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct UnshieldedTransactionsSubscription;
 
     #[derive(GraphQLQuery)]
     #[graphql(
@@ -1151,5 +1146,5 @@ mod graphql {
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
-    pub struct WalletSubscription;
+    pub struct ShieldedTransactionsSubscription;
 }

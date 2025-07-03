@@ -395,10 +395,39 @@ subscription ContractActionSubscription(
     }
 }
 
-subscription UnshieldedUtxosSubscription($address: UnshieldedAddress!) {
-    unshieldedUtxos(address: $address) {
+subscription ShieldedTransactionsSubscription(
+    $sessionId: HexEncoded!
+) {
+    shieldedTransactions(sessionId: $sessionId) {
         __typename
-        ... on UnshieldedUtxoUpdate {
+        ... on ViewingUpdate {
+            index
+            update {
+                __typename
+                ... on MerkleTreeCollapsedUpdate {
+                    start
+                    end
+                }
+                __typename
+                ... on RelevantTransaction {
+                    start
+                    end
+                }
+            }
+        }
+        __typename
+        ... on ShieldedTransactionsProgress {
+            highestIndex
+            highestRelevantIndex
+            highestRelevantWalletIndex
+        }
+    }
+}
+
+subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
+    unshieldedTransactions(address: $address) {
+        __typename
+        ... on UnshieldedTransaction {
             transaction {
                 hash
                 block {
@@ -430,37 +459,8 @@ subscription UnshieldedUtxosSubscription($address: UnshieldedAddress!) {
             }
         }
         __typename
-        ... on UnshieldedProgressUpdate {
+        ... on UnshieldedTransactionsProgress {
             highestTransactionId
-        }
-    }
-}
-
-subscription WalletSubscription(
-    $sessionId: HexEncoded!
-) {
-    wallet(sessionId: $sessionId) {
-        __typename
-        ... on ViewingUpdate {
-            index
-            update {
-                __typename
-                ... on MerkleTreeCollapsedUpdate {
-                    start
-                    end
-                }
-                __typename
-                ... on RelevantTransaction {
-                    start
-                    end
-                }
-            }
-        }
-        __typename
-        ... on WalletProgressUpdate {
-            highestIndex
-            highestRelevantIndex
-            highestRelevantWalletIndex
         }
     }
 }
