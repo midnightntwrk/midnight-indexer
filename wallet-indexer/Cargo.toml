@@ -27,14 +27,12 @@ itertools        = { workspace = true }
 secrecy          = { workspace = true }
 serde            = { workspace = true, features = [ "derive" ] }
 sqlx             = { workspace = true, features = [ "runtime-tokio", "time", "uuid" ] }
-thiserror        = { workspace = true }
 tokio            = { workspace = true, features = [ "macros", "rt-multi-thread", "time" ] }
 tokio-stream     = { workspace = true }
 trait-variant    = { workspace = true }
 uuid             = { workspace = true, features = [ "v7" ] }
 
 [dev-dependencies]
-midnight-ledger        = { workspace = true, features = [ "proving" ] }
 testcontainers         = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }
 
