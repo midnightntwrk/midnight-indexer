@@ -1822,9 +1822,9 @@ dependencies = [
 
 [[package]]
 name = "fastrace"
-version = "0.7.13"
+version = "0.7.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fde94e75dd0b863818f8407f0447193a92d6ac7bf83e12dc5a910854575cfa5"
+checksum = "318783b9fefe06130ab664ff1779215657586b004c0c7f3d6ece16d658936d06"
 dependencies = [
  "fastant",
  "fastrace-macro",
@@ -1849,9 +1849,9 @@ dependencies = [
 
 [[package]]
 name = "fastrace-macro"
-version = "0.7.13"
+version = "0.7.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57fb13c45c063581a7aee247508b2ccec10208a4c6f77fa3681c35692acb4982"
+checksum = "c7079009cf129d63c850dee732b58d7639d278a47ad99c607954ac94cfd57ef4"
 dependencies = [
  "proc-macro-error2",
  "proc-macro2",
