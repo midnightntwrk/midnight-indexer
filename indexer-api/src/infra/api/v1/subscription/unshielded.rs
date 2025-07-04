@@ -41,23 +41,23 @@ const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(30);
 /// An event of the unshielded transactions subscription.
 #[derive(Debug, Union)]
 pub enum UnshieldedTransactionsEvent<S: Storage> {
+    /// A transaction that created and/or spent UTXOs alongside these and other information.
     UnshieldedTransaction(Box<UnshieldedTransaction<S>>),
+
+    /// Information about the unshielded indexing progress.
     UnshieldedTransactionsProgress(UnshieldedTransactionsProgress),
 }
 
-/// A transaction and its created and spent UTXOs.
+/// A transaction that created and/or spent UTXOs alongside these and other information.
 #[derive(Debug, SimpleObject)]
 pub struct UnshieldedTransaction<S: Storage> {
-    /// The transaction ID.
-    pub transaction_id: u64,
-
-    /// The transaction.
+    /// The transaction that created and/or spent UTXOs.
     pub transaction: Transaction<S>,
 
-    /// UTXOs created in the above transaction.
+    /// UTXOs created in the above transaction, possibly empty.
     pub created_utxos: Vec<UnshieldedUtxo<S>>,
 
-    /// UTXOs spent in the above transaction.
+    /// UTXOs spent in the above transaction, possibly empty.
     pub spent_utxos: Vec<UnshieldedUtxo<S>>,
 }
 
@@ -104,11 +104,11 @@ where
             .try_into_domain(cx.get_network_id())
             .map_err_into_client_error(|| "invalid address")?;
 
-        // Build a stream of WalletSyncEvents by merging ViewingUpdates and ProgressUpdates. The
-        // ViewingUpdates stream should be infinite by definition (see the trait). However, if it
-        // nevertheless completes, we use a Tripwire to ensure the ProgressUpdates stream also
-        // completes, preventing the merged stream from hanging indefinitely waiting for both
-        // streams to complete.
+        // Build a stream of unshielded transaction events by merging ViewingUpdates and
+        // ProgressUpdates. The ViewingUpdates stream should be infinite by definition (see
+        // the trait). However, if it nevertheless completes, we use a Tripwire to ensure
+        // the ProgressUpdates stream also completes, preventing the merged stream from
+        // hanging indefinitely waiting for both streams to complete.
         let (trigger, tripwire) = Tripwire::new();
 
         let unshielded_transactions =
@@ -226,14 +226,14 @@ where
         .get_unshielded_utxos_by_address_created_by_transaction(address, transaction_id)
         .await
         .map_err_into_server_error(|| {
-            format!("get created UTXOs for existing transaction with ID {transaction_id}")
+            format!("get created UTXOs for transaction with ID {transaction_id}")
         })?;
 
     let spent = storage
         .get_unshielded_utxos_by_address_spent_by_transaction(address, transaction_id)
         .await
         .map_err_into_server_error(|| {
-            format!("get spent UTXOs for existing transaction with ID {transaction_id}")
+            format!("get spent UTXOs for transaction with ID {transaction_id}")
         })?;
 
     // Only emit an event for transactions that have UTXOs for this address.
@@ -249,7 +249,6 @@ where
             .collect();
 
         UnshieldedTransaction {
-            transaction_id,
             transaction: transaction.into(),
             created_utxos,
             spent_utxos,

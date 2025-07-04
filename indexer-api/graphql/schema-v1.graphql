@@ -261,6 +261,10 @@ A transaction with its relevant data.
 """
 type Transaction {
 	"""
+	The transaction ID.
+	"""
+	id: Int!
+	"""
 	The transaction hash.
 	"""
 	hash: HexEncoded!
@@ -357,23 +361,19 @@ scalar Unit
 scalar UnshieldedAddress
 
 """
-A transaction and its created and spent UTXOs.
+A transaction that created and/or spent UTXOs alongside these and other information.
 """
 type UnshieldedTransaction {
 	"""
-	The transaction ID.
-	"""
-	transactionId: Int!
-	"""
-	The transaction.
+	The transaction that created and/or spent UTXOs.
 	"""
 	transaction: Transaction!
 	"""
-	UTXOs created in the above transaction.
+	UTXOs created in the above transaction, possibly empty.
 	"""
 	createdUtxos: [UnshieldedUtxo!]!
 	"""
-	UTXOs spent in the above transaction.
+	UTXOs spent in the above transaction, possibly empty.
 	"""
 	spentUtxos: [UnshieldedUtxo!]!
 }

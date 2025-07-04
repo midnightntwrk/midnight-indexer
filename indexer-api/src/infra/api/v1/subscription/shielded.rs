@@ -192,11 +192,11 @@ where
         let index = index.unwrap_or_default();
         let send_progress_updates = send_progress_updates.unwrap_or(true);
 
-        // Build a stream of WalletSyncEvents by merging ViewingUpdates and ProgressUpdates. The
-        // ViewingUpdates stream should be infinite by definition (see the trait). However, if it
-        // nevertheless completes, we use a Tripwire to ensure the ProgressUpdates stream also
-        // completes, preventing the merged stream from hanging indefinitely waiting for both
-        // streams to complete.
+        // Build a stream of shielded transaction events by merging ViewingUpdates and
+        // ProgressUpdates. The ViewingUpdates stream should be infinite by definition (see
+        // the trait). However, if it nevertheless completes, we use a Tripwire to ensure
+        // the ProgressUpdates stream also completes, preventing the merged stream from
+        // hanging indefinitely waiting for both streams to complete.
         let (trigger, tripwire) = Tripwire::new();
 
         let viewing_updates = make_viewing_updates::<S, B, Z>(cx, session_id, index, trigger)
@@ -228,7 +228,7 @@ where
             .try_filter_map(ok)
             .on_drop(move || {
                 cx.get_metrics().wallets_connected.decrement(1);
-                debug!(session_id:%; "wallet subscription ended");
+                debug!(session_id:%; "shielded transaction subscription ended");
             });
 
         Ok(events)

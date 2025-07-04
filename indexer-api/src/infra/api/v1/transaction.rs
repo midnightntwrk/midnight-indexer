@@ -18,6 +18,9 @@ pub struct Transaction<S>
 where
     S: Storage,
 {
+    /// The transaction ID.
+    id: u64,
+
     /// The transaction hash.
     hash: HexEncoded,
 
@@ -41,9 +44,6 @@ where
     /// The merkle-tree root.
     #[debug(skip)]
     merkle_tree_root: HexEncoded,
-
-    #[graphql(skip)]
-    id: u64,
 
     #[graphql(skip)]
     block_hash: BlockHash,
