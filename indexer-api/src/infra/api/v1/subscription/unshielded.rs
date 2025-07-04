@@ -146,7 +146,7 @@ where
 
     try_stream! {
         // Stream UTXO events for existing transactions.
-        debug!(address:?, transaction_id; "streaming existing UnshieldedTransaction events");
+        debug!(address:?, transaction_id; "streaming events for existing transactions");
 
         let transactions =
             storage.get_transactions_involving_unshielded(address, transaction_id, BATCH_SIZE);
@@ -171,6 +171,7 @@ where
         }
 
         // Stream UTXO events for live transactions.
+        debug!(address:?, transaction_id; "streaming events for live transactions");
         let mut utxo_indexed_events = pin!(utxo_indexed_events);
         while utxo_indexed_events
             .try_next()

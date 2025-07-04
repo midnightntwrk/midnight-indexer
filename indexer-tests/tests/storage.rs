@@ -473,32 +473,31 @@ async fn run_tests(
     let contract_actions = indexer_api_storage.get_contract_actions_by_address(
         &UNKNOWN_ADDRESS,
         0,
-        0,
         10.try_into().unwrap(),
     );
     let len = contract_actions.count().await;
     assert_eq!(len, 0);
 
     let contract_actions = indexer_api_storage
-        .get_contract_actions_by_address(&ADDRESS, 0, 0, 10.try_into().unwrap())
+        .get_contract_actions_by_address(&ADDRESS, 0, 10.try_into().unwrap())
         .try_collect::<Vec<_>>()
         .await?;
     assert_eq!(contract_actions.len(), 5);
 
     let contract_actions = indexer_api_storage
-        .get_contract_actions_by_address(&ADDRESS, 0, 0, 1.try_into().unwrap())
+        .get_contract_actions_by_address(&ADDRESS, 0, 1.try_into().unwrap())
         .try_collect::<Vec<_>>()
         .await?;
     assert_eq!(contract_actions.len(), 5);
 
     let contract_actions = indexer_api_storage
-        .get_contract_actions_by_address(&ADDRESS, 2, 0, 10.try_into().unwrap())
+        .get_contract_actions_by_address(&ADDRESS, 3, 10.try_into().unwrap())
         .try_collect::<Vec<_>>()
         .await?;
     assert_eq!(contract_actions.len(), 3);
 
     let contract_actions = indexer_api_storage
-        .get_contract_actions_by_address(&ADDRESS, 0, 4, 10.try_into().unwrap())
+        .get_contract_actions_by_address(&ADDRESS, 4, 10.try_into().unwrap())
         .try_collect::<Vec<_>>()
         .await?;
     assert_eq!(contract_actions.len(), 2);

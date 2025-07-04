@@ -185,7 +185,6 @@ where
         ApiError,
     > {
         cx.get_metrics().wallets_connected.increment(1);
-        debug!(session_id:%; "wallet subscription started");
 
         let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
@@ -283,6 +282,7 @@ where
         }
 
         // Stream live transactions.
+        debug!(session_id:%, index; "streaming live transactions");
         let mut wallet_indexed_events = pin!(wallet_indexed_events);
         while wallet_indexed_events
             .try_next()

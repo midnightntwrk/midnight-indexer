@@ -224,7 +224,6 @@ impl ContractActionStorage for SqliteStorage {
     fn get_contract_actions_by_address(
         &self,
         address: &RawContractAddress,
-        height: u32,
         mut contract_action_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send {
@@ -232,7 +231,7 @@ impl ContractActionStorage for SqliteStorage {
             loop {
                 let query = indoc! {"
                     SELECT
-                        contract_actions.id,
+                        contract_actions.id AS id,
                         contract_actions.address,
                         contract_actions.state,
                         contract_actions.attributes,
@@ -242,15 +241,13 @@ impl ContractActionStorage for SqliteStorage {
                     INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
                     INNER JOIN blocks ON blocks.id = transactions.block_id
                     WHERE contract_actions.address = $1
-                    AND blocks.height >= $2
-                    AND contract_actions.id >= $3
-                    ORDER BY contract_actions.id
-                    LIMIT $4
+                    AND contract_actions.id >= $2
+                    ORDER BY id
+                    LIMIT $3
                 "};
 
-                let actions = sqlx::query_as::<_, ContractAction>(query)
+                let actions = sqlx::query_as(query)
                     .bind(address)
-                    .bind(height as i64)
                     .bind(contract_action_id as i64)
                     .bind(batch_size.get() as i64)
                     .fetch(&*self.pool)
@@ -284,5 +281,27 @@ impl ContractActionStorage for SqliteStorage {
             .bind(contract_action_id as i64)
             .fetch_all(&*self.pool)
             .await
+    }
+
+    async fn get_contract_action_id_by_block_height(
+        &self,
+        block_height: u32,
+    ) -> Result<Option<u64>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT contract_actions.id
+            FROM contract_actions
+            JOIN transactions ON transactions.id = contract_actions.transaction_id
+            JOIN blocks ON blocks.id = transactions.block_id
+            WHERE blocks.height >= $1
+            ORDER BY contract_actions.id
+            LIMIT 1
+        "};
+
+        let id = sqlx::query_as::<_, (i64,)>(query)
+            .bind(block_height as i64)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        Ok(id.map(|(id,)| id as u64))
     }
 }

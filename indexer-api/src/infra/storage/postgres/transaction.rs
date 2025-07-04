@@ -48,7 +48,7 @@ impl TransactionStorage for PostgresStorage {
             WHERE transactions.id = $1
         "};
 
-        let transaction = sqlx::query_as::<_, Transaction>(query)
+        let transaction = sqlx::query_as(query)
             .bind(id as i64)
             .fetch_optional(&*self.pool)
             .await?;
@@ -78,7 +78,7 @@ impl TransactionStorage for PostgresStorage {
             ORDER BY transactions.id
         "};
 
-        let transactions = sqlx::query_as::<_, Transaction>(query)
+        let transactions = sqlx::query_as(query)
             .bind(id as i64)
             .fetch_all(&*self.pool)
             .await?;
@@ -111,7 +111,7 @@ impl TransactionStorage for PostgresStorage {
             ORDER BY transactions.id DESC
         "};
 
-        let transactions = sqlx::query_as::<_, Transaction>(query)
+        let transactions = sqlx::query_as(query)
             .bind(hash)
             .fetch_all(&*self.pool)
             .await?;
@@ -144,7 +144,7 @@ impl TransactionStorage for PostgresStorage {
             ORDER BY transactions.id
         "};
 
-        let transactions = sqlx::query_as::<_, Transaction>(query)
+        let transactions = sqlx::query_as(query)
             .bind(identifier)
             .fetch_all(&*self.pool)
             .await?;

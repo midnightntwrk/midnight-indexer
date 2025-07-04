@@ -110,6 +110,9 @@ enum DecodeSessionIdError {
     ByteArrayLen(#[from] ByteArrayLenError),
 }
 
+/// Resolve the block height for the given optional block offset. If it is a block height, it is
+/// simple, if it is a hash, the block is loaded and its height returned. If the block offset is
+/// omitted, the last block is loaded and its height returned.
 async fn resolve_height(offset: Option<BlockOffset>, storage: &impl Storage) -> ApiResult<u32> {
     match offset {
         Some(offset) => match offset {

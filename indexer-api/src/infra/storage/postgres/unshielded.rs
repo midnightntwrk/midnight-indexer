@@ -40,7 +40,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
             ORDER BY id
         "};
 
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
+        let utxos = sqlx::query_as(query)
             .bind(address.as_ref())
             .fetch_all(&*self.pool)
             .await?;
@@ -68,7 +68,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
             ORDER BY output_index
         "};
 
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
+        let utxos = sqlx::query_as(query)
             .bind(transaction_id as i64)
             .fetch_all(&*self.pool)
             .await?;
@@ -96,7 +96,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
             ORDER BY output_index
         "};
 
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
+        let utxos = sqlx::query_as(query)
             .bind(transaction_id as i64)
             .fetch_all(&*self.pool)
             .await?;
@@ -126,7 +126,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
             ORDER BY output_index
         "};
 
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
+        let utxos = sqlx::query_as(query)
             .bind(transaction_id as i64)
             .bind(address.as_ref())
             .fetch_all(&*self.pool)
@@ -157,7 +157,7 @@ impl UnshieldedUtxoStorage for PostgresStorage {
             ORDER BY output_index
         "};
 
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
+        let utxos = sqlx::query_as(query)
             .bind(transaction_id as i64)
             .bind(address.as_ref())
             .fetch_all(&*self.pool)

@@ -69,12 +69,11 @@ where
         id: u64,
     ) -> Result<Vec<ContractAction>, sqlx::Error>;
 
-    /// Get a stream of contract actions for the given address starting at the given block height
-    /// and contract_action ID, ordered by transaction ID.
+    /// Get a stream of contract actions for the given address starting at the given contract_action
+    /// ID, ordered by transaction ID.
     fn get_contract_actions_by_address(
         &self,
         address: &RawContractAddress,
-        height: u32,
         contract_action_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send;
@@ -84,6 +83,13 @@ where
         &self,
         contract_action_id: u64,
     ) -> Result<Vec<ContractBalance>, sqlx::Error>;
+
+    /// Get the ID for the first contract action in a transaction in a block with the given block
+    /// height or higher.
+    async fn get_contract_action_id_by_block_height(
+        &self,
+        block_height: u32,
+    ) -> Result<Option<u64>, sqlx::Error>;
 }
 
 #[allow(unused_variables)]
@@ -152,7 +158,6 @@ impl ContractActionStorage for NoopStorage {
     fn get_contract_actions_by_address(
         &self,
         address: &RawContractAddress,
-        block_height: u32,
         contract_action_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send {
@@ -164,6 +169,14 @@ impl ContractActionStorage for NoopStorage {
         &self,
         contract_action_id: u64,
     ) -> Result<Vec<ContractBalance>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_contract_action_id_by_block_height(
+        &self,
+        block_height: u32,
+    ) -> Result<Option<u64>, sqlx::Error> {
         unimplemented!()
     }
 }

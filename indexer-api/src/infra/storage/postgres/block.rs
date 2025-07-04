@@ -32,9 +32,7 @@ impl BlockStorage for PostgresStorage {
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, Block>(query)
-            .fetch_optional(&*self.pool)
-            .await
+        sqlx::query_as(query).fetch_optional(&*self.pool).await
     }
 
     #[trace(properties = { "hash": "{hash}" })]
@@ -46,7 +44,7 @@ impl BlockStorage for PostgresStorage {
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, Block>(query)
+        sqlx::query_as(query)
             .bind(hash)
             .fetch_optional(&*self.pool)
             .await
@@ -61,7 +59,7 @@ impl BlockStorage for PostgresStorage {
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, Block>(query)
+        sqlx::query_as(query)
             .bind(height as i64)
             .fetch_optional(&*self.pool)
             .await
@@ -85,7 +83,7 @@ impl BlockStorage for PostgresStorage {
                     LIMIT $2
                 "};
 
-                let blocks = sqlx::query_as::<_, Block>(query)
+                let blocks = sqlx::query_as(query)
                     .bind(height as i64)
                     .bind(batch_size.get() as i64)
                     .fetch_all(&*self.pool)

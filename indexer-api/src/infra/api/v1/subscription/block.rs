@@ -66,7 +66,8 @@ where
         let mut height = resolve_height(offset, storage).await?;
 
         let blocks_stream = try_stream! {
-            debug!(height; "streaming so far stored blocks");
+            // Stream existing blocks.
+            debug!(height; "streaming existing blocks");
 
             let blocks = storage.get_blocks(height, BATCH_SIZE);
             let mut blocks = pin!(blocks);
@@ -81,7 +82,8 @@ where
                 yield block.into();
             }
 
-            // Yield "future" blocks.
+            // Stream live blocks.
+            debug!(height; "streaming live blocks");
             let mut block_indexed_stream = pin!(block_indexed_stream);
             while block_indexed_stream
                 .try_next()
