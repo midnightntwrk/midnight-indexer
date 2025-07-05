@@ -18,10 +18,10 @@ check:
     if [ "{{feature}}" = "standalone" ]; then cargo check -p indexer-standalone --tests --features standalone; fi
 
 fmt:
-    cargo +nightly-2025-07-01 fmt
+    cargo +$NIGHTLY_TOOLCHAIN fmt
 
 fmt-check:
-    cargo +nightly-2025-07-01 fmt --check
+    cargo +$NIGHTLY_TOOLCHAIN fmt --check
 
 lint:
     cargo clippy -p indexer-common       --no-deps --tests                        -- -D warnings
@@ -65,11 +65,11 @@ lint-fix:
     if [ "{{feature}}" = "standalone" ]; then cargo clippy -p indexer-standalone --no-deps --tests --features standalone --fix --allow-dirty --allow-staged; fi
 
 doc:
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +nightly-2025-07-01 doc -p indexer-common       --no-deps --all-features
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +nightly-2025-07-01 doc -p chain-indexer        --no-deps --features {{feature}}
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +nightly-2025-07-01 doc -p wallet-indexer       --no-deps --features {{feature}}
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +nightly-2025-07-01 doc -p indexer-api          --no-deps --features {{feature}}
-    if [ "{{feature}}" = "standalone" ]; then RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +nightly-2025-07-01 doc -p indexer-standalone --no-deps --features standalone; fi
+    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +$NIGHTLY_TOOLCHAIN doc -p indexer-common       --no-deps --all-features
+    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +$NIGHTLY_TOOLCHAIN doc -p chain-indexer        --no-deps --features {{feature}}
+    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +$NIGHTLY_TOOLCHAIN doc -p wallet-indexer       --no-deps --features {{feature}}
+    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +$NIGHTLY_TOOLCHAIN doc -p indexer-api          --no-deps --features {{feature}}
+    if [ "{{feature}}" = "standalone" ]; then RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +$NIGHTLY_TOOLCHAIN doc -p indexer-standalone --no-deps --features standalone; fi
 
 all: check fmt lint test doc
 
