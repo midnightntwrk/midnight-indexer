@@ -84,6 +84,13 @@ query BlockQuery($block_offset: BlockOffset) {
                 intentHash
                 outputIndex
             }
+            unshieldedSpentOutputs {
+                owner
+                value
+                tokenType
+                intentHash
+                outputIndex
+            }
         }
     }
 }
@@ -164,6 +171,13 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
             intentHash
             outputIndex
         }
+        unshieldedSpentOutputs {
+            owner
+            value
+            tokenType
+            intentHash
+            outputIndex
+        }
     }
 }
 
@@ -219,29 +233,6 @@ query ContractActionQuery($address: HexEncoded!, $contract_action_offset: Contra
         }
     }
 }
-
-query UnshieldedUtxosQuery($address: UnshieldedAddress!) {
-    unshieldedUtxos(address: $address) {
-        owner
-        value
-        tokenType
-        outputIndex
-        intentHash
-        createdAtTransaction {
-            hash
-            block {
-                height
-            }
-        }
-        spentAtTransaction {
-            hash
-            block {
-                height
-            }
-        }
-    }
-}
-
 
 mutation ConnectMutation($viewingKey: ViewingKey!) {
     connect(viewingKey: $viewingKey)
@@ -337,6 +328,13 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                 intentHash
                 outputIndex
             }
+            unshieldedSpentOutputs {
+                owner
+                value
+                tokenType
+                intentHash
+                outputIndex
+            }
         }
     }
 }
@@ -397,48 +395,10 @@ subscription ContractActionSubscription(
     }
 }
 
-subscription UnshieldedUtxosSubscription($address: UnshieldedAddress!) {
-    unshieldedUtxos(address: $address) {
-        progress {
-            highestTransactionId
-            currentTransactionId
-        }
-        transaction {
-            hash
-            block {
-                height
-            }
-        }
-        createdUtxos {
-            owner
-            value
-            tokenType
-            intentHash
-            outputIndex
-            createdAtTransaction {
-                hash
-            }
-        }
-        spentUtxos {
-            owner
-            value
-            tokenType
-            intentHash
-            outputIndex
-            createdAtTransaction {
-                hash
-            }
-            spentAtTransaction {
-                hash
-            }
-        }
-    }
-}
-
-subscription WalletSubscription(
+subscription ShieldedTransactionsSubscription(
     $sessionId: HexEncoded!
 ) {
-    wallet(sessionId: $sessionId) {
+    shieldedTransactions(sessionId: $sessionId) {
         __typename
         ... on ViewingUpdate {
             index
@@ -456,10 +416,51 @@ subscription WalletSubscription(
             }
         }
         __typename
-        ... on ProgressUpdate {
+        ... on ShieldedTransactionsProgress {
             highestIndex
             highestRelevantIndex
             highestRelevantWalletIndex
+        }
+    }
+}
+
+subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
+    unshieldedTransactions(address: $address) {
+        __typename
+        ... on UnshieldedTransaction {
+            transaction {
+                hash
+                block {
+                    height
+                }
+            }
+            createdUtxos {
+                owner
+                tokenType
+                value
+                outputIndex
+                intentHash
+                createdAtTransaction {
+                    hash
+                }
+            }
+            spentUtxos {
+                owner
+                tokenType
+                value
+                outputIndex
+                intentHash
+                createdAtTransaction {
+                    hash
+                }
+                spentAtTransaction {
+                    hash
+                }
+            }
+        }
+        __typename
+        ... on UnshieldedTransactionsProgress {
+            highestTransactionId
         }
     }
 }

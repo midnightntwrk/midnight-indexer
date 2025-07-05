@@ -12,16 +12,14 @@
 // limitations under the License.
 
 use crate::{
-    domain::{LedgerStateCache, Transaction, storage::Storage},
+    domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, ContextExt, HexEncoded, InnerApiError, ResultExt,
-        v1::{
-            decode_session_id,
-            wallet::{ProgressUpdate, ViewingUpdate, WalletSyncEvent, ZswapChainStateUpdate},
-        },
+        ApiError, ApiResult, AsBytesExt, ContextExt, HexEncoded, InnerApiError, ResultExt,
+        v1::{decode_session_id, transaction::Transaction},
     },
 };
-use async_graphql::{Context, Subscription, async_stream::try_stream};
+use async_graphql::{Context, SimpleObject, Subscription, Union, async_stream::try_stream};
+use derive_more::Debug;
 use drop_stream::DropStreamExt;
 use fastrace::trace;
 use futures::{
@@ -49,13 +47,114 @@ const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(3);
 // TODO: Make configurable!
 const ACTIVATE_WALLET_INTERVAL: Duration = Duration::from_secs(60);
 
-pub struct WalletSubscription<S, B, Z> {
+/// An event of the shielded transactions subscription.
+#[derive(Debug, Union)]
+pub enum ShieldedTransactionsEvent<S: Storage> {
+    ViewingUpdate(ViewingUpdate<S>),
+    ShieldedTransactionsProgress(ShieldedTransactionsProgress),
+}
+
+/// Aggregates a relevant transaction with the next start index and an optional collapsed
+/// Merkle-Tree update.
+#[derive(Debug, SimpleObject)]
+pub struct ViewingUpdate<S: Storage> {
+    /// Next start index into the zswap state to be queried. Usually the end index of the included
+    /// relevant transaction plus one unless that is a failure in which case just its end
+    /// index.
+    pub index: u64,
+
+    /// Relevant transaction for the wallet and maybe a collapsed Merkle-Tree update.
+    pub update: Vec<ZswapChainStateUpdate<S>>,
+}
+
+/// Aggregates information about the shielded transactions indexing progress.
+#[derive(Debug, SimpleObject)]
+pub struct ShieldedTransactionsProgress {
+    /// The highest end index into the zswap state of all currently known transactions.
+    pub highest_index: u64,
+
+    /// The highest end index into the zswap state of all currently known relevant transactions,
+    /// i.e. those that belong to any known wallet. Less or equal `highest_index`.
+    pub highest_relevant_index: u64,
+
+    /// The highest end index into the zswap state of all currently known relevant transactions for
+    /// a particular wallet. Less or equal `highest_relevant_index`.
+    pub highest_relevant_wallet_index: u64,
+}
+
+#[derive(Debug, Union)]
+#[allow(clippy::large_enum_variant)]
+pub enum ZswapChainStateUpdate<S: Storage> {
+    MerkleTreeCollapsedUpdate(MerkleTreeCollapsedUpdate),
+    RelevantTransaction(RelevantTransaction<S>),
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct MerkleTreeCollapsedUpdate {
+    /// The start index into the zswap state.
+    start: u64,
+
+    /// The end index into the zswap state.
+    end: u64,
+
+    /// The hex-encoded merkle-tree collapsed update.
+    #[debug(skip)]
+    update: HexEncoded,
+
+    /// The protocol version.
+    protocol_version: u32,
+}
+
+impl From<domain::MerkleTreeCollapsedUpdate> for MerkleTreeCollapsedUpdate {
+    fn from(value: domain::MerkleTreeCollapsedUpdate) -> Self {
+        let domain::MerkleTreeCollapsedUpdate {
+            start_index,
+            end_index,
+            update,
+            protocol_version,
+        } = value;
+
+        Self {
+            start: start_index,
+            end: end_index,
+            update: update.hex_encode(),
+            protocol_version: protocol_version.0,
+        }
+    }
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct RelevantTransaction<S: Storage> {
+    /// Relevant transaction for the wallet.
+    transaction: Transaction<S>,
+
+    /// The start index.
+    start: u64,
+
+    /// The end index.
+    end: u64,
+}
+
+impl<S> From<domain::Transaction> for RelevantTransaction<S>
+where
+    S: Storage,
+{
+    fn from(value: domain::Transaction) -> Self {
+        Self {
+            start: value.start_index,
+            end: value.end_index,
+            transaction: value.into(),
+        }
+    }
+}
+
+pub struct ShieldedTransactionsSubscription<S, B, Z> {
     _s: PhantomData<S>,
     _b: PhantomData<B>,
     _z: PhantomData<Z>,
 }
 
-impl<S, B, Z> Default for WalletSubscription<S, B, Z> {
+impl<S, B, Z> Default for ShieldedTransactionsSubscription<S, B, Z> {
     fn default() -> Self {
         Self {
             _s: PhantomData,
@@ -66,50 +165,46 @@ impl<S, B, Z> Default for WalletSubscription<S, B, Z> {
 }
 
 #[Subscription]
-impl<S, B, Z> WalletSubscription<S, B, Z>
+impl<S, B, Z> ShieldedTransactionsSubscription<S, B, Z>
 where
     S: Storage,
     B: Subscriber,
     Z: LedgerStateStorage,
 {
-    /// Subscribe to wallet events for the given session ID starting at the given index or at zero
-    /// if the index is omitted. Wallet events are either a ViewingUpdate or a ProgressUpdate.
+    /// Subscribe shielded transaction events for the given session ID starting at the given index
+    /// or at zero if omitted.
     #[trace(properties = { "session_id": "{session_id:?}", "index": "{index:?}" })]
-    pub async fn wallet<'a>(
+    pub async fn shielded_transactions<'a>(
         &self,
         cx: &'a Context<'a>,
         session_id: HexEncoded,
         index: Option<u64>,
         send_progress_updates: Option<bool>,
-    ) -> Result<impl Stream<Item = ApiResult<WalletSyncEvent<S>>> + use<'a, S, B, Z>, ApiError>
-    {
+    ) -> Result<
+        impl Stream<Item = ApiResult<ShieldedTransactionsEvent<S>>> + use<'a, S, B, Z>,
+        ApiError,
+    > {
         cx.get_metrics().wallets_connected.increment(1);
-        debug!(session_id:%; "wallet subscription started");
 
         let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
         let index = index.unwrap_or_default();
         let send_progress_updates = send_progress_updates.unwrap_or(true);
 
-        // Build a stream of WalletSyncEvents by merging ViewingUpdates and ProgressUpdates. The
-        // ViewingUpdates stream should be infinite by definition (see the trait). However, if it
-        // nevertheless completes, we use a Tripwire to ensure the ProgressUpdates stream also
-        // completes, preventing the merged stream from hanging indefinitely waiting for both
-        // streams to complete.
+        // Build a stream of shielded transaction events by merging ViewingUpdates and
+        // ProgressUpdates. The ViewingUpdates stream should be infinite by definition (see
+        // the trait). However, if it nevertheless completes, we use a Tripwire to ensure
+        // the ProgressUpdates stream also completes, preventing the merged stream from
+        // hanging indefinitely waiting for both streams to complete.
         let (trigger, tripwire) = Tripwire::new();
 
-        let viewing_updates = viewing_updates::<S, B, Z>(cx, session_id, index, trigger)
-            .await?
-            .map_ok(|viewing_update| {
-                debug!(viewing_update:?; "emitting viewing update");
-                WalletSyncEvent::ViewingUpdate(viewing_update)
-            });
+        let viewing_updates = make_viewing_updates::<S, B, Z>(cx, session_id, index, trigger)
+            .map_ok(ShieldedTransactionsEvent::ViewingUpdate);
 
         let progress_updates = if send_progress_updates {
-            progress_updates::<S>(cx, session_id)
-                .await?
+            make_progress_updates::<S>(cx, session_id)
                 .take_until_if(tripwire)
-                .map_ok(WalletSyncEvent::ProgressUpdate)
+                .map_ok(ShieldedTransactionsEvent::ShieldedTransactionsProgress)
                 .boxed()
         } else {
             stream::empty().boxed()
@@ -132,7 +227,7 @@ where
             .try_filter_map(ok)
             .on_drop(move || {
                 cx.get_metrics().wallets_connected.decrement(1);
-                debug!(session_id:%; "wallet subscription ended");
+                debug!(session_id:%; "shielded transaction subscription ended");
             });
 
         Ok(events)
@@ -140,12 +235,12 @@ where
 }
 
 #[trace(properties = { "session_id": "{session_id:?}", "index": "{index}" })]
-async fn viewing_updates<'a, S, B, Z>(
+fn make_viewing_updates<'a, S, B, Z>(
     cx: &'a Context<'a>,
     session_id: SessionId,
-    index: u64,
+    mut index: u64,
     trigger: Trigger,
-) -> Result<impl Stream<Item = ApiResult<ViewingUpdate<S>>> + use<'a, S, B, Z>, ApiError>
+) -> impl Stream<Item = ApiResult<ViewingUpdate<S>>> + use<'a, S, B, Z>
 where
     S: Storage,
     B: Subscriber,
@@ -160,10 +255,10 @@ where
     let wallet_indexed_events = subscriber
         .subscribe::<WalletIndexed>()
         .try_filter(move |wallet_indexed| ready(wallet_indexed.session_id == session_id));
-    let mut next_index = index;
 
-    let viewing_updates = try_stream! {
-        debug!(session_id:%, index; "streaming so far stored transactions");
+    try_stream! {
+        // Stream exiting transactions.
+        debug!(session_id:%, index; "streaming existing transactions");
 
         let transactions = storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
         let mut transactions = pin!(transactions);
@@ -172,21 +267,22 @@ where
             .await
             .map_err_into_server_error(|| "get next transaction")?
         {
-            let viewing_update = viewing_update(
-                next_index,
+            let viewing_update = make_viewing_update(
+                index,
                 transaction,
-                network_id,
                 ledger_state_storage,
                 zswap_state_cache,
+                network_id,
             )
             .await?;
 
-            next_index = viewing_update.index;
+            index = viewing_update.index;
 
             yield viewing_update;
         }
 
-        // Yield "future" transactions.
+        // Stream live transactions.
+        debug!(session_id:%, index; "streaming live transactions");
         let mut wallet_indexed_events = pin!(wallet_indexed_events);
         while wallet_indexed_events
             .try_next()
@@ -194,10 +290,10 @@ where
             .map_err_into_server_error(|| "get next WalletIndexed event")?
             .is_some()
         {
-            debug!(next_index; "streaming next transactions");
+            debug!(index; "streaming next transactions");
 
             let transactions =
-                storage.get_relevant_transactions(session_id, next_index, BATCH_SIZE);
+                storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
             let mut transactions = pin!(transactions);
 
             while let Some(transaction) = transactions
@@ -205,15 +301,16 @@ where
                 .await
                 .map_err_into_server_error(|| "get next transaction")?
             {
-                let viewing_update = viewing_update(
-                    next_index,
+                let viewing_update = make_viewing_update(
+                    index,
                     transaction,
-                    network_id,
                     ledger_state_storage,
                     zswap_state_cache,
+                    network_id,
                 )
                 .await?;
-                next_index = viewing_update.index;
+
+                index = viewing_update.index;
 
                 yield viewing_update;
             }
@@ -221,18 +318,16 @@ where
 
         warn!("stream of WalletIndexed events completed unexpectedly");
         trigger.cancel();
-    };
-
-    Ok(viewing_updates)
+    }
 }
 
 #[trace(properties = { "from": "{from:?}" })]
-async fn viewing_update<S, Z>(
+async fn make_viewing_update<S, Z>(
     from: u64,
-    transaction: Transaction,
-    network_id: NetworkId,
+    transaction: domain::Transaction,
     ledger_state_storage: &Z,
     zswap_state_cache: &LedgerStateCache,
+    network_id: NetworkId,
 ) -> ApiResult<ViewingUpdate<S>>
 where
     S: Storage,
@@ -275,27 +370,26 @@ where
     Ok(viewing_update)
 }
 
-async fn progress_updates<'a, S>(
+fn make_progress_updates<'a, S>(
     cx: &'a Context<'a>,
     session_id: SessionId,
-) -> ApiResult<impl Stream<Item = ApiResult<ProgressUpdate>> + use<'a, S>>
+) -> impl Stream<Item = ApiResult<ShieldedTransactionsProgress>> + use<'a, S>
 where
     S: Storage,
 {
-    let storage = cx.get_storage::<S>();
-
     let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
-    let updates = intervals.then(move |_| progress_update(session_id, storage));
-
-    Ok(updates)
+    intervals.then(move |_| make_progress_update(session_id, cx.get_storage::<S>()))
 }
 
-async fn progress_update<S>(session_id: SessionId, storage: &S) -> ApiResult<ProgressUpdate>
+async fn make_progress_update<S>(
+    session_id: SessionId,
+    storage: &S,
+) -> ApiResult<ShieldedTransactionsProgress>
 where
     S: Storage,
 {
     let (highest_index, highest_relevant_index, highest_relevant_wallet_index) = storage
-        .get_highest_indices(session_id)
+        .get_highest_end_indices(session_id)
         .await
         .map_err_into_server_error(|| "get highest indices")?;
 
@@ -303,7 +397,7 @@ where
     let highest_relevant_index = highest_relevant_index.unwrap_or_default();
     let highest_relevant_wallet_index = highest_relevant_wallet_index.unwrap_or_default();
 
-    Ok(ProgressUpdate {
+    Ok(ShieldedTransactionsProgress {
         highest_index,
         highest_relevant_index,
         highest_relevant_wallet_index,

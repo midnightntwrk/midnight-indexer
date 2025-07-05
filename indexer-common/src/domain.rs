@@ -106,7 +106,7 @@ impl From<&ContractAttributes> for ContractActionVariant {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnshieldedUtxo {
     pub value: u128,
-    pub owner_address: RawUnshieldedAddress,
+    pub owner: RawUnshieldedAddress,
     pub token_type: RawTokenType,
     pub intent_hash: IntentHash,
     pub output_index: u32,

@@ -18,7 +18,6 @@ pub mod query;
 pub mod subscription;
 pub mod transaction;
 pub mod unshielded;
-pub mod wallet;
 
 use crate::{
     domain::{
@@ -107,10 +106,13 @@ enum DecodeSessionIdError {
     #[error("cannot hex-decode session ID")]
     HexDecode(#[from] HexDecodeError),
 
-    #[error(transparent)]
+    #[error("cannot convert into session ID")]
     ByteArrayLen(#[from] ByteArrayLenError),
 }
 
+/// Resolve the block height for the given optional block offset. If it is a block height, it is
+/// simple, if it is a hash, the block is loaded and its height returned. If the block offset is
+/// omitted, the last block is loaded and its height returned.
 async fn resolve_height(offset: Option<BlockOffset>, storage: &impl Storage) -> ApiResult<u32> {
     match offset {
         Some(offset) => match offset {

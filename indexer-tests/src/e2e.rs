@@ -16,8 +16,8 @@
 use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
-        ContractActionSubscription, DisconnectMutation, TransactionsQuery, WalletSubscription,
-        block_query,
+        ContractActionSubscription, DisconnectMutation, ShieldedTransactionsSubscription,
+        TransactionsQuery, UnshieldedTransactionsSubscription, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks as BlockSubscriptionBlock,
             BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
@@ -30,7 +30,8 @@ use crate::{
             self, ContractActionQueryContractAction,
             TransactionResultStatus as ContractActionQueryTransactionResultStatus,
         },
-        contract_action_subscription, disconnect_mutation, transactions_query, wallet_subscription,
+        contract_action_subscription, disconnect_mutation, shielded_transactions_subscription,
+        transactions_query, unshielded_transactions_subscription,
     },
     graphql_ws_client,
 };
@@ -39,10 +40,7 @@ use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::{
     domain::ViewingKey,
-    infra::api::{
-        AsBytesExt, HexEncoded,
-        v1::{transaction::TransactionResultStatus, unshielded::UnshieldedAddress},
-    },
+    infra::api::{AsBytesExt, HexEncoded, v1::transaction::TransactionResultStatus},
 };
 use indexer_common::domain::{ByteArray, NetworkId, PROTOCOL_VERSION_000_013_000};
 use itertools::Itertools;
@@ -88,9 +86,6 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_contract_action_query(&indexer_data, &api_client, &api_url)
         .await
         .context("test contract action query")?;
-    test_unshielded_utxo_queries(&indexer_data, &api_client, &api_url)
-        .await
-        .context("test unshielded UTXOs query")?;
 
     // Test mutations.
     test_connect_mutation(&api_client, &api_url, network_id)
@@ -101,13 +96,13 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
         .context("test disconnect mutation query")?;
 
     // Test subscriptions (the block subscription has already been tested above).
-    test_contract_action_subscription(&indexer_data, &ws_api_url)
+    test_contract_actions_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test contract action subscription")?;
-    test_unshielded_utxo_subscription(&indexer_data, &ws_api_url) // we use node mock version at the moment
+    test_unshielded_transactions_subscription(&indexer_data, &ws_api_url) // we use node mock version at the moment
         .await
         .context("test unshielded UTXOs subscription")?;
-    test_wallet_subscription(&ws_api_url, network_id)
+    test_shielded_transactions_subscription(&ws_api_url, network_id)
         .await
         .context("test wallet subscription")?;
 
@@ -249,12 +244,11 @@ impl IndexerData {
             })
             .all(|(a1, a2)| a1 == a2);
 
+        // Collect unshielded UTXOs.
         let unshielded_utxos = transactions
             .iter()
             .flat_map(|transaction| transaction.unshielded_created_outputs.to_owned())
             .collect::<Vec<_>>();
-
-        assert!(!unshielded_utxos.is_empty());
 
         // Test genesis UTXOs for non-MainNet networks.
         // MainNet has no pre-funded accounts (clean genesis), while test/dev networks
@@ -315,7 +309,7 @@ async fn test_block_query(
             .await?
             .block
             .expect("there is a block");
-        assert_eq!(block.to_value(), expected_block.to_value());
+        assert_eq!(block.to_json_value(), expected_block.to_json_value());
 
         // Existing height.
         let variables = block_query::Variables {
@@ -325,7 +319,7 @@ async fn test_block_query(
             .await?
             .block
             .expect("there is a block");
-        assert_eq!(block.to_value(), expected_block.to_value());
+        assert_eq!(block.to_json_value(), expected_block.to_json_value());
     }
 
     // No offset which yields the last block; as the node proceeds, that is unknown an only its
@@ -382,9 +376,9 @@ async fn test_transactions_query(
         // Verify expected transaction is in results
         let transaction_values = transactions
             .iter()
-            .map(|t| t.to_value())
+            .map(|t| t.to_json_value())
             .collect::<Vec<_>>();
-        assert!(transaction_values.contains(&expected_transaction.to_value()));
+        assert!(transaction_values.contains(&expected_transaction.to_json_value()));
 
         // Validate fee metadata and segment results for all returned transactions
         for transaction in &transactions {
@@ -461,9 +455,9 @@ async fn test_transactions_query(
             // Verify expected transaction is in results
             let transaction_values = transactions
                 .iter()
-                .map(|t| t.to_value())
+                .map(|t| t.to_json_value())
                 .collect::<Vec<_>>();
-            assert!(transaction_values.contains(&expected_transaction.to_value()));
+            assert!(transaction_values.contains(&expected_transaction.to_json_value()));
 
             // Also validate fee metadata for identifier queries
             for transaction in &transactions {
@@ -521,8 +515,8 @@ async fn test_contract_action_query(
             .contract_action
             .expect("there is a contract action");
         assert_eq!(
-            contract_action.to_value(),
-            expected_contract_action.to_value()
+            contract_action.to_json_value(),
+            expected_contract_action.to_json_value()
         );
 
         // Existing block height.
@@ -537,8 +531,8 @@ async fn test_contract_action_query(
             .contract_action
             .expect("there is a contract action");
         assert_eq!(
-            contract_action.to_value(),
-            expected_contract_action.to_value()
+            contract_action.to_json_value(),
+            expected_contract_action.to_json_value()
         );
 
         // Existing transaction hash.
@@ -557,8 +551,8 @@ async fn test_contract_action_query(
             .contract_action
             .expect("there is a contract action");
         assert_eq!(
-            contract_action.to_value(),
-            expected_contract_action.to_value()
+            contract_action.to_json_value(),
+            expected_contract_action.to_json_value()
         );
 
         // Existing transaction identifier.
@@ -639,51 +633,6 @@ async fn test_contract_action_query(
     Ok(())
 }
 
-/// Test the unshielded UTXOs query.
-async fn test_unshielded_utxo_queries(
-    indexer_data: &IndexerData,
-    api_client: &Client,
-    api_url: &str,
-) -> anyhow::Result<()> {
-    use graphql::graphql_types::*;
-
-    // Test with addresses that have UTXOs
-    for expected_utxo in &indexer_data.unshielded_utxos {
-        let variables = unshielded_utxos_query::Variables {
-            address: expected_utxo.owner.clone(),
-        };
-        let utxos = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables)
-            .await?
-            .unshielded_utxos;
-
-        assert!(!utxos.is_empty());
-        // Verify that the expected UTXO is in the results
-        assert!(utxos.iter().any(|utxo| {
-            utxo.owner == expected_utxo.owner
-                && utxo.value == expected_utxo.value
-                && utxo.token_type == expected_utxo.token_type
-                && utxo.intent_hash == expected_utxo.intent_hash
-                && utxo.output_index == expected_utxo.output_index
-        }));
-    }
-
-    // Test with unknown address (should return empty)
-    const NETWORK_ID: NetworkId = NetworkId::Undeployed;
-    let unknown_addr_bytes = [255; 32]; // Some address that doesn't exist
-    let unknown_addr = UnshieldedAddress::bech32m_encode(unknown_addr_bytes, NETWORK_ID);
-
-    let variables = unshielded_utxos_query::Variables {
-        address: unknown_addr,
-    };
-    let utxos = send_query::<UnshieldedUtxosQuery>(api_client, api_url, variables)
-        .await?
-        .unshielded_utxos;
-
-    assert!(utxos.is_empty());
-
-    Ok(())
-}
-
 /// Test the connect mutation.
 async fn test_connect_mutation(
     api_client: &Client,
@@ -728,7 +677,7 @@ async fn test_disconnect_mutation(api_client: &Client, api_url: &str) -> anyhow:
 }
 
 /// Test the contract action subscription.
-async fn test_contract_action_subscription(
+async fn test_contract_actions_subscription(
     indexer_data: &IndexerData,
     ws_api_url: &str,
 ) -> anyhow::Result<()> {
@@ -736,7 +685,7 @@ async fn test_contract_action_subscription(
     let contract_actions_by_address = indexer_data
         .contract_actions
         .iter()
-        .map(|c| (c.address(), c.to_value()))
+        .map(|c| (c.address(), c.to_json_value()))
         .into_group_map();
 
     for (address, expected_contract_actions) in contract_actions_by_address {
@@ -750,7 +699,7 @@ async fn test_contract_action_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_value())
+                .map_ok(|data| data.contract_actions.to_json_value())
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
@@ -773,7 +722,7 @@ async fn test_contract_action_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_value())
+                .map_ok(|data| data.contract_actions.to_json_value())
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
@@ -791,7 +740,7 @@ async fn test_contract_action_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_value())
+                .map_ok(|data| data.contract_actions.to_json_value())
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
@@ -801,104 +750,54 @@ async fn test_contract_action_subscription(
     Ok(())
 }
 
-async fn test_unshielded_utxo_subscription(
+async fn test_unshielded_transactions_subscription(
     indexer_data: &IndexerData,
     ws_api_url: &str,
 ) -> anyhow::Result<()> {
-    use graphql::graphql_types::*;
-    use tokio::time::{Duration, timeout};
+    use unshielded_transactions_subscription::UnshieldedTransactionsSubscriptionUnshieldedTransactions as UnshieldedTransactions;
 
-    let utxo_addresses = indexer_data
+    let unshielded_address = indexer_data
         .unshielded_utxos
-        .iter()
-        .map(|utxo| utxo.owner.clone())
-        .collect::<Vec<_>>();
+        .first()
+        .cloned()
+        .unwrap()
+        .owner;
 
-    assert!(!utxo_addresses.is_empty());
-
-    let unshielded_address = UnshieldedAddress(utxo_addresses[0].clone().0);
-
-    let variables = unshielded_utxos_subscription::Variables {
+    let variables = unshielded_transactions_subscription::Variables {
         address: unshielded_address.clone(),
     };
-
-    let subscription_stream =
-        graphql_ws_client::subscribe::<UnshieldedUtxosSubscription>(ws_api_url, variables)
+    let unshielded_utxos_updates =
+        graphql_ws_client::subscribe::<UnshieldedTransactionsSubscription>(ws_api_url, variables)
             .await
-            .context("subscribe to unshielded UTXOs")?;
-
-    // Wait for events with a short timeout to check for PROGRESS events
-    let events = timeout(Duration::from_millis(400), async {
-        subscription_stream
-            .take(1) // Take just 1 event to check for PROGRESS
-            .map_ok(|data| data.unshielded_utxos)
+            .context("subscribe to unshielded UTXOs")?
+            .take(3)
+            .map_ok(|data| data.unshielded_transactions)
+            .try_filter_map(|event| match event {
+                UnshieldedTransactions::UnshieldedTransaction(t) => ok(Some(t)),
+                _ => ok(None),
+            })
             .try_collect::<Vec<_>>()
             .await
-    })
-    .await;
-
-    match events {
-        Result::Ok(Result::Ok(events)) if !events.is_empty() => {
-            let has_progress = events.iter().any(|event| {
-                // Progress-only events have no transaction
-                event.transaction.is_none()
-            });
-
-            if has_progress {
-                println!("Received PROGRESS event as expected");
-            }
-
-            for event in &events {
-                // Check progress information is always present
-                println!(
-                    "Progress: {}/{}",
-                    event.progress.current_transaction_id, event.progress.highest_transaction_id
-                );
-
-                if let Some(ref created_utxos) = event.created_utxos {
-                    if !created_utxos.is_empty() {
-                        assert_eq!(created_utxos[0].owner, unshielded_address);
-                    }
-                }
-
-                if let Some(ref spent_utxos) = event.spent_utxos {
-                    if !spent_utxos.is_empty() {
-                        assert_eq!(spent_utxos[0].owner, unshielded_address);
-                    }
-                }
-            }
-        }
-        Result::Ok(Result::Ok(_)) => {
-            println!("No events received within 400ms timeout");
-        }
-        Result::Ok(Err(e)) => {
-            println!("Error collecting events: {e:?}");
-        }
-        Err(_) => {
-            println!("Timeout waiting for events - this is expected if no recent activity");
-        }
-    }
-
-    // Additional test with address that has no UTXOs
-    const NETWORK_ID: NetworkId = NetworkId::Undeployed;
-    let empty_addr_bytes = [0x11, 0x22, 0x33, 0x44]; // Raw bytes for a non-existent address
-    let empty_address = UnshieldedAddress::bech32m_encode(empty_addr_bytes, NETWORK_ID);
-
-    let empty_variables = unshielded_utxos_subscription::Variables {
-        address: empty_address,
-    };
-
-    let _empty_subscription =
-        graphql_ws_client::subscribe::<UnshieldedUtxosSubscription>(ws_api_url, empty_variables)
-            .await
-            .context("subscribe to unshielded UTXOs for empty address")?;
+            .context("collect unshielded UTXO events")?;
+    assert!(unshielded_utxos_updates.iter().any(move |update| {
+        update
+            .created_utxos
+            .iter()
+            .any(|u| u.owner == unshielded_address)
+    }));
 
     Ok(())
 }
 
 /// Test the wallet subscription.
-async fn test_wallet_subscription(ws_api_url: &str, network_id: NetworkId) -> anyhow::Result<()> {
-    use wallet_subscription::WalletSubscriptionWalletOnViewingUpdateUpdate as ViewingUpdate;
+async fn test_shielded_transactions_subscription(
+    ws_api_url: &str,
+    network_id: NetworkId,
+) -> anyhow::Result<()> {
+    use shielded_transactions_subscription::{
+        ShieldedTransactionsSubscriptionShieldedTransactions as ShieldedTransactions,
+        ShieldedTransactionsSubscriptionShieldedTransactionsOnViewingUpdateUpdate as ViewingUpdate,
+    };
 
     let viewing_key =
         ViewingKey::derive_for_testing(seed(1), network_id, PROTOCOL_VERSION_000_013_000)
@@ -907,30 +806,28 @@ async fn test_wallet_subscription(ws_api_url: &str, network_id: NetworkId) -> an
 
     // Collect wallet events until there are no more viewing updates (3s deadline).
     let mut viewing_update_timestamp = Instant::now();
-    let variables = wallet_subscription::Variables { session_id };
-    let events = graphql_ws_client::subscribe::<WalletSubscription>(ws_api_url, variables)
-        .await
-        .context("subscribe to wallet")?
-        .map_ok(|data| data.wallet)
-        .try_take_while(|event| {
-            let duration = Instant::now() - viewing_update_timestamp;
+    let variables = shielded_transactions_subscription::Variables { session_id };
+    let events =
+        graphql_ws_client::subscribe::<ShieldedTransactionsSubscription>(ws_api_url, variables)
+            .await
+            .context("subscribe to wallet")?
+            .map_ok(|data| data.shielded_transactions)
+            .try_take_while(|event| {
+                let duration = Instant::now() - viewing_update_timestamp;
 
-            if let wallet_subscription::WalletSubscriptionWallet::ViewingUpdate(_) = event {
-                viewing_update_timestamp = Instant::now()
-            }
+                if let ShieldedTransactions::ViewingUpdate(_) = event {
+                    viewing_update_timestamp = Instant::now()
+                }
 
-            ok(duration < Duration::from_secs(3))
-        })
-        .try_collect::<Vec<_>>()
-        .await
-        .context("collect wallet events")?;
+                ok(duration < Duration::from_secs(3))
+            })
+            .try_collect::<Vec<_>>()
+            .await
+            .context("collect wallet events")?;
 
     // Filter viewing updates only.
     let viewing_updates = events.into_iter().filter_map(|event| match event {
-        wallet_subscription::WalletSubscriptionWallet::ViewingUpdate(viewing_update) => {
-            Some(viewing_update)
-        }
-
+        ShieldedTransactions::ViewingUpdate(viewing_update) => Some(viewing_update),
         _ => None,
     });
 
@@ -967,7 +864,7 @@ trait SerializeExt
 where
     Self: Serialize,
 {
-    fn to_value(&self) -> serde_json::Value {
+    fn to_json_value(&self) -> serde_json::Value {
         serde_json::to_value(self).expect("can be JSON-serialized")
     }
 }
@@ -1203,30 +1100,13 @@ mod graphql {
     )]
     pub struct ContractActionQuery;
 
-    // TODO(midnight-indexer/PR #23): Temporary wrapper to dodge the
-    // GraphQLQuery error-type mismatch (anyhow::Error vs serde::de::Error).
-    // Delete this `mod graphql_types` once we align the error types or
-    // customise the derive to return our own error.
-    pub mod graphql_types {
-        use graphql_client::GraphQLQuery;
-        use indexer_api::infra::api::{HexEncoded, v1::unshielded::UnshieldedAddress};
-
-        #[derive(GraphQLQuery)]
-        #[graphql(
-            schema_path = "../indexer-api/graphql/schema-v1.graphql",
-            query_path = "./e2e.graphql",
-            response_derives = "Debug, Clone, Serialize"
-        )]
-        pub struct UnshieldedUtxosQuery;
-
-        #[derive(GraphQLQuery)]
-        #[graphql(
-            schema_path = "../indexer-api/graphql/schema-v1.graphql",
-            query_path = "./e2e.graphql",
-            response_derives = "Debug, Clone, Serialize"
-        )]
-        pub struct UnshieldedUtxosSubscription;
-    }
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct UnshieldedTransactionsSubscription;
 
     #[derive(GraphQLQuery)]
     #[graphql(
@@ -1266,5 +1146,5 @@ mod graphql {
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
-    pub struct WalletSubscription;
+    pub struct ShieldedTransactionsSubscription;
 }

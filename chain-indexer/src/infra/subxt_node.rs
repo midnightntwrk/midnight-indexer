@@ -241,8 +241,8 @@ impl SubxtNode {
         let BlockDetails {
             timestamp,
             raw_transactions,
-            created_unshielded_utxo_infos,
-            spent_unshielded_utxo_infos,
+            created_unshielded_utxos_by_hash,
+            spent_unshielded_utxos_by_hash,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
 
         let mut transactions = Vec::with_capacity(raw_transactions.len());
@@ -251,8 +251,8 @@ impl SubxtNode {
                 raw_transaction,
                 hash,
                 protocol_version,
-                &created_unshielded_utxo_infos,
-                &spent_unshielded_utxo_infos,
+                &created_unshielded_utxos_by_hash,
+                &spent_unshielded_utxos_by_hash,
                 online_client,
                 network_id,
             )
@@ -518,8 +518,8 @@ async fn make_transaction(
     raw_transaction: Vec<u8>,
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
-    created_unshielded_utxo_infos: &HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
-    spent_unshielded_utxo_infos: &HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
+    created_unshielded_utxos_by_hash: &HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
+    spent_unshielded_utxo_by_hash: &HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
     online_client: &OnlineClient<SubstrateConfig>,
     network_id: NetworkId,
 ) -> Result<Transaction, SubxtNodeError> {
@@ -534,7 +534,7 @@ async fn make_transaction(
 
     let contract_actions = ledger_transaction
         .contract_actions(
-            |address| async {
+            |address| async move {
                 runtimes::get_contract_state(online_client, address, block_hash, protocol_version)
                     .await
             },
@@ -545,11 +545,11 @@ async fn make_transaction(
         .map(Into::into)
         .collect();
 
-    let created_unshielded_utxos = created_unshielded_utxo_infos
+    let created_unshielded_utxos = created_unshielded_utxos_by_hash
         .get(&hash)
         .cloned()
         .unwrap_or_default();
-    let spent_unshielded_utxos = spent_unshielded_utxo_infos
+    let spent_unshielded_utxos = spent_unshielded_utxo_by_hash
         .get(&hash)
         .cloned()
         .unwrap_or_default();

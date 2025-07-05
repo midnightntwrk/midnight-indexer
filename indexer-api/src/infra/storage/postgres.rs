@@ -14,7 +14,7 @@
 mod block;
 mod contract_action;
 mod transaction;
-mod unshielded_utxo;
+mod unshielded;
 mod wallet;
 
 use crate::domain::storage::Storage;

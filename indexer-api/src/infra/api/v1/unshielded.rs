@@ -15,14 +15,14 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiResult, AsBytesExt, HexEncoded,
+        ApiResult, AsBytesExt, ContextExt, HexEncoded, OptionExt, ResultExt,
         v1::{
             block::BlockOffset,
             transaction::{Transaction, TransactionOffset},
         },
     },
 };
-use async_graphql::{ComplexObject, OneofObject, SimpleObject, scalar};
+use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject, scalar};
 use bech32::{Bech32m, Hrp};
 use derive_more::Debug;
 use indexer_common::domain::{
@@ -42,23 +42,23 @@ pub struct UnshieldedUtxo<S: Storage> {
     /// Owner address (Bech32m, `mn_addr…`)
     owner: UnshieldedAddress,
 
-    /// The hash of the intent that created this output (hex-encoded)
-    intent_hash: HexEncoded,
+    /// Token type (hex-encoded)
+    token_type: HexEncoded,
 
     /// UTXO value (quantity) as a string to support u128
     value: String,
 
-    /// Token type (hex-encoded)
-    token_type: HexEncoded,
-
     /// Index of this output within its creating transaction
     output_index: u32,
 
-    #[graphql(skip)]
-    created_at_transaction_data: Option<domain::Transaction>,
+    /// The hash of the intent that created this output (hex-encoded)
+    intent_hash: HexEncoded,
 
     #[graphql(skip)]
-    spent_at_transaction_data: Option<domain::Transaction>,
+    creating_transaction_id: u64,
+
+    #[graphql(skip)]
+    spending_transaction_id: Option<u64>,
 
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -66,67 +66,50 @@ pub struct UnshieldedUtxo<S: Storage> {
 
 #[ComplexObject]
 impl<S: Storage> UnshieldedUtxo<S> {
-    /// Transaction that created this UTXO
-    async fn created_at_transaction(&self) -> ApiResult<Option<Transaction<S>>> {
-        //can't change the return type to be non-optional because the node ut data is mocked and
-        // the test fails
-        Ok(self
-            .created_at_transaction_data
-            .clone()
-            .map(Transaction::<S>::from))
+    /// Transaction that created this UTXO.
+    async fn created_at_transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        let id = self.creating_transaction_id;
+
+        let transaction = cx
+            .get_storage::<S>()
+            .get_transaction_by_id(id)
+            .await
+            .map_err_into_server_error(|| format!("get transaction by ID {id})"))?
+            .ok_or_server_error(|| format!("transaction with ID {id} not found"))?;
+
+        Ok(transaction.into())
     }
 
-    /// Transaction that spent this UTXO, if spent
-    async fn spent_at_transaction(&self) -> ApiResult<Option<Transaction<S>>> {
-        Ok(self
-            .spent_at_transaction_data
-            .clone()
-            .map(Transaction::<S>::from))
+    /// Transaction that spent this UTXO.
+    async fn spent_at_transaction(&self, cx: &Context<'_>) -> ApiResult<Option<Transaction<S>>> {
+        let Some(id) = self.spending_transaction_id else {
+            return Ok(None);
+        };
+
+        let transaction = cx
+            .get_storage::<S>()
+            .get_transaction_by_id(id)
+            .await
+            .map_err_into_server_error(|| format!("get transaction by ID {id}"))?
+            .ok_or_server_error(|| format!("transaction with ID {id} not found"))?;
+
+        Ok(Some(transaction.into()))
     }
 }
 
 impl<S: Storage> From<(domain::UnshieldedUtxo, NetworkId)> for UnshieldedUtxo<S> {
     fn from((utxo, network_id): (domain::UnshieldedUtxo, NetworkId)) -> Self {
         Self {
-            owner: UnshieldedAddress::bech32m_encode(utxo.owner_address, network_id),
-            value: utxo.value.to_string(),
-            intent_hash: utxo.intent_hash.hex_encode(),
+            owner: UnshieldedAddress::bech32m_encode(utxo.owner, network_id),
             token_type: utxo.token_type.hex_encode(),
+            value: utxo.value.to_string(),
             output_index: utxo.output_index,
-            created_at_transaction_data: utxo.created_at_transaction,
-            spent_at_transaction_data: utxo.spent_at_transaction,
+            intent_hash: utxo.intent_hash.hex_encode(),
+            creating_transaction_id: utxo.creating_transaction_id,
+            spending_transaction_id: utxo.spending_transaction_id,
             _s: PhantomData,
         }
     }
-}
-
-/// Progress tracking information for unshielded token synchronization.
-#[derive(SimpleObject, Clone, Debug)]
-pub struct UnshieldedProgress {
-    /// The highest transaction ID of all currently known transactions for a particular address.
-    pub highest_transaction_id: u64,
-
-    /// The current transaction ID for a particular address.
-    pub current_transaction_id: u64,
-}
-
-/// Payload emitted by `subscription { unshieldedUtxos … }`
-#[derive(SimpleObject)]
-pub struct UnshieldedUtxoEvent<S>
-where
-    S: Storage,
-{
-    /// Progress information for wallet synchronization.
-    pub progress: UnshieldedProgress,
-
-    /// The transaction associated with this event.
-    pub transaction: Option<Transaction<S>>,
-
-    /// UTXOs created in this transaction for the subscribed address.
-    pub created_utxos: Option<Vec<UnshieldedUtxo<S>>>,
-
-    /// UTXOs spent in this transaction for the subscribed address.
-    pub spent_utxos: Option<Vec<UnshieldedUtxo<S>>>,
 }
 
 /// Either a block offset or a transaction offset.
@@ -179,6 +162,7 @@ impl UnshieldedAddress {
         }
 
         let address = bytes.try_into()?;
+
         Ok(address)
     }
 
@@ -212,7 +196,7 @@ pub enum UnshieldedAddressFormatError {
     #[error("network ID mismatch: got {0}, expected {1}")]
     UnexpectedNetworkId(NetworkId, NetworkId),
 
-    #[error(transparent)]
+    #[error("cannot convert into unshielded address")]
     ByteArrayLen(#[from] ByteArrayLenError),
 }
 

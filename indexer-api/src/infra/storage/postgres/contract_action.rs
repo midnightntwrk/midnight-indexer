@@ -34,12 +34,12 @@ impl ContractActionStorage for PostgresStorage {
         // For any address the first contract action is always a deploy.
         let query = indoc! {"
             SELECT
-                contract_actions.id,
-                contract_actions.address,
-                contract_actions.state,
-                contract_actions.attributes,
-                contract_actions.zswap_state,
-                contract_actions.transaction_id
+                id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
             FROM contract_actions
             WHERE contract_actions.address = $1
             ORDER BY id
@@ -59,26 +59,25 @@ impl ContractActionStorage for PostgresStorage {
     }
 
     #[trace(properties = { "address": "{address:?}" })]
-    async fn get_contract_action_by_address(
+    async fn get_latest_contract_action_by_address(
         &self,
         address: &RawContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
-                contract_actions.id AS id,
-                contract_actions.address,
-                contract_actions.state,
-                contract_actions.attributes,
-                contract_actions.zswap_state,
-                contract_actions.transaction_id
+                contract_actions.id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
             FROM contract_actions
-            INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
-            WHERE contract_actions.address = $1
+            WHERE address = $1
             ORDER BY id DESC
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, ContractAction>(query)
+        sqlx::query_as(query)
             .bind(address)
             .fetch_optional(&*self.pool)
             .await
@@ -92,21 +91,21 @@ impl ContractActionStorage for PostgresStorage {
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
-                contract_actions.id AS id,
-                contract_actions.address,
-                contract_actions.state,
-                contract_actions.attributes,
-                contract_actions.zswap_state,
-                contract_actions.transaction_id
+                contract_actions.id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
             FROM contract_actions
-            INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
-            WHERE contract_actions.address = $1
+            INNER JOIN transactions ON transactions.id = transaction_id
+            WHERE address = $1
             AND transactions.block_id = (SELECT id FROM blocks WHERE hash = $2)
-            ORDER BY id DESC
+            ORDER BY contract_actions.id DESC
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, ContractAction>(query)
+        sqlx::query_as(query)
             .bind(address)
             .bind(hash)
             .fetch_optional(&*self.pool)
@@ -121,22 +120,22 @@ impl ContractActionStorage for PostgresStorage {
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
-                contract_actions.id AS id,
-                contract_actions.address,
-                contract_actions.state,
-                contract_actions.attributes,
-                contract_actions.zswap_state,
-                contract_actions.transaction_id
+                contract_actions.id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
             FROM contract_actions
-            INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
+            INNER JOIN transactions ON transactions.id = transaction_id
             INNER JOIN blocks ON blocks.id = transactions.block_id
-            WHERE contract_actions.address = $1
+            WHERE address = $1
             AND blocks.height = $2
-            ORDER BY id DESC
+            ORDER BY contract_actions.id DESC
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, ContractAction>(query)
+        sqlx::query_as(query)
             .bind(address)
             .bind(height as i64)
             .fetch_optional(&*self.pool)
@@ -151,26 +150,25 @@ impl ContractActionStorage for PostgresStorage {
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
-                contract_actions.id AS id,
-                contract_actions.address,
-                contract_actions.state,
-                contract_actions.attributes,
-                contract_actions.zswap_state,
-                contract_actions.transaction_id
+                contract_actions.id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
             FROM contract_actions
-            INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
-            WHERE contract_actions.address = $1
-            AND transactions.id = (
+            WHERE address = $1
+            AND contract_actions.transaction_id = (
                 SELECT id FROM transactions
                 WHERE hash = $2
                 ORDER BY id
                 LIMIT 1
             )
-            ORDER BY id DESC
+            ORDER BY contract_actions.id DESC
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, ContractAction>(query)
+        sqlx::query_as(query)
             .bind(address)
             .bind(hash)
             .fetch_optional(&*self.pool)
@@ -185,21 +183,21 @@ impl ContractActionStorage for PostgresStorage {
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
-                contract_actions.id AS id,
-                contract_actions.address,
-                contract_actions.state,
-                contract_actions.attributes,
-                contract_actions.zswap_state,
+                contract_actions.id,
+                address,
+                state,
+                attributes,
+                zswap_state,
                 contract_actions.transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
-            WHERE contract_actions.address = $1
+            WHERE address = $1
             AND $2 = ANY(transactions.identifiers)
-            ORDER BY id DESC
+            ORDER BY contract_actions.id DESC
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, ContractAction>(query)
+        sqlx::query_as(query)
             .bind(address)
             .bind(identifier)
             .fetch_optional(&*self.pool)
@@ -213,28 +211,30 @@ impl ContractActionStorage for PostgresStorage {
     ) -> Result<Vec<ContractAction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
-                contract_actions.id AS id,
-                contract_actions.address,
-                contract_actions.state,
-                contract_actions.attributes,
-                contract_actions.zswap_state,
-                contract_actions.transaction_id
+                id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
             FROM contract_actions
-            WHERE contract_actions.transaction_id = $1
+            WHERE transaction_id = $1
             ORDER BY id
         "};
 
-        sqlx::query_as::<_, ContractAction>(query)
+        sqlx::query_as(query)
             .bind(id as i64)
             .fetch_all(&*self.pool)
             .await
     }
 
-    #[trace(properties = { "address": "{address:?}", "height": "{height}" })]
+    #[trace(properties = {
+        "address": "{address:?}",
+        "contract_action_id": "{contract_action_id}"
+    })]
     fn get_contract_actions_by_address(
         &self,
         address: &RawContractAddress,
-        height: u32,
         mut contract_action_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send {
@@ -242,25 +242,23 @@ impl ContractActionStorage for PostgresStorage {
             loop {
                 let query = indoc! {"
                     SELECT
-                        contract_actions.id AS id,
-                        contract_actions.address,
-                        contract_actions.state,
-                        contract_actions.attributes,
-                        contract_actions.zswap_state,
-                        contract_actions.transaction_id
+                        contract_actions.id,
+                        address,
+                        state,
+                        attributes,
+                        zswap_state,
+                        transaction_id
                     FROM contract_actions
-                    INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
+                    INNER JOIN transactions ON transactions.id = transaction_id
                     INNER JOIN blocks ON blocks.id = transactions.block_id
-                    WHERE contract_actions.address = $1
-                    AND blocks.height >= $2
-                    AND contract_actions.id >= $3
-                    ORDER BY id
-                    LIMIT $4
+                    WHERE address = $1
+                    AND contract_actions.id >= $2
+                    ORDER BY contract_actions.id
+                    LIMIT $3
                 "};
 
-                let actions = sqlx::query_as::<_, ContractAction>(query)
+                let actions = sqlx::query_as(query)
                     .bind(address)
-                    .bind(height as i64)
                     .bind(contract_action_id as i64)
                     .bind(batch_size.get() as i64)
                     .fetch(&*self.pool)
@@ -268,9 +266,8 @@ impl ContractActionStorage for PostgresStorage {
                     .try_collect::<Vec<_>>()
                     .await?;
 
-                let max_id = actions.iter().map(|action| action.id).max();
-                match max_id {
-                    Some(max_id) => contract_action_id = max_id + 1,
+                match actions.last() {
+                    Some(action) => contract_action_id = action.id + 1,
                     None => break,
                 }
 
@@ -292,9 +289,31 @@ impl ContractActionStorage for PostgresStorage {
             WHERE contract_action_id = $1
         "};
 
-        sqlx::query_as::<_, crate::domain::ContractBalance>(query)
+        sqlx::query_as(query)
             .bind(contract_action_id as i64)
             .fetch_all(&*self.pool)
             .await
+    }
+
+    async fn get_contract_action_id_by_block_height(
+        &self,
+        block_height: u32,
+    ) -> Result<Option<u64>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT contract_actions.id
+            FROM contract_actions
+            JOIN transactions ON transactions.id = transaction_id
+            JOIN blocks ON blocks.id = transactions.block_id
+            WHERE blocks.height >= $1
+            ORDER BY contract_actions.id
+            LIMIT 1
+        "};
+
+        let id = sqlx::query_as::<_, (i64,)>(query)
+            .bind(block_height as i64)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        Ok(id.map(|(id,)| id as u64))
     }
 }

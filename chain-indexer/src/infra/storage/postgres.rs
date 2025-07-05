@@ -133,7 +133,7 @@ impl Storage for PostgresStorage {
         &self,
         block_height: u32,
     ) -> Result<BlockTransactions, sqlx::Error> {
-        let sql = indoc! {"
+        let query = indoc! {"
             SELECT
                 id,
                 protocol_version,
@@ -144,18 +144,18 @@ impl Storage for PostgresStorage {
         "};
 
         let (block_id, protocol_version, block_parent_hash, block_timestamp) =
-            sqlx::query_as::<_, (i64, i64, ByteArray<32>, i64)>(sql)
+            sqlx::query_as::<_, (i64, i64, ByteArray<32>, i64)>(query)
                 .bind(block_height as i64)
                 .fetch_one(&*self.pool)
                 .await?;
 
-        let sql = indoc! {"
+        let query = indoc! {"
             SELECT raw
             FROM transactions
             WHERE block_id = $1
         "};
 
-        let transactions = sqlx::query_as::<_, (ByteVec,)>(sql)
+        let transactions = sqlx::query_as::<_, (ByteVec,)>(query)
             .bind(block_id)
             .fetch(&*self.pool)
             .map_ok(|(t,)| t)
@@ -305,7 +305,7 @@ async fn save_transactions(
         .await?;
     }
 
-    let max_id = transaction_ids.iter().max().copied().map(|n| n as u64);
+    let max_id = transaction_ids.last().map(|&n| n as u64);
     Ok((max_id, transaction_ids))
 }
 
@@ -326,7 +326,7 @@ async fn save_unshielded_utxos(
                 INSERT INTO unshielded_utxos (
                     creating_transaction_id,
                     output_index,
-                    owner_address,
+                    owner,
                     token_type,
                     intent_hash,
                     value,
@@ -341,7 +341,7 @@ async fn save_unshielded_utxos(
             sqlx::query(query)
                 .bind(*transaction_id)
                 .bind(utxo_info_for_spending.output_index as i32)
-                .bind(utxo_info_for_spending.owner_address)
+                .bind(utxo_info_for_spending.owner)
                 .bind(utxo_info_for_spending.token_type)
                 .bind(utxo_info_for_spending.intent_hash)
                 .bind(U128BeBytes::from(utxo_info_for_spending.value))
@@ -354,7 +354,7 @@ async fn save_unshielded_utxos(
             INSERT INTO unshielded_utxos (
                 creating_transaction_id,
                 output_index,
-                owner_address,
+                owner,
                 token_type,
                 intent_hash,
                 value
@@ -365,7 +365,7 @@ async fn save_unshielded_utxos(
             .push_values(utxos.iter(), |mut q, utxo| {
                 q.push_bind(transaction_id)
                     .push_bind(utxo.output_index as i32)
-                    .push_bind(utxo.owner_address)
+                    .push_bind(utxo.owner)
                     .push_bind(utxo.token_type)
                     .push_bind(utxo.intent_hash)
                     .push_bind(U128BeBytes::from(utxo.value));
