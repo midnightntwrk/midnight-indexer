@@ -36,7 +36,7 @@ pub struct Transaction {
     pub end_index: u64,
     pub paid_fees: u128,
     pub estimated_fees: u128,
-    /// DUST events emitted during transaction processing
+    /// DUST events emitted during transaction processing.
     pub dust_events: Vec<DustEvent>,
 }
 
