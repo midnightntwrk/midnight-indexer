@@ -146,13 +146,7 @@ async fn process_initial_utxos(
     let (generation_infos, dust_utxos): (Vec<_>, Vec<_>) = initial_utxos
         .into_iter()
         .map(|(output, generation, generation_index)| {
-            let generation_info = DustGenerationInfo {
-                value: generation.value,
-                owner: generation.owner,
-                nonce: generation.nonce,
-                ctime: generation.ctime,
-                dtime: generation.dtime,
-            };
+            let generation_info = *generation;
 
             let dust_utxo = DustUtxo {
                 // TODO: Calculate proper commitment from output fields once ledger API provides it.
