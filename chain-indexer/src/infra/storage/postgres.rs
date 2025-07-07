@@ -18,7 +18,8 @@ use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        ByteArray, ByteVec, ContractActionVariant, ContractBalance, UnshieldedUtxo,
+        ByteArray, ByteVec, ContractActionVariant, ContractBalance, DustCommitment, DustNullifier,
+        DustOwner, RawTransaction, UnshieldedUtxo,
         dust::{DustEvent, DustEventDetails, DustGenerationInfo, DustRegistration, DustUtxo},
     },
     infra::{pool::postgres::PostgresPool, sqlx::U128BeBytes},
@@ -178,7 +179,7 @@ impl Storage for PostgresStorage {
     async fn save_dust_events(
         &self,
         events: &[DustEvent],
-        transaction_id: i64,
+        transaction_id: u64,
     ) -> Result<(), sqlx::Error> {
         if events.is_empty() {
             return Ok(());
@@ -207,8 +208,8 @@ impl Storage for PostgresStorage {
             "};
 
             sqlx::query(query)
-                .bind(transaction_id)
-                .bind(&event.transaction_hash.0[..])
+                .bind(transaction_id as i64)
+                .bind(event.transaction_hash.as_ref())
                 .bind(event.logical_segment as i16)
                 .bind(event.physical_segment as i16)
                 .bind(event_type)
@@ -243,11 +244,11 @@ impl Storage for PostgresStorage {
 
         QueryBuilder::new(query)
             .push_values(utxos.iter(), |mut q, utxo| {
-                q.push_bind(&utxo.commitment.0[..])
-                    .push_bind(utxo.nullifier.as_ref().map(|n| &n.0[..]))
+                q.push_bind(utxo.commitment.as_ref())
+                    .push_bind(utxo.nullifier.as_ref().map(|n| n.as_ref()))
                     .push_bind(U128BeBytes::from(utxo.initial_value))
-                    .push_bind(&utxo.owner.0[..])
-                    .push_bind(&utxo.nonce.0[..])
+                    .push_bind(utxo.owner.as_ref())
+                    .push_bind(utxo.nonce.as_ref())
                     .push_bind(utxo.seq as i32)
                     .push_bind(utxo.ctime as i64)
                     .push_bind(utxo.generation_info_id.map(|id| id as i64))
@@ -284,8 +285,8 @@ impl Storage for PostgresStorage {
         QueryBuilder::new(query)
             .push_values(generation_info.iter(), |mut q, info| {
                 q.push_bind(U128BeBytes::from(info.value))
-                    .push_bind(&info.owner.0[..])
-                    .push_bind(&info.nonce.0[..])
+                    .push_bind(info.owner.as_ref())
+                    .push_bind(info.nonce.as_ref())
                     .push_bind(info.ctime as i64)
                     .push_bind(if info.dtime == 0 {
                         None
@@ -324,7 +325,7 @@ impl Storage for PostgresStorage {
         QueryBuilder::new(query)
             .push_values(registrations.iter(), |mut q, reg| {
                 q.push_bind(reg.cardano_address.as_ref())
-                    .push_bind(&reg.dust_address.0[..])
+                    .push_bind(reg.dust_address.as_ref())
                     .push_bind(reg.is_valid)
                     .push_bind(reg.registered_at as i64)
                     .push_bind(reg.removed_at.map(|t| t as i64));
@@ -341,7 +342,7 @@ impl Storage for PostgresStorage {
 
     async fn get_dust_generation_info_by_owner(
         &self,
-        owner: &[u8],
+        owner: DustOwner,
     ) -> Result<Vec<DustGenerationInfo>, sqlx::Error> {
         let query = indoc! {"
             SELECT value, owner, nonce, ctime, dtime
@@ -351,7 +352,7 @@ impl Storage for PostgresStorage {
         "};
 
         let rows = sqlx::query(query)
-            .bind(owner)
+            .bind(owner.as_ref())
             .fetch_all(&*self.pool)
             .await?;
 
@@ -394,7 +395,10 @@ impl Storage for PostgresStorage {
         Ok(results)
     }
 
-    async fn get_dust_utxos_by_owner(&self, owner: &[u8]) -> Result<Vec<DustUtxo>, sqlx::Error> {
+    async fn get_dust_utxos_by_owner(
+        &self,
+        owner: DustOwner,
+    ) -> Result<Vec<DustUtxo>, sqlx::Error> {
         let query = indoc! {"
             SELECT commitment, nullifier, initial_value, owner, nonce, seq, ctime,
                    generation_info_id, spent_at_transaction_id
@@ -404,7 +408,7 @@ impl Storage for PostgresStorage {
         "};
 
         let rows = sqlx::query(query)
-            .bind(owner)
+            .bind(owner.as_ref())
             .fetch_all(&*self.pool)
             .await?;
 
@@ -473,31 +477,32 @@ impl Storage for PostgresStorage {
         &self,
         prefix: &str,
         after_block: Option<u32>,
-    ) -> Result<Vec<(i64, Vec<u8>)>, sqlx::Error> {
+    ) -> Result<Vec<(u64, RawTransaction)>, sqlx::Error> {
         // Use the prefix index for privacy-preserving search.
         let prefix_len = prefix.len().min(8); // Max prefix length supported by index.
         let truncated_prefix = &prefix[..prefix_len];
 
         let query = if let Some(_block_height) = after_block {
             indoc! {"
-                SELECT DISTINCT du.spent_at_transaction_id, du.nullifier
-                FROM dust_utxos du
-                JOIN transactions t ON du.spent_at_transaction_id = t.id
-                JOIN blocks b ON t.block_id = b.id
-                WHERE substring(du.nullifier::text, 1, $1) = $2
-                  AND du.nullifier IS NOT NULL
-                  AND du.spent_at_transaction_id IS NOT NULL
-                  AND b.height > $3
-                ORDER BY du.spent_at_transaction_id
+                SELECT DISTINCT dust_utxos.spent_at_transaction_id, transactions.raw
+                FROM dust_utxos
+                JOIN transactions ON dust_utxos.spent_at_transaction_id = transactions.id
+                JOIN blocks ON transactions.block_id = blocks.id
+                WHERE substring(dust_utxos.nullifier::text, 1, $1) = $2
+                  AND dust_utxos.nullifier IS NOT NULL
+                  AND dust_utxos.spent_at_transaction_id IS NOT NULL
+                  AND blocks.height > $3
+                ORDER BY dust_utxos.spent_at_transaction_id
             "}
         } else {
             indoc! {"
-                SELECT DISTINCT spent_at_transaction_id, nullifier
+                SELECT DISTINCT dust_utxos.spent_at_transaction_id, transactions.raw
                 FROM dust_utxos
-                WHERE substring(nullifier::text, 1, $1) = $2
-                  AND nullifier IS NOT NULL
-                  AND spent_at_transaction_id IS NOT NULL
-                ORDER BY spent_at_transaction_id
+                JOIN transactions ON dust_utxos.spent_at_transaction_id = transactions.id
+                WHERE substring(dust_utxos.nullifier::text, 1, $1) = $2
+                  AND dust_utxos.nullifier IS NOT NULL
+                  AND dust_utxos.spent_at_transaction_id IS NOT NULL
+                ORDER BY dust_utxos.spent_at_transaction_id
             "}
         };
 
@@ -515,8 +520,8 @@ impl Storage for PostgresStorage {
             .into_iter()
             .map(|row| {
                 let tx_id: i64 = row.try_get(0)?;
-                let nullifier: Vec<u8> = row.try_get(1)?;
-                Ok((tx_id, nullifier))
+                let raw_tx: RawTransaction = row.try_get(1)?;
+                Ok((tx_id as u64, raw_tx))
             })
             .collect::<Result<Vec<_>, sqlx::Error>>()?;
 
@@ -545,9 +550,9 @@ impl Storage for PostgresStorage {
 
     async fn mark_dust_utxo_spent(
         &self,
-        commitment: &[u8],
-        nullifier: &[u8],
-        transaction_id: i64,
+        commitment: DustCommitment,
+        nullifier: DustNullifier,
+        transaction_id: u64,
     ) -> Result<(), sqlx::Error> {
         let query = indoc! {"
             UPDATE dust_utxos
@@ -558,9 +563,9 @@ impl Storage for PostgresStorage {
         "};
 
         let result = sqlx::query(query)
-            .bind(nullifier)
-            .bind(transaction_id)
-            .bind(commitment)
+            .bind(nullifier.as_ref())
+            .bind(transaction_id as i64)
+            .bind(commitment.as_ref())
             .execute(&*self.pool)
             .await?;
 

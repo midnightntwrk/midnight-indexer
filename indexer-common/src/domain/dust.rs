@@ -11,134 +11,160 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ByteArray, ByteVec};
+use crate::domain::{ByteArray, ByteVec, TransactionHash};
 use serde::{Deserialize, Serialize};
 
-/// DUST event for the indexer domain
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// DUST event for the indexer domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustEvent {
-    pub transaction_hash: ByteArray<32>,
+    pub transaction_hash: TransactionHash,
     pub logical_segment: u16,
     pub physical_segment: u16,
     pub event_details: DustEventDetails,
 }
 
-/// DUST event details
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// DUST event details.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum DustEventDetails {
-    /// Initial DUST UTXO creation
+    /// Initial DUST UTXO creation.
     DustInitialUtxo {
-        /// Qualified DUST output
+        /// Qualified DUST output.
         output: QualifiedDustOutput,
-        /// Generation information
+        /// Generation information.
         generation: DustGenerationInfo,
-        /// Merkle tree index for generation
+        /// Merkle tree index for generation.
         generation_index: u64,
     },
-    /// DUST generation time update (when backing Night is spent)
+
+    /// DUST generation time update (when backing Night is spent).
     DustGenerationDtimeUpdate {
-        /// Updated generation information
+        /// Updated generation information.
         generation: DustGenerationInfo,
-        /// Merkle tree index for generation
+        /// Merkle tree index for generation.
         generation_index: u64,
     },
-    /// DUST spend processed
+
+    /// DUST spend processed.
     DustSpendProcessed {
-        /// DUST commitment
+        /// DUST commitment.
         commitment: ByteArray<32>,
-        /// Commitment merkle tree index
+        /// Commitment merkle tree index.
         commitment_index: u64,
-        /// DUST nullifier
+        /// DUST nullifier.
         nullifier: ByteArray<32>,
-        /// Fee amount paid
+        /// Fee amount paid.
         v_fee: u128,
-        /// Timestamp of spend
+        /// Timestamp of spend.
         time: u64,
-        /// DUST parameters
+        /// DUST parameters.
         params: DustParameters,
     },
 }
 
-/// Qualified DUST output information
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Qualified DUST output information.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QualifiedDustOutput {
-    /// Initial value of DUST UTXO
+    /// Initial value of DUST UTXO.
     pub initial_value: u128,
-    /// Owner's DUST public key
+
+    /// Owner's DUST public key.
     pub owner: ByteArray<32>,
-    /// Nonce for this DUST UTXO
+
+    /// Nonce for this DUST UTXO.
     pub nonce: ByteArray<32>,
-    /// Sequence number
+
+    /// Sequence number.
     pub seq: u32,
-    /// Creation time
+
+    /// Creation time.
     pub ctime: u64,
-    /// Backing Night UTXO nonce
+
+    /// Backing Night UTXO nonce.
     pub backing_night: ByteArray<32>,
-    /// Merkle tree index
+
+    /// Merkle tree index.
     pub mt_index: u64,
 }
 
-/// DUST generation information
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// DUST generation information.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustGenerationInfo {
-    /// Value of backing Night UTXO
+    /// Value of backing Night UTXO.
     pub value: u128,
-    /// Owner's DUST public key
+
+    /// Owner's DUST public key.
     pub owner: ByteArray<32>,
-    /// Initial nonce
+
+    /// Initial nonce.
     pub nonce: ByteArray<32>,
-    /// Creation time
+
+    /// Creation time.
     pub ctime: u64,
-    /// Decay time (when Night is spent)
+
+    /// Decay time (when Night is spent).
     pub dtime: u64,
 }
 
-/// DUST parameters
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// DUST parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustParameters {
-    /// Night to DUST ratio
+    /// Night to DUST ratio.
     pub night_dust_ratio: u64,
-    /// Generation decay rate
+
+    /// Generation decay rate.
     pub generation_decay_rate: u32,
-    /// DUST grace period in seconds
+
+    /// DUST grace period in seconds.
     pub dust_grace_period: u64,
 }
 
-/// Registration mapping between Cardano address and DUST address
+/// Registration mapping between Cardano address and DUST address.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustRegistration {
-    /// Cardano address (Night holder)
+    /// Cardano address (Night holder).
     pub cardano_address: ByteVec,
-    /// DUST address (where DUST is sent)
+
+    /// DUST address (where DUST is sent).
     pub dust_address: ByteArray<32>,
-    /// Whether this registration is currently valid (only one per Cardano address)
+
+    /// Whether this registration is currently valid (only one per Cardano address).
     pub is_valid: bool,
-    /// When this registration was created
+
+    /// When this registration was created.
     pub registered_at: u64,
-    /// When this registration was removed (if applicable)
+
+    /// When this registration was removed (if applicable).
     pub removed_at: Option<u64>,
 }
 
-/// DUST UTXO state
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// DUST UTXO state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustUtxo {
-    /// DUST commitment
+    /// DUST commitment.
     pub commitment: ByteArray<32>,
-    /// DUST nullifier (when spent)
+
+    /// DUST nullifier (when spent).
     pub nullifier: Option<ByteArray<32>>,
-    /// Initial value
+
+    /// Initial value.
     pub initial_value: u128,
-    /// Owner's DUST public key
+
+    /// Owner's DUST public key.
     pub owner: ByteArray<32>,
-    /// UTXO nonce
+
+    /// UTXO nonce.
     pub nonce: ByteArray<32>,
-    /// Sequence number
+
+    /// Sequence number.
     pub seq: u32,
-    /// Creation time
+
+    /// Creation time.
     pub ctime: u64,
-    /// Reference to generation info
+
+    /// Reference to generation info.
     pub generation_info_id: Option<u64>,
-    /// Transaction where this was spent
+
+    /// Transaction where this was spent.
     pub spent_at_transaction_id: Option<u64>,
 }

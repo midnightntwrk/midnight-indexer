@@ -119,7 +119,7 @@ CREATE TABLE dust_generation_info (
     dtime BIGINT
 );
 
-CREATE INDEX dust_generation_info_owner_idx ON dust_generation_info(owner);
+CREATE INDEX ON dust_generation_info(owner);
 
 CREATE TABLE dust_utxos (
     id BIGSERIAL PRIMARY KEY,
@@ -134,10 +134,10 @@ CREATE TABLE dust_utxos (
     nullifier BYTEA
 );
 
-CREATE INDEX dust_utxos_owner_idx ON dust_utxos(owner);
-CREATE INDEX dust_utxos_generation_idx ON dust_utxos(generation_info_id);
-CREATE INDEX dust_utxos_spent_idx ON dust_utxos(spent_at_transaction_id);
-CREATE INDEX dust_utxos_nullifier_prefix_idx ON dust_utxos(substring(nullifier::text, 1, 8)) WHERE nullifier IS NOT NULL;
+CREATE INDEX ON dust_utxos(owner);
+CREATE INDEX ON dust_utxos(generation_info_id);
+CREATE INDEX ON dust_utxos(spent_at_transaction_id);
+CREATE INDEX ON dust_utxos(substring(nullifier::text, 1, 8)) WHERE nullifier IS NOT NULL;
 
 CREATE TABLE cnight_registrations (
     id BIGSERIAL PRIMARY KEY,
@@ -149,8 +149,8 @@ CREATE TABLE cnight_registrations (
     UNIQUE(cardano_address, dust_address)
 );
 
-CREATE INDEX cnight_registrations_cardano_addr_idx ON cnight_registrations(cardano_address);
-CREATE INDEX cnight_registrations_dust_addr_idx ON cnight_registrations(dust_address);
+CREATE INDEX ON cnight_registrations(cardano_address);
+CREATE INDEX ON cnight_registrations(dust_address);
 
 -- TODO: These tables are for future merkle tree storage once ledger integration is complete.
 CREATE TABLE dust_commitment_tree (
@@ -177,6 +177,6 @@ CREATE TABLE dust_events (
     event_data JSONB NOT NULL
 );
 
-CREATE INDEX dust_events_transaction_idx ON dust_events(transaction_id);
-CREATE INDEX dust_events_type_idx ON dust_events(event_type);
+CREATE INDEX ON dust_events(transaction_id);
+CREATE INDEX ON dust_events(event_type);
 

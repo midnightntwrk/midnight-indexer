@@ -15,7 +15,7 @@ use crate::domain::Transaction;
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
-    ByteArray, NetworkId, RawTransaction, TransactionResultWithEvents, ledger::ContractState,
+    ByteArray, NetworkId, RawTransaction, TransactionResultWithDustEvents, ledger::ContractState,
 };
 use std::ops::DerefMut;
 use thiserror::Error;
@@ -99,10 +99,10 @@ impl LedgerState {
         let mut end_index = self.zswap_first_free();
 
         // Apply transaction with DUST event capture
-        let TransactionResultWithEvents {
+        let TransactionResultWithDustEvents {
             result: transaction_result,
             dust_events,
-        } = self.apply_transaction_with_events(
+        } = self.apply_transaction(
             &transaction.raw,
             block_parent_hash,
             block_timestamp,

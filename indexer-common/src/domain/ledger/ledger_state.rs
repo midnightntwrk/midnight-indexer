@@ -14,7 +14,7 @@
 use crate::domain::{
     ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
     RawContractAddress, RawLedgerState, RawTransaction, RawZswapState, RawZswapStateRoot,
-    TransactionResult, TransactionResultWithEvents, UnshieldedUtxo,
+    TransactionResult, TransactionResultWithDustEvents, UnshieldedUtxo,
     ledger::{Error, LedgerTransactionV5, NetworkIdExt, SerializableV5Ext},
 };
 use fastrace::trace;
@@ -83,7 +83,7 @@ impl LedgerState {
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
         network_id: NetworkId,
-    ) -> Result<TransactionResult, Error> {
+    ) -> Result<TransactionResultWithDustEvents, Error> {
         match self {
             LedgerState::V5(ledger_state) => {
                 let ledger_transaction = deserialize_v5::<LedgerTransactionV5, _>(
@@ -120,37 +120,13 @@ impl LedgerState {
                     TransactionResultV5::Failure(_) => TransactionResult::Failure,
                 };
 
-                Ok(transaction_result)
+                Ok(TransactionResultWithDustEvents {
+                    result: transaction_result,
+                    dust_events: Vec::new(), /* TODO: Extract events from TransactionResultV5
+                                              * when ledger support is available */
+                })
             }
         }
-    }
-
-    /// Apply the given raw transaction and capture any DUST events emitted.
-    #[trace(properties = { "network_id": "{network_id}" })]
-    pub fn apply_transaction_with_events(
-        &mut self,
-        transaction: &RawTransaction,
-        block_parent_hash: ByteArray<32>,
-        block_timestamp: u64,
-        network_id: NetworkId,
-    ) -> Result<TransactionResultWithEvents, Error> {
-        // For now, just apply the transaction normally and return empty events.
-        // The actual event conversion will be implemented when the ledger
-        // abstraction is extended to handle events properly.
-        //
-        // Currently blocked by:
-        // - The midnight-ledger library needs to expose DUST events through its API
-        // - TransactionResultV5 from the ledger only provides limited event information
-        // - We need structured DUST event data from the ledger before we can extract and convert
-        //   them to our domain model
-        let result =
-            self.apply_transaction(transaction, block_parent_hash, block_timestamp, network_id)?;
-
-        Ok(TransactionResultWithEvents {
-            result,
-            dust_events: Vec::new(), /* TODO: Implement event extraction once ledger support is
-                                      * available. */
-        })
     }
 
     /// Get the first free index of the zswap state.

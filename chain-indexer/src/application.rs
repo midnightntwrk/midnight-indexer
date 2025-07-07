@@ -15,7 +15,7 @@ mod metrics;
 
 use crate::{
     application::metrics::Metrics,
-    domain::{Block, BlockInfo, DustEventProcessor, LedgerState, Node, storage::Storage},
+    domain::{Block, BlockInfo, LedgerState, Node, dust, storage::Storage},
 };
 use anyhow::{Context, bail};
 use async_stream::stream;
@@ -42,48 +42,22 @@ pub struct Config {
     pub save_ledger_state_after: u32,
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
-    #[serde(default)]
     pub dust: DustConfig,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct DustConfig {
-    /// Enable DUST processing (default: true)
-    #[serde(default = "default_dust_enabled")]
+    /// Enable DUST processing.
     pub enabled: bool,
-    /// Merkle tree batch update size (default: 1000)
-    #[serde(default = "default_merkle_batch_size")]
+
+    /// Merkle tree batch update size.
     pub merkle_tree_batch_size: usize,
-    /// Privacy prefix length for nullifier queries (default: 8)
-    #[serde(default = "default_privacy_prefix_length")]
+
+    /// Privacy prefix length for nullifier queries.
     pub privacy_prefix_length: usize,
-    /// Maximum registrations per DUST address (default: 10)
-    #[serde(default = "default_max_registrations")]
+
+    /// Maximum registrations per DUST address.
     pub max_registrations_per_address: usize,
-}
-
-impl Default for DustConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            merkle_tree_batch_size: 1000,
-            privacy_prefix_length: 8,
-            max_registrations_per_address: 10,
-        }
-    }
-}
-
-fn default_dust_enabled() -> bool {
-    true
-}
-fn default_merkle_batch_size() -> usize {
-    1000
-}
-fn default_privacy_prefix_length() -> usize {
-    8
-}
-fn default_max_registrations() -> usize {
-    10
 }
 
 impl Default for Config {
@@ -94,7 +68,12 @@ impl Default for Config {
             save_ledger_state_after: 1000,
             caught_up_max_distance: 10,
             caught_up_leeway: 5,
-            dust: DustConfig::default(),
+            dust: DustConfig {
+                enabled: false,
+                merkle_tree_batch_size: 1000,
+                privacy_prefix_length: 8,
+                max_registrations_per_address: 10,
+            },
         }
     }
 }
@@ -420,7 +399,7 @@ async fn index_block(
     // Process DUST events from all transactions in the block.
     if config.dust.enabled {
         for transaction in &block.transactions {
-            DustEventProcessor::process_transaction_dust_events(storage, transaction)
+            dust::process_transaction_dust_events(storage, transaction)
                 .await
                 .context("process DUST events")?;
         }
