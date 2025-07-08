@@ -103,11 +103,11 @@ impl From<&ContractAttributes> for ContractActionVariant {
 }
 
 /// An unshielded UTXO.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnshieldedUtxo {
-    pub value: u128,
     pub owner: RawUnshieldedAddress,
     pub token_type: RawTokenType,
+    pub value: u128,
     pub intent_hash: IntentHash,
     pub output_index: u32,
 }

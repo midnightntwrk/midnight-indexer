@@ -100,7 +100,7 @@ async fn run() -> anyhow::Result<()> {
         let node = SubxtNode::new(node_config)
             .await
             .context("create SubxtNode")?;
-        let storage = chain_indexer::infra::storage::sqlite::SqliteStorage::new(pool.clone());
+        let storage = chain_indexer::infra::storage::Storage::new(pool.clone());
 
         chain_indexer::application::run(
             application_config.into(),

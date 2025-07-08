@@ -45,10 +45,7 @@ use std::{convert::Into, sync::LazyLock};
 /// data uses undeployed network format, we use NetworkId::Undeployed for consistency.
 const TEST_NETWORK_ID: NetworkId = NetworkId::Undeployed;
 
-#[cfg(feature = "cloud")]
-type ChainIndexerStorage = chain_indexer::infra::storage::postgres::PostgresStorage;
-#[cfg(feature = "standalone")]
-type ChainIndexerStorage = chain_indexer::infra::storage::sqlite::SqliteStorage;
+type ChainIndexerStorage = chain_indexer::infra::storage::Storage;
 
 #[cfg(feature = "cloud")]
 type IndexerApiStorage = indexer_api::infra::storage::postgres::PostgresStorage;
@@ -99,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
         make_cipher(env!("APP__INFRA__SECRET").to_string().into()).context("make cipher")?;
 
     run_tests(
-        chain_indexer::infra::storage::postgres::PostgresStorage::new(pool.clone()),
+        chain_indexer::infra::storage::Storage::new(pool.clone()),
         indexer_api::infra::storage::postgres::PostgresStorage::new(cipher, pool),
     )
     .await?;
@@ -122,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
         make_cipher(env!("APP__INFRA__SECRET").to_string().into()).context("make cipher")?;
 
     run_tests(
-        chain_indexer::infra::storage::sqlite::SqliteStorage::new(pool.clone()),
+        chain_indexer::infra::storage::Storage::new(pool.clone()),
         indexer_api::infra::storage::sqlite::SqliteStorage::new(cipher, pool),
     )
     .await?;
@@ -137,7 +134,7 @@ async fn run_tests(
     // chain-indexer ===============================================================================
 
     let highest_block_hash = chain_indexer_storage
-        .get_highest_block()
+        .get_highest_block_info()
         .await
         .context("get max block height")?;
     assert!(highest_block_hash.is_none());
@@ -160,7 +157,7 @@ async fn run_tests(
         .context("save block 2")?;
 
     let highest_block = chain_indexer_storage
-        .get_highest_block()
+        .get_highest_block_info()
         .await
         .context("get highest block hash")?;
     assert_matches!(

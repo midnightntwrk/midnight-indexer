@@ -21,7 +21,7 @@ where
     Self: Clone + Send + Sync + 'static,
 {
     /// Get the hash and height of the highest stored block.
-    async fn get_highest_block(&self) -> Result<Option<BlockInfo>, sqlx::Error>;
+    async fn get_highest_block_info(&self) -> Result<Option<BlockInfo>, sqlx::Error>;
 
     /// Get the number of stored transactions.
     async fn get_transaction_count(&self) -> Result<u64, sqlx::Error>;
@@ -29,20 +29,20 @@ where
     /// Get the number of stored contract actions: deploys, calls, updates.
     async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error>;
 
+    /// Get all transactions with additional block data for the given block height.
+    async fn get_block_transactions(
+        &self,
+        block_height: u32,
+    ) -> Result<BlockTransactions, sqlx::Error>;
+
     /// Save the given block, update transaction IDs, and return the max transaction ID.
     async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error>;
 
     /// Save the given unshielded UTXOs.
     async fn save_unshielded_utxos(
         &self,
-        utxos: &[UnshieldedUtxo],
-        transaction_id: &i64,
+        utxos: impl AsRef<[UnshieldedUtxo]> + Send,
+        transaction_id: u64,
         spent: bool,
     ) -> Result<(), sqlx::Error>;
-
-    /// Get all transactions with additional block data for the given block height.
-    async fn get_block_transactions(
-        &self,
-        block_height: u32,
-    ) -> Result<BlockTransactions, sqlx::Error>;
 }
