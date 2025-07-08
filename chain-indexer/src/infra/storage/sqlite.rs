@@ -226,8 +226,6 @@ impl Storage for SqliteStorage {
             return Ok(());
         }
 
-        let mut tx = self.pool.begin().await?;
-
         // SQLite doesn't support batch inserts with QueryBuilder the same way.
         // So we insert one by one.
         for utxo in utxos {
@@ -256,11 +254,11 @@ impl Storage for SqliteStorage {
                 .bind(utxo.ctime as i64)
                 .bind(utxo.generation_info_id.map(|id| id as i64))
                 .bind(utxo.spent_at_transaction_id.map(|id| id as i64))
-                .execute(&mut *tx)
+                .execute(&*self.pool)
                 .await?;
         }
 
-        tx.commit().await
+        Ok(())
     }
 
     async fn save_dust_generation_info(
@@ -271,8 +269,6 @@ impl Storage for SqliteStorage {
         if generation_info.is_empty() {
             return Ok(());
         }
-
-        let mut tx = self.pool.begin().await?;
 
         for info in generation_info {
             let query = indoc! {"
@@ -298,11 +294,11 @@ impl Storage for SqliteStorage {
                     Some(info.dtime as i64)
                 })
                 .bind(0i64) // TODO: merkle_index should come from somewhere.
-                .execute(&mut *tx)
+                .execute(&*self.pool)
                 .await?;
         }
 
-        tx.commit().await
+        Ok(())
     }
 
     async fn save_cnight_registrations(
@@ -313,8 +309,6 @@ impl Storage for SqliteStorage {
         if registrations.is_empty() {
             return Ok(());
         }
-
-        let mut tx = self.pool.begin().await?;
 
         for reg in registrations {
             let query = indoc! {"
@@ -337,11 +331,11 @@ impl Storage for SqliteStorage {
                 .bind(if reg.is_valid { 1i32 } else { 0i32 }) // SQLite boolean
                 .bind(reg.registered_at as i64)
                 .bind(reg.removed_at.map(|t| t as i64))
-                .execute(&mut *tx)
+                .execute(&*self.pool)
                 .await?;
         }
 
-        tx.commit().await
+        Ok(())
     }
 
     fn get_dust_generation_info_by_owner(
