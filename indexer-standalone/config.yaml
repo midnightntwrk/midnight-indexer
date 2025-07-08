@@ -7,7 +7,6 @@ application:
   caught_up_max_distance: 10
   caught_up_leeway: 5
   dust:
-    enabled: false
     merkle_tree_batch_size: 1000
     privacy_prefix_length: 8
     max_registrations_per_address: 10

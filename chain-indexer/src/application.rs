@@ -15,7 +15,7 @@ mod metrics;
 
 use crate::{
     application::metrics::Metrics,
-    domain::{Block, BlockInfo, LedgerState, Node, dust, storage::Storage},
+    domain::{Block, BlockInfo, LedgerState, Node, dust::process_dust_events, storage::Storage},
 };
 use anyhow::{Context, bail};
 use async_stream::stream;
@@ -47,9 +47,6 @@ pub struct Config {
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct DustConfig {
-    /// Enable DUST processing.
-    pub enabled: bool,
-
     /// Merkle tree batch update size.
     pub merkle_tree_batch_size: usize,
 
@@ -69,7 +66,6 @@ impl Default for Config {
             caught_up_max_distance: 10,
             caught_up_leeway: 5,
             dust: DustConfig {
-                enabled: false,
                 merkle_tree_batch_size: 1000,
                 privacy_prefix_length: 8,
                 max_registrations_per_address: 10,
@@ -397,12 +393,10 @@ async fn index_block(
     let max_transaction_id = storage.save_block(&mut block).await.context("save block")?;
 
     // Process DUST events from all transactions in the block.
-    if config.dust.enabled {
-        for transaction in &block.transactions {
-            dust::process_transaction_dust_events(storage, transaction)
-                .await
-                .context("process DUST events")?;
-        }
+    for transaction in &block.transactions {
+        process_dust_events(transaction, storage)
+            .await
+            .context("process DUST events")?;
     }
 
     // Then save the ledger state. This order is important to maintain consistency.

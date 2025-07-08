@@ -25,7 +25,6 @@ pub struct DustEvent {
 
 /// DUST event details.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
 pub enum DustEventDetails {
     /// Initial DUST UTXO creation.
     DustInitialUtxo {

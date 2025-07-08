@@ -98,7 +98,7 @@ impl LedgerState {
         let start_index = self.zswap_first_free();
         let mut end_index = self.zswap_first_free();
 
-        // Apply transaction with DUST event capture
+        // Apply transaction with DUST event capture.
         let TransactionResultWithDustEvents {
             result: transaction_result,
             dust_events,

@@ -36,6 +36,7 @@ pub type BlockAuthor = ByteArray<32>;
 pub type BlockHash = ByteArray<32>;
 pub type ContractEntryPoint = ByteVec;
 pub type DustCommitment = ByteArray<32>;
+pub type DustNonce = ByteArray<32>;
 pub type DustNullifier = ByteArray<32>;
 pub type DustOwner = ByteArray<32>;
 pub type IntentHash = ByteArray<32>;

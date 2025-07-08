@@ -48,7 +48,6 @@ pub struct ApplicationConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct DustConfig {
-    pub enabled: bool,
     pub merkle_tree_batch_size: usize,
     pub privacy_prefix_length: usize,
     pub max_registrations_per_address: usize,
@@ -72,7 +71,6 @@ impl From<ApplicationConfig> for chain_indexer::application::Config {
             caught_up_max_distance,
             caught_up_leeway,
             dust: chain_indexer::application::DustConfig {
-                enabled: config.dust.enabled,
                 merkle_tree_batch_size: config.dust.merkle_tree_batch_size,
                 privacy_prefix_length: config.dust.privacy_prefix_length,
                 max_registrations_per_address: config.dust.max_registrations_per_address,

@@ -16,7 +16,7 @@ use indexer_common::domain::{
     ByteArray,
     dust::{DustEvent, DustEventDetails, DustGenerationInfo, DustUtxo},
 };
-use log::{info, warn};
+use log::info;
 use thiserror::Error;
 
 // Type aliases for event grouping to improve readability.
@@ -41,9 +41,9 @@ pub enum DustProcessingError {
 }
 
 /// Process all DUST events from a transaction and update the database.
-pub async fn process_transaction_dust_events(
-    storage: &impl Storage,
+pub async fn process_dust_events(
     transaction: &Transaction,
+    storage: &impl Storage,
 ) -> Result<(), DustProcessingError> {
     if transaction.dust_events.is_empty() {
         return Ok(());
@@ -115,12 +115,14 @@ fn group_events_by_type(
                 } => {
                     initial.push((output, generation, *generation_index));
                 }
+
                 DustEventDetails::DustGenerationDtimeUpdate {
                     generation,
                     generation_index,
                 } => {
                     updates.push((generation, *generation_index));
                 }
+
                 DustEventDetails::DustSpendProcessed {
                     commitment,
                     nullifier,
@@ -129,11 +131,8 @@ fn group_events_by_type(
                 } => {
                     spends.push((*commitment, *nullifier, *v_fee));
                 }
-                _ => {
-                    // Handle any future event types.
-                    warn!("unhandled DUST event type");
-                }
             }
+
             (initial, updates, spends)
         },
     )
@@ -175,23 +174,6 @@ async fn process_initial_utxos(
     if !dust_utxos.is_empty() {
         storage.save_dust_utxos(&dust_utxos).await?;
     }
-
-    Ok(())
-}
-
-/// Process system transactions that might contain registration changes.
-/// This is called for transactions received from the node's native-token-observation pallet.
-pub async fn process_system_transaction_registrations(
-    _storage: &impl Storage,
-    _transaction: &Transaction,
-) -> Result<(), DustProcessingError> {
-    // Note: This would be implemented once we have the system transaction format
-    // from Justin's node work. For now, we'll process registrations via events
-    // or direct node communication.
-
-    // Placeholder for future implementation when node system transactions
-    // include registration data.
-    warn!("system transaction registration processing not yet implemented");
 
     Ok(())
 }
