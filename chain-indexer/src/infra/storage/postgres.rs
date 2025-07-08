@@ -557,7 +557,7 @@ impl Storage for PostgresStorage {
             SET nullifier = $1,
                 spent_at_transaction_id = $2
             WHERE commitment = $3
-              AND spent_at_transaction_id IS NULL
+            AND spent_at_transaction_id IS NULL
         "};
 
         let result = sqlx::query(query)

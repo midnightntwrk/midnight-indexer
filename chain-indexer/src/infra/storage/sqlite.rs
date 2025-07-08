@@ -479,10 +479,10 @@ impl Storage for SqliteStorage {
                         JOIN transactions ON dust_utxos.spent_at_transaction_id = transactions.id
                         JOIN blocks ON transactions.block_id = blocks.id
                         WHERE substr(hex(dust_utxos.nullifier), 1, $1) = $2
-                          AND dust_utxos.nullifier IS NOT NULL
-                          AND dust_utxos.spent_at_transaction_id IS NOT NULL
-                          AND dust_utxos.spent_at_transaction_id >= $3
-                          AND blocks.height > $4
+                        AND dust_utxos.nullifier IS NOT NULL
+                        AND dust_utxos.spent_at_transaction_id IS NOT NULL
+                        AND dust_utxos.spent_at_transaction_id >= $3
+                        AND blocks.height > $4
                         ORDER BY dust_utxos.spent_at_transaction_id
                         LIMIT $5
                     "}
@@ -492,9 +492,9 @@ impl Storage for SqliteStorage {
                         FROM dust_utxos
                         JOIN transactions ON dust_utxos.spent_at_transaction_id = transactions.id
                         WHERE substr(hex(dust_utxos.nullifier), 1, $1) = $2
-                          AND dust_utxos.nullifier IS NOT NULL
-                          AND dust_utxos.spent_at_transaction_id IS NOT NULL
-                          AND dust_utxos.spent_at_transaction_id >= $3
+                        AND dust_utxos.nullifier IS NOT NULL
+                        AND dust_utxos.spent_at_transaction_id IS NOT NULL
+                        AND dust_utxos.spent_at_transaction_id >= $3
                         ORDER BY dust_utxos.spent_at_transaction_id
                         LIMIT $4
                     "}
@@ -565,7 +565,7 @@ impl Storage for SqliteStorage {
             SET nullifier = $1,
                 spent_at_transaction_id = $2
             WHERE commitment = $3
-              AND spent_at_transaction_id IS NULL
+            AND spent_at_transaction_id IS NULL
         "};
 
         let result = sqlx::query(query)
