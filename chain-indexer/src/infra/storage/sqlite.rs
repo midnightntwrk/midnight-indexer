@@ -15,12 +15,16 @@ use crate::domain::{
     Block, BlockInfo, BlockTransactions, ContractAction, Transaction, storage::Storage,
 };
 use async_stream::try_stream;
+use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{
     domain::{
         ByteArray, ByteVec, ContractActionVariant, ContractBalance, DustCommitment, DustNonce,
         DustNullifier, DustOwner, RawTransaction, RawTransactionIdentifier, UnshieldedUtxo,
-        dust::{DustEvent, DustEventType, DustGenerationInfo, DustRegistration, DustUtxo},
+        dust::{
+            DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, DustRegistration,
+            DustUtxo,
+        },
     },
     infra::{pool::sqlite::SqlitePool, sqlx::U128BeBytes},
     stream::flatten_chunks,
@@ -710,6 +714,17 @@ async fn save_transactions(
             tx,
         )
         .await?;
+
+        // Process DUST events within the same transaction.
+        if !transaction.dust_events.is_empty() {
+            process_dust_events_in_transaction(
+                &transaction.dust_events,
+                *transaction_id as u64,
+                tx,
+            )
+            .await?;
+            save_dust_events_tx(&transaction.dust_events, *transaction_id as u64, tx).await?;
+        }
     }
 
     let max_id = transaction_ids.last().map(|&n| n as u64);
@@ -871,6 +886,289 @@ async fn save_contract_balances(
             .bind(U128BeBytes::from(balance.amount))
             .execute(&mut **tx)
             .await?;
+    }
+
+    Ok(())
+}
+
+// Transaction-aware DUST processing functions.
+
+#[trace]
+async fn save_dust_events_tx(
+    events: impl AsRef<[DustEvent]>,
+    transaction_id: u64,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    let events = events.as_ref();
+    for event in events {
+        let event_type = DustEventType::from(&event.event_details);
+
+        // SQLite doesn't support custom enum types like PostgreSQL does.
+        // While PostgreSQL can use the DustEventType enum directly (via sqlx::Type),
+        // SQLite requires us to manually convert the enum to a string representation.
+        let event_type_str = match event_type {
+            DustEventType::DustInitialUtxo => "DustInitialUtxo",
+            DustEventType::DustGenerationDtimeUpdate => "DustGenerationDtimeUpdate",
+            DustEventType::DustSpendProcessed => "DustSpendProcessed",
+        };
+
+        let query = indoc! {"
+            INSERT INTO dust_events (
+                transaction_id,
+                transaction_hash,
+                logical_segment,
+                physical_segment,
+                event_type,
+                event_data
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+        "};
+
+        sqlx::query(query)
+            .bind(transaction_id as i64)
+            .bind(event.transaction_hash.as_ref())
+            .bind(event.logical_segment as i32)
+            .bind(event.physical_segment as i32)
+            .bind(event_type_str)
+            .bind(Json(&event.event_details))
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    Ok(())
+}
+
+#[trace]
+async fn process_dust_events_in_transaction(
+    events: impl AsRef<[DustEvent]>,
+    transaction_id: u64,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    // Group events by type for efficient processing.
+    let (initial_utxos, generation_updates, spend_events) = group_dust_events_by_type(&events);
+
+    // Process initial DUST UTXOs.
+    if !initial_utxos.is_empty() {
+        process_initial_utxos_tx(initial_utxos, tx).await?;
+    }
+
+    // Process generation time updates.
+    for (generation, generation_index) in generation_updates {
+        update_dust_generation_dtime_tx(generation_index, generation.dtime, tx).await?;
+    }
+
+    // Process DUST spends.
+    for (commitment, nullifier, _v_fee) in spend_events {
+        mark_dust_utxo_spent_tx(commitment, nullifier, transaction_id, tx).await?;
+    }
+
+    Ok(())
+}
+
+type InitialUtxoEvent<'a> = (
+    &'a indexer_common::domain::dust::QualifiedDustOutput,
+    &'a DustGenerationInfo,
+    u64,
+);
+type GenerationUpdateEvent<'a> = (&'a DustGenerationInfo, u64);
+type SpendEvent = (ByteArray<32>, ByteArray<32>, u128);
+
+fn group_dust_events_by_type<'a>(
+    events: &'a impl AsRef<[DustEvent]>,
+) -> (
+    Vec<InitialUtxoEvent<'a>>,
+    Vec<GenerationUpdateEvent<'a>>,
+    Vec<SpendEvent>,
+) {
+    events.as_ref().iter().fold(
+        (Vec::new(), Vec::new(), Vec::new()),
+        |(mut initial, mut updates, mut spends), event| {
+            match &event.event_details {
+                DustEventDetails::DustInitialUtxo {
+                    output,
+                    generation,
+                    generation_index,
+                } => {
+                    initial.push((output, generation, *generation_index));
+                }
+
+                DustEventDetails::DustGenerationDtimeUpdate {
+                    generation,
+                    generation_index,
+                } => {
+                    updates.push((generation, *generation_index));
+                }
+
+                DustEventDetails::DustSpendProcessed {
+                    commitment,
+                    nullifier,
+                    v_fee,
+                    ..
+                } => {
+                    spends.push((*commitment, *nullifier, *v_fee));
+                }
+            }
+
+            (initial, updates, spends)
+        },
+    )
+}
+
+async fn process_initial_utxos_tx(
+    initial_utxos: Vec<InitialUtxoEvent<'_>>,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    let (generation_infos, dust_utxos) = initial_utxos
+        .into_iter()
+        .map(|(output, generation, generation_index)| {
+            let generation_info = *generation;
+
+            let dust_utxo = DustUtxo {
+                // TODO: Calculate proper commitment from output fields once ledger API provides it.
+                // For now using owner as placeholder which is incorrect.
+                commitment: indexer_common::domain::ByteArray(output.owner.0),
+                nullifier: None, // Not spent yet.
+                initial_value: output.initial_value,
+                owner: output.owner,
+                nonce: output.nonce,
+                seq: output.seq,
+                ctime: output.ctime,
+                generation_info_id: Some(generation_index),
+                spent_at_transaction_id: None,
+            };
+
+            (generation_info, dust_utxo)
+        })
+        .unzip::<_, _, Vec<_>, Vec<_>>();
+
+    // Save generation info first.
+    if !generation_infos.is_empty() {
+        save_dust_generation_info_tx(&generation_infos, tx).await?;
+    }
+
+    // Then save DUST UTXOs.
+    if !dust_utxos.is_empty() {
+        save_dust_utxos_tx(&dust_utxos, tx).await?;
+    }
+
+    Ok(())
+}
+
+async fn save_dust_generation_info_tx(
+    generation_info: &[DustGenerationInfo],
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    // SQLite doesn't support batch inserts the same way.
+    for info in generation_info {
+        let query = indoc! {"
+            INSERT INTO dust_generation_info (
+                value,
+                owner,
+                nonce,
+                ctime,
+                dtime,
+                merkle_index
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+        "};
+
+        sqlx::query(query)
+            .bind(U128BeBytes::from(info.value))
+            .bind(info.owner.as_ref())
+            .bind(info.nonce.as_ref())
+            .bind(info.ctime as i64)
+            .bind(if info.dtime == 0 {
+                None
+            } else {
+                Some(info.dtime as i64)
+            })
+            .bind(0i64) // TODO: merkle_index should come from somewhere.
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    Ok(())
+}
+
+async fn save_dust_utxos_tx(utxos: &[DustUtxo], tx: &mut Tx) -> Result<(), sqlx::Error> {
+    // SQLite doesn't support batch inserts the same way.
+    for utxo in utxos {
+        let query = indoc! {"
+            INSERT INTO dust_utxos (
+                commitment,
+                nullifier,
+                initial_value,
+                owner,
+                nonce,
+                seq,
+                ctime,
+                generation_info_id,
+                spent_at_transaction_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        "};
+
+        sqlx::query(query)
+            .bind(utxo.commitment.as_ref())
+            .bind(utxo.nullifier.as_ref().map(|n| n.as_ref()))
+            .bind(U128BeBytes::from(utxo.initial_value))
+            .bind(utxo.owner.as_ref())
+            .bind(utxo.nonce.as_ref())
+            .bind(utxo.seq as i32)
+            .bind(utxo.ctime as i64)
+            .bind(utxo.generation_info_id.map(|id| id as i64))
+            .bind(utxo.spent_at_transaction_id.map(|id| id as i64))
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    Ok(())
+}
+
+async fn update_dust_generation_dtime_tx(
+    generation_index: u64,
+    dtime: u64,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        UPDATE dust_generation_info
+        SET dtime = $1
+        WHERE merkle_index = $2
+    "};
+
+    sqlx::query(query)
+        .bind(dtime as i64)
+        .bind(generation_index as i64)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+async fn mark_dust_utxo_spent_tx(
+    commitment: DustCommitment,
+    nullifier: DustNullifier,
+    transaction_id: u64,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        UPDATE dust_utxos
+        SET nullifier = $1,
+            spent_at_transaction_id = $2
+        WHERE commitment = $3
+        AND spent_at_transaction_id IS NULL
+    "};
+
+    let result = sqlx::query(query)
+        .bind(nullifier.as_ref())
+        .bind(transaction_id as i64)
+        .bind(commitment.as_ref())
+        .execute(&mut **tx)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        // Either UTXO doesn't exist or is already spent.
+        return Err(sqlx::Error::RowNotFound);
     }
 
     Ok(())

@@ -15,7 +15,7 @@ mod metrics;
 
 use crate::{
     application::metrics::Metrics,
-    domain::{Block, BlockInfo, LedgerState, Node, dust::process_dust_events, storage::Storage},
+    domain::{Block, BlockInfo, LedgerState, Node, storage::Storage},
 };
 use anyhow::{Context, bail};
 use async_stream::stream;
@@ -389,15 +389,8 @@ async fn index_block(
         info!(caught_up:%; "caught-up status changed")
     }
 
-    // First save and update the block.
+    // Save the block and all transaction data (including DUST events) in a single transaction.
     let max_transaction_id = storage.save_block(&mut block).await.context("save block")?;
-
-    // Process DUST events from all transactions in the block.
-    for transaction in &block.transactions {
-        process_dust_events(transaction, storage)
-            .await
-            .context("process DUST events")?;
-    }
 
     // Then save the ledger state. This order is important to maintain consistency.
     if *caught_up || block.height % save_ledger_state_after == 0 {
