@@ -22,11 +22,16 @@ use indexer_common::{
 };
 use indoc::indoc;
 use sqlx::{QueryBuilder, types::Json};
-use std::iter;
 
-type Tx<D> = sqlx::Transaction<'static, D>;
+#[cfg(feature = "cloud")]
+type Tx = sqlx::Transaction<'static, sqlx::Postgres>;
 
-#[derive(Clone)]
+#[cfg(feature = "standalone")]
+type Tx = sqlx::Transaction<'static, sqlx::Sqlite>;
+
+/// Unified storage implementation for PostgreSQL (cloud) and SQLite (standalone). Uses Cargo
+/// features to select the appropriate database backend at build time.
+#[derive(Debug, Clone)]
 pub struct Storage {
     #[cfg(feature = "cloud")]
     pool: indexer_common::infra::pool::postgres::PostgresPool,
@@ -150,37 +155,23 @@ impl domain::storage::Storage for Storage {
         })
     }
 
+    #[trace]
     async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         let (max_transaction_id, transaction_ids) = save_block(block, &mut tx).await?;
         tx.commit().await?;
 
-        // Update the block's transactions with their database IDs
+        // Update the block's transactions with their database IDs.
         for (transaction, id) in block.transactions.iter_mut().zip(transaction_ids.iter()) {
             transaction.id = *id as u64;
         }
 
         Ok(max_transaction_id)
     }
-
-    async fn save_unshielded_utxos(
-        &self,
-        utxos: impl AsRef<[UnshieldedUtxo]> + Send,
-        transaction_id: u64,
-        spent: bool,
-    ) -> Result<(), sqlx::Error> {
-        let mut tx = self.pool.begin().await?;
-        save_unshielded_utxos(utxos.as_ref(), transaction_id as i64, spent, &mut tx).await?;
-        tx.commit().await
-    }
 }
 
 #[trace]
-async fn save_block(
-    block: &Block,
-    #[cfg(feature = "cloud")] tx: &mut Tx<sqlx::Postgres>,
-    #[cfg(feature = "standalone")] tx: &mut Tx<sqlx::Sqlite>,
-) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
+async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
     let query = indoc! {"
         INSERT INTO blocks (
             hash,
@@ -193,7 +184,7 @@ async fn save_block(
     "};
 
     let block_id = QueryBuilder::new(query)
-        .push_values(iter::once(block), |mut q, block| {
+        .push_values([block], |mut q, block| {
             let Block {
                 hash,
                 height,
@@ -227,8 +218,7 @@ async fn save_block(
 async fn save_transactions(
     transactions: &[Transaction],
     block_id: i64,
-    #[cfg(feature = "cloud")] tx: &mut Tx<sqlx::Postgres>,
-    #[cfg(feature = "standalone")] tx: &mut Tx<sqlx::Sqlite>,
+    tx: &mut Tx,
 ) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
     if transactions.is_empty() {
         return Ok((None, vec![]));
@@ -346,13 +336,12 @@ async fn save_transactions(
     Ok((max_id, transaction_ids))
 }
 
-#[trace]
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_unshielded_utxos(
     utxos: &[UnshieldedUtxo],
     transaction_id: i64,
     spent: bool,
-    #[cfg(feature = "cloud")] tx: &mut Tx<sqlx::Postgres>,
-    #[cfg(feature = "standalone")] tx: &mut Tx<sqlx::Sqlite>,
+    tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
     if utxos.is_empty() {
         return Ok(());
@@ -444,8 +433,7 @@ async fn save_unshielded_utxos(
 async fn save_contract_actions(
     contract_actions: &[ContractAction],
     transaction_id: i64,
-    #[cfg(feature = "cloud")] tx: &mut Tx<sqlx::Postgres>,
-    #[cfg(feature = "standalone")] tx: &mut Tx<sqlx::Sqlite>,
+    tx: &mut Tx,
 ) -> Result<Vec<i64>, sqlx::Error> {
     if contract_actions.is_empty() {
         return Ok(Vec::new());
@@ -485,8 +473,7 @@ async fn save_contract_actions(
 #[trace]
 async fn save_contract_balances(
     balances: Vec<(i64, ContractBalance)>,
-    #[cfg(feature = "cloud")] tx: &mut Tx<sqlx::Postgres>,
-    #[cfg(feature = "standalone")] tx: &mut Tx<sqlx::Sqlite>,
+    tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
     if !balances.is_empty() {
         let query = indoc! {"
@@ -517,10 +504,11 @@ async fn save_contract_balances(
 }
 
 #[cfg(feature = "standalone")]
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_identifiers(
     identifiers: &[indexer_common::domain::RawTransactionIdentifier],
     transaction_id: i64,
-    tx: &mut Tx<sqlx::Sqlite>,
+    tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
     if !identifiers.is_empty() {
         let query = indoc! {"

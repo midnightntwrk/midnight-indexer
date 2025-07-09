@@ -231,7 +231,7 @@ mod tests {
         postgres::PgSslMode,
         types::{Json, time::OffsetDateTime},
     };
-    use std::{error::Error as StdError, iter, time::Duration};
+    use std::{error::Error as StdError, time::Duration};
     use testcontainers::{ImageExt, runners::AsyncRunner};
     use testcontainers_modules::postgres::Postgres;
     use uuid::Uuid;
@@ -278,7 +278,7 @@ mod tests {
             ) 
         "};
         QueryBuilder::new(query)
-            .push_values(iter::once(1), |mut q, id| {
+            .push_values([1], |mut q, id| {
                 q.push_bind(id.to_string().into_bytes())
                     .push_bind(id)
                     .push_bind(1_000)

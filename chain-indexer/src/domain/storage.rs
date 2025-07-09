@@ -12,7 +12,6 @@
 // limitations under the License.
 
 use crate::domain::{Block, BlockInfo, BlockTransactions};
-use indexer_common::domain::UnshieldedUtxo;
 
 /// Storage abstraction.
 #[trait_variant::make(Send)]
@@ -37,12 +36,4 @@ where
 
     /// Save the given block, update transaction IDs, and return the max transaction ID.
     async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error>;
-
-    /// Save the given unshielded UTXOs.
-    async fn save_unshielded_utxos(
-        &self,
-        utxos: impl AsRef<[UnshieldedUtxo]> + Send,
-        transaction_id: u64,
-        spent: bool,
-    ) -> Result<(), sqlx::Error>;
 }

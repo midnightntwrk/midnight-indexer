@@ -194,7 +194,7 @@ mod tests {
         QueryBuilder, Row,
         types::{Json, time::OffsetDateTime},
     };
-    use std::{error::Error as StdError, iter, time::Duration};
+    use std::{error::Error as StdError, time::Duration};
     use uuid::Uuid;
 
     #[tokio::test]
@@ -215,7 +215,7 @@ mod tests {
             ) 
         "};
         let block_id = QueryBuilder::new(query)
-            .push_values(iter::once(1), |mut q, id| {
+            .push_values([1], |mut q, id| {
                 q.push_bind(id.to_string())
                     .push_bind(id)
                     .push_bind(1_000)
@@ -264,7 +264,7 @@ mod tests {
             INSERT INTO transaction_identifiers (transaction_id, identifier)
         "};
             QueryBuilder::new(query)
-                .push_values(iter::once("identifier"), |mut q, identifier| {
+                .push_values(["identifier"], |mut q, identifier| {
                     q.push_bind(transaction_id).push_bind(identifier);
                 })
                 .build()
