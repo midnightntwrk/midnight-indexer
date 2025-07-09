@@ -112,8 +112,7 @@ async fn run() -> anyhow::Result<()> {
     });
 
     let indexer_api = task::spawn({
-        let storage =
-            indexer_api::infra::storage::sqlite::SqliteStorage::new(cipher.clone(), pool.clone());
+        let storage = indexer_api::infra::storage::Storage::new(cipher.clone(), pool.clone());
         let subscriber = pub_sub.subscriber();
         let api = AxumApi::new(
             api_config,

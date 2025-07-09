@@ -46,11 +46,7 @@ use std::{convert::Into, sync::LazyLock};
 const TEST_NETWORK_ID: NetworkId = NetworkId::Undeployed;
 
 type ChainIndexerStorage = chain_indexer::infra::storage::Storage;
-
-#[cfg(feature = "cloud")]
-type IndexerApiStorage = indexer_api::infra::storage::postgres::PostgresStorage;
-#[cfg(feature = "standalone")]
-type IndexerApiStorage = indexer_api::infra::storage::sqlite::SqliteStorage;
+type IndexerApiStorage = indexer_api::infra::storage::Storage;
 
 #[tokio::test]
 #[cfg(feature = "cloud")]
@@ -97,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
 
     run_tests(
         chain_indexer::infra::storage::Storage::new(pool.clone()),
-        indexer_api::infra::storage::postgres::PostgresStorage::new(cipher, pool),
+        indexer_api::infra::storage::Storage::new(cipher, pool),
     )
     .await?;
 
@@ -120,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
 
     run_tests(
         chain_indexer::infra::storage::Storage::new(pool.clone()),
-        indexer_api::infra::storage::sqlite::SqliteStorage::new(cipher, pool),
+        indexer_api::infra::storage::Storage::new(cipher, pool),
     )
     .await?;
 

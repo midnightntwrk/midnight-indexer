@@ -16,6 +16,8 @@ use crate::{
     infra::storage,
 };
 use chacha20poly1305::ChaCha20Poly1305;
+use derive_more::Debug;
+#[cfg(feature = "cloud")]
 use fastrace::trace;
 use futures::TryStreamExt;
 use indexer_common::domain::{ByteVec, DecryptViewingKeyError, ViewingKey};
@@ -29,8 +31,9 @@ use std::{num::NonZeroUsize, time::Duration};
 
 /// Unified storage implementation for PostgreSQL (cloud) and SQLite (standalone). Uses Cargo
 /// features to select the appropriate database backend at build time.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Storage {
+    #[debug(skip)]
     cipher: ChaCha20Poly1305,
 
     #[cfg(feature = "cloud")]
@@ -103,7 +106,7 @@ impl domain::storage::Storage for Storage {
         Ok(Some(tx))
     }
 
-    #[trace(properties = { "from": "{from}", "limit": "{limit}" })]
+    #[cfg_attr(feature = "cloud", trace(properties = { "from": "{from}", "limit": "{limit}" }))]
     async fn get_transactions(
         &self,
         from: u64,
@@ -128,7 +131,7 @@ impl domain::storage::Storage for Storage {
             .await
     }
 
-    #[trace]
+    #[cfg_attr(feature = "cloud", trace)]
     async fn save_relevant_transactions(
         &self,
         viewing_key: &ViewingKey,
@@ -189,7 +192,7 @@ impl domain::storage::Storage for Storage {
         Ok(())
     }
 
-    #[trace]
+    #[cfg_attr(feature = "cloud", trace)]
     async fn active_wallets(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error> {
         // Query wallets.
         let query = indoc! {"
@@ -255,7 +258,7 @@ impl domain::storage::Storage for Storage {
         Ok(ids)
     }
 
-    #[trace(properties = { "id": "{id}" })]
+    #[cfg_attr(feature = "cloud", trace(properties = { "id": "{id}" }))]
     async fn get_wallet_by_id(
         &self,
         id: Uuid,

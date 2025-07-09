@@ -13,12 +13,15 @@
 
 use crate::{
     domain::{UnshieldedUtxo, storage::unshielded::UnshieldedUtxoStorage},
-    infra::storage::sqlite::SqliteStorage,
+    infra::storage::Storage,
 };
+#[cfg(feature = "cloud")]
+use fastrace::trace;
 use indexer_common::domain::RawUnshieldedAddress;
 use indoc::indoc;
 
-impl UnshieldedUtxoStorage for SqliteStorage {
+impl UnshieldedUtxoStorage for Storage {
+    #[cfg_attr(feature = "cloud", trace(properties = { "address": "{address}" }))]
     async fn get_unshielded_utxos_by_address(
         &self,
         address: RawUnshieldedAddress,
@@ -38,7 +41,7 @@ impl UnshieldedUtxoStorage for SqliteStorage {
             ORDER BY id
         "};
 
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
+        let utxos = sqlx::query_as(query)
             .bind(address.as_ref())
             .fetch_all(&*self.pool)
             .await?;
@@ -46,6 +49,7 @@ impl UnshieldedUtxoStorage for SqliteStorage {
         Ok(utxos)
     }
 
+    #[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
     async fn get_unshielded_utxos_created_by_transaction(
         &self,
         transaction_id: u64,
@@ -65,7 +69,7 @@ impl UnshieldedUtxoStorage for SqliteStorage {
             ORDER BY output_index
         "};
 
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
+        let utxos = sqlx::query_as(query)
             .bind(transaction_id as i64)
             .fetch_all(&*self.pool)
             .await?;
@@ -73,6 +77,7 @@ impl UnshieldedUtxoStorage for SqliteStorage {
         Ok(utxos)
     }
 
+    #[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
     async fn get_unshielded_utxos_spent_by_transaction(
         &self,
         transaction_id: u64,
@@ -92,7 +97,7 @@ impl UnshieldedUtxoStorage for SqliteStorage {
             ORDER BY output_index
         "};
 
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
+        let utxos = sqlx::query_as(query)
             .bind(transaction_id as i64)
             .fetch_all(&*self.pool)
             .await?;
@@ -100,6 +105,10 @@ impl UnshieldedUtxoStorage for SqliteStorage {
         Ok(utxos)
     }
 
+    #[cfg_attr(
+        feature = "cloud",
+        trace(properties = { "address": "{address}", "transaction_id": "{transaction_id}" })
+    )]
     async fn get_unshielded_utxos_by_address_created_by_transaction(
         &self,
         address: RawUnshieldedAddress,
@@ -121,7 +130,7 @@ impl UnshieldedUtxoStorage for SqliteStorage {
             ORDER BY output_index
         "};
 
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
+        let utxos = sqlx::query_as(query)
             .bind(transaction_id as i64)
             .bind(address.as_ref())
             .fetch_all(&*self.pool)
@@ -130,6 +139,10 @@ impl UnshieldedUtxoStorage for SqliteStorage {
         Ok(utxos)
     }
 
+    #[cfg_attr(
+        feature = "cloud",
+        trace(properties = { "address": "{address}", "transaction_id": "{transaction_id}" })
+    )]
     async fn get_unshielded_utxos_by_address_spent_by_transaction(
         &self,
         address: RawUnshieldedAddress,
@@ -151,7 +164,7 @@ impl UnshieldedUtxoStorage for SqliteStorage {
             ORDER BY output_index
         "};
 
-        let utxos = sqlx::query_as::<_, UnshieldedUtxo>(query)
+        let utxos = sqlx::query_as(query)
             .bind(transaction_id as i64)
             .bind(address.as_ref())
             .fetch_all(&*self.pool)

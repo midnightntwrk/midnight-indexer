@@ -83,7 +83,7 @@ async fn run() -> anyhow::Result<()> {
             .context("run Postgres migrations")?;
     }
     let cipher = make_cipher(secret).context("make cipher")?;
-    let storage = infra::storage::postgres::PostgresStorage::new(cipher, pool);
+    let storage = infra::storage::Storage::new(cipher, pool);
 
     let ledger_state_storage =
         ledger_state_storage::nats::NatsLedgerStateStorage::new(ledger_state_storage_config)

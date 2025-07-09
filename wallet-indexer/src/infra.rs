@@ -11,25 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "cloud")]
-use indexer_common::infra::pool;
-#[cfg(feature = "cloud")]
-use indexer_common::infra::pub_sub;
-#[cfg(feature = "cloud")]
-use secrecy::SecretString;
-
+#[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
 #[cfg(any(feature = "cloud", feature = "standalone"))]
 pub mod storage;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "cloud")))]
 #[cfg(feature = "cloud")]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
     #[serde(rename = "storage")]
-    pub storage_config: pool::postgres::Config,
+    pub storage_config: indexer_common::infra::pool::postgres::Config,
 
     #[cfg(feature = "cloud")]
     #[serde(rename = "pub_sub")]
-    pub pub_sub_config: pub_sub::nats::Config,
+    pub pub_sub_config: indexer_common::infra::pub_sub::nats::Config,
 
-    pub secret: SecretString,
+    pub secret: secrecy::SecretString,
 }
