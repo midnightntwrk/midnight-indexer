@@ -50,7 +50,7 @@ impl PostgresStorage {
 }
 
 impl Storage for PostgresStorage {
-    type Database = sqlx::Postgres;
+    type Tx = sqlx::Transaction<'static, sqlx::Postgres>;
 
     #[trace(properties = { "wallet_id": "{wallet_id}" })]
     async fn acquire_lock(&mut self, wallet_id: Uuid) -> Result<Option<Tx>, sqlx::Error> {

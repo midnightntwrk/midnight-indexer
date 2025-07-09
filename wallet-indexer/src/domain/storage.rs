@@ -16,6 +16,9 @@ use indexer_common::domain::ViewingKey;
 use std::{num::NonZeroUsize, time::Duration};
 use uuid::Uuid;
 
+/// Sqlx transaction.
+pub type Tx<D> = sqlx::Transaction<'static, D>;
+
 /// Storage abstraction. `acquire_lock` tries to acquire an application level lock and, if
 /// successful, returns a transaction which is intended to be used by all the other functions.
 #[trait_variant::make(Send)]
@@ -23,6 +26,7 @@ pub trait Storage
 where
     Self: Clone + Send + Sync + 'static,
 {
+    /// Sqlx transaction.
     type Database: sqlx::Database;
 
     /// Try to acquire an application level lock for the given session ID. Return a transaction if
@@ -30,7 +34,7 @@ where
     async fn acquire_lock(
         &mut self,
         wallet_id: Uuid,
-    ) -> Result<Option<sqlx::Transaction<'static, Self::Database>>, sqlx::Error>;
+    ) -> Result<Option<Tx<Self::Database>>, sqlx::Error>;
 
     /// Get at most `limit` transactions starting at the given `from` ID; it is supposed that the
     /// IDs are a gapless strictly monotonically increasing sequence.
@@ -38,7 +42,7 @@ where
         &self,
         from: u64,
         limit: NonZeroUsize,
-        tx: &mut sqlx::Transaction<'static, Self::Database>,
+        tx: &mut Tx<Self::Database>,
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
     /// For the given session ID, transactionally save the given relevant `transactions` and
@@ -48,7 +52,7 @@ where
         viewing_key: &ViewingKey,
         transactions: &[Transaction],
         last_indexed_transaction_id: u64,
-        tx: &mut sqlx::Transaction<'static, Self::Database>,
+        tx: &mut Tx<Self::Database>,
     ) -> Result<(), sqlx::Error>;
 
     /// Get the IDs of active walltes, thereby marking "old" ones inactive.
@@ -58,6 +62,6 @@ where
     async fn get_wallet_by_id(
         &self,
         session_id: Uuid,
-        tx: &mut sqlx::Transaction<'static, Self::Database>,
+        tx: &mut Tx<Self::Database>,
     ) -> Result<Wallet, sqlx::Error>;
 }

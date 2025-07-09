@@ -39,10 +39,12 @@ impl ViewingKey {
     /// Try to decrypt the given bytes as viewing key using ChaCha20Poly1305 AEAD with the given
     /// nonce and ciphertext and the given wallet ID.
     pub fn decrypt(
-        nonce_and_ciphertext: &[u8],
+        nonce_and_ciphertext: impl AsRef<[u8]>,
         wallet_id: Uuid,
         cipher: &ChaCha20Poly1305,
     ) -> Result<Self, DecryptViewingKeyError> {
+        let nonce_and_ciphertext = nonce_and_ciphertext.as_ref();
+
         let nonce = &nonce_and_ciphertext[0..12];
         let ciphertext = &nonce_and_ciphertext[12..];
 

@@ -18,6 +18,7 @@ use indexer_common::infra::pub_sub;
 #[cfg(feature = "cloud")]
 use secrecy::SecretString;
 
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 pub mod storage;
 
 #[cfg(feature = "cloud")]

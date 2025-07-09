@@ -392,11 +392,11 @@ async fn save_unshielded_utxos(
         let query_base = indoc! {"
             INSERT INTO unshielded_utxos (
                 creating_transaction_id,
-                    owner,
-                    token_type,
-                    value,
-                    output_index,
-                    intent_hash
+                owner,
+                token_type,
+                value,
+                output_index,
+                intent_hash
             )
         "};
 
