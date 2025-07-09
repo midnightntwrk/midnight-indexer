@@ -97,14 +97,14 @@ pub async fn process_dust_events(
     Ok(())
 }
 
-fn group_events_by_type(
-    events: &[DustEvent],
+fn group_events_by_type<'a>(
+    events: &'a impl AsRef<[DustEvent]>,
 ) -> (
-    Vec<InitialUtxoEvent>,
-    Vec<GenerationUpdateEvent>,
+    Vec<InitialUtxoEvent<'a>>,
+    Vec<GenerationUpdateEvent<'a>>,
     Vec<SpendEvent>,
 ) {
-    events.iter().fold(
+    events.as_ref().iter().fold(
         (Vec::new(), Vec::new(), Vec::new()),
         |(mut initial, mut updates, mut spends), event| {
             match &event.event_details {
