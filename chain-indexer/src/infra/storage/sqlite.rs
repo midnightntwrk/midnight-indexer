@@ -20,7 +20,7 @@ use indexer_common::{
     domain::{
         ByteArray, ByteVec, ContractActionVariant, ContractBalance, DustCommitment, DustNonce,
         DustNullifier, DustOwner, RawTransaction, RawTransactionIdentifier, UnshieldedUtxo,
-        dust::{DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, DustRegistration, DustUtxo},
+        dust::{DustEvent, DustEventType, DustGenerationInfo, DustRegistration, DustUtxo},
     },
     infra::{pool::sqlite::SqlitePool, sqlx::U128BeBytes},
     stream::flatten_chunks,
@@ -184,7 +184,7 @@ impl Storage for SqliteStorage {
 
         for event in events {
             let event_type = DustEventType::from(&event.event_details);
-            
+
             // SQLite doesn't support custom enum types like PostgreSQL does.
             // While PostgreSQL can use the DustEventType enum directly (via sqlx::Type),
             // SQLite requires us to manually convert the enum to a string representation.
@@ -349,7 +349,6 @@ impl Storage for SqliteStorage {
         mut generation_info_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationInfo, sqlx::Error>> + Send {
-
         let chunks = try_stream! {
             loop {
                 let query = indoc! {"
@@ -401,7 +400,6 @@ impl Storage for SqliteStorage {
         mut utxo_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustUtxo, sqlx::Error>> + Send {
-
         let chunks = try_stream! {
             loop {
                 let query = indoc! {"
@@ -527,7 +525,7 @@ impl Storage for SqliteStorage {
                 yield items
                     .into_iter()
                     .map(|(tx_id, raw_tx)| (tx_id as u64, raw_tx))
-                    .collect();
+                    .collect::<Vec<_>>();
             }
         };
 

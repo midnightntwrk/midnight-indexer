@@ -21,7 +21,7 @@ use indexer_common::{
     domain::{
         ByteArray, ByteVec, ContractActionVariant, ContractBalance, DustCommitment, DustNonce,
         DustNullifier, DustOwner, RawTransaction, UnshieldedUtxo,
-        dust::{DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, DustRegistration, DustUtxo},
+        dust::{DustEvent, DustEventType, DustGenerationInfo, DustRegistration, DustUtxo},
     },
     infra::{pool::postgres::PostgresPool, sqlx::U128BeBytes},
     stream::flatten_chunks,
@@ -343,7 +343,6 @@ impl Storage for PostgresStorage {
         mut generation_info_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationInfo, sqlx::Error>> + Send {
-
         let chunks = try_stream! {
             loop {
                 let query = indoc! {"
@@ -392,7 +391,6 @@ impl Storage for PostgresStorage {
         mut utxo_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustUtxo, sqlx::Error>> + Send {
-
         let chunks = try_stream! {
             loop {
                 let query = indoc! {"
@@ -813,7 +811,7 @@ async fn save_contract_actions(
         .await?
         .into_iter()
         .map(|(id,)| id)
-        .collect();
+        .collect::<Vec<_>>();
 
     Ok(contract_action_ids)
 }

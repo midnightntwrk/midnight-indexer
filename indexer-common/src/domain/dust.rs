@@ -174,10 +174,10 @@ pub struct DustUtxo {
 pub enum DustEventType {
     /// Initial DUST UTXO creation.
     DustInitialUtxo,
-    
+
     /// DUST generation time update.
     DustGenerationDtimeUpdate,
-    
+
     /// DUST spend processed.
     DustSpendProcessed,
 }

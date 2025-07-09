@@ -16,7 +16,7 @@ use indexer_common::domain::{
     ByteArray,
     dust::{DustEvent, DustEventDetails, DustGenerationInfo, DustUtxo},
 };
-use log::info;
+use log::debug;
 use thiserror::Error;
 
 // Type aliases for event grouping to improve readability.
@@ -98,13 +98,13 @@ pub async fn process_dust_events(
 }
 
 fn group_events_by_type(
-    events: impl AsRef<[DustEvent]>,
+    events: &[DustEvent],
 ) -> (
     Vec<InitialUtxoEvent>,
     Vec<GenerationUpdateEvent>,
     Vec<SpendEvent>,
 ) {
-    events.as_ref().iter().fold(
+    events.iter().fold(
         (Vec::new(), Vec::new(), Vec::new()),
         |(mut initial, mut updates, mut spends), event| {
             match &event.event_details {

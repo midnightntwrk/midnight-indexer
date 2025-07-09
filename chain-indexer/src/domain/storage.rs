@@ -52,7 +52,7 @@ where
     ) -> Result<BlockTransactions, sqlx::Error>;
 
     // DUST-specific storage methods.
-    
+
     /// Save DUST events from transaction processing.
     async fn save_dust_events(
         &self,
