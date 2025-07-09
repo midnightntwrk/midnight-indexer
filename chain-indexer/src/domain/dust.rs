@@ -49,7 +49,7 @@ pub async fn process_dust_events(
         return Ok(());
     }
 
-    info!(
+    debug!(
         dust_event_count = transaction.dust_events.len(),
         transaction_hash:% = transaction.hash;
         "processing DUST events"
@@ -84,12 +84,12 @@ pub async fn process_dust_events(
         }
     }
 
-    // Save all events for audit trail.
+    // Save all events.
     storage
         .save_dust_events(&transaction.dust_events, transaction.id)
         .await?;
 
-    info!(
+    debug!(
         transaction_hash:% = transaction.hash;
         "successfully processed DUST events"
     );
@@ -98,13 +98,13 @@ pub async fn process_dust_events(
 }
 
 fn group_events_by_type(
-    events: &[DustEvent],
+    events: impl AsRef<[DustEvent]>,
 ) -> (
     Vec<InitialUtxoEvent>,
     Vec<GenerationUpdateEvent>,
     Vec<SpendEvent>,
 ) {
-    events.iter().fold(
+    events.as_ref().iter().fold(
         (Vec::new(), Vec::new(), Vec::new()),
         |(mut initial, mut updates, mut spends), event| {
             match &event.event_details {
@@ -142,7 +142,7 @@ async fn process_initial_utxos(
     storage: &impl Storage,
     initial_utxos: Vec<InitialUtxoEvent<'_>>,
 ) -> Result<(), DustProcessingError> {
-    let (generation_infos, dust_utxos): (Vec<_>, Vec<_>) = initial_utxos
+    let (generation_infos, dust_utxos) = initial_utxos
         .into_iter()
         .map(|(output, generation, generation_index)| {
             let generation_info = *generation;
@@ -163,7 +163,7 @@ async fn process_initial_utxos(
 
             (generation_info, dust_utxo)
         })
-        .unzip();
+        .unzip::<_, _, Vec<_>, Vec<_>>();
 
     // Save generation info first.
     if !generation_infos.is_empty() {

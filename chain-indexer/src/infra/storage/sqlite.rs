@@ -20,7 +20,7 @@ use indexer_common::{
     domain::{
         ByteArray, ByteVec, ContractActionVariant, ContractBalance, DustCommitment, DustNonce,
         DustNullifier, DustOwner, RawTransaction, RawTransactionIdentifier, UnshieldedUtxo,
-        dust::{DustEvent, DustEventDetails, DustGenerationInfo, DustRegistration, DustUtxo},
+        dust::{DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, DustRegistration, DustUtxo},
     },
     infra::{pool::sqlite::SqlitePool, sqlx::U128BeBytes},
     stream::flatten_chunks,
@@ -183,10 +183,15 @@ impl Storage for SqliteStorage {
         }
 
         for event in events {
-            let event_type = match &event.event_details {
-                DustEventDetails::DustInitialUtxo { .. } => "DustInitialUtxo",
-                DustEventDetails::DustGenerationDtimeUpdate { .. } => "DustGenerationDtimeUpdate",
-                DustEventDetails::DustSpendProcessed { .. } => "DustSpendProcessed",
+            let event_type = DustEventType::from(&event.event_details);
+            
+            // SQLite doesn't support custom enum types like PostgreSQL does.
+            // While PostgreSQL can use the DustEventType enum directly (via sqlx::Type),
+            // SQLite requires us to manually convert the enum to a string representation.
+            let event_type_str = match event_type {
+                DustEventType::DustInitialUtxo => "DustInitialUtxo",
+                DustEventType::DustGenerationDtimeUpdate => "DustGenerationDtimeUpdate",
+                DustEventType::DustSpendProcessed => "DustSpendProcessed",
             };
 
             // Store event details as JSON for SQLite.
@@ -208,7 +213,7 @@ impl Storage for SqliteStorage {
                 .bind(event.transaction_hash.as_ref())
                 .bind(event.logical_segment as i32)
                 .bind(event.physical_segment as i32)
-                .bind(event_type)
+                .bind(event_type_str)
                 .bind(Json(&event.event_details))
                 .execute(&*self.pool)
                 .await?;
@@ -341,10 +346,9 @@ impl Storage for SqliteStorage {
     fn get_dust_generation_info_by_owner(
         &self,
         owner: DustOwner,
-        generation_info_id: u64,
+        mut generation_info_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationInfo, sqlx::Error>> + Send {
-        let mut id = generation_info_id as i64;
 
         let chunks = try_stream! {
             loop {
@@ -359,30 +363,28 @@ impl Storage for SqliteStorage {
 
                 let rows = sqlx::query_as::<_, (i64, U128BeBytes, Vec<u8>, Vec<u8>, i64, Option<i64>)>(query)
                     .bind(owner.as_ref())
-                    .bind(id)
+                    .bind(generation_info_id as i64)
                     .bind(batch_size.get() as i64)
                     .fetch_all(&*self.pool)
                     .await?;
 
-                let mut last_id = None;
-                let items: Vec<DustGenerationInfo> = rows
-                    .into_iter()
-                    .map(|(row_id, value, owner, nonce, ctime, dtime)| {
-                        last_id = Some(row_id);
+                let items = rows
+                    .iter()
+                    .map(|(_, value, owner, nonce, ctime, dtime)| -> Result<DustGenerationInfo, sqlx::Error> {
                         Ok(DustGenerationInfo {
-                            value: value.into(),
-                            owner: DustOwner::try_from(owner)
+                            value: (*value).into(),
+                            owner: DustOwner::try_from(owner.clone())
                                 .map_err(|e| sqlx::Error::Decode(e.into()))?,
-                            nonce: DustNonce::try_from(nonce)
+                            nonce: DustNonce::try_from(nonce.clone())
                                 .map_err(|e| sqlx::Error::Decode(e.into()))?,
-                            ctime: ctime as u64,
+                            ctime: *ctime as u64,
                             dtime: dtime.map(|dt| dt as u64).unwrap_or(0),
                         })
                     })
-                    .collect::<Result<Vec<_>, sqlx::Error>>()?;
+                    .collect::<Result<Vec<DustGenerationInfo>, _>>()?;
 
-                match last_id {
-                    Some(last) => id = last + 1,
+                match rows.last() {
+                    Some(row) => generation_info_id = row.0 as u64 + 1,
                     None => break,
                 }
 
@@ -396,10 +398,9 @@ impl Storage for SqliteStorage {
     fn get_dust_utxos_by_owner(
         &self,
         owner: DustOwner,
-        utxo_id: u64,
+        mut utxo_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustUtxo, sqlx::Error>> + Send {
-        let mut id = utxo_id as i64;
 
         let chunks = try_stream! {
             loop {
@@ -415,38 +416,37 @@ impl Storage for SqliteStorage {
 
                 let rows = sqlx::query_as::<_, (i64, Vec<u8>, Option<Vec<u8>>, U128BeBytes, Vec<u8>, Vec<u8>, i32, i64, Option<i64>, Option<i64>)>(query)
                     .bind(owner.as_ref())
-                    .bind(id)
+                    .bind(utxo_id as i64)
                     .bind(batch_size.get() as i64)
                     .fetch_all(&*self.pool)
                     .await?;
 
-                let mut last_id = None;
-                let items: Vec<DustUtxo> = rows
-                    .into_iter()
-                    .map(|(row_id, commitment, nullifier, initial_value, owner, nonce, seq, ctime, generation_info_id, spent_at_transaction_id)| {
-                        last_id = Some(row_id);
+                let items = rows
+                    .iter()
+                    .map(|(_, commitment, nullifier, initial_value, owner, nonce, seq, ctime, generation_info_id, spent_at_transaction_id)| -> Result<DustUtxo, sqlx::Error> {
                         Ok(DustUtxo {
-                            commitment: DustCommitment::try_from(commitment)
+                            commitment: DustCommitment::try_from(commitment.clone())
                                 .map_err(|e| sqlx::Error::Decode(e.into()))?,
                             nullifier: nullifier
-                                .map(DustNullifier::try_from)
-                                .transpose()
+                                .as_ref()
+                                .map(|n| DustNullifier::try_from(n.clone())
+                                    .map_err(|e| sqlx::Error::Decode(e.into())))
+                                .transpose()?,
+                            initial_value: (*initial_value).into(),
+                            owner: DustOwner::try_from(owner.clone())
                                 .map_err(|e| sqlx::Error::Decode(e.into()))?,
-                            initial_value: initial_value.into(),
-                            owner: DustOwner::try_from(owner)
+                            nonce: DustNonce::try_from(nonce.clone())
                                 .map_err(|e| sqlx::Error::Decode(e.into()))?,
-                            nonce: DustNonce::try_from(nonce)
-                                .map_err(|e| sqlx::Error::Decode(e.into()))?,
-                            seq: seq as u32,
-                            ctime: ctime as u64,
+                            seq: *seq as u32,
+                            ctime: *ctime as u64,
                             generation_info_id: generation_info_id.map(|id| id as u64),
                             spent_at_transaction_id: spent_at_transaction_id.map(|id| id as u64),
                         })
                     })
-                    .collect::<Result<Vec<_>, sqlx::Error>>()?;
+                    .collect::<Result<Vec<DustUtxo>, _>>()?;
 
-                match last_id {
-                    Some(last) => id = last + 1,
+                match rows.last() {
+                    Some(row) => utxo_id = row.0 as u64 + 1,
                     None => break,
                 }
 

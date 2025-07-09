@@ -167,3 +167,27 @@ pub struct DustUtxo {
     /// Transaction where this was spent.
     pub spent_at_transaction_id: Option<u64>,
 }
+
+/// DUST event type for database storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "DUST_EVENT_TYPE", rename_all = "PascalCase")]
+pub enum DustEventType {
+    /// Initial DUST UTXO creation.
+    DustInitialUtxo,
+    
+    /// DUST generation time update.
+    DustGenerationDtimeUpdate,
+    
+    /// DUST spend processed.
+    DustSpendProcessed,
+}
+
+impl From<&DustEventDetails> for DustEventType {
+    fn from(details: &DustEventDetails) -> Self {
+        match details {
+            DustEventDetails::DustInitialUtxo { .. } => Self::DustInitialUtxo,
+            DustEventDetails::DustGenerationDtimeUpdate { .. } => Self::DustGenerationDtimeUpdate,
+            DustEventDetails::DustSpendProcessed { .. } => Self::DustSpendProcessed,
+        }
+    }
+}

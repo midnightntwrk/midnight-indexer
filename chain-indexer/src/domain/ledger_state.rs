@@ -100,7 +100,7 @@ impl LedgerState {
 
         // Apply transaction with DUST event capture.
         let TransactionResultWithDustEvents {
-            result: transaction_result,
+            result,
             dust_events,
         } = self.apply_transaction(
             &transaction.raw,
@@ -124,7 +124,7 @@ impl LedgerState {
         }
 
         // Update transaction.
-        transaction.transaction_result = transaction_result;
+        transaction.transaction_result = result;
         transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize(network_id)?;
         transaction.start_index = start_index;
         transaction.end_index = end_index;

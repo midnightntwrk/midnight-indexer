@@ -4,6 +4,12 @@ CREATE TYPE CONTRACT_ACTION_VARIANT AS ENUM(
     'Update'
 );
 
+CREATE TYPE DUST_EVENT_TYPE AS ENUM(
+    'DustInitialUtxo',
+    'DustGenerationDtimeUpdate',
+    'DustSpendProcessed'
+);
+
 CREATE TABLE blocks(
     id BIGSERIAL PRIMARY KEY,
     hash BYTEA NOT NULL UNIQUE,
@@ -173,7 +179,7 @@ CREATE TABLE dust_events (
     transaction_hash BYTEA NOT NULL,
     logical_segment INTEGER NOT NULL,
     physical_segment INTEGER NOT NULL,
-    event_type TEXT NOT NULL,
+    event_type DUST_EVENT_TYPE NOT NULL,
     event_data JSONB NOT NULL
 );
 

@@ -591,11 +591,9 @@ async fn make_transaction(
         spent_unshielded_utxos,
         paid_fees: fees.paid_fees,
         estimated_fees: fees.estimated_fees,
-        dust_events: Vec::new(), /* DUST events are execution artifacts generated when this
-                                  * transaction is applied to
-                                  * the ledger state. They're populated in
-                                  * ledger_state.rs::apply_transaction_mut() during block
-                                  * processing. */
+        // DUST events are execution artifacts generated when transactions are applied to the ledger state.
+        // They're populated in ledger_state.rs::apply_transaction_mut() during block processing.
+        dust_events: Vec::new(),
     };
 
     Ok(transaction)

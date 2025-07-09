@@ -21,7 +21,7 @@ use indexer_common::{
     domain::{
         ByteArray, ByteVec, ContractActionVariant, ContractBalance, DustCommitment, DustNonce,
         DustNullifier, DustOwner, RawTransaction, UnshieldedUtxo,
-        dust::{DustEvent, DustEventDetails, DustGenerationInfo, DustRegistration, DustUtxo},
+        dust::{DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, DustRegistration, DustUtxo},
     },
     infra::{pool::postgres::PostgresPool, sqlx::U128BeBytes},
     stream::flatten_chunks,
@@ -186,11 +186,7 @@ impl Storage for PostgresStorage {
         }
 
         for event in events {
-            let event_type = match &event.event_details {
-                DustEventDetails::DustInitialUtxo { .. } => "DustInitialUtxo",
-                DustEventDetails::DustGenerationDtimeUpdate { .. } => "DustGenerationDtimeUpdate",
-                DustEventDetails::DustSpendProcessed { .. } => "DustSpendProcessed",
-            };
+            let event_type = DustEventType::from(&event.event_details);
 
             let query = indoc! {"
                 INSERT INTO dust_events (
@@ -344,10 +340,9 @@ impl Storage for PostgresStorage {
     fn get_dust_generation_info_by_owner(
         &self,
         owner: DustOwner,
-        generation_info_id: u64,
+        mut generation_info_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationInfo, sqlx::Error>> + Send {
-        let mut id = generation_info_id as i64;
 
         let chunks = try_stream! {
             loop {
@@ -362,12 +357,12 @@ impl Storage for PostgresStorage {
 
                 let rows = sqlx::query_as::<_, (i64, U128BeBytes, DustOwner, DustNonce, i64, Option<i64>)>(query)
                     .bind(owner.as_ref())
-                    .bind(id)
+                    .bind(generation_info_id as i64)
                     .bind(batch_size.get() as i64)
                     .fetch_all(&*self.pool)
                     .await?;
 
-                let items: Vec<DustGenerationInfo> = rows
+                let items = rows
                     .iter()
                     .map(|(_, value, owner, nonce, ctime, dtime)| DustGenerationInfo {
                         value: (*value).into(),
@@ -376,10 +371,10 @@ impl Storage for PostgresStorage {
                         ctime: *ctime as u64,
                         dtime: dtime.map(|dt| dt as u64).unwrap_or(0),
                     })
-                    .collect();
+                    .collect::<Vec<DustGenerationInfo>>();
 
                 match rows.last() {
-                    Some((last_id, _, _, _, _, _)) => id = last_id + 1,
+                    Some(row) => generation_info_id = row.0 as u64 + 1,
                     None => break,
                 }
 
@@ -394,10 +389,9 @@ impl Storage for PostgresStorage {
     fn get_dust_utxos_by_owner(
         &self,
         owner: DustOwner,
-        utxo_id: u64,
+        mut utxo_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustUtxo, sqlx::Error>> + Send {
-        let mut id = utxo_id as i64;
 
         let chunks = try_stream! {
             loop {
@@ -413,12 +407,12 @@ impl Storage for PostgresStorage {
 
                 let rows = sqlx::query_as::<_, (i64, DustCommitment, Option<DustNullifier>, U128BeBytes, DustOwner, DustNonce, i32, i64, Option<i64>, Option<i64>)>(query)
                     .bind(owner.as_ref())
-                    .bind(id)
+                    .bind(utxo_id as i64)
                     .bind(batch_size.get() as i64)
                     .fetch_all(&*self.pool)
                     .await?;
 
-                let items: Vec<DustUtxo> = rows
+                let items = rows
                     .iter()
                     .map(|(_, commitment, nullifier, initial_value, owner, nonce, seq, ctime, generation_info_id, spent_at_transaction_id)| DustUtxo {
                         commitment: *commitment,
@@ -431,10 +425,10 @@ impl Storage for PostgresStorage {
                         generation_info_id: generation_info_id.map(|id| id as u64),
                         spent_at_transaction_id: spent_at_transaction_id.map(|id| id as u64),
                     })
-                    .collect();
+                    .collect::<Vec<DustUtxo>>();
 
                 match rows.last() {
-                    Some((last_id, _, _, _, _, _, _, _, _, _)) => id = last_id + 1,
+                    Some(row) => utxo_id = row.0 as u64 + 1,
                     None => break,
                 }
 
