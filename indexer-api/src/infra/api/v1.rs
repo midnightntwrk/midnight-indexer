@@ -125,7 +125,7 @@ async fn resolve_height(offset: Option<BlockOffset>, storage: &impl Storage) -> 
                     .get_block_by_hash(hash)
                     .await
                     .map_err_into_server_error(|| format!("get block by hash {hash}"))?
-                    .ok_or_server_error(|| format!("block with hash {hash} not found"))?;
+                    .ok_or_client_error(|| format!("block with hash {hash} not found"))?;
 
                 Ok(block.height)
             }
@@ -135,7 +135,7 @@ async fn resolve_height(offset: Option<BlockOffset>, storage: &impl Storage) -> 
                     .get_block_by_height(height)
                     .await
                     .map_err_into_server_error(|| "get block by height")?
-                    .ok_or_server_error(|| format!("block with height {height} not found"))?;
+                    .ok_or_client_error(|| format!("block with height {height} not found"))?;
 
                 Ok(height)
             }
