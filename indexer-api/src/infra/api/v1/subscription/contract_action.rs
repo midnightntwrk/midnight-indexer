@@ -136,7 +136,7 @@ async fn get_next_contract_action<E>(
     contract_actions
         .try_next()
         .in_span(Span::root(
-            "contract-actions-subscription.get-next-contract-action",
+            "subscription.contract-actions.get-next-contract-action",
             SpanContext::random(),
         ))
         .await

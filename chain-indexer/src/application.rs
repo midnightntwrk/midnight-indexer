@@ -189,7 +189,7 @@ pub async fn run(
         let mut blocks = pin!(blocks);
         let mut caught_up = false;
 
-        while let Some(s) = get_and_index_block(
+        while let Some(next_ledger_state) = get_and_index_block(
             config,
             &mut blocks,
             ledger_state,
@@ -203,7 +203,7 @@ pub async fn run(
         .in_span(Span::root("get-and-index-block", SpanContext::random()))
         .await?
         {
-            ledger_state = s
+            ledger_state = next_ledger_state
         }
 
         Ok::<_, anyhow::Error>(())

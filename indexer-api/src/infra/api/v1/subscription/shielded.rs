@@ -15,13 +15,13 @@ use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
         ApiError, ApiResult, AsBytesExt, ContextExt, HexEncoded, InnerApiError, ResultExt,
-        v1::{decode_session_id, transaction::Transaction},
+        v1::{decode_session_id, subscription::get_next_transaction, transaction::Transaction},
     },
 };
 use async_graphql::{Context, SimpleObject, Subscription, Union, async_stream::try_stream};
 use derive_more::Debug;
 use drop_stream::DropStreamExt;
-use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
+use fastrace::trace;
 use futures::{
     Stream, StreamExt,
     future::ok,
@@ -397,16 +397,4 @@ where
         highest_relevant_index,
         highest_relevant_wallet_index,
     })
-}
-
-async fn get_next_transaction<E>(
-    transactions: &mut (impl Stream<Item = Result<domain::Transaction, E>> + Unpin),
-) -> Result<Option<domain::Transaction>, E> {
-    transactions
-        .try_next()
-        .in_span(Span::root(
-            "transactions-subscription.get-next-transaction",
-            SpanContext::random(),
-        ))
-        .await
 }

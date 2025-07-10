@@ -96,7 +96,7 @@ where
 
                 while let Some(block) = get_next_block(&mut blocks)
                     .await
-                    .map_err_into_server_error(|| "get next block")?
+                    .map_err_into_server_error(|| format!("get next block at height {height}"))?
                 {
                     assert_eq!(block.height, height);
                     height += 1;
@@ -118,7 +118,7 @@ async fn get_next_block<E>(
     blocks
         .try_next()
         .in_span(Span::root(
-            "blocks-subscription.get-next-block",
+            "subscription.blocks.get-next-block",
             SpanContext::random(),
         ))
         .await
