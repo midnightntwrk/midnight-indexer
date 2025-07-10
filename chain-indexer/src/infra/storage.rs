@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{self, Block, BlockInfo, BlockTransactions, ContractAction, Transaction};
+use async_stream::try_stream;
 use fastrace::trace;
 use futures::{Stream, TryFutureExt, TryStreamExt};
 use indexer_common::{
@@ -180,7 +181,7 @@ impl domain::storage::Storage for Storage {
     }
 
     // DUST-specific storage methods.
-    #[trace]
+    #[trace(properties = { "transaction_id": "{transaction_id}" })]
     async fn save_dust_events(
         &self,
         events: impl AsRef<[DustEvent]> + Send,
@@ -191,20 +192,20 @@ impl domain::storage::Storage for Storage {
             return Ok(());
         }
 
+        let query = indoc! {"
+            INSERT INTO dust_events (
+                transaction_id,
+                transaction_hash,
+                logical_segment,
+                physical_segment,
+                event_type,
+                event_data
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+        "};
+
         for event in events {
             let event_type = DustEventType::from(&event.event_details);
-
-            let query = indoc! {"
-                INSERT INTO dust_events (
-                    transaction_id,
-                    transaction_hash,
-                    logical_segment,
-                    physical_segment,
-                    event_type,
-                    event_data
-                )
-                VALUES ($1, $2, $3, $4, $5, $6)
-            "};
 
             #[cfg(feature = "cloud")]
             {
@@ -224,7 +225,7 @@ impl domain::storage::Storage for Storage {
                 // SQLite doesn't support custom enum types like PostgreSQL does.
                 // While PostgreSQL can use the DustEventType enum directly (via sqlx::Type),
                 // SQLite requires us to manually convert the enum to a string representation.
-                let event_type_str = match event_type {
+                let event_type = match event_type {
                     DustEventType::DustInitialUtxo => "DustInitialUtxo",
                     DustEventType::DustGenerationDtimeUpdate => "DustGenerationDtimeUpdate",
                     DustEventType::DustSpendProcessed => "DustSpendProcessed",
@@ -235,12 +236,13 @@ impl domain::storage::Storage for Storage {
                     .bind(event.transaction_hash.as_ref())
                     .bind(event.logical_segment as i32)
                     .bind(event.physical_segment as i32)
-                    .bind(event_type_str)
+                    .bind(event_type)
                     .bind(Json(&event.event_details))
                     .execute(&*self.pool)
                     .await?;
             }
         }
+
         Ok(())
     }
 
@@ -254,22 +256,22 @@ impl domain::storage::Storage for Storage {
             return Ok(());
         }
 
+        let query = indoc! {"
+            INSERT INTO dust_utxos (
+                commitment,
+                nullifier,
+                initial_value,
+                owner,
+                nonce,
+                seq,
+                ctime,
+                generation_info_id,
+                spent_at_transaction_id
+            )
+        "};
+
         #[cfg(feature = "cloud")]
         {
-            let query = indoc! {"
-                INSERT INTO dust_utxos (
-                    commitment,
-                    nullifier,
-                    initial_value,
-                    owner,
-                    nonce,
-                    seq,
-                    ctime,
-                    generation_info_id,
-                    spent_at_transaction_id
-                )
-            "};
-
             QueryBuilder::new(query)
                 .push_values(utxos.iter(), |mut q, utxo| {
                     q.push_bind(utxo.commitment)
@@ -289,38 +291,23 @@ impl domain::storage::Storage for Storage {
 
         #[cfg(feature = "standalone")]
         {
-            // SQLite doesn't support multi-row VALUES lists with dynamic data.
-            // So we insert one by one.
-            for utxo in utxos {
-                let query = indoc! {"
-                    INSERT INTO dust_utxos (
-                        commitment,
-                        nullifier,
-                        initial_value,
-                        owner,
-                        nonce,
-                        seq,
-                        ctime,
-                        generation_info_id,
-                        spent_at_transaction_id
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                "};
-
-                sqlx::query(query)
-                    .bind(utxo.commitment.as_ref())
-                    .bind(utxo.nullifier.as_ref().map(|n| n.as_ref()))
-                    .bind(U128BeBytes::from(utxo.initial_value))
-                    .bind(utxo.owner.as_ref())
-                    .bind(utxo.nonce.as_ref())
-                    .bind(utxo.seq as i32)
-                    .bind(utxo.ctime as i64)
-                    .bind(utxo.generation_info_id.map(|id| id as i64))
-                    .bind(utxo.spent_at_transaction_id.map(|id| id as i64))
-                    .execute(&*self.pool)
-                    .await?;
-            }
+            QueryBuilder::new(query)
+                .push_values(utxos.iter(), |mut q, utxo| {
+                    q.push_bind(utxo.commitment.as_ref())
+                        .push_bind(utxo.nullifier.as_ref().map(|n| n.as_ref()))
+                        .push_bind(U128BeBytes::from(utxo.initial_value))
+                        .push_bind(utxo.owner.as_ref())
+                        .push_bind(utxo.nonce.as_ref())
+                        .push_bind(utxo.seq as i32)
+                        .push_bind(utxo.ctime as i64)
+                        .push_bind(utxo.generation_info_id.map(|id| id as i64))
+                        .push_bind(utxo.spent_at_transaction_id.map(|id| id as i64));
+                })
+                .build()
+                .execute(&*self.pool)
+                .await?;
         }
+
         Ok(())
     }
 
@@ -334,19 +321,19 @@ impl domain::storage::Storage for Storage {
             return Ok(());
         }
 
+        let query = indoc! {"
+            INSERT INTO dust_generation_info (
+                value,
+                owner,
+                nonce,
+                merkle_index,
+                ctime,
+                dtime
+            )
+        "};
+
         #[cfg(feature = "cloud")]
         {
-            let query = indoc! {"
-                INSERT INTO dust_generation_info (
-                    value,
-                    owner,
-                    nonce,
-                    merkle_index,
-                    ctime,
-                    dtime
-                )
-            "};
-
             QueryBuilder::new(query)
                 .push_values(generation_info.iter(), |mut q, info| {
                     q.push_bind(U128BeBytes::from(info.value))
@@ -367,34 +354,24 @@ impl domain::storage::Storage for Storage {
 
         #[cfg(feature = "standalone")]
         {
-            for info in generation_info {
-                let query = indoc! {"
-                    INSERT INTO dust_generation_info (
-                        value,
-                        owner,
-                        nonce,
-                        merkle_index,
-                        ctime,
-                        dtime
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                "};
-
-                sqlx::query(query)
-                    .bind(U128BeBytes::from(info.value))
-                    .bind(info.owner.as_ref())
-                    .bind(info.nonce.as_ref())
-                    .bind(0i64) // TODO: merkle_index should come from somewhere.
-                    .bind(info.ctime as i64)
-                    .bind(if info.dtime == 0 {
-                        None
-                    } else {
-                        Some(info.dtime as i64)
-                    })
-                    .execute(&*self.pool)
-                    .await?;
-            }
+            QueryBuilder::new(query)
+                .push_values(generation_info.iter(), |mut q, info| {
+                    q.push_bind(U128BeBytes::from(info.value))
+                        .push_bind(info.owner.as_ref())
+                        .push_bind(info.nonce.as_ref())
+                        .push_bind(0i64) // TODO: merkle_index should come from somewhere.
+                        .push_bind(info.ctime as i64)
+                        .push_bind(if info.dtime == 0 {
+                            None
+                        } else {
+                            Some(info.dtime as i64)
+                        });
+                })
+                .build()
+                .execute(&*self.pool)
+                .await?;
         }
+
         Ok(())
     }
 
@@ -463,22 +440,26 @@ impl domain::storage::Storage for Storage {
                     .await?;
             }
         }
+
         Ok(())
     }
 
-    #[trace]
     fn get_dust_generation_info_by_owner(
         &self,
         owner: DustOwner,
         mut generation_info_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationInfo, sqlx::Error>> + Send {
-        let pool = self.pool.clone();
-
-        async_stream::try_stream! {
+        try_stream! {
             loop {
                 let query = indoc! {"
-                    SELECT id, value, owner, nonce, ctime, dtime
+                    SELECT
+                        id,
+                        value,
+                        owner,
+                        nonce,
+                        ctime,
+                        dtime
                     FROM dust_generation_info
                     WHERE owner = $1
                     AND id >= $2
@@ -491,7 +472,7 @@ impl domain::storage::Storage for Storage {
                     .bind(owner.as_ref())
                     .bind(generation_info_id as i64)
                     .bind(batch_size.get() as i64)
-                    .fetch_all(&*pool)
+                    .fetch_all(&*self.pool)
                     .await?;
 
                 #[cfg(feature = "standalone")]
@@ -499,7 +480,7 @@ impl domain::storage::Storage for Storage {
                     .bind(owner.as_ref())
                     .bind(generation_info_id as i64)
                     .bind(batch_size.get() as i64)
-                    .fetch_all(&*pool)
+                    .fetch_all(&*self.pool)
                     .await?;
 
                 if rows.is_empty() {
@@ -546,20 +527,26 @@ impl domain::storage::Storage for Storage {
         }
     }
 
-    #[trace]
     fn get_dust_utxos_by_owner(
         &self,
         owner: DustOwner,
         mut utxo_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustUtxo, sqlx::Error>> + Send {
-        let pool = self.pool.clone();
-
-        async_stream::try_stream! {
+        try_stream! {
             loop {
                 let query = indoc! {"
-                    SELECT id, commitment, nullifier, initial_value, owner, nonce, seq, ctime,
-                           generation_info_id, spent_at_transaction_id
+                    SELECT 
+                        id,
+                        commitment,
+                        nullifier,
+                        initial_value,
+                        owner,
+                        nonce,
+                        seq,
+                        ctime,
+                        generation_info_id,
+                        spent_at_transaction_id
                     FROM dust_utxos
                     WHERE owner = $1
                     AND id >= $2
@@ -572,7 +559,7 @@ impl domain::storage::Storage for Storage {
                     .bind(owner.as_ref())
                     .bind(utxo_id as i64)
                     .bind(batch_size.get() as i64)
-                    .fetch_all(&*pool)
+                    .fetch_all(&*self.pool)
                     .await?;
 
                 #[cfg(feature = "standalone")]
@@ -580,7 +567,7 @@ impl domain::storage::Storage for Storage {
                     .bind(owner.as_ref())
                     .bind(utxo_id as i64)
                     .bind(batch_size.get() as i64)
-                    .fetch_all(&*pool)
+                    .fetch_all(&*self.pool)
                     .await?;
 
                 if rows.is_empty() {
@@ -647,11 +634,10 @@ impl domain::storage::Storage for Storage {
         mut transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<(u64, RawTransaction), sqlx::Error>> + Send {
-        let pool = self.pool.clone();
         let nullifier_prefix = prefix.to_string();
         let prefix_len = nullifier_prefix.len();
 
-        async_stream::try_stream! {
+        try_stream! {
             loop {
                 #[cfg(feature = "cloud")]
                 let query = if let Some(_block_height) = after_block {
@@ -718,7 +704,7 @@ impl domain::storage::Storage for Storage {
                         .bind(transaction_id as i64)
                         .bind(block_height as i64)
                         .bind(batch_size.get() as i64)
-                        .fetch_all(&*pool)
+                        .fetch_all(&*self.pool)
                         .await?
                 } else {
                     sqlx::query_as::<_, (i64, ByteVec)>(query)
@@ -726,7 +712,7 @@ impl domain::storage::Storage for Storage {
                         .bind(&nullifier_prefix)
                         .bind(transaction_id as i64)
                         .bind(batch_size.get() as i64)
-                        .fetch_all(&*pool)
+                        .fetch_all(&*self.pool)
                         .await?
                 };
 
@@ -746,7 +732,7 @@ impl domain::storage::Storage for Storage {
         }
     }
 
-    #[trace]
+    #[trace(properties = { "generation_index": "{generation_index}", "dtime": "{dtime}" })]
     async fn update_dust_generation_dtime(
         &self,
         generation_index: u64,
@@ -767,7 +753,7 @@ impl domain::storage::Storage for Storage {
         Ok(())
     }
 
-    #[trace]
+    #[trace(properties = { "transaction_id": "{transaction_id}" })]
     async fn mark_dust_utxo_spent(
         &self,
         commitment: DustCommitment,
@@ -776,7 +762,8 @@ impl domain::storage::Storage for Storage {
     ) -> Result<(), sqlx::Error> {
         let query = indoc! {"
             UPDATE dust_utxos
-            SET nullifier = $1,
+            SET
+                nullifier = $1,
                 spent_at_transaction_id = $2
             WHERE commitment = $3
         "};
@@ -1209,7 +1196,7 @@ async fn save_dust_events_tx(
             // SQLite doesn't support custom enum types like PostgreSQL does.
             // While PostgreSQL can use the DustEventType enum directly (via sqlx::Type),
             // SQLite requires us to manually convert the enum to a string representation.
-            let event_type_str = match event_type {
+            let event_type = match event_type {
                 DustEventType::DustInitialUtxo => "DustInitialUtxo",
                 DustEventType::DustGenerationDtimeUpdate => "DustGenerationDtimeUpdate",
                 DustEventType::DustSpendProcessed => "DustSpendProcessed",
@@ -1220,12 +1207,13 @@ async fn save_dust_events_tx(
                 .bind(event.transaction_hash.as_ref())
                 .bind(event.logical_segment as i32)
                 .bind(event.physical_segment as i32)
-                .bind(event_type_str)
+                .bind(event_type)
                 .bind(Json(&event.event_details))
                 .execute(&mut **tx)
                 .await?;
         }
     }
+
     Ok(())
 }
 
@@ -1507,7 +1495,8 @@ async fn mark_dust_utxo_spent_tx(
 ) -> Result<(), sqlx::Error> {
     let query = indoc! {"
         UPDATE dust_utxos
-        SET nullifier = $1,
+        SET 
+            nullifier = $1,
             spent_at_transaction_id = $2
         WHERE commitment = $3
     "};
