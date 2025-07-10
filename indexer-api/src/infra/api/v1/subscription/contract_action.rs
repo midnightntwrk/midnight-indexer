@@ -12,14 +12,14 @@
 // limitations under the License.
 
 use crate::{
-    domain::storage::Storage,
+    domain::{self, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, HexEncoded, ResultExt,
         v1::{block::BlockOffset, contract_action::ContractAction, resolve_height},
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
-use fastrace::trace;
+use fastrace::{Span, future::FutureExt, prelude::SpanContext};
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};
 use log::{debug, warn};
@@ -50,7 +50,6 @@ where
 {
     /// Subscribe to contract actions with the given address starting at the given offset or at the
     /// latest block if the offset is omitted.
-    #[trace(properties = { "address": "{address:?}", "offset": "{offset:?}" })]
     async fn contract_actions<'a>(
         &self,
         cx: &'a Context<'a>,
@@ -84,8 +83,7 @@ where
                 BATCH_SIZE,
             );
             let mut contract_actions = pin!(contract_actions);
-            while let Some(contract_action) = contract_actions
-                .try_next()
+            while let Some(contract_action) = get_next_contract_action(&mut contract_actions)
                 .await
                 .map_err_into_server_error(|| {
                     format!("get next contract action for ID {contract_action_id}")
@@ -113,8 +111,7 @@ where
                 );
                 let mut contract_actions = pin!(contract_actions);
 
-                while let Some(contract_action) = contract_actions
-                    .try_next()
+                while let Some(contract_action) = get_next_contract_action(&mut contract_actions)
                     .await
                     .map_err_into_server_error(|| {
                         format!("get next contract action for ID {contract_action_id}")
@@ -131,4 +128,16 @@ where
 
         Ok(contract_actions)
     }
+}
+
+async fn get_next_contract_action<E>(
+    contract_actions: &mut (impl Stream<Item = Result<domain::ContractAction, E>> + Unpin),
+) -> Result<Option<domain::ContractAction>, E> {
+    contract_actions
+        .try_next()
+        .in_span(Span::root(
+            "contract-actions-subscription.get-next-contract-action",
+            SpanContext::random(),
+        ))
+        .await
 }

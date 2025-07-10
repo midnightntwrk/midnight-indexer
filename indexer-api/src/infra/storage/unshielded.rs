@@ -15,13 +15,12 @@ use crate::{
     domain::{UnshieldedUtxo, storage::unshielded::UnshieldedUtxoStorage},
     infra::storage::Storage,
 };
-#[cfg(feature = "cloud")]
 use fastrace::trace;
 use indexer_common::domain::RawUnshieldedAddress;
 use indoc::indoc;
 
 impl UnshieldedUtxoStorage for Storage {
-    #[cfg_attr(feature = "cloud", trace(properties = { "address": "{address}" }))]
+    #[trace(properties = { "address": "{address}" })]
     async fn get_unshielded_utxos_by_address(
         &self,
         address: RawUnshieldedAddress,
@@ -49,7 +48,7 @@ impl UnshieldedUtxoStorage for Storage {
         Ok(utxos)
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
+    #[trace(properties = { "transaction_id": "{transaction_id}" })]
     async fn get_unshielded_utxos_created_by_transaction(
         &self,
         transaction_id: u64,
@@ -77,7 +76,7 @@ impl UnshieldedUtxoStorage for Storage {
         Ok(utxos)
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
+    #[trace(properties = { "transaction_id": "{transaction_id}" })]
     async fn get_unshielded_utxos_spent_by_transaction(
         &self,
         transaction_id: u64,
@@ -105,10 +104,7 @@ impl UnshieldedUtxoStorage for Storage {
         Ok(utxos)
     }
 
-    #[cfg_attr(
-        feature = "cloud",
-        trace(properties = { "address": "{address}", "transaction_id": "{transaction_id}" })
-    )]
+    #[trace(properties = { "address": "{address}", "transaction_id": "{transaction_id}" })]
     async fn get_unshielded_utxos_by_address_created_by_transaction(
         &self,
         address: RawUnshieldedAddress,
@@ -139,10 +135,7 @@ impl UnshieldedUtxoStorage for Storage {
         Ok(utxos)
     }
 
-    #[cfg_attr(
-        feature = "cloud",
-        trace(properties = { "address": "{address}", "transaction_id": "{transaction_id}" })
-    )]
+    #[trace(properties = { "address": "{address}", "transaction_id": "{transaction_id}" })]
     async fn get_unshielded_utxos_by_address_spent_by_transaction(
         &self,
         address: RawUnshieldedAddress,

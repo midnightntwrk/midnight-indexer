@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::storage::Storage,
+    domain::{self, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
         v1::{
@@ -22,7 +22,7 @@ use crate::{
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
-use fastrace::trace;
+use fastrace::{Span, future::FutureExt, prelude::SpanContext};
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};
 use log::{debug, warn};
@@ -53,7 +53,6 @@ where
 {
     /// Subscribe to blocks starting at the given offset or at the latest block if the offset is
     /// omitted.
-    #[trace(properties = { "offset": "{offset:?}" })]
     async fn blocks<'a>(
         &self,
         cx: &'a Context<'a>,
@@ -71,8 +70,7 @@ where
 
             let blocks = storage.get_blocks(height, BATCH_SIZE);
             let mut blocks = pin!(blocks);
-            while let Some(block) = blocks
-                .try_next()
+            while let Some(block) = get_next_block(&mut blocks)
                 .await
                 .map_err_into_server_error(|| format!("get next block at height {height}"))?
             {
@@ -96,8 +94,7 @@ where
                 let blocks = storage.get_blocks(height, BATCH_SIZE);
                 let mut blocks = pin!(blocks);
 
-                while let Some(block) = blocks
-                    .try_next()
+                while let Some(block) = get_next_block(&mut blocks)
                     .await
                     .map_err_into_server_error(|| "get next block")?
                 {
@@ -113,4 +110,16 @@ where
 
         Ok(blocks_stream)
     }
+}
+
+async fn get_next_block<E>(
+    blocks: &mut (impl Stream<Item = Result<domain::Block, E>> + Unpin),
+) -> Result<Option<domain::Block>, E> {
+    blocks
+        .try_next()
+        .in_span(Span::root(
+            "blocks-subscription.get-next-block",
+            SpanContext::random(),
+        ))
+        .await
 }

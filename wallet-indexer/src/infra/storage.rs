@@ -17,7 +17,6 @@ use crate::{
 };
 use chacha20poly1305::ChaCha20Poly1305;
 use derive_more::Debug;
-#[cfg(feature = "cloud")]
 use fastrace::trace;
 use futures::TryStreamExt;
 use indexer_common::domain::{ByteVec, DecryptViewingKeyError, ViewingKey};
@@ -106,7 +105,7 @@ impl domain::storage::Storage for Storage {
         Ok(Some(tx))
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "from": "{from}", "limit": "{limit}" }))]
+    #[trace(properties = { "from": "{from}", "limit": "{limit}" })]
     async fn get_transactions(
         &self,
         from: u64,
@@ -131,7 +130,7 @@ impl domain::storage::Storage for Storage {
             .await
     }
 
-    #[cfg_attr(feature = "cloud", trace)]
+    #[trace]
     async fn save_relevant_transactions(
         &self,
         viewing_key: &ViewingKey,
@@ -192,7 +191,7 @@ impl domain::storage::Storage for Storage {
         Ok(())
     }
 
-    #[cfg_attr(feature = "cloud", trace)]
+    #[trace]
     async fn active_wallets(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error> {
         // Query wallets.
         let query = indoc! {"
@@ -258,7 +257,7 @@ impl domain::storage::Storage for Storage {
         Ok(ids)
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "id": "{id}" }))]
+    #[trace(properties = { "id": "{id}" })]
     async fn get_wallet_by_id(
         &self,
         id: Uuid,

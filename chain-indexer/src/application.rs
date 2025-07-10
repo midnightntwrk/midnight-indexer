@@ -189,7 +189,7 @@ pub async fn run(
         let mut blocks = pin!(blocks);
         let mut caught_up = false;
 
-        while let Some(z) = get_and_index_block(
+        while let Some(s) = get_and_index_block(
             config,
             &mut blocks,
             ledger_state,
@@ -203,7 +203,7 @@ pub async fn run(
         .in_span(Span::root("get-and-index-block", SpanContext::random()))
         .await?
         {
-            ledger_state = z
+            ledger_state = s
         }
 
         Ok::<_, anyhow::Error>(())
@@ -264,15 +264,7 @@ where
     }
 }
 
-#[trace]
-async fn get_next_block<E>(
-    blocks: &mut (impl Stream<Item = Result<Block, E>> + Unpin),
-) -> Result<Option<Block>, E> {
-    blocks.try_next().await
-}
-
 #[allow(clippy::too_many_arguments)]
-#[trace]
 async fn get_and_index_block<E>(
     config: Config,
     blocks: &mut (impl Stream<Item = Result<Block, E>> + Unpin),
@@ -311,6 +303,13 @@ where
 
         None => Ok(None),
     }
+}
+
+#[trace]
+async fn get_next_block<E>(
+    blocks: &mut (impl Stream<Item = Result<Block, E>> + Unpin),
+) -> Result<Option<Block>, E> {
+    blocks.try_next().await
 }
 
 #[allow(clippy::too_many_arguments)]
