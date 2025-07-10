@@ -263,18 +263,18 @@ async fn save_transactions(
 
     let transaction_ids = QueryBuilder::new(query)
         .push_values(transactions.iter(), |mut q, transaction| {
-            #[cfg_attr(feature = "standalone", allow(unused_variables))]
             let Transaction {
                 hash,
                 protocol_version,
                 transaction_result,
-                identifiers,
                 raw,
                 merkle_tree_root,
                 start_index,
                 end_index,
                 paid_fees,
                 estimated_fees,
+                #[cfg(feature = "cloud")]
+                identifiers,
                 ..
             } = transaction;
 

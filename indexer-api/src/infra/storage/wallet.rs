@@ -91,6 +91,9 @@ impl WalletStorage for Storage {
             .map_ok(|_| ())
             .await;
 
+        // PostgreSQL deadlock handling: This operation can conflict with wallet-indexer's
+        // concurrent wallet processing. Deadlock errors are acceptable because the wallet
+        // will be set active again on the next API request.
         #[cfg(feature = "cloud")]
         let result = result.or_else(|error| {
             indexer_common::infra::sqlx::postgres::ignore_deadlock_detected(error, || ())
