@@ -185,7 +185,7 @@ impl LedgerState {
                     let utxo = &*utxo_tuple.0;
                     UnshieldedUtxo {
                         value: utxo.value,
-                        owner_address: utxo.owner.0.0.into(),
+                        owner: utxo.owner.0.0.into(),
                         token_type: utxo.type_.0.0.into(),
                         intent_hash: utxo.intent_hash.0.0.into(),
                         output_index: utxo.output_no,
