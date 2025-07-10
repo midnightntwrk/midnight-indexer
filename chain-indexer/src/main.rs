@@ -89,7 +89,7 @@ async fn run() -> anyhow::Result<()> {
             .await
             .context("run Postgres migrations")?;
     }
-    let storage = infra::storage::postgres::PostgresStorage::new(pool);
+    let storage = infra::storage::Storage::new(pool);
 
     let ledger_state_storage =
         ledger_state_storage::nats::NatsLedgerStateStorage::new(ledger_state_storage_config)

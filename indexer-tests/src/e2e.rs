@@ -99,12 +99,12 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_contract_actions_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test contract action subscription")?;
-    test_unshielded_transactions_subscription(&indexer_data, &ws_api_url) // we use node mock version at the moment
-        .await
-        .context("test unshielded UTXOs subscription")?;
     test_shielded_transactions_subscription(&ws_api_url, network_id)
         .await
-        .context("test wallet subscription")?;
+        .context("test shielded transactions subscription")?;
+    test_unshielded_transactions_subscription(&indexer_data, &ws_api_url)
+        .await
+        .context("test unshielded transactions subscription")?;
 
     println!("### successfully finished e2e testing");
 

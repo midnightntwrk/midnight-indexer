@@ -13,10 +13,12 @@
 
 use crate::{
     domain::{ContractAction, ContractAttributes, storage::contract_action::ContractActionStorage},
-    infra::storage::sqlite::SqliteStorage,
+    infra::storage::Storage,
 };
 use async_stream::try_stream;
-use futures::{Stream, stream::TryStreamExt};
+#[cfg(feature = "cloud")]
+use fastrace::trace;
+use futures::{Stream, TryStreamExt};
 use indexer_common::{
     domain::{BlockHash, RawContractAddress, RawTransactionIdentifier, TransactionHash},
     stream::flatten_chunks,
@@ -24,7 +26,8 @@ use indexer_common::{
 use indoc::indoc;
 use std::num::NonZeroU32;
 
-impl ContractActionStorage for SqliteStorage {
+impl ContractActionStorage for Storage {
+    #[cfg_attr(feature = "cloud", trace(properties = { "address": "{address}" }))]
     async fn get_contract_deploy_by_address(
         &self,
         address: &RawContractAddress,
@@ -56,6 +59,7 @@ impl ContractActionStorage for SqliteStorage {
         Ok(action)
     }
 
+    #[cfg_attr(feature = "cloud", trace(properties = { "address": "{address}" }))]
     async fn get_latest_contract_action_by_address(
         &self,
         address: &RawContractAddress,
@@ -74,12 +78,13 @@ impl ContractActionStorage for SqliteStorage {
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, ContractAction>(query)
+        sqlx::query_as(query)
             .bind(address)
             .fetch_optional(&*self.pool)
             .await
     }
 
+    #[cfg_attr(feature = "cloud", trace(properties = { "address": "{address}", "hash": "{hash}" }))]
     async fn get_contract_action_by_address_and_block_hash(
         &self,
         address: &RawContractAddress,
@@ -101,17 +106,24 @@ impl ContractActionStorage for SqliteStorage {
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, ContractAction>(query)
-            .bind(address.as_ref())
-            .bind(hash.as_ref())
+        #[cfg(feature = "standalone")]
+        let (address, hash) = { (address.as_ref(), hash.as_ref()) };
+
+        sqlx::query_as(query)
+            .bind(address)
+            .bind(hash)
             .fetch_optional(&*self.pool)
             .await
     }
 
+    #[cfg_attr(
+        feature = "cloud",
+        trace(properties = { "address": "{address}", "block_height": "{block_height}" })
+    )]
     async fn get_contract_action_by_address_and_block_height(
         &self,
         address: &RawContractAddress,
-        height: u32,
+        block_height: u32,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -130,13 +142,14 @@ impl ContractActionStorage for SqliteStorage {
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, ContractAction>(query)
+        sqlx::query_as(query)
             .bind(address)
-            .bind(height as i64)
+            .bind(block_height as i64)
             .fetch_optional(&*self.pool)
             .await
     }
 
+    #[cfg_attr(feature = "cloud", trace(properties = { "address": "{address}", "hash": "{hash}" }))]
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
         address: &RawContractAddress,
@@ -162,18 +175,43 @@ impl ContractActionStorage for SqliteStorage {
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, ContractAction>(query)
-            .bind(address.as_ref())
-            .bind(hash.as_ref())
+        #[cfg(feature = "standalone")]
+        let (address, hash) = { (address.as_ref(), hash.as_ref()) };
+
+        sqlx::query_as(query)
+            .bind(address)
+            .bind(hash)
             .fetch_optional(&*self.pool)
             .await
     }
 
+    #[cfg_attr(
+        feature = "cloud",
+        trace(properties = { "address": "{address}", "identifier": "{identifier}" })
+    )]
     async fn get_contract_action_by_address_and_transaction_identifier(
         &self,
         address: &RawContractAddress,
         identifier: &RawTransactionIdentifier,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            SELECT
+                contract_actions.id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                contract_actions.transaction_id
+            FROM contract_actions
+            INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
+            WHERE address = $1
+            AND $2 = ANY(transactions.identifiers)
+            ORDER BY contract_actions.id DESC
+            LIMIT 1
+        "};
+
+        #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
                 contract_actions.id,
@@ -191,13 +229,14 @@ impl ContractActionStorage for SqliteStorage {
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, ContractAction>(query)
+        sqlx::query_as(query)
             .bind(address)
             .bind(identifier)
             .fetch_optional(&*self.pool)
             .await
     }
 
+    #[cfg_attr(feature = "cloud", trace(properties = { "id": "{id}" }))]
     async fn get_contract_actions_by_transaction_id(
         &self,
         id: u64,
@@ -215,12 +254,16 @@ impl ContractActionStorage for SqliteStorage {
             ORDER BY id
         "};
 
-        sqlx::query_as::<_, ContractAction>(query)
+        sqlx::query_as(query)
             .bind(id as i64)
             .fetch_all(&*self.pool)
             .await
     }
 
+    #[cfg_attr(
+        feature = "cloud",
+        trace(properties = { "address": "{address}", "contract_action_id": "{contract_action_id}" })
+    )]
     fn get_contract_actions_by_address(
         &self,
         address: &RawContractAddress,
@@ -267,6 +310,10 @@ impl ContractActionStorage for SqliteStorage {
         flatten_chunks(chunks)
     }
 
+    #[cfg_attr(
+        feature = "cloud",
+        trace(properties = { "contract_action_id": "{contract_action_id}" })
+    )]
     async fn get_unshielded_balances_by_action_id(
         &self,
         contract_action_id: u64,
@@ -274,15 +321,19 @@ impl ContractActionStorage for SqliteStorage {
         let query = indoc! {"
             SELECT token_type, amount 
             FROM contract_balances 
-            WHERE contract_action_id = ?
+            WHERE contract_action_id = $1
         "};
 
-        sqlx::query_as::<_, crate::domain::ContractBalance>(query)
+        sqlx::query_as(query)
             .bind(contract_action_id as i64)
             .fetch_all(&*self.pool)
             .await
     }
 
+    #[cfg_attr(
+        feature = "cloud",
+        trace(properties = { "block_height": "{block_height}" })
+    )]
     async fn get_contract_action_id_by_block_height(
         &self,
         block_height: u32,
@@ -290,7 +341,7 @@ impl ContractActionStorage for SqliteStorage {
         let query = indoc! {"
             SELECT contract_actions.id
             FROM contract_actions
-            JOIN transactions ON transactions.id = contract_actions.transaction_id
+            JOIN transactions ON transactions.id = transaction_id
             JOIN blocks ON blocks.id = transactions.block_id
             WHERE blocks.height >= $1
             ORDER BY contract_actions.id

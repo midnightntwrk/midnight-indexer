@@ -11,9 +11,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg_attr(docsrs, doc(cfg(feature = "cloud")))]
-#[cfg(feature = "cloud")]
-pub mod postgres;
-#[cfg_attr(docsrs, doc(cfg(feature = "standalone")))]
-#[cfg(feature = "standalone")]
-pub mod sqlite;
+mod block;
+mod contract_action;
+mod transaction;
+mod unshielded;
+mod wallet;
+
+use crate::domain;
+use chacha20poly1305::ChaCha20Poly1305;
+use derive_more::Debug;
+
+/// Unified storage implementation for PostgreSQL (cloud) and SQLite (standalone). Uses Cargo
+/// features to select the appropriate database backend at build time.
+#[derive(Debug, Clone)]
+pub struct Storage {
+    #[debug(skip)]
+    cipher: ChaCha20Poly1305,
+
+    #[cfg(feature = "cloud")]
+    pool: indexer_common::infra::pool::postgres::PostgresPool,
+
+    #[cfg(feature = "standalone")]
+    pool: indexer_common::infra::pool::sqlite::SqlitePool,
+}
+
+impl Storage {
+    #[cfg(feature = "cloud")]
+    pub fn new(
+        cipher: ChaCha20Poly1305,
+        pool: indexer_common::infra::pool::postgres::PostgresPool,
+    ) -> Self {
+        Self { cipher, pool }
+    }
+
+    #[cfg(feature = "standalone")]
+    pub fn new(
+        cipher: ChaCha20Poly1305,
+        pool: indexer_common::infra::pool::sqlite::SqlitePool,
+    ) -> Self {
+        Self { cipher, pool }
+    }
+}
+
+impl domain::storage::Storage for Storage {}

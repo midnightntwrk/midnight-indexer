@@ -82,7 +82,7 @@ async fn run() -> anyhow::Result<()> {
             .context("run Postgres migrations")?;
     }
     let cipher = make_cipher(secret).context("make cipher")?;
-    let storage = infra::storage::postgres::PostgresStorage::new(cipher, pool);
+    let storage = infra::storage::Storage::new(cipher, pool);
 
     let publisher = pub_sub::nats::publisher::NatsPublisher::new(pub_sub_config.clone())
         .await

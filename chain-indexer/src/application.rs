@@ -66,7 +66,7 @@ pub async fn run(
     let network_id = config.network_id;
 
     let highest_block = storage
-        .get_highest_block()
+        .get_highest_block_info()
         .await
         .context("get highest block")?;
     let highest_height = highest_block.map(|b| b.height);

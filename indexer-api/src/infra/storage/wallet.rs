@@ -11,17 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{domain::storage::wallet::WalletStorage, infra::storage::postgres::PostgresStorage};
+use crate::{domain::storage::wallet::WalletStorage, infra::storage::Storage};
+#[cfg(feature = "cloud")]
 use fastrace::trace;
-use indexer_common::{
-    domain::{SessionId, ViewingKey},
-    infra::sqlx::postgres::ignore_deadlock_detected,
-};
+use futures::TryFutureExt;
+use indexer_common::domain::{SessionId, ViewingKey};
 use indoc::indoc;
 use sqlx::types::{Uuid, time::OffsetDateTime};
 
-impl WalletStorage for PostgresStorage {
-    #[trace]
+impl WalletStorage for Storage {
+    #[cfg_attr(feature = "cloud", trace)]
     async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<(), sqlx::Error> {
         let id = Uuid::now_v7();
         let session_id = viewing_key.to_session_id();
@@ -41,6 +40,9 @@ impl WalletStorage for PostgresStorage {
             DO UPDATE SET active = TRUE, last_active = $4
         "};
 
+        #[cfg(feature = "standalone")]
+        let (session_id, viewing_key) = { (session_id.as_ref(), &viewing_key) };
+
         sqlx::query(query)
             .bind(id)
             .bind(session_id)
@@ -52,13 +54,16 @@ impl WalletStorage for PostgresStorage {
         Ok(())
     }
 
-    #[trace(properties = { "session_id": "{session_id}" })]
+    #[cfg_attr(feature = "cloud", trace(properties = { "session_id": "{session_id}" }))]
     async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
         let query = indoc! {"
             UPDATE wallets
             SET active = FALSE
             WHERE session_id = $1
         "};
+
+        #[cfg(feature = "standalone")]
+        let session_id = session_id.as_ref();
 
         sqlx::query(query)
             .bind(session_id)
@@ -68,10 +73,7 @@ impl WalletStorage for PostgresStorage {
         Ok(())
     }
 
-    // This could cause a "deadlock_detected" error when the indexer-api sets a wallet
-    // active at the same time. These errors can be ignored, because this operation will be
-    // executed "very soon" again for an active wallet.
-    #[trace(properties = { "session_id": "{session_id}" })]
+    #[cfg_attr(feature = "cloud", trace(properties = { "session_id": "{session_id}" }))]
     async fn set_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
         let query = indoc! {"
             UPDATE wallets
@@ -79,14 +81,21 @@ impl WalletStorage for PostgresStorage {
             WHERE session_id = $1
         "};
 
-        sqlx::query(query)
+        #[cfg(feature = "standalone")]
+        let session_id = session_id.as_ref();
+
+        let result = sqlx::query(query)
             .bind(session_id)
             .bind(OffsetDateTime::now_utc())
             .execute(&*self.pool)
-            .await
-            .map(|_| ())
-            .or_else(|error| ignore_deadlock_detected(error, || ()))?;
+            .map_ok(|_| ())
+            .await;
 
-        Ok(())
+        #[cfg(feature = "cloud")]
+        let result = result.or_else(|error| {
+            indexer_common::infra::sqlx::postgres::ignore_deadlock_detected(error, || ())
+        });
+
+        result
     }
 }
