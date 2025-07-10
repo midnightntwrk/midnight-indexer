@@ -66,15 +66,21 @@ where
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
         let height = resolve_height(offset, storage).await?;
-        let mut next_contract_action_id = 0;
+        let mut contract_action_id = storage
+            .get_contract_action_id_by_block_height(height)
+            .await
+            .map_err_into_server_error(|| {
+                format!("get contract action id by block height {height}")
+            })?
+            .unwrap_or_default();
 
         let contract_actions = try_stream! {
-            debug!(height; "streaming so far stored contract actions");
+            // Stream existing contract actions.
+            debug!(contract_action_id; "streaming existing contract actions");
 
             let contract_actions = storage.get_contract_actions_by_address(
                 &address,
-                height,
-                next_contract_action_id,
+                contract_action_id,
                 BATCH_SIZE,
             );
             let mut contract_actions = pin!(contract_actions);
@@ -82,15 +88,16 @@ where
                 .try_next()
                 .await
                 .map_err_into_server_error(|| {
-                    format!("get next contract action for ID {next_contract_action_id}")
+                    format!("get next contract action for ID {contract_action_id}")
                 })?
             {
-                next_contract_action_id = contract_action.id + 1;
+                contract_action_id = contract_action.id + 1;
 
                 yield contract_action.into();
             }
 
-            // Yield "future" contract actions.
+            // Stream live contract actions.
+            debug!(contract_action_id; "streaming live contract actions");
             let mut block_indexed_stream = pin!(block_indexed_stream);
             while let Some(BlockIndexed { height, .. }) = block_indexed_stream
                 .try_next()
@@ -101,8 +108,7 @@ where
 
                 let contract_actions = storage.get_contract_actions_by_address(
                     &address,
-                    0,
-                    next_contract_action_id,
+                    contract_action_id,
                     BATCH_SIZE,
                 );
                 let mut contract_actions = pin!(contract_actions);
@@ -111,10 +117,10 @@ where
                     .try_next()
                     .await
                     .map_err_into_server_error(|| {
-                        format!("get next contract action for ID {next_contract_action_id}")
+                        format!("get next contract action for ID {contract_action_id}")
                     })?
                 {
-                    next_contract_action_id = contract_action.id + 1;
+                    contract_action_id = contract_action.id + 1;
 
                     yield contract_action.into();
                 }

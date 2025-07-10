@@ -13,10 +13,8 @@ publish       = { workspace = true }
 [dependencies]
 anyhow            = { workspace = true }
 assert_matches    = { workspace = true }
-bech32            = { workspace = true }
 chain-indexer     = { path = "../chain-indexer" }
 clap              = { workspace = true, features = [ "derive" ] }
-const-hex         = { workspace = true }
 derive_more       = { workspace = true, features = [ "display" ] }
 fake              = { workspace = true }
 futures           = { workspace = true }
@@ -32,8 +30,6 @@ tokio             = { workspace = true, features = [ "macros", "process", "rt-mu
 tokio-tungstenite = { workspace = true, features = [ "rustls-tls-webpki-roots" ] }
 
 [dev-dependencies]
-bech32                 = { workspace = true }
-const-hex              = { workspace = true }
 fake                   = { workspace = true }
 fs_extra               = { workspace = true }
 sqlx                   = { workspace = true, features = [ "postgres" ] }

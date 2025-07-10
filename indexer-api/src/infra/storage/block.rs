@@ -13,17 +13,18 @@
 
 use crate::{
     domain::{Block, storage::block::BlockStorage},
-    infra::storage::postgres::PostgresStorage,
+    infra::storage::Storage,
 };
 use async_stream::try_stream;
+#[cfg(feature = "cloud")]
 use fastrace::trace;
 use futures::Stream;
 use indexer_common::{domain::BlockHash, stream::flatten_chunks};
 use indoc::indoc;
 use std::num::NonZeroU32;
 
-impl BlockStorage for PostgresStorage {
-    #[trace]
+impl BlockStorage for Storage {
+    #[cfg_attr(feature = "cloud", trace)]
     async fn get_latest_block(&self) -> Result<Option<Block>, sqlx::Error> {
         let query = indoc! {"
             SELECT *
@@ -32,12 +33,10 @@ impl BlockStorage for PostgresStorage {
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, Block>(query)
-            .fetch_optional(&*self.pool)
-            .await
+        sqlx::query_as(query).fetch_optional(&*self.pool).await
     }
 
-    #[trace(properties = { "hash": "{hash}" })]
+    #[cfg_attr(feature = "cloud", trace(properties = { "hash": "{hash}" }))]
     async fn get_block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>, sqlx::Error> {
         let query = indoc! {"
             SELECT *
@@ -46,13 +45,16 @@ impl BlockStorage for PostgresStorage {
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, Block>(query)
+        #[cfg(feature = "standalone")]
+        let hash = hash.as_ref();
+
+        sqlx::query_as(query)
             .bind(hash)
             .fetch_optional(&*self.pool)
             .await
     }
 
-    #[trace(properties = { "height": "{height}" })]
+    #[cfg_attr(feature = "cloud", trace(properties = { "height": "{height}" }))]
     async fn get_block_by_height(&self, height: u32) -> Result<Option<Block>, sqlx::Error> {
         let query = indoc! {"
             SELECT *
@@ -61,13 +63,16 @@ impl BlockStorage for PostgresStorage {
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, Block>(query)
+        sqlx::query_as(query)
             .bind(height as i64)
             .fetch_optional(&*self.pool)
             .await
     }
 
-    #[trace(properties = { "height": "{height}", "batch_size": "{batch_size}" })]
+    #[cfg_attr(
+        feature = "cloud",
+        trace(properties = { "height": "{height}", "batch_size": "{batch_size}" })
+    )]
     fn get_blocks(
         &self,
         mut height: u32,
@@ -85,7 +90,7 @@ impl BlockStorage for PostgresStorage {
                     LIMIT $2
                 "};
 
-                let blocks = sqlx::query_as::<_, Block>(query)
+                let blocks = sqlx::query_as(query)
                     .bind(height as i64)
                     .bind(batch_size.get() as i64)
                     .fetch_all(&*self.pool)

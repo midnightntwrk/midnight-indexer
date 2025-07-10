@@ -14,12 +14,12 @@
 pub mod block;
 pub mod contract_action;
 pub mod transaction;
-pub mod unshielded_utxo;
+pub mod unshielded;
 pub mod wallet;
 
 use crate::domain::storage::{
     block::BlockStorage, contract_action::ContractActionStorage, transaction::TransactionStorage,
-    unshielded_utxo::UnshieldedUtxoStorage, wallet::WalletStorage,
+    unshielded::UnshieldedUtxoStorage, wallet::WalletStorage,
 };
 use std::fmt::Debug;
 

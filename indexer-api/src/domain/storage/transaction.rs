@@ -55,11 +55,18 @@ where
 
     /// Get all transactions that create or spend unshielded UTXOs for the given address, ordered by
     /// transaction ID.
-    async fn get_transactions_involving_unshielded(
+    fn get_transactions_involving_unshielded(
         &self,
-        address: &RawUnshieldedAddress,
+        address: RawUnshieldedAddress,
         from_transaction_id: u64,
-    ) -> Result<Vec<Transaction>, sqlx::Error>;
+        batch_size: NonZeroU32,
+    ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send;
+
+    /// Get the highest transaction ID for the given unshielded address.
+    async fn get_highest_transaction_id_for_unshielded_address(
+        &self,
+        address: RawUnshieldedAddress,
+    ) -> Result<Option<u64>, sqlx::Error>;
 
     /// Get a tuple of end indices:
     /// - the highest end index into the zswap state of all currently known transactions,
@@ -67,7 +74,7 @@ where
     ///   i.e. those that belong to any known wallet,
     /// - the highest end index into the zswap state of all currently known relevant transactions
     ///   for a particular wallet identified by the given session ID.
-    async fn get_highest_indices(
+    async fn get_highest_end_indices(
         &self,
         session_id: SessionId,
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error>;
@@ -112,16 +119,25 @@ impl TransactionStorage for NoopStorage {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn get_transactions_involving_unshielded(
+    fn get_transactions_involving_unshielded(
         &self,
-        address: &RawUnshieldedAddress,
+        address: RawUnshieldedAddress,
         from_transaction_id: u64,
-    ) -> Result<Vec<Transaction>, sqlx::Error> {
+        batch_size: NonZeroU32,
+    ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send {
+        stream::empty()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_highest_transaction_id_for_unshielded_address(
+        &self,
+        address: RawUnshieldedAddress,
+    ) -> Result<Option<u64>, sqlx::Error> {
         unimplemented!()
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn get_highest_indices(
+    async fn get_highest_end_indices(
         &self,
         session_id: SessionId,
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error> {

@@ -62,9 +62,9 @@ CREATE INDEX contract_actions_address ON contract_actions(address);
 CREATE INDEX contract_actions_id_address ON contract_actions(id, address);
 
 CREATE TABLE wallets(
-    id BLOB PRIMARY KEY,
+    id BLOB PRIMARY KEY, -- UUID
     session_id BLOB NOT NULL UNIQUE,
-    viewing_key BLOB NOT NULL,
+    viewing_key BLOB NOT NULL, -- Ciphertext with nonce, no longer unique!
     last_indexed_transaction_id INTEGER NOT NULL DEFAULT 0,
     active BOOLEAN NOT NULL DEFAULT TRUE,
     last_active INTEGER NOT NULL
@@ -87,24 +87,26 @@ CREATE TABLE unshielded_utxos(
     id INTEGER PRIMARY KEY,
     creating_transaction_id INTEGER NOT NULL,
     spending_transaction_id INTEGER,
-    output_index INTEGER NOT NULL,
-    owner_address BLOB NOT NULL,
+    owner BLOB NOT NULL,
     token_type BLOB NOT NULL,
-    intent_hash BLOB NOT NULL,
     value BLOB NOT NULL,
+    output_index INTEGER NOT NULL,
+    intent_hash BLOB NOT NULL,
     FOREIGN KEY (creating_transaction_id) REFERENCES transactions(id),
     FOREIGN KEY (spending_transaction_id) REFERENCES transactions(id),
     UNIQUE (intent_hash, output_index)
 );
 
-CREATE INDEX unshielded_owner_idx ON unshielded_utxos(owner_address);
+CREATE INDEX unshielded_creating_idx ON unshielded_utxos(creating_transaction_id);
+
+CREATE INDEX unshielded_spending_idx ON unshielded_utxos(spending_transaction_id);
+
+CREATE INDEX unshielded_owner_idx ON unshielded_utxos(owner);
 
 CREATE INDEX unshielded_token_type_idx ON unshielded_utxos(token_type);
 
-CREATE INDEX unshielded_spent_idx ON unshielded_utxos(spending_transaction_id);
-
 CREATE TABLE zswap_state(
-    id BLOB PRIMARY KEY,
+    id BLOB PRIMARY KEY, -- UUID
     value BLOB NOT NULL,
     last_index INTEGER
 );
@@ -112,8 +114,8 @@ CREATE TABLE zswap_state(
 CREATE TABLE contract_balances(
     id INTEGER PRIMARY KEY,
     contract_action_id INTEGER NOT NULL REFERENCES contract_actions(id),
-    token_type BLOB NOT NULL,
-    amount BLOB NOT NULL,
+    token_type BLOB NOT NULL, -- Serialized TokenType (hex-encoded)
+    amount BLOB NOT NULL, -- u128 amount as bytes (for large number support)
     UNIQUE (contract_action_id, token_type)
 );
 

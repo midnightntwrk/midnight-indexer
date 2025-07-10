@@ -12,7 +12,6 @@
 // limitations under the License.
 
 use futures::{Stream, StreamExt, stream};
-use std::iter;
 
 /// Flattens a stream of results of chunks of items into a stream of results of items.
 pub fn flatten_chunks<T, E>(
@@ -20,7 +19,7 @@ pub fn flatten_chunks<T, E>(
 ) -> impl Stream<Item = Result<T, E>> {
     chunks.flat_map(|chunk: Result<Vec<_>, E>| match chunk {
         Ok(chunk) => stream::iter(chunk.into_iter().map(Ok)).left_stream(),
-        Err(error) => stream::iter(iter::once(Err(error))).right_stream(),
+        Err(error) => stream::iter([Err(error)]).right_stream(),
     })
 }
 

@@ -100,7 +100,7 @@ async fn run() -> anyhow::Result<()> {
         let node = SubxtNode::new(node_config)
             .await
             .context("create SubxtNode")?;
-        let storage = chain_indexer::infra::storage::sqlite::SqliteStorage::new(pool.clone());
+        let storage = chain_indexer::infra::storage::Storage::new(pool.clone());
 
         chain_indexer::application::run(
             application_config.into(),
@@ -112,8 +112,7 @@ async fn run() -> anyhow::Result<()> {
     });
 
     let indexer_api = task::spawn({
-        let storage =
-            indexer_api::infra::storage::sqlite::SqliteStorage::new(cipher.clone(), pool.clone());
+        let storage = indexer_api::infra::storage::Storage::new(cipher.clone(), pool.clone());
         let subscriber = pub_sub.subscriber();
         let api = AxumApi::new(
             api_config,
@@ -126,7 +125,7 @@ async fn run() -> anyhow::Result<()> {
     });
 
     let wallet_indexer = task::spawn({
-        let storage = wallet_indexer::infra::storage::sqlite::SqliteStorage::new(cipher, pool);
+        let storage = wallet_indexer::infra::storage::Storage::new(cipher, pool);
         let publisher = pub_sub.publisher();
         let subscriber = pub_sub.subscriber();
 

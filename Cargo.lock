@@ -1033,7 +1033,6 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "metrics",
- "midnight-ledger",
  "parity-scale-codec",
  "parking_lot",
  "paste",
@@ -1832,9 +1831,9 @@ dependencies = [
 
 [[package]]
 name = "fastrace"
-version = "0.7.13"
+version = "0.7.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fde94e75dd0b863818f8407f0447193a92d6ac7bf83e12dc5a910854575cfa5"
+checksum = "318783b9fefe06130ab664ff1779215657586b004c0c7f3d6ece16d658936d06"
 dependencies = [
  "fastant",
  "fastrace-macro",
@@ -1859,9 +1858,9 @@ dependencies = [
 
 [[package]]
 name = "fastrace-macro"
-version = "0.7.13"
+version = "0.7.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57fb13c45c063581a7aee247508b2ccec10208a4c6f77fa3681c35692acb4982"
+checksum = "c7079009cf129d63c850dee732b58d7639d278a47ad99c607954ac94cfd57ef4"
 dependencies = [
  "proc-macro-error2",
  "proc-macro2",
@@ -2948,7 +2947,6 @@ name = "indexer-api"
 version = "3.0.0"
 dependencies = [
  "anyhow",
- "assert_matches",
  "async-graphql",
  "async-graphql-axum",
  "async-stream",
@@ -2967,7 +2965,6 @@ dependencies = [
  "indoc",
  "log",
  "metrics",
- "midnight-zswap",
  "secrecy",
  "serde",
  "sqlx",
@@ -2997,7 +2994,6 @@ dependencies = [
  "figment",
  "futures",
  "humantime-serde",
- "k256",
  "log",
  "logforth",
  "metrics-exporter-prometheus",
@@ -3052,10 +3048,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
- "bech32",
  "chain-indexer",
  "clap",
- "const-hex",
  "derive_more 2.0.1",
  "fake",
  "fs_extra",
@@ -7007,9 +7001,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.46.0"
+version = "1.46.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1140bb80481756a8cbe10541f37433b459c5aa1e727b4c020fbfebdc25bf3ec4"
+checksum = "0cc3a2344dafbe23a245241fe8b09735b521110d30fcefbbd5feb1797ca35d17"
 dependencies = [
  "backtrace",
  "bytes",
@@ -7645,6 +7639,7 @@ version = "3.0.0"
 dependencies = [
  "anyhow",
  "chacha20poly1305",
+ "derive_more 2.0.1",
  "fastrace",
  "futures",
  "humantime-serde",
@@ -7652,13 +7647,11 @@ dependencies = [
  "indoc",
  "itertools 0.14.0",
  "log",
- "midnight-ledger",
  "secrecy",
  "serde",
  "sqlx",
  "testcontainers",
  "testcontainers-modules",
- "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
  "trait-variant",

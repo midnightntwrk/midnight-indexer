@@ -59,7 +59,6 @@ message!(WalletIndexed);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnshieldedUtxoIndexed {
     pub address: RawUnshieldedAddress,
-    pub transaction_id: u64,
 }
 message!(UnshieldedUtxoIndexed);
 

@@ -39,10 +39,12 @@ impl ViewingKey {
     /// Try to decrypt the given bytes as viewing key using ChaCha20Poly1305 AEAD with the given
     /// nonce and ciphertext and the given wallet ID.
     pub fn decrypt(
-        nonce_and_ciphertext: &[u8],
+        nonce_and_ciphertext: impl AsRef<[u8]>,
         wallet_id: Uuid,
         cipher: &ChaCha20Poly1305,
     ) -> Result<Self, DecryptViewingKeyError> {
+        let nonce_and_ciphertext = nonce_and_ciphertext.as_ref();
+
         let nonce = &nonce_and_ciphertext[0..12];
         let ciphertext = &nonce_and_ciphertext[12..];
 
@@ -50,11 +52,7 @@ impl ViewingKey {
             msg: ciphertext,
             aad: wallet_id.as_bytes(),
         };
-        let bytes = cipher.decrypt(nonce.into(), payload)?;
-
-        let bytes = bytes
-            .try_into()
-            .map_err(DecryptViewingKeyError::ByteArrayLen)?;
+        let bytes = cipher.decrypt(nonce.into(), payload)?.try_into()?;
 
         Ok(Self(bytes))
     }
@@ -108,6 +106,6 @@ pub enum DecryptViewingKeyError {
     #[error("cannot decrypt secret")]
     DecryptViewingKeyError(#[from] chacha20poly1305::Error),
 
-    #[error(transparent)]
-    ByteArrayLen(ByteArrayLenError),
+    #[error("cannot convert into viewing key")]
+    ByteArrayLen(#[from] ByteArrayLenError),
 }

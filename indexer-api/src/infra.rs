@@ -12,24 +12,22 @@
 // limitations under the License.
 
 pub mod api;
+#[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 pub mod storage;
 
-#[cfg(feature = "cloud")]
-use indexer_common::infra::pool;
-#[cfg(feature = "cloud")]
-use indexer_common::infra::{ledger_state_storage, pub_sub};
-
+#[cfg_attr(docsrs, doc(cfg(feature = "cloud")))]
 #[cfg(feature = "cloud")]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
     #[serde(rename = "storage")]
-    pub storage_config: pool::postgres::Config,
+    pub storage_config: indexer_common::infra::pool::postgres::Config,
 
     #[serde(rename = "pub_sub")]
-    pub pub_sub_config: pub_sub::nats::Config,
+    pub pub_sub_config: indexer_common::infra::pub_sub::nats::Config,
 
     #[serde(rename = "ledger_state_storage")]
-    pub ledger_state_storage_config: ledger_state_storage::nats::Config,
+    pub ledger_state_storage_config: indexer_common::infra::ledger_state_storage::nats::Config,
 
     #[serde(rename = "api")]
     pub api_config: api::Config,

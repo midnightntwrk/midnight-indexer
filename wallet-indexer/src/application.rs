@@ -162,8 +162,9 @@ async fn index_wallet(
             .await
             .context("get transactions")?;
 
-        let last_indexed_transaction_id = transactions.iter().map(|t| t.id).max();
-        let Some(last_indexed_transaction_id) = last_indexed_transaction_id else {
+        let last_indexed_transaction_id = if let Some(transaction) = transactions.last() {
+            transaction.id
+        } else {
             debug!(wallet_id:%; "no transactions for wallet");
             return Ok(());
         };

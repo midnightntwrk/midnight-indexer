@@ -407,6 +407,10 @@ trait OptionExt<T> {
     fn ok_or_server_error<S>(self, message: impl Fn() -> S) -> Result<T, ApiError>
     where
         S: ToString;
+
+    fn ok_or_client_error<S>(self, message: impl Fn() -> S) -> Result<T, ApiError>
+    where
+        S: ToString;
 }
 
 impl<T> OptionExt<T> for Option<T> {
@@ -415,6 +419,13 @@ impl<T> OptionExt<T> for Option<T> {
         S: ToString,
     {
         self.ok_or_else(|| ApiError::Server(InnerApiError(message().to_string(), None)))
+    }
+
+    fn ok_or_client_error<S>(self, message: impl Fn() -> S) -> Result<T, ApiError>
+    where
+        S: ToString,
+    {
+        self.ok_or_else(|| ApiError::Client(InnerApiError(message().to_string(), None)))
     }
 }
 

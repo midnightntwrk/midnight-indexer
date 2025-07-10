@@ -13,8 +13,8 @@
 
 mod block;
 mod contract_action;
+mod shielded;
 mod unshielded;
-mod wallet;
 
 use crate::domain::storage::Storage;
 use async_graphql::MergedSubscription;
@@ -24,8 +24,8 @@ use indexer_common::domain::{LedgerStateStorage, Subscriber};
 pub struct Subscription<S, B, Z>(
     block::BlockSubscription<S, B>,
     contract_action::ContractActionSubscription<S, B>,
-    wallet::WalletSubscription<S, B, Z>,
-    unshielded::UnshieldedSubscription<S, B>,
+    shielded::ShieldedTransactionsSubscription<S, B, Z>,
+    unshielded::UnshieldedTransactionsSubscription<S, B>,
 )
 where
     S: Storage,
@@ -42,8 +42,8 @@ where
         Subscription(
             block::BlockSubscription::default(),
             contract_action::ContractActionSubscription::default(),
-            wallet::WalletSubscription::default(),
-            unshielded::UnshieldedSubscription::default(),
+            shielded::ShieldedTransactionsSubscription::default(),
+            unshielded::UnshieldedTransactionsSubscription::default(),
         )
     }
 }

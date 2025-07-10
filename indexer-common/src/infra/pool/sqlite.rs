@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use derive_more::Into;
 use log::debug;
 use serde::Deserialize;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -21,7 +22,7 @@ use thiserror::Error;
 ///
 /// To use as `&sqlx::SqlitePool` in `Query::execute`, use its `Deref` implementation: `&*pool` or
 /// `pool.deref()`. If an owned `sqlx::SqlitePool` is needed, use `Into::into`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Into)]
 pub struct SqlitePool(sqlx::SqlitePool);
 
 impl SqlitePool {

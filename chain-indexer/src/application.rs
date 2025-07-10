@@ -84,7 +84,7 @@ pub async fn run(
     let network_id = config.network_id;
 
     let highest_block = storage
-        .get_highest_block()
+        .get_highest_block_info()
         .await
         .context("get highest block")?;
     let highest_height = highest_block.map(|b| b.height);
@@ -430,19 +430,15 @@ async fn index_block(
 
     // Publish UnshieldedUtxoIndexed events for affected addresses.
     for transaction in &block.transactions {
-        let transaction_id = transaction.id;
         let mut published_addresses = HashSet::new();
 
         // For created UTXOs
         for utxo in &transaction.created_unshielded_utxos {
-            let address = utxo.owner_address.to_owned();
+            let address = utxo.owner.to_owned();
 
             if published_addresses.insert(address) {
                 publisher
-                    .publish(&UnshieldedUtxoIndexed {
-                        address,
-                        transaction_id,
-                    })
+                    .publish(&UnshieldedUtxoIndexed { address })
                     .await
                     .context("publish UnshieldedUtxoIndexed for created")?;
             }
@@ -450,14 +446,11 @@ async fn index_block(
 
         // For spent UTXOs
         for utxo in &transaction.spent_unshielded_utxos {
-            let address = utxo.owner_address.to_owned();
+            let address = utxo.owner.to_owned();
 
             if published_addresses.insert(address) {
                 publisher
-                    .publish(&UnshieldedUtxoIndexed {
-                        address,
-                        transaction_id,
-                    })
+                    .publish(&UnshieldedUtxoIndexed { address })
                     .await
                     .context("publish UnshieldedUtxoIndexed for spent")?;
             }
