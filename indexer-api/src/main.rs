@@ -49,6 +49,8 @@ async fn run() -> anyhow::Result<()> {
     use log::{error, info};
 
     // Load configuration.
+    let config = Config::load().context("load configuration")?;
+    info!(config:?; "starting");
     let Config {
         run_migrations,
         application_config,
@@ -58,13 +60,11 @@ async fn run() -> anyhow::Result<()> {
                 tracing_config,
                 metrics_config,
             },
-    } = Config::load().context("load configuration")?;
+    } = config;
 
     // Initialize tracing and metrics.
     telemetry::init_tracing(tracing_config);
     telemetry::init_metrics(metrics_config);
-
-    info!(run_migrations, application_config:?, infra_config:?; "starting");
 
     let infra::Config {
         secret,

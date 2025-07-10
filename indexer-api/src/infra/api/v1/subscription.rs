@@ -16,8 +16,10 @@ mod contract_action;
 mod shielded;
 mod unshielded;
 
-use crate::domain::storage::Storage;
+use crate::domain::{self, storage::Storage};
 use async_graphql::MergedSubscription;
+use fastrace::{Span, future::FutureExt, prelude::SpanContext};
+use futures::{Stream, stream::TryStreamExt};
 use indexer_common::domain::{LedgerStateStorage, Subscriber};
 
 #[derive(MergedSubscription)]
@@ -46,4 +48,16 @@ where
             unshielded::UnshieldedTransactionsSubscription::default(),
         )
     }
+}
+
+async fn get_next_transaction<E>(
+    transactions: &mut (impl Stream<Item = Result<domain::Transaction, E>> + Unpin),
+) -> Result<Option<domain::Transaction>, E> {
+    transactions
+        .try_next()
+        .in_span(Span::root(
+            "subscription.transactions.get-next-transaction",
+            SpanContext::random(),
+        ))
+        .await
 }

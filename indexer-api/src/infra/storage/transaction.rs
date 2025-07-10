@@ -16,7 +16,6 @@ use crate::{
     infra::storage::Storage,
 };
 use async_stream::try_stream;
-#[cfg(feature = "cloud")]
 use fastrace::trace;
 use futures::Stream;
 use indexer_common::{
@@ -27,7 +26,7 @@ use indoc::indoc;
 use std::num::NonZeroU32;
 
 impl TransactionStorage for Storage {
-    #[cfg_attr(feature = "cloud", trace(properties = { "id": "{id}" }))]
+    #[trace(properties = { "id": "{id}" })]
     async fn get_transaction_by_id(&self, id: u64) -> Result<Option<Transaction>, sqlx::Error> {
         #[cfg(feature = "cloud")]
         let query = indoc! {"
@@ -83,7 +82,7 @@ impl TransactionStorage for Storage {
         Ok(transaction)
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "id": "{id}" }))]
+    #[trace(properties = { "id": "{id}" })]
     async fn get_transactions_by_block_id(&self, id: u64) -> Result<Vec<Transaction>, sqlx::Error> {
         #[cfg(feature = "cloud")]
         let query = indoc! {"
@@ -141,7 +140,7 @@ impl TransactionStorage for Storage {
         Ok(transactions)
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "hash": "{hash}" }))]
+    #[trace(properties = { "hash": "{hash}" })]
     async fn get_transactions_by_hash(
         &self,
         hash: TransactionHash,
@@ -205,7 +204,7 @@ impl TransactionStorage for Storage {
         Ok(transactions)
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "identifier": "{identifier}" }))]
+    #[trace(properties = { "identifier": "{identifier}" })]
     async fn get_transactions_by_identifier(
         &self,
         identifier: &RawTransactionIdentifier,
@@ -267,7 +266,6 @@ impl TransactionStorage for Storage {
         Ok(transactions)
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "session_id": "{session_id}" }))]
     fn get_relevant_transactions(
         &self,
         session_id: SessionId,
@@ -276,74 +274,12 @@ impl TransactionStorage for Storage {
     ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send {
         let chunks = try_stream! {
             loop {
-                #[cfg(feature = "cloud")]
-                let query = indoc! {"
-                    SELECT
-                        transactions.id,
-                        transactions.hash,
-                        blocks.hash AS block_hash,
-                        transactions.protocol_version,
-                        transactions.transaction_result,
-                        transactions.identifiers,
-                        transactions.raw,
-                        transactions.merkle_tree_root,
-                        transactions.start_index,
-                        transactions.end_index,
-                        transactions.paid_fees,
-                        transactions.estimated_fees
-                    FROM transactions
-                    INNER JOIN blocks ON blocks.id = transactions.block_id
-                    INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
-                    INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
-                    WHERE wallets.session_id = $1
-                    AND transactions.start_index >= $2
-                    ORDER BY transactions.id
-                    LIMIT $3
-                "};
-
-                #[cfg(feature = "standalone")]
-                let query = indoc! {"
-                    SELECT
-                        transactions.id,
-                        transactions.hash,
-                        blocks.hash AS block_hash,
-                        transactions.protocol_version,
-                        transactions.transaction_result,
-                        transactions.raw,
-                        transactions.merkle_tree_root,
-                        transactions.start_index,
-                        transactions.end_index,
-                        transactions.paid_fees,
-                        transactions.estimated_fees
-                    FROM transactions
-                    INNER JOIN blocks ON blocks.id = transactions.block_id
-                    INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
-                    INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
-                    WHERE wallets.session_id = $1
-                    AND transactions.start_index >= $2
-                    ORDER BY transactions.id
-                    LIMIT $3
-                "};
-
-                #[cfg(feature = "standalone")]
-                let session_id = session_id.as_ref();
-
-                #[cfg_attr(feature = "cloud", allow(unused_mut))]
-                let mut transactions = sqlx::query_as::<_, Transaction>(query)
-                    .bind(session_id)
-                    .bind(index as i64)
-                    .bind(batch_size.get() as i64)
-                    .fetch_all(&*self.pool)
+                let transactions = self
+                    .get_relevant_transactions(session_id, index, batch_size)
                     .await?;
 
-                #[cfg(feature = "standalone")]
-                for transaction in transactions.iter_mut() {
-                    transaction.identifiers =
-                        get_identifiers_for_transaction(transaction.id, &self.pool).await?;
-                }
-
-                match transactions.iter().map(|t| t.end_index).max() {
-                    Some(end_index) => index = end_index + 1,
+                match transactions.last() {
+                    Some(transaction) => index = transaction.end_index + 1,
                     None => break,
                 }
 
@@ -354,7 +290,6 @@ impl TransactionStorage for Storage {
         flatten_chunks(chunks)
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "address": "{address}" }))]
     fn get_transactions_involving_unshielded(
         &self,
         address: RawUnshieldedAddress,
@@ -363,70 +298,9 @@ impl TransactionStorage for Storage {
     ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send {
         let chunks = try_stream! {
             loop {
-                #[cfg(feature = "cloud")]
-                let query = indoc! {"
-                    SELECT DISTINCT
-                        transactions.id,
-                        transactions.hash,
-                        blocks.hash AS block_hash,
-                        transactions.protocol_version,
-                        transactions.transaction_result,
-                        transactions.identifiers,
-                        transactions.raw,
-                        transactions.merkle_tree_root,
-                        transactions.start_index,
-                        transactions.end_index,
-                        transactions.paid_fees,
-                        transactions.estimated_fees
-                    FROM transactions
-                    INNER JOIN blocks ON blocks.id = transactions.block_id
-                    INNER JOIN unshielded_utxos ON
-                        unshielded_utxos.creating_transaction_id = transactions.id OR
-                        unshielded_utxos.spending_transaction_id = transactions.id
-                    WHERE unshielded_utxos.owner = $1
-                    AND transactions.id >= $2
-                    ORDER BY transactions.id
-                    LIMIT $3
-                "};
-
-                #[cfg(feature = "standalone")]
-                let query = indoc! {"
-                    SELECT DISTINCT
-                        transactions.id,
-                        transactions.hash,
-                        blocks.hash AS block_hash,
-                        transactions.protocol_version,
-                        transactions.transaction_result,
-                        transactions.raw,
-                        transactions.merkle_tree_root,
-                        transactions.start_index,
-                        transactions.end_index,
-                        transactions.paid_fees,
-                        transactions.estimated_fees
-                    FROM transactions
-                    INNER JOIN blocks ON blocks.id = transactions.block_id
-                    INNER JOIN unshielded_utxos ON
-                        unshielded_utxos.creating_transaction_id = transactions.id OR
-                        unshielded_utxos.spending_transaction_id = transactions.id
-                    WHERE unshielded_utxos.owner = $1
-                    AND transactions.id >= $2
-                    ORDER BY transactions.id
-                    LIMIT $3
-                "};
-
-                #[cfg_attr(feature = "cloud", allow(unused_mut))]
-                let mut transactions = sqlx::query_as::<_, Transaction>(query)
-                    .bind(address.as_ref())
-                    .bind(transaction_id as i64)
-                    .bind(batch_size.get() as i64)
-                    .fetch_all(&*self.pool)
+                let transactions = self
+                    .get_transactions_involving_unshielded(address, transaction_id, batch_size)
                     .await?;
-
-                #[cfg(feature = "standalone")]
-                for transaction in transactions.iter_mut() {
-                    transaction.identifiers =
-                        get_identifiers_for_transaction(transaction.id, &self.pool).await?;
-                }
 
                 match transactions.last() {
                     Some(transaction) => transaction_id = transaction.id + 1,
@@ -440,7 +314,7 @@ impl TransactionStorage for Storage {
         flatten_chunks(chunks)
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "address": "{address}" }))]
+    #[trace(properties = { "address": "{address}" })]
     async fn get_highest_transaction_id_for_unshielded_address(
         &self,
         address: RawUnshieldedAddress,
@@ -465,7 +339,7 @@ impl TransactionStorage for Storage {
         Ok(id.map(|id| id as u64))
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "session_id": "{session_id}" }))]
+    #[trace(properties = { "session_id": "{session_id}" })]
     async fn get_highest_end_indices(
         &self,
         session_id: SessionId,
@@ -507,6 +381,167 @@ impl TransactionStorage for Storage {
             highest_relevant_index.map(|n| n as u64),
             highest_relevant_wallet_index.map(|n| n as u64),
         ))
+    }
+}
+
+impl Storage {
+    #[trace(properties = {
+        "session_id": "{session_id}",
+        "index": "{index}",
+        "batch_size": "{batch_size}"
+    })]
+    async fn get_relevant_transactions(
+        &self,
+        session_id: SessionId,
+        index: u64,
+        batch_size: NonZeroU32,
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            SELECT
+                transactions.id,
+                transactions.hash,
+                blocks.hash AS block_hash,
+                transactions.protocol_version,
+                transactions.transaction_result,
+                transactions.identifiers,
+                transactions.raw,
+                transactions.merkle_tree_root,
+                transactions.start_index,
+                transactions.end_index,
+                transactions.paid_fees,
+                transactions.estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
+            INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
+            WHERE wallets.session_id = $1
+            AND transactions.start_index >= $2
+            ORDER BY transactions.id
+            LIMIT $3
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            SELECT
+                transactions.id,
+                transactions.hash,
+                blocks.hash AS block_hash,
+                transactions.protocol_version,
+                transactions.transaction_result,
+                transactions.raw,
+                transactions.merkle_tree_root,
+                transactions.start_index,
+                transactions.end_index,
+                transactions.paid_fees,
+                transactions.estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
+            INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
+            WHERE wallets.session_id = $1
+            AND transactions.start_index >= $2
+            ORDER BY transactions.id
+            LIMIT $3
+        "};
+
+        #[cfg(feature = "standalone")]
+        let session_id = session_id.as_ref();
+
+        #[cfg_attr(feature = "cloud", allow(unused_mut))]
+        let mut transactions = sqlx::query_as::<_, Transaction>(query)
+            .bind(session_id)
+            .bind(index as i64)
+            .bind(batch_size.get() as i64)
+            .fetch_all(&*self.pool)
+            .await?;
+
+        #[cfg(feature = "standalone")]
+        for transaction in transactions.iter_mut() {
+            transaction.identifiers =
+                get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+        }
+
+        Ok(transactions)
+    }
+
+    #[trace(properties = {
+        "address": "{address}",
+        "transaction_id": "{transaction_id}",
+        "batch_size": "{batch_size}"
+    })]
+    async fn get_transactions_involving_unshielded(
+        &self,
+        address: RawUnshieldedAddress,
+        transaction_id: u64,
+        batch_size: NonZeroU32,
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            SELECT DISTINCT
+                transactions.id,
+                transactions.hash,
+                blocks.hash AS block_hash,
+                transactions.protocol_version,
+                transactions.transaction_result,
+                transactions.identifiers,
+                transactions.raw,
+                transactions.merkle_tree_root,
+                transactions.start_index,
+                transactions.end_index,
+                transactions.paid_fees,
+                transactions.estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN unshielded_utxos ON
+                unshielded_utxos.creating_transaction_id = transactions.id OR
+                unshielded_utxos.spending_transaction_id = transactions.id
+            WHERE unshielded_utxos.owner = $1
+            AND transactions.id >= $2
+            ORDER BY transactions.id
+            LIMIT $3
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            SELECT DISTINCT
+                transactions.id,
+                transactions.hash,
+                blocks.hash AS block_hash,
+                transactions.protocol_version,
+                transactions.transaction_result,
+                transactions.raw,
+                transactions.merkle_tree_root,
+                transactions.start_index,
+                transactions.end_index,
+                transactions.paid_fees,
+                transactions.estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN unshielded_utxos ON
+                unshielded_utxos.creating_transaction_id = transactions.id OR
+                unshielded_utxos.spending_transaction_id = transactions.id
+            WHERE unshielded_utxos.owner = $1
+            AND transactions.id >= $2
+            ORDER BY transactions.id
+            LIMIT $3
+        "};
+
+        #[cfg_attr(feature = "cloud", allow(unused_mut))]
+        let mut transactions = sqlx::query_as::<_, Transaction>(query)
+            .bind(address.as_ref())
+            .bind(transaction_id as i64)
+            .bind(batch_size.get() as i64)
+            .fetch_all(&*self.pool)
+            .await?;
+
+        #[cfg(feature = "standalone")]
+        for transaction in transactions.iter_mut() {
+            transaction.identifiers =
+                get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+        }
+
+        Ok(transactions)
     }
 }
 

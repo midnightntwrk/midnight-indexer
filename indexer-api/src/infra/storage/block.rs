@@ -16,7 +16,6 @@ use crate::{
     infra::storage::Storage,
 };
 use async_stream::try_stream;
-#[cfg(feature = "cloud")]
 use fastrace::trace;
 use futures::Stream;
 use indexer_common::{domain::BlockHash, stream::flatten_chunks};
@@ -24,7 +23,7 @@ use indoc::indoc;
 use std::num::NonZeroU32;
 
 impl BlockStorage for Storage {
-    #[cfg_attr(feature = "cloud", trace)]
+    #[trace]
     async fn get_latest_block(&self) -> Result<Option<Block>, sqlx::Error> {
         let query = indoc! {"
             SELECT *
@@ -36,7 +35,7 @@ impl BlockStorage for Storage {
         sqlx::query_as(query).fetch_optional(&*self.pool).await
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "hash": "{hash}" }))]
+    #[trace(properties = { "hash": "{hash}" })]
     async fn get_block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>, sqlx::Error> {
         let query = indoc! {"
             SELECT *
@@ -54,7 +53,7 @@ impl BlockStorage for Storage {
             .await
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "height": "{height}" }))]
+    #[trace(properties = { "height": "{height}" })]
     async fn get_block_by_height(&self, height: u32) -> Result<Option<Block>, sqlx::Error> {
         let query = indoc! {"
             SELECT *
@@ -69,37 +68,18 @@ impl BlockStorage for Storage {
             .await
     }
 
-    #[cfg_attr(
-        feature = "cloud",
-        trace(properties = { "height": "{height}", "batch_size": "{batch_size}" })
-    )]
     fn get_blocks(
         &self,
         mut height: u32,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<Block, sqlx::Error>> {
-        // We know that by construction the sequence of block heights is equivalent to the natural
-        // numbers starting at zero. Therefore the below order by and height calculation are valid.
         let chunks = try_stream! {
             loop {
-                let query = indoc! {"
-                    SELECT *
-                    FROM blocks
-                    WHERE height >= $1
-                    ORDER BY height
-                    LIMIT $2
-                "};
+                let blocks = self.get_blocks(height, batch_size).await?;
 
-                let blocks = sqlx::query_as(query)
-                    .bind(height as i64)
-                    .bind(batch_size.get() as i64)
-                    .fetch_all(&*self.pool)
-                    .await?;
-
-                if blocks.is_empty() {
-                    break;
-                } else {
-                    height += blocks.len() as u32;
+                match blocks.last() {
+                    Some(block) => height = block.height + 1,
+                    None => break,
                 }
 
                 yield blocks;
@@ -107,5 +87,28 @@ impl BlockStorage for Storage {
         };
 
         flatten_chunks(chunks)
+    }
+}
+
+impl Storage {
+    #[trace(properties = { "height": "{height}", "batch_size": "{batch_size}" })]
+    async fn get_blocks(
+        &self,
+        height: u32,
+        batch_size: NonZeroU32,
+    ) -> Result<Vec<Block>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT *
+            FROM blocks
+            WHERE height >= $1
+            ORDER BY height
+            LIMIT $2
+        "};
+
+        sqlx::query_as(query)
+            .bind(height as i64)
+            .bind(batch_size.get() as i64)
+            .fetch_all(&*self.pool)
+            .await
     }
 }

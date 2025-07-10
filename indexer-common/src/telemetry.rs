@@ -23,11 +23,15 @@
 //!
 //! ## Tracing
 //! - Use the `#[trace]` attribute to instrument functions/methods.
-//! - To createa a root span, use `Span::root("name", SpanContext::random())`.
+//! - To create a root span, use `Span::root("name", SpanContext::random())`.
 //!
 //! ## Metrics
 //! - Metrics are exposed via Prometheus at the configured endpoint.
 
+use fastrace::{
+    collector::{ConsoleReporter, Reporter},
+    prelude::SpanRecord,
+};
 use fastrace_opentelemetry::OpenTelemetryReporter;
 use logforth::{
     append::{FastraceEvent, Stdout},
@@ -64,6 +68,10 @@ pub struct TracingConfig {
     #[serde(default)]
     pub enabled: bool,
 
+    /// Defaults to false.
+    #[serde(default)]
+    pub console_reporter_enabled: bool,
+
     /// Defaults to OTLP gRPC: "http://localhost:4317".
     #[serde(default = "otlp_exporter_endpoint_default")]
     pub otlp_exporter_endpoint: String,
@@ -85,6 +93,7 @@ impl Default for TracingConfig {
     fn default() -> Self {
         Self {
             enabled: Default::default(),
+            console_reporter_enabled: Default::default(),
             otlp_exporter_endpoint: otlp_exporter_endpoint_default(),
             service_name: package_name(),
             instrumentation_scope_name: package_name(),
@@ -155,6 +164,7 @@ pub fn init_logging() {
 pub fn init_tracing(config: TracingConfig) {
     if config.enabled {
         let TracingConfig {
+            console_reporter_enabled,
             otlp_exporter_endpoint,
             service_name,
             instrumentation_scope_name,
@@ -174,8 +184,13 @@ pub fn init_tracing(config: TracingConfig) {
             .with_version(instrumentation_scope_version)
             .build();
 
-        let reporter =
+        let open_telemetry =
             OpenTelemetryReporter::new(exporter, Cow::Owned(resource), instrumentation_scope);
+        let console_reporter = console_reporter_enabled.then_some(ConsoleReporter);
+        let reporter = TracingReporter {
+            open_telemetry,
+            console_reporter,
+        };
 
         fastrace::set_reporter(reporter, fastrace::collector::Config::default());
     }
@@ -200,6 +215,21 @@ pub fn init_metrics(config: MetricsConfig) {
             .with_http_listener((address, port))
             .install()
             .expect("Prometheus exporter can be installed");
+    }
+}
+
+struct TracingReporter {
+    open_telemetry: OpenTelemetryReporter,
+    console_reporter: Option<ConsoleReporter>,
+}
+
+impl Reporter for TracingReporter {
+    fn report(&mut self, spans: Vec<SpanRecord>) {
+        if let Some(ref mut console_reporter) = self.console_reporter {
+            console_reporter.report(spans.clone());
+        }
+
+        self.open_telemetry.report(spans);
     }
 }
 
