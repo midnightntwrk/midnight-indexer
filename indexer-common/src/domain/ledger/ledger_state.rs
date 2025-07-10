@@ -1,7 +1,20 @@
+// This file is part of midnight-indexer.
+// Copyright (C) 2025 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use crate::domain::{
     ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
     RawContractAddress, RawLedgerState, RawTransaction, RawZswapState, RawZswapStateRoot,
-    TransactionResult, UnshieldedUtxo,
+    TransactionResult, TransactionResultWithDustEvents, UnshieldedUtxo,
     ledger::{Error, LedgerTransactionV5, NetworkIdExt, SerializableV5Ext},
 };
 use fastrace::trace;
@@ -70,7 +83,7 @@ impl LedgerState {
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
         network_id: NetworkId,
-    ) -> Result<TransactionResult, Error> {
+    ) -> Result<TransactionResultWithDustEvents, Error> {
         match self {
             LedgerState::V5(ledger_state) => {
                 let ledger_transaction = deserialize_v5::<LedgerTransactionV5, _>(
@@ -94,9 +107,9 @@ impl LedgerState {
                 *self = LedgerState::V5(ledger_state);
 
                 let transaction_result = match transaction_result {
-                    TransactionResultV5::Success => TransactionResult::Success,
+                    TransactionResultV5::Success(_events) => TransactionResult::Success,
 
-                    TransactionResultV5::PartialSuccess(segments) => {
+                    TransactionResultV5::PartialSuccess(segments, _events) => {
                         let segments = segments
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
@@ -107,7 +120,11 @@ impl LedgerState {
                     TransactionResultV5::Failure(_) => TransactionResult::Failure,
                 };
 
-                Ok(transaction_result)
+                Ok(TransactionResultWithDustEvents {
+                    result: transaction_result,
+                    dust_events: Vec::new(), /* TODO: Extract events from TransactionResultV5
+                                              * when ledger support is available */
+                })
             }
         }
     }
@@ -161,12 +178,18 @@ impl LedgerState {
                 .utxo
                 .utxos
                 .iter()
-                .map(|utxo| UnshieldedUtxo {
-                    value: utxo.value,
-                    owner_address: utxo.owner.0.0.into(),
-                    token_type: utxo.type_.0.0.into(),
-                    intent_hash: utxo.intent_hash.0.0.into(),
-                    output_index: utxo.output_no,
+                .map(|entry| {
+                    // With dust feature, utxos is HashMap<Utxo, UtxoMeta, D>
+                    // and iter returns Sp<(Sp<Utxo>, Sp<UtxoMeta>)>
+                    let utxo_tuple = &*entry;
+                    let utxo = &*utxo_tuple.0;
+                    UnshieldedUtxo {
+                        value: utxo.value,
+                        owner_address: utxo.owner.0.0.into(),
+                        token_type: utxo.type_.0.0.into(),
+                        intent_hash: utxo.intent_hash.0.0.into(),
+                        output_index: utxo.output_no,
+                    }
                 })
                 .collect(),
         }

@@ -11,20 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod storage;
+use thiserror::Error;
 
-mod block;
-mod contract_action;
-pub mod dust;
-mod ledger_state;
-mod node;
-mod transaction;
-mod transaction_fees;
+#[derive(Error, Debug)]
+pub enum DustProcessingError {
+    #[error("Database error during DUST processing")]
+    Database(#[from] sqlx::Error),
 
-pub use block::*;
-pub use contract_action::*;
-pub use dust::*;
-pub use ledger_state::*;
-pub use node::*;
-pub use transaction::*;
-pub use transaction_fees::*;
+    #[error("Invalid DUST event data: {0}")]
+    InvalidEventData(String),
+
+    #[error("DUST generation info not found for index {0}")]
+    GenerationInfoNotFound(u64),
+}

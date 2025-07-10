@@ -14,7 +14,7 @@
 use crate::domain::ContractAction;
 use indexer_common::domain::{
     ByteArray, ProtocolVersion, RawTransaction, RawTransactionIdentifier, RawZswapStateRoot,
-    TransactionHash, TransactionResult, UnshieldedUtxo,
+    TransactionHash, TransactionResult, UnshieldedUtxo, dust::DustEvent,
 };
 use sqlx::FromRow;
 use std::fmt::Debug;
@@ -36,6 +36,7 @@ pub struct Transaction {
     pub end_index: u64,
     pub paid_fees: u128,
     pub estimated_fees: u128,
+    pub dust_events: Vec<DustEvent>,
 }
 
 /// All raw transactions from a single block along with metadata needed for ledger state

@@ -4,6 +4,12 @@ CREATE TYPE CONTRACT_ACTION_VARIANT AS ENUM(
     'Update'
 );
 
+CREATE TYPE DUST_EVENT_TYPE AS ENUM(
+    'DustInitialUtxo',
+    'DustGenerationDtimeUpdate',
+    'DustSpendProcessed'
+);
+
 CREATE TABLE blocks(
     id BIGSERIAL PRIMARY KEY,
     hash BYTEA NOT NULL UNIQUE,
@@ -111,7 +117,6 @@ CREATE INDEX ON contract_balances(contract_action_id, token_type);
 
 CREATE TABLE dust_generation_info (
     id BIGSERIAL PRIMARY KEY,
-    night_utxo_hash BYTEA NOT NULL,
     value BYTEA NOT NULL,
     owner BYTEA NOT NULL,
     nonce BYTEA NOT NULL,
@@ -120,8 +125,7 @@ CREATE TABLE dust_generation_info (
     dtime BIGINT
 );
 
-CREATE INDEX dust_generation_info_owner_idx ON dust_generation_info(owner);
-CREATE INDEX dust_generation_info_utxo_idx ON dust_generation_info(night_utxo_hash);
+CREATE INDEX ON dust_generation_info(owner);
 
 CREATE TABLE dust_utxos (
     id BIGSERIAL PRIMARY KEY,
@@ -136,23 +140,25 @@ CREATE TABLE dust_utxos (
     nullifier BYTEA
 );
 
-CREATE INDEX dust_utxos_owner_idx ON dust_utxos(owner);
-CREATE INDEX dust_utxos_generation_idx ON dust_utxos(generation_info_id);
-CREATE INDEX dust_utxos_spent_idx ON dust_utxos(spent_at_transaction_id);
+CREATE INDEX ON dust_utxos(owner);
+CREATE INDEX ON dust_utxos(generation_info_id);
+CREATE INDEX ON dust_utxos(spent_at_transaction_id);
+CREATE INDEX ON dust_utxos(substring(nullifier::text, 1, 8)) WHERE nullifier IS NOT NULL;
 
 CREATE TABLE cnight_registrations (
     id BIGSERIAL PRIMARY KEY,
-    night_address BYTEA NOT NULL,
+    cardano_address BYTEA NOT NULL,
     dust_address BYTEA NOT NULL,
     is_valid BOOLEAN NOT NULL,
     registered_at BIGINT NOT NULL,
     removed_at BIGINT,
-    UNIQUE(night_address, dust_address)
+    UNIQUE(cardano_address, dust_address)
 );
 
-CREATE INDEX cnight_registrations_night_addr_idx ON cnight_registrations(night_address);
-CREATE INDEX cnight_registrations_dust_addr_idx ON cnight_registrations(dust_address);
+CREATE INDEX ON cnight_registrations(cardano_address);
+CREATE INDEX ON cnight_registrations(dust_address);
 
+-- TODO: These tables are for future merkle tree storage once ledger integration is complete.
 CREATE TABLE dust_commitment_tree (
     id BIGSERIAL PRIMARY KEY,
     block_height BIGINT NOT NULL,
@@ -167,4 +173,16 @@ CREATE TABLE dust_generation_tree (
     tree_data BYTEA NOT NULL
 );
 
+CREATE TABLE dust_events (
+    id BIGSERIAL PRIMARY KEY,
+    transaction_id BIGINT NOT NULL REFERENCES transactions(id),
+    transaction_hash BYTEA NOT NULL,
+    logical_segment INTEGER NOT NULL,
+    physical_segment INTEGER NOT NULL,
+    event_type DUST_EVENT_TYPE NOT NULL,
+    event_data JSONB NOT NULL
+);
+
+CREATE INDEX ON dust_events(transaction_id);
+CREATE INDEX ON dust_events(event_type);
 

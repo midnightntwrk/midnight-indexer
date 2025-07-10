@@ -42,6 +42,19 @@ pub struct Config {
     pub save_ledger_state_after: u32,
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
+    pub dust: DustConfig,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct DustConfig {
+    /// Merkle tree batch update size.
+    pub merkle_tree_batch_size: usize,
+
+    /// Privacy prefix length for nullifier queries.
+    pub privacy_prefix_length: usize,
+
+    /// Maximum registrations per DUST address.
+    pub max_registrations_per_address: usize,
 }
 
 impl Default for Config {
@@ -52,6 +65,11 @@ impl Default for Config {
             save_ledger_state_after: 1000,
             caught_up_max_distance: 10,
             caught_up_leeway: 5,
+            dust: DustConfig {
+                merkle_tree_batch_size: 1000,
+                privacy_prefix_length: 8,
+                max_registrations_per_address: 10,
+            },
         }
     }
 }
@@ -371,7 +389,7 @@ async fn index_block(
         info!(caught_up:%; "caught-up status changed")
     }
 
-    // First save and update the block.
+    // Save the block and all transaction data (including DUST events) in a single transaction.
     let max_transaction_id = storage.save_block(&mut block).await.context("save block")?;
 
     // Then save the ledger state. This order is important to maintain consistency.
