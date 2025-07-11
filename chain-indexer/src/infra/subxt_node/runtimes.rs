@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[subxt::subxt(runtime_metadata_path = "../.node/0.13.0-alpha.3/metadata.scale")]
+#[subxt::subxt(runtime_metadata_path = "../.node/0.13.2-df743663/metadata.scale")]
 mod runtime_0_13 {}
 
 use crate::infra::subxt_node::SubxtNodeError;
