@@ -12,12 +12,6 @@
 // limitations under the License.
 
 use crate::domain::{Block, BlockInfo, BlockTransactions};
-use futures::Stream;
-use indexer_common::domain::{
-    DustCommitment, DustNullifier, DustOwner, RawTransaction,
-    dust::{DustEvent, DustGenerationInfo, DustRegistration, DustUtxo},
-};
-use std::num::NonZeroU32;
 
 /// Storage abstraction.
 #[trait_variant::make(Send)]
@@ -42,72 +36,4 @@ where
 
     /// Save the given block, update transaction IDs, and return the max transaction ID.
     async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error>;
-
-    // DUST-specific storage methods.
-
-    /// Save DUST events from transaction processing.
-    async fn save_dust_events(
-        &self,
-        events: impl AsRef<[DustEvent]> + Send,
-        transaction_id: u64,
-    ) -> Result<(), sqlx::Error>;
-
-    /// Save DUST UTXOs.
-    async fn save_dust_utxos(
-        &self,
-        utxos: impl AsRef<[DustUtxo]> + Send,
-    ) -> Result<(), sqlx::Error>;
-
-    /// Save DUST generation information.
-    async fn save_dust_generation_info(
-        &self,
-        generation_info: impl AsRef<[DustGenerationInfo]> + Send,
-    ) -> Result<(), sqlx::Error>;
-
-    /// Save cNIGHT registrations.
-    async fn save_cnight_registrations(
-        &self,
-        registrations: impl AsRef<[DustRegistration]> + Send,
-    ) -> Result<(), sqlx::Error>;
-
-    /// Get DUST generation info by owner address.
-    fn get_dust_generation_info_by_owner(
-        &self,
-        owner: DustOwner,
-        generation_info_id: u64,
-        batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<DustGenerationInfo, sqlx::Error>> + Send;
-
-    /// Get DUST UTXOs by owner address.
-    fn get_dust_utxos_by_owner(
-        &self,
-        owner: DustOwner,
-        utxo_id: u64,
-        batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<DustUtxo, sqlx::Error>> + Send;
-
-    /// Search for transactions by nullifier prefix (privacy-preserving) and return pairs of
-    /// transaction ID and raw transaction contents.
-    fn search_transactions_by_nullifier_prefix(
-        &self,
-        prefix: &str,
-        after_block: Option<u32>,
-        transaction_id: u64,
-        batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<(u64, RawTransaction), sqlx::Error>> + Send;
-
-    /// Update DUST generation dtime when Night UTXO is spent.
-    async fn update_dust_generation_dtime(
-        &self,
-        generation_index: u64,
-        dtime: u64,
-    ) -> Result<(), sqlx::Error>;
-
-    /// Mark DUST UTXO as spent.
-    async fn mark_dust_utxo_spent(
-        &self,
-        commitment: DustCommitment,
-        nullifier: DustNullifier,
-        transaction_id: u64,
-    ) -> Result<(), sqlx::Error>;
 }
