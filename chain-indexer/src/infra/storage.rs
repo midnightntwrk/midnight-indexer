@@ -11,13 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{self, Block, BlockInfo, BlockTransactions, ContractAction, Transaction};
+use crate::domain::{
+    self, Block, BlockInfo, BlockTransactions, ContractAction, Transaction,
+    dust::{DustEvent, DustEventDetails, DustGenerationInfo, QualifiedDustOutput},
+};
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
         BlockHash, ByteArray, ByteVec, ContractActionVariant, ContractBalance, UnshieldedUtxo,
-        dust::{DustEvent, DustEventDetails},
     },
     infra::sqlx::U128BeBytes,
 };
@@ -638,20 +640,13 @@ async fn process_initial_utxos_tx(
             ..
         } = event
         {
-            // Create a modified generation info with night_utxo_hash from backing_night
-            // TODO: This is a temporary solution until ledger provides actual night_utxo_hash
-            let generation_with_hash = indexer_common::domain::dust::DustGenerationInfo {
-                night_utxo_hash: output.backing_night,
-                value: generation.value,
-                owner: generation.owner,
-                nonce: generation.nonce,
-                ctime: generation.ctime,
-                dtime: generation.dtime,
-            };
+            // Convert event types to storage types
+            let generation_storage: DustGenerationInfo = (*generation).into();
+            let output_storage: QualifiedDustOutput = (*output).into();
 
             let generation_info_id =
-                save_dust_generation_info_tx(&generation_with_hash, *generation_index, tx).await?;
-            save_dust_utxos_tx(output, generation_info_id, tx).await?;
+                save_dust_generation_info_tx(&generation_storage, *generation_index, tx).await?;
+            save_dust_utxos_tx(&output_storage, generation_info_id, tx).await?;
         }
     }
     Ok(())
@@ -659,7 +654,7 @@ async fn process_initial_utxos_tx(
 
 #[cfg_attr(feature = "cloud", trace)]
 async fn save_dust_generation_info_tx(
-    generation: &indexer_common::domain::dust::DustGenerationInfo,
+    generation: &DustGenerationInfo,
     generation_index: u64,
     tx: &mut Tx,
 ) -> Result<u64, sqlx::Error> {
@@ -706,7 +701,7 @@ async fn save_dust_generation_info_tx(
 
 #[cfg_attr(feature = "cloud", trace)]
 async fn save_dust_utxos_tx(
-    output: &indexer_common::domain::dust::QualifiedDustOutput,
+    output: &QualifiedDustOutput,
     generation_info_id: u64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {

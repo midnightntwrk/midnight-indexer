@@ -83,7 +83,7 @@ impl LedgerState {
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
         network_id: NetworkId,
-    ) -> Result<TransactionResultWithDustEvents, Error> {
+    ) -> Result<TransactionResultWithDustEvents<()>, Error> {
         match self {
             LedgerState::V5(ledger_state) => {
                 let ledger_transaction = deserialize_v5::<LedgerTransactionV5, _>(

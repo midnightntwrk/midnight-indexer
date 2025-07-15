@@ -14,9 +14,7 @@
 use crate::domain::Transaction;
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
-use indexer_common::domain::{
-    ByteArray, NetworkId, RawTransaction, TransactionResultWithDustEvents, ledger::ContractState,
-};
+use indexer_common::domain::{ByteArray, NetworkId, RawTransaction, ledger::ContractState};
 use std::ops::DerefMut;
 use thiserror::Error;
 
@@ -99,15 +97,17 @@ impl LedgerState {
         let mut end_index = self.zswap_first_free();
 
         // Apply transaction with DUST event capture.
-        let TransactionResultWithDustEvents {
-            result,
-            dust_events,
-        } = self.apply_transaction(
+        let ledger_result = self.apply_transaction(
             &transaction.raw,
             block_parent_hash,
             block_timestamp,
             network_id,
         )?;
+        let result = ledger_result.result;
+
+        // TODO: Extract actual DUST events from ledger when support is available
+        // For now, dust_events will be empty
+        let dust_events = Vec::new();
 
         // Handle genesis block: extract any pre-funded unshielded UTXOs.
         // Check if this is genesis block by examining parent hash.
