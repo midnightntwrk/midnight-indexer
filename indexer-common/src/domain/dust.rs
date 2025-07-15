@@ -11,7 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ByteArray, ByteVec, TransactionHash};
+use crate::domain::{
+    ByteVec, DustCommitment, DustNonce, DustNullifier, DustOwner, NightUtxoHash,
+    NightUtxoNonce, TransactionHash,
+};
 use serde::{Deserialize, Serialize};
 
 /// DUST event for the indexer domain.
@@ -47,11 +50,11 @@ pub enum DustEventDetails {
     /// DUST spend processed.
     DustSpendProcessed {
         /// DUST commitment.
-        commitment: ByteArray<32>,
+        commitment: DustCommitment,
         /// Commitment merkle tree index.
         commitment_index: u64,
         /// DUST nullifier.
-        nullifier: ByteArray<32>,
+        nullifier: DustNullifier,
         /// Fee amount paid.
         v_fee: u128,
         /// Timestamp of spend.
@@ -68,10 +71,10 @@ pub struct QualifiedDustOutput {
     pub initial_value: u128,
 
     /// Owner's DUST public key.
-    pub owner: ByteArray<32>,
+    pub owner: DustOwner,
 
     /// Nonce for this DUST UTXO.
-    pub nonce: ByteArray<32>,
+    pub nonce: DustNonce,
 
     /// Sequence number.
     pub seq: u32,
@@ -80,7 +83,7 @@ pub struct QualifiedDustOutput {
     pub ctime: u64,
 
     /// Backing Night UTXO nonce.
-    pub backing_night: ByteArray<32>,
+    pub backing_night: NightUtxoNonce,
 
     /// Merkle tree index.
     pub mt_index: u64,
@@ -89,14 +92,17 @@ pub struct QualifiedDustOutput {
 /// DUST generation information.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustGenerationInfo {
+    /// Hash of the backing Night UTXO.
+    pub night_utxo_hash: NightUtxoHash,
+
     /// Value of backing Night UTXO.
     pub value: u128,
 
     /// Owner's DUST public key.
-    pub owner: ByteArray<32>,
+    pub owner: DustOwner,
 
     /// Initial nonce.
-    pub nonce: ByteArray<32>,
+    pub nonce: DustNonce,
 
     /// Creation time.
     pub ctime: u64,
@@ -125,7 +131,7 @@ pub struct DustRegistration {
     pub cardano_address: ByteVec,
 
     /// DUST address (where DUST is sent).
-    pub dust_address: ByteArray<32>,
+    pub dust_address: DustOwner,
 
     /// Whether this registration is currently valid (only one per Cardano address).
     pub is_valid: bool,
@@ -141,19 +147,19 @@ pub struct DustRegistration {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustUtxo {
     /// DUST commitment.
-    pub commitment: ByteArray<32>,
+    pub commitment: DustCommitment,
 
     /// DUST nullifier (when spent).
-    pub nullifier: Option<ByteArray<32>>,
+    pub nullifier: Option<DustNullifier>,
 
     /// Initial value.
     pub initial_value: u128,
 
     /// Owner's DUST public key.
-    pub owner: ByteArray<32>,
+    pub owner: DustOwner,
 
     /// UTXO nonce.
-    pub nonce: ByteArray<32>,
+    pub nonce: DustNonce,
 
     /// Sequence number.
     pub seq: u32,

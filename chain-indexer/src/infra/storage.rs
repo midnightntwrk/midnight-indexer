@@ -638,8 +638,19 @@ async fn process_initial_utxos_tx(
             ..
         } = event
         {
+            // Create a modified generation info with night_utxo_hash from backing_night
+            // TODO: This is a temporary solution until ledger provides actual night_utxo_hash
+            let generation_with_hash = indexer_common::domain::dust::DustGenerationInfo {
+                night_utxo_hash: output.backing_night,
+                value: generation.value,
+                owner: generation.owner,
+                nonce: generation.nonce,
+                ctime: generation.ctime,
+                dtime: generation.dtime,
+            };
+            
             let generation_info_id =
-                save_dust_generation_info_tx(generation, *generation_index, tx).await?;
+                save_dust_generation_info_tx(&generation_with_hash, *generation_index, tx).await?;
             save_dust_utxos_tx(output, generation_info_id, tx).await?;
         }
     }
@@ -649,31 +660,35 @@ async fn process_initial_utxos_tx(
 #[cfg_attr(feature = "cloud", trace)]
 async fn save_dust_generation_info_tx(
     generation: &indexer_common::domain::dust::DustGenerationInfo,
-    _generation_index: u64,
+    generation_index: u64,
     tx: &mut Tx,
 ) -> Result<u64, sqlx::Error> {
     let query = indoc! {"
         INSERT INTO dust_generation_info (
+            night_utxo_hash,
             value,
             owner,
             nonce,
             ctime,
+            merkle_index,
             dtime
         )
-        VALUES ($1, $2, $3, $4, $5)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
     "};
 
     #[cfg(feature = "standalone")]
-    let (owner, nonce) = (generation.owner.as_ref(), generation.nonce.as_ref());
+    let (night_utxo_hash, owner, nonce) = (generation.night_utxo_hash.as_ref(), generation.owner.as_ref(), generation.nonce.as_ref());
     #[cfg(feature = "cloud")]
-    let (owner, nonce) = (&generation.owner, &generation.nonce);
+    let (night_utxo_hash, owner, nonce) = (&generation.night_utxo_hash, &generation.owner, &generation.nonce);
 
     let (id,) = sqlx::query_as::<_, (i64,)>(query)
+        .bind(night_utxo_hash)
         .bind(U128BeBytes::from(generation.value))
         .bind(owner)
         .bind(nonce)
         .bind(generation.ctime as i64)
+        .bind(generation_index as i64)
         .bind(generation.dtime as i64)
         .fetch_one(&mut **tx)
         .await?;
@@ -743,7 +758,7 @@ async fn update_dust_generation_dtime_tx(
         let query = indoc! {"
             UPDATE dust_generation_info
             SET dtime = $1
-            WHERE id = $2
+            WHERE merkle_index = $2
         "};
 
         sqlx::query(query)
