@@ -13,6 +13,7 @@
 
 mod block;
 mod contract_action;
+mod dust;
 mod shielded;
 mod unshielded;
 
@@ -24,6 +25,7 @@ use indexer_common::domain::{LedgerStateStorage, Subscriber};
 pub struct Subscription<S, B, Z>(
     block::BlockSubscription<S, B>,
     contract_action::ContractActionSubscription<S, B>,
+    dust::DustSubscription<S, B>,
     shielded::ShieldedTransactionsSubscription<S, B, Z>,
     unshielded::UnshieldedTransactionsSubscription<S, B>,
 )
@@ -42,6 +44,7 @@ where
         Subscription(
             block::BlockSubscription::default(),
             contract_action::ContractActionSubscription::default(),
+            dust::DustSubscription::default(),
             shielded::ShieldedTransactionsSubscription::default(),
             unshielded::UnshieldedTransactionsSubscription::default(),
         )

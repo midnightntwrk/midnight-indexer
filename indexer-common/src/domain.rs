@@ -31,6 +31,26 @@ use sqlx::Type;
 use std::str::FromStr;
 use thiserror::Error;
 
+/// Address type for registration queries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AddressType {
+    /// Night address.
+    Night,
+    /// DUST address.
+    Dust,
+    /// Cardano stake key.
+    CardanoStake,
+}
+
+/// DUST Merkle tree type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DustMerkleTreeType {
+    /// Commitment tree.
+    Commitment,
+    /// Generation tree.
+    Generation,
+}
+
 pub type BlockAuthor = ByteArray<32>;
 pub type BlockHash = ByteArray<32>;
 pub type ContractEntryPoint = ByteVec;

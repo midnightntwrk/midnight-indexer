@@ -464,3 +464,199 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
         }
     }
 }
+
+# GraphQL queries for DUST functionality
+
+query DustSystemStateQuery {
+  currentDustState {
+    commitmentTreeRoot
+    generationTreeRoot
+    blockHeight
+    timestamp
+    totalRegistrations
+  }
+}
+
+query DustGenerationStatusQuery($cardanoStakeKeys: [String!]!) {
+  dustGenerationStatus(cardanoStakeKeys: $cardanoStakeKeys) {
+    cardanoStakeKey
+    dustAddress
+    isRegistered
+    generationRate
+    currentCapacity
+    nightBalance
+  }
+}
+
+query DustMerkleRootQuery($treeType: DustMerkleTreeTypeGraphQL!, $timestamp: Int!) {
+  dustMerkleRoot(treeType: $treeType, timestamp: $timestamp)
+}
+
+subscription DustGenerationsSubscription($dustAddress: String!, $fromGenerationIndex: Int, $fromMerkleIndex: Int, $onlyActive: Boolean) {
+  dustGenerations(
+    dustAddress: $dustAddress
+    fromGenerationIndex: $fromGenerationIndex
+    fromMerkleIndex: $fromMerkleIndex
+    onlyActive: $onlyActive
+  ) {
+    __typename
+    ... on DustGenerationInfo {
+      nightUtxoHash
+      value
+      owner
+      nonce
+      ctime
+      dtime
+      merkleIndex
+    }
+    ... on DustGenerationMerkleUpdate {
+      index
+      collapsedUpdate
+      blockHeight
+    }
+    ... on DustGenerationProgress {
+      highestIndex
+      activeGenerations
+    }
+  }
+}
+
+subscription DustNullifierTransactionsSubscription($prefixes: [String!]!, $minPrefixLength: Int, $fromBlock: Int) {
+  dustNullifierTransactions(
+    prefixes: $prefixes
+    minPrefixLength: $minPrefixLength
+    fromBlock: $fromBlock
+  ) {
+    __typename
+    ... on DustNullifierTransaction {
+      transactionId
+      transactionHash
+      matchingNullifierPrefixes
+    }
+    ... on DustNullifierTransactionProgress {
+      highestBlock
+      matchedCount
+    }
+  }
+}
+
+subscription DustCommitmentsSubscription($commitmentPrefixes: [String!]!, $startIndex: Int!, $minPrefixLength: Int) {
+  dustCommitments(
+    commitmentPrefixes: $commitmentPrefixes
+    startIndex: $startIndex
+    minPrefixLength: $minPrefixLength
+  ) {
+    __typename
+    ... on DustCommitment {
+      commitment
+      nullifier
+      value
+      owner
+      nonce
+      createdAt
+      spentAt
+    }
+    ... on DustCommitmentMerkleUpdate {
+      index
+      collapsedUpdate
+      blockHeight
+    }
+    ... on DustCommitmentProgress {
+      highestIndex
+      totalCommitments
+    }
+  }
+}
+
+subscription RegistrationUpdatesSubscription($addresses: [RegistrationAddress!]!, $fromTimestamp: Int) {
+  registrationUpdates(
+    addresses: $addresses
+    fromTimestamp: $fromTimestamp
+  ) {
+    __typename
+    ... on RegistrationUpdate {
+      addressType
+      addressValue
+      relatedAddresses {
+        nightAddress
+        dustAddress
+        cardanoStakeKey
+      }
+      isActive
+      timestamp
+    }
+    ... on RegistrationUpdateProgress {
+      processedCount
+      timestamp
+    }
+  }
+}
+
+# Fragment definitions for reusable components
+fragment DustGenerationFields on DustGenerationInfo {
+  nightUtxoHash
+  value
+  owner
+  nonce
+  ctime
+  dtime
+  merkleIndex
+}
+
+fragment DustCommitmentFields on DustCommitment {
+  commitment
+  nullifier
+  value
+  owner
+  nonce
+  createdAt
+  spentAt
+}
+
+fragment TransactionFields on Transaction {
+  id
+  hash
+  protocolVersion
+  transactionResult {
+    status
+    segments {
+      id
+      success
+    }
+  }
+  fees {
+    paidFees
+    estimatedFees
+  }
+  identifiers
+  merkleTreeRoot
+  block {
+    hash
+    height
+    timestamp
+  }
+}
+
+# Example query with variables
+query DustStateWithGenerationStatus($cardanoStakeKeys: [String!]!) {
+  currentDustState {
+    commitmentTreeRoot
+    generationTreeRoot
+    blockHeight
+    timestamp
+    totalRegistrations
+  }
+  
+  dustGenerationStatus(cardanoStakeKeys: $cardanoStakeKeys) {
+    cardanoStakeKey
+    dustAddress
+    isRegistered
+    generationRate
+    currentCapacity
+    nightBalance
+  }
+}
+
+# Note: Privacy-preserving wallet sync would require separate subscriptions
+# for each data type (dustGenerations, dustNullifierTransactions, dustCommitments)
+# as GraphQL doesn't allow multiple fields in a subscription root
