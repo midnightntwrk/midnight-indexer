@@ -127,6 +127,7 @@ CREATE INDEX contract_balances_action_token_idx ON contract_balances(contract_ac
 
 CREATE TABLE dust_generation_info (
     id INTEGER PRIMARY KEY,
+    night_utxo_hash BLOB NOT NULL,
     value BLOB NOT NULL,
     owner BLOB NOT NULL,
     nonce BLOB NOT NULL,
@@ -136,6 +137,7 @@ CREATE TABLE dust_generation_info (
 );
 
 CREATE INDEX dust_generation_info_owner_idx ON dust_generation_info(owner);
+CREATE INDEX dust_generation_info_utxo_idx ON dust_generation_info(night_utxo_hash);
 
 CREATE TABLE dust_utxos (
     id INTEGER PRIMARY KEY,

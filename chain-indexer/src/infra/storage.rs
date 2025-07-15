@@ -11,13 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{self, Block, BlockInfo, BlockTransactions, ContractAction, Transaction};
+use crate::domain::{
+    self, Block, BlockInfo, BlockTransactions, ContractAction, Transaction,
+    dust::{DustEvent, DustEventDetails, DustGenerationInfo, QualifiedDustOutput},
+};
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
         BlockHash, ByteArray, ByteVec, ContractActionVariant, ContractBalance, UnshieldedUtxo,
-        dust::{DustEvent, DustEventDetails},
     },
     infra::sqlx::U128BeBytes,
 };
@@ -638,9 +640,13 @@ async fn process_initial_utxos_tx(
             ..
         } = event
         {
+            // Convert event types to storage types
+            let generation_storage: DustGenerationInfo = (*generation).into();
+            let output_storage: QualifiedDustOutput = (*output).into();
+
             let generation_info_id =
-                save_dust_generation_info_tx(generation, *generation_index, tx).await?;
-            save_dust_utxos_tx(output, generation_info_id, tx).await?;
+                save_dust_generation_info_tx(&generation_storage, *generation_index, tx).await?;
+            save_dust_utxos_tx(&output_storage, generation_info_id, tx).await?;
         }
     }
     Ok(())
@@ -648,32 +654,44 @@ async fn process_initial_utxos_tx(
 
 #[cfg_attr(feature = "cloud", trace)]
 async fn save_dust_generation_info_tx(
-    generation: &indexer_common::domain::dust::DustGenerationInfo,
-    _generation_index: u64,
+    generation: &DustGenerationInfo,
+    generation_index: u64,
     tx: &mut Tx,
 ) -> Result<u64, sqlx::Error> {
     let query = indoc! {"
         INSERT INTO dust_generation_info (
+            night_utxo_hash,
             value,
             owner,
             nonce,
             ctime,
+            merkle_index,
             dtime
         )
-        VALUES ($1, $2, $3, $4, $5)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
     "};
 
     #[cfg(feature = "standalone")]
-    let (owner, nonce) = (generation.owner.as_ref(), generation.nonce.as_ref());
+    let (night_utxo_hash, owner, nonce) = (
+        generation.night_utxo_hash.as_ref(),
+        generation.owner.as_ref(),
+        generation.nonce.as_ref(),
+    );
     #[cfg(feature = "cloud")]
-    let (owner, nonce) = (&generation.owner, &generation.nonce);
+    let (night_utxo_hash, owner, nonce) = (
+        &generation.night_utxo_hash,
+        &generation.owner,
+        &generation.nonce,
+    );
 
     let (id,) = sqlx::query_as::<_, (i64,)>(query)
+        .bind(night_utxo_hash)
         .bind(U128BeBytes::from(generation.value))
         .bind(owner)
         .bind(nonce)
         .bind(generation.ctime as i64)
+        .bind(generation_index as i64)
         .bind(generation.dtime as i64)
         .fetch_one(&mut **tx)
         .await?;
@@ -683,7 +701,7 @@ async fn save_dust_generation_info_tx(
 
 #[cfg_attr(feature = "cloud", trace)]
 async fn save_dust_utxos_tx(
-    output: &indexer_common::domain::dust::QualifiedDustOutput,
+    output: &QualifiedDustOutput,
     generation_info_id: u64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
@@ -743,7 +761,7 @@ async fn update_dust_generation_dtime_tx(
         let query = indoc! {"
             UPDATE dust_generation_info
             SET dtime = $1
-            WHERE id = $2
+            WHERE merkle_index = $2
         "};
 
         sqlx::query(query)

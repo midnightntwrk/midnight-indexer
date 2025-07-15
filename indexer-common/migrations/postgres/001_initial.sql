@@ -119,6 +119,7 @@ CREATE INDEX ON contract_balances(contract_action_id, token_type);
 
 CREATE TABLE dust_generation_info (
     id BIGSERIAL PRIMARY KEY,
+    night_utxo_hash BYTEA NOT NULL,
     value BYTEA NOT NULL,
     owner BYTEA NOT NULL,
     nonce BYTEA NOT NULL,
@@ -128,6 +129,7 @@ CREATE TABLE dust_generation_info (
 );
 
 CREATE INDEX ON dust_generation_info(owner);
+CREATE INDEX ON dust_generation_info(night_utxo_hash);
 
 CREATE TABLE dust_utxos (
     id BIGSERIAL PRIMARY KEY,

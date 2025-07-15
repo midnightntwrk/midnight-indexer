@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod dust;
 pub mod ledger;
 
 mod bytes;
@@ -39,6 +38,8 @@ pub type DustCommitment = ByteArray<32>;
 pub type DustNonce = ByteArray<32>;
 pub type DustNullifier = ByteArray<32>;
 pub type DustOwner = ByteArray<32>;
+pub type NightUtxoHash = ByteArray<32>;
+pub type NightUtxoNonce = ByteArray<32>;
 pub type IntentHash = ByteArray<32>;
 pub type RawContractAddress = ByteVec;
 pub type RawContractState = ByteVec;
@@ -66,13 +67,13 @@ pub enum TransactionResult {
     Failure,
 }
 
-/// Extended transaction result that includes DUST events when available.
+/// Extended transaction result that includes events when available.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TransactionResultWithDustEvents {
+pub struct TransactionResultWithDustEvents<T> {
     /// The basic transaction result.
     pub result: TransactionResult,
-    /// DUST events emitted during transaction processing (if available).
-    pub dust_events: Vec<dust::DustEvent>,
+    /// Events emitted during transaction processing (if available).
+    pub dust_events: Vec<T>,
 }
 
 /// A contract action.
