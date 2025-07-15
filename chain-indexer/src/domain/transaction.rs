@@ -11,10 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::ContractAction;
+use crate::domain::{ContractAction, dust::DustEvent};
 use indexer_common::domain::{
     ByteArray, ProtocolVersion, RawTransaction, RawTransactionIdentifier, RawZswapStateRoot,
-    TransactionHash, TransactionResult, UnshieldedUtxo, dust::DustEvent,
+    TransactionHash, TransactionResult, UnshieldedUtxo,
 };
 use sqlx::FromRow;
 use std::fmt::Debug;

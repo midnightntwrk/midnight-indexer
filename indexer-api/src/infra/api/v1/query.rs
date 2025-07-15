@@ -14,10 +14,11 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ApiResult, ContextExt, HexEncoded, ResultExt,
+        ApiError, ApiResult, AsBytesExt, ContextExt, HexEncoded, InnerApiError, ResultExt,
         v1::{
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
+            dust::{DustGenerationStatus, DustMerkleTreeTypeGraphQL, DustSystemState},
             transaction::{Transaction, TransactionOffset},
         },
     },
@@ -198,5 +199,61 @@ where
         };
 
         Ok(contract_action.map(Into::into))
+    }
+
+    /// Get current DUST system state.
+    #[trace]
+    async fn current_dust_state(&self, cx: &Context<'_>) -> ApiResult<DustSystemState> {
+        let storage = cx.get_storage::<S>();
+
+        let state = storage
+            .get_current_dust_state()
+            .await
+            .map_err_into_server_error(|| "get current dust state")?;
+
+        Ok(state.into())
+    }
+
+    /// Get DUST generation status for multiple stake keys.
+    #[trace(properties = { "cardano_stake_keys": "{cardano_stake_keys:?}" })]
+    async fn dust_generation_status(
+        &self,
+        cx: &Context<'_>,
+        cardano_stake_keys: Vec<String>,
+    ) -> ApiResult<Vec<DustGenerationStatus>> {
+        let storage = cx.get_storage::<S>();
+
+        // Prevent DOS attacks by limiting database query complexity
+        if cardano_stake_keys.len() > 10 {
+            return Err(ApiError::Client(InnerApiError(
+                "Maximum 10 stake keys allowed per request".to_owned(),
+                None,
+            )));
+        }
+
+        let statuses = storage
+            .get_dust_generation_status_batch(&cardano_stake_keys)
+            .await
+            .map_err_into_server_error(|| "get dust generation status batch")?;
+
+        Ok(statuses.into_iter().map(Into::into).collect())
+    }
+
+    /// Get historical Merkle tree root for a specific timestamp.
+    #[trace(properties = { "tree_type": "{tree_type:?}", "timestamp": "{timestamp}" })]
+    async fn dust_merkle_root(
+        &self,
+        cx: &Context<'_>,
+        tree_type: DustMerkleTreeTypeGraphQL,
+        timestamp: i64,
+    ) -> ApiResult<Option<HexEncoded>> {
+        let storage = cx.get_storage::<S>();
+
+        let root = storage
+            .get_dust_merkle_root_at_timestamp(tree_type.into(), timestamp)
+            .await
+            .map_err_into_server_error(|| "get dust merkle root at timestamp")?;
+
+        Ok(root.map(|r| r.hex_encode()))
     }
 }

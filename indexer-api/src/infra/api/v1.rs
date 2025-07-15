@@ -13,6 +13,7 @@
 
 pub mod block;
 pub mod contract_action;
+pub mod dust;
 pub mod mutation;
 pub mod query;
 pub mod subscription;
