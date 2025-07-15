@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::domain::{
-    ByteVec, DustCommitment, DustNonce, DustNullifier, DustOwner, NightUtxoHash,
-    NightUtxoNonce, TransactionHash,
+    ByteVec, DustCommitment, DustNonce, DustNullifier, DustOwner, NightUtxoHash, NightUtxoNonce,
+    TransactionHash,
 };
 use serde::{Deserialize, Serialize};
 

@@ -648,7 +648,7 @@ async fn process_initial_utxos_tx(
                 ctime: generation.ctime,
                 dtime: generation.dtime,
             };
-            
+
             let generation_info_id =
                 save_dust_generation_info_tx(&generation_with_hash, *generation_index, tx).await?;
             save_dust_utxos_tx(output, generation_info_id, tx).await?;
@@ -678,9 +678,17 @@ async fn save_dust_generation_info_tx(
     "};
 
     #[cfg(feature = "standalone")]
-    let (night_utxo_hash, owner, nonce) = (generation.night_utxo_hash.as_ref(), generation.owner.as_ref(), generation.nonce.as_ref());
+    let (night_utxo_hash, owner, nonce) = (
+        generation.night_utxo_hash.as_ref(),
+        generation.owner.as_ref(),
+        generation.nonce.as_ref(),
+    );
     #[cfg(feature = "cloud")]
-    let (night_utxo_hash, owner, nonce) = (&generation.night_utxo_hash, &generation.owner, &generation.nonce);
+    let (night_utxo_hash, owner, nonce) = (
+        &generation.night_utxo_hash,
+        &generation.owner,
+        &generation.nonce,
+    );
 
     let (id,) = sqlx::query_as::<_, (i64,)>(query)
         .bind(night_utxo_hash)
