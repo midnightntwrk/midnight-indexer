@@ -169,8 +169,8 @@ coverage-generation:
 coverage-report: coverage-generation
     RUSTC_BOOTSTRAP=1 cargo llvm-cov report --open
 
-node_version := "0.13.0-alpha.3"
-generator_version := "0.13.0-alpha.3"
+node_version := "0.13.2-rc.1"
+generator_version := "0.13.2-rc.1"
 
 generate-node-data:
     if [ -d ./.node/{{node_version}} ]; then rm -r ./.node/{{node_version}}; fi
@@ -188,14 +188,14 @@ generate-node-data:
         --name generator-generate-txs \
         --network host \
         -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
+        ghcr.io/midnight-ntwrk/midnight-node-toolkit:{{generator_version}} \
         generate-txs batches -n 3 -b 2
     docker run \
         --rm \
         --name generator-generate-contract-deploy \
         --network host \
         -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
+        ghcr.io/midnight-ntwrk/midnight-node-toolkit:{{generator_version}} \
         generate-txs --dest-file /out/contract_tx_1_deploy.mn --to-bytes \
         contract-calls deploy \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037'
@@ -204,7 +204,7 @@ generate-node-data:
         --name generator-generate-contract-address \
         --network host \
         -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
+        ghcr.io/midnight-ntwrk/midnight-node-toolkit:{{generator_version}} \
         contract-address --network undeployed \
         --src-file /out/contract_tx_1_deploy.mn --dest-file /out/contract_address.mn
     docker run \
@@ -212,7 +212,7 @@ generate-node-data:
         --name generator-send-contract-deploy \
         --network host \
         -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
+        ghcr.io/midnight-ntwrk/midnight-node-toolkit:{{generator_version}} \
         generate-txs --src-files /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 \
         send
     docker run \
@@ -220,7 +220,7 @@ generate-node-data:
         --name generator-generate-contract-call \
         --network host \
         -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
+        ghcr.io/midnight-ntwrk/midnight-node-toolkit:{{generator_version}} \
         generate-txs contract-calls call \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
         --contract-address /out/contract_address.mn
@@ -229,7 +229,7 @@ generate-node-data:
         --name generator-generate-contract-maintenance \
         --network host \
         -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-generator:{{generator_version}} \
+        ghcr.io/midnight-ntwrk/midnight-node-toolkit:{{generator_version}} \
         generate-txs contract-calls maintenance \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
         --contract-address /out/contract_address.mn
