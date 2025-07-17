@@ -169,8 +169,8 @@ coverage-generation:
 coverage-report: coverage-generation
     RUSTC_BOOTSTRAP=1 cargo llvm-cov report --open
 
-node_version := "0.13.2-df743663"
-generator_version := "0.13.2-df743663"
+node_version := "0.13.2-rc.1"
+generator_version := "0.13.2-rc.1"
 
 generate-node-data:
     if [ -d ./.node/{{node_version}} ]; then rm -r ./.node/{{node_version}}; fi
