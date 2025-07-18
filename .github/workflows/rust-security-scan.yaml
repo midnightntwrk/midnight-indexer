@@ -22,7 +22,7 @@ jobs:
       run: cargo install --git https://github.com/cosmir17/rustsec --branch sarif-support cargo-audit
 
     - name: Run vuln scan
-      run: cargo audit --format sarif > scan.sarif
+      run: cargo audit --format sarif > scan.sarif || true
 
     - name: Upload SARIF
       uses: github/codeql-action/upload-sarif@v3
