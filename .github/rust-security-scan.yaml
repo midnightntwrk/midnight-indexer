@@ -15,15 +15,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Install Trivy
-      run: |
-        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+    - name: Install cargo-audit
+      run: cargo install --git https://github.com/cosmir17/rustsec --branch sarif-support cargo-audit
+    - name: Run vuln scan
+      run: cargo audit --format sarif > scan.sarif
 
-    - name: Run Trivy (vuln scan)
-      run: |
-        trivy fs . --scanners vuln --format sarif --output trivy.sarif
-
-    - name: Upload Trivy SARIF
+    - name: Upload SARIF
       uses: github/codeql-action/upload-sarif@v3
       with:
-        sarif_file: trivy.sarif
+        sarif_file: scan.sarif
