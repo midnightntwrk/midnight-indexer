@@ -336,12 +336,9 @@ async fn save_transactions(
         )
         .await?;
 
-        // Process DUST events within the same transaction.
-        if !transaction.dust_events.is_empty() {
-            process_dust_events_in_transaction(&transaction.dust_events, transaction_id as u64, tx)
-                .await?;
-            save_dust_events_tx(&transaction.dust_events, transaction_id as u64, tx).await?;
-        }
+        process_dust_events(&transaction.dust_events, transaction_id, tx).await?;
+
+        save_dust_events(&transaction.dust_events, transaction_id, tx).await?;
     }
 
     let max_id = transaction_ids.last().map(|&n| n as u64);
@@ -542,9 +539,48 @@ async fn save_identifiers(
 }
 
 #[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
-async fn save_dust_events_tx(
+async fn process_dust_events(
     dust_events: &[DustEvent],
-    transaction_id: u64,
+    transaction_id: i64,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    let mut generation_dtime = None;
+
+    for dust_event in dust_events {
+        match dust_event.event_details {
+            DustEventDetails::DustInitialUtxo {
+                output, generation, ..
+            } => {
+                let generation_info_id = save_dust_generation_info(generation, tx).await?;
+                save_dust_utxos(output, generation_info_id, tx).await?;
+            }
+
+            DustEventDetails::DustGenerationDtimeUpdate {
+                generation,
+                generation_index,
+            } => generation_dtime = Some((generation.dtime, generation_index)),
+
+            DustEventDetails::DustSpendProcessed {
+                commitment,
+                nullifier,
+                ..
+            } => {
+                mark_dust_utxo_spent(commitment, nullifier, transaction_id, tx).await?;
+            }
+        }
+    }
+
+    if let Some((dtime, index)) = generation_dtime {
+        update_dust_generation_dtime(dtime, index, tx).await?;
+    }
+
+    Ok(())
+}
+
+#[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
+async fn save_dust_events(
+    dust_events: &[DustEvent],
+    transaction_id: i64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
     if dust_events.is_empty() {
@@ -560,7 +596,7 @@ async fn save_dust_events_tx(
 
     QueryBuilder::new(query)
         .push_values(dust_events.iter(), |mut q, event| {
-            q.push_bind(transaction_id as i64).push_bind(Json(event));
+            q.push_bind(transaction_id).push_bind(Json(event));
         })
         .build()
         .execute(&mut **tx)
@@ -569,86 +605,9 @@ async fn save_dust_events_tx(
     Ok(())
 }
 
-struct GroupedDustEvents<'a> {
-    initial_utxos: Vec<&'a DustEvent>,
-    spent_night: Option<&'a DustEvent>,
-    spent_dust: Vec<&'a DustEvent>,
-}
-
-fn group_dust_events_by_type(events: &[DustEvent]) -> GroupedDustEvents {
-    let mut initial_utxos = Vec::new();
-    let mut spent_night = None;
-    let mut spent_dust = Vec::new();
-
-    for event in events {
-        match &event.event_details {
-            DustEventDetails::DustInitialUtxo { .. } => initial_utxos.push(event),
-            DustEventDetails::DustGenerationDtimeUpdate { .. } => spent_night = Some(event),
-            DustEventDetails::DustSpendProcessed { .. } => spent_dust.push(event),
-        }
-    }
-
-    GroupedDustEvents {
-        initial_utxos,
-        spent_night,
-        spent_dust,
-    }
-}
-
-#[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
-async fn process_dust_events_in_transaction(
-    dust_events: &[DustEvent],
-    transaction_id: u64,
-    tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    let grouped_events = group_dust_events_by_type(dust_events);
-
-    // Process initial UTXOs
-    if !grouped_events.initial_utxos.is_empty() {
-        process_initial_utxos_tx(&grouped_events.initial_utxos, tx).await?;
-    }
-
-    // Update generation dtime for spent Night
-    if let Some(spent_event) = grouped_events.spent_night {
-        update_dust_generation_dtime_tx(spent_event, tx).await?;
-    }
-
-    // Mark DUST UTXOs as spent
-    for spent_dust in &grouped_events.spent_dust {
-        mark_dust_utxo_spent_tx(spent_dust, transaction_id, tx).await?;
-    }
-
-    Ok(())
-}
-
-#[cfg_attr(feature = "cloud", trace)]
-async fn process_initial_utxos_tx(
-    initial_utxo_events: &[&DustEvent],
-    tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    for event in initial_utxo_events {
-        if let DustEvent {
-            event_details:
-                DustEventDetails::DustInitialUtxo {
-                    output,
-                    generation,
-                    generation_index,
-                },
-            ..
-        } = event
-        {
-            let generation_info_id =
-                save_dust_generation_info_tx(generation, *generation_index, tx).await?;
-            save_dust_utxos_tx(output, generation_info_id, tx).await?;
-        }
-    }
-    Ok(())
-}
-
-#[cfg_attr(feature = "cloud", trace)]
-async fn save_dust_generation_info_tx(
-    generation: &indexer_common::domain::dust::DustGenerationInfo,
-    _generation_index: u64,
+#[trace]
+async fn save_dust_generation_info(
+    generation: indexer_common::domain::dust::DustGenerationInfo,
     tx: &mut Tx,
 ) -> Result<u64, sqlx::Error> {
     let query = indoc! {"
@@ -663,15 +622,10 @@ async fn save_dust_generation_info_tx(
         RETURNING id
     "};
 
-    #[cfg(feature = "standalone")]
-    let (owner, nonce) = (generation.owner.as_ref(), generation.nonce.as_ref());
-    #[cfg(feature = "cloud")]
-    let (owner, nonce) = (&generation.owner, &generation.nonce);
-
     let (id,) = sqlx::query_as::<_, (i64,)>(query)
         .bind(U128BeBytes::from(generation.value))
-        .bind(owner)
-        .bind(nonce)
+        .bind(generation.owner.as_ref())
+        .bind(generation.nonce.as_ref())
         .bind(generation.ctime as i64)
         .bind(generation.dtime as i64)
         .fetch_one(&mut **tx)
@@ -680,9 +634,9 @@ async fn save_dust_generation_info_tx(
     Ok(id as u64)
 }
 
-#[cfg_attr(feature = "cloud", trace)]
-async fn save_dust_utxos_tx(
-    output: &indexer_common::domain::dust::QualifiedDustOutput,
+#[trace]
+async fn save_dust_utxos(
+    output: indexer_common::domain::dust::QualifiedDustOutput,
     generation_info_id: u64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
@@ -702,20 +656,11 @@ async fn save_dust_utxos_tx(
     // Calculate commitment (in real implementation, this would use proper crypto).
     let commitment = output.nonce; // Placeholder - should be properly calculated.
 
-    #[cfg(feature = "standalone")]
-    let (commitment, owner, nonce) = (
-        commitment.as_ref(),
-        output.owner.as_ref(),
-        output.nonce.as_ref(),
-    );
-    #[cfg(feature = "cloud")]
-    let (commitment, owner, nonce) = (&commitment, &output.owner, &output.nonce);
-
     sqlx::query(query)
-        .bind(commitment)
+        .bind(commitment.as_ref())
         .bind(U128BeBytes::from(output.initial_value))
-        .bind(owner)
-        .bind(nonce)
+        .bind(output.owner.as_ref())
+        .bind(output.nonce.as_ref())
         .bind(output.seq as i64)
         .bind(output.ctime as i64)
         .bind(generation_info_id as i64)
@@ -725,76 +670,47 @@ async fn save_dust_utxos_tx(
     Ok(())
 }
 
-#[cfg_attr(feature = "cloud", trace)]
-async fn update_dust_generation_dtime_tx(
-    spent_night_event: &DustEvent,
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn mark_dust_utxo_spent(
+    commitment: ByteArray<32>,
+    nullifier: ByteArray<32>,
+    transaction_id: i64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
-    if let DustEvent {
-        event_details:
-            DustEventDetails::DustGenerationDtimeUpdate {
-                generation,
-                generation_index,
-            },
-        ..
-    } = spent_night_event
-    {
-        let query = indoc! {"
+    let query = indoc! {"
+                UPDATE dust_utxos
+                SET nullifier = $1, spent_at_transaction_id = $2
+                WHERE nullifier IS NULL
+                AND commitment = $3
+            "};
+
+    sqlx::query(query)
+        .bind(nullifier.as_ref())
+        .bind(transaction_id)
+        .bind(commitment.as_ref())
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace]
+async fn update_dust_generation_dtime(
+    dtime: u64,
+    index: u64,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
             UPDATE dust_generation_info
             SET dtime = $1
             WHERE id = $2
         "};
 
-        sqlx::query(query)
-            .bind(generation.dtime as i64)
-            .bind(*generation_index as i64)
-            .execute(&mut **tx)
-            .await?;
-    }
-
-    Ok(())
-}
-
-#[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
-async fn mark_dust_utxo_spent_tx(
-    spent_dust_event: &DustEvent,
-    transaction_id: u64,
-    tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    if let DustEvent {
-        event_details:
-            DustEventDetails::DustSpendProcessed {
-                commitment,
-                commitment_index: _,
-                nullifier,
-                v_fee: _,
-                time: _,
-                params: _,
-            },
-        ..
-    } = spent_dust_event
-    {
-        // Find the unspent UTXO with the matching commitment and mark it as spent.
-        let query = indoc! {"
-            UPDATE dust_utxos
-            SET nullifier = $1,
-                spent_at_transaction_id = $2
-            WHERE nullifier IS NULL
-            AND commitment = $3
-        "};
-
-        #[cfg(feature = "standalone")]
-        let (nullifier, commitment) = (nullifier.as_ref(), commitment.as_ref());
-        #[cfg(feature = "cloud")]
-        let (nullifier, commitment) = (nullifier, commitment);
-
-        sqlx::query(query)
-            .bind(nullifier)
-            .bind(transaction_id as i64)
-            .bind(commitment)
-            .execute(&mut **tx)
-            .await?;
-    }
+    sqlx::query(query)
+        .bind(dtime as i64)
+        .bind(index as i64)
+        .execute(&mut **tx)
+        .await?;
 
     Ok(())
 }
