@@ -2,7 +2,7 @@
 // Copyright (C) 2025 Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
-// You may not use this file except in compliance with the License.
+// you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 // http://www.apache.org/licenses/LICENSE-2.0
 // Unless required by applicable law or agreed to in writing, software
@@ -12,24 +12,17 @@
 // limitations under the License.
 
 use crate::domain::{self, Block, BlockInfo, BlockTransactions, ContractAction, Transaction};
-use async_stream::try_stream;
 use fastrace::trace;
-use futures::{Stream, TryFutureExt, TryStreamExt};
+use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteArray, ByteVec, ContractActionVariant, ContractBalance, DustCommitment,
-        DustNonce, DustNullifier, DustOwner, RawTransaction, UnshieldedUtxo,
-        dust::{
-            DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, DustRegistration,
-            DustUtxo, QualifiedDustOutput,
-        },
+        BlockHash, ByteArray, ByteVec, ContractActionVariant, ContractBalance, UnshieldedUtxo,
+        dust::{DustEvent, DustEventDetails},
     },
     infra::sqlx::U128BeBytes,
-    stream::flatten_chunks,
 };
 use indoc::indoc;
 use sqlx::{QueryBuilder, types::Json};
-use std::num::NonZeroU32;
 
 #[cfg(feature = "cloud")]
 type Tx = sqlx::Transaction<'static, sqlx::Postgres>;
@@ -57,327 +50,6 @@ impl Storage {
     #[cfg(feature = "standalone")]
     pub fn new(pool: indexer_common::infra::pool::sqlite::SqlitePool) -> Self {
         Self { pool }
-    }
-
-    #[trace(properties = { "owner": "%{owner}", "generation_info_id": "{generation_info_id}", "batch_size": "{batch_size}" })]
-    async fn get_dust_generation_info_by_owner(
-        &self,
-        owner: DustOwner,
-        generation_info_id: u64,
-        batch_size: NonZeroU32,
-    ) -> Result<Vec<(u64, DustGenerationInfo)>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT
-                id,
-                value,
-                owner,
-                nonce,
-                ctime,
-                dtime
-            FROM dust_generation_info
-            WHERE owner = $1
-            AND id >= $2
-            ORDER BY id
-            LIMIT $3
-        "};
-
-        #[cfg(feature = "cloud")]
-        let rows =
-            sqlx::query_as::<_, (i64, U128BeBytes, DustOwner, DustNonce, i64, Option<i64>)>(query)
-                .bind(owner.as_ref())
-                .bind(generation_info_id as i64)
-                .bind(batch_size.get() as i64)
-                .fetch_all(&*self.pool)
-                .await?;
-
-        #[cfg(feature = "standalone")]
-        let rows =
-            sqlx::query_as::<_, (i64, U128BeBytes, ByteVec, ByteVec, i64, Option<i64>)>(query)
-                .bind(owner.as_ref())
-                .bind(generation_info_id as i64)
-                .bind(batch_size.get() as i64)
-                .fetch_all(&*self.pool)
-                .await?;
-
-        #[cfg(feature = "cloud")]
-        let generation_infos = rows
-            .into_iter()
-            .map(|(id, value, owner, nonce, ctime, dtime)| {
-                (
-                    id as u64,
-                    DustGenerationInfo {
-                        value: value.into(),
-                        owner,
-                        nonce,
-                        ctime: ctime as u64,
-                        dtime: dtime.map(|d| d as u64).unwrap_or(0),
-                    },
-                )
-            })
-            .collect();
-
-        #[cfg(feature = "standalone")]
-        let generation_infos = rows
-            .into_iter()
-            .map(|(id, value, owner_bytes, nonce_bytes, ctime, dtime)| {
-                Ok((
-                    id as u64,
-                    DustGenerationInfo {
-                        value: value.into(),
-                        owner: DustOwner::try_from(owner_bytes.as_ref())
-                            .map_err(|error| sqlx::Error::Decode(error.into()))?,
-                        nonce: DustNonce::try_from(nonce_bytes.as_ref())
-                            .map_err(|error| sqlx::Error::Decode(error.into()))?,
-                        ctime: ctime as u64,
-                        dtime: dtime.map(|d| d as u64).unwrap_or(0),
-                    },
-                ))
-            })
-            .collect::<Result<Vec<_>, sqlx::Error>>()?;
-
-        Ok(generation_infos)
-    }
-
-    #[trace(properties = { "owner": "%{owner}", "utxo_id": "{utxo_id}", "batch_size": "{batch_size}" })]
-    async fn get_dust_utxos_by_owner(
-        &self,
-        owner: DustOwner,
-        utxo_id: u64,
-        batch_size: NonZeroU32,
-    ) -> Result<Vec<(u64, DustUtxo)>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT 
-                id,
-                commitment,
-                nullifier,
-                initial_value,
-                owner,
-                nonce,
-                seq,
-                ctime,
-                generation_info_id,
-                spent_at_transaction_id
-            FROM dust_utxos
-            WHERE owner = $1
-            AND id >= $2
-            ORDER BY id
-            LIMIT $3
-        "};
-
-        #[cfg(feature = "cloud")]
-        let rows = sqlx::query_as::<
-            _,
-            (
-                i64,
-                DustCommitment,
-                Option<DustNullifier>,
-                U128BeBytes,
-                DustOwner,
-                DustNonce,
-                i32,
-                i64,
-                Option<i64>,
-                Option<i64>,
-            ),
-        >(query)
-        .bind(owner.as_ref())
-        .bind(utxo_id as i64)
-        .bind(batch_size.get() as i64)
-        .fetch_all(&*self.pool)
-        .await?;
-
-        #[cfg(feature = "standalone")]
-        let rows = sqlx::query_as::<
-            _,
-            (
-                i64,
-                ByteVec,
-                Option<ByteVec>,
-                U128BeBytes,
-                ByteVec,
-                ByteVec,
-                i32,
-                i64,
-                Option<i64>,
-                Option<i64>,
-            ),
-        >(query)
-        .bind(owner.as_ref())
-        .bind(utxo_id as i64)
-        .bind(batch_size.get() as i64)
-        .fetch_all(&*self.pool)
-        .await?;
-
-        #[cfg(feature = "cloud")]
-        let utxos = rows
-            .into_iter()
-            .map(
-                |(
-                    id,
-                    commitment,
-                    nullifier,
-                    initial_value,
-                    owner,
-                    nonce,
-                    seq,
-                    ctime,
-                    generation_info_id,
-                    spent_at_transaction_id,
-                )| {
-                    (
-                        id as u64,
-                        DustUtxo {
-                            commitment,
-                            nullifier,
-                            initial_value: initial_value.into(),
-                            owner,
-                            nonce,
-                            seq: seq as u32,
-                            ctime: ctime as u64,
-                            generation_info_id: generation_info_id.map(|id| id as u64),
-                            spent_at_transaction_id: spent_at_transaction_id.map(|id| id as u64),
-                        },
-                    )
-                },
-            )
-            .collect();
-
-        #[cfg(feature = "standalone")]
-        let utxos = rows
-            .into_iter()
-            .map(
-                |(
-                    id,
-                    commitment_bytes,
-                    nullifier_bytes,
-                    initial_value,
-                    owner_bytes,
-                    nonce_bytes,
-                    seq,
-                    ctime,
-                    generation_info_id,
-                    spent_at_transaction_id,
-                )| {
-                    Ok((
-                        id as u64,
-                        DustUtxo {
-                            commitment: DustCommitment::try_from(commitment_bytes.as_ref())
-                                .map_err(|error| sqlx::Error::Decode(error.into()))?,
-                            nullifier: nullifier_bytes
-                                .map(|bytes| DustNullifier::try_from(bytes.as_ref()))
-                                .transpose()
-                                .map_err(|error| sqlx::Error::Decode(error.into()))?,
-                            initial_value: initial_value.into(),
-                            owner: DustOwner::try_from(owner_bytes.as_ref())
-                                .map_err(|error| sqlx::Error::Decode(error.into()))?,
-                            nonce: DustNonce::try_from(nonce_bytes.as_ref())
-                                .map_err(|error| sqlx::Error::Decode(error.into()))?,
-                            seq: seq as u32,
-                            ctime: ctime as u64,
-                            generation_info_id: generation_info_id.map(|id| id as u64),
-                            spent_at_transaction_id: spent_at_transaction_id.map(|id| id as u64),
-                        },
-                    ))
-                },
-            )
-            .collect::<Result<Vec<_>, sqlx::Error>>()?;
-
-        Ok(utxos)
-    }
-
-    #[trace(properties = { "prefix": "{prefix}", "after_block": "{after_block:?}", "transaction_id": "{transaction_id}", "batch_size": "{batch_size}" })]
-    async fn search_transactions_by_nullifier_prefix(
-        &self,
-        prefix: &str,
-        after_block: Option<u32>,
-        transaction_id: u64,
-        batch_size: NonZeroU32,
-    ) -> Result<Vec<(u64, RawTransaction)>, sqlx::Error> {
-        // Use the prefix index for privacy-preserving search.
-        let prefix_len = prefix.len().min(8); // Max prefix length supported by index.
-        let truncated_prefix = prefix[..prefix_len].to_string();
-
-        #[cfg(feature = "cloud")]
-        let query = if let Some(_block_height) = after_block {
-            indoc! {"
-                SELECT DISTINCT dust_utxos.spent_at_transaction_id, transactions.raw
-                FROM dust_utxos
-                JOIN transactions ON dust_utxos.spent_at_transaction_id = transactions.id
-                JOIN blocks ON transactions.block_id = blocks.id
-                WHERE substring(dust_utxos.nullifier::text, 1, $1) = $2
-                AND dust_utxos.nullifier IS NOT NULL
-                AND dust_utxos.spent_at_transaction_id IS NOT NULL
-                AND dust_utxos.spent_at_transaction_id >= $3
-                AND blocks.height > $4
-                ORDER BY dust_utxos.spent_at_transaction_id
-                LIMIT $5
-            "}
-        } else {
-            indoc! {"
-                SELECT DISTINCT dust_utxos.spent_at_transaction_id, transactions.raw
-                FROM dust_utxos
-                JOIN transactions ON dust_utxos.spent_at_transaction_id = transactions.id
-                WHERE substring(dust_utxos.nullifier::text, 1, $1) = $2
-                AND dust_utxos.nullifier IS NOT NULL
-                AND dust_utxos.spent_at_transaction_id IS NOT NULL
-                AND dust_utxos.spent_at_transaction_id >= $3
-                ORDER BY dust_utxos.spent_at_transaction_id
-                LIMIT $4
-            "}
-        };
-
-        #[cfg(feature = "standalone")]
-        let query = if let Some(_block_height) = after_block {
-            indoc! {"
-                SELECT DISTINCT dust_utxos.spent_at_transaction_id, transactions.raw
-                FROM dust_utxos
-                JOIN transactions ON dust_utxos.spent_at_transaction_id = transactions.id
-                JOIN blocks ON transactions.block_id = blocks.id
-                WHERE substr(hex(dust_utxos.nullifier), 1, $1) = $2
-                AND dust_utxos.nullifier IS NOT NULL
-                AND dust_utxos.spent_at_transaction_id IS NOT NULL
-                AND dust_utxos.spent_at_transaction_id >= $3
-                AND blocks.height > $4
-                ORDER BY dust_utxos.spent_at_transaction_id
-                LIMIT $5
-            "}
-        } else {
-            indoc! {"
-                SELECT DISTINCT dust_utxos.spent_at_transaction_id, transactions.raw
-                FROM dust_utxos
-                JOIN transactions ON dust_utxos.spent_at_transaction_id = transactions.id
-                WHERE substr(hex(dust_utxos.nullifier), 1, $1) = $2
-                AND dust_utxos.nullifier IS NOT NULL
-                AND dust_utxos.spent_at_transaction_id IS NOT NULL
-                AND dust_utxos.spent_at_transaction_id >= $3
-                ORDER BY dust_utxos.spent_at_transaction_id
-                LIMIT $4
-            "}
-        };
-
-        let rows = if let Some(block_height) = after_block {
-            sqlx::query_as::<_, (i64, ByteVec)>(query)
-                .bind(prefix_len as i32)
-                .bind(&truncated_prefix)
-                .bind(transaction_id as i64)
-                .bind(block_height as i32)
-                .bind(batch_size.get() as i64)
-                .fetch_all(&*self.pool)
-                .await?
-        } else {
-            sqlx::query_as::<_, (i64, ByteVec)>(query)
-                .bind(prefix_len as i32)
-                .bind(&truncated_prefix)
-                .bind(transaction_id as i64)
-                .bind(batch_size.get() as i64)
-                .fetch_all(&*self.pool)
-                .await?
-        };
-
-        Ok(rows
-            .into_iter()
-            .map(|(tx_id, raw)| (tx_id as u64, raw))
-            .collect())
     }
 }
 
@@ -500,388 +172,6 @@ impl domain::storage::Storage for Storage {
         }
 
         Ok(max_transaction_id)
-    }
-
-    // DUST-specific storage methods.
-    #[trace(properties = { "transaction_id": "{transaction_id}" })]
-    async fn save_dust_events(
-        &self,
-        events: impl AsRef<[DustEvent]> + Send,
-        transaction_id: u64,
-    ) -> Result<(), sqlx::Error> {
-        let events = events.as_ref();
-        if events.is_empty() {
-            return Ok(());
-        }
-
-        let query = indoc! {"
-            INSERT INTO dust_events (
-                transaction_id,
-                transaction_hash,
-                logical_segment,
-                physical_segment,
-                event_type,
-                event_data
-            )
-            VALUES ($1, $2, $3, $4, $5, $6)
-        "};
-
-        for event in events {
-            let event_type = DustEventType::from(&event.event_details);
-
-            #[cfg(feature = "cloud")]
-            {
-                sqlx::query(query)
-                    .bind(transaction_id as i64)
-                    .bind(event.transaction_hash)
-                    .bind(event.logical_segment as i16)
-                    .bind(event.physical_segment as i16)
-                    .bind(event_type)
-                    .bind(Json(&event.event_details))
-                    .execute(&*self.pool)
-                    .await?;
-            }
-
-            #[cfg(feature = "standalone")]
-            {
-                // SQLite doesn't support custom enum types like PostgreSQL does.
-                // While PostgreSQL can use the DustEventType enum directly (via sqlx::Type),
-                // SQLite requires us to manually convert the enum to a string representation.
-                let event_type = match event_type {
-                    DustEventType::DustInitialUtxo => "DustInitialUtxo",
-                    DustEventType::DustGenerationDtimeUpdate => "DustGenerationDtimeUpdate",
-                    DustEventType::DustSpendProcessed => "DustSpendProcessed",
-                };
-
-                sqlx::query(query)
-                    .bind(transaction_id as i64)
-                    .bind(event.transaction_hash.as_ref())
-                    .bind(event.logical_segment as i32)
-                    .bind(event.physical_segment as i32)
-                    .bind(event_type)
-                    .bind(Json(&event.event_details))
-                    .execute(&*self.pool)
-                    .await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    #[trace]
-    async fn save_dust_utxos(
-        &self,
-        utxos: impl AsRef<[DustUtxo]> + Send,
-    ) -> Result<(), sqlx::Error> {
-        let utxos = utxos.as_ref();
-        if utxos.is_empty() {
-            return Ok(());
-        }
-
-        let query = indoc! {"
-            INSERT INTO dust_utxos (
-                commitment,
-                nullifier,
-                initial_value,
-                owner,
-                nonce,
-                seq,
-                ctime,
-                generation_info_id,
-                spent_at_transaction_id
-            )
-        "};
-
-        #[cfg(feature = "cloud")]
-        {
-            QueryBuilder::new(query)
-                .push_values(utxos.iter(), |mut q, utxo| {
-                    q.push_bind(utxo.commitment)
-                        .push_bind(utxo.nullifier)
-                        .push_bind(U128BeBytes::from(utxo.initial_value))
-                        .push_bind(utxo.owner)
-                        .push_bind(utxo.nonce)
-                        .push_bind(utxo.seq as i32)
-                        .push_bind(utxo.ctime as i64)
-                        .push_bind(utxo.generation_info_id.map(|id| id as i64))
-                        .push_bind(utxo.spent_at_transaction_id.map(|id| id as i64));
-                })
-                .build()
-                .execute(&*self.pool)
-                .await?;
-        }
-
-        #[cfg(feature = "standalone")]
-        {
-            QueryBuilder::new(query)
-                .push_values(utxos.iter(), |mut q, utxo| {
-                    q.push_bind(utxo.commitment.as_ref())
-                        .push_bind(utxo.nullifier.as_ref().map(|n| n.as_ref()))
-                        .push_bind(U128BeBytes::from(utxo.initial_value))
-                        .push_bind(utxo.owner.as_ref())
-                        .push_bind(utxo.nonce.as_ref())
-                        .push_bind(utxo.seq as i32)
-                        .push_bind(utxo.ctime as i64)
-                        .push_bind(utxo.generation_info_id.map(|id| id as i64))
-                        .push_bind(utxo.spent_at_transaction_id.map(|id| id as i64));
-                })
-                .build()
-                .execute(&*self.pool)
-                .await?;
-        }
-
-        Ok(())
-    }
-
-    #[trace]
-    async fn save_dust_generation_info(
-        &self,
-        generation_info: impl AsRef<[DustGenerationInfo]> + Send,
-    ) -> Result<(), sqlx::Error> {
-        let generation_info = generation_info.as_ref();
-        if generation_info.is_empty() {
-            return Ok(());
-        }
-
-        let query = indoc! {"
-            INSERT INTO dust_generation_info (
-                value,
-                owner,
-                nonce,
-                ctime,
-                dtime,
-                merkle_index
-            )
-        "};
-
-        #[cfg(feature = "cloud")]
-        {
-            QueryBuilder::new(query)
-                .push_values(generation_info.iter(), |mut q, info| {
-                    q.push_bind(U128BeBytes::from(info.value))
-                        .push_bind(info.owner)
-                        .push_bind(info.nonce)
-                        .push_bind(info.ctime as i64)
-                        .push_bind(if info.dtime == 0 {
-                            None
-                        } else {
-                            Some(info.dtime as i64)
-                        })
-                        .push_bind(0i64); // TODO: merkle_index should come from somewhere.
-                })
-                .build()
-                .execute(&*self.pool)
-                .await?;
-        }
-
-        #[cfg(feature = "standalone")]
-        {
-            QueryBuilder::new(query)
-                .push_values(generation_info.iter(), |mut q, info| {
-                    q.push_bind(U128BeBytes::from(info.value))
-                        .push_bind(info.owner.as_ref())
-                        .push_bind(info.nonce.as_ref())
-                        .push_bind(info.ctime as i64)
-                        .push_bind(if info.dtime == 0 {
-                            None
-                        } else {
-                            Some(info.dtime as i64)
-                        })
-                        .push_bind(0i64); // TODO: merkle_index should come from somewhere.
-                })
-                .build()
-                .execute(&*self.pool)
-                .await?;
-        }
-
-        Ok(())
-    }
-
-    #[trace]
-    async fn save_cnight_registrations(
-        &self,
-        registrations: impl AsRef<[DustRegistration]> + Send,
-    ) -> Result<(), sqlx::Error> {
-        let registrations = registrations.as_ref();
-        if registrations.is_empty() {
-            return Ok(());
-        }
-
-        #[cfg(feature = "cloud")]
-        {
-            let query = indoc! {"
-                INSERT INTO cnight_registrations (
-                    cardano_address,
-                    dust_address,
-                    is_valid,
-                    registered_at,
-                    removed_at
-                )
-            "};
-
-            QueryBuilder::new(query)
-                .push_values(registrations.iter(), |mut q, reg| {
-                    q.push_bind(reg.cardano_address.as_ref())
-                        .push_bind(reg.dust_address.as_ref())
-                        .push_bind(reg.is_valid)
-                        .push_bind(reg.registered_at as i64)
-                        .push_bind(reg.removed_at.map(|t| t as i64));
-                })
-                .push(" ON CONFLICT (cardano_address, dust_address) DO UPDATE SET ")
-                .push("is_valid = EXCLUDED.is_valid, ")
-                .push("removed_at = EXCLUDED.removed_at")
-                .build()
-                .execute(&*self.pool)
-                .await?;
-        }
-
-        #[cfg(feature = "standalone")]
-        {
-            for reg in registrations {
-                let query = indoc! {"
-                    INSERT INTO cnight_registrations (
-                        cardano_address,
-                        dust_address,
-                        is_valid,
-                        registered_at,
-                        removed_at
-                    )
-                    VALUES ($1, $2, $3, $4, $5)
-                    ON CONFLICT (cardano_address, dust_address) DO UPDATE SET
-                        is_valid = excluded.is_valid,
-                        removed_at = excluded.removed_at
-                "};
-
-                sqlx::query(query)
-                    .bind(reg.cardano_address.as_ref())
-                    .bind(reg.dust_address.as_ref())
-                    .bind(if reg.is_valid { 1i32 } else { 0i32 }) // SQLite boolean
-                    .bind(reg.registered_at as i64)
-                    .bind(reg.removed_at.map(|t| t as i64))
-                    .execute(&*self.pool)
-                    .await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn get_dust_generation_info_by_owner(
-        &self,
-        owner: DustOwner,
-        mut generation_info_id: u64,
-        batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<DustGenerationInfo, sqlx::Error>> + Send {
-        flatten_chunks(try_stream! {
-            loop {
-                let batch = self.get_dust_generation_info_by_owner(owner, generation_info_id, batch_size).await?;
-                if batch.is_empty() {
-                    break;
-                }
-                generation_info_id = batch.last().unwrap().0 + 1;
-                yield batch.into_iter().map(|(_, info)| info).collect();
-            }
-        })
-    }
-
-    fn get_dust_utxos_by_owner(
-        &self,
-        owner: DustOwner,
-        mut utxo_id: u64,
-        batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<DustUtxo, sqlx::Error>> + Send {
-        flatten_chunks(try_stream! {
-            loop {
-                let batch = self.get_dust_utxos_by_owner(owner, utxo_id, batch_size).await?;
-                if batch.is_empty() {
-                    break;
-                }
-                utxo_id = batch.last().unwrap().0 + 1;
-                yield batch.into_iter().map(|(_, utxo)| utxo).collect();
-            }
-        })
-    }
-
-    fn search_transactions_by_nullifier_prefix(
-        &self,
-        prefix: &str,
-        after_block: Option<u32>,
-        mut transaction_id: u64,
-        batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<(u64, RawTransaction), sqlx::Error>> + Send {
-        let prefix = prefix.to_string();
-
-        flatten_chunks(try_stream! {
-            loop {
-                let batch = self.search_transactions_by_nullifier_prefix(&prefix, after_block, transaction_id, batch_size).await?;
-                if batch.is_empty() {
-                    break;
-                }
-                transaction_id = batch.last().unwrap().0 + 1;
-                yield batch;
-            }
-        })
-    }
-
-    #[trace(properties = { "generation_index": "{generation_index}", "dtime": "{dtime}" })]
-    async fn update_dust_generation_dtime(
-        &self,
-        generation_index: u64,
-        dtime: u64,
-    ) -> Result<(), sqlx::Error> {
-        let query = indoc! {"
-            UPDATE dust_generation_info
-            SET dtime = $1
-            WHERE merkle_index = $2
-        "};
-
-        sqlx::query(query)
-            .bind(dtime as i64)
-            .bind(generation_index as i64)
-            .execute(&*self.pool)
-            .await?;
-
-        Ok(())
-    }
-
-    #[trace(properties = { "transaction_id": "{transaction_id}" })]
-    async fn mark_dust_utxo_spent(
-        &self,
-        commitment: DustCommitment,
-        nullifier: DustNullifier,
-        transaction_id: u64,
-    ) -> Result<(), sqlx::Error> {
-        let query = indoc! {"
-            UPDATE dust_utxos
-            SET
-                nullifier = $1,
-                spent_at_transaction_id = $2
-            WHERE commitment = $3
-            AND spent_at_transaction_id IS NULL
-        "};
-
-        #[cfg(feature = "cloud")]
-        let result = sqlx::query(query)
-            .bind(nullifier)
-            .bind(transaction_id as i64)
-            .bind(commitment)
-            .execute(&*self.pool)
-            .await?;
-
-        #[cfg(feature = "standalone")]
-        let result = sqlx::query(query)
-            .bind(nullifier.as_ref())
-            .bind(transaction_id as i64)
-            .bind(commitment.as_ref())
-            .execute(&*self.pool)
-            .await?;
-
-        if result.rows_affected() == 0 {
-            // Either UTXO doesn't exist or is already spent.
-            return Err(sqlx::Error::RowNotFound);
-        }
-
-        Ok(())
     }
 }
 
@@ -1252,370 +542,259 @@ async fn save_identifiers(
     Ok(())
 }
 
-// Transaction-aware DUST processing functions.
-#[trace]
+#[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
 async fn save_dust_events_tx(
-    events: impl AsRef<[DustEvent]>,
+    dust_events: &[DustEvent],
     transaction_id: u64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
-    let events = events.as_ref();
+    if dust_events.is_empty() {
+        return Ok(());
+    }
+
+    let query = indoc! {"
+        INSERT INTO dust_events (
+            transaction_id,
+            details
+        )
+    "};
+
+    QueryBuilder::new(query)
+        .push_values(dust_events.iter(), |mut q, event| {
+            q.push_bind(transaction_id as i64).push_bind(Json(event));
+        })
+        .build()
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+struct GroupedDustEvents<'a> {
+    initial_utxos: Vec<&'a DustEvent>,
+    spent_night: Option<&'a DustEvent>,
+    spent_dust: Vec<&'a DustEvent>,
+}
+
+fn group_dust_events_by_type(events: &[DustEvent]) -> GroupedDustEvents {
+    let mut initial_utxos = Vec::new();
+    let mut spent_night = None;
+    let mut spent_dust = Vec::new();
+
     for event in events {
-        let event_type = DustEventType::from(&event.event_details);
-
-        let query = indoc! {"
-            INSERT INTO dust_events (
-                transaction_id,
-                transaction_hash,
-                logical_segment,
-                physical_segment,
-                event_type,
-                event_data
-            )
-            VALUES ($1, $2, $3, $4, $5, $6)
-        "};
-
-        #[cfg(feature = "cloud")]
-        {
-            sqlx::query(query)
-                .bind(transaction_id as i64)
-                .bind(event.transaction_hash)
-                .bind(event.logical_segment as i16)
-                .bind(event.physical_segment as i16)
-                .bind(event_type)
-                .bind(Json(&event.event_details))
-                .execute(&mut **tx)
-                .await?;
-        }
-
-        #[cfg(feature = "standalone")]
-        {
-            // SQLite doesn't support custom enum types like PostgreSQL does.
-            // While PostgreSQL can use the DustEventType enum directly (via sqlx::Type),
-            // SQLite requires us to manually convert the enum to a string representation.
-            let event_type = match event_type {
-                DustEventType::DustInitialUtxo => "DustInitialUtxo",
-                DustEventType::DustGenerationDtimeUpdate => "DustGenerationDtimeUpdate",
-                DustEventType::DustSpendProcessed => "DustSpendProcessed",
-            };
-
-            sqlx::query(query)
-                .bind(transaction_id as i64)
-                .bind(event.transaction_hash.as_ref())
-                .bind(event.logical_segment as i32)
-                .bind(event.physical_segment as i32)
-                .bind(event_type)
-                .bind(Json(&event.event_details))
-                .execute(&mut **tx)
-                .await?;
+        match &event.event_details {
+            DustEventDetails::DustInitialUtxo { .. } => initial_utxos.push(event),
+            DustEventDetails::DustGenerationDtimeUpdate { .. } => spent_night = Some(event),
+            DustEventDetails::DustSpendProcessed { .. } => spent_dust.push(event),
         }
     }
 
-    Ok(())
+    GroupedDustEvents {
+        initial_utxos,
+        spent_night,
+        spent_dust,
+    }
 }
 
-#[trace]
+#[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
 async fn process_dust_events_in_transaction(
-    events: impl AsRef<[DustEvent]>,
+    dust_events: &[DustEvent],
     transaction_id: u64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
-    // Group events by type for efficient processing.
-    let (initial_utxos, generation_updates, spend_events) = group_dust_events_by_type(&events);
+    let grouped_events = group_dust_events_by_type(dust_events);
 
-    // Process initial DUST UTXOs.
-    if !initial_utxos.is_empty() {
-        process_initial_utxos_tx(initial_utxos, tx).await?;
+    // Process initial UTXOs
+    if !grouped_events.initial_utxos.is_empty() {
+        process_initial_utxos_tx(&grouped_events.initial_utxos, tx).await?;
     }
 
-    // Process generation time updates.
-    for (generation, generation_index) in generation_updates {
-        update_dust_generation_dtime_tx(generation_index, generation.dtime, tx).await?;
+    // Update generation dtime for spent Night
+    if let Some(spent_event) = grouped_events.spent_night {
+        update_dust_generation_dtime_tx(spent_event, tx).await?;
     }
 
-    // Process DUST spends.
-    for (commitment, nullifier, _v_fee) in spend_events {
-        mark_dust_utxo_spent_tx(commitment, nullifier, transaction_id, tx).await?;
+    // Mark DUST UTXOs as spent
+    for spent_dust in &grouped_events.spent_dust {
+        mark_dust_utxo_spent_tx(spent_dust, transaction_id, tx).await?;
     }
 
     Ok(())
 }
 
-type InitialUtxoEvent<'a> = (&'a QualifiedDustOutput, &'a DustGenerationInfo, u64);
-type GenerationUpdateEvent<'a> = (&'a DustGenerationInfo, u64);
-type SpendEvent = (ByteArray<32>, ByteArray<32>, u128);
-
-fn group_dust_events_by_type<'a>(
-    events: &'a impl AsRef<[DustEvent]>,
-) -> (
-    Vec<InitialUtxoEvent<'a>>,
-    Vec<GenerationUpdateEvent<'a>>,
-    Vec<SpendEvent>,
-) {
-    events.as_ref().iter().fold(
-        (Vec::new(), Vec::new(), Vec::new()),
-        |(mut initial, mut updates, mut spends), event| {
-            match &event.event_details {
+#[cfg_attr(feature = "cloud", trace)]
+async fn process_initial_utxos_tx(
+    initial_utxo_events: &[&DustEvent],
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    for event in initial_utxo_events {
+        if let DustEvent {
+            event_details:
                 DustEventDetails::DustInitialUtxo {
                     output,
                     generation,
                     generation_index,
-                } => {
-                    initial.push((output, generation, *generation_index));
-                }
-                DustEventDetails::DustGenerationDtimeUpdate {
-                    generation,
-                    generation_index,
-                } => {
-                    updates.push((generation, *generation_index));
-                }
-                DustEventDetails::DustSpendProcessed {
-                    commitment,
-                    commitment_index: _,
-                    nullifier,
-                    v_fee,
-                    time: _,
-                    params: _,
-                } => {
-                    spends.push((*commitment, *nullifier, *v_fee));
-                }
-            }
-            (initial, updates, spends)
-        },
-    )
-}
-
-async fn process_initial_utxos_tx(
-    initial_utxos: Vec<InitialUtxoEvent<'_>>,
-    tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    let (generation_infos, dust_utxos) = initial_utxos
-        .into_iter()
-        .map(|(output, generation, generation_index)| {
-            let generation_info = *generation;
-            let dust_utxo = DustUtxo {
-                // TODO: Calculate proper commitment from output fields once ledger API provides it.
-                // For now using owner as placeholder which is incorrect.
-                commitment: ByteArray(output.owner.0),
-                nullifier: None,
-                initial_value: output.initial_value,
-                owner: output.owner,
-                nonce: output.nonce,
-                seq: output.seq,
-                ctime: output.ctime,
-                generation_info_id: Some(generation_index),
-                spent_at_transaction_id: None,
-            };
-            (generation_info, dust_utxo)
-        })
-        .unzip::<_, _, Vec<_>, Vec<_>>();
-
-    // Save generation info first.
-    if !generation_infos.is_empty() {
-        save_dust_generation_info_tx(&generation_infos, tx).await?;
+                },
+            ..
+        } = event
+        {
+            let generation_info_id =
+                save_dust_generation_info_tx(generation, *generation_index, tx).await?;
+            save_dust_utxos_tx(output, generation_info_id, tx).await?;
+        }
     }
-
-    // Then save DUST UTXOs.
-    if !dust_utxos.is_empty() {
-        save_dust_utxos_tx(&dust_utxos, tx).await?;
-    }
-
     Ok(())
 }
 
+#[cfg_attr(feature = "cloud", trace)]
 async fn save_dust_generation_info_tx(
-    generation_info: &[DustGenerationInfo],
+    generation: &indexer_common::domain::dust::DustGenerationInfo,
+    _generation_index: u64,
     tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    #[cfg(feature = "cloud")]
-    {
-        let query = indoc! {"
-            INSERT INTO dust_generation_info (
-                value,
-                owner,
-                nonce,
-                ctime,
-                dtime,
-                merkle_index
-            )
-        "};
-
-        QueryBuilder::new(query)
-            .push_values(generation_info.iter(), |mut q, info| {
-                q.push_bind(U128BeBytes::from(info.value))
-                    .push_bind(info.owner)
-                    .push_bind(info.nonce)
-                    .push_bind(info.ctime as i64)
-                    .push_bind(if info.dtime == 0 {
-                        None
-                    } else {
-                        Some(info.dtime as i64)
-                    })
-                    .push_bind(0i64); // TODO: merkle_index should come from somewhere.
-            })
-            .build()
-            .execute(&mut **tx)
-            .await?;
-    }
+) -> Result<u64, sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO dust_generation_info (
+            value,
+            owner,
+            nonce,
+            ctime,
+            dtime
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+    "};
 
     #[cfg(feature = "standalone")]
-    {
-        let query = indoc! {"
-            INSERT INTO dust_generation_info (
-                value,
-                owner,
-                nonce,
-                ctime,
-                dtime,
-                merkle_index
-            )
-        "};
-
-        QueryBuilder::new(query)
-            .push_values(generation_info.iter(), |mut q, info| {
-                q.push_bind(U128BeBytes::from(info.value))
-                    .push_bind(info.owner.as_ref())
-                    .push_bind(info.nonce.as_ref())
-                    .push_bind(info.ctime as i64)
-                    .push_bind(if info.dtime == 0 {
-                        None
-                    } else {
-                        Some(info.dtime as i64)
-                    })
-                    .push_bind(0i64); // TODO: merkle_index should come from somewhere.
-            })
-            .build()
-            .execute(&mut **tx)
-            .await?;
-    }
-
-    Ok(())
-}
-
-async fn save_dust_utxos_tx(utxos: &[DustUtxo], tx: &mut Tx) -> Result<(), sqlx::Error> {
+    let (owner, nonce) = (generation.owner.as_ref(), generation.nonce.as_ref());
     #[cfg(feature = "cloud")]
-    {
-        let query = indoc! {"
-            INSERT INTO dust_utxos (
-                commitment,
-                nullifier,
-                initial_value,
-                owner,
-                nonce,
-                seq,
-                ctime,
-                generation_info_id,
-                spent_at_transaction_id
-            )
-        "};
+    let (owner, nonce) = (&generation.owner, &generation.nonce);
 
-        QueryBuilder::new(query)
-            .push_values(utxos.iter(), |mut q, utxo| {
-                q.push_bind(utxo.commitment)
-                    .push_bind(utxo.nullifier)
-                    .push_bind(U128BeBytes::from(utxo.initial_value))
-                    .push_bind(utxo.owner)
-                    .push_bind(utxo.nonce)
-                    .push_bind(utxo.seq as i32)
-                    .push_bind(utxo.ctime as i64)
-                    .push_bind(utxo.generation_info_id.map(|id| id as i64))
-                    .push_bind(utxo.spent_at_transaction_id.map(|id| id as i64));
-            })
-            .build()
-            .execute(&mut **tx)
-            .await?;
-    }
+    let (id,) = sqlx::query_as::<_, (i64,)>(query)
+        .bind(U128BeBytes::from(generation.value))
+        .bind(owner)
+        .bind(nonce)
+        .bind(generation.ctime as i64)
+        .bind(generation.dtime as i64)
+        .fetch_one(&mut **tx)
+        .await?;
 
-    #[cfg(feature = "standalone")]
-    {
-        let query = indoc! {"
-            INSERT INTO dust_utxos (
-                commitment,
-                nullifier,
-                initial_value,
-                owner,
-                nonce,
-                seq,
-                ctime,
-                generation_info_id,
-                spent_at_transaction_id
-            )
-        "};
-
-        QueryBuilder::new(query)
-            .push_values(utxos.iter(), |mut q, utxo| {
-                q.push_bind(utxo.commitment.as_ref())
-                    .push_bind(utxo.nullifier.as_ref().map(|n| n.as_ref()))
-                    .push_bind(U128BeBytes::from(utxo.initial_value))
-                    .push_bind(utxo.owner.as_ref())
-                    .push_bind(utxo.nonce.as_ref())
-                    .push_bind(utxo.seq as i32)
-                    .push_bind(utxo.ctime as i64)
-                    .push_bind(utxo.generation_info_id.map(|id| id as i64))
-                    .push_bind(utxo.spent_at_transaction_id.map(|id| id as i64));
-            })
-            .build()
-            .execute(&mut **tx)
-            .await?;
-    }
-
-    Ok(())
+    Ok(id as u64)
 }
 
-async fn update_dust_generation_dtime_tx(
-    generation_index: u64,
-    dtime: u64,
+#[cfg_attr(feature = "cloud", trace)]
+async fn save_dust_utxos_tx(
+    output: &indexer_common::domain::dust::QualifiedDustOutput,
+    generation_info_id: u64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
     let query = indoc! {"
-        UPDATE dust_generation_info
-        SET dtime = $1
-        WHERE merkle_index = $2
+        INSERT INTO dust_utxos (
+            commitment,
+            initial_value,
+            owner,
+            nonce,
+            seq,
+            ctime,
+            generation_info_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
     "};
 
+    // Calculate commitment (in real implementation, this would use proper crypto).
+    let commitment = output.nonce; // Placeholder - should be properly calculated.
+
+    #[cfg(feature = "standalone")]
+    let (commitment, owner, nonce) = (
+        commitment.as_ref(),
+        output.owner.as_ref(),
+        output.nonce.as_ref(),
+    );
+    #[cfg(feature = "cloud")]
+    let (commitment, owner, nonce) = (&commitment, &output.owner, &output.nonce);
+
     sqlx::query(query)
-        .bind(dtime as i64)
-        .bind(generation_index as i64)
+        .bind(commitment)
+        .bind(U128BeBytes::from(output.initial_value))
+        .bind(owner)
+        .bind(nonce)
+        .bind(output.seq as i64)
+        .bind(output.ctime as i64)
+        .bind(generation_info_id as i64)
         .execute(&mut **tx)
         .await?;
 
     Ok(())
 }
 
+#[cfg_attr(feature = "cloud", trace)]
+async fn update_dust_generation_dtime_tx(
+    spent_night_event: &DustEvent,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    if let DustEvent {
+        event_details:
+            DustEventDetails::DustGenerationDtimeUpdate {
+                generation,
+                generation_index,
+            },
+        ..
+    } = spent_night_event
+    {
+        let query = indoc! {"
+            UPDATE dust_generation_info
+            SET dtime = $1
+            WHERE id = $2
+        "};
+
+        sqlx::query(query)
+            .bind(generation.dtime as i64)
+            .bind(*generation_index as i64)
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    Ok(())
+}
+
+#[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
 async fn mark_dust_utxo_spent_tx(
-    commitment: DustCommitment,
-    nullifier: DustNullifier,
+    spent_dust_event: &DustEvent,
     transaction_id: u64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
-    let query = indoc! {"
-        UPDATE dust_utxos
-        SET 
-            nullifier = $1,
-            spent_at_transaction_id = $2
-        WHERE commitment = $3
-        AND spent_at_transaction_id IS NULL
-    "};
+    if let DustEvent {
+        event_details:
+            DustEventDetails::DustSpendProcessed {
+                commitment,
+                commitment_index: _,
+                nullifier,
+                v_fee: _,
+                time: _,
+                params: _,
+            },
+        ..
+    } = spent_dust_event
+    {
+        // Find the unspent UTXO with the matching commitment and mark it as spent.
+        let query = indoc! {"
+            UPDATE dust_utxos
+            SET nullifier = $1,
+                spent_at_transaction_id = $2
+            WHERE nullifier IS NULL
+            AND commitment = $3
+        "};
 
-    #[cfg(feature = "cloud")]
-    let result = sqlx::query(query)
-        .bind(nullifier)
-        .bind(transaction_id as i64)
-        .bind(commitment)
-        .execute(&mut **tx)
-        .await?;
+        #[cfg(feature = "standalone")]
+        let (nullifier, commitment) = (nullifier.as_ref(), commitment.as_ref());
+        #[cfg(feature = "cloud")]
+        let (nullifier, commitment) = (nullifier, commitment);
 
-    #[cfg(feature = "standalone")]
-    let result = sqlx::query(query)
-        .bind(nullifier.as_ref())
-        .bind(transaction_id as i64)
-        .bind(commitment.as_ref())
-        .execute(&mut **tx)
-        .await?;
-
-    if result.rows_affected() == 0 {
-        // Either UTXO doesn't exist or is already spent.
-        return Err(sqlx::Error::RowNotFound);
+        sqlx::query(query)
+            .bind(nullifier)
+            .bind(transaction_id as i64)
+            .bind(commitment)
+            .execute(&mut **tx)
+            .await?;
     }
 
     Ok(())
