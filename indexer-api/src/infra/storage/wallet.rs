@@ -12,7 +12,6 @@
 // limitations under the License.
 
 use crate::{domain::storage::wallet::WalletStorage, infra::storage::Storage};
-#[cfg(feature = "cloud")]
 use fastrace::trace;
 use futures::TryFutureExt;
 use indexer_common::domain::{SessionId, ViewingKey};
@@ -20,7 +19,7 @@ use indoc::indoc;
 use sqlx::types::{Uuid, time::OffsetDateTime};
 
 impl WalletStorage for Storage {
-    #[cfg_attr(feature = "cloud", trace)]
+    #[trace]
     async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<(), sqlx::Error> {
         let id = Uuid::now_v7();
         let session_id = viewing_key.to_session_id();
@@ -54,7 +53,7 @@ impl WalletStorage for Storage {
         Ok(())
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "session_id": "{session_id}" }))]
+    #[trace(properties = { "session_id": "{session_id}" })]
     async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
         let query = indoc! {"
             UPDATE wallets
@@ -73,7 +72,7 @@ impl WalletStorage for Storage {
         Ok(())
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "session_id": "{session_id}" }))]
+    #[trace(properties = { "session_id": "{session_id}" })]
     async fn set_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
         let query = indoc! {"
             UPDATE wallets
