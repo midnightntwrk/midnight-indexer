@@ -549,9 +549,12 @@ async fn process_dust_events(
     for dust_event in dust_events {
         match dust_event.event_details {
             DustEventDetails::DustInitialUtxo {
-                output, generation, ..
+                output,
+                generation,
+                generation_index,
             } => {
-                let generation_info_id = save_dust_generation_info(generation, tx).await?;
+                let generation_info_id =
+                    save_dust_generation_info(generation, generation_index, tx).await?;
                 save_dust_utxos(output, generation_info_id, tx).await?;
             }
 
@@ -608,6 +611,7 @@ async fn save_dust_events(
 #[trace]
 async fn save_dust_generation_info(
     generation: indexer_common::domain::dust::DustGenerationInfo,
+    generation_index: u64,
     tx: &mut Tx,
 ) -> Result<u64, sqlx::Error> {
     let query = indoc! {"
@@ -616,9 +620,10 @@ async fn save_dust_generation_info(
             owner,
             nonce,
             ctime,
-            dtime
+            dtime,
+            merkle_index
         )
-        VALUES ($1, $2, $3, $4, $5)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
     "};
 
@@ -628,6 +633,7 @@ async fn save_dust_generation_info(
         .bind(generation.nonce.as_ref())
         .bind(generation.ctime as i64)
         .bind(generation.dtime as i64)
+        .bind(generation_index as i64)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -697,18 +703,18 @@ async fn mark_dust_utxo_spent(
 #[trace]
 async fn update_dust_generation_dtime(
     dtime: u64,
-    index: u64,
+    merkle_index: u64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
     let query = indoc! {"
             UPDATE dust_generation_info
             SET dtime = $1
-            WHERE id = $2
+            WHERE merkle_index = $2
         "};
 
     sqlx::query(query)
         .bind(dtime as i64)
-        .bind(index as i64)
+        .bind(merkle_index as i64)
         .execute(&mut **tx)
         .await?;
 
