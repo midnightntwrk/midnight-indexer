@@ -131,10 +131,8 @@ jobs:
 
       - name: Validate Docker Compose syntax
         run: |
-          echo "Validating Docker Compose syntax for cloud profile..."
-          docker compose config --profile cloud --quiet
-          echo "Validating Docker Compose syntax for standalone profile..."
-          docker compose config --profile standalone --quiet
+          echo "Validating Docker Compose syntax for ${{ matrix.profile }} profile..."
+          docker compose --profile ${{ matrix.profile }} config --quiet
           echo "Docker Compose syntax validation completed successfully"
 
       - name: Store indexer version
