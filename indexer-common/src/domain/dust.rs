@@ -31,7 +31,7 @@ pub enum DustEventDetails {
         /// Qualified DUST output.
         output: QualifiedDustOutput,
         /// Generation information.
-        generation: DustGenerationInfo,
+        generation_info: DustGenerationInfo,
         /// Merkle tree index for generation.
         generation_index: u64,
     },
@@ -39,7 +39,7 @@ pub enum DustEventDetails {
     /// DUST generation time update (when backing Night is spent).
     DustGenerationDtimeUpdate {
         /// Updated generation information.
-        generation: DustGenerationInfo,
+        generation_info: DustGenerationInfo,
         /// Merkle tree index for generation.
         generation_index: u64,
     },
