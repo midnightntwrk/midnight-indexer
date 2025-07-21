@@ -624,39 +624,34 @@ mod tests {
     async fn test_finalized_blocks_0_13() -> Result<(), BoxError> {
         test_finalized_blocks(
             PROTOCOL_VERSION_000_013_000,
-            Some("alpha.3"),
-            "0ac58cba8956851701915291080437a42993e094e0a2792f64c28ebcf977dc7c",
-            8,
-            "9c5e8f3c01f6691ce4682442fdbd752f40975f165465f631d56d72741da283f8",
-            28,
+            "0.13.2-rc.1",
+            "3e8e195cd77c011f1dc8ff7d62dd6befb5408c6eb73e0779fa63424b3941a2f9",
+            7,
+            "e9eaa0b9806d24456b2119e6fdec0132eacfc7326465da93ba86e94fa893c309",
+            26,
         )
         .await
     }
 
     async fn test_finalized_blocks(
         genesis_protocol_version: ProtocolVersion,
-        suffix: Option<&'static str>,
+        node_version: &'static str,
         before_first_tx_block_hash: &'static str,
         before_first_tx_height: u32,
         first_tx_hash: &'static str,
         last_tx_height: u32,
     ) -> Result<(), BoxError> {
-        let mut node_version = genesis_protocol_version.to_string();
-        if let Some(suffix) = suffix {
-            node_version = format!("{node_version}-{suffix}");
-        }
-
         let node_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../.node")
-            .join(&node_version)
+            .join(node_version)
             .canonicalize()?;
         let tmp_dir = tempfile::tempdir()?;
         copy(node_dir, &tmp_dir, &CopyOptions::default())?;
 
-        let host_path = tmp_dir.path().join(&node_version).display().to_string();
+        let host_path = tmp_dir.path().join(node_version).display().to_string();
         let node_container = GenericImage::new(
             "ghcr.io/midnight-ntwrk/midnight-node".to_string(),
-            node_version,
+            node_version.to_string(),
         )
         .with_wait_for(WaitFor::message_on_stderr("9944"))
         .with_mount(Mount::bind_mount(host_path, "/node"))

@@ -16,7 +16,6 @@ use crate::{
     infra::storage::Storage,
 };
 use async_stream::try_stream;
-#[cfg(feature = "cloud")]
 use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::{
@@ -27,7 +26,7 @@ use indoc::indoc;
 use std::num::NonZeroU32;
 
 impl ContractActionStorage for Storage {
-    #[cfg_attr(feature = "cloud", trace(properties = { "address": "{address}" }))]
+    #[trace(properties = { "address": "{address}" })]
     async fn get_contract_deploy_by_address(
         &self,
         address: &RawContractAddress,
@@ -59,7 +58,7 @@ impl ContractActionStorage for Storage {
         Ok(action)
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "address": "{address}" }))]
+    #[trace(properties = { "address": "{address}" })]
     async fn get_latest_contract_action_by_address(
         &self,
         address: &RawContractAddress,
@@ -84,7 +83,7 @@ impl ContractActionStorage for Storage {
             .await
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "address": "{address}", "hash": "{hash}" }))]
+    #[trace(properties = { "address": "{address}", "hash": "{hash}" })]
     async fn get_contract_action_by_address_and_block_hash(
         &self,
         address: &RawContractAddress,
@@ -116,10 +115,7 @@ impl ContractActionStorage for Storage {
             .await
     }
 
-    #[cfg_attr(
-        feature = "cloud",
-        trace(properties = { "address": "{address}", "block_height": "{block_height}" })
-    )]
+    #[trace(properties = { "address": "{address}", "block_height": "{block_height}" })]
     async fn get_contract_action_by_address_and_block_height(
         &self,
         address: &RawContractAddress,
@@ -149,7 +145,7 @@ impl ContractActionStorage for Storage {
             .await
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "address": "{address}", "hash": "{hash}" }))]
+    #[trace(properties = { "address": "{address}", "hash": "{hash}" })]
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
         address: &RawContractAddress,
@@ -185,10 +181,7 @@ impl ContractActionStorage for Storage {
             .await
     }
 
-    #[cfg_attr(
-        feature = "cloud",
-        trace(properties = { "address": "{address}", "identifier": "{identifier}" })
-    )]
+    #[trace(properties = { "address": "{address}", "identifier": "{identifier}" })]
     async fn get_contract_action_by_address_and_transaction_identifier(
         &self,
         address: &RawContractAddress,
@@ -236,7 +229,7 @@ impl ContractActionStorage for Storage {
             .await
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "id": "{id}" }))]
+    #[trace(properties = { "id": "{id}" })]
     async fn get_contract_actions_by_transaction_id(
         &self,
         id: u64,
@@ -260,10 +253,6 @@ impl ContractActionStorage for Storage {
             .await
     }
 
-    #[cfg_attr(
-        feature = "cloud",
-        trace(properties = { "address": "{address}", "contract_action_id": "{contract_action_id}" })
-    )]
     fn get_contract_actions_by_address(
         &self,
         address: &RawContractAddress,
@@ -272,30 +261,8 @@ impl ContractActionStorage for Storage {
     ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send {
         let chunks = try_stream! {
             loop {
-                let query = indoc! {"
-                    SELECT
-                        contract_actions.id,
-                        address,
-                        state,
-                        attributes,
-                        zswap_state,
-                        transaction_id
-                    FROM contract_actions
-                    INNER JOIN transactions ON transactions.id = transaction_id
-                    INNER JOIN blocks ON blocks.id = transactions.block_id
-                    WHERE address = $1
-                    AND contract_actions.id >= $2
-                    ORDER BY contract_actions.id
-                    LIMIT $3
-                "};
-
-                let actions = sqlx::query_as(query)
-                    .bind(address)
-                    .bind(contract_action_id as i64)
-                    .bind(batch_size.get() as i64)
-                    .fetch(&*self.pool)
-                    .map_ok(ContractAction::from)
-                    .try_collect::<Vec<_>>()
+                let actions = self
+                    .get_contract_actions_by_address(address, contract_action_id, batch_size)
                     .await?;
 
                 match actions.last() {
@@ -310,10 +277,7 @@ impl ContractActionStorage for Storage {
         flatten_chunks(chunks)
     }
 
-    #[cfg_attr(
-        feature = "cloud",
-        trace(properties = { "contract_action_id": "{contract_action_id}" })
-    )]
+    #[trace(properties = { "contract_action_id": "{contract_action_id}" })]
     async fn get_unshielded_balances_by_action_id(
         &self,
         contract_action_id: u64,
@@ -330,10 +294,7 @@ impl ContractActionStorage for Storage {
             .await
     }
 
-    #[cfg_attr(
-        feature = "cloud",
-        trace(properties = { "block_height": "{block_height}" })
-    )]
+    #[trace(properties = { "block_height": "{block_height}" })]
     async fn get_contract_action_id_by_block_height(
         &self,
         block_height: u32,
@@ -354,5 +315,45 @@ impl ContractActionStorage for Storage {
             .await?;
 
         Ok(id.map(|(id,)| id as u64))
+    }
+}
+
+impl Storage {
+    #[trace(properties = {
+        "address": "{address}",
+        "contract_action_id": "{contract_action_id}",
+        "batch_size": "{batch_size}"
+    })]
+    async fn get_contract_actions_by_address(
+        &self,
+        address: &RawContractAddress,
+        contract_action_id: u64,
+        batch_size: NonZeroU32,
+    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT
+                contract_actions.id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
+            FROM contract_actions
+            INNER JOIN transactions ON transactions.id = transaction_id
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE address = $1
+            AND contract_actions.id >= $2
+            ORDER BY contract_actions.id
+            LIMIT $3
+        "};
+
+        sqlx::query_as(query)
+            .bind(address)
+            .bind(contract_action_id as i64)
+            .bind(batch_size.get() as i64)
+            .fetch(&*self.pool)
+            .map_ok(ContractAction::from)
+            .try_collect::<Vec<_>>()
+            .await
     }
 }

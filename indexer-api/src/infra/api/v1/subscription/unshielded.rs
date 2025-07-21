@@ -16,6 +16,7 @@ use crate::{
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
         v1::{
+            subscription::get_next_transaction,
             transaction::Transaction,
             unshielded::{UnshieldedAddress, UnshieldedUtxo},
         },
@@ -90,7 +91,6 @@ where
 {
     /// Subscribe unshielded transaction events for the given address and the given transaction ID
     /// or zero if omitted.
-    #[trace(properties = { "address": "{address:?}", "transaction_id": "{transaction_id:?}" })]
     async fn unshielded_transactions<'a>(
         &self,
         cx: &'a Context<'a>,
@@ -125,7 +125,6 @@ where
     }
 }
 
-#[trace(properties = { "address": "{address:?}", "transaction_id": "{transaction_id}" })]
 fn make_unshielded_transactions<'a, S, B>(
     cx: &'a Context<'a>,
     address: RawUnshieldedAddress,
@@ -150,10 +149,8 @@ where
 
         let transactions =
             storage.get_transactions_involving_unshielded(address, transaction_id, BATCH_SIZE);
-
         let mut transactions = pin!(transactions);
-        while let Some(transaction) = transactions
-            .try_next()
+        while let Some(transaction) = get_next_transaction(&mut transactions)
             .await
             .map_err_into_server_error(|| format!("get next transaction for address {address}"))?
         {
@@ -181,11 +178,9 @@ where
         {
             let transactions =
                 storage.get_transactions_involving_unshielded(address, transaction_id, BATCH_SIZE);
-
             let mut transactions = pin!(transactions);
             while let Some(transaction) =
-                transactions
-                    .try_next()
+                get_next_transaction(&mut transactions)
                     .await
                     .map_err_into_server_error(|| {
                         format!("get next transaction for address {address}")
@@ -210,6 +205,7 @@ where
     }
 }
 
+#[trace(properties = { "transaction_id": "{transaction_id}", "address": "{address:?}" })]
 async fn make_unshielded_transaction<S>(
     transaction_id: &mut u64,
     storage: &S,

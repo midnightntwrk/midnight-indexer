@@ -53,7 +53,7 @@ impl Storage {
 }
 
 impl domain::storage::Storage for Storage {
-    #[cfg_attr(feature = "cloud", trace)]
+    #[trace]
     async fn get_highest_block_info(&self) -> Result<Option<BlockInfo>, sqlx::Error> {
         let query = indoc! {"
             SELECT hash, height
@@ -77,7 +77,7 @@ impl domain::storage::Storage for Storage {
             .transpose()
     }
 
-    #[cfg_attr(feature = "cloud", trace)]
+    #[trace]
     async fn get_transaction_count(&self) -> Result<u64, sqlx::Error> {
         let query = indoc! {"
             SELECT count(*) 
@@ -91,7 +91,7 @@ impl domain::storage::Storage for Storage {
         Ok(count as u64)
     }
 
-    #[cfg_attr(feature = "cloud", trace)]
+    #[trace]
     async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error> {
         let query = indoc! {"
             SELECT count(*) 
@@ -115,7 +115,7 @@ impl domain::storage::Storage for Storage {
         Ok((deploy_count as u64, call_count as u64, update_count as u64))
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "block_height": "{block_height}" }))]
+    #[trace(properties = { "block_height": "{block_height}" })]
     async fn get_block_transactions(
         &self,
         block_height: u32,
@@ -159,7 +159,7 @@ impl domain::storage::Storage for Storage {
         })
     }
 
-    #[cfg_attr(feature = "cloud", trace)]
+    #[trace]
     async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         let (max_transaction_id, transaction_ids) = save_block(block, &mut tx).await?;
@@ -174,7 +174,7 @@ impl domain::storage::Storage for Storage {
     }
 }
 
-#[cfg_attr(feature = "cloud", trace)]
+#[trace]
 async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
     let query = indoc! {"
         INSERT INTO blocks (
@@ -218,7 +218,7 @@ async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>
     save_transactions(&block.transactions, block_id, tx).await
 }
 
-#[cfg_attr(feature = "cloud", trace(properties = { "block_id": "{block_id}" }))]
+#[trace(properties = { "block_id": "{block_id}" })]
 async fn save_transactions(
     transactions: &[Transaction],
     block_id: i64,
@@ -340,7 +340,7 @@ async fn save_transactions(
     Ok((max_id, transaction_ids))
 }
 
-#[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_unshielded_utxos(
     utxos: &[UnshieldedUtxo],
     transaction_id: i64,
@@ -433,7 +433,7 @@ async fn save_unshielded_utxos(
     Ok(())
 }
 
-#[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_contract_actions(
     contract_actions: &[ContractAction],
     transaction_id: i64,
@@ -474,7 +474,7 @@ async fn save_contract_actions(
     Ok(contract_action_ids)
 }
 
-#[cfg_attr(feature = "cloud", trace)]
+#[trace]
 async fn save_contract_balances(
     balances: Vec<(i64, ContractBalance)>,
     tx: &mut Tx,
@@ -508,7 +508,6 @@ async fn save_contract_balances(
 }
 
 #[cfg(feature = "standalone")]
-#[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_identifiers(
     identifiers: &[indexer_common::domain::RawTransactionIdentifier],
     transaction_id: i64,
