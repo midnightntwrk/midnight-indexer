@@ -382,18 +382,14 @@ async fn save_unshielded_utxos(
                 output_index,
             } = utxo;
 
-            #[cfg(feature = "standalone")]
-            let (owner, token_type, intent_hash) =
-                { (owner.as_ref(), token_type.as_ref(), intent_hash.as_ref()) };
-
             sqlx::query(query)
                 .bind(transaction_id)
                 .bind(transaction_id)
-                .bind(owner)
-                .bind(token_type)
+                .bind(owner.as_ref())
+                .bind(token_type.as_ref())
                 .bind(U128BeBytes::from(value))
                 .bind(output_index as i32)
-                .bind(intent_hash)
+                .bind(intent_hash.as_ref())
                 .execute(&mut **tx)
                 .await?;
         }
@@ -419,16 +415,12 @@ async fn save_unshielded_utxos(
                     output_index,
                 } = utxo;
 
-                #[cfg(feature = "standalone")]
-                let (owner, token_type, intent_hash) =
-                    { (owner.as_ref(), token_type.as_ref(), intent_hash.as_ref()) };
-
                 q.push_bind(transaction_id)
-                    .push_bind(owner)
-                    .push_bind(token_type)
+                    .push_bind(owner.as_ref())
+                    .push_bind(token_type.as_ref())
                     .push_bind(U128BeBytes::from(*value))
                     .push_bind(*output_index as i32)
-                    .push_bind(intent_hash);
+                    .push_bind(intent_hash.as_ref());
             })
             .build()
             .execute(&mut **tx)
@@ -497,11 +489,8 @@ async fn save_contract_balances(
             .push_values(balances.iter(), |mut q, (action_id, balance)| {
                 let ContractBalance { token_type, amount } = balance;
 
-                #[cfg(feature = "standalone")]
-                let token_type = token_type.as_ref();
-
                 q.push_bind(*action_id)
-                    .push_bind(token_type)
+                    .push_bind(token_type.as_ref())
                     .push_bind(U128BeBytes::from(*amount));
             })
             .build()
@@ -538,30 +527,30 @@ async fn save_identifiers(
     Ok(())
 }
 
-#[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn process_dust_events(
     dust_events: &[DustEvent],
     transaction_id: i64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
-    let mut generation_dtime = None;
+    let mut generation_dtime_and_index = None;
 
     for dust_event in dust_events {
         match dust_event.event_details {
             DustEventDetails::DustInitialUtxo {
                 output,
-                generation,
+                generation_info,
                 generation_index,
             } => {
                 let generation_info_id =
-                    save_dust_generation_info(generation, generation_index, tx).await?;
+                    save_dust_generation_info(generation_info, generation_index, tx).await?;
                 save_dust_utxos(output, generation_info_id, tx).await?;
             }
 
             DustEventDetails::DustGenerationDtimeUpdate {
-                generation,
+                generation_info,
                 generation_index,
-            } => generation_dtime = Some((generation.dtime, generation_index)),
+            } => generation_dtime_and_index = Some((generation_info.dtime, generation_index)),
 
             DustEventDetails::DustSpendProcessed {
                 commitment,
@@ -573,14 +562,14 @@ async fn process_dust_events(
         }
     }
 
-    if let Some((dtime, index)) = generation_dtime {
+    if let Some((dtime, index)) = generation_dtime_and_index {
         update_dust_generation_dtime(dtime, index, tx).await?;
     }
 
     Ok(())
 }
 
-#[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_dust_events(
     dust_events: &[DustEvent],
     transaction_id: i64,
@@ -610,8 +599,8 @@ async fn save_dust_events(
 
 #[trace]
 async fn save_dust_generation_info(
-    generation: indexer_common::domain::dust::DustGenerationInfo,
-    generation_index: u64,
+    info: indexer_common::domain::dust::DustGenerationInfo,
+    index: u64,
     tx: &mut Tx,
 ) -> Result<u64, sqlx::Error> {
     let query = indoc! {"
@@ -621,19 +610,19 @@ async fn save_dust_generation_info(
             nonce,
             ctime,
             dtime,
-            merkle_index
+            index
         )
         VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
     "};
 
     let (id,) = sqlx::query_as::<_, (i64,)>(query)
-        .bind(U128BeBytes::from(generation.value))
-        .bind(generation.owner.as_ref())
-        .bind(generation.nonce.as_ref())
-        .bind(generation.ctime as i64)
-        .bind(generation.dtime as i64)
-        .bind(generation_index as i64)
+        .bind(U128BeBytes::from(info.value))
+        .bind(info.owner.as_ref())
+        .bind(info.nonce.as_ref())
+        .bind(info.ctime as i64)
+        .bind(info.dtime as i64)
+        .bind(index as i64)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -703,18 +692,18 @@ async fn mark_dust_utxo_spent(
 #[trace]
 async fn update_dust_generation_dtime(
     dtime: u64,
-    merkle_index: u64,
+    index: u64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
     let query = indoc! {"
             UPDATE dust_generation_info
             SET dtime = $1
-            WHERE merkle_index = $2
+            WHERE index = $2
         "};
 
     sqlx::query(query)
         .bind(dtime as i64)
-        .bind(merkle_index as i64)
+        .bind(index as i64)
         .execute(&mut **tx)
         .await?;
 
