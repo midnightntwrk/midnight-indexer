@@ -20,6 +20,7 @@ use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
         BlockHash, ByteArray, ByteVec, ContractActionVariant, ContractBalance, UnshieldedUtxo,
+        dust::{DustEvent, DustEventDetails},
     },
     infra::sqlx::U128BeBytes,
 };
@@ -56,7 +57,7 @@ impl Storage {
 }
 
 impl domain::storage::Storage for Storage {
-    #[cfg_attr(feature = "cloud", trace)]
+    #[trace]
     async fn get_highest_block_info(&self) -> Result<Option<BlockInfo>, sqlx::Error> {
         let query = indoc! {"
             SELECT hash, height
@@ -80,7 +81,7 @@ impl domain::storage::Storage for Storage {
             .transpose()
     }
 
-    #[cfg_attr(feature = "cloud", trace)]
+    #[trace]
     async fn get_transaction_count(&self) -> Result<u64, sqlx::Error> {
         let query = indoc! {"
             SELECT count(*) 
@@ -94,7 +95,7 @@ impl domain::storage::Storage for Storage {
         Ok(count as u64)
     }
 
-    #[cfg_attr(feature = "cloud", trace)]
+    #[trace]
     async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error> {
         let query = indoc! {"
             SELECT count(*) 
@@ -118,7 +119,7 @@ impl domain::storage::Storage for Storage {
         Ok((deploy_count as u64, call_count as u64, update_count as u64))
     }
 
-    #[cfg_attr(feature = "cloud", trace(properties = { "block_height": "{block_height}" }))]
+    #[trace(properties = { "block_height": "{block_height}" })]
     async fn get_block_transactions(
         &self,
         block_height: u32,
@@ -162,7 +163,7 @@ impl domain::storage::Storage for Storage {
         })
     }
 
-    #[cfg_attr(feature = "cloud", trace)]
+    #[trace]
     async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         let (max_transaction_id, transaction_ids) = save_block(block, &mut tx).await?;
@@ -177,7 +178,7 @@ impl domain::storage::Storage for Storage {
     }
 }
 
-#[cfg_attr(feature = "cloud", trace)]
+#[trace]
 async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
     let query = indoc! {"
         INSERT INTO blocks (
@@ -221,7 +222,7 @@ async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>
     save_transactions(&block.transactions, block_id, tx).await
 }
 
-#[cfg_attr(feature = "cloud", trace(properties = { "block_id": "{block_id}" }))]
+#[trace(properties = { "block_id": "{block_id}" })]
 async fn save_transactions(
     transactions: &[Transaction],
     block_id: i64,
@@ -338,19 +339,16 @@ async fn save_transactions(
         )
         .await?;
 
-        // Process DUST events within the same transaction.
-        if !transaction.dust_events.is_empty() {
-            process_dust_events_in_transaction(&transaction.dust_events, transaction_id as u64, tx)
-                .await?;
-            save_dust_events_tx(&transaction.dust_events, transaction_id as u64, tx).await?;
-        }
+        process_dust_events(&transaction.dust_events, transaction_id, tx).await?;
+
+        save_dust_events(&transaction.dust_events, transaction_id, tx).await?;
     }
 
     let max_id = transaction_ids.last().map(|&n| n as u64);
     Ok((max_id, transaction_ids))
 }
 
-#[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_unshielded_utxos(
     utxos: &[UnshieldedUtxo],
     transaction_id: i64,
@@ -387,18 +385,14 @@ async fn save_unshielded_utxos(
                 output_index,
             } = utxo;
 
-            #[cfg(feature = "standalone")]
-            let (owner, token_type, intent_hash) =
-                { (owner.as_ref(), token_type.as_ref(), intent_hash.as_ref()) };
-
             sqlx::query(query)
                 .bind(transaction_id)
                 .bind(transaction_id)
-                .bind(owner)
-                .bind(token_type)
+                .bind(owner.as_ref())
+                .bind(token_type.as_ref())
                 .bind(U128BeBytes::from(value))
                 .bind(output_index as i32)
-                .bind(intent_hash)
+                .bind(intent_hash.as_ref())
                 .execute(&mut **tx)
                 .await?;
         }
@@ -424,16 +418,12 @@ async fn save_unshielded_utxos(
                     output_index,
                 } = utxo;
 
-                #[cfg(feature = "standalone")]
-                let (owner, token_type, intent_hash) =
-                    { (owner.as_ref(), token_type.as_ref(), intent_hash.as_ref()) };
-
                 q.push_bind(transaction_id)
-                    .push_bind(owner)
-                    .push_bind(token_type)
+                    .push_bind(owner.as_ref())
+                    .push_bind(token_type.as_ref())
                     .push_bind(U128BeBytes::from(*value))
                     .push_bind(*output_index as i32)
-                    .push_bind(intent_hash);
+                    .push_bind(intent_hash.as_ref());
             })
             .build()
             .execute(&mut **tx)
@@ -443,7 +433,7 @@ async fn save_unshielded_utxos(
     Ok(())
 }
 
-#[cfg_attr(feature = "cloud", trace(properties = { "transaction_id": "{transaction_id}" }))]
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_contract_actions(
     contract_actions: &[ContractAction],
     transaction_id: i64,
@@ -484,7 +474,7 @@ async fn save_contract_actions(
     Ok(contract_action_ids)
 }
 
-#[cfg_attr(feature = "cloud", trace)]
+#[trace]
 async fn save_contract_balances(
     balances: Vec<(i64, ContractBalance)>,
     tx: &mut Tx,
@@ -502,11 +492,8 @@ async fn save_contract_balances(
             .push_values(balances.iter(), |mut q, (action_id, balance)| {
                 let ContractBalance { token_type, amount } = balance;
 
-                #[cfg(feature = "standalone")]
-                let token_type = token_type.as_ref();
-
                 q.push_bind(*action_id)
-                    .push_bind(token_type)
+                    .push_bind(token_type.as_ref())
                     .push_bind(U128BeBytes::from(*amount));
             })
             .build()
@@ -518,7 +505,6 @@ async fn save_contract_balances(
 }
 
 #[cfg(feature = "standalone")]
-#[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_identifiers(
     identifiers: &[indexer_common::domain::RawTransactionIdentifier],
     transaction_id: i64,
@@ -540,6 +526,189 @@ async fn save_identifiers(
             .execute(&mut **tx)
             .await?;
     }
+
+    Ok(())
+}
+
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn process_dust_events(
+    dust_events: &[DustEvent],
+    transaction_id: i64,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    let mut generation_dtime_and_index = None;
+
+    for dust_event in dust_events {
+        match dust_event.event_details {
+            DustEventDetails::DustInitialUtxo {
+                output,
+                generation_info,
+                generation_index,
+            } => {
+                let generation_info_id =
+                    save_dust_generation_info(generation_info, generation_index, tx).await?;
+                save_dust_utxos(output, generation_info_id, tx).await?;
+            }
+
+            DustEventDetails::DustGenerationDtimeUpdate {
+                generation_info,
+                generation_index,
+            } => generation_dtime_and_index = Some((generation_info.dtime, generation_index)),
+
+            DustEventDetails::DustSpendProcessed {
+                commitment,
+                nullifier,
+                ..
+            } => {
+                mark_dust_utxo_spent(commitment, nullifier, transaction_id, tx).await?;
+            }
+        }
+    }
+
+    if let Some((dtime, index)) = generation_dtime_and_index {
+        update_dust_generation_dtime(dtime, index, tx).await?;
+    }
+
+    Ok(())
+}
+
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn save_dust_events(
+    dust_events: &[DustEvent],
+    transaction_id: i64,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    if dust_events.is_empty() {
+        return Ok(());
+    }
+
+    let query = indoc! {"
+        INSERT INTO dust_events (
+            transaction_id,
+            details
+        )
+    "};
+
+    QueryBuilder::new(query)
+        .push_values(dust_events.iter(), |mut q, event| {
+            q.push_bind(transaction_id).push_bind(Json(event));
+        })
+        .build()
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace]
+async fn save_dust_generation_info(
+    info: indexer_common::domain::dust::DustGenerationInfo,
+    index: u64,
+    tx: &mut Tx,
+) -> Result<u64, sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO dust_generation_info (
+            value,
+            owner,
+            nonce,
+            ctime,
+            dtime,
+            index
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id
+    "};
+
+    let (id,) = sqlx::query_as::<_, (i64,)>(query)
+        .bind(U128BeBytes::from(info.value))
+        .bind(info.owner.as_ref())
+        .bind(info.nonce.as_ref())
+        .bind(info.ctime as i64)
+        .bind(info.dtime as i64)
+        .bind(index as i64)
+        .fetch_one(&mut **tx)
+        .await?;
+
+    Ok(id as u64)
+}
+
+#[trace]
+async fn save_dust_utxos(
+    output: indexer_common::domain::dust::QualifiedDustOutput,
+    generation_info_id: u64,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO dust_utxos (
+            commitment,
+            initial_value,
+            owner,
+            nonce,
+            seq,
+            ctime,
+            generation_info_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+    "};
+
+    // Calculate commitment (in real implementation, this would use proper crypto).
+    let commitment = output.nonce; // Placeholder - should be properly calculated.
+
+    sqlx::query(query)
+        .bind(commitment.as_ref())
+        .bind(U128BeBytes::from(output.initial_value))
+        .bind(output.owner.as_ref())
+        .bind(output.nonce.as_ref())
+        .bind(output.seq as i64)
+        .bind(output.ctime as i64)
+        .bind(generation_info_id as i64)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn mark_dust_utxo_spent(
+    commitment: ByteArray<32>,
+    nullifier: ByteArray<32>,
+    transaction_id: i64,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+                UPDATE dust_utxos
+                SET nullifier = $1, spent_at_transaction_id = $2
+                WHERE nullifier IS NULL
+                AND commitment = $3
+            "};
+
+    sqlx::query(query)
+        .bind(nullifier.as_ref())
+        .bind(transaction_id)
+        .bind(commitment.as_ref())
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace]
+async fn update_dust_generation_dtime(
+    dtime: u64,
+    index: u64,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+            UPDATE dust_generation_info
+            SET dtime = $1
+            WHERE index = $2
+        "};
+
+    sqlx::query(query)
+        .bind(dtime as i64)
+        .bind(index as i64)
+        .execute(&mut **tx)
+        .await?;
 
     Ok(())
 }

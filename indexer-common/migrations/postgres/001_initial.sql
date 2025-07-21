@@ -124,7 +124,7 @@ CREATE TABLE dust_generation_info (
     owner BYTEA NOT NULL,
     nonce BYTEA NOT NULL,
     ctime BIGINT NOT NULL,
-    merkle_index BIGINT NOT NULL,
+    index BIGINT NOT NULL,
     dtime BIGINT
 );
 

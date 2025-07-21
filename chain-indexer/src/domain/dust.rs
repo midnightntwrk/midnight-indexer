@@ -11,6 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use indexer_common::{domain::ByteArray, infra::sqlx::SqlxOption};
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 use indexer_common::{
     domain::{
         ByteArray, ByteVec, DustCommitment, DustNonce, DustNullifier, DustOwner, NightUtxoHash,

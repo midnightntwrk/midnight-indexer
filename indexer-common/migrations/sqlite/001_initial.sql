@@ -132,7 +132,7 @@ CREATE TABLE dust_generation_info (
     owner BLOB NOT NULL,
     nonce BLOB NOT NULL,
     ctime INTEGER NOT NULL,
-    merkle_index INTEGER NOT NULL,
+    index INTEGER NOT NULL,
     dtime INTEGER
 );
 

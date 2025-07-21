@@ -15,7 +15,7 @@ use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
         ApiError, ApiResult, AsBytesExt, ContextExt, HexEncoded, InnerApiError, ResultExt,
-        v1::{decode_session_id, transaction::Transaction},
+        v1::{decode_session_id, subscription::get_next_transaction, transaction::Transaction},
     },
 };
 use async_graphql::{Context, SimpleObject, Subscription, Union, async_stream::try_stream};
@@ -173,7 +173,6 @@ where
 {
     /// Subscribe shielded transaction events for the given session ID starting at the given index
     /// or at zero if omitted.
-    #[trace(properties = { "session_id": "{session_id:?}", "index": "{index:?}" })]
     pub async fn shielded_transactions<'a>(
         &self,
         cx: &'a Context<'a>,
@@ -234,7 +233,6 @@ where
     }
 }
 
-#[trace(properties = { "session_id": "{session_id:?}", "index": "{index}" })]
 fn make_viewing_updates<'a, S, B, Z>(
     cx: &'a Context<'a>,
     session_id: SessionId,
@@ -262,8 +260,7 @@ where
 
         let transactions = storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
         let mut transactions = pin!(transactions);
-        while let Some(transaction) = transactions
-            .try_next()
+        while let Some(transaction) = get_next_transaction(&mut transactions)
             .await
             .map_err_into_server_error(|| "get next transaction")?
         {
@@ -295,9 +292,7 @@ where
             let transactions =
                 storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
             let mut transactions = pin!(transactions);
-
-            while let Some(transaction) = transactions
-                .try_next()
+            while let Some(transaction) =  get_next_transaction(&mut transactions)
                 .await
                 .map_err_into_server_error(|| "get next transaction")?
             {
