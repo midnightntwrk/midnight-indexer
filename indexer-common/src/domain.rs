@@ -68,15 +68,6 @@ pub enum TransactionResult {
     Failure,
 }
 
-/// Extended transaction result that includes events when available.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TransactionResultWithDustEvents<T> {
-    /// The basic transaction result.
-    pub result: TransactionResult,
-    /// Events emitted during transaction processing (if available).
-    pub dust_events: Vec<T>,
-}
-
 /// A contract action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {

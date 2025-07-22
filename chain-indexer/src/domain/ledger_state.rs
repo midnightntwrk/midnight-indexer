@@ -96,17 +96,17 @@ impl LedgerState {
         let start_index = self.zswap_first_free();
         let mut end_index = self.zswap_first_free();
 
-        // Apply transaction with DUST event capture.
-        let ledger_result = self.apply_transaction(
+        // Apply transaction.
+        let result = self.apply_transaction(
             &transaction.raw,
             block_parent_hash,
             block_timestamp,
             network_id,
         )?;
-        let result = ledger_result.result;
 
-        // TODO: Extract actual DUST events from ledger when support is available
-        // For now, dust_events will be empty
+        // TODO: Extract DUST events from ledger when support is available.
+        // Currently, the ledger doesn't provide events through apply_transaction.
+        // In the future, we'll need to re-apply transactions to extract events.
         let dust_events = Vec::new();
 
         // Handle genesis block: extract any pre-funded unshielded UTXOs.

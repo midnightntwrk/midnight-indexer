@@ -62,16 +62,9 @@ pub enum DustEventDetails {
         /// DUST parameters.
         params: DustParameters,
     },
-
-    /// cNIGHT registration event.
-    CnightRegistration {
-        /// Cardano stake key.
-        cardano_stake_key: String,
-        /// DUST address where DUST will be sent.
-        dust_address: DustOwner,
-        /// Whether this is a registration (true) or deregistration (false).
-        is_registration: bool,
-    },
+    // TODO: Registration events will be provided by the node team, not the ledger.
+    // These events will track mappings between Cardano stake keys and DUST addresses.
+    // See PM-17951 for node team's integration work.
 }
 
 /// Qualified DUST output information.
@@ -146,9 +139,7 @@ pub enum DustEventType {
 
     /// DUST spend processed.
     DustSpendProcessed,
-
-    /// cNIGHT registration/deregistration.
-    CnightRegistration,
+    // TODO: Registration event type will be added when node team implements registration events.
 }
 
 impl From<&DustEventDetails> for DustEventType {
@@ -157,7 +148,6 @@ impl From<&DustEventDetails> for DustEventType {
             DustEventDetails::DustInitialUtxo { .. } => Self::DustInitialUtxo,
             DustEventDetails::DustGenerationDtimeUpdate { .. } => Self::DustGenerationDtimeUpdate,
             DustEventDetails::DustSpendProcessed { .. } => Self::DustSpendProcessed,
-            DustEventDetails::CnightRegistration { .. } => Self::CnightRegistration,
         }
     }
 }

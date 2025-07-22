@@ -53,3 +53,12 @@ pub struct BlockTransactions {
     #[sqlx(try_from = "i64")]
     pub block_timestamp: u64,
 }
+
+/// Extended transaction result that includes DUST events when available.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransactionResultWithDustEvents {
+    /// The basic transaction result.
+    pub result: TransactionResult,
+    /// DUST events emitted during transaction processing.
+    pub dust_events: Vec<DustEvent>,
+}

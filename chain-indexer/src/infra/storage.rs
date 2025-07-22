@@ -17,7 +17,7 @@ use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
         BlockHash, ByteArray, ByteVec, ContractActionVariant, ContractBalance, DustCommitment,
-        DustNullifier, DustOwner, UnshieldedUtxo,
+        DustNullifier, UnshieldedUtxo,
         dust::{
             DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, QualifiedDustOutput,
         },
@@ -561,16 +561,10 @@ async fn process_dust_events(
                 ..
             } => {
                 mark_dust_utxo_spent(*commitment, *nullifier, transaction_id, tx).await?;
-            }
-
-            DustEventDetails::CnightRegistration {
-                cardano_stake_key,
-                dust_address,
-                is_registration,
-            } => {
-                save_cnight_registration(cardano_stake_key, *dust_address, *is_registration, tx)
-                    .await?;
-            }
+            } /* TODO: Handle registration events when node team implements them.
+               * These will come from system transactions created by the node,
+               * not from the ledger events.
+               * See PM-17951 for node integration work. */
         }
     }
 
@@ -770,80 +764,84 @@ async fn save_dust_utxos_tx(
     Ok(())
 }
 
-#[trace]
-async fn save_cnight_registration(
-    cardano_stake_key: &str,
-    dust_address: DustOwner,
-    is_registration: bool,
-    tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    // TODO: Implement cNIGHT registration tracking once the new ledger and node
-    // versions with DUST features are available. The registration event format
-    // and validation logic will be determined by the node implementation.
-    // For now, this is a placeholder to handle registration events when they
-    // are eventually emitted by the node.
-
-    if is_registration {
-        // Handle registration: insert new registration or update existing one
-        let query = indoc! {"
-            INSERT INTO cnight_registrations (
-                cardano_address,
-                dust_address,
-                is_valid,
-                registered_at
-            )
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (cardano_address, dust_address)
-            DO UPDATE SET 
-                is_valid = $3,
-                registered_at = $4,
-                removed_at = NULL
-        "};
-
-        #[cfg(feature = "standalone")]
-        let dust_address_bytes = dust_address.as_ref();
-        #[cfg(feature = "cloud")]
-        let dust_address_bytes = &dust_address;
-
-        // TODO: Use proper timestamp from the event when available
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        sqlx::query(query)
-            .bind(cardano_stake_key.as_bytes())
-            .bind(dust_address_bytes)
-            .bind(true)
-            .bind(current_time)
-            .execute(&mut **tx)
-            .await?;
-    } else {
-        // Handle deregistration: mark as invalid
-        let query = indoc! {"
-            UPDATE cnight_registrations 
-            SET is_valid = false, removed_at = $1
-            WHERE cardano_address = $2 AND dust_address = $3 AND is_valid = true
-        "};
-
-        #[cfg(feature = "standalone")]
-        let dust_address_bytes = dust_address.as_ref();
-        #[cfg(feature = "cloud")]
-        let dust_address_bytes = &dust_address;
-
-        // TODO: Use proper timestamp from the event when available
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        sqlx::query(query)
-            .bind(current_time)
-            .bind(cardano_stake_key.as_bytes())
-            .bind(dust_address_bytes)
-            .execute(&mut **tx)
-            .await?;
-    }
-
-    Ok(())
-}
+// TODO: Uncomment this function when node team implements registration events.
+// Registration events will be emitted by the node when it detects Cardano stake
+// key registrations/deregistrations. See PM-17951 for node integration work.
+//
+// #[trace]
+// async fn save_cnight_registration(
+//     cardano_stake_key: &str,
+//     dust_address: DustOwner,
+//     is_registration: bool,
+//     tx: &mut Tx,
+// ) -> Result<(), sqlx::Error> {
+//     // TODO: Implement cNIGHT registration tracking once the new ledger and node
+//     // versions with DUST features are available. The registration event format
+//     // and validation logic will be determined by the node implementation.
+//     // For now, this is a placeholder to handle registration events when they
+//     // are eventually emitted by the node.
+//
+//     if is_registration {
+//         // Handle registration: insert new registration or update existing one
+//         let query = indoc! {"
+//             INSERT INTO cnight_registrations (
+//                 cardano_address,
+//                 dust_address,
+//                 is_valid,
+//                 registered_at
+//             )
+//             VALUES ($1, $2, $3, $4)
+//             ON CONFLICT (cardano_address, dust_address)
+//             DO UPDATE SET
+//                 is_valid = $3,
+//                 registered_at = $4,
+//                 removed_at = NULL
+//         "};
+//
+//         #[cfg(feature = "standalone")]
+//         let dust_address_bytes = dust_address.as_ref();
+//         #[cfg(feature = "cloud")]
+//         let dust_address_bytes = &dust_address;
+//
+//         // TODO: Use proper timestamp from the event when available.
+//         let current_time = std::time::SystemTime::now()
+//             .duration_since(std::time::UNIX_EPOCH)
+//             .unwrap()
+//             .as_secs() as i64;
+//
+//         sqlx::query(query)
+//             .bind(cardano_stake_key.as_bytes())
+//             .bind(dust_address_bytes)
+//             .bind(true)
+//             .bind(current_time)
+//             .execute(&mut **tx)
+//             .await?;
+//     } else {
+//         // Handle deregistration: mark as invalid
+//         let query = indoc! {"
+//             UPDATE cnight_registrations
+//             SET is_valid = false, removed_at = $1
+//             WHERE cardano_address = $2 AND dust_address = $3 AND is_valid = true
+//         "};
+//
+//         #[cfg(feature = "standalone")]
+//         let dust_address_bytes = dust_address.as_ref();
+//         #[cfg(feature = "cloud")]
+//         let dust_address_bytes = &dust_address;
+//
+//         // TODO: Use proper timestamp from the event when available.
+//         let current_time = std::time::SystemTime::now()
+//             .duration_since(std::time::UNIX_EPOCH)
+//             .unwrap()
+//             .as_secs() as i64;
+//
+//         sqlx::query(query)
+//             .bind(current_time)
+//             .bind(cardano_stake_key.as_bytes())
+//             .bind(dust_address_bytes)
+//             .execute(&mut **tx)
+//             .await?;
+//     }
+//
+//     Ok(())
+// }
