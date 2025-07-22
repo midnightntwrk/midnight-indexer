@@ -620,11 +620,11 @@ mod tests {
     async fn test_finalized_blocks_0_13() -> Result<(), BoxError> {
         test_finalized_blocks(
             PROTOCOL_VERSION_000_013_000,
-            "0.13.2-rc.1",
-            "3e8e195cd77c011f1dc8ff7d62dd6befb5408c6eb73e0779fa63424b3941a2f9",
-            7,
-            "e9eaa0b9806d24456b2119e6fdec0132eacfc7326465da93ba86e94fa893c309",
-            26,
+            "0.13.2-rc.2",
+            "023e5fad5b86f1d95258f046edecfaa1c8d5c45097c1c07fcb6c5a518d136285",
+            8,
+            "997d8033e893233a7dd980ee5545023ac52af2c38cfe2128a3fde2fcfd4c4d7b",
+            27,
         )
         .await
     }
