@@ -18,7 +18,7 @@ use crate::domain::{
 use serde::{Deserialize, Serialize};
 
 /// DUST event for the indexer domain.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustEvent {
     pub transaction_hash: TransactionHash,
     pub logical_segment: u16,
@@ -27,7 +27,7 @@ pub struct DustEvent {
 }
 
 /// DUST event details.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DustEventDetails {
     /// Initial DUST UTXO creation.
     DustInitialUtxo {

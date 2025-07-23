@@ -546,8 +546,8 @@ async fn process_dust_events(
                 generation_index,
             } => {
                 let generation_info_id =
-                    save_dust_generation_info_tx(generation_info, *generation_index, tx).await?;
-                save_dust_utxos_tx(output, generation_info_id, tx).await?;
+                    save_dust_generation_info(generation_info, *generation_index, tx).await?;
+                save_dust_utxos(output, generation_info_id, tx).await?;
             }
 
             DustEventDetails::DustGenerationDtimeUpdate {
@@ -621,11 +621,11 @@ async fn mark_dust_utxo_spent(
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
     let query = indoc! {"
-                UPDATE dust_utxos
-                SET nullifier = $1, spent_at_transaction_id = $2
-                WHERE nullifier IS NULL
-                AND commitment = $3
-            "};
+        UPDATE dust_utxos
+        SET nullifier = $1, spent_at_transaction_id = $2
+        WHERE nullifier IS NULL
+        AND commitment = $3
+    "};
 
     sqlx::query(query)
         .bind(nullifier.as_ref())
@@ -644,10 +644,10 @@ async fn update_dust_generation_dtime(
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
     let query = indoc! {"
-            UPDATE dust_generation_info
-            SET dtime = $1
-            WHERE index = $2
-        "};
+        UPDATE dust_generation_info
+        SET dtime = $1
+        WHERE index = $2
+    "};
 
     sqlx::query(query)
         .bind(dtime as i64)
@@ -659,7 +659,7 @@ async fn update_dust_generation_dtime(
 }
 
 #[cfg_attr(feature = "cloud", trace)]
-async fn save_dust_generation_info_tx(
+async fn save_dust_generation_info(
     generation: &DustGenerationInfo,
     generation_index: u64,
     tx: &mut Tx,
@@ -678,17 +678,10 @@ async fn save_dust_generation_info_tx(
         RETURNING id
     "};
 
-    #[cfg(feature = "standalone")]
     let (night_utxo_hash, owner, nonce) = (
         generation.night_utxo_hash.as_ref(),
         generation.owner.as_ref(),
         generation.nonce.as_ref(),
-    );
-    #[cfg(feature = "cloud")]
-    let (night_utxo_hash, owner, nonce) = (
-        &generation.night_utxo_hash,
-        &generation.owner,
-        &generation.nonce,
     );
 
     let (id,) = sqlx::query_as::<_, (i64,)>(query)
@@ -706,7 +699,7 @@ async fn save_dust_generation_info_tx(
 }
 
 #[cfg_attr(feature = "cloud", trace)]
-async fn save_dust_utxos_tx(
+async fn save_dust_utxos(
     output: &QualifiedDustOutput,
     generation_info_id: u64,
     tx: &mut Tx,
@@ -741,14 +734,11 @@ async fn save_dust_utxos_tx(
     let commitment_bytes: [u8; 32] = hasher.finalize().into();
     let commitment = DustCommitment::from(commitment_bytes);
 
-    #[cfg(feature = "standalone")]
     let (commitment, owner, nonce) = (
         commitment.as_ref(),
         output.owner.as_ref(),
         output.nonce.as_ref(),
     );
-    #[cfg(feature = "cloud")]
-    let (commitment, owner, nonce) = (&commitment, &output.owner, &output.nonce);
 
     sqlx::query(query)
         .bind(commitment)
@@ -798,10 +788,7 @@ async fn save_dust_utxos_tx(
 //                 removed_at = NULL
 //         "};
 //
-//         #[cfg(feature = "standalone")]
 //         let dust_address_bytes = dust_address.as_ref();
-//         #[cfg(feature = "cloud")]
-//         let dust_address_bytes = &dust_address;
 //
 //         // TODO: Use proper timestamp from the event when available.
 //         let current_time = std::time::SystemTime::now()
@@ -824,10 +811,7 @@ async fn save_dust_utxos_tx(
 //             WHERE cardano_address = $2 AND dust_address = $3 AND is_valid = true
 //         "};
 //
-//         #[cfg(feature = "standalone")]
 //         let dust_address_bytes = dust_address.as_ref();
-//         #[cfg(feature = "cloud")]
-//         let dust_address_bytes = &dust_address;
 //
 //         // TODO: Use proper timestamp from the event when available.
 //         let current_time = std::time::SystemTime::now()
