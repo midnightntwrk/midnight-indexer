@@ -16,8 +16,11 @@ use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteArray, ByteVec, ContractActionVariant, ContractBalance, UnshieldedUtxo,
-        dust::{DustEvent, DustEventDetails},
+        BlockHash, ByteArray, ByteVec, ContractActionVariant, ContractBalance, DustCommitment,
+        DustNullifier, UnshieldedUtxo,
+        dust::{
+            DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, QualifiedDustOutput,
+        },
     },
     infra::sqlx::U128BeBytes,
 };
@@ -536,29 +539,32 @@ async fn process_dust_events(
     let mut generation_dtime_and_index = None;
 
     for dust_event in dust_events {
-        match dust_event.event_details {
+        match &dust_event.event_details {
             DustEventDetails::DustInitialUtxo {
                 output,
                 generation_info,
                 generation_index,
             } => {
                 let generation_info_id =
-                    save_dust_generation_info(generation_info, generation_index, tx).await?;
+                    save_dust_generation_info(generation_info, *generation_index, tx).await?;
                 save_dust_utxos(output, generation_info_id, tx).await?;
             }
 
             DustEventDetails::DustGenerationDtimeUpdate {
                 generation_info,
                 generation_index,
-            } => generation_dtime_and_index = Some((generation_info.dtime, generation_index)),
+            } => generation_dtime_and_index = Some((generation_info.dtime, *generation_index)),
 
             DustEventDetails::DustSpendProcessed {
                 commitment,
                 nullifier,
                 ..
             } => {
-                mark_dust_utxo_spent(commitment, nullifier, transaction_id, tx).await?;
-            }
+                mark_dust_utxo_spent(*commitment, *nullifier, transaction_id, tx).await?;
+            } /* TODO: Handle registration events when node team implements them.
+               * These will come from system transactions created by the node,
+               * not from the ledger events.
+               * See PM-17951 for node integration work. */
         }
     }
 
@@ -582,13 +588,23 @@ async fn save_dust_events(
     let query = indoc! {"
         INSERT INTO dust_events (
             transaction_id,
-            details
+            transaction_hash,
+            logical_segment,
+            physical_segment,
+            event_type,
+            event_data
         )
     "};
 
     QueryBuilder::new(query)
         .push_values(dust_events.iter(), |mut q, event| {
-            q.push_bind(transaction_id).push_bind(Json(event));
+            let event_type = DustEventType::from(&event.event_details);
+            q.push_bind(transaction_id)
+                .push_bind(event.transaction_hash.as_ref())
+                .push_bind(event.logical_segment as i32)
+                .push_bind(event.physical_segment as i32)
+                .push_bind(event_type)
+                .push_bind(Json(&event.event_details));
         })
         .build()
         .execute(&mut **tx)
@@ -597,87 +613,19 @@ async fn save_dust_events(
     Ok(())
 }
 
-#[trace]
-async fn save_dust_generation_info(
-    info: indexer_common::domain::dust::DustGenerationInfo,
-    index: u64,
-    tx: &mut Tx,
-) -> Result<u64, sqlx::Error> {
-    let query = indoc! {"
-        INSERT INTO dust_generation_info (
-            value,
-            owner,
-            nonce,
-            ctime,
-            dtime,
-            index
-        )
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id
-    "};
-
-    let (id,) = sqlx::query_as::<_, (i64,)>(query)
-        .bind(U128BeBytes::from(info.value))
-        .bind(info.owner.as_ref())
-        .bind(info.nonce.as_ref())
-        .bind(info.ctime as i64)
-        .bind(info.dtime as i64)
-        .bind(index as i64)
-        .fetch_one(&mut **tx)
-        .await?;
-
-    Ok(id as u64)
-}
-
-#[trace]
-async fn save_dust_utxos(
-    output: indexer_common::domain::dust::QualifiedDustOutput,
-    generation_info_id: u64,
-    tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    let query = indoc! {"
-        INSERT INTO dust_utxos (
-            commitment,
-            initial_value,
-            owner,
-            nonce,
-            seq,
-            ctime,
-            generation_info_id
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-    "};
-
-    // Calculate commitment (in real implementation, this would use proper crypto).
-    let commitment = output.nonce; // Placeholder - should be properly calculated.
-
-    sqlx::query(query)
-        .bind(commitment.as_ref())
-        .bind(U128BeBytes::from(output.initial_value))
-        .bind(output.owner.as_ref())
-        .bind(output.nonce.as_ref())
-        .bind(output.seq as i64)
-        .bind(output.ctime as i64)
-        .bind(generation_info_id as i64)
-        .execute(&mut **tx)
-        .await?;
-
-    Ok(())
-}
-
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn mark_dust_utxo_spent(
-    commitment: ByteArray<32>,
-    nullifier: ByteArray<32>,
+    commitment: DustCommitment,
+    nullifier: DustNullifier,
     transaction_id: i64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
     let query = indoc! {"
-                UPDATE dust_utxos
-                SET nullifier = $1, spent_at_transaction_id = $2
-                WHERE nullifier IS NULL
-                AND commitment = $3
-            "};
+        UPDATE dust_utxos
+        SET nullifier = $1, spent_at_transaction_id = $2
+        WHERE nullifier IS NULL
+        AND commitment = $3
+    "};
 
     sqlx::query(query)
         .bind(nullifier.as_ref())
@@ -696,10 +644,10 @@ async fn update_dust_generation_dtime(
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {
     let query = indoc! {"
-            UPDATE dust_generation_info
-            SET dtime = $1
-            WHERE index = $2
-        "};
+        UPDATE dust_generation_info
+        SET dtime = $1
+        WHERE index = $2
+    "};
 
     sqlx::query(query)
         .bind(dtime as i64)
@@ -709,3 +657,163 @@ async fn update_dust_generation_dtime(
 
     Ok(())
 }
+
+#[cfg_attr(feature = "cloud", trace)]
+async fn save_dust_generation_info(
+    generation: &DustGenerationInfo,
+    generation_index: u64,
+    tx: &mut Tx,
+) -> Result<u64, sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO dust_generation_info (
+            night_utxo_hash,
+            value,
+            owner,
+            nonce,
+            ctime,
+            index,
+            dtime
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id
+    "};
+
+    let (id,) = sqlx::query_as::<_, (i64,)>(query)
+        .bind(generation.night_utxo_hash.as_ref())
+        .bind(U128BeBytes::from(generation.value))
+        .bind(generation.owner.as_ref())
+        .bind(generation.nonce.as_ref())
+        .bind(generation.ctime as i64)
+        .bind(generation_index as i64)
+        .bind(generation.dtime as i64)
+        .fetch_one(&mut **tx)
+        .await?;
+
+    Ok(id as u64)
+}
+
+#[cfg_attr(feature = "cloud", trace)]
+async fn save_dust_utxos(
+    output: &QualifiedDustOutput,
+    generation_info_id: u64,
+    tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO dust_utxos (
+            commitment,
+            initial_value,
+            owner,
+            nonce,
+            seq,
+            ctime,
+            generation_info_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+    "};
+
+    // TODO: Implement proper cryptographic commitment calculation once the new ledger
+    // and node versions with DUST features are available. The commitment algorithm
+    // must match the node's implementation to ensure consistency across the system.
+    // For now, using a deterministic SHA256 placeholder based on all DUST UTXO fields
+    // to enable tracking functionality for PM-16218.
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(output.owner.as_ref());
+    hasher.update(output.nonce.as_ref());
+    hasher.update(output.initial_value.to_be_bytes());
+    hasher.update(output.seq.to_be_bytes());
+    hasher.update(output.ctime.to_be_bytes());
+    hasher.update(output.backing_night.as_ref());
+    hasher.update(output.mt_index.to_be_bytes());
+    let commitment_bytes: [u8; 32] = hasher.finalize().into();
+    let commitment = DustCommitment::from(commitment_bytes);
+
+    sqlx::query(query)
+        .bind(commitment.as_ref())
+        .bind(U128BeBytes::from(output.initial_value))
+        .bind(output.owner.as_ref())
+        .bind(output.nonce.as_ref())
+        .bind(output.seq as i64)
+        .bind(output.ctime as i64)
+        .bind(generation_info_id as i64)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+// TODO: Uncomment this function when node team implements registration events.
+// Registration events will be emitted by the node when it detects Cardano stake
+// key registrations/deregistrations. See PM-17951 for node integration work.
+//
+// #[trace]
+// async fn save_cnight_registration(
+//     cardano_stake_key: &str,
+//     dust_address: DustOwner,
+//     is_registration: bool,
+//     tx: &mut Tx,
+// ) -> Result<(), sqlx::Error> {
+//     // TODO: Implement cNIGHT registration tracking once the new ledger and node
+//     // versions with DUST features are available. The registration event format
+//     // and validation logic will be determined by the node implementation.
+//     // For now, this is a placeholder to handle registration events when they
+//     // are eventually emitted by the node.
+//
+//     if is_registration {
+//         // Handle registration: insert new registration or update existing one
+//         let query = indoc! {"
+//             INSERT INTO cnight_registrations (
+//                 cardano_address,
+//                 dust_address,
+//                 is_valid,
+//                 registered_at
+//             )
+//             VALUES ($1, $2, $3, $4)
+//             ON CONFLICT (cardano_address, dust_address)
+//             DO UPDATE SET
+//                 is_valid = $3,
+//                 registered_at = $4,
+//                 removed_at = NULL
+//         "};
+//
+//         let dust_address_bytes = dust_address.as_ref();
+//
+//         // TODO: Use proper timestamp from the event when available.
+//         let current_time = std::time::SystemTime::now()
+//             .duration_since(std::time::UNIX_EPOCH)
+//             .unwrap()
+//             .as_secs() as i64;
+//
+//         sqlx::query(query)
+//             .bind(cardano_stake_key.as_bytes())
+//             .bind(dust_address_bytes)
+//             .bind(true)
+//             .bind(current_time)
+//             .execute(&mut **tx)
+//             .await?;
+//     } else {
+//         // Handle deregistration: mark as invalid
+//         let query = indoc! {"
+//             UPDATE cnight_registrations
+//             SET is_valid = false, removed_at = $1
+//             WHERE cardano_address = $2 AND dust_address = $3 AND is_valid = true
+//         "};
+//
+//         let dust_address_bytes = dust_address.as_ref();
+//
+//         // TODO: Use proper timestamp from the event when available.
+//         let current_time = std::time::SystemTime::now()
+//             .duration_since(std::time::UNIX_EPOCH)
+//             .unwrap()
+//             .as_secs() as i64;
+//
+//         sqlx::query(query)
+//             .bind(current_time)
+//             .bind(cardano_stake_key.as_bytes())
+//             .bind(dust_address_bytes)
+//             .execute(&mut **tx)
+//             .await?;
+//     }
+//
+//     Ok(())
+// }

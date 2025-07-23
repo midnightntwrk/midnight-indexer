@@ -14,7 +14,7 @@
 use crate::domain::{
     ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
     RawContractAddress, RawLedgerState, RawTransaction, RawZswapState, RawZswapStateRoot,
-    TransactionResult, TransactionResultWithDustEvents, UnshieldedUtxo,
+    TransactionResult, UnshieldedUtxo,
     ledger::{Error, LedgerTransactionV5, NetworkIdExt, SerializableV5Ext},
 };
 use fastrace::trace;
@@ -83,7 +83,7 @@ impl LedgerState {
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
         network_id: NetworkId,
-    ) -> Result<TransactionResultWithDustEvents, Error> {
+    ) -> Result<TransactionResult, Error> {
         match self {
             LedgerState::V5(ledger_state) => {
                 let ledger_transaction = deserialize_v5::<LedgerTransactionV5, _>(
@@ -107,9 +107,13 @@ impl LedgerState {
                 *self = LedgerState::V5(ledger_state);
 
                 let transaction_result = match transaction_result {
-                    TransactionResultV5::Success(_events) => TransactionResult::Success,
+                    TransactionResultV5::Success(_events) => {
+                        // TODO: Extract DUST events from _events when ledger support is available.
+                        TransactionResult::Success
+                    }
 
                     TransactionResultV5::PartialSuccess(segments, _events) => {
+                        // TODO: Extract DUST events from _events when ledger support is available.
                         let segments = segments
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
@@ -120,11 +124,7 @@ impl LedgerState {
                     TransactionResultV5::Failure(_) => TransactionResult::Failure,
                 };
 
-                Ok(TransactionResultWithDustEvents {
-                    result: transaction_result,
-                    dust_events: Vec::new(), /* TODO: Extract events from TransactionResultV5
-                                              * when ledger support is available */
-                })
+                Ok(transaction_result)
             }
         }
     }

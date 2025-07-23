@@ -11,7 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ByteArray, ByteVec, TransactionHash};
+use crate::domain::{
+    DustCommitment, DustNonce, DustNullifier, DustOwner, NightUtxoHash, NightUtxoNonce,
+    TransactionHash,
+};
 use serde::{Deserialize, Serialize};
 
 /// DUST event for the indexer domain.
@@ -47,11 +50,11 @@ pub enum DustEventDetails {
     /// DUST spend processed.
     DustSpendProcessed {
         /// DUST commitment.
-        commitment: ByteArray<32>,
+        commitment: DustCommitment,
         /// Commitment merkle tree index.
         commitment_index: u64,
         /// DUST nullifier.
-        nullifier: ByteArray<32>,
+        nullifier: DustNullifier,
         /// Fee amount paid.
         v_fee: u128,
         /// Timestamp of spend.
@@ -59,6 +62,9 @@ pub enum DustEventDetails {
         /// DUST parameters.
         params: DustParameters,
     },
+    // TODO: Registration events will be provided by the node team, not the ledger.
+    // These events will track mappings between Cardano stake keys and DUST addresses.
+    // See PM-17951 for node team's integration work.
 }
 
 /// Qualified DUST output information.
@@ -68,10 +74,10 @@ pub struct QualifiedDustOutput {
     pub initial_value: u128,
 
     /// Owner's DUST public key.
-    pub owner: ByteArray<32>,
+    pub owner: DustOwner,
 
     /// Nonce for this DUST UTXO.
-    pub nonce: ByteArray<32>,
+    pub nonce: DustNonce,
 
     /// Sequence number.
     pub seq: u32,
@@ -80,7 +86,7 @@ pub struct QualifiedDustOutput {
     pub ctime: u64,
 
     /// Backing Night UTXO nonce.
-    pub backing_night: ByteArray<32>,
+    pub backing_night: NightUtxoNonce,
 
     /// Merkle tree index.
     pub mt_index: u64,
@@ -89,14 +95,17 @@ pub struct QualifiedDustOutput {
 /// DUST generation information.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustGenerationInfo {
+    /// Hash of the backing Night UTXO.
+    pub night_utxo_hash: NightUtxoHash,
+
     /// Value of backing Night UTXO.
     pub value: u128,
 
     /// Owner's DUST public key.
-    pub owner: ByteArray<32>,
+    pub owner: DustOwner,
 
     /// Initial nonce.
-    pub nonce: ByteArray<32>,
+    pub nonce: DustNonce,
 
     /// Creation time.
     pub ctime: u64,
@@ -118,56 +127,6 @@ pub struct DustParameters {
     pub dust_grace_period: u64,
 }
 
-/// Registration mapping between Cardano address and DUST address.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DustRegistration {
-    /// Cardano address (Night holder).
-    pub cardano_address: ByteVec,
-
-    /// DUST address (where DUST is sent).
-    pub dust_address: ByteArray<32>,
-
-    /// Whether this registration is currently valid (only one per Cardano address).
-    pub is_valid: bool,
-
-    /// When this registration was created.
-    pub registered_at: u64,
-
-    /// When this registration was removed (if applicable).
-    pub removed_at: Option<u64>,
-}
-
-/// DUST UTXO state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DustUtxo {
-    /// DUST commitment.
-    pub commitment: ByteArray<32>,
-
-    /// DUST nullifier (when spent).
-    pub nullifier: Option<ByteArray<32>>,
-
-    /// Initial value.
-    pub initial_value: u128,
-
-    /// Owner's DUST public key.
-    pub owner: ByteArray<32>,
-
-    /// UTXO nonce.
-    pub nonce: ByteArray<32>,
-
-    /// Sequence number.
-    pub seq: u32,
-
-    /// Creation time.
-    pub ctime: u64,
-
-    /// Reference to generation info.
-    pub generation_info_id: Option<u64>,
-
-    /// Transaction where this was spent.
-    pub spent_at_transaction_id: Option<u64>,
-}
-
 /// DUST event type for database storage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "DUST_EVENT_TYPE", rename_all = "PascalCase")]
@@ -180,6 +139,7 @@ pub enum DustEventType {
 
     /// DUST spend processed.
     DustSpendProcessed,
+    // TODO: Registration event type will be added when node team implements registration events.
 }
 
 impl From<&DustEventDetails> for DustEventType {
