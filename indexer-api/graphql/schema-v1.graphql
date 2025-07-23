@@ -1,4 +1,22 @@
 """
+Address type for registration queries.
+"""
+enum AddressType {
+	"""
+	Night address.
+	"""
+	NIGHT
+	"""
+	DUST address.
+	"""
+	DUST
+	"""
+	Cardano stake key.
+	"""
+	CARDANO_STAKE
+}
+
+"""
 A block with its relevant data.
 """
 type Block {
@@ -131,6 +149,255 @@ type ContractUpdate implements ContractAction {
 	unshieldedBalances: [ContractBalance!]!
 }
 
+"""
+DUST commitment information.
+"""
+type DustCommitment {
+	"""
+	DUST commitment.
+	"""
+	commitment: String!
+	"""
+	DUST nullifier (if spent).
+	"""
+	nullifier: String
+	"""
+	Initial value.
+	"""
+	value: String!
+	"""
+	DUST address of owner.
+	"""
+	owner: String!
+	"""
+	Nonce.
+	"""
+	nonce: String!
+	"""
+	Creation timestamp.
+	"""
+	createdAt: Int!
+	"""
+	Spend timestamp (if spent).
+	"""
+	spentAt: Int
+}
+
+"""
+DUST commitment event union type.
+"""
+union DustCommitmentEvent = DustCommitment | DustCommitmentMerkleUpdate | DustCommitmentProgress
+
+"""
+DUST commitment Merkle tree update.
+"""
+type DustCommitmentMerkleUpdate {
+	"""
+	Tree index.
+	"""
+	index: Int!
+	"""
+	Collapsed update data.
+	"""
+	collapsedUpdate: String!
+	"""
+	Block height of update.
+	"""
+	blockHeight: Int!
+}
+
+"""
+DUST commitment progress information.
+"""
+type DustCommitmentProgress {
+	"""
+	Highest processed index.
+	"""
+	highestIndex: Int!
+	"""
+	Number of commitments in batch.
+	"""
+	commitmentCount: Int!
+}
+
+"""
+DUST generation event union type.
+"""
+union DustGenerationEvent = DustGenerationInfo | DustGenerationMerkleUpdate | DustGenerationProgress
+
+"""
+DUST generation information.
+"""
+type DustGenerationInfo {
+	"""
+	Night UTXO hash (or cNIGHT hash for Cardano).
+	"""
+	nightUtxoHash: String!
+	"""
+	Generation value in Specks (u128 as string).
+	"""
+	value: String!
+	"""
+	DUST public key of owner.
+	"""
+	owner: String!
+	"""
+	Initial nonce for DUST chain.
+	"""
+	nonce: String!
+	"""
+	Creation time (UNIX timestamp).
+	"""
+	ctime: Int!
+	"""
+	Destruction time. None if still generating.
+	"""
+	dtime: Int
+	"""
+	Index in generation Merkle tree.
+	"""
+	merkleIndex: Int!
+}
+
+"""
+DUST generation Merkle tree update.
+"""
+type DustGenerationMerkleUpdate {
+	"""
+	Tree index.
+	"""
+	index: Int!
+	"""
+	Collapsed update data.
+	"""
+	collapsedUpdate: String!
+	"""
+	Block height of update.
+	"""
+	blockHeight: Int!
+}
+
+"""
+DUST generation progress information.
+"""
+type DustGenerationProgress {
+	"""
+	Highest processed index.
+	"""
+	highestIndex: Int!
+	"""
+	Number of active generations.
+	"""
+	activeGenerations: Int!
+}
+
+"""
+DUST generation status for a specific Cardano stake key.
+"""
+type DustGenerationStatus {
+	"""
+	Cardano stake key.
+	"""
+	cardanoStakeKey: String!
+	"""
+	Associated DUST address if registered.
+	"""
+	dustAddress: String
+	"""
+	Whether this stake key is registered.
+	"""
+	isRegistered: Boolean!
+	"""
+	Generation rate in Specks per second.
+	"""
+	generationRate: String!
+	"""
+	Current DUST capacity.
+	"""
+	currentCapacity: String!
+	"""
+	NIGHT balance backing generation.
+	"""
+	nightBalance: String!
+}
+
+"""
+Type of Merkle tree.
+"""
+enum DustMerkleTreeType {
+	"""
+	Commitment Merkle tree.
+	"""
+	COMMITMENT
+	"""
+	Generation Merkle tree.
+	"""
+	GENERATION
+}
+
+"""
+Transaction containing DUST nullifiers.
+"""
+type DustNullifierTransaction {
+	"""
+	Transaction hash.
+	"""
+	transactionHash: String!
+	"""
+	Block height.
+	"""
+	blockHeight: Int!
+	"""
+	Matching nullifier prefixes.
+	"""
+	matchingNullifierPrefixes: [String!]!
+}
+
+"""
+DUST nullifier transaction event union type.
+"""
+union DustNullifierTransactionEvent = DustNullifierTransaction | DustNullifierTransactionProgress
+
+"""
+DUST nullifier transaction progress.
+"""
+type DustNullifierTransactionProgress {
+	"""
+	Highest processed block.
+	"""
+	highestBlock: Int!
+	"""
+	Number of matched transactions.
+	"""
+	matchedCount: Int!
+}
+
+"""
+DUST system state containing current Merkle tree roots and statistics.
+"""
+type DustSystemState {
+	"""
+	Current commitment tree root.
+	"""
+	commitmentTreeRoot: String!
+	"""
+	Current generation tree root.
+	"""
+	generationTreeRoot: String!
+	"""
+	Current block height.
+	"""
+	blockHeight: Int!
+	"""
+	Current timestamp.
+	"""
+	timestamp: Int!
+	"""
+	Total number of registrations.
+	"""
+	totalRegistrations: Int!
+}
+
 scalar HexEncoded
 
 type MerkleTreeCollapsedUpdate {
@@ -176,6 +443,77 @@ type Query {
 	Find a contract action for the given address and optional offset.
 	"""
 	contractAction(address: HexEncoded!, offset: ContractActionOffset): ContractAction
+	"""
+	Get current DUST system state.
+	"""
+	currentDustState: DustSystemState!
+	"""
+	Get DUST generation status for specific stake keys (DOS protected).
+	"""
+	dustGenerationStatus(cardanoStakeKeys: [String!]!): [DustGenerationStatus!]!
+	"""
+	Get historical Merkle tree root for a specific timestamp.
+	"""
+	dustMerkleRoot(treeType: DustMerkleTreeType!, timestamp: Int!): HexEncoded
+}
+
+"""
+Registration address input for GraphQL.
+"""
+input RegistrationAddressInput {
+	"""
+	Type of address.
+	"""
+	type: AddressType!
+	"""
+	Address value.
+	"""
+	value: String!
+}
+
+"""
+Registration update information.
+"""
+type RegistrationUpdate {
+	"""
+	Cardano stake key.
+	"""
+	cardanoStakeKey: String!
+	"""
+	DUST address.
+	"""
+	dustAddress: String!
+	"""
+	Whether this registration is active.
+	"""
+	isActive: Boolean!
+	"""
+	Registration timestamp.
+	"""
+	registeredAt: Int!
+	"""
+	Removal timestamp (if removed).
+	"""
+	removedAt: Int
+}
+
+"""
+Registration update event union type.
+"""
+union RegistrationUpdateEvent = RegistrationUpdate | RegistrationUpdateProgress
+
+"""
+Registration update progress.
+"""
+type RegistrationUpdateProgress {
+	"""
+	Latest processed timestamp.
+	"""
+	latestTimestamp: Int!
+	"""
+	Number of updates in batch.
+	"""
+	updateCount: Int!
 }
 
 type RelevantTransaction {
@@ -254,6 +592,22 @@ type Subscription {
 	or zero if omitted.
 	"""
 	unshieldedTransactions(address: UnshieldedAddress!, transactionId: Int): UnshieldedTransactionsEvent!
+	"""
+	Stream generation info with merkle updates for wallet reconstruction.
+	"""
+	dustGenerations(dustAddress: String!, fromGenerationIndex: Int! = 0, fromMerkleIndex: Int! = 0, onlyActive: Boolean! = true): DustGenerationEvent!
+	"""
+	Stream regular transactions containing DUST nullifiers.
+	"""
+	dustNullifierTransactions(prefixes: [String!]!, minPrefixLength: Int!, fromBlock: Int! = 0): DustNullifierTransactionEvent!
+	"""
+	Stream DUST commitments with merkle tree updates, filtered by prefix.
+	"""
+	dustCommitments(commitmentPrefixes: [String!]!, startIndex: Int!, minPrefixLength: Int!): DustCommitmentEvent!
+	"""
+	Stream registration changes for multiple address types.
+	"""
+	registrationUpdates(addresses: [RegistrationAddressInput!]!): RegistrationUpdateEvent!
 }
 
 """

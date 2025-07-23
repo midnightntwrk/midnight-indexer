@@ -14,10 +14,11 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ApiResult, ContextExt, HexEncoded, ResultExt,
+        ApiError, ApiResult, ContextExt, HexEncoded, InnerApiError, ResultExt,
         v1::{
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
+            dust::{DustGenerationStatus, DustMerkleTreeType, DustSystemState},
             transaction::{Transaction, TransactionOffset},
         },
     },
@@ -198,5 +199,60 @@ where
         };
 
         Ok(contract_action.map(Into::into))
+    }
+
+    /// Get current DUST system state.
+    #[trace]
+    async fn current_dust_state(&self, cx: &Context<'_>) -> ApiResult<DustSystemState> {
+        let storage = cx.get_storage::<S>();
+
+        let state = storage
+            .get_current_dust_state()
+            .await
+            .map_err_into_server_error(|| "get current DUST state")?;
+
+        Ok(state.into())
+    }
+
+    /// Get DUST generation status for specific stake keys (DOS protected).
+    async fn dust_generation_status(
+        &self,
+        cx: &Context<'_>,
+        cardano_stake_keys: Vec<String>,
+    ) -> ApiResult<Vec<DustGenerationStatus>> {
+        // DOS protection: limit to 10 keys
+        if cardano_stake_keys.len() > 10 {
+            return Err(ApiError::Client(InnerApiError(
+                "Maximum 10 stake keys allowed per request".to_string(),
+                None,
+            )));
+        }
+
+        let storage = cx.get_storage::<S>();
+
+        let statuses = storage
+            .get_dust_generation_status(&cardano_stake_keys)
+            .await
+            .map_err_into_server_error(|| "get DUST generation status")?;
+
+        Ok(statuses.into_iter().map(Into::into).collect())
+    }
+
+    /// Get historical Merkle tree root for a specific timestamp.
+    #[trace(properties = { "tree_type": "{tree_type:?}", "timestamp": "{timestamp}" })]
+    async fn dust_merkle_root(
+        &self,
+        cx: &Context<'_>,
+        tree_type: DustMerkleTreeType,
+        timestamp: i32,
+    ) -> ApiResult<Option<HexEncoded>> {
+        let storage = cx.get_storage::<S>();
+
+        let root = storage
+            .get_dust_merkle_root(tree_type.into(), timestamp)
+            .await
+            .map_err_into_server_error(|| "get DUST merkle root")?;
+
+        Ok(root.map(|bytes| HexEncoded(const_hex::encode(&bytes))))
     }
 }

@@ -1,0 +1,482 @@
+// This file is part of midnight-indexer.
+// Copyright (C) 2025 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! GraphQL API types for DUST operations.
+
+use crate::domain;
+use async_graphql::{Enum, SimpleObject, Union};
+use serde::{Deserialize, Serialize};
+
+/// DUST system state containing current Merkle tree roots and statistics.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustSystemState {
+    /// Current commitment tree root.
+    pub commitment_tree_root: String,
+    /// Current generation tree root.
+    pub generation_tree_root: String,
+    /// Current block height.
+    pub block_height: i32,
+    /// Current timestamp.
+    pub timestamp: i64,
+    /// Total number of registrations.
+    pub total_registrations: i32,
+}
+
+impl From<domain::dust::DustSystemState> for DustSystemState {
+    fn from(state: domain::dust::DustSystemState) -> Self {
+        Self {
+            commitment_tree_root: state.commitment_tree_root,
+            generation_tree_root: state.generation_tree_root,
+            block_height: state.block_height,
+            timestamp: state.timestamp,
+            total_registrations: state.total_registrations,
+        }
+    }
+}
+
+/// DUST generation status for a specific Cardano stake key.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustGenerationStatus {
+    /// Cardano stake key.
+    pub cardano_stake_key: String,
+    /// Associated DUST address if registered.
+    pub dust_address: Option<String>,
+    /// Whether this stake key is registered.
+    pub is_registered: bool,
+    /// Generation rate in Specks per second.
+    pub generation_rate: String,
+    /// Current DUST capacity.
+    pub current_capacity: String,
+    /// NIGHT balance backing generation.
+    pub night_balance: String,
+}
+
+impl From<domain::dust::DustGenerationStatus> for DustGenerationStatus {
+    fn from(status: domain::dust::DustGenerationStatus) -> Self {
+        Self {
+            cardano_stake_key: status.cardano_stake_key,
+            dust_address: status.dust_address,
+            is_registered: status.is_registered,
+            generation_rate: status.generation_rate,
+            current_capacity: status.current_capacity,
+            night_balance: status.night_balance,
+        }
+    }
+}
+
+/// Type of Merkle tree.
+#[derive(Debug, Clone, Copy, Enum, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DustMerkleTreeType {
+    /// Commitment Merkle tree.
+    Commitment,
+    /// Generation Merkle tree.
+    Generation,
+}
+
+impl From<domain::dust::DustMerkleTreeType> for DustMerkleTreeType {
+    fn from(tree_type: domain::dust::DustMerkleTreeType) -> Self {
+        match tree_type {
+            domain::dust::DustMerkleTreeType::Commitment => Self::Commitment,
+            domain::dust::DustMerkleTreeType::Generation => Self::Generation,
+        }
+    }
+}
+
+impl From<DustMerkleTreeType> for domain::dust::DustMerkleTreeType {
+    fn from(tree_type: DustMerkleTreeType) -> Self {
+        match tree_type {
+            DustMerkleTreeType::Commitment => Self::Commitment,
+            DustMerkleTreeType::Generation => Self::Generation,
+        }
+    }
+}
+
+/// DUST generation information.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustGenerationInfo {
+    /// Night UTXO hash (or cNIGHT hash for Cardano).
+    pub night_utxo_hash: String,
+    /// Generation value in Specks (u128 as string).
+    pub value: String,
+    /// DUST public key of owner.
+    pub owner: String,
+    /// Initial nonce for DUST chain.
+    pub nonce: String,
+    /// Creation time (UNIX timestamp).
+    pub ctime: i32,
+    /// Destruction time. None if still generating.
+    pub dtime: Option<i32>,
+    /// Index in generation Merkle tree.
+    pub merkle_index: i32,
+}
+
+impl From<domain::dust::DustGenerationInfo> for DustGenerationInfo {
+    fn from(info: domain::dust::DustGenerationInfo) -> Self {
+        Self {
+            night_utxo_hash: info.night_utxo_hash,
+            value: info.value,
+            owner: info.owner,
+            nonce: info.nonce,
+            ctime: info.ctime,
+            dtime: info.dtime,
+            merkle_index: info.merkle_index,
+        }
+    }
+}
+
+/// DUST generation Merkle tree update.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustGenerationMerkleUpdate {
+    /// Tree index.
+    pub index: i32,
+    /// Collapsed update data.
+    pub collapsed_update: String,
+    /// Block height of update.
+    pub block_height: i32,
+}
+
+impl From<domain::dust::DustGenerationMerkleUpdate> for DustGenerationMerkleUpdate {
+    fn from(update: domain::dust::DustGenerationMerkleUpdate) -> Self {
+        Self {
+            index: update.index,
+            collapsed_update: update.collapsed_update,
+            block_height: update.block_height,
+        }
+    }
+}
+
+/// DUST generation progress information.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustGenerationProgress {
+    /// Highest processed index.
+    pub highest_index: i32,
+    /// Number of active generations.
+    pub active_generations: i32,
+}
+
+impl From<domain::dust::DustGenerationProgress> for DustGenerationProgress {
+    fn from(progress: domain::dust::DustGenerationProgress) -> Self {
+        Self {
+            highest_index: progress.highest_index,
+            active_generations: progress.active_generations,
+        }
+    }
+}
+
+/// DUST generation event union type.
+#[derive(Debug, Clone, Union, Serialize, Deserialize)]
+pub enum DustGenerationEvent {
+    /// Generation information.
+    Info(DustGenerationInfo),
+    /// Merkle tree update.
+    MerkleUpdate(DustGenerationMerkleUpdate),
+    /// Progress update.
+    Progress(DustGenerationProgress),
+}
+
+impl From<domain::dust::DustGenerationEvent> for DustGenerationEvent {
+    fn from(event: domain::dust::DustGenerationEvent) -> Self {
+        match event {
+            domain::dust::DustGenerationEvent::Info(info) => Self::Info(info.into()),
+            domain::dust::DustGenerationEvent::MerkleUpdate(update) => {
+                Self::MerkleUpdate(update.into())
+            }
+            domain::dust::DustGenerationEvent::Progress(progress) => {
+                Self::Progress(progress.into())
+            }
+        }
+    }
+}
+
+/// Transaction containing DUST nullifiers.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustNullifierTransaction {
+    /// Transaction hash.
+    pub transaction_hash: String,
+    /// Block height.
+    pub block_height: i32,
+    /// Matching nullifier prefixes.
+    pub matching_nullifier_prefixes: Vec<String>,
+}
+
+impl From<domain::dust::DustNullifierTransaction> for DustNullifierTransaction {
+    fn from(tx: domain::dust::DustNullifierTransaction) -> Self {
+        Self {
+            transaction_hash: tx.transaction_hash,
+            block_height: tx.block_height,
+            matching_nullifier_prefixes: tx.matching_nullifier_prefixes,
+        }
+    }
+}
+
+/// DUST nullifier transaction progress.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustNullifierTransactionProgress {
+    /// Highest processed block.
+    pub highest_block: i32,
+    /// Number of matched transactions.
+    pub matched_count: i32,
+}
+
+impl From<domain::dust::DustNullifierTransactionProgress> for DustNullifierTransactionProgress {
+    fn from(progress: domain::dust::DustNullifierTransactionProgress) -> Self {
+        Self {
+            highest_block: progress.highest_block,
+            matched_count: progress.matched_count,
+        }
+    }
+}
+
+/// DUST nullifier transaction event union type.
+#[derive(Debug, Clone, Union, Serialize, Deserialize)]
+pub enum DustNullifierTransactionEvent {
+    /// Transaction with nullifiers.
+    Transaction(DustNullifierTransaction),
+    /// Progress update.
+    Progress(DustNullifierTransactionProgress),
+}
+
+impl From<domain::dust::DustNullifierTransactionEvent> for DustNullifierTransactionEvent {
+    fn from(event: domain::dust::DustNullifierTransactionEvent) -> Self {
+        match event {
+            domain::dust::DustNullifierTransactionEvent::Transaction(tx) => {
+                Self::Transaction(tx.into())
+            }
+            domain::dust::DustNullifierTransactionEvent::Progress(progress) => {
+                Self::Progress(progress.into())
+            }
+        }
+    }
+}
+
+/// DUST commitment information.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustCommitment {
+    /// DUST commitment.
+    pub commitment: String,
+    /// DUST nullifier (if spent).
+    pub nullifier: Option<String>,
+    /// Initial value.
+    pub value: String,
+    /// DUST address of owner.
+    pub owner: String,
+    /// Nonce.
+    pub nonce: String,
+    /// Creation timestamp.
+    pub created_at: i32,
+    /// Spend timestamp (if spent).
+    pub spent_at: Option<i32>,
+}
+
+impl From<domain::dust::DustCommitment> for DustCommitment {
+    fn from(commitment: domain::dust::DustCommitment) -> Self {
+        Self {
+            commitment: commitment.commitment,
+            nullifier: commitment.nullifier,
+            value: commitment.value,
+            owner: commitment.owner,
+            nonce: commitment.nonce,
+            created_at: commitment.created_at,
+            spent_at: commitment.spent_at,
+        }
+    }
+}
+
+/// DUST commitment Merkle tree update.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustCommitmentMerkleUpdate {
+    /// Tree index.
+    pub index: i32,
+    /// Collapsed update data.
+    pub collapsed_update: String,
+    /// Block height of update.
+    pub block_height: i32,
+}
+
+impl From<domain::dust::DustCommitmentMerkleUpdate> for DustCommitmentMerkleUpdate {
+    fn from(update: domain::dust::DustCommitmentMerkleUpdate) -> Self {
+        Self {
+            index: update.index,
+            collapsed_update: update.collapsed_update,
+            block_height: update.block_height,
+        }
+    }
+}
+
+/// DUST commitment progress information.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustCommitmentProgress {
+    /// Highest processed index.
+    pub highest_index: i32,
+    /// Number of commitments in batch.
+    pub commitment_count: i32,
+}
+
+impl From<domain::dust::DustCommitmentProgress> for DustCommitmentProgress {
+    fn from(progress: domain::dust::DustCommitmentProgress) -> Self {
+        Self {
+            highest_index: progress.highest_index,
+            commitment_count: progress.commitment_count,
+        }
+    }
+}
+
+/// DUST commitment event union type.
+#[derive(Debug, Clone, Union, Serialize, Deserialize)]
+pub enum DustCommitmentEvent {
+    /// Commitment information.
+    Commitment(DustCommitment),
+    /// Merkle tree update.
+    MerkleUpdate(DustCommitmentMerkleUpdate),
+    /// Progress update.
+    Progress(DustCommitmentProgress),
+}
+
+impl From<domain::dust::DustCommitmentEvent> for DustCommitmentEvent {
+    fn from(event: domain::dust::DustCommitmentEvent) -> Self {
+        match event {
+            domain::dust::DustCommitmentEvent::Commitment(commitment) => {
+                Self::Commitment(commitment.into())
+            }
+            domain::dust::DustCommitmentEvent::MerkleUpdate(update) => {
+                Self::MerkleUpdate(update.into())
+            }
+            domain::dust::DustCommitmentEvent::Progress(progress) => {
+                Self::Progress(progress.into())
+            }
+        }
+    }
+}
+
+/// Address type for registration queries.
+#[derive(Debug, Clone, Copy, Enum, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AddressType {
+    /// Night address.
+    Night,
+    /// DUST address.
+    Dust,
+    /// Cardano stake key.
+    CardanoStake,
+}
+
+impl From<domain::dust::AddressType> for AddressType {
+    fn from(address_type: domain::dust::AddressType) -> Self {
+        match address_type {
+            domain::dust::AddressType::Night => Self::Night,
+            domain::dust::AddressType::Dust => Self::Dust,
+            domain::dust::AddressType::CardanoStake => Self::CardanoStake,
+        }
+    }
+}
+
+impl From<AddressType> for domain::dust::AddressType {
+    fn from(address_type: AddressType) -> Self {
+        match address_type {
+            AddressType::Night => Self::Night,
+            AddressType::Dust => Self::Dust,
+            AddressType::CardanoStake => Self::CardanoStake,
+        }
+    }
+}
+
+/// Registration address input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistrationAddress {
+    /// Type of address.
+    pub address_type: AddressType,
+    /// Address value.
+    pub value: String,
+}
+
+impl From<domain::dust::RegistrationAddress> for RegistrationAddress {
+    fn from(address: domain::dust::RegistrationAddress) -> Self {
+        Self {
+            address_type: address.address_type.into(),
+            value: address.value,
+        }
+    }
+}
+
+impl From<RegistrationAddress> for domain::dust::RegistrationAddress {
+    fn from(address: RegistrationAddress) -> Self {
+        Self {
+            address_type: address.address_type.into(),
+            value: address.value,
+        }
+    }
+}
+
+/// Registration update information.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct RegistrationUpdate {
+    /// Cardano stake key.
+    pub cardano_stake_key: String,
+    /// DUST address.
+    pub dust_address: String,
+    /// Whether this registration is active.
+    pub is_active: bool,
+    /// Registration timestamp.
+    pub registered_at: i32,
+    /// Removal timestamp (if removed).
+    pub removed_at: Option<i32>,
+}
+
+impl From<domain::dust::RegistrationUpdate> for RegistrationUpdate {
+    fn from(update: domain::dust::RegistrationUpdate) -> Self {
+        Self {
+            cardano_stake_key: update.cardano_stake_key,
+            dust_address: update.dust_address,
+            is_active: update.is_active,
+            registered_at: update.registered_at,
+            removed_at: update.removed_at,
+        }
+    }
+}
+
+/// Registration update progress.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct RegistrationUpdateProgress {
+    /// Latest processed timestamp.
+    pub latest_timestamp: i32,
+    /// Number of updates in batch.
+    pub update_count: i32,
+}
+
+impl From<domain::dust::RegistrationUpdateProgress> for RegistrationUpdateProgress {
+    fn from(progress: domain::dust::RegistrationUpdateProgress) -> Self {
+        Self {
+            latest_timestamp: progress.latest_timestamp,
+            update_count: progress.update_count,
+        }
+    }
+}
+
+/// Registration update event union type.
+#[derive(Debug, Clone, Union, Serialize, Deserialize)]
+pub enum RegistrationUpdateEvent {
+    /// Registration update.
+    Update(RegistrationUpdate),
+    /// Progress update.
+    Progress(RegistrationUpdateProgress),
+}
+
+impl From<domain::dust::RegistrationUpdateEvent> for RegistrationUpdateEvent {
+    fn from(event: domain::dust::RegistrationUpdateEvent) -> Self {
+        match event {
+            domain::dust::RegistrationUpdateEvent::Update(update) => Self::Update(update.into()),
+            domain::dust::RegistrationUpdateEvent::Progress(progress) => {
+                Self::Progress(progress.into())
+            }
+        }
+    }
+}
