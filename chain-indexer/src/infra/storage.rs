@@ -678,17 +678,11 @@ async fn save_dust_generation_info(
         RETURNING id
     "};
 
-    let (night_utxo_hash, owner, nonce) = (
-        generation.night_utxo_hash.as_ref(),
-        generation.owner.as_ref(),
-        generation.nonce.as_ref(),
-    );
-
     let (id,) = sqlx::query_as::<_, (i64,)>(query)
-        .bind(night_utxo_hash)
+        .bind(generation.night_utxo_hash.as_ref())
         .bind(U128BeBytes::from(generation.value))
-        .bind(owner)
-        .bind(nonce)
+        .bind(generation.owner.as_ref())
+        .bind(generation.nonce.as_ref())
         .bind(generation.ctime as i64)
         .bind(generation_index as i64)
         .bind(generation.dtime as i64)
@@ -734,17 +728,11 @@ async fn save_dust_utxos(
     let commitment_bytes: [u8; 32] = hasher.finalize().into();
     let commitment = DustCommitment::from(commitment_bytes);
 
-    let (commitment, owner, nonce) = (
-        commitment.as_ref(),
-        output.owner.as_ref(),
-        output.nonce.as_ref(),
-    );
-
     sqlx::query(query)
-        .bind(commitment)
+        .bind(commitment.as_ref())
         .bind(U128BeBytes::from(output.initial_value))
-        .bind(owner)
-        .bind(nonce)
+        .bind(output.owner.as_ref())
+        .bind(output.nonce.as_ref())
         .bind(output.seq as i64)
         .bind(output.ctime as i64)
         .bind(generation_info_id as i64)
