@@ -13,21 +13,28 @@
 
 //! GraphQL API types for DUST operations.
 
-use crate::domain;
-use async_graphql::{Enum, SimpleObject, Union};
+use crate::{
+    domain,
+    infra::api::{AsBytesExt, HexEncoded},
+};
+use async_graphql::{Enum, InputObject, SimpleObject, Union};
 use serde::{Deserialize, Serialize};
 
 /// DUST system state containing current Merkle tree roots and statistics.
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustSystemState {
     /// Current commitment tree root.
-    pub commitment_tree_root: String,
+    pub commitment_tree_root: HexEncoded,
+
     /// Current generation tree root.
-    pub generation_tree_root: String,
+    pub generation_tree_root: HexEncoded,
+
     /// Current block height.
     pub block_height: i32,
+
     /// Current timestamp.
     pub timestamp: i64,
+
     /// Total number of registrations.
     pub total_registrations: i32,
 }
@@ -35,8 +42,8 @@ pub struct DustSystemState {
 impl From<domain::dust::DustSystemState> for DustSystemState {
     fn from(state: domain::dust::DustSystemState) -> Self {
         Self {
-            commitment_tree_root: state.commitment_tree_root,
-            generation_tree_root: state.generation_tree_root,
+            commitment_tree_root: state.commitment_tree_root.hex_encode(),
+            generation_tree_root: state.generation_tree_root.hex_encode(),
             block_height: state.block_height,
             timestamp: state.timestamp,
             total_registrations: state.total_registrations,
@@ -48,15 +55,20 @@ impl From<domain::dust::DustSystemState> for DustSystemState {
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustGenerationStatus {
     /// Cardano stake key.
-    pub cardano_stake_key: String,
+    pub cardano_stake_key: HexEncoded,
+
     /// Associated DUST address if registered.
-    pub dust_address: Option<String>,
+    pub dust_address: Option<HexEncoded>,
+
     /// Whether this stake key is registered.
     pub is_registered: bool,
+
     /// Generation rate in Specks per second.
     pub generation_rate: String,
+
     /// Current DUST capacity.
     pub current_capacity: String,
+
     /// NIGHT balance backing generation.
     pub night_balance: String,
 }
@@ -64,12 +76,12 @@ pub struct DustGenerationStatus {
 impl From<domain::dust::DustGenerationStatus> for DustGenerationStatus {
     fn from(status: domain::dust::DustGenerationStatus) -> Self {
         Self {
-            cardano_stake_key: status.cardano_stake_key,
-            dust_address: status.dust_address,
+            cardano_stake_key: status.cardano_stake_key.hex_encode(),
+            dust_address: status.dust_address.map(|addr| addr.hex_encode()),
             is_registered: status.is_registered,
-            generation_rate: status.generation_rate,
-            current_capacity: status.current_capacity,
-            night_balance: status.night_balance,
+            generation_rate: status.generation_rate.to_string(),
+            current_capacity: status.current_capacity.to_string(),
+            night_balance: status.night_balance.to_string(),
         }
     }
 }
@@ -105,17 +117,23 @@ impl From<DustMerkleTreeType> for domain::dust::DustMerkleTreeType {
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustGenerationInfo {
     /// Night UTXO hash (or cNIGHT hash for Cardano).
-    pub night_utxo_hash: String,
+    pub night_utxo_hash: HexEncoded,
+
     /// Generation value in Specks (u128 as string).
     pub value: String,
+
     /// DUST public key of owner.
-    pub owner: String,
+    pub owner: HexEncoded,
+
     /// Initial nonce for DUST chain.
-    pub nonce: String,
+    pub nonce: HexEncoded,
+
     /// Creation time (UNIX timestamp).
     pub ctime: i32,
+
     /// Destruction time. None if still generating.
     pub dtime: Option<i32>,
+
     /// Index in generation Merkle tree.
     pub merkle_index: i32,
 }
@@ -123,10 +141,10 @@ pub struct DustGenerationInfo {
 impl From<domain::dust::DustGenerationInfo> for DustGenerationInfo {
     fn from(info: domain::dust::DustGenerationInfo) -> Self {
         Self {
-            night_utxo_hash: info.night_utxo_hash,
-            value: info.value,
-            owner: info.owner,
-            nonce: info.nonce,
+            night_utxo_hash: info.night_utxo_hash.hex_encode(),
+            value: info.value.to_string(),
+            owner: info.owner.hex_encode(),
+            nonce: info.nonce.hex_encode(),
             ctime: info.ctime,
             dtime: info.dtime,
             merkle_index: info.merkle_index,
@@ -139,8 +157,10 @@ impl From<domain::dust::DustGenerationInfo> for DustGenerationInfo {
 pub struct DustGenerationMerkleUpdate {
     /// Tree index.
     pub index: i32,
+
     /// Collapsed update data.
-    pub collapsed_update: String,
+    pub collapsed_update: HexEncoded,
+
     /// Block height of update.
     pub block_height: i32,
 }
@@ -149,7 +169,7 @@ impl From<domain::dust::DustGenerationMerkleUpdate> for DustGenerationMerkleUpda
     fn from(update: domain::dust::DustGenerationMerkleUpdate) -> Self {
         Self {
             index: update.index,
-            collapsed_update: update.collapsed_update,
+            collapsed_update: update.collapsed_update.hex_encode(),
             block_height: update.block_height,
         }
     }
@@ -160,6 +180,7 @@ impl From<domain::dust::DustGenerationMerkleUpdate> for DustGenerationMerkleUpda
 pub struct DustGenerationProgress {
     /// Highest processed index.
     pub highest_index: i32,
+
     /// Number of active generations.
     pub active_generations: i32,
 }
@@ -202,19 +223,25 @@ impl From<domain::dust::DustGenerationEvent> for DustGenerationEvent {
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustNullifierTransaction {
     /// Transaction hash.
-    pub transaction_hash: String,
+    pub transaction_hash: HexEncoded,
+
     /// Block height.
     pub block_height: i32,
+
     /// Matching nullifier prefixes.
-    pub matching_nullifier_prefixes: Vec<String>,
+    pub matching_nullifier_prefixes: Vec<HexEncoded>,
 }
 
 impl From<domain::dust::DustNullifierTransaction> for DustNullifierTransaction {
     fn from(tx: domain::dust::DustNullifierTransaction) -> Self {
         Self {
-            transaction_hash: tx.transaction_hash,
+            transaction_hash: tx.transaction_hash.hex_encode(),
             block_height: tx.block_height,
-            matching_nullifier_prefixes: tx.matching_nullifier_prefixes,
+            matching_nullifier_prefixes: tx
+                .matching_nullifier_prefixes
+                .into_iter()
+                .map(|prefix| prefix.hex_encode())
+                .collect(),
         }
     }
 }
@@ -224,6 +251,7 @@ impl From<domain::dust::DustNullifierTransaction> for DustNullifierTransaction {
 pub struct DustNullifierTransactionProgress {
     /// Highest processed block.
     pub highest_block: i32,
+
     /// Number of matched transactions.
     pub matched_count: i32,
 }
@@ -263,29 +291,35 @@ impl From<domain::dust::DustNullifierTransactionEvent> for DustNullifierTransact
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustCommitment {
     /// DUST commitment.
-    pub commitment: String,
+    pub commitment: HexEncoded,
+
     /// DUST nullifier (if spent).
-    pub nullifier: Option<String>,
+    pub nullifier: Option<HexEncoded>,
+
     /// Initial value.
     pub value: String,
+
     /// DUST address of owner.
-    pub owner: String,
+    pub owner: HexEncoded,
+
     /// Nonce.
-    pub nonce: String,
+    pub nonce: HexEncoded,
+
     /// Creation timestamp.
     pub created_at: i32,
+
     /// Spend timestamp (if spent).
     pub spent_at: Option<i32>,
 }
 
-impl From<domain::dust::DustCommitment> for DustCommitment {
-    fn from(commitment: domain::dust::DustCommitment) -> Self {
+impl From<domain::dust::DustCommitmentInfo> for DustCommitment {
+    fn from(commitment: domain::dust::DustCommitmentInfo) -> Self {
         Self {
-            commitment: commitment.commitment,
-            nullifier: commitment.nullifier,
-            value: commitment.value,
-            owner: commitment.owner,
-            nonce: commitment.nonce,
+            commitment: commitment.commitment.hex_encode(),
+            nullifier: commitment.nullifier.map(|n| n.hex_encode()),
+            value: commitment.value.to_string(),
+            owner: commitment.owner.hex_encode(),
+            nonce: commitment.nonce.hex_encode(),
             created_at: commitment.created_at,
             spent_at: commitment.spent_at,
         }
@@ -297,8 +331,10 @@ impl From<domain::dust::DustCommitment> for DustCommitment {
 pub struct DustCommitmentMerkleUpdate {
     /// Tree index.
     pub index: i32,
+
     /// Collapsed update data.
-    pub collapsed_update: String,
+    pub collapsed_update: HexEncoded,
+
     /// Block height of update.
     pub block_height: i32,
 }
@@ -307,7 +343,7 @@ impl From<domain::dust::DustCommitmentMerkleUpdate> for DustCommitmentMerkleUpda
     fn from(update: domain::dust::DustCommitmentMerkleUpdate) -> Self {
         Self {
             index: update.index,
-            collapsed_update: update.collapsed_update,
+            collapsed_update: update.collapsed_update.hex_encode(),
             block_height: update.block_height,
         }
     }
@@ -318,6 +354,7 @@ impl From<domain::dust::DustCommitmentMerkleUpdate> for DustCommitmentMerkleUpda
 pub struct DustCommitmentProgress {
     /// Highest processed index.
     pub highest_index: i32,
+
     /// Number of commitments in batch.
     pub commitment_count: i32,
 }
@@ -390,29 +427,32 @@ impl From<AddressType> for domain::dust::AddressType {
 }
 
 /// Registration address input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, InputObject, Serialize, Deserialize)]
 pub struct RegistrationAddress {
     /// Type of address.
     pub address_type: AddressType,
+
     /// Address value.
-    pub value: String,
+    pub value: HexEncoded,
 }
 
 impl From<domain::dust::RegistrationAddress> for RegistrationAddress {
     fn from(address: domain::dust::RegistrationAddress) -> Self {
         Self {
             address_type: address.address_type.into(),
-            value: address.value,
+            value: address.value.hex_encode(),
         }
     }
 }
 
-impl From<RegistrationAddress> for domain::dust::RegistrationAddress {
-    fn from(address: RegistrationAddress) -> Self {
-        Self {
+impl TryFrom<RegistrationAddress> for domain::dust::RegistrationAddress {
+    type Error = anyhow::Error;
+
+    fn try_from(address: RegistrationAddress) -> Result<Self, Self::Error> {
+        Ok(Self {
             address_type: address.address_type.into(),
-            value: address.value,
-        }
+            value: address.value.hex_decode()?,
+        })
     }
 }
 
@@ -420,13 +460,17 @@ impl From<RegistrationAddress> for domain::dust::RegistrationAddress {
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct RegistrationUpdate {
     /// Cardano stake key.
-    pub cardano_stake_key: String,
+    pub cardano_stake_key: HexEncoded,
+
     /// DUST address.
-    pub dust_address: String,
+    pub dust_address: HexEncoded,
+
     /// Whether this registration is active.
     pub is_active: bool,
+
     /// Registration timestamp.
     pub registered_at: i32,
+
     /// Removal timestamp (if removed).
     pub removed_at: Option<i32>,
 }
@@ -434,8 +478,8 @@ pub struct RegistrationUpdate {
 impl From<domain::dust::RegistrationUpdate> for RegistrationUpdate {
     fn from(update: domain::dust::RegistrationUpdate) -> Self {
         Self {
-            cardano_stake_key: update.cardano_stake_key,
-            dust_address: update.dust_address,
+            cardano_stake_key: update.cardano_stake_key.hex_encode(),
+            dust_address: update.dust_address.hex_encode(),
             is_active: update.is_active,
             registered_at: update.registered_at,
             removed_at: update.removed_at,
@@ -448,6 +492,7 @@ impl From<domain::dust::RegistrationUpdate> for RegistrationUpdate {
 pub struct RegistrationUpdateProgress {
     /// Latest processed timestamp.
     pub latest_timestamp: i32,
+
     /// Number of updates in batch.
     pub update_count: i32,
 }

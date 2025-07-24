@@ -156,11 +156,11 @@ type DustCommitment {
 	"""
 	DUST commitment.
 	"""
-	commitment: String!
+	commitment: HexEncoded!
 	"""
 	DUST nullifier (if spent).
 	"""
-	nullifier: String
+	nullifier: HexEncoded
 	"""
 	Initial value.
 	"""
@@ -168,11 +168,11 @@ type DustCommitment {
 	"""
 	DUST address of owner.
 	"""
-	owner: String!
+	owner: HexEncoded!
 	"""
 	Nonce.
 	"""
-	nonce: String!
+	nonce: HexEncoded!
 	"""
 	Creation timestamp.
 	"""
@@ -199,7 +199,7 @@ type DustCommitmentMerkleUpdate {
 	"""
 	Collapsed update data.
 	"""
-	collapsedUpdate: String!
+	collapsedUpdate: HexEncoded!
 	"""
 	Block height of update.
 	"""
@@ -232,7 +232,7 @@ type DustGenerationInfo {
 	"""
 	Night UTXO hash (or cNIGHT hash for Cardano).
 	"""
-	nightUtxoHash: String!
+	nightUtxoHash: HexEncoded!
 	"""
 	Generation value in Specks (u128 as string).
 	"""
@@ -240,11 +240,11 @@ type DustGenerationInfo {
 	"""
 	DUST public key of owner.
 	"""
-	owner: String!
+	owner: HexEncoded!
 	"""
 	Initial nonce for DUST chain.
 	"""
-	nonce: String!
+	nonce: HexEncoded!
 	"""
 	Creation time (UNIX timestamp).
 	"""
@@ -270,7 +270,7 @@ type DustGenerationMerkleUpdate {
 	"""
 	Collapsed update data.
 	"""
-	collapsedUpdate: String!
+	collapsedUpdate: HexEncoded!
 	"""
 	Block height of update.
 	"""
@@ -298,11 +298,11 @@ type DustGenerationStatus {
 	"""
 	Cardano stake key.
 	"""
-	cardanoStakeKey: String!
+	cardanoStakeKey: HexEncoded!
 	"""
 	Associated DUST address if registered.
 	"""
-	dustAddress: String
+	dustAddress: HexEncoded
 	"""
 	Whether this stake key is registered.
 	"""
@@ -342,7 +342,7 @@ type DustNullifierTransaction {
 	"""
 	Transaction hash.
 	"""
-	transactionHash: String!
+	transactionHash: HexEncoded!
 	"""
 	Block height.
 	"""
@@ -350,7 +350,7 @@ type DustNullifierTransaction {
 	"""
 	Matching nullifier prefixes.
 	"""
-	matchingNullifierPrefixes: [String!]!
+	matchingNullifierPrefixes: [HexEncoded!]!
 }
 
 """
@@ -379,11 +379,11 @@ type DustSystemState {
 	"""
 	Current commitment tree root.
 	"""
-	commitmentTreeRoot: String!
+	commitmentTreeRoot: HexEncoded!
 	"""
 	Current generation tree root.
 	"""
-	generationTreeRoot: String!
+	generationTreeRoot: HexEncoded!
 	"""
 	Current block height.
 	"""
@@ -450,7 +450,7 @@ type Query {
 	"""
 	Get DUST generation status for specific stake keys (DOS protected).
 	"""
-	dustGenerationStatus(cardanoStakeKeys: [String!]!): [DustGenerationStatus!]!
+	dustGenerationStatus(cardanoStakeKeys: [HexEncoded!]!): [DustGenerationStatus!]!
 	"""
 	Get historical Merkle tree root for a specific timestamp.
 	"""
@@ -458,17 +458,17 @@ type Query {
 }
 
 """
-Registration address input for GraphQL.
+Registration address input.
 """
-input RegistrationAddressInput {
+input RegistrationAddress {
 	"""
 	Type of address.
 	"""
-	type: AddressType!
+	addressType: AddressType!
 	"""
 	Address value.
 	"""
-	value: String!
+	value: HexEncoded!
 }
 
 """
@@ -478,11 +478,11 @@ type RegistrationUpdate {
 	"""
 	Cardano stake key.
 	"""
-	cardanoStakeKey: String!
+	cardanoStakeKey: HexEncoded!
 	"""
 	DUST address.
 	"""
-	dustAddress: String!
+	dustAddress: HexEncoded!
 	"""
 	Whether this registration is active.
 	"""
@@ -595,19 +595,19 @@ type Subscription {
 	"""
 	Stream generation info with merkle updates for wallet reconstruction.
 	"""
-	dustGenerations(dustAddress: String!, fromGenerationIndex: Int! = 0, fromMerkleIndex: Int! = 0, onlyActive: Boolean! = true): DustGenerationEvent!
+	dustGenerations(dustAddress: HexEncoded!, fromGenerationIndex: Int, fromMerkleIndex: Int, onlyActive: Boolean): DustGenerationEvent!
 	"""
 	Stream regular transactions containing DUST nullifiers.
 	"""
-	dustNullifierTransactions(prefixes: [String!]!, minPrefixLength: Int!, fromBlock: Int! = 0): DustNullifierTransactionEvent!
+	dustNullifierTransactions(prefixes: [HexEncoded!]!, minPrefixLength: Int!, fromBlock: Int): DustNullifierTransactionEvent!
 	"""
 	Stream DUST commitments with merkle tree updates, filtered by prefix.
 	"""
-	dustCommitments(commitmentPrefixes: [String!]!, startIndex: Int!, minPrefixLength: Int!): DustCommitmentEvent!
+	dustCommitments(commitmentPrefixes: [HexEncoded!]!, startIndex: Int!, minPrefixLength: Int!): DustCommitmentEvent!
 	"""
 	Stream registration changes for multiple address types.
 	"""
-	registrationUpdates(addresses: [RegistrationAddressInput!]!): RegistrationUpdateEvent!
+	registrationUpdates(addresses: [RegistrationAddress!]!): RegistrationUpdateEvent!
 }
 
 """

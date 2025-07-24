@@ -14,7 +14,7 @@
 use crate::{
     domain::{
         dust::{
-            AddressType, DustCommitment, DustCommitmentEvent, DustCommitmentMerkleUpdate,
+            AddressType, DustCommitmentEvent, DustCommitmentInfo, DustCommitmentMerkleUpdate,
             DustCommitmentProgress, DustGenerationEvent, DustGenerationInfo,
             DustGenerationMerkleUpdate, DustGenerationProgress, DustGenerationStatus,
             DustMerkleTreeType, DustNullifierTransaction, DustNullifierTransactionEvent,
@@ -28,7 +28,10 @@ use crate::{
 use async_stream::try_stream;
 use futures::Stream;
 use indexer_common::{
-    domain::{DustNonce, DustOwner, NightUtxoHash},
+    domain::{
+        CardanoStakeKey, DustAddress, DustMerkleRoot, DustNonce, DustOwner, DustPrefix,
+        NightUtxoHash,
+    },
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
 use indoc::indoc;
@@ -40,18 +43,25 @@ use std::num::NonZeroU32;
 struct DustGenerationRow {
     #[sqlx(try_from = "i64")]
     id: u64,
+
     #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     night_utxo_hash: NightUtxoHash,
+
     #[sqlx(try_from = "U128BeBytes")]
     value: u128,
+
     #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     owner: DustOwner,
+
     #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     nonce: DustNonce,
+
     #[sqlx(try_from = "i64")]
     ctime: u64,
+
     #[sqlx(try_from = "SqlxOption<i64>")]
     dtime: Option<u64>,
+
     #[sqlx(rename = "merkle_index", try_from = "i64")]
     index: u64,
 }
@@ -61,18 +71,25 @@ struct DustGenerationRow {
 struct DustUtxoRow {
     #[sqlx(try_from = "i64")]
     id: u64,
+
     #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     commitment: indexer_common::domain::DustCommitment,
+
     #[cfg_attr(feature = "standalone", sqlx(try_from = "SqlxOption<&'a [u8]>"))]
     nullifier: Option<indexer_common::domain::DustNullifier>,
+
     #[sqlx(rename = "initial_value", try_from = "U128BeBytes")]
     value: u128,
+
     #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     owner: DustOwner,
+
     #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     nonce: DustNonce,
+
     #[sqlx(try_from = "i64")]
     ctime: u64,
+
     #[sqlx(try_from = "SqlxOption<i64>")]
     spent_at_transaction_id: Option<u64>,
 }
@@ -82,7 +99,9 @@ struct DustUtxoRow {
 struct MerkleTreeRow {
     #[sqlx(try_from = "i64")]
     index: u64,
+
     root: Vec<u8>,
+
     #[sqlx(try_from = "i64")]
     block_height: u64,
 }
@@ -92,9 +111,15 @@ struct MerkleTreeRow {
 struct RegistrationRow {
     #[sqlx(try_from = "i64")]
     id: u64,
-    cardano_address: Vec<u8>,
-    dust_address: Vec<u8>,
+
+    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
+    cardano_address: CardanoStakeKey,
+
+    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
+    dust_address: DustAddress,
+
     is_valid: bool,
+
     #[sqlx(try_from = "i64")]
     registered_at: u64,
     #[sqlx(try_from = "SqlxOption<i64>")]
@@ -157,15 +182,11 @@ impl DustStorage for super::Storage {
 
         Ok(DustSystemState {
             commitment_tree_root: commitment_root
-                .map(|r| r.hex_encode().to_string())
-                .unwrap_or_else(|| {
-                    "0x0000000000000000000000000000000000000000000000000000000000000000".to_string()
-                }),
+                .and_then(|r| r.try_into().ok())
+                .unwrap_or_default(),
             generation_tree_root: generation_root
-                .map(|r| r.hex_encode().to_string())
-                .unwrap_or_else(|| {
-                    "0x0000000000000000000000000000000000000000000000000000000000000000".to_string()
-                }),
+                .and_then(|r| r.try_into().ok())
+                .unwrap_or_default(),
             block_height: block_height as i32,
             timestamp,
             total_registrations: total_registrations as i32,
@@ -175,7 +196,7 @@ impl DustStorage for super::Storage {
     #[cfg_attr(feature = "cloud", fastrace::trace)]
     async fn get_dust_generation_status(
         &self,
-        cardano_stake_keys: &[String],
+        cardano_stake_keys: &[indexer_common::domain::CardanoStakeKey],
     ) -> Result<Vec<DustGenerationStatus>, Self::Error> {
         // Convert stake keys to bytea format for querying
         let mut statuses = Vec::new();
@@ -190,28 +211,23 @@ impl DustStorage for super::Storage {
                 LIMIT 1
             "};
 
-            let stake_key_bytes =
-                const_hex::decode(stake_key.trim_start_matches("0x")).unwrap_or_default();
-
             let registration_info: Option<(Vec<u8>, bool)> = sqlx::query_as(registration_query)
-                .bind(&stake_key_bytes)
+                .bind(stake_key.as_ref())
                 .fetch_optional(&*self.pool)
                 .await?;
 
-            let (dust_address, is_registered) = match registration_info {
-                Some((addr, valid)) => (Some(addr.hex_encode().to_string()), valid),
+            let (dust_address, is_registered): (Option<DustAddress>, bool) = match registration_info
+            {
+                Some((addr, valid)) => (addr.as_slice().try_into().ok(), valid),
                 None => (None, false),
             };
 
             // Query active generation info if registered
-            let mut generation_rate = "0".to_string();
-            let mut current_capacity = "0".to_string();
-            let mut night_balance = "0".to_string();
+            let mut generation_rate = 0u128;
+            let mut current_capacity = 0u128;
+            let mut night_balance = 0u128;
 
             if let Some(ref dust_addr) = dust_address {
-                let dust_addr_bytes =
-                    const_hex::decode(dust_addr.trim_start_matches("0x")).unwrap_or_default();
-
                 // Get active generation info
                 let generation_query = indoc! {"
                     SELECT value
@@ -222,7 +238,7 @@ impl DustStorage for super::Storage {
                 "};
 
                 let value_bytes: Option<Vec<u8>> = sqlx::query_scalar(generation_query)
-                    .bind(&dust_addr_bytes)
+                    .bind(dust_addr.as_ref())
                     .fetch_optional(&*self.pool)
                     .await?;
 
@@ -230,11 +246,11 @@ impl DustStorage for super::Storage {
                     // Convert 16 bytes to u128
                     if value.len() == 16 {
                         let value_u128 = u128::from_be_bytes(value.try_into().unwrap());
-                        night_balance = value_u128.to_string();
+                        night_balance = value_u128;
                         // Simplified generation rate calculation (1 Speck per NIGHT per second)
-                        generation_rate = value_u128.to_string();
+                        generation_rate = value_u128;
                         // Capacity could be calculated based on time since ctime
-                        current_capacity = "0".to_string(); // TODO: Calculate based on elapsed time
+                        current_capacity = 0; // TODO: Calculate based on elapsed time
                     }
                 }
             }
@@ -257,7 +273,7 @@ impl DustStorage for super::Storage {
         &self,
         tree_type: DustMerkleTreeType,
         timestamp: i32,
-    ) -> Result<Option<Vec<u8>>, Self::Error> {
+    ) -> Result<Option<DustMerkleRoot>, Self::Error> {
         let query = match tree_type {
             DustMerkleTreeType::Commitment => indoc! {"
                 SELECT dc.root
@@ -282,20 +298,18 @@ impl DustStorage for super::Storage {
             .fetch_optional(&*self.pool)
             .await?;
 
-        Ok(root)
+        Ok(root.map(|r| r.as_slice().try_into().unwrap()))
     }
 
     async fn get_dust_generations(
         &self,
-        dust_address: &str,
+        dust_address: &indexer_common::domain::DustAddress,
         from_generation_index: i64,
         from_merkle_index: i64,
         only_active: bool,
         batch_size: NonZeroU32,
     ) -> Result<impl Stream<Item = Result<DustGenerationEvent, Self::Error>> + Send, Self::Error>
     {
-        let dust_addr_bytes =
-            const_hex::decode(dust_address.trim_start_matches("0x")).unwrap_or_default();
         let batch_size = batch_size.get() as i64;
 
         let stream = try_stream! {
@@ -306,30 +320,30 @@ impl DustStorage for super::Storage {
             while has_more {
                 // Query generation info
                 let query = if only_active {
-                    indoc! {"
+                    indoc! {r#"
                         SELECT 
                             id, night_utxo_hash, value, owner, nonce, 
-                            ctime, dtime, index as merkle_index
+                            ctime, dtime, "index" as merkle_index
                         FROM dust_generation_info
-                        WHERE owner = $1 AND index >= $2 AND dtime IS NULL
-                        ORDER BY index
+                        WHERE owner = $1 AND "index" >= $2 AND dtime IS NULL
+                        ORDER BY "index"
                         LIMIT $3
-                    "}
+                    "#}
                 } else {
-                    indoc! {"
+                    indoc! {r#"
                         SELECT 
                             id, night_utxo_hash, value, owner, nonce, 
-                            ctime, dtime, index as merkle_index
+                            ctime, dtime, "index" as merkle_index
                         FROM dust_generation_info
-                        WHERE owner = $1 AND index >= $2
-                        ORDER BY index
+                        WHERE owner = $1 AND "index" >= $2
+                        ORDER BY "index"
                         LIMIT $3
-                    "}
+                    "#}
                 };
 
                 let rows: Vec<DustGenerationRow> =
                     sqlx::query_as(query)
-                        .bind(&dust_addr_bytes)
+                        .bind(dust_address.as_ref())
                         .bind(last_index)
                         .bind(batch_size)
                         .fetch_all(&*self.pool)
@@ -340,10 +354,10 @@ impl DustStorage for super::Storage {
                 } else {
                     for row in rows {
                         yield DustGenerationEvent::Info(DustGenerationInfo {
-                            night_utxo_hash: row.night_utxo_hash.hex_encode().to_string(),
-                            value: row.value.to_string(),
-                            owner: row.owner.hex_encode().to_string(),
-                            nonce: row.nonce.hex_encode().to_string(),
+                            night_utxo_hash: row.night_utxo_hash,
+                            value: row.value,
+                            owner: row.owner,
+                            nonce: row.nonce,
                             ctime: row.ctime as i32,
                             dtime: row.dtime.map(|d| d as i32),
                             merkle_index: row.index as i32,
@@ -354,13 +368,13 @@ impl DustStorage for super::Storage {
                     }
 
                     // Query merkle updates for this batch
-                    let merkle_query = indoc! {"
-                        SELECT index, root, block_height
+                    let merkle_query = indoc! {r#"
+                        SELECT "index", root, block_height
                         FROM dust_generation_tree
-                        WHERE index >= $1
-                        ORDER BY index
+                        WHERE "index" >= $1
+                        ORDER BY "index"
                         LIMIT $2
-                    "};
+                    "#};
 
                     let merkle_rows: Vec<MerkleTreeRow> = sqlx::query_as(merkle_query)
                         .bind(last_merkle_index)
@@ -371,7 +385,7 @@ impl DustStorage for super::Storage {
                     for row in merkle_rows {
                         yield DustGenerationEvent::MerkleUpdate(DustGenerationMerkleUpdate {
                             index: row.index as i32,
-                            collapsed_update: row.root.hex_encode().to_string(),
+                            collapsed_update: row.root.into(),
                             block_height: row.block_height as i32,
                         });
                     }
@@ -384,7 +398,7 @@ impl DustStorage for super::Storage {
                     "};
 
                     let active_count: i64 = sqlx::query_scalar(active_count_query)
-                        .bind(&dust_addr_bytes)
+                        .bind(dust_address.as_ref())
                         .fetch_one(&*self.pool)
                         .await?;
 
@@ -401,7 +415,7 @@ impl DustStorage for super::Storage {
 
     async fn get_dust_nullifier_transactions(
         &self,
-        prefixes: &[String],
+        prefixes: &[DustPrefix],
         min_prefix_length: i32,
         from_block: i32,
         batch_size: NonZeroU32,
@@ -420,14 +434,14 @@ impl DustStorage for super::Storage {
                 // Build prefix conditions for the query
                 let mut conditions = Vec::new();
                 for prefix in prefixes {
-                    if prefix.len() >= min_prefix_length {
-                        let clean_prefix = prefix.trim_start_matches("0x");
+                    if prefix.as_ref().len() >= min_prefix_length {
+                        let hex_prefix = prefix.hex_encode().to_string();
                         #[cfg(feature = "cloud")]
                         conditions.push(format!("substring(nullifier::text, 1, {}) = '\\\\x{}'::text",
-                            clean_prefix.len(), clean_prefix));
+                            hex_prefix.len(), hex_prefix));
                         #[cfg(feature = "standalone")]
                         conditions.push(format!("substr(hex(nullifier), 1, {}) = '{}'",
-                            clean_prefix.len(), clean_prefix));
+                            hex_prefix.len(), hex_prefix));
                     }
                 }
 
@@ -479,18 +493,19 @@ impl DustStorage for super::Storage {
                             .await?;
 
                         let mut matching_prefixes = Vec::new();
-                        for nullifier in nullifiers {
-                            let nullifier_hex = const_hex::encode(&nullifier);
+                        for nullifier_bytes in nullifiers {
+                            let nullifier: indexer_common::domain::DustNullifier = nullifier_bytes.as_slice().try_into().unwrap();
+                            let nullifier_hex = nullifier.hex_encode().to_string();
                             for prefix in prefixes {
-                                let clean_prefix = prefix.trim_start_matches("0x");
-                                if nullifier_hex.starts_with(clean_prefix) && clean_prefix.len() >= min_prefix_length {
+                                let hex_prefix = prefix.hex_encode().to_string();
+                                if nullifier_hex.starts_with(&hex_prefix) && prefix.as_ref().len() >= min_prefix_length {
                                     matching_prefixes.push(prefix.clone());
                                 }
                             }
                         }
 
                         yield DustNullifierTransactionEvent::Transaction(DustNullifierTransaction {
-                            transaction_hash: tx_hash.hex_encode().to_string(),
+                            transaction_hash: tx_hash.as_slice().try_into().unwrap(),
                             block_height: *block_height as i32,
                             matching_nullifier_prefixes: matching_prefixes,
                         });
@@ -516,7 +531,7 @@ impl DustStorage for super::Storage {
 
     async fn get_dust_commitments(
         &self,
-        commitment_prefixes: &[String],
+        commitment_prefixes: &[DustPrefix],
         start_index: i32,
         min_prefix_length: i32,
         batch_size: NonZeroU32,
@@ -533,14 +548,14 @@ impl DustStorage for super::Storage {
                 // Build prefix conditions
                 let mut conditions = Vec::new();
                 for prefix in commitment_prefixes {
-                    if prefix.len() >= min_prefix_length {
-                        let clean_prefix = prefix.trim_start_matches("0x");
+                    if prefix.as_ref().len() >= min_prefix_length {
+                        let hex_prefix = prefix.hex_encode().to_string();
                         #[cfg(feature = "cloud")]
                         conditions.push(format!("substring(commitment::text, 1, {}) = '\\\\x{}'::text",
-                            clean_prefix.len(), clean_prefix));
+                            hex_prefix.len(), hex_prefix));
                         #[cfg(feature = "standalone")]
                         conditions.push(format!("substr(hex(commitment), 1, {}) = '{}'",
-                            clean_prefix.len(), clean_prefix));
+                            hex_prefix.len(), hex_prefix));
                     }
                 }
 
@@ -597,12 +612,12 @@ impl DustStorage for super::Storage {
                             None
                         };
 
-                        yield DustCommitmentEvent::Commitment(DustCommitment {
-                            commitment: row.commitment.hex_encode().to_string(),
-                            nullifier: row.nullifier.map(|n| n.hex_encode().to_string()),
-                            value: row.value.to_string(),
-                            owner: row.owner.hex_encode().to_string(),
-                            nonce: row.nonce.hex_encode().to_string(),
+                        yield DustCommitmentEvent::Commitment(DustCommitmentInfo {
+                            commitment: row.commitment,
+                            nullifier: row.nullifier,
+                            value: row.value,
+                            owner: row.owner,
+                            nonce: row.nonce,
                             created_at: row.ctime as i32,
                             spent_at,
                         });
@@ -612,13 +627,13 @@ impl DustStorage for super::Storage {
                     }
 
                     // Query merkle updates
-                    let merkle_query = indoc! {"
-                        SELECT index, root, block_height
+                    let merkle_query = indoc! {r#"
+                        SELECT "index", root, block_height
                         FROM dust_commitment_tree
-                        WHERE index >= $1
-                        ORDER BY index
+                        WHERE "index" >= $1
+                        ORDER BY "index"
                         LIMIT $2
-                    "};
+                    "#};
 
                     let merkle_rows: Vec<MerkleTreeRow> = sqlx::query_as(merkle_query)
                         .bind(current_index)
@@ -629,7 +644,7 @@ impl DustStorage for super::Storage {
                     for row in merkle_rows {
                         yield DustCommitmentEvent::MerkleUpdate(DustCommitmentMerkleUpdate {
                             index: row.index as i32,
-                            collapsed_update: row.root.hex_encode().to_string(),
+                            collapsed_update: row.root.into(),
                             block_height: row.block_height as i32,
                         });
                     }
@@ -663,8 +678,7 @@ impl DustStorage for super::Storage {
                 let mut conditions = Vec::new();
 
                 for addr in addresses {
-                    let addr_bytes = const_hex::decode(addr.value.trim_start_matches("0x"))
-                        .unwrap_or_default();
+                    let addr_bytes = addr.value.as_ref();
 
                     match addr.address_type {
                         AddressType::CardanoStake => {
@@ -727,12 +741,9 @@ impl DustStorage for super::Storage {
                     let mut latest_timestamp = 0i64;
 
                     for row in rows {
-                        // Convert Cardano address to stake key format
-                        let cardano_stake_key = row.cardano_address.hex_encode().to_string();
-
                         yield RegistrationUpdateEvent::Update(RegistrationUpdate {
-                            cardano_stake_key,
-                            dust_address: row.dust_address.hex_encode().to_string(),
+                            cardano_stake_key: row.cardano_address,
+                            dust_address: row.dust_address,
                             is_active: row.is_valid && row.removed_at.is_none(),
                             registered_at: row.registered_at as i32,
                             removed_at: row.removed_at.map(|t| t as i32),
