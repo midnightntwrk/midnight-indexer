@@ -51,7 +51,7 @@ cloud      = [ "indexer-common/cloud", "uuid" ]
 standalone = [ "indexer-common/standalone", "uuid" ]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = [ 'cfg(coverage)' ] }
+unexpected_cfgs = { level = "warn", check-cfg = [ 'cfg(coverage_nightly)' ] }
 
 [package.metadata.cargo-shear]
 ignored = [ "uuid" ]

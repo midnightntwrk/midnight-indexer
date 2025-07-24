@@ -77,6 +77,18 @@ all-features:
     just all
     just feature=standalone all
 
+coverage:
+    #!/usr/bin/env bash
+    rustup component add llvm-tools-preview --toolchain nightly-2025-07-01
+    source <(cargo +nightly-2025-07-01 llvm-cov show-env --export-prefix)
+    cargo llvm-cov clean --workspace
+    if [ "{{feature}}" = "cloud" ];      then cargo +nightly-2025-07-01 build -p chain-indexer      --features cloud;      fi
+    if [ "{{feature}}" = "cloud" ];      then cargo +nightly-2025-07-01 build -p wallet-indexer     --features cloud;      fi
+    if [ "{{feature}}" = "cloud" ];      then cargo +nightly-2025-07-01 build -p indexer-api        --features cloud;      fi
+    if [ "{{feature}}" = "standalone" ]; then cargo +nightly-2025-07-01 build -p indexer-standalone --features standalone; fi
+    cargo +nightly-2025-07-01 test -p indexer-tests --test native_e2e --features {{feature}}
+    cargo llvm-cov report --html
+
 docker-chain-indexer profile="dev":
     tag=$(git rev-parse --short=8 HEAD) && \
     docker build \
@@ -162,12 +174,6 @@ run-indexer-standalone node="ws://localhost:9944" network_id="Undeployed":
         APP__INFRA__NODE__URL={{node}} \
         APP__INFRA__STORAGE__CNN_URL=target/data/indexer.sqlite \
         cargo run -p indexer-standalone --features standalone
-
-coverage-generation:
-    RUSTC_BOOTSTRAP=1 cargo llvm-cov --lcov --output-path target/lcov.info --features "cloud test"
-
-coverage-report: coverage-generation
-    RUSTC_BOOTSTRAP=1 cargo llvm-cov report --open
 
 node_version := "0.13.2-rc.2"
 generator_version := "0.13.2-rc.2"

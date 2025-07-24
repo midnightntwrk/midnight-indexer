@@ -32,6 +32,7 @@ tokio-tungstenite = { workspace = true, features = [ "rustls-tls-webpki-roots" ]
 [dev-dependencies]
 fake                   = { workspace = true }
 fs_extra               = { workspace = true }
+nix                    = { workspace = true, features = [ "signal" ] }
 sqlx                   = { workspace = true, features = [ "postgres" ] }
 tempfile               = { workspace = true }
 testcontainers         = { workspace = true }

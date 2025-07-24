@@ -82,17 +82,17 @@ where
 
 #[allow(unused_variables)]
 impl TransactionStorage for NoopStorage {
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_transaction_by_id(&self, id: u64) -> Result<Option<Transaction>, sqlx::Error> {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_transactions_by_block_id(&self, id: u64) -> Result<Vec<Transaction>, sqlx::Error> {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_transactions_by_hash(
         &self,
         hash: TransactionHash,
@@ -100,7 +100,7 @@ impl TransactionStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_transactions_by_identifier(
         &self,
         identifier: &RawTransactionIdentifier,
@@ -108,7 +108,7 @@ impl TransactionStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn get_relevant_transactions(
         &self,
         session_id: SessionId,
@@ -118,7 +118,7 @@ impl TransactionStorage for NoopStorage {
         stream::empty()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn get_transactions_involving_unshielded(
         &self,
         address: RawUnshieldedAddress,
@@ -128,7 +128,7 @@ impl TransactionStorage for NoopStorage {
         stream::empty()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_highest_transaction_id_for_unshielded_address(
         &self,
         address: RawUnshieldedAddress,
@@ -136,7 +136,7 @@ impl TransactionStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_highest_end_indices(
         &self,
         session_id: SessionId,

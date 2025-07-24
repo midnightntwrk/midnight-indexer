@@ -94,7 +94,7 @@ where
 
 #[allow(unused_variables)]
 impl ContractActionStorage for NoopStorage {
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_contract_deploy_by_address(
         &self,
         address: &RawContractAddress,
@@ -102,7 +102,7 @@ impl ContractActionStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_latest_contract_action_by_address(
         &self,
         address: &RawContractAddress,
@@ -110,7 +110,7 @@ impl ContractActionStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_contract_action_by_address_and_block_hash(
         &self,
         address: &RawContractAddress,
@@ -119,7 +119,7 @@ impl ContractActionStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_contract_action_by_address_and_block_height(
         &self,
         address: &RawContractAddress,
@@ -128,7 +128,7 @@ impl ContractActionStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
         address: &RawContractAddress,
@@ -137,7 +137,7 @@ impl ContractActionStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_contract_action_by_address_and_transaction_identifier(
         &self,
         address: &RawContractAddress,
@@ -146,7 +146,7 @@ impl ContractActionStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_contract_actions_by_transaction_id(
         &self,
         id: u64,
@@ -154,7 +154,7 @@ impl ContractActionStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn get_contract_actions_by_address(
         &self,
         address: &RawContractAddress,
@@ -164,7 +164,7 @@ impl ContractActionStorage for NoopStorage {
         stream::empty()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_unshielded_balances_by_action_id(
         &self,
         contract_action_id: u64,
@@ -172,7 +172,7 @@ impl ContractActionStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get_contract_action_id_by_block_height(
         &self,
         block_height: u32,

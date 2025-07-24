@@ -15,11 +15,17 @@ use anyhow::Context;
 use fs_extra::dir::{CopyOptions, copy};
 use indexer_common::domain::NetworkId;
 use indexer_tests::e2e;
+use nix::{
+    sys::signal::{self, Signal},
+    unistd::Pid,
+};
 use reqwest::StatusCode;
 use std::{
-    collections::HashMap,
+    env,
     net::TcpListener,
     path::Path,
+    process::{Child, Command},
+    sync::LazyLock,
     time::{Duration, Instant},
 };
 use tempfile::TempDir;
@@ -28,59 +34,52 @@ use testcontainers::{
     core::{Mount, WaitFor},
     runners::AsyncRunner,
 };
-#[cfg(feature = "cloud")]
-use testcontainers_modules::postgres::Postgres;
-use tokio::{
-    process::{Child, Command},
-    time::sleep,
-};
+use tokio::time::sleep;
 
 const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
+
 const NODE_VERSION: &str = "0.13.2-rc.2";
+
+const WS_DIR: LazyLock<String> = LazyLock::new(|| format!("{}/..", env!("CARGO_MANIFEST_DIR")));
+
+const TARGET_DIR: LazyLock<String> = LazyLock::new(|| {
+    env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| format!("{}/target", &*WS_DIR))
+});
 
 /// Setup for e2e testing using workspace executables built by cargo. Sets up the Indexer with the
 /// "cloud" architecture, i.e. as three separate processes and also PostgreSQL and NATS as Docker
 /// containers. This is intended to be executed locally (`just test`) as well as on CI.
-#[tokio::test]
 #[cfg(feature = "cloud")]
+#[tokio::test]
 async fn main() -> anyhow::Result<()> {
     // Start PostgreSQL and NATS.
-    let (_postgres_container, postgres_port) = start_postgres().await.context("start postgres")?;
-    let (_nats_container, nats_url) = start_nats().await.context("start nats")?;
+    let (_postgres_container, postgres_port) = start_postgres().await?;
+    let (_nats_container, nats_url) = start_nats().await?;
     // Give PostgreSQL and NATS some headstart.
     sleep(Duration::from_millis(3_000)).await;
 
     // Start node.
-    let node_handle = start_node().await.context("start node")?;
+    let node_handle = start_node().await?;
 
     // Start Indexer components.
-    let mut chain_indexer = start_chain_indexer(postgres_port, &nats_url, &node_handle.node_url)
-        .context("start chain-indexer")?;
-    let (mut indexer_api, api_port) =
-        start_indexer_api(postgres_port, &nats_url, &mut chain_indexer)
-            .await
-            .context("start indexer-api")?;
-    let mut wallet_indexer = start_wallet_indexer(
-        postgres_port,
-        &nats_url,
-        &mut chain_indexer,
-        &mut indexer_api,
-    )
-    .await
-    .context("start wallet-indexer")?;
+    let mut chain_indexer = start_chain_indexer(postgres_port, &nats_url, &node_handle.node_url)?;
+    let mut wallet_indexer = start_wallet_indexer(postgres_port, &nats_url).await?;
+    let (mut indexer_api, api_port) = start_indexer_api(postgres_port, &nats_url).await?;
 
-    // Wait until indexer-api ready.
-    wait_for_api_ready(api_port, API_READY_TIMEOUT)
-        .await
-        .context("wait for indexer-api to become ready")?;
+    // Wait for indexer-api to become ready.
+    wait_for_api_ready(api_port, API_READY_TIMEOUT).await?;
 
     // Run the tests.
     let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
 
-    // It is best practice to kill the processes even when spawned with `kill_on_drop`.
-    let _ = chain_indexer.kill().await;
-    let _ = indexer_api.kill().await;
-    let _ = wallet_indexer.kill().await;
+    // Terminate Indexer components using SIGTERM and wait which is imporant for coverage data to be
+    // written and to avoid zombie processes.
+    let _ = signal::kill(Pid::from_raw(indexer_api.id() as i32), Signal::SIGTERM);
+    let _ = signal::kill(Pid::from_raw(wallet_indexer.id() as i32), Signal::SIGTERM);
+    let _ = signal::kill(Pid::from_raw(chain_indexer.id() as i32), Signal::SIGTERM);
+    let _ = indexer_api.wait();
+    let _ = wallet_indexer.wait();
+    let _ = chain_indexer.wait();
 
     result
 }
@@ -88,26 +87,29 @@ async fn main() -> anyhow::Result<()> {
 /// Setup for e2e testing using workspace executables built by cargo. Sets up the Indexer with the
 /// "standalone" architecture, i.e. as a single process. This is intended to be executed locally
 /// (`just test`) as well as on CI.
-#[tokio::test]
 #[cfg(feature = "standalone")]
+#[tokio::test]
 async fn main() -> anyhow::Result<()> {
     // Start node.
-    let node_handle = start_node().await.context("start node")?;
+    let node_handle = start_node().await?;
 
-    // Start Indexer components.
+    // Start Indexer.
     let (mut indexer_standalone, api_port, _temp_dir) =
         start_indexer_standalone(&node_handle.node_url).context("start indexer_standalone")?;
 
-    // Wait until indexer-api ready.
-    wait_for_api_ready(api_port, API_READY_TIMEOUT)
-        .await
-        .context("wait for indexer-api to become ready")?;
+    // Wait for indexer-api to become ready.
+    wait_for_api_ready(api_port, API_READY_TIMEOUT).await?;
 
     // Run the tests.
     let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
 
-    // It is best practice to kill the processes even when spawned with `kill_on_drop`.
-    let _ = indexer_standalone.kill().await;
+    // Terminate Indexer using SIGTERM and wait which is imporant for coverage data to be written
+    // and to avoid zombie processes.
+    let _ = signal::kill(
+        Pid::from_raw(indexer_standalone.id() as i32),
+        Signal::SIGTERM,
+    );
+    let _ = indexer_standalone.wait();
 
     result
 }
@@ -155,8 +157,12 @@ async fn start_node() -> anyhow::Result<NodeHandle> {
 }
 
 #[cfg(feature = "cloud")]
-async fn start_postgres() -> anyhow::Result<(ContainerAsync<Postgres>, u16)> {
+async fn start_postgres() -> anyhow::Result<(
+    ContainerAsync<testcontainers_modules::postgres::Postgres>,
+    u16,
+)> {
     use testcontainers::{ImageExt, runners::AsyncRunner};
+    use testcontainers_modules::postgres::Postgres;
 
     let postgres_container = Postgres::default()
         .with_db_name("indexer")
@@ -218,83 +224,52 @@ fn start_chain_indexer(
     nats_url: &str,
     node_url: &str,
 ) -> anyhow::Result<Child> {
-    let env_vars = [
-        ("RUST_LOG", "chain_indexer=error".to_string()),
-        (
+    Command::new(format!("{}/debug/chain-indexer", &*TARGET_DIR))
+        .env("RUST_LOG", "chain_indexer=warn,error")
+        .env(
             "CONFIG_FILE",
-            format!(
-                "{}/../chain-indexer/config.yaml",
-                env!("CARGO_MANIFEST_DIR")
-            ),
-        ),
-        ("APP__INFRA__NODE__URL", node_url.to_owned()),
-        ("APP__INFRA__PUB_SUB__URL", nats_url.to_owned()),
-        ("APP__INFRA__STORAGE__PORT", postgres_port.to_string()),
-        ("APP__INFRA__LEDGER_STATE_STORAGE__URL", nats_url.to_owned()),
-    ];
-
-    spawn_child("chain-indexer", env_vars.into())
+            format!("{}/chain-indexer/config.yaml", &*WS_DIR),
+        )
+        .env("APP__INFRA__NODE__URL", node_url)
+        .env("APP__INFRA__PUB_SUB__URL", nats_url)
+        .env("APP__INFRA__STORAGE__PORT", postgres_port.to_string())
+        .env("APP__INFRA__LEDGER_STATE_STORAGE__URL", nats_url)
+        .spawn()
+        .context("spawn chain-indexer process")
 }
 
 #[cfg(feature = "cloud")]
-async fn start_indexer_api(
-    postgres_port: u16,
-    nats_url: &str,
-    chain_indexer: &mut Child,
-) -> anyhow::Result<(Child, u16)> {
+async fn start_wallet_indexer(postgres_port: u16, nats_url: &str) -> anyhow::Result<Child> {
+    Command::new(format!("{}/debug/wallet-indexer", &*TARGET_DIR))
+        .env("RUST_LOG", "wallet_indexer=warn,error")
+        .env(
+            "CONFIG_FILE",
+            format!("{}/wallet-indexer/config.yaml", &*WS_DIR),
+        )
+        .env("APP__INFRA__PUB_SUB__URL", nats_url)
+        .env("APP__INFRA__STORAGE__PORT", postgres_port.to_string())
+        .spawn()
+        .context("spawn wallet-indexer process")
+}
+
+#[cfg(feature = "cloud")]
+async fn start_indexer_api(postgres_port: u16, nats_url: &str) -> anyhow::Result<(Child, u16)> {
     let api_port = find_free_port()?;
 
-    let env_vars = [
-        ("RUST_LOG", "error".to_string()),
-        (
+    Command::new(format!("{}/debug/indexer-api", &*TARGET_DIR))
+        .env("RUST_LOG", "indexer_api=warn,error")
+        .env(
             "CONFIG_FILE",
-            format!("{}/../indexer-api/config.yaml", env!("CARGO_MANIFEST_DIR")),
-        ),
-        ("APP__INFRA__API__PORT", api_port.to_string()),
-        ("APP__INFRA__API__MAX_COMPLEXITY", "500".to_string()),
-        ("APP__INFRA__NETWORK_ID", "Undeployed".to_string()),
-        ("APP__INFRA__PUB_SUB__URL", nats_url.to_owned()),
-        ("APP__INFRA__STORAGE__PORT", postgres_port.to_string()),
-        ("APP__INFRA__LEDGER_STATE_STORAGE__URL", nats_url.to_owned()),
-    ];
-
-    let child = spawn_child("indexer-api", env_vars.into());
-
-    if child.is_err() {
-        let _ = chain_indexer.kill().await;
-    }
-
-    child.map(|child| (child, api_port))
-}
-
-#[cfg(feature = "cloud")]
-async fn start_wallet_indexer(
-    postgres_port: u16,
-    nats_url: &str,
-    chain_indexer: &mut Child,
-    indexer_api: &mut Child,
-) -> anyhow::Result<Child> {
-    let env_vars = [
-        ("RUST_LOG", "error".into()),
-        (
-            "CONFIG_FILE",
-            format!(
-                "{}/../wallet-indexer/config.yaml",
-                env!("CARGO_MANIFEST_DIR")
-            ),
-        ),
-        ("APP__INFRA__PUB_SUB__URL", nats_url.to_owned()),
-        ("APP__INFRA__STORAGE__PORT", postgres_port.to_string()),
-    ];
-
-    let child = spawn_child("wallet-indexer", env_vars.into());
-
-    if child.is_err() {
-        let _ = chain_indexer.kill().await;
-        let _ = indexer_api.kill().await;
-    }
-
-    child
+            format!("{}/indexer-api/config.yaml", &*WS_DIR),
+        )
+        .env("APP__INFRA__API__PORT", api_port.to_string())
+        .env("APP__INFRA__API__MAX_COMPLEXITY", "500")
+        .env("APP__INFRA__PUB_SUB__URL", nats_url)
+        .env("APP__INFRA__STORAGE__PORT", postgres_port.to_string())
+        .env("APP__INFRA__LEDGER_STATE_STORAGE__URL", nats_url)
+        .spawn()
+        .context("spawn indexer-api process")
+        .map(|child| (child, api_port))
 }
 
 #[cfg(feature = "standalone")]
@@ -303,37 +278,19 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
     let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
     let sqlite_file = temp_dir.path().join("indexer.sqlite").display().to_string();
 
-    let env_vars = [
-        ("RUST_LOG", "error".to_string()),
-        (
+    Command::new(format!("{}/debug/indexer-standalone", &*TARGET_DIR))
+        .env("RUST_LOG", "indexer_standalone=warn,error")
+        .env(
             "CONFIG_FILE",
-            format!(
-                "{}/../indexer-standalone/config.yaml",
-                env!("CARGO_MANIFEST_DIR")
-            ),
-        ),
-        ("APP__INFRA__API__PORT", api_port.to_string()),
-        ("APP__INFRA__API__MAX_COMPLEXITY", "500".to_string()),
-        ("APP__INFRA__NODE__URL", node_url.to_owned()),
-        ("APP__INFRA__STORAGE__CNN_URL", sqlite_file),
-    ];
-
-    spawn_child("indexer-standalone", env_vars.into()).map(|child| (child, api_port, temp_dir))
-}
-
-fn spawn_child(
-    name: &'static str,
-    env_vars: HashMap<&'static str, String>,
-) -> anyhow::Result<Child> {
-    Command::new(format!(
-        "{}/debug/{name}",
-        std::env::var("CARGO_TARGET_DIR")
-            .unwrap_or(format!("{}/../target/", env!("CARGO_MANIFEST_DIR")))
-    ))
-    .envs(env_vars)
-    .kill_on_drop(true)
-    .spawn()
-    .context(format!("spawn child {name}"))
+            format!("{}/indexer-standalone/config.yaml", &*WS_DIR),
+        )
+        .env("APP__INFRA__API__PORT", api_port.to_string())
+        .env("APP__INFRA__API__MAX_COMPLEXITY", "500")
+        .env("APP__INFRA__NODE__URL", node_url)
+        .env("APP__INFRA__STORAGE__CNN_URL", sqlite_file)
+        .spawn()
+        .context("spawn indexer-standalone process")
+        .map(|child| (child, api_port, temp_dir))
 }
 
 async fn wait_for_api_ready(api_port: u16, timeout: Duration) -> anyhow::Result<()> {
