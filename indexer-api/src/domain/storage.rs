@@ -13,13 +13,14 @@
 
 pub mod block;
 pub mod contract_action;
+pub mod dust;
 pub mod transaction;
 pub mod unshielded;
 pub mod wallet;
 
 use crate::domain::storage::{
-    block::BlockStorage, contract_action::ContractActionStorage, transaction::TransactionStorage,
-    unshielded::UnshieldedUtxoStorage, wallet::WalletStorage,
+    block::BlockStorage, contract_action::ContractActionStorage, dust::DustStorage,
+    transaction::TransactionStorage, unshielded::UnshieldedUtxoStorage, wallet::WalletStorage,
 };
 use std::fmt::Debug;
 
@@ -29,6 +30,7 @@ pub trait Storage
 where
     Self: BlockStorage
         + ContractActionStorage
+        + DustStorage
         + TransactionStorage
         + UnshieldedUtxoStorage
         + WalletStorage
