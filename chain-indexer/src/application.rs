@@ -32,6 +32,7 @@ use serde::Deserialize;
 use std::{collections::HashSet, error::Error as StdError, future::ready, pin::pin, sync::Arc};
 use tokio::{
     select,
+    signal::unix::Signal,
     task::{self},
 };
 
@@ -62,6 +63,7 @@ pub async fn run(
     storage: impl Storage,
     mut ledger_state_storage: impl LedgerStateStorage,
     publisher: impl Publisher,
+    mut sigterm: Signal,
 ) -> anyhow::Result<()> {
     let network_id = config.network_id;
 
@@ -210,9 +212,19 @@ pub async fn run(
     });
 
     select! {
-        result = highest_block_on_node_task => result,
-        result = index_blocks_task => result,
-    }?
+        result = highest_block_on_node_task => result
+            .context("highest_block_on_node_task panicked")
+            .and_then(|r| r.context("highest_block_on_node_task failed")),
+
+        result = index_blocks_task => result
+            .context("index_blocks_task panicked")
+            .and_then(|r| r.context("index_blocks_task failed")),
+
+        _ = sigterm.recv() => {
+            warn!("SIGTERM received");
+            Ok(())
+        }
+    }
 }
 
 /// An infinite stream of [Block]s, neither with duplicates, nor with gaps or otherwise unexpected

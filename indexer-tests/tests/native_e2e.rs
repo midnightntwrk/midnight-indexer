@@ -40,9 +40,9 @@ const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
 const NODE_VERSION: &str = "0.13.2-rc.2";
 
-const WS_DIR: LazyLock<String> = LazyLock::new(|| format!("{}/..", env!("CARGO_MANIFEST_DIR")));
+static WS_DIR: LazyLock<String> = LazyLock::new(|| format!("{}/..", env!("CARGO_MANIFEST_DIR")));
 
-const TARGET_DIR: LazyLock<String> = LazyLock::new(|| {
+static TARGET_DIR: LazyLock<String> = LazyLock::new(|| {
     env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| format!("{}/target", &*WS_DIR))
 });
 

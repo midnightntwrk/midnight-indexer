@@ -33,17 +33,14 @@ where
 
 #[allow(unused_variables)]
 impl WalletStorage for NoopStorage {
-    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<(), sqlx::Error> {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn set_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
         unimplemented!()
     }
