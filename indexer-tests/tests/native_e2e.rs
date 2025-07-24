@@ -48,7 +48,8 @@ static TARGET_DIR: LazyLock<String> = LazyLock::new(|| {
 
 /// Setup for e2e testing using workspace executables built by cargo. Sets up the Indexer with the
 /// "cloud" architecture, i.e. as three separate processes and also PostgreSQL and NATS as Docker
-/// containers. This is intended to be executed locally (`just test`) as well as on CI.
+/// containers. This is intended to be executed locally (`just test`) as well as on CI. This setup
+/// is also intended to be used for test coverage measurements using `cargo llvm-cov`.
 #[cfg(feature = "cloud")]
 #[tokio::test]
 async fn main() -> anyhow::Result<()> {
@@ -86,7 +87,8 @@ async fn main() -> anyhow::Result<()> {
 
 /// Setup for e2e testing using workspace executables built by cargo. Sets up the Indexer with the
 /// "standalone" architecture, i.e. as a single process. This is intended to be executed locally
-/// (`just test`) as well as on CI.
+/// (`just test`) as well as on CI. This setup is also intended to be used for test coverage
+/// measurements using `cargo llvm-cov`.
 #[cfg(feature = "standalone")]
 #[tokio::test]
 async fn main() -> anyhow::Result<()> {

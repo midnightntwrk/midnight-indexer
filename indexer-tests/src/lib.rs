@@ -11,8 +11,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-#![cfg_attr(coverage_nightly, coverage(off))]
-
 pub mod e2e;
 pub mod graphql_ws_client;

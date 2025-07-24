@@ -79,6 +79,7 @@ all-features:
 
 coverage:
     #!/usr/bin/env bash
+    set -euxo pipefail
     rustup component add llvm-tools-preview --toolchain nightly-2025-07-01
     cargo llvm-cov clean --workspace
     # First build tests without instrumentation.
