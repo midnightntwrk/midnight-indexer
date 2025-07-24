@@ -49,7 +49,11 @@ async fn run() -> anyhow::Result<()> {
     };
     use log::info;
     use std::panic;
-    use tokio::{select, task};
+    use tokio::{
+        select,
+        signal::unix::{SignalKind, signal},
+        task,
+    };
 
     // Load configuration.
     let Config {
@@ -101,6 +105,7 @@ async fn run() -> anyhow::Result<()> {
             .await
             .context("create SubxtNode")?;
         let storage = chain_indexer::infra::storage::Storage::new(pool.clone());
+        let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
         chain_indexer::application::run(
             application_config.into(),
@@ -108,28 +113,37 @@ async fn run() -> anyhow::Result<()> {
             storage,
             ledger_state_storage.clone(),
             pub_sub.publisher(),
+            sigterm,
         )
     });
 
     let indexer_api = task::spawn({
-        let storage = indexer_api::infra::storage::Storage::new(cipher.clone(), pool.clone());
         let subscriber = pub_sub.subscriber();
+        let storage = indexer_api::infra::storage::Storage::new(cipher.clone(), pool.clone());
         let api = AxumApi::new(
             api_config,
             storage,
             ledger_state_storage,
             subscriber.clone(),
         );
+        let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
-        indexer_api::application::run(application_config.into(), api, subscriber)
+        indexer_api::application::run(application_config.into(), api, subscriber, sigterm)
     });
 
     let wallet_indexer = task::spawn({
         let storage = wallet_indexer::infra::storage::Storage::new(cipher, pool);
         let publisher = pub_sub.publisher();
         let subscriber = pub_sub.subscriber();
+        let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
-        wallet_indexer::application::run(application_config.into(), storage, publisher, subscriber)
+        wallet_indexer::application::run(
+            application_config.into(),
+            storage,
+            publisher,
+            subscriber,
+            sigterm,
+        )
     });
 
     select! {

@@ -46,7 +46,7 @@ async fn run() -> anyhow::Result<()> {
     use wallet_indexer::{application, config::Config, infra};
 
     // Register SIGTERM handler.
-    let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+    let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
     // Load configuration.
     let config = Config::load().context("load configuration")?;
@@ -91,14 +91,7 @@ async fn run() -> anyhow::Result<()> {
         .context("create NatsSubscriber")?;
 
     // Run indexing.
-    application::run(
-        application_config,
-        storage,
-        publisher,
-        subscriber,
-        &mut sigterm,
-    )
-    .await
+    application::run(application_config, storage, publisher, subscriber, sigterm).await
 }
 
 #[cfg(not(feature = "cloud"))]

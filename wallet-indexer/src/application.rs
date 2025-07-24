@@ -51,7 +51,7 @@ pub async fn run(
     storage: impl Storage,
     publisher: impl Publisher,
     subscriber: impl Subscriber,
-    sigterm: &mut Signal,
+    mut sigterm: Signal,
 ) -> anyhow::Result<()> {
     let Config {
         network_id,
