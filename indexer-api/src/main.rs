@@ -46,7 +46,11 @@ async fn run() -> anyhow::Result<()> {
         infra::{ledger_state_storage, migrations, pool, pub_sub},
         telemetry,
     };
-    use log::{error, info};
+    use log::info;
+    use tokio::signal::unix::{SignalKind, signal};
+
+    // Register SIGTERM handler.
+    let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
     // Load configuration.
     let config = Config::load().context("load configuration")?;
@@ -99,13 +103,9 @@ async fn run() -> anyhow::Result<()> {
         subscriber.clone(),
     );
 
-    application::run(application_config, api, subscriber)
+    application::run(application_config, api, subscriber, sigterm)
         .await
-        .context("run indexer-API application")?;
-
-    error!("indexer-api terminated");
-
-    Ok(())
+        .context("run indexer-API application")
 }
 
 #[cfg(not(feature = "cloud"))]

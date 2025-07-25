@@ -17,7 +17,7 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, future::ok, stream};
 use indexer_common::domain::{BlockIndexed, NetworkId, Publisher, Subscriber, WalletIndexed};
 use itertools::Itertools;
-use log::debug;
+use log::{debug, warn};
 use serde::Deserialize;
 use std::{
     num::NonZeroUsize,
@@ -27,7 +27,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{select, task};
+use tokio::{select, signal::unix::Signal, task};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -51,6 +51,7 @@ pub async fn run(
     storage: impl Storage,
     publisher: impl Publisher,
     subscriber: impl Subscriber,
+    mut sigterm: Signal,
 ) -> anyhow::Result<()> {
     let Config {
         network_id,
@@ -112,9 +113,19 @@ pub async fn run(
     };
 
     select! {
-        result = block_indexed_task => result,
-        result = index_wallets_task => result,
-    }?
+        result = block_indexed_task => result
+            .context("block_indexed_task")
+            .and_then(|r| r.context("block_indexed_task failed")),
+
+        result = index_wallets_task => result
+            .context("index_wallets_task panicked")
+            .and_then(|r| r.context("index_wallets_task failed")),
+
+        _ = sigterm.recv() => {
+            warn!("SIGTERM received");
+            Ok(())
+        }
+    }
 }
 
 fn active_wallets(

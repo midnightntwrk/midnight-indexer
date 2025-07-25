@@ -77,6 +77,25 @@ all-features:
     just all
     just feature=standalone all
 
+coverage:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+    rustup component add llvm-tools-preview --toolchain nightly-2025-07-01
+    cargo llvm-cov clean --workspace
+    # First build tests without instrumentation.
+    cloud_tests=$(cargo test -p indexer-tests --test native_e2e --features cloud --no-run --message-format=json | jq -r 'select(.profile.test == true and .target.name == "native_e2e") | .executable')
+    standalone_tests=$(cargo test -p indexer-tests --test native_e2e --features standalone --no-run --message-format=json | jq -r 'select(.profile.test == true and .target.name == "native_e2e") | .executable')
+    # Then setup for coverage instrumentation and build the executables which are spawned in the tests.
+    source <(cargo +nightly-2025-07-01 llvm-cov show-env --export-prefix)
+    cargo +nightly-2025-07-01 build -p chain-indexer      --features cloud
+    cargo +nightly-2025-07-01 build -p wallet-indexer     --features cloud
+    cargo +nightly-2025-07-01 build -p indexer-api        --features cloud
+    cargo +nightly-2025-07-01 build -p indexer-standalone --features standalone
+    # Finally execute tests and create coverage report.
+    "$cloud_tests"
+    "$standalone_tests"
+    cargo llvm-cov report --html
+
 docker-chain-indexer profile="dev":
     tag=$(git rev-parse --short=8 HEAD) && \
     docker build \
@@ -162,12 +181,6 @@ run-indexer-standalone node="ws://localhost:9944" network_id="Undeployed":
         APP__INFRA__NODE__URL={{node}} \
         APP__INFRA__STORAGE__CNN_URL=target/data/indexer.sqlite \
         cargo run -p indexer-standalone --features standalone
-
-coverage-generation:
-    RUSTC_BOOTSTRAP=1 cargo llvm-cov --lcov --output-path target/lcov.info --features "cloud test"
-
-coverage-report: coverage-generation
-    RUSTC_BOOTSTRAP=1 cargo llvm-cov report --open
 
 node_version := "0.13.2-rc.2"
 generator_version := "0.13.2-rc.2"
