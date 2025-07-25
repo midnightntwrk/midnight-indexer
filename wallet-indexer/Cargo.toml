@@ -33,10 +33,6 @@ tokio-stream     = { workspace = true }
 trait-variant    = { workspace = true }
 uuid             = { workspace = true, features = [ "v7" ] }
 
-[dev-dependencies]
-testcontainers         = { workspace = true }
-testcontainers-modules = { workspace = true, features = [ "postgres" ] }
-
 [features]
 cloud      = [ "indexer-common/cloud" ]
 standalone = [ "indexer-common/standalone" ]

@@ -11,7 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[subxt::subxt(runtime_metadata_path = "../.node/0.13.2-rc.2/metadata.scale")]
+#[subxt::subxt(
+    runtime_metadata_path = "../.node/0.13.2-rc.2/metadata.scale",
+    derive_for_type(
+        path = "sp_consensus_slots::Slot",
+        derive = "parity_scale_codec::Encode, parity_scale_codec::Decode",
+        recursive
+    )
+)]
 mod runtime_0_13 {}
 
 use crate::infra::subxt_node::SubxtNodeError;
