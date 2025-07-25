@@ -44,10 +44,7 @@ use opentelemetry::InstrumentationScope;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::Resource;
 use serde::Deserialize;
-use std::{
-    borrow::Cow,
-    net::{IpAddr, Ipv4Addr},
-};
+use std::{borrow::Cow, net::IpAddr};
 
 /// Telemetry (tracing, metrics) configuration.
 #[derive(Debug, Clone, Deserialize)]
@@ -64,21 +61,15 @@ pub struct Config {
 /// All fields have sensible deserialization defaults.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TracingConfig {
-    /// Defaults to false.
-    #[serde(default)]
     pub enabled: bool,
 
-    /// Defaults to false.
-    #[serde(default)]
-    pub console_reporter_enabled: bool,
+    pub service_name: String,
 
-    /// Defaults to OTLP gRPC: "http://localhost:4317".
-    #[serde(default = "otlp_exporter_endpoint_default")]
     pub otlp_exporter_endpoint: String,
 
-    /// Defaults to the package name.
-    #[serde(default = "package_name")]
-    pub service_name: String,
+    /// Should only be used for testing. Defaults to false.
+    #[serde(default)]
+    pub console_reporter_enabled: bool,
 
     /// Defaults to the package name.
     #[serde(default = "package_name")]
@@ -89,45 +80,14 @@ pub struct TracingConfig {
     pub instrumentation_scope_version: String,
 }
 
-impl Default for TracingConfig {
-    fn default() -> Self {
-        Self {
-            enabled: Default::default(),
-            console_reporter_enabled: Default::default(),
-            otlp_exporter_endpoint: otlp_exporter_endpoint_default(),
-            service_name: package_name(),
-            instrumentation_scope_name: package_name(),
-            instrumentation_scope_version: package_version(),
-        }
-    }
-}
-
 /// Metrics configuration.
 ///
 /// All fields have sensible deserialization defaults.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MetricsConfig {
-    /// Defaults to false.
-    #[serde(default)]
     pub enabled: bool,
-
-    /// Defaults to `"0.0.0.0"`.
-    #[serde(default = "metrics_address_default")]
     pub address: IpAddr,
-
-    /// Defaults to `9,000`.
-    #[serde(default = "metrics_port_default")]
     pub port: u16,
-}
-
-impl Default for MetricsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: Default::default(),
-            address: metrics_address_default(),
-            port: metrics_port_default(),
-        }
-    }
 }
 
 /// Initialize logging with [Logforth](https://github.com/fast/logforth).
@@ -233,22 +193,10 @@ impl Reporter for TracingReporter {
     }
 }
 
-fn otlp_exporter_endpoint_default() -> String {
-    "http://localhost:4317".to_string()
-}
-
 fn package_name() -> String {
     env!("CARGO_PKG_NAME").to_owned()
 }
 
 fn package_version() -> String {
     format!("v{}", env!("CARGO_PKG_VERSION"))
-}
-
-fn metrics_address_default() -> IpAddr {
-    IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-}
-
-fn metrics_port_default() -> u16 {
-    9_000
 }

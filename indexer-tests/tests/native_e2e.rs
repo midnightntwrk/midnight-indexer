@@ -227,7 +227,10 @@ fn start_chain_indexer(
     node_url: &str,
 ) -> anyhow::Result<Child> {
     Command::new(format!("{}/debug/chain-indexer", &*TARGET_DIR))
-        .env("RUST_LOG", "chain_indexer=warn,error")
+        .env(
+            "RUST_LOG",
+            "chain_indexer=warn,fastrace_opentelemetry=off,error",
+        )
         .env(
             "CONFIG_FILE",
             format!("{}/chain-indexer/config.yaml", &*WS_DIR),
@@ -236,6 +239,7 @@ fn start_chain_indexer(
         .env("APP__INFRA__PUB_SUB__URL", nats_url)
         .env("APP__INFRA__STORAGE__PORT", postgres_port.to_string())
         .env("APP__INFRA__LEDGER_STATE_STORAGE__URL", nats_url)
+        .env("APP__TELEMETRY__TRACING__ENABLED", "true")
         .spawn()
         .context("spawn chain-indexer process")
 }
@@ -243,13 +247,17 @@ fn start_chain_indexer(
 #[cfg(feature = "cloud")]
 async fn start_wallet_indexer(postgres_port: u16, nats_url: &str) -> anyhow::Result<Child> {
     Command::new(format!("{}/debug/wallet-indexer", &*TARGET_DIR))
-        .env("RUST_LOG", "wallet_indexer=warn,error")
+        .env(
+            "RUST_LOG",
+            "wallet_indexer=warn,fastrace_opentelemetry=off,error",
+        )
         .env(
             "CONFIG_FILE",
             format!("{}/wallet-indexer/config.yaml", &*WS_DIR),
         )
         .env("APP__INFRA__PUB_SUB__URL", nats_url)
         .env("APP__INFRA__STORAGE__PORT", postgres_port.to_string())
+        .env("APP__TELEMETRY__TRACING__ENABLED", "true")
         .spawn()
         .context("spawn wallet-indexer process")
 }
@@ -259,7 +267,10 @@ async fn start_indexer_api(postgres_port: u16, nats_url: &str) -> anyhow::Result
     let api_port = find_free_port()?;
 
     Command::new(format!("{}/debug/indexer-api", &*TARGET_DIR))
-        .env("RUST_LOG", "indexer_api=warn,error")
+        .env(
+            "RUST_LOG",
+            "indexer_api=warn,fastrace_opentelemetry=off,error",
+        )
         .env(
             "CONFIG_FILE",
             format!("{}/indexer-api/config.yaml", &*WS_DIR),
@@ -269,6 +280,7 @@ async fn start_indexer_api(postgres_port: u16, nats_url: &str) -> anyhow::Result
         .env("APP__INFRA__PUB_SUB__URL", nats_url)
         .env("APP__INFRA__STORAGE__PORT", postgres_port.to_string())
         .env("APP__INFRA__LEDGER_STATE_STORAGE__URL", nats_url)
+        .env("APP__TELEMETRY__TRACING__ENABLED", "true")
         .spawn()
         .context("spawn indexer-api process")
         .map(|child| (child, api_port))
@@ -281,7 +293,10 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
     let sqlite_file = temp_dir.path().join("indexer.sqlite").display().to_string();
 
     Command::new(format!("{}/debug/indexer-standalone", &*TARGET_DIR))
-        .env("RUST_LOG", "indexer_standalone=warn,error")
+        .env(
+            "RUST_LOG",
+            "indexer_standalone=warn,fastrace_opentelemetry=off,error",
+        )
         .env(
             "CONFIG_FILE",
             format!("{}/indexer-standalone/config.yaml", &*WS_DIR),
@@ -290,6 +305,7 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
         .env("APP__INFRA__API__MAX_COMPLEXITY", "500")
         .env("APP__INFRA__NODE__URL", node_url)
         .env("APP__INFRA__STORAGE__CNN_URL", sqlite_file)
+        .env("APP__TELEMETRY__TRACING__ENABLED", "true")
         .spawn()
         .context("spawn indexer-standalone process")
         .map(|child| (child, api_port, temp_dir))
