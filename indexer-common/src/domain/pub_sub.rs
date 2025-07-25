@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg_attr(coverage_nightly, coverage(off))]
+
 use crate::domain::{RawUnshieldedAddress, SessionId};
 use derive_more::derive::From;
 use futures::{Stream, stream};
