@@ -27,6 +27,7 @@ tokio           = { workspace = true, features = [ "macros", "rt-multi-thread", 
 wallet-indexer  = { path = "../wallet-indexer", optional = true }
 
 [features]
+cloud = [  ]
 standalone = [
     "chain-indexer/standalone",
     "indexer-api/standalone",
