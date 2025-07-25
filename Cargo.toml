@@ -58,7 +58,7 @@ midnight-onchain-runtime    = { git = "https://github.com/midnightntwrk/midnight
 midnight-serialize          = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.3" }
 midnight-storage            = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.3" }
 midnight-transient-crypto   = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.3" }
-midnight-zswap              = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.3" }
+midnight-zswap              = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-6.0" }
 nix                         = { version = "0.30" }
 opentelemetry               = { version = "0.30" }
 opentelemetry_sdk           = { version = "0.30" }
