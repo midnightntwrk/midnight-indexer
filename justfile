@@ -7,14 +7,14 @@ rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\
 nightly := "nightly-2025-07-01"
 node_version := "0.13.2-rc.2"
 
-license-headers:
-    ./license_headers.sh
-
 check:
     for package in {{packages}}; do \
         cargo check -p "$package" --tests; \
         cargo check -p "$package" --tests --features {{feature}}; \
     done
+
+license-headers:
+    ./license_headers.sh
 
 fmt:
     cargo +{{nightly}} fmt

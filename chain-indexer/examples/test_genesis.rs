@@ -4,7 +4,7 @@ use chain_indexer::{
     infra::subxt_node::{Config, SubxtNode},
 };
 use futures::{StreamExt, TryStreamExt};
-use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_013_000};
+use indexer_common::domain::PROTOCOL_VERSION_000_013_000;
 use std::{pin::pin, time::Duration};
 
 /// Simple test to verify connection to midnight-node and basic block retrieval.
@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 
-    let blocks = node.finalized_blocks(None, NetworkId::Undeployed).take(3);
+    let blocks = node.finalized_blocks(None).take(3);
     let mut blocks = pin!(blocks);
 
     while let Some(block) = blocks.try_next().await.context("get next block")? {

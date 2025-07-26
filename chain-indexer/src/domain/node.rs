@@ -35,6 +35,5 @@ where
     fn finalized_blocks(
         &mut self,
         after: Option<BlockInfo>,
-        network_id: NetworkId,
     ) -> impl Stream<Item = Result<Block, Self::Error>>;
 }

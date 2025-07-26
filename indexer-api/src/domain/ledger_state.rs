@@ -13,7 +13,7 @@
 
 use derive_more::derive::{Deref, From};
 use indexer_common::{
-    domain::{ByteVec, LedgerStateStorage, NetworkId, ProtocolVersion, ledger},
+    domain::{ByteVec, LedgerStateStorage, ProtocolVersion, ledger},
     error::BoxError,
 };
 use log::debug;
@@ -29,7 +29,6 @@ impl LedgerStateCache {
         start_index: u64,
         end_index: u64,
         ledger_state_storage: &impl LedgerStateStorage,
-        network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, LedgerStateCacheError> {
         // Acquire a read lock.
@@ -63,12 +62,9 @@ impl LedgerStateCache {
 
                 match ledger_state_and_protocol_version {
                     Some((ledger_state, protocol_version)) => {
-                        let ledger_state = ledger::LedgerState::deserialize(
-                            ledger_state,
-                            network_id,
-                            protocol_version,
-                        )?
-                        .into();
+                        let ledger_state =
+                            ledger::LedgerState::deserialize(ledger_state, protocol_version)?
+                                .into();
 
                         *ledger_state_write = ledger_state;
                     }
@@ -82,12 +78,8 @@ impl LedgerStateCache {
 
         debug!(start_index, end_index; "creating collapsed update");
 
-        let collapsed_update = ledger_state_read.collapsed_update(
-            start_index,
-            end_index,
-            network_id,
-            protocol_version,
-        )?;
+        let collapsed_update =
+            ledger_state_read.collapsed_update(start_index, end_index, protocol_version)?;
 
         Ok(collapsed_update)
     }
@@ -115,12 +107,9 @@ impl LedgerState {
         &self,
         start_index: u64,
         end_index: u64,
-        network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, ledger::Error> {
-        let update = self
-            .0
-            .collapsed_update(start_index, end_index, network_id)?;
+        let update = self.0.collapsed_update(start_index, end_index)?;
 
         Ok(MerkleTreeCollapsedUpdate {
             start_index,

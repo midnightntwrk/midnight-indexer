@@ -12,10 +12,10 @@
 // limitations under the License.
 
 use crate::domain::{
-    ContractAction, ContractAttributes, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
+    ContractAction, ContractAttributes, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
     RawContractAddress, RawContractState, RawTransactionIdentifier, TransactionHash,
     TransactionStructure, ViewingKey,
-    ledger::{Error, LedgerTransactionV5, NetworkIdExt, SerializableV5Ext},
+    ledger::{Error, LedgerTransactionV5, TaggedSerializableV5Ext},
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
@@ -26,7 +26,7 @@ use midnight_ledger::structure::{
     ContractAction as ContractActionV5, StandardTransaction as StandardTransactionV5,
     Transaction as TransactionV5,
 };
-use midnight_serialize::deserialize as deserialize_v5;
+use midnight_serialize::tagged_deserialize;
 use midnight_storage::{DefaultDB as DefaultDBV5, arena::Sp as SpV5};
 use midnight_transient_crypto::{encryption::SecretKey as SecretKeyV5, proofs::Proof as ProofV5};
 use midnight_zswap::Offer as OfferV5;
@@ -39,20 +39,15 @@ pub enum Transaction {
 }
 
 impl Transaction {
-    /// Deserialize the given raw transaction using the given protocol version and network ID.
-    #[trace(properties = {
-        "network_id": "{network_id}",
-        "protocol_version": "{protocol_version}"
-    })]
+    /// Deserialize the given raw transaction using the given protocol version.
+    #[trace(properties = { "protocol_version": "{protocol_version}" })]
     pub fn deserialize(
         raw_transaction: impl AsRef<[u8]>,
-        network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-            let transaction =
-                deserialize_v5(&mut raw_transaction.as_ref(), network_id.into_ledger_v5())
-                    .map_err(|error| Error::Io("cannot deserialize LedgerTransactionV5", error))?;
+            let transaction = tagged_deserialize(&mut raw_transaction.as_ref())
+                .map_err(|error| Error::Io("cannot deserialize LedgerTransactionV5", error))?;
             Ok(Self::V5(transaction))
         } else {
             Err(Error::InvalidProtocolVersion(protocol_version))
@@ -67,15 +62,12 @@ impl Transaction {
     }
 
     /// Get the identifiers.
-    pub fn identifiers(
-        &self,
-        network_id: NetworkId,
-    ) -> Result<Vec<RawTransactionIdentifier>, Error> {
+    pub fn identifiers(&self) -> Result<Vec<RawTransactionIdentifier>, Error> {
         match self {
             Transaction::V5(transaction) => transaction
                 .identifiers()
                 .map(|identifier| {
-                    let identifier = identifier.serialize(network_id).map_err(|error| {
+                    let identifier = identifier.tagged_serialize().map_err(|error| {
                         Error::Io("cannot serialize TransactionIdentifierV5", error)
                     })?;
                     Ok(identifier.into())
@@ -85,11 +77,10 @@ impl Transaction {
     }
 
     /// Get the contract actions; this involves node calls.
-    #[trace(properties = { "network_id": "{network_id}" })]
+    #[trace]
     pub async fn contract_actions<E, F>(
         &self,
         get_contract_state: impl Fn(RawContractAddress) -> F,
-        network_id: NetworkId,
     ) -> Result<Vec<ContractAction>, Error>
     where
         E: StdError + 'static + Send + Sync,
@@ -102,8 +93,7 @@ impl Transaction {
                         .then(|(_, contract_action)| async {
                             match contract_action {
                                 ContractActionV5::Deploy(deploy) => {
-                                    let address =
-                                        serialize_contract_address(deploy.address(), network_id)?;
+                                    let address = serialize_contract_address(deploy.address())?;
                                     let state = get_contract_state(address.clone())
                                         .await
                                         .map_err(|error| Error::GetContractState(error.into()))?;
@@ -116,8 +106,7 @@ impl Transaction {
                                 }
 
                                 ContractActionV5::Call(call) => {
-                                    let address =
-                                        serialize_contract_address(call.address, network_id)?;
+                                    let address = serialize_contract_address(call.address)?;
                                     let state = get_contract_state(address.clone())
                                         .await
                                         .map_err(|error| Error::GetContractState(error.into()))?;
@@ -131,8 +120,7 @@ impl Transaction {
                                 }
 
                                 ContractActionV5::Maintain(update) => {
-                                    let address =
-                                        serialize_contract_address(update.address, network_id)?;
+                                    let address = serialize_contract_address(update.address)?;
                                     let state = get_contract_state(address.clone())
                                         .await
                                         .map_err(|error| Error::GetContractState(error.into()))?;
@@ -151,7 +139,7 @@ impl Transaction {
                     Ok(contract_actions)
                 }
 
-                TransactionV5::ClaimMint(_) => Ok(vec![]),
+                TransactionV5::ClaimRewards(_) => Ok(vec![]),
             },
         }
     }
@@ -182,7 +170,7 @@ impl Transaction {
                     }
                 }
 
-                LedgerTransactionV5::ClaimMint(_) => TransactionStructure {
+                LedgerTransactionV5::ClaimRewards(_) => TransactionStructure {
                     segment_count: 1,
                     estimated_input_count: 1,
                     estimated_output_count: 1,
@@ -219,18 +207,15 @@ impl Transaction {
                     can_decrypt_guaranteed_coins && can_decrypt_fallible_coins
                 }
 
-                TransactionV5::ClaimMint(_) => false,
+                TransactionV5::ClaimRewards(_) => false,
             },
         }
     }
 }
 
-fn serialize_contract_address(
-    address: ContractAddressV5,
-    network_id: NetworkId,
-) -> Result<RawContractAddress, Error> {
+fn serialize_contract_address(address: ContractAddressV5) -> Result<RawContractAddress, Error> {
     let address = address
-        .serialize(network_id)
+        .tagged_serialize()
         .map_err(|error| Error::Io("cannot serialize ContractAddressV5", error))?;
     Ok(address.into())
 }
