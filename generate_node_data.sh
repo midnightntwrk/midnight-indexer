@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 
-set -euxo pipefail
+set -eo pipefail
 
+if [ -z "$1" ]; then
+    echo "Error: node version parameter is required" >&2
+    echo "Usage: $0 <node_version>" >&2
+    exit 1
+fi
 node_version="$1"
 
-if [ -d ./.node/$node_version ]; then \
-    rm -r ./.node/$node_version; \
+if [ -d ./.node/$node_version ]; then
+    rm -r ./.node/$node_version;
 fi
 
 docker run \

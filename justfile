@@ -69,7 +69,7 @@ all-all:
     just feature=standalone all
 
 coverage:
-    ./coverage.sh
+    ./coverage.sh {{nightly}}
 
 generate-indexer-api-schema:
     cargo run -p indexer-api --bin indexer-api-cli print-api-schema-v1 > \
