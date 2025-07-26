@@ -57,7 +57,7 @@ impl ViewingKey {
             return Err(ViewingKeyFormatError::UnexpectedNetworkId(n, network_id));
         }
 
-        let secret_key = ledger::SecretKey::deserialize(bytes, network_id, protocol_version)?;
+        let secret_key = ledger::SecretKey::deserialize(bytes, protocol_version)?;
 
         Ok(secret_key.expose_secret().into())
     }
@@ -68,7 +68,7 @@ impl ViewingKey {
         network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Self {
-        let key = ledger::SecretKey::derive_for_testing(seed, network_id, protocol_version)
+        let key = ledger::SecretKey::derive_for_testing(seed, protocol_version)
             .expect("secret key can be derived");
 
         let hrp = match network_id {
@@ -122,9 +122,9 @@ mod tests {
         assert!(domain_viewing_key.is_ok());
         let viewing_key = domain_viewing_key.unwrap();
 
-        let secret_key = ledger::SecretKey::derive_for_testing(seed, network_id, protocol_version)
+        let secret_key = ledger::SecretKey::derive_for_testing(seed, protocol_version)
             .expect("secret key can be derived");
-        let secret_key = ledger::SecretKey::deserialize(secret_key, network_id, protocol_version)
+        let secret_key = ledger::SecretKey::deserialize(secret_key, protocol_version)
             .expect("secret key can be deserialized");
         let expected_viewing_key =
             indexer_common::domain::ViewingKey::from(secret_key.expose_secret());

@@ -42,7 +42,7 @@ impl LedgerState {
         network_id: NetworkId,
     ) -> Result<(), Error> {
         for transaction in transactions {
-            self.apply_transaction(transaction, block_parent_hash, block_timestamp, network_id)?;
+            self.apply_transaction(transaction, block_parent_hash, block_timestamp)?;
         }
 
         self.post_apply_transactions(block_timestamp);
@@ -96,12 +96,8 @@ impl LedgerState {
         let start_index = self.zswap_first_free();
         let mut end_index = self.zswap_first_free();
 
-        let transaction_result = self.apply_transaction(
-            &transaction.raw,
-            block_parent_hash,
-            block_timestamp,
-            network_id,
-        )?;
+        let transaction_result =
+            self.apply_transaction(&transaction.raw, block_parent_hash, block_timestamp)?;
 
         // Handle genesis block: extract any pre-funded unshielded UTXOs.
         // Check if this is genesis block by examining parent hash.
@@ -113,38 +109,30 @@ impl LedgerState {
         // Update end_index and contract zswap state if necessary.
         let first_free = self.zswap_first_free();
         if first_free > start_index {
-            self.update_contract_zswap_state(transaction, network_id)?;
+            self.update_contract_zswap_state(transaction)?;
             end_index = first_free - 1;
         }
 
         // Update transaction.
         transaction.transaction_result = transaction_result;
-        transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize(network_id)?;
+        transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize()?;
         transaction.start_index = start_index;
         transaction.end_index = end_index;
 
         // Update extracted balances of contract actions.
         for contract_action in &mut transaction.contract_actions {
-            let contract_state = ContractState::deserialize(
-                &contract_action.state,
-                network_id,
-                transaction.protocol_version,
-            )?;
-            let balances = contract_state.balances(network_id)?;
+            let contract_state =
+                ContractState::deserialize(&contract_action.state, transaction.protocol_version)?;
+            let balances = contract_state.balances()?;
             contract_action.extracted_balances = balances;
         }
 
         Ok(())
     }
 
-    fn update_contract_zswap_state(
-        &self,
-        transaction: &mut Transaction,
-        network_id: NetworkId,
-    ) -> Result<(), Error> {
+    fn update_contract_zswap_state(&self, transaction: &mut Transaction) -> Result<(), Error> {
         for contract_action in transaction.contract_actions.iter_mut() {
-            let zswap_state =
-                self.extract_contract_zswap_state(&contract_action.address, network_id)?;
+            let zswap_state = self.extract_contract_zswap_state(&contract_action.address)?;
             contract_action.zswap_state = zswap_state;
         }
 

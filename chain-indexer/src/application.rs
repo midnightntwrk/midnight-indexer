@@ -91,9 +91,8 @@ pub async fn run(
         .await
         .context("load ledger state")?
         .map(|(ledger_state, block_height, protocol_version)| {
-            let ledger_state =
-                ledger::LedgerState::deserialize(&ledger_state, network_id, protocol_version)
-                    .context("deserialize ledger state")?;
+            let ledger_state = ledger::LedgerState::deserialize(&ledger_state, protocol_version)
+                .context("deserialize ledger state")?;
             Ok::<_, anyhow::Error>((ledger_state.into(), Some(block_height)))
         })
         .transpose()?
@@ -138,9 +137,7 @@ pub async fn run(
                     })?;
             }
 
-            let raw_ledger_state = ledger_state
-                .serialize(network_id)
-                .context("serialize ledger state")?;
+            let raw_ledger_state = ledger_state.serialize().context("serialize ledger state")?;
             ledger_state_storage
                 .save(
                     &raw_ledger_state,
@@ -185,7 +182,7 @@ pub async fn run(
     });
 
     let index_blocks_task = task::spawn(async move {
-        let blocks = blocks(highest_block, config.network_id, node)
+        let blocks = blocks(highest_block, node)
             .map(ready)
             .buffered(config.blocks_buffer);
         let mut blocks = pin!(blocks);
@@ -231,7 +228,6 @@ pub async fn run(
 /// blocks.
 fn blocks<N>(
     mut highest_block: Option<BlockInfo>,
-    network_id: NetworkId,
     mut node: N,
 ) -> impl Stream<Item = Result<Block, N::Error>>
 where
@@ -239,7 +235,7 @@ where
 {
     stream! {
         loop {
-            let blocks = node.finalized_blocks(highest_block, network_id);
+            let blocks = node.finalized_blocks(highest_block);
             let mut blocks = pin!(blocks);
 
             while let Some(block) = blocks.next().await {
@@ -358,9 +354,7 @@ async fn index_block(
         );
     }
 
-    let raw_ledger_state = ledger_state
-        .serialize(network_id)
-        .context("serialize ledger state")?;
+    let raw_ledger_state = ledger_state.serialize().context("serialize ledger state")?;
 
     // Determine whether caught up, also allowing to fall back a little in that state.
     let node_block_height = highest_block_on_node
@@ -471,14 +465,14 @@ mod tests {
     use fake::{Fake, Faker};
     use futures::{Stream, StreamExt, TryStreamExt, stream};
     use indexer_common::{
-        domain::{BlockHash, ByteArray, NetworkId, ProtocolVersion, ledger::ZswapStateRoot},
+        domain::{BlockHash, ByteArray, ProtocolVersion, ledger::ZswapStateRoot},
         error::BoxError,
     };
     use std::{convert::Infallible, sync::LazyLock};
 
     #[tokio::test]
     async fn test_blocks() -> Result<(), BoxError> {
-        let blocks = blocks(None, NetworkId::Undeployed, MockNode);
+        let blocks = blocks(None, MockNode);
         let heights = blocks
             .take(4)
             .map_ok(|block| block.height)
@@ -504,7 +498,6 @@ mod tests {
         fn finalized_blocks(
             &mut self,
             _highest_block: Option<BlockInfo>,
-            _network_id: NetworkId,
         ) -> impl Stream<Item = Result<Block, Self::Error>> {
             stream::iter([&*BLOCK_0, &*BLOCK_1, &*BLOCK_2, &*BLOCK_3])
                 .map(|block| Ok(block.to_owned()))
