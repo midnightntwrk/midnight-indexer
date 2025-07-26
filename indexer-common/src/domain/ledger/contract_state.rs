@@ -12,13 +12,13 @@
 // limitations under the License.
 
 use crate::domain::{
-    ContractBalance, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion, RawTokenType,
-    ledger::{Error, NetworkIdExt, SerializableV5Ext},
+    ContractBalance, PROTOCOL_VERSION_000_013_000, ProtocolVersion, RawTokenType,
+    ledger::{Error, TaggedSerializableV5Ext},
 };
 use fastrace::trace;
 use midnight_coin_structure::coin::TokenType as TokenTypeV5;
 use midnight_onchain_runtime::state::ContractState as ContractStateV5;
-use midnight_serialize::deserialize as deserialize_v5;
+use midnight_serialize::tagged_deserialize;
 use midnight_storage::{DefaultDB as DefaultDBV5, arena::Sp as SpV5};
 
 /// Facade for `ContractState` from `midnight_ledger` across supported (protocol) versions.
@@ -28,20 +28,15 @@ pub enum ContractState {
 }
 
 impl ContractState {
-    /// Deserialize the given raw contract state using the given protocol version and network ID.
-    #[trace(properties = {
-        "network_id": "{network_id}",
-        "protocol_version": "{protocol_version}"
-    })]
+    /// Deserialize the given raw contract state using the given protocol version.
+    #[trace(properties = { "protocol_version": "{protocol_version}" })]
     pub fn deserialize(
         contract_state: impl AsRef<[u8]>,
-        network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-            let contract_state =
-                deserialize_v5(&mut contract_state.as_ref(), network_id.into_ledger_v5())
-                    .map_err(|error| Error::Io("cannot deserialize ContractStateV5", error))?;
+            let contract_state = tagged_deserialize(&mut contract_state.as_ref())
+                .map_err(|error| Error::Io("cannot deserialize ContractStateV5", error))?;
             Ok(Self::V5(contract_state))
         } else {
             Err(Error::InvalidProtocolVersion(protocol_version))
@@ -49,7 +44,7 @@ impl ContractState {
     }
 
     /// Get the token balances for this contract.
-    pub fn balances(&self, network_id: NetworkId) -> Result<Vec<ContractBalance>, Error> {
+    pub fn balances(&self) -> Result<Vec<ContractBalance>, Error> {
         match self {
             ContractState::V5(contract_state) => {
                 contract_state
@@ -73,7 +68,7 @@ impl ContractState {
                             // For other tokens we serialize the type.
                             _ => {
                                 let token_type =
-                                    token_type.serialize(network_id).map_err(|error| {
+                                    token_type.tagged_serialize().map_err(|error| {
                                         Error::Io("cannot serialize TokenTypeV5", error)
                                     })?;
 

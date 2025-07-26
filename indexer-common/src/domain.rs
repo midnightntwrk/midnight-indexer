@@ -25,10 +25,12 @@ pub use protocol_version::*;
 pub use pub_sub::*;
 pub use viewing_key::*;
 
-use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
-use std::str::FromStr;
+use std::{
+    fmt::{self, Display},
+    str::FromStr,
+};
 use thiserror::Error;
 
 pub type BlockAuthor = ByteArray<32>;
@@ -46,6 +48,11 @@ pub type RawZswapState = ByteVec;
 pub type RawZswapStateRoot = ByteVec;
 pub type SessionId = ByteArray<32>;
 pub type TransactionHash = ByteArray<32>;
+
+const UNDEPLOYED: &str = "undeployed";
+const DEV: &str = "dev";
+const TEST: &str = "test";
+const MAIN: &str = "";
 
 /// The result of applying a transaction to the ledger state.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,12 +140,29 @@ pub struct ContractBalance {
 }
 
 /// Clone of midnight_serialize::NetworkId for the purpose of Serde deserialization.
-#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkId {
     Undeployed,
     DevNet,
     TestNet,
     MainNet,
+}
+
+impl Display for NetworkId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NetworkId::Undeployed => write!(f, "{UNDEPLOYED}"),
+            NetworkId::DevNet => write!(f, "{DEV}"),
+            NetworkId::TestNet => write!(f, "{TEST}"),
+            NetworkId::MainNet => write!(f, "{MAIN}"),
+        }
+    }
+}
+
+impl From<NetworkId> for String {
+    fn from(value: NetworkId) -> Self {
+        value.to_string()
+    }
 }
 
 impl FromStr for NetworkId {
@@ -154,10 +178,10 @@ impl TryFrom<&str> for NetworkId {
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s.to_lowercase().as_str() {
-            "undeployed" => Ok(Self::Undeployed),
-            "dev" => Ok(Self::DevNet),
-            "test" => Ok(Self::TestNet),
-            "" => Ok(Self::MainNet),
+            UNDEPLOYED => Ok(Self::Undeployed),
+            DEV => Ok(Self::DevNet),
+            TEST => Ok(Self::TestNet),
+            MAIN => Ok(Self::MainNet),
             _ => Err(UnknownNetworkIdError(s.to_owned())),
         }
     }
@@ -170,13 +194,22 @@ pub struct UnknownNetworkIdError(String);
 #[cfg(test)]
 mod tests {
     use crate::domain::NetworkId;
+    use assert_matches::assert_matches;
 
     #[test]
-    fn test_network_id_deserialize() {
-        let network_id = serde_json::from_str::<NetworkId>("\"Undeployed\"");
-        assert_eq!(network_id.unwrap(), NetworkId::Undeployed);
+    fn test_network_id() {
+        assert!("foo".parse::<NetworkId>().is_err());
 
-        let network_id = serde_json::from_str::<NetworkId>("\"FooBarBaz\"");
-        assert!(network_id.is_err());
+        let network_id = NetworkId::Undeployed.to_string().parse::<NetworkId>();
+        assert_matches!(network_id, Ok(NetworkId::Undeployed));
+
+        let network_id = NetworkId::DevNet.to_string().parse::<NetworkId>();
+        assert_matches!(network_id, Ok(NetworkId::DevNet));
+
+        let network_id = NetworkId::TestNet.to_string().parse::<NetworkId>();
+        assert_matches!(network_id, Ok(NetworkId::TestNet));
+
+        let network_id = NetworkId::MainNet.to_string().parse::<NetworkId>();
+        assert_matches!(network_id, Ok(NetworkId::MainNet));
     }
 }

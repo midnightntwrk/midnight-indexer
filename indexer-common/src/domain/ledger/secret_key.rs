@@ -12,12 +12,15 @@
 // limitations under the License.
 
 use crate::domain::{
-    ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion, VIEWING_KEY_LEN,
-    ledger::{Error, NetworkIdExt},
+    ByteArray, ByteVec, PROTOCOL_VERSION_000_013_000, ProtocolVersion, VIEWING_KEY_LEN,
+    ledger::{Error, TaggedSerializableV5Ext},
 };
+use bip32::{DerivationPath, XPrv};
 use fastrace::trace;
-use midnight_serialize::deserialize as deserialize_v5;
+use midnight_serialize::tagged_deserialize;
 use midnight_transient_crypto::encryption::SecretKey as SecretKeyV5;
+use midnight_zswap::keys::{SecretKeys as SecretKeysV5, Seed as SeedV5};
+use std::str::FromStr;
 
 /// Facade for `SecretKey` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
@@ -26,18 +29,14 @@ pub enum SecretKey {
 }
 
 impl SecretKey {
-    /// Deserialize the given raw secret key using the given protocol version and network ID.
-    #[trace(properties = {
-        "network_id": "{network_id}",
-        "protocol_version": "{protocol_version}"
-    })]
+    /// Deserialize the given raw secret key using the given protocol version.
+    #[trace(properties = { "protocol_version": "{protocol_version}" })]
     pub fn deserialize(
         secret_key: impl AsRef<[u8]>,
-        network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-            let secret_key = deserialize_v5(&mut secret_key.as_ref(), network_id.into_ledger_v5())
+            let secret_key = tagged_deserialize(&mut secret_key.as_ref())
                 .map_err(|error| Error::Io("cannot deserialize SecretKeyV5", error))?;
             Ok(Self::V5(secret_key))
         } else {
@@ -55,15 +54,9 @@ impl SecretKey {
     /// Derive a serialized secret key for testing from the given root seed.
     pub fn derive_for_testing(
         seed: ByteArray<32>,
-        network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Result<ByteVec, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-            use crate::domain::ledger::SerializableV5Ext;
-            use bip32::{DerivationPath, XPrv};
-            use midnight_zswap::keys::{SecretKeys as SecretKeysV5, Seed as SeedV5};
-            use std::str::FromStr;
-
             let derivation_path = DerivationPath::from_str("m/44'/2400'/0'/3/0")
                 .expect(r#"derivation path "m/44'/2400'/0'/3/0" is valid"#);
             let derived: [u8; 32] = XPrv::derive_from_path(seed, &derivation_path)
@@ -76,7 +69,7 @@ impl SecretKey {
 
             let bytes = secret_keys
                 .encryption_secret_key
-                .serialize(network_id)
+                .tagged_serialize()
                 .map_err(|error| Error::Io("cannot serialize encryption::SecretKeyV5", error))?;
 
             Ok(bytes.into())
