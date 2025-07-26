@@ -11,37 +11,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 use anyhow::Context;
-use fs_extra::dir::{CopyOptions, copy};
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 use indexer_common::domain::NetworkId;
-use indexer_tests::e2e;
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
 };
-use reqwest::StatusCode;
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+use std::process::{Child, Command};
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 use std::{
     env,
     net::TcpListener,
     path::Path,
-    process::{Child, Command},
     sync::LazyLock,
     time::{Duration, Instant},
 };
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 use tempfile::TempDir;
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 use testcontainers::{
     ContainerAsync, GenericImage, ImageExt,
     core::{Mount, WaitFor},
     runners::AsyncRunner,
 };
+#[cfg(feature = "cloud")]
+use testcontainers_modules::postgres::Postgres;
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 use tokio::time::sleep;
 
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 const NODE_VERSION: &str = "0.13.2-rc.2";
 
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 static WS_DIR: LazyLock<String> = LazyLock::new(|| format!("{}/..", env!("CARGO_MANIFEST_DIR")));
 
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 static TARGET_DIR: LazyLock<String> = LazyLock::new(|| {
     env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| format!("{}/target", &*WS_DIR))
 });
@@ -71,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
     wait_for_api_ready(api_port, API_READY_TIMEOUT).await?;
 
     // Run the tests.
-    let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
+    let result = indexer_tests::e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
 
     // Terminate Indexer components using SIGTERM and wait which is imporant for coverage data to be
     // written and to avoid zombie processes.
@@ -103,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
     wait_for_api_ready(api_port, API_READY_TIMEOUT).await?;
 
     // Run the tests.
-    let result = e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
+    let result = indexer_tests::e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
 
     // Terminate Indexer using SIGTERM and wait which is imporant for coverage data to be written
     // and to avoid zombie processes.
@@ -116,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 struct NodeHandle {
     node_url: String,
 
@@ -126,7 +138,10 @@ struct NodeHandle {
     _node_container: ContainerAsync<GenericImage>,
 }
 
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 async fn start_node() -> anyhow::Result<NodeHandle> {
+    use fs_extra::dir::{CopyOptions, copy};
+
     let node_dir = Path::new(&format!("{}/../.node", env!("CARGO_MANIFEST_DIR")))
         .join(NODE_VERSION)
         .canonicalize()
@@ -159,12 +174,9 @@ async fn start_node() -> anyhow::Result<NodeHandle> {
 }
 
 #[cfg(feature = "cloud")]
-async fn start_postgres() -> anyhow::Result<(
-    ContainerAsync<testcontainers_modules::postgres::Postgres>,
-    u16,
-)> {
+async fn start_postgres() -> anyhow::Result<(ContainerAsync<Postgres>, u16)> {
+    use Postgres;
     use testcontainers::{ImageExt, runners::AsyncRunner};
-    use testcontainers_modules::postgres::Postgres;
 
     let postgres_container = Postgres::default()
         .with_db_name("indexer")
@@ -311,7 +323,10 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
         .map(|child| (child, api_port, temp_dir))
 }
 
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 async fn wait_for_api_ready(api_port: u16, timeout: Duration) -> anyhow::Result<()> {
+    use reqwest::StatusCode;
+
     let client = reqwest::Client::new();
     let ready_url = format!("http://localhost:{api_port}/ready");
 
@@ -331,6 +346,7 @@ async fn wait_for_api_ready(api_port: u16, timeout: Duration) -> anyhow::Result<
     anyhow::bail!("indexer-api has not become ready within {timeout:?}")
 }
 
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 fn find_free_port() -> anyhow::Result<u16> {
     // Bind to port 0, which tells the OS to assign a free port.
     let listener = TcpListener::bind("127.0.0.1:0").context("bind to 127.0.0.1:0")?;
