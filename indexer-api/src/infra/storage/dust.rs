@@ -293,8 +293,11 @@ impl DustStorage for super::Storage {
             "},
         };
 
+        // Convert timestamp from seconds to milliseconds for comparison with database
+        let timestamp_ms = (timestamp as i64) * 1000;
+        
         let root: Option<Vec<u8>> = sqlx::query_scalar(query)
-            .bind(timestamp as i64)
+            .bind(timestamp_ms)
             .fetch_optional(&*self.pool)
             .await?;
 
