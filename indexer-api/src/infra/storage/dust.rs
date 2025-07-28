@@ -370,12 +370,15 @@ impl DustStorage for super::Storage {
                         last_merkle_index = row.index as i64 + 1;
                     }
 
-                    // Query merkle updates for this batch
+                    // TODO: Fix merkle tree queries - the schema doesn't have an index column
+                    // For now, skip merkle updates as the current schema doesn't support per-generation tracking
+                    // The merkle trees are stored per block, not per generation
+                    /*
                     let merkle_query = indoc! {r#"
-                        SELECT "index", root, block_height
+                        SELECT block_height, root, block_height as "index"
                         FROM dust_generation_tree
-                        WHERE "index" >= $1
-                        ORDER BY "index"
+                        WHERE block_height >= $1
+                        ORDER BY block_height
                         LIMIT $2
                     "#};
 
@@ -387,11 +390,12 @@ impl DustStorage for super::Storage {
 
                     for row in merkle_rows {
                         yield DustGenerationEvent::MerkleUpdate(DustGenerationMerkleUpdate {
-                            index: row.index as i32,
+                            index: row.block_height as i32,
                             collapsed_update: row.root.into(),
                             block_height: row.block_height as i32,
                         });
                     }
+                    */
 
                     // Send progress update
                     let active_count_query = indoc! {"
@@ -629,7 +633,10 @@ impl DustStorage for super::Storage {
                         current_index = row.id as i64 + 1;
                     }
 
-                    // Query merkle updates
+                    // TODO: Fix merkle tree queries - the schema doesn't have an index column
+                    // For now, skip merkle updates as the current schema doesn't support per-commitment tracking
+                    // The merkle trees are stored per block, not per commitment
+                    /*
                     let merkle_query = indoc! {r#"
                         SELECT "index", root, block_height
                         FROM dust_commitment_tree
@@ -651,6 +658,7 @@ impl DustStorage for super::Storage {
                             block_height: row.block_height as i32,
                         });
                     }
+                    */
 
                     // Send progress update
                     yield DustCommitmentEvent::Progress(DustCommitmentProgress {
