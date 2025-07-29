@@ -3001,7 +3001,7 @@ dependencies = [
  "midnight-coin-structure",
  "midnight-ledger",
  "midnight-onchain-runtime",
- "midnight-serialize",
+ "midnight-serialize 0.4.0-alpha.1",
  "midnight-storage",
  "midnight-transient-crypto",
  "midnight-zswap",
@@ -3689,7 +3689,7 @@ dependencies = [
  "k256",
  "lazy_static",
  "midnight-base-crypto-derive",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "paste",
  "rand 0.8.5",
  "reqwest 0.12.22",
@@ -3745,7 +3745,7 @@ dependencies = [
  "fake",
  "lazy_static",
  "midnight-base-crypto",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
@@ -3763,12 +3763,12 @@ dependencies = [
  "introspection",
  "introspection-derive",
  "is_sorted",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-onchain-runtime",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "midnight-storage",
  "midnight-transient-crypto",
  "midnight-zswap",
@@ -3796,7 +3796,7 @@ dependencies = [
  "midnight-coin-structure",
  "midnight-onchain-state",
  "midnight-onchain-vm",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
@@ -3815,7 +3815,7 @@ dependencies = [
  "hex",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
@@ -3835,7 +3835,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-onchain-state",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
@@ -3853,7 +3853,20 @@ dependencies = [
  "crypto",
  "konst",
  "lazy_static",
- "midnight-serialize-macros",
+ "midnight-serialize-macros 0.1.0 (git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3)",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "midnight-serialize"
+version = "0.4.0-alpha.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0#34a3279e3262bc9c5bd8e34bb669787234cf1d3c"
+dependencies = [
+ "crypto",
+ "konst",
+ "lazy_static",
+ "midnight-serialize-macros 0.1.0 (git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0)",
  "serde",
  "serde_bytes",
 ]
@@ -3869,6 +3882,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-serialize-macros"
+version = "0.1.0"
+source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0#34a3279e3262bc9c5bd8e34bb669787234cf1d3c"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.40",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "midnight-storage"
 version = "0.5.0-alpha"
 source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-5.0.0-alpha.3#5f527d1431fe6a0d490784dd1bf30b3156eaa969"
@@ -3881,7 +3904,7 @@ dependencies = [
  "konst",
  "lru 0.14.0",
  "midnight-base-crypto",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "midnight-storage-macros",
  "parking_lot",
  "rand 0.8.5",
@@ -3921,7 +3944,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-base-crypto-derive",
  "midnight-circuits",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "midnight-storage",
  "pasta_curves",
  "paste",
@@ -3943,12 +3966,12 @@ dependencies = [
  "fake",
  "futures",
  "is_sorted",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-onchain-runtime",
- "midnight-serialize",
+ "midnight-serialize 0.3.3-alpha.3",
  "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
@@ -4733,7 +4756,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote 1.0.40",
  "syn 2.0.104",
@@ -7923,7 +7946,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
