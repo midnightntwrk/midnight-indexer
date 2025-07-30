@@ -106,16 +106,3 @@ impl<const N: usize> TryFrom<SqlxOption<&[u8]>> for Option<ByteArray<N>> {
         Ok(value)
     }
 }
-
-/// Wrapper around a byte array implementing `sqlx::FromRow` to make it queryable.
-#[derive(Debug, FromRow)]
-pub struct QueryableByteArray<const N: usize> {
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
-    inner: ByteArray<N>,
-}
-
-impl<const N: usize> From<QueryableByteArray<N>> for ByteArray<N> {
-    fn from(bytes: QueryableByteArray<N>) -> Self {
-        bytes.inner
-    }
-}

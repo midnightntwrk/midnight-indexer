@@ -33,7 +33,7 @@ use indexer_common::{
         CardanoStakeKey, DustAddress, DustMerkleRoot, DustNonce, DustOwner, DustPrefix,
         NightUtxoHash,
     },
-    infra::sqlx::{QueryableByteArray, SqlxOption, U128BeBytes},
+    infra::sqlx::{SqlxOption, U128BeBytes},
 };
 use indoc::indoc;
 use sqlx::FromRow;
@@ -50,10 +50,10 @@ impl DustStorage for Storage {
             LIMIT 1
         "};
 
-        let commitment_tree_root = sqlx::query_as::<_, QueryableByteArray<32>>(query)
+        let commitment_tree_root = sqlx::query_as::<_, (DustMerkleRoot,)>(query)
             .fetch_optional(&*self.pool)
             .await?
-            .map(|bytes| bytes.into())
+            .map(|(x,)| x)
             .unwrap_or_default();
 
         // Get latest generation tree root.
@@ -64,10 +64,10 @@ impl DustStorage for Storage {
             LIMIT 1
         "};
 
-        let generation_tree_root = sqlx::query_as::<_, QueryableByteArray<32>>(query)
+        let generation_tree_root = sqlx::query_as::<_, (DustMerkleRoot,)>(query)
             .fetch_optional(&*self.pool)
             .await?
-            .map(|bytes| bytes.into())
+            .map(|(x,)| x)
             .unwrap_or_default();
 
         // Get latest block info.
@@ -201,12 +201,13 @@ impl DustStorage for Storage {
             "},
         };
 
-        let root = sqlx::query_as::<_, QueryableByteArray<32>>(query)
+        let root = sqlx::query_as::<_, (DustMerkleRoot,)>(query)
             .bind(timestamp as i64)
             .fetch_optional(&*self.pool)
-            .await?;
+            .await?
+            .map(|(x,)| x.into());
 
-        Ok(root.map(|r| r.into()))
+        Ok(root)
     }
 
     async fn get_dust_generations(
