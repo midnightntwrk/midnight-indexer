@@ -1,4 +1,4 @@
-use indexer_api::domain::ViewingKey;
+use indexer_api::infra::api::v1::viewing_key::ViewingKey;
 use indexer_common::domain::{ByteArray, NetworkId, PROTOCOL_VERSION_000_013_000};
 
 /// Print the Bech32m-encoded viewing keys and their session IDs for the prefunded wallets (root

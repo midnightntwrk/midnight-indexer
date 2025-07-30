@@ -45,18 +45,6 @@ pub struct Config {
     pub caught_up_leeway: u32,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            network_id: NetworkId::Undeployed,
-            blocks_buffer: 10,
-            save_ledger_state_after: 1000,
-            caught_up_max_distance: 10,
-            caught_up_leeway: 5,
-        }
-    }
-}
-
 pub async fn run(
     config: Config,
     node: impl Node,

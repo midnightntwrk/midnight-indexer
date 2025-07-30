@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{
-    ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion, VIEWING_KEY_LEN,
+    ByteArray, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion, VIEWING_KEY_LEN,
     ledger::{Error, NetworkIdExt},
 };
 use fastrace::trace;
@@ -46,18 +46,19 @@ impl SecretKey {
     }
 
     /// Get the repr of this secret key.
-    pub fn expose_secret(&self) -> [u8; VIEWING_KEY_LEN] {
+    pub fn expose_secret(&self) -> ByteArray<VIEWING_KEY_LEN> {
         match self {
-            SecretKey::V5(secret_key) => secret_key.repr(),
+            SecretKey::V5(secret_key) => secret_key.repr().into(),
         }
     }
 
     /// Derive a serialized secret key for testing from the given root seed.
+    #[cfg(feature = "testing")]
     pub fn derive_for_testing(
-        seed: ByteArray<32>,
+        seed: crate::domain::ByteArray<32>,
         network_id: NetworkId,
         protocol_version: ProtocolVersion,
-    ) -> Result<ByteVec, Error> {
+    ) -> Result<crate::domain::ByteVec, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
             use crate::domain::ledger::SerializableV5Ext;
             use bip32::{DerivationPath, XPrv};

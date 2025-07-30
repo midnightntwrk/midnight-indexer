@@ -16,12 +16,14 @@ use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteArray, ByteVec, ContractActionVariant, ContractBalance, UnshieldedUtxo,
+        BlockHash, ByteArray, ByteVec,
+        ledger::{ContractAttributes, ContractBalance, UnshieldedUtxo},
     },
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
-use sqlx::{QueryBuilder, types::Json};
+use serde::{Deserialize, Serialize};
+use sqlx::{QueryBuilder, Type, types::Json};
 
 #[cfg(feature = "cloud")]
 type Tx = sqlx::Transaction<'static, sqlx::Postgres>;
@@ -171,6 +173,30 @@ impl domain::storage::Storage for Storage {
         }
 
         Ok(max_transaction_id)
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[cfg_attr(feature = "cloud", sqlx(type_name = "CONTRACT_ACTION_VARIANT"))]
+pub enum ContractActionVariant {
+    /// A contract deployment.
+    #[default]
+    Deploy,
+
+    /// A contract call.
+    Call,
+
+    /// A contract update.
+    Update,
+}
+
+impl From<&ContractAttributes> for ContractActionVariant {
+    fn from(attributes: &ContractAttributes) -> Self {
+        match attributes {
+            ContractAttributes::Deploy => Self::Deploy,
+            ContractAttributes::Call { .. } => Self::Call,
+            ContractAttributes::Update => Self::Update,
+        }
     }
 }
 
@@ -448,7 +474,7 @@ async fn save_contract_actions(
             transaction_id,
             address,
             state,
-            zswap_state,
+            chain_state,
             variant,
             attributes
         )
@@ -459,7 +485,7 @@ async fn save_contract_actions(
             q.push_bind(transaction_id)
                 .push_bind(&action.address)
                 .push_bind(&action.state)
-                .push_bind(&action.zswap_state)
+                .push_bind(&action.chain_state)
                 .push_bind(ContractActionVariant::from(&action.attributes))
                 .push_bind(Json(&action.attributes));
         })
@@ -509,7 +535,7 @@ async fn save_contract_balances(
 
 #[cfg(feature = "standalone")]
 async fn save_identifiers(
-    identifiers: &[indexer_common::domain::RawTransactionIdentifier],
+    identifiers: &[indexer_common::domain::ledger::SerializedTransactionIdentifier],
     transaction_id: i64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {

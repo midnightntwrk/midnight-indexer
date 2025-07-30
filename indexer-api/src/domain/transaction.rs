@@ -14,8 +14,11 @@
 use derive_more::Debug;
 use indexer_common::{
     domain::{
-        BlockHash, ProtocolVersion, RawTransaction, RawTransactionIdentifier, RawZswapStateRoot,
-        TransactionHash, TransactionResult,
+        BlockHash, ProtocolVersion,
+        ledger::{
+            SerializedTransaction, SerializedTransactionIdentifier, SerializedZswapStateRoot,
+            TransactionHash, TransactionResult,
+        },
     },
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
@@ -41,13 +44,13 @@ pub struct Transaction {
 
     #[debug(skip)]
     #[cfg_attr(feature = "standalone", sqlx(skip))]
-    pub identifiers: Vec<RawTransactionIdentifier>,
+    pub identifiers: Vec<SerializedTransactionIdentifier>,
 
     #[debug(skip)]
-    pub raw: RawTransaction,
+    pub raw: SerializedTransaction,
 
     #[debug(skip)]
-    pub merkle_tree_root: RawZswapStateRoot,
+    pub merkle_tree_root: SerializedZswapStateRoot,
 
     #[sqlx(try_from = "i64")]
     pub start_index: u64,

@@ -19,7 +19,10 @@ use async_stream::try_stream;
 use fastrace::trace;
 use futures::Stream;
 use indexer_common::{
-    domain::{RawTransactionIdentifier, RawUnshieldedAddress, SessionId, TransactionHash},
+    domain::{
+        SessionId,
+        ledger::{RawUnshieldedAddress, SerializedTransactionIdentifier, TransactionHash},
+    },
     stream::flatten_chunks,
 };
 use indoc::indoc;
@@ -207,7 +210,7 @@ impl TransactionStorage for Storage {
     #[trace(properties = { "identifier": "{identifier}" })]
     async fn get_transactions_by_identifier(
         &self,
-        identifier: &RawTransactionIdentifier,
+        identifier: &SerializedTransactionIdentifier,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
         #[cfg(feature = "cloud")]
         let query = indoc! {"
@@ -549,7 +552,7 @@ impl Storage {
 async fn get_identifiers_for_transaction(
     transaction_id: u64,
     pool: &indexer_common::infra::pool::sqlite::SqlitePool,
-) -> Result<Vec<RawTransactionIdentifier>, sqlx::Error> {
+) -> Result<Vec<SerializedTransactionIdentifier>, sqlx::Error> {
     use futures::TryStreamExt;
 
     let query = indoc! {"
@@ -558,7 +561,7 @@ async fn get_identifiers_for_transaction(
         WHERE transaction_id = $1
     "};
 
-    sqlx::query_as::<_, (RawTransactionIdentifier,)>(query)
+    sqlx::query_as::<_, (SerializedTransactionIdentifier,)>(query)
         .bind(transaction_id as i64)
         .fetch(&**pool)
         .map_ok(|(identifier,)| identifier)

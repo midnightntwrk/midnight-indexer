@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::domain::{
-    ContractBalance, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion, RawTokenType,
-    ledger::{Error, NetworkIdExt, SerializableV5Ext},
+    NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
+    ledger::{Error, NetworkIdExt, RawTokenType, SerializableV5Ext},
 };
 use fastrace::trace;
 use midnight_coin_structure::coin::TokenType as TokenTypeV5;
@@ -89,4 +89,14 @@ impl ContractState {
             }
         }
     }
+}
+
+/// Token balance of a contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContractBalance {
+    /// Token type identifier.
+    pub token_type: RawTokenType,
+
+    /// Balance amount as u128.
+    pub amount: u128,
 }

@@ -12,9 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{
-    ContractAction, ContractAttributes, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
-    RawContractAddress, RawContractState, RawTransactionIdentifier, TransactionHash,
-    TransactionStructure, ViewingKey,
+    ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion, ViewingKey,
     ledger::{Error, LedgerTransactionV5, NetworkIdExt, SerializableV5Ext},
 };
 use fastrace::trace;
@@ -31,6 +29,12 @@ use midnight_storage::{DefaultDB as DefaultDBV5, arena::Sp as SpV5};
 use midnight_transient_crypto::{encryption::SecretKey as SecretKeyV5, proofs::Proof as ProofV5};
 use midnight_zswap::Offer as OfferV5;
 use std::error::Error as StdError;
+
+pub type SerializedContractAddress = ByteVec;
+pub type SerializedContractEntryPoint = ByteVec;
+pub type SerializedContractState = ByteVec;
+pub type SerializedTransactionIdentifier = ByteVec;
+pub type TransactionHash = ByteArray<32>;
 
 /// Facade for `Transaction` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
@@ -70,7 +74,7 @@ impl Transaction {
     pub fn identifiers(
         &self,
         network_id: NetworkId,
-    ) -> Result<Vec<RawTransactionIdentifier>, Error> {
+    ) -> Result<Vec<SerializedTransactionIdentifier>, Error> {
         match self {
             Transaction::V5(transaction) => transaction
                 .identifiers()
@@ -88,12 +92,12 @@ impl Transaction {
     #[trace(properties = { "network_id": "{network_id}" })]
     pub async fn contract_actions<E, F>(
         &self,
-        get_contract_state: impl Fn(RawContractAddress) -> F,
+        get_contract_state: impl Fn(SerializedContractAddress) -> F,
         network_id: NetworkId,
     ) -> Result<Vec<ContractAction>, Error>
     where
         E: StdError + 'static + Send + Sync,
-        F: Future<Output = Result<RawContractState, E>>,
+        F: Future<Output = Result<SerializedContractState, E>>,
     {
         match self {
             Transaction::V5(transaction) => match transaction {
@@ -121,7 +125,13 @@ impl Transaction {
                                     let state = get_contract_state(address.clone())
                                         .await
                                         .map_err(|error| Error::GetContractState(error.into()))?;
-                                    let entry_point = call.entry_point.as_ref().into();
+                                    let entry_point = call
+                                        .entry_point
+                                        .serialize(network_id)
+                                        .map_err(|error| {
+                                            Error::Io("cannot serialize EntryPointBufV5", error)
+                                        })?
+                                        .into();
 
                                     Ok(ContractAction {
                                         address,
@@ -225,10 +235,38 @@ impl Transaction {
     }
 }
 
+/// A contract action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractAction {
+    pub address: SerializedContractAddress,
+    pub state: SerializedContractState,
+    pub attributes: ContractAttributes,
+}
+
+/// Attributes for a specific contract action.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub enum ContractAttributes {
+    Deploy,
+    Call {
+        entry_point: SerializedContractEntryPoint,
+    },
+    Update,
+}
+
+/// Transaction structure for fees calculation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransactionStructure {
+    pub segment_count: usize,
+    pub estimated_input_count: usize,
+    pub estimated_output_count: usize,
+    pub has_contract_operations: bool,
+    pub size: usize,
+}
+
 fn serialize_contract_address(
     address: ContractAddressV5,
     network_id: NetworkId,
-) -> Result<RawContractAddress, Error> {
+) -> Result<SerializedContractAddress, Error> {
     let address = address
         .serialize(network_id)
         .map_err(|error| Error::Io("cannot serialize ContractAddressV5", error))?;

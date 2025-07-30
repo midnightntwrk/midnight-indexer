@@ -15,8 +15,9 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiResult, AsBytesExt, ContextExt, HexEncoded, OptionExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v1::{
+            AsBytesExt, HexEncoded,
             block::BlockOffset,
             transaction::{Transaction, TransactionOffset},
         },
@@ -26,7 +27,7 @@ use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject, scalar};
 use bech32::{Bech32m, Hrp};
 use derive_more::Debug;
 use indexer_common::domain::{
-    ByteArrayLenError, NetworkId, RawUnshieldedAddress, UnknownNetworkIdError,
+    ByteArrayLenError, NetworkId, UnknownNetworkIdError, ledger::RawUnshieldedAddress,
 };
 use log::error;
 use serde::{Deserialize, Serialize};
@@ -39,19 +40,19 @@ const HRP_UNSHIELDED_BASE: &str = "mn_addr";
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
 pub struct UnshieldedUtxo<S: Storage> {
-    /// Owner address (Bech32m, `mn_addr…`)
+    /// Owner Bech32m-encoded address.
     owner: UnshieldedAddress,
 
-    /// Token type (hex-encoded)
+    /// Token hex-encoded serialized token type.
     token_type: HexEncoded,
 
-    /// UTXO value (quantity) as a string to support u128
+    /// UTXO value (quantity) as a string to support u128.
     value: String,
 
-    /// Index of this output within its creating transaction
+    /// Index of this output within its creating transaction.
     output_index: u32,
 
-    /// The hash of the intent that created this output (hex-encoded)
+    /// The hex-encoded serialized intent hash.
     intent_hash: HexEncoded,
 
     #[graphql(skip)]

@@ -49,6 +49,7 @@ uuid               = { workspace = true, features = [ "v7" ], optional = true }
 [features]
 cloud      = [ "indexer-common/cloud", "uuid" ]
 standalone = [ "indexer-common/standalone", "uuid" ]
+testing    = [ "indexer-common/testing" ]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [ 'cfg(coverage_nightly)' ] }

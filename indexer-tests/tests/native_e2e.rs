@@ -66,20 +66,37 @@ static TARGET_DIR: LazyLock<String> = LazyLock::new(|| {
 async fn main() -> anyhow::Result<()> {
     // Start PostgreSQL and NATS.
     let (_postgres_container, postgres_port) = start_postgres().await?;
+    println!("PostgreSQL started");
     let (_nats_container, nats_url) = start_nats().await?;
+    println!("NATS started");
     // Give PostgreSQL and NATS some headstart.
     sleep(Duration::from_millis(3_000)).await;
 
     // Start node.
     let node_handle = start_node().await?;
+    println!("Node started");
 
     // Start Indexer components.
     let mut chain_indexer = start_chain_indexer(postgres_port, &nats_url, &node_handle.node_url)?;
+    println!("Chain Indexer started");
     let mut wallet_indexer = start_wallet_indexer(postgres_port, &nats_url).await?;
+    println!("Wallet Indexer started");
     let (mut indexer_api, api_port) = start_indexer_api(postgres_port, &nats_url).await?;
+    println!("Indexer API started");
 
-    // Wait for indexer-api to become ready.
+    // Terminate Chain Indexer, then start it again.
+    sleep(Duration::from_millis(1_000)).await;
+    signal::kill(Pid::from_raw(chain_indexer.id() as i32), Signal::SIGTERM)
+        .context("terminate Chain Indexer")?;
+    chain_indexer
+        .wait()
+        .context("wait for Chain Indexer termination")?;
+    chain_indexer = start_chain_indexer(postgres_port, &nats_url, &node_handle.node_url)?;
+    println!("Indexer API started again");
+
+    // Wait for Indexer API to become ready.
     wait_for_api_ready(api_port, API_READY_TIMEOUT).await?;
+    println!("Indexer API ready");
 
     // Run the tests.
     let result = indexer_tests::e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
@@ -105,13 +122,16 @@ async fn main() -> anyhow::Result<()> {
 async fn main() -> anyhow::Result<()> {
     // Start node.
     let node_handle = start_node().await?;
+    println!("Node started");
 
     // Start Indexer.
     let (mut indexer_standalone, api_port, _temp_dir) =
         start_indexer_standalone(&node_handle.node_url).context("start indexer_standalone")?;
+    println!("Indexer started");
 
     // Wait for indexer-api to become ready.
     wait_for_api_ready(api_port, API_READY_TIMEOUT).await?;
+    println!("Indexer API ready");
 
     // Run the tests.
     let result = indexer_tests::e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;

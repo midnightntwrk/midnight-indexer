@@ -23,8 +23,8 @@ mod runtime_0_13 {}
 
 use crate::infra::subxt_node::SubxtNodeError;
 use indexer_common::domain::{
-    BlockHash, PROTOCOL_VERSION_000_013_000, ProtocolVersion, RawContractAddress, RawContractState,
-    TransactionHash, UnshieldedUtxo,
+    BlockHash, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
+    ledger::{SerializedContractAddress, SerializedContractState, TransactionHash, UnshieldedUtxo},
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
@@ -78,10 +78,10 @@ pub fn decode_slot(slot: &[u8], protocol_version: ProtocolVersion) -> Result<u64
 /// Get contract state depending on the given protocol version.
 pub async fn get_contract_state(
     online_client: &OnlineClient<SubstrateConfig>,
-    address: RawContractAddress,
+    address: SerializedContractAddress,
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
-) -> Result<RawContractState, SubxtNodeError> {
+) -> Result<SerializedContractState, SubxtNodeError> {
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
         get_contract_state_runtime_0_13(online_client, address, block_hash).await
     } else {
@@ -278,9 +278,10 @@ macro_rules! get_contract_state {
         paste::paste! {
             async fn [<get_contract_state_ $module>](
                 online_client: &OnlineClient<SubstrateConfig>,
-                address: RawContractAddress,
+                address: SerializedContractAddress,
                 block_hash: BlockHash,
-            ) -> Result<RawContractState, SubxtNodeError> {
+            ) -> Result<SerializedContractState, SubxtNodeError> {
+                // This returns the serialized contract state.
                 let get_state = $module::apis()
                     .midnight_runtime_api()
                     .get_contract_state(address.into());

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{Block, ContractAction};
-use indexer_common::domain::{ContractAttributes, RawLedgerState};
+use indexer_common::domain::ledger::{ContractAttributes, SerializedLedgerState};
 use metrics::{Counter, Gauge, counter, gauge};
 
 pub struct Metrics {
@@ -61,7 +61,7 @@ impl Metrics {
     pub fn update(
         &self,
         block: &Block,
-        ledger_state: &RawLedgerState,
+        ledger_state: &SerializedLedgerState,
         node_block_height: u32,
         caught_up: bool,
     ) {

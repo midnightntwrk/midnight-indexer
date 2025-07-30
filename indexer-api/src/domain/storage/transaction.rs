@@ -14,7 +14,8 @@
 use crate::domain::{Transaction, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{
-    RawTransactionIdentifier, RawUnshieldedAddress, SessionId, TransactionHash,
+    SessionId,
+    ledger::{RawUnshieldedAddress, SerializedTransactionIdentifier, TransactionHash},
 };
 use std::{fmt::Debug, num::NonZeroU32};
 
@@ -41,7 +42,7 @@ where
     /// than one, because identifiers are not unique.
     async fn get_transactions_by_identifier(
         &self,
-        identifier: &RawTransactionIdentifier,
+        identifier: &SerializedTransactionIdentifier,
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
     /// Get a stream of all transactions relevant for a wallet with the given session ID, starting
@@ -99,7 +100,7 @@ impl TransactionStorage for NoopStorage {
 
     async fn get_transactions_by_identifier(
         &self,
-        identifier: &RawTransactionIdentifier,
+        identifier: &SerializedTransactionIdentifier,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
         unimplemented!()
     }

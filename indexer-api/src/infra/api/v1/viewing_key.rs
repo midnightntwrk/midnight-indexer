@@ -12,13 +12,9 @@
 // limitations under the License.
 
 use async_graphql::scalar;
-use bech32::{Bech32m, Hrp};
 use derive_more::{Display, derive::From};
 use fastrace::trace;
-use indexer_common::domain::{
-    ByteArray, NetworkId, ProtocolVersion, UnknownNetworkIdError, ViewingKey as CommonViewingKey,
-    ledger,
-};
+use indexer_common::domain::{NetworkId, ProtocolVersion, UnknownNetworkIdError, ledger};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -45,7 +41,7 @@ impl ViewingKey {
         self,
         network_id: NetworkId,
         protocol_version: ProtocolVersion,
-    ) -> Result<CommonViewingKey, ViewingKeyFormatError> {
+    ) -> Result<indexer_common::domain::ViewingKey, ViewingKeyFormatError> {
         let (hrp, bytes) = bech32::decode(&self.0).map_err(ViewingKeyFormatError::Decode)?;
         let hrp = hrp.to_lowercase();
 
@@ -63,11 +59,14 @@ impl ViewingKey {
     }
 
     /// Derive a bech32m-encoded secret key for testing from the given root seed.
+    #[cfg(feature = "testing")]
     pub fn derive_for_testing(
-        seed: ByteArray<32>,
+        seed: indexer_common::domain::ByteArray<32>,
         network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Self {
+        use bech32::{Bech32m, Hrp};
+
         let key = ledger::SecretKey::derive_for_testing(seed, network_id, protocol_version)
             .expect("secret key can be derived");
 
@@ -104,9 +103,9 @@ pub enum ViewingKeyFormatError {
     Ledger(#[from] ledger::Error),
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "testing"))]
 mod tests {
-    use crate::domain::ViewingKey;
+    use crate::infra::api::v1::viewing_key::ViewingKey;
     use indexer_common::domain::{ByteArray, NetworkId, PROTOCOL_VERSION_000_013_000, ledger};
 
     #[test]

@@ -19,7 +19,7 @@ type Block {
 	"""
 	timestamp: Int!
 	"""
-	The block author.
+	The hex-encoded block author.
 	"""
 	author: HexEncoded
 	"""
@@ -90,9 +90,21 @@ type ContractBalance {
 A contract call.
 """
 type ContractCall implements ContractAction {
+	"""
+	The hex-encoded serialized address.
+	"""
 	address: HexEncoded!
+	"""
+	The hex-encoded serialized state.
+	"""
 	state: HexEncoded!
+	"""
+	The hex-encoded serialized contract-specific zswap state.
+	"""
 	chainState: HexEncoded!
+	"""
+	The hex-encoded serialized entry point.
+	"""
 	entryPoint: HexEncoded!
 	transaction: Transaction!
 	deploy: ContractDeploy!
@@ -106,8 +118,17 @@ type ContractCall implements ContractAction {
 A contract deployment.
 """
 type ContractDeploy implements ContractAction {
+	"""
+	The hex-encoded serialized address.
+	"""
 	address: HexEncoded!
+	"""
+	The hex-encoded serialized state.
+	"""
 	state: HexEncoded!
+	"""
+	The hex-encoded serialized contract-specific zswap state.
+	"""
 	chainState: HexEncoded!
 	transaction: Transaction!
 	"""
@@ -121,8 +142,17 @@ type ContractDeploy implements ContractAction {
 A contract update.
 """
 type ContractUpdate implements ContractAction {
+	"""
+	The hex-encoded serialized address.
+	"""
 	address: HexEncoded!
+	"""
+	The hex-encoded serialized state.
+	"""
 	state: HexEncoded!
+	"""
+	The hex-encoded serialized contract-specific zswap state.
+	"""
 	chainState: HexEncoded!
 	transaction: Transaction!
 	"""
@@ -265,7 +295,7 @@ type Transaction {
 	"""
 	id: Int!
 	"""
-	The transaction hash.
+	The hex-encoded transaction hash.
 	"""
 	hash: HexEncoded!
 	"""
@@ -281,15 +311,15 @@ type Transaction {
 	"""
 	fees: TransactionFees!
 	"""
-	The transaction identifiers.
+	The hex-encoded serialized transaction identifiers.
 	"""
 	identifiers: [HexEncoded!]!
 	"""
-	The raw transaction content.
+	The hex-encoded serialized transaction content.
 	"""
 	raw: HexEncoded!
 	"""
-	The merkle-tree root.
+	The hex-encoded serialized merkle-tree root.
 	"""
 	merkleTreeRoot: HexEncoded!
 	"""
@@ -398,23 +428,23 @@ Represents an unshielded UTXO.
 """
 type UnshieldedUtxo {
 	"""
-	Owner address (Bech32m, `mn_addr…`)
+	Owner Bech32m-encoded address.
 	"""
 	owner: UnshieldedAddress!
 	"""
-	Token type (hex-encoded)
+	Token hex-encoded serialized token type.
 	"""
 	tokenType: HexEncoded!
 	"""
-	UTXO value (quantity) as a string to support u128
+	UTXO value (quantity) as a string to support u128.
 	"""
 	value: String!
 	"""
-	Index of this output within its creating transaction
+	Index of this output within its creating transaction.
 	"""
 	outputIndex: Int!
 	"""
-	The hash of the intent that created this output (hex-encoded)
+	The hex-encoded serialized intent hash.
 	"""
 	intentHash: HexEncoded!
 	"""

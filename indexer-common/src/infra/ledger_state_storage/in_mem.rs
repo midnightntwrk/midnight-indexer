@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{LedgerStateStorage, ProtocolVersion, RawLedgerState};
+use crate::domain::{LedgerStateStorage, ProtocolVersion, ledger::SerializedLedgerState};
 use parking_lot::RwLock;
 use std::{convert::Infallible, sync::Arc};
 
@@ -30,13 +30,13 @@ impl LedgerStateStorage for InMemZswapStateStorage {
 
     async fn load_ledger_state(
         &self,
-    ) -> Result<Option<(RawLedgerState, u32, ProtocolVersion)>, Self::Error> {
+    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, Self::Error> {
         Ok(self.data.read().ledger_state.clone())
     }
 
     async fn save(
         &mut self,
-        ledger_state: &RawLedgerState,
+        ledger_state: &SerializedLedgerState,
         block_height: u32,
         highest_zswap_state_index: Option<u64>,
         protocol_version: ProtocolVersion,
@@ -52,6 +52,6 @@ impl LedgerStateStorage for InMemZswapStateStorage {
 
 #[derive(Default)]
 struct Data {
-    ledger_state: Option<(RawLedgerState, u32, ProtocolVersion)>,
+    ledger_state: Option<(SerializedLedgerState, u32, ProtocolVersion)>,
     highest_zswap_state_index: Option<u64>,
 }

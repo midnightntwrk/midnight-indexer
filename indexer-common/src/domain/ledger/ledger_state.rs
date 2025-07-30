@@ -13,9 +13,9 @@
 
 use crate::domain::{
     ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
-    RawContractAddress, RawLedgerState, RawTransaction, RawZswapState, RawZswapStateRoot,
-    TransactionResult, UnshieldedUtxo,
-    ledger::{Error, LedgerTransactionV5, NetworkIdExt, SerializableV5Ext},
+    ledger::{
+        Error, LedgerTransactionV5, NetworkIdExt, SerializableV5Ext, SerializedContractAddress,
+    },
 };
 use fastrace::trace;
 use midnight_base_crypto::{hash::HashOutput as HashOutputV5, time::Timestamp as TimestampV5};
@@ -34,6 +34,15 @@ use midnight_transient_crypto::merkle_tree::{
     MerkleTreeDigest as MerkleTreeDigestV5,
 };
 use midnight_zswap::ledger::State as ZswapStateV5;
+use serde::Deserialize;
+
+pub type IntentHash = ByteArray<32>;
+pub type RawTokenType = ByteArray<32>;
+pub type RawUnshieldedAddress = ByteArray<32>;
+pub type SerializedLedgerState = ByteVec;
+pub type SerializedTransaction = ByteVec;
+pub type SerializedZswapState = ByteVec;
+pub type SerializedZswapStateRoot = ByteVec;
 
 /// Facade for `LedgerState` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
@@ -64,7 +73,7 @@ impl LedgerState {
 
     /// Serialize this ledger state using the given network ID.
     #[trace(properties = { "network_id": "{network_id}" })]
-    pub fn serialize(&self, network_id: NetworkId) -> Result<RawLedgerState, Error> {
+    pub fn serialize(&self, network_id: NetworkId) -> Result<SerializedLedgerState, Error> {
         match self {
             LedgerState::V5(ledger_state) => {
                 let bytes = ledger_state
@@ -79,7 +88,7 @@ impl LedgerState {
     #[trace(properties = { "network_id": "{network_id}" })]
     pub fn apply_transaction(
         &mut self,
-        transaction: &RawTransaction,
+        transaction: &SerializedTransaction,
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
         network_id: NetworkId,
@@ -145,9 +154,9 @@ impl LedgerState {
     /// Extract the zswap state for the given contract address.
     pub fn extract_contract_zswap_state(
         &self,
-        address: &RawContractAddress,
+        address: &SerializedContractAddress,
         network_id: NetworkId,
-    ) -> Result<RawZswapState, Error> {
+    ) -> Result<SerializedZswapState, Error> {
         match self {
             LedgerState::V5(ledger_state) => {
                 let address = deserialize_v5::<ContractAddressV5, _>(
@@ -227,6 +236,30 @@ impl Default for LedgerState {
     }
 }
 
+/// The result of applying a transaction to the ledger state.
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, Deserialize)]
+pub enum TransactionResult {
+    /// All guaranteed and fallible coins succeeded.
+    Success,
+
+    /// Not all fallible coins succeeded; the value maps segemt ID to success.
+    PartialSuccess(Vec<(u16, bool)>),
+
+    /// Guaranteed coins failed.
+    #[default]
+    Failure,
+}
+
+/// An unshielded UTXO.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnshieldedUtxo {
+    pub owner: RawUnshieldedAddress,
+    pub token_type: RawTokenType,
+    pub value: u128,
+    pub intent_hash: IntentHash,
+    pub output_index: u32,
+}
+
 /// Facade for zswap state root across supported (protocol) versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZswapStateRoot {
@@ -255,7 +288,7 @@ impl ZswapStateRoot {
 
     /// Serialize this zswap state root using the given network ID.
     #[trace(properties = { "network_id": "{network_id}" })]
-    pub fn serialize(&self, network_id: NetworkId) -> Result<RawZswapStateRoot, Error> {
+    pub fn serialize(&self, network_id: NetworkId) -> Result<SerializedZswapStateRoot, Error> {
         match self {
             ZswapStateRoot::V5(digest) => {
                 let bytes = digest

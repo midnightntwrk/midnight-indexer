@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use indexer_common::{
-    domain::{IntentHash, RawTokenType, RawUnshieldedAddress},
+    domain::ledger::{IntentHash, RawTokenType, RawUnshieldedAddress},
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
 use sqlx::FromRow;

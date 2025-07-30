@@ -19,7 +19,10 @@ use async_stream::try_stream;
 use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::{
-    domain::{BlockHash, RawContractAddress, RawTransactionIdentifier, TransactionHash},
+    domain::{
+        BlockHash,
+        ledger::{SerializedContractAddress, SerializedTransactionIdentifier, TransactionHash},
+    },
     stream::flatten_chunks,
 };
 use indoc::indoc;
@@ -29,7 +32,7 @@ impl ContractActionStorage for Storage {
     #[trace(properties = { "address": "{address}" })]
     async fn get_contract_deploy_by_address(
         &self,
-        address: &RawContractAddress,
+        address: &SerializedContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         // For any address the first contract action is always a deploy.
         let query = indoc! {"
@@ -38,7 +41,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                zswap_state,
+                chain_state,
                 transaction_id
             FROM contract_actions
             WHERE contract_actions.address = $1
@@ -61,7 +64,7 @@ impl ContractActionStorage for Storage {
     #[trace(properties = { "address": "{address}" })]
     async fn get_latest_contract_action_by_address(
         &self,
-        address: &RawContractAddress,
+        address: &SerializedContractAddress,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -69,7 +72,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                zswap_state,
+                chain_state,
                 transaction_id
             FROM contract_actions
             WHERE address = $1
@@ -86,7 +89,7 @@ impl ContractActionStorage for Storage {
     #[trace(properties = { "address": "{address}", "hash": "{hash}" })]
     async fn get_contract_action_by_address_and_block_hash(
         &self,
-        address: &RawContractAddress,
+        address: &SerializedContractAddress,
         hash: BlockHash,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
@@ -95,7 +98,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                zswap_state,
+                chain_state,
                 transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
@@ -118,7 +121,7 @@ impl ContractActionStorage for Storage {
     #[trace(properties = { "address": "{address}", "block_height": "{block_height}" })]
     async fn get_contract_action_by_address_and_block_height(
         &self,
-        address: &RawContractAddress,
+        address: &SerializedContractAddress,
         block_height: u32,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
@@ -127,7 +130,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                zswap_state,
+                chain_state,
                 transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
@@ -148,7 +151,7 @@ impl ContractActionStorage for Storage {
     #[trace(properties = { "address": "{address}", "hash": "{hash}" })]
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
-        address: &RawContractAddress,
+        address: &SerializedContractAddress,
         hash: TransactionHash,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         let query = indoc! {"
@@ -157,7 +160,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                zswap_state,
+                chain_state,
                 transaction_id
             FROM contract_actions
             WHERE address = $1
@@ -184,8 +187,8 @@ impl ContractActionStorage for Storage {
     #[trace(properties = { "address": "{address}", "identifier": "{identifier}" })]
     async fn get_contract_action_by_address_and_transaction_identifier(
         &self,
-        address: &RawContractAddress,
-        identifier: &RawTransactionIdentifier,
+        address: &SerializedContractAddress,
+        identifier: &SerializedTransactionIdentifier,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
         #[cfg(feature = "cloud")]
         let query = indoc! {"
@@ -194,7 +197,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                zswap_state,
+                chain_state,
                 contract_actions.transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
@@ -211,7 +214,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                zswap_state,
+                chain_state,
                 contract_actions.transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
@@ -240,7 +243,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                zswap_state,
+                chain_state,
                 transaction_id
             FROM contract_actions
             WHERE transaction_id = $1
@@ -255,7 +258,7 @@ impl ContractActionStorage for Storage {
 
     fn get_contract_actions_by_address(
         &self,
-        address: &RawContractAddress,
+        address: &SerializedContractAddress,
         mut contract_action_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send {
@@ -326,7 +329,7 @@ impl Storage {
     })]
     async fn get_contract_actions_by_address(
         &self,
-        address: &RawContractAddress,
+        address: &SerializedContractAddress,
         contract_action_id: u64,
         batch_size: NonZeroU32,
     ) -> Result<Vec<ContractAction>, sqlx::Error> {
@@ -336,7 +339,7 @@ impl Storage {
                 address,
                 state,
                 attributes,
-                zswap_state,
+                chain_state,
                 transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
