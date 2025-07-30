@@ -98,9 +98,9 @@ impl DustStorage for Storage {
         Ok(DustSystemState {
             commitment_tree_root,
             generation_tree_root,
-            block_height: block_height as i32,
-            timestamp,
-            total_registrations: total_registrations as i32,
+            block_height: block_height as u32,
+            timestamp: timestamp as u64,
+            total_registrations: total_registrations as u32,
         })
     }
 
@@ -148,21 +148,18 @@ impl DustStorage for Storage {
                     LIMIT 1
                 "};
 
-                let value_bytes: Option<Vec<u8>> = sqlx::query_scalar(generation_query)
+                let value = sqlx::query_as::<_, (U128BeBytes,)>(generation_query)
                     .bind(dust_addr.as_ref())
                     .fetch_optional(&*self.pool)
                     .await?;
 
-                if let Some(value) = value_bytes {
-                    // Convert 16 bytes to u128
-                    if value.len() == 16 {
-                        let value_u128 = u128::from_be_bytes(value.try_into().unwrap());
-                        night_balance = value_u128;
-                        // Simplified generation rate calculation (1 Speck per NIGHT per second)
-                        generation_rate = value_u128;
-                        // Capacity could be calculated based on time since ctime
-                        current_capacity = 0; // TODO: Calculate based on elapsed time
-                    }
+                if let Some((value,)) = value {
+                    let value_u128 = value.into();
+                    night_balance = value_u128;
+                    // Simplified generation rate calculation (1 Speck per NIGHT per second)
+                    generation_rate = value_u128;
+                    // Capacity could be calculated based on time since ctime
+                    current_capacity = 0; // TODO: Calculate based on elapsed time
                 }
             }
 
@@ -204,12 +201,12 @@ impl DustStorage for Storage {
             "},
         };
 
-        let root: Option<Vec<u8>> = sqlx::query_scalar(query)
+        let root = sqlx::query_as::<_, QueryableByteArray<32>>(query)
             .bind(timestamp as i64)
             .fetch_optional(&*self.pool)
             .await?;
 
-        Ok(root.map(|r| r.as_slice().try_into().unwrap()))
+        Ok(root.map(|r| r.into()))
     }
 
     async fn get_dust_generations(
@@ -269,9 +266,9 @@ impl DustStorage for Storage {
                             value: row.value,
                             owner: row.owner,
                             nonce: row.nonce,
-                            ctime: row.ctime as i32,
-                            dtime: row.dtime.map(|d| d as i32),
-                            merkle_index: row.index as i32,
+                            ctime: row.ctime as u32,
+                            dtime: row.dtime.map(|d| d as u32),
+                            merkle_index: row.index as u32,
                         });
 
                         last_index = row.id as i64 + 1;
@@ -295,9 +292,9 @@ impl DustStorage for Storage {
 
                     for row in merkle_rows {
                         yield DustGenerationEvent::MerkleUpdate(DustGenerationMerkleUpdate {
-                            index: row.index as i32,
+                            index: row.index as u32,
                             collapsed_update: row.root.into(),
-                            block_height: row.block_height as i32,
+                            block_height: row.block_height as u32,
                         });
                     }
 
@@ -308,14 +305,14 @@ impl DustStorage for Storage {
                         WHERE owner = $1 AND dtime IS NULL
                     "};
 
-                    let active_count: i64 = sqlx::query_scalar(active_count_query)
+                    let (active_count,) = sqlx::query_as::<_, (i64,)>(active_count_query)
                         .bind(dust_address.as_ref())
                         .fetch_one(&*self.pool)
                         .await?;
 
                     yield DustGenerationEvent::Progress(DustGenerationProgress {
-                        highest_index: last_merkle_index as i32,
-                        active_generations: active_count as i32,
+                        highest_index: last_merkle_index as u32,
+                        active_generations: active_count as u32,
                     });
                 }
             }
@@ -399,13 +396,13 @@ impl DustStorage for Storage {
                             AND nullifier IS NOT NULL
                         "};
 
-                        let nullifiers: Vec<Vec<u8>> = sqlx::query_scalar(nullifier_query)
+                        let nullifiers = sqlx::query_as::<_, (Vec<u8>,)>(nullifier_query)
                             .bind(tx_hash)
                             .fetch_all(&*self.pool)
                             .await?;
 
                         let mut matching_prefixes = Vec::new();
-                        for nullifier_bytes in nullifiers {
+                        for (nullifier_bytes,) in nullifiers {
                             let nullifier: indexer_common::domain::DustNullifier = nullifier_bytes.as_slice().try_into().unwrap();
                             let nullifier_hex = nullifier.hex_encode().to_string();
                             for prefix in prefixes {
@@ -418,7 +415,7 @@ impl DustStorage for Storage {
 
                         yield DustNullifierTransactionEvent::Transaction(DustNullifierTransaction {
                             transaction_hash: tx_hash.as_slice().try_into().unwrap(),
-                            block_height: *block_height as i32,
+                            block_height: *block_height as u32,
                             matching_nullifier_prefixes: matching_prefixes,
                         });
                     }
@@ -429,9 +426,9 @@ impl DustStorage for Storage {
                     }
 
                     // Send progress update
-                    let matched_count = rows.len() as i32;
+                    let matched_count = rows.len() as u32;
                     yield DustNullifierTransactionEvent::Progress(DustNullifierTransactionProgress {
-                        highest_block: current_block as i32 - 1,
+                        highest_block: (current_block as u32).saturating_sub(1),
                         matched_count,
                     });
                 }
@@ -515,12 +512,12 @@ impl DustStorage for Storage {
                                 WHERE t.id = $1
                             "};
 
-                            let timestamp: Option<i64> = sqlx::query_scalar(spent_query)
+                            let timestamp = sqlx::query_as::<_, (i64,)>(spent_query)
                                 .bind(row.spent_at_transaction_id.map(|id| id as i64))
                                 .fetch_optional(&*self.pool)
                                 .await?;
 
-                            timestamp.map(|t| t as i32)
+                            timestamp.map(|(t,)| t as u32)
                         } else {
                             None
                         };
@@ -531,7 +528,7 @@ impl DustStorage for Storage {
                             value: row.value,
                             owner: row.owner,
                             nonce: row.nonce,
-                            created_at: row.ctime as i32,
+                            created_at: row.ctime as u32,
                             spent_at,
                         });
 
@@ -556,15 +553,15 @@ impl DustStorage for Storage {
 
                     for row in merkle_rows {
                         yield DustCommitmentEvent::MerkleUpdate(DustCommitmentMerkleUpdate {
-                            index: row.index as i32,
+                            index: row.index as u32,
                             collapsed_update: row.root.into(),
-                            block_height: row.block_height as i32,
+                            block_height: row.block_height as u32,
                         });
                     }
 
                     // Send progress update
                     yield DustCommitmentEvent::Progress(DustCommitmentProgress {
-                        highest_index: current_index as i32,
+                        highest_index: current_index as u32,
                         commitment_count,
                     });
                 }
@@ -651,7 +648,7 @@ impl DustStorage for Storage {
                 if rows.is_empty() {
                     has_more = false;
                 } else {
-                    let update_count = rows.len() as i32;
+                    let update_count = rows.len() as u32;
                     let mut latest_timestamp = 0i64;
 
                     for row in rows {
@@ -659,8 +656,8 @@ impl DustStorage for Storage {
                             cardano_stake_key: row.cardano_address,
                             dust_address: row.dust_address,
                             is_active: row.is_valid && row.removed_at.is_none(),
-                            registered_at: row.registered_at as i32,
-                            removed_at: row.removed_at.map(|t| t as i32),
+                            registered_at: row.registered_at as u32,
+                            removed_at: row.removed_at.map(|t| t as u32),
                         });
 
                         last_id = row.id as i64;
@@ -672,7 +669,7 @@ impl DustStorage for Storage {
 
                     // Send progress update
                     yield RegistrationUpdateEvent::Progress(RegistrationUpdateProgress {
-                        latest_timestamp: latest_timestamp as i32,
+                        latest_timestamp: latest_timestamp as u32,
                         update_count,
                     });
                 }
