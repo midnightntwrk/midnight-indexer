@@ -20,7 +20,7 @@ mod sqlite;
 
 use crate::domain::{ByteArray, ByteArrayLenError};
 use serde::{Deserialize, Serialize};
-use sqlx::{Database, Decode, Type, error::BoxDynError};
+use sqlx::{Database, Decode, FromRow, Type, error::BoxDynError};
 
 /// A helper to use `Option<T>` where T does not implement `sqlx::Type` but a `TryFrom` into a
 /// supported type with `sqlx::FromRow` like this:
@@ -104,5 +104,18 @@ impl<const N: usize> TryFrom<SqlxOption<&[u8]>> for Option<ByteArray<N>> {
     fn try_from(value: SqlxOption<&[u8]>) -> Result<Self, Self::Error> {
         let value = value.0.map(TryInto::try_into).transpose()?;
         Ok(value)
+    }
+}
+
+/// Wrapper around a byte array implementing `sqlx::FromRow` to make it queryable.
+#[derive(Debug, FromRow)]
+pub struct QueryableByteArray<const N: usize> {
+    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
+    inner: ByteArray<N>,
+}
+
+impl<const N: usize> From<QueryableByteArray<N>> for ByteArray<N> {
+    fn from(bytes: QueryableByteArray<N>) -> Self {
+        bytes.inner
     }
 }
