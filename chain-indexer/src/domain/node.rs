@@ -13,7 +13,6 @@
 
 use crate::domain::{Block, BlockInfo};
 use futures::Stream;
-use indexer_common::domain::NetworkId;
 use std::error::Error as StdError;
 
 /// Node abstraction.
@@ -35,6 +34,5 @@ where
     fn finalized_blocks(
         &mut self,
         after: Option<BlockInfo>,
-        network_id: NetworkId,
     ) -> impl Stream<Item = Result<Block, Self::Error>>;
 }

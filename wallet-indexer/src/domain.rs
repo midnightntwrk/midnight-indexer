@@ -14,7 +14,7 @@
 pub mod storage;
 
 use fastrace::trace;
-use indexer_common::domain::{NetworkId, ProtocolVersion, RawTransaction, ViewingKey, ledger};
+use indexer_common::domain::{ProtocolVersion, RawTransaction, ViewingKey, ledger};
 use sqlx::prelude::FromRow;
 
 /// Relevant data of a wallet from the perspective of the Wallet Indexer.
@@ -37,11 +37,10 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    /// Check the relevance of this transaction for the given wallet and the given network ID.
+    /// Check the relevance of this transaction for the given wallet.
     #[trace]
-    pub fn relevant(&self, wallet: &Wallet, network_id: NetworkId) -> Result<bool, ledger::Error> {
-        let transaction =
-            ledger::Transaction::deserialize(&self.raw, network_id, self.protocol_version)?;
+    pub fn relevant(&self, wallet: &Wallet) -> Result<bool, ledger::Error> {
+        let transaction = ledger::Transaction::deserialize(&self.raw, self.protocol_version)?;
         Ok(transaction.relevant(wallet.viewing_key))
     }
 }
