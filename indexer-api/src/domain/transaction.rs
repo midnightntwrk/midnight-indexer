@@ -30,10 +30,8 @@ pub struct Transaction {
     #[sqlx(try_from = "i64")]
     pub id: u64,
 
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     pub hash: TransactionHash,
 
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     pub block_hash: BlockHash,
 
     #[sqlx(try_from = "i64")]
