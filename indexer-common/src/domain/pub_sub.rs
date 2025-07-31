@@ -13,7 +13,7 @@
 
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-use crate::domain::{RawUnshieldedAddress, SessionId};
+use crate::domain::{SessionId, ledger::RawUnshieldedAddress};
 use derive_more::derive::From;
 use futures::{Stream, stream};
 use serde::{Deserialize, Serialize};

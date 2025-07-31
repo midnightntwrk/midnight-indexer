@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{LedgerStateStorage, ProtocolVersion, RawLedgerState};
+use crate::domain::{LedgerStateStorage, ProtocolVersion, ledger::SerializedLedgerState};
 use async_nats::{
     ConnectError, ConnectOptions,
     jetstream::{
@@ -109,7 +109,7 @@ impl LedgerStateStorage for NatsLedgerStateStorage {
     #[trace]
     async fn load_ledger_state(
         &self,
-    ) -> Result<Option<(RawLedgerState, u32, ProtocolVersion)>, Self::Error> {
+    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, Self::Error> {
         let object_name = self.current_object_name().await?;
         debug!(object_name; "loading ledger state");
 
@@ -141,7 +141,7 @@ impl LedgerStateStorage for NatsLedgerStateStorage {
     #[trace]
     async fn save(
         &mut self,
-        ledger_state: &RawLedgerState,
+        ledger_state: &SerializedLedgerState,
         block_height: u32,
         highest_zswap_state_index: Option<u64>,
         protocol_version: ProtocolVersion,

@@ -49,7 +49,7 @@ CREATE TABLE contract_actions(
     transaction_id INTEGER NOT NULL,
     address BLOB NOT NULL,
     state BLOB NOT NULL,
-    zswap_state BLOB NOT NULL,
+    chain_state BLOB NOT NULL,
     variant TEXT CHECK (variant IN ('Deploy', 'Call', 'Update')) NOT NULL,
     attributes TEXT NOT NULL,
     FOREIGN KEY (transaction_id) REFERENCES transactions(id)

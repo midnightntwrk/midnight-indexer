@@ -14,8 +14,9 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiResult, AsBytesExt, ContextExt, HexEncoded, OptionExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v1::{
+            AsBytesExt, HexEncoded,
             block::BlockOffset,
             transaction::{Transaction, TransactionOffset},
             unshielded::ContractBalance,
@@ -24,7 +25,7 @@ use crate::{
 };
 use async_graphql::{ComplexObject, Context, Interface, OneofObject, SimpleObject};
 use derive_more::Debug;
-use indexer_common::domain::RawContractAddress;
+use indexer_common::domain::ledger::SerializedContractAddress;
 use std::marker::PhantomData;
 
 /// A contract action.
@@ -57,7 +58,7 @@ where
             address,
             state,
             attributes,
-            zswap_state,
+            chain_state,
             transaction_id,
             ..
         } = action;
@@ -66,7 +67,7 @@ where
             domain::ContractAttributes::Deploy => ContractAction::Deploy(ContractDeploy {
                 address: address.hex_encode(),
                 state: state.hex_encode(),
-                chain_state: zswap_state.hex_encode(),
+                chain_state: chain_state.hex_encode(),
                 transaction_id,
                 contract_action_id: id,
                 _s: PhantomData,
@@ -77,7 +78,7 @@ where
                     address: address.hex_encode(),
                     state: state.hex_encode(),
                     entry_point: entry_point.hex_encode(),
-                    chain_state: zswap_state.hex_encode(),
+                    chain_state: chain_state.hex_encode(),
                     transaction_id,
                     contract_action_id: id,
                     raw_address: address,
@@ -88,7 +89,7 @@ where
             domain::ContractAttributes::Update => ContractAction::Update(ContractUpdate {
                 address: address.hex_encode(),
                 state: state.hex_encode(),
-                chain_state: zswap_state.hex_encode(),
+                chain_state: chain_state.hex_encode(),
                 transaction_id,
                 contract_action_id: id,
                 _s: PhantomData,
@@ -101,10 +102,13 @@ where
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
 pub struct ContractDeploy<S: Storage> {
+    /// The hex-encoded serialized address.
     address: HexEncoded,
 
+    /// The hex-encoded serialized state.
     state: HexEncoded,
 
+    /// The hex-encoded serialized contract-specific zswap state.
     chain_state: HexEncoded,
 
     #[graphql(skip)]
@@ -145,12 +149,16 @@ impl<S: Storage> ContractDeploy<S> {
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
 pub struct ContractCall<S: Storage> {
+    /// The hex-encoded serialized address.
     address: HexEncoded,
 
+    /// The hex-encoded serialized state.
     state: HexEncoded,
 
+    /// The hex-encoded serialized contract-specific zswap state.
     chain_state: HexEncoded,
 
+    /// The hex-encoded serialized entry point.
     entry_point: HexEncoded,
 
     #[graphql(skip)]
@@ -160,7 +168,7 @@ pub struct ContractCall<S: Storage> {
     contract_action_id: u64,
 
     #[graphql(skip)]
-    raw_address: RawContractAddress,
+    raw_address: SerializedContractAddress,
 
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -211,10 +219,13 @@ impl<S: Storage> ContractCall<S> {
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
 pub struct ContractUpdate<S: Storage> {
+    /// The hex-encoded serialized address.
     address: HexEncoded,
 
+    /// The hex-encoded serialized state.
     state: HexEncoded,
 
+    /// The hex-encoded serialized contract-specific zswap state.
     chain_state: HexEncoded,
 
     #[graphql(skip)]

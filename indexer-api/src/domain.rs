@@ -19,7 +19,6 @@ mod contract_action;
 mod ledger_state;
 mod transaction;
 mod unshielded;
-mod viewing_key;
 
 pub use api::*;
 pub use block::*;
@@ -27,7 +26,6 @@ pub use contract_action::*;
 pub use ledger_state::*;
 pub use transaction::*;
 pub use unshielded::*;
-pub use viewing_key::*;
 
 use indexer_common::domain::{PROTOCOL_VERSION_000_013_000, ProtocolVersion};
 

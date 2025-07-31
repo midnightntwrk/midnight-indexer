@@ -38,9 +38,8 @@ use crate::{
 use anyhow::{Context, Ok, bail};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
-use indexer_api::{
-    domain::ViewingKey,
-    infra::api::{AsBytesExt, HexEncoded, v1::transaction::TransactionResultStatus},
+use indexer_api::infra::api::v1::{
+    AsBytesExt, HexEncoded, transaction::TransactionResultStatus, viewing_key::ViewingKey,
 };
 use indexer_common::domain::{ByteArray, NetworkId, PROTOCOL_VERSION_000_013_000};
 use itertools::Itertools;
@@ -57,7 +56,7 @@ const MAX_HEIGHT: usize = 30;
 /// Tests include validation of transaction fee metadata (paid_fee, estimated_fee) and segment
 /// results.
 pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> anyhow::Result<()> {
-    println!("### starting e2e testing");
+    println!("Starting e2e testing");
 
     let (api_url, ws_api_url) = {
         let core = format!("{host}:{port}/api/v1/graphql");
@@ -106,7 +105,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
         .await
         .context("test unshielded transactions subscription")?;
 
-    println!("### successfully finished e2e testing");
+    println!("Successfully finished e2e testing");
 
     Ok(())
 }
@@ -1068,12 +1067,8 @@ fn seed(n: u8) -> ByteArray<32> {
 
 mod graphql {
     use graphql_client::GraphQLQuery;
-    use indexer_api::{
-        domain::ViewingKey,
-        infra::api::{
-            HexEncoded,
-            v1::{mutation::Unit, unshielded::UnshieldedAddress},
-        },
+    use indexer_api::infra::api::v1::{
+        HexEncoded, mutation::Unit, unshielded::UnshieldedAddress, viewing_key::ViewingKey,
     };
 
     #[derive(GraphQLQuery)]

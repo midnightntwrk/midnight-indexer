@@ -44,11 +44,8 @@ impl BlockStorage for Storage {
             LIMIT 1
         "};
 
-        #[cfg(feature = "standalone")]
-        let hash = hash.as_ref();
-
         sqlx::query_as(query)
-            .bind(hash)
+            .bind(hash.as_ref())
             .fetch_optional(&*self.pool)
             .await
     }

@@ -25,6 +25,8 @@ cargo +$nightly build -p indexer-api        --features cloud
 cargo +$nightly build -p indexer-standalone --features standalone
 
 # Finally execute tests and create coverage report.
-"$cloud_tests"
-"$standalone_tests"
+echo "Running tests for cloud feature"
+"$cloud_tests" --no-capture
+echo "Running tests for standalone feature"
+"$standalone_tests" --no-capture
 cargo llvm-cov report --html

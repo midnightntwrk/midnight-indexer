@@ -12,8 +12,11 @@
 // limitations under the License.
 
 use crate::{
-    domain::{PROTOCOL_VERSION, ViewingKey, storage::Storage},
-    infra::api::{ApiResult, AsBytesExt, ContextExt, HexEncoded, ResultExt, v1::decode_session_id},
+    domain::{PROTOCOL_VERSION, storage::Storage},
+    infra::api::{
+        ApiResult, ContextExt, ResultExt,
+        v1::{AsBytesExt, HexEncoded, decode_session_id, viewing_key::ViewingKey},
+    },
 };
 use async_graphql::{Context, Object, scalar};
 use fastrace::trace;

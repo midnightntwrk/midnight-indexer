@@ -39,10 +39,9 @@ impl Display for ByteVec {
 
 /// A newtype for a byte array implementing various traits, amongst others `Debug` and `Display`
 /// returning a hex-encoded string, the former no longer than nine characters.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRef, From, Into, Serialize, Deserialize, Type)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRef, From, Into, Serialize, Deserialize)]
 #[as_ref([u8])]
 #[into([u8; N], Vec<u8>)]
-#[sqlx(transparent)]
 pub struct ByteArray<const N: usize>(#[serde(with = "const_hex")] pub [u8; N]);
 
 impl<const N: usize> Default for ByteArray<N> {
@@ -80,6 +79,39 @@ impl<const N: usize> Debug for ByteArray<N> {
 impl<const N: usize> Display for ByteArray<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         display(self, f)
+    }
+}
+
+#[cfg(feature = "cloud")]
+impl<const N: usize> Type<sqlx::Postgres> for ByteArray<N> {
+    fn type_info() -> <sqlx::Postgres as sqlx::Database>::TypeInfo {
+        <[u8; N] as Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+#[cfg(feature = "standalone")]
+impl<const N: usize> Type<sqlx::Sqlite> for ByteArray<N> {
+    fn type_info() -> <sqlx::Sqlite as sqlx::Database>::TypeInfo {
+        <&[u8] as Type<sqlx::Sqlite>>::type_info()
+    }
+}
+
+#[cfg(feature = "cloud")]
+impl<'r, const N: usize> sqlx::Decode<'r, sqlx::Postgres> for ByteArray<N> {
+    fn decode(
+        value: <sqlx::Postgres as sqlx::Database>::ValueRef<'r>,
+    ) -> Result<Self, sqlx::error::BoxDynError> {
+        <[u8; N] as sqlx::Decode<'r, sqlx::Postgres>>::decode(value).map(Self)
+    }
+}
+
+#[cfg(feature = "standalone")]
+impl<'r, const N: usize> sqlx::Decode<'r, sqlx::Sqlite> for ByteArray<N> {
+    fn decode(
+        value: <sqlx::Sqlite as sqlx::Database>::ValueRef<'r>,
+    ) -> Result<Self, sqlx::error::BoxDynError> {
+        <&[u8] as sqlx::Decode<'r, sqlx::Sqlite>>::decode(value)
+            .and_then(|bytes| ByteArray::try_from(bytes).map_err(|error| error.into()))
     }
 }
 

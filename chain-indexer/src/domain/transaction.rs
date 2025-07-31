@@ -13,8 +13,11 @@
 
 use crate::domain::ContractAction;
 use indexer_common::domain::{
-    ByteArray, ProtocolVersion, RawTransaction, RawTransactionIdentifier, RawZswapStateRoot,
-    TransactionHash, TransactionResult, UnshieldedUtxo,
+    ByteArray, ProtocolVersion,
+    ledger::{
+        SerializedTransaction, SerializedTransactionIdentifier, SerializedZswapStateRoot,
+        TransactionHash, TransactionResult, UnshieldedUtxo,
+    },
 };
 use sqlx::FromRow;
 use std::fmt::Debug;
@@ -26,12 +29,12 @@ pub struct Transaction {
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
     pub transaction_result: TransactionResult,
-    pub identifiers: Vec<RawTransactionIdentifier>,
-    pub raw: RawTransaction,
+    pub identifiers: Vec<SerializedTransactionIdentifier>,
+    pub raw: SerializedTransaction,
     pub contract_actions: Vec<ContractAction>,
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
-    pub merkle_tree_root: RawZswapStateRoot,
+    pub merkle_tree_root: SerializedZswapStateRoot,
     pub start_index: u64,
     pub end_index: u64,
     pub paid_fees: u128,
@@ -42,7 +45,7 @@ pub struct Transaction {
 /// application.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct BlockTransactions {
-    pub transactions: Vec<RawTransaction>,
+    pub transactions: Vec<SerializedTransaction>,
 
     #[sqlx(try_from = "i64")]
     pub protocol_version: ProtocolVersion,

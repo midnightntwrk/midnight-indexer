@@ -24,8 +24,7 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{
     domain::{
         BlockAuthor, BlockHash, NetworkId, ProtocolVersion, ScaleDecodeProtocolVersionError,
-        TransactionHash, UnshieldedUtxo,
-        ledger::{self, ZswapStateRoot},
+        ledger::{self, TransactionHash, UnshieldedUtxo, ZswapStateRoot},
     },
     error::BoxError,
 };

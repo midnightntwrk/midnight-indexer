@@ -14,7 +14,9 @@
 pub mod storage;
 
 use fastrace::trace;
-use indexer_common::domain::{NetworkId, ProtocolVersion, RawTransaction, ViewingKey, ledger};
+use indexer_common::domain::{
+    NetworkId, ProtocolVersion, ViewingKey, ledger, ledger::SerializedTransaction,
+};
 use sqlx::prelude::FromRow;
 
 /// Relevant data of a wallet from the perspective of the Wallet Indexer.
@@ -33,7 +35,7 @@ pub struct Transaction {
     #[sqlx(try_from = "i64")]
     pub protocol_version: ProtocolVersion,
 
-    pub raw: RawTransaction,
+    pub raw: SerializedTransaction,
 }
 
 impl Transaction {

@@ -13,7 +13,7 @@
 
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-use crate::domain::{ProtocolVersion, RawLedgerState};
+use crate::domain::{ProtocolVersion, ledger::SerializedLedgerState};
 use std::{convert::Infallible, error::Error as StdError};
 
 /// Abstraction for ledger state storage.
@@ -27,12 +27,12 @@ pub trait LedgerStateStorage: Sync + 'static {
     /// Load the ledger state, block height and protocol version.
     async fn load_ledger_state(
         &self,
-    ) -> Result<Option<(RawLedgerState, u32, ProtocolVersion)>, Self::Error>;
+    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, Self::Error>;
 
     /// Save the given ledger state, block_height and highest zswap state index.
     async fn save(
         &mut self,
-        ledger_state: &RawLedgerState,
+        ledger_state: &SerializedLedgerState,
         block_height: u32,
         highest_zswap_state_index: Option<u64>,
         protocol_version: ProtocolVersion,
@@ -50,14 +50,14 @@ impl LedgerStateStorage for NoopLedgerStateStorage {
 
     async fn load_ledger_state(
         &self,
-    ) -> Result<Option<(RawLedgerState, u32, ProtocolVersion)>, Self::Error> {
+    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, Self::Error> {
         unimplemented!()
     }
 
     #[allow(unused_variables)]
     async fn save(
         &mut self,
-        ledger_state: &RawLedgerState,
+        ledger_state: &SerializedLedgerState,
         block_height: u32,
         highest_zswap_state_index: Option<u64>,
         protocol_version: ProtocolVersion,

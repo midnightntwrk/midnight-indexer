@@ -19,7 +19,10 @@ use async_stream::try_stream;
 use fastrace::trace;
 use futures::Stream;
 use indexer_common::{
-    domain::{RawTransactionIdentifier, RawUnshieldedAddress, SessionId, TransactionHash},
+    domain::{
+        SessionId,
+        ledger::{RawUnshieldedAddress, SerializedTransactionIdentifier, TransactionHash},
+    },
     stream::flatten_chunks,
 };
 use indoc::indoc;
@@ -186,12 +189,9 @@ impl TransactionStorage for Storage {
             ORDER BY transactions.id DESC
         "};
 
-        #[cfg(feature = "standalone")]
-        let hash = hash.as_ref();
-
         #[cfg_attr(feature = "cloud", allow(unused_mut))]
         let mut transactions = sqlx::query_as::<_, Transaction>(query)
-            .bind(hash)
+            .bind(hash.as_ref())
             .fetch_all(&*self.pool)
             .await?;
 
@@ -207,7 +207,7 @@ impl TransactionStorage for Storage {
     #[trace(properties = { "identifier": "{identifier}" })]
     async fn get_transactions_by_identifier(
         &self,
-        identifier: &RawTransactionIdentifier,
+        identifier: &SerializedTransactionIdentifier,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
         #[cfg(feature = "cloud")]
         let query = indoc! {"
@@ -328,11 +328,8 @@ impl TransactionStorage for Storage {
             WHERE unshielded_utxos.owner = $1
         "};
 
-        #[cfg(feature = "standalone")]
-        let address = address.as_ref();
-
         let (id,) = sqlx::query_as::<_, (Option<i64>,)>(query)
-            .bind(address)
+            .bind(address.as_ref())
             .fetch_one(&*self.pool)
             .await?;
 
@@ -367,12 +364,9 @@ impl TransactionStorage for Storage {
             ) AS max_end_index_for_session
         "};
 
-        #[cfg(feature = "standalone")]
-        let session_id = session_id.as_ref();
-
         let (highest_index, highest_relevant_index, highest_relevant_wallet_index) =
             sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(query)
-                .bind(session_id)
+                .bind(session_id.as_ref())
                 .fetch_one(&*self.pool)
                 .await?;
 
@@ -445,12 +439,9 @@ impl Storage {
             LIMIT $3
         "};
 
-        #[cfg(feature = "standalone")]
-        let session_id = session_id.as_ref();
-
         #[cfg_attr(feature = "cloud", allow(unused_mut))]
         let mut transactions = sqlx::query_as::<_, Transaction>(query)
-            .bind(session_id)
+            .bind(session_id.as_ref())
             .bind(index as i64)
             .bind(batch_size.get() as i64)
             .fetch_all(&*self.pool)
@@ -549,7 +540,7 @@ impl Storage {
 async fn get_identifiers_for_transaction(
     transaction_id: u64,
     pool: &indexer_common::infra::pool::sqlite::SqlitePool,
-) -> Result<Vec<RawTransactionIdentifier>, sqlx::Error> {
+) -> Result<Vec<SerializedTransactionIdentifier>, sqlx::Error> {
     use futures::TryStreamExt;
 
     let query = indoc! {"
@@ -558,7 +549,7 @@ async fn get_identifiers_for_transaction(
         WHERE transaction_id = $1
     "};
 
-    sqlx::query_as::<_, (RawTransactionIdentifier,)>(query)
+    sqlx::query_as::<_, (SerializedTransactionIdentifier,)>(query)
         .bind(transaction_id as i64)
         .fetch(&**pool)
         .map_ok(|(identifier,)| identifier)

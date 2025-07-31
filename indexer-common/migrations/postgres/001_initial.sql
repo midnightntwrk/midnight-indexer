@@ -46,7 +46,7 @@ CREATE TABLE contract_actions(
     transaction_id BIGINT NOT NULL REFERENCES transactions(id),
     address BYTEA NOT NULL,
     state BYTEA NOT NULL,
-    zswap_state BYTEA NOT NULL,
+    chain_state BYTEA NOT NULL,
     variant CONTRACT_ACTION_VARIANT NOT NULL,
     attributes JSONB NOT NULL
 );
@@ -93,7 +93,7 @@ CREATE INDEX ON unshielded_utxos(creating_transaction_id);
 
 CREATE INDEX ON unshielded_utxos(spending_transaction_id);
 
-CREATE INDEX ON unshielded_utxos(OWNER);
+CREATE INDEX ON unshielded_utxos(owner);
 
 CREATE INDEX ON unshielded_utxos(token_type);
 

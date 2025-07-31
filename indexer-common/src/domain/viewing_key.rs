@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ByteArray, ByteArrayLenError, SessionId};
+use crate::domain::{ByteArray, ByteArrayLenError};
 use chacha20poly1305::{
     AeadCore, ChaCha20Poly1305,
     aead::{Aead, OsRng, Payload},
@@ -21,6 +21,8 @@ use sha2::{Digest, Sha256};
 use sqlx::types::Uuid;
 use std::fmt::{self, Debug, Display};
 use thiserror::Error;
+
+pub type SessionId = ByteArray<32>;
 
 pub const VIEWING_KEY_LEN: usize = 32;
 

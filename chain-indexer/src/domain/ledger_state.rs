@@ -14,7 +14,10 @@
 use crate::domain::Transaction;
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
-use indexer_common::domain::{ByteArray, NetworkId, RawTransaction, ledger::ContractState};
+use indexer_common::domain::{
+    ByteArray, NetworkId,
+    ledger::{ContractState, SerializedTransaction},
+};
 use std::ops::DerefMut;
 use thiserror::Error;
 
@@ -36,7 +39,7 @@ impl LedgerState {
     })]
     pub fn apply_raw_transactions<'a>(
         &mut self,
-        transactions: impl Iterator<Item = &'a RawTransaction>,
+        transactions: impl Iterator<Item = &'a SerializedTransaction>,
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
         network_id: NetworkId,
@@ -145,7 +148,7 @@ impl LedgerState {
         for contract_action in transaction.contract_actions.iter_mut() {
             let zswap_state =
                 self.extract_contract_zswap_state(&contract_action.address, network_id)?;
-            contract_action.zswap_state = zswap_state;
+            contract_action.chain_state = zswap_state;
         }
 
         Ok(())

@@ -16,12 +16,14 @@ use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteArray, ByteVec, ContractActionVariant, ContractBalance, UnshieldedUtxo,
+        BlockHash, ByteArray, ByteVec,
+        ledger::{ContractAttributes, ContractBalance, UnshieldedUtxo},
     },
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
-use sqlx::{QueryBuilder, types::Json};
+use serde::{Deserialize, Serialize};
+use sqlx::{QueryBuilder, Type, types::Json};
 
 #[cfg(feature = "cloud")]
 type Tx = sqlx::Transaction<'static, sqlx::Postgres>;
@@ -174,6 +176,30 @@ impl domain::storage::Storage for Storage {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[cfg_attr(feature = "cloud", sqlx(type_name = "CONTRACT_ACTION_VARIANT"))]
+pub enum ContractActionVariant {
+    /// A contract deployment.
+    #[default]
+    Deploy,
+
+    /// A contract call.
+    Call,
+
+    /// A contract update.
+    Update,
+}
+
+impl From<&ContractAttributes> for ContractActionVariant {
+    fn from(attributes: &ContractAttributes) -> Self {
+        match attributes {
+            ContractAttributes::Deploy => Self::Deploy,
+            ContractAttributes::Call { .. } => Self::Call,
+            ContractAttributes::Update => Self::Update,
+        }
+    }
+}
+
 #[trace]
 async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
     let query = indoc! {"
@@ -199,14 +225,11 @@ async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>
                 ..
             } = block;
 
-            #[cfg(feature = "standalone")]
-            let author = author.as_ref().map(|a| a.as_ref());
-
             q.push_bind(hash.as_ref())
                 .push_bind(*height as i64)
                 .push_bind(protocol_version.0 as i64)
                 .push_bind(parent_hash.as_ref())
-                .push_bind(author)
+                .push_bind(author.as_ref().map(|a| a.as_ref()))
                 .push_bind(*timestamp as i64);
         })
         .push(" RETURNING id")
@@ -377,18 +400,14 @@ async fn save_unshielded_utxos(
                 output_index,
             } = utxo;
 
-            #[cfg(feature = "standalone")]
-            let (owner, token_type, intent_hash) =
-                { (owner.as_ref(), token_type.as_ref(), intent_hash.as_ref()) };
-
             sqlx::query(query)
                 .bind(transaction_id)
                 .bind(transaction_id)
-                .bind(owner)
-                .bind(token_type)
+                .bind(owner.as_ref())
+                .bind(token_type.as_ref())
                 .bind(U128BeBytes::from(value))
                 .bind(output_index as i32)
-                .bind(intent_hash)
+                .bind(intent_hash.as_ref())
                 .execute(&mut **tx)
                 .await?;
         }
@@ -414,16 +433,12 @@ async fn save_unshielded_utxos(
                     output_index,
                 } = utxo;
 
-                #[cfg(feature = "standalone")]
-                let (owner, token_type, intent_hash) =
-                    { (owner.as_ref(), token_type.as_ref(), intent_hash.as_ref()) };
-
                 q.push_bind(transaction_id)
-                    .push_bind(owner)
-                    .push_bind(token_type)
+                    .push_bind(owner.as_ref())
+                    .push_bind(token_type.as_ref())
                     .push_bind(U128BeBytes::from(*value))
                     .push_bind(*output_index as i32)
-                    .push_bind(intent_hash);
+                    .push_bind(intent_hash.as_ref());
             })
             .build()
             .execute(&mut **tx)
@@ -448,7 +463,7 @@ async fn save_contract_actions(
             transaction_id,
             address,
             state,
-            zswap_state,
+            chain_state,
             variant,
             attributes
         )
@@ -459,7 +474,7 @@ async fn save_contract_actions(
             q.push_bind(transaction_id)
                 .push_bind(&action.address)
                 .push_bind(&action.state)
-                .push_bind(&action.zswap_state)
+                .push_bind(&action.chain_state)
                 .push_bind(ContractActionVariant::from(&action.attributes))
                 .push_bind(Json(&action.attributes));
         })
@@ -490,14 +505,9 @@ async fn save_contract_balances(
 
         QueryBuilder::new(query)
             .push_values(balances.iter(), |mut q, (action_id, balance)| {
-                let ContractBalance { token_type, amount } = balance;
-
-                #[cfg(feature = "standalone")]
-                let token_type = token_type.as_ref();
-
                 q.push_bind(*action_id)
-                    .push_bind(token_type)
-                    .push_bind(U128BeBytes::from(*amount));
+                    .push_bind(balance.token_type.as_ref())
+                    .push_bind(U128BeBytes::from(balance.amount));
             })
             .build()
             .execute(&mut **tx)
@@ -509,7 +519,7 @@ async fn save_contract_balances(
 
 #[cfg(feature = "standalone")]
 async fn save_identifiers(
-    identifiers: &[indexer_common::domain::RawTransactionIdentifier],
+    identifiers: &[indexer_common::domain::ledger::SerializedTransactionIdentifier],
     transaction_id: i64,
     tx: &mut Tx,
 ) -> Result<(), sqlx::Error> {

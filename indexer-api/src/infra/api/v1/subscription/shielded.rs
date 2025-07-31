@@ -14,8 +14,11 @@
 use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, AsBytesExt, ContextExt, HexEncoded, InnerApiError, ResultExt,
-        v1::{decode_session_id, subscription::get_next_transaction, transaction::Transaction},
+        ApiError, ApiResult, ContextExt, InnerApiError, ResultExt,
+        v1::{
+            AsBytesExt, HexEncoded, decode_session_id, subscription::get_next_transaction,
+            transaction::Transaction,
+        },
     },
 };
 use async_graphql::{Context, SimpleObject, Subscription, Union, async_stream::try_stream};
@@ -28,7 +31,7 @@ use futures::{
     stream::{self, TryStreamExt},
 };
 use indexer_common::domain::{
-    LedgerStateStorage, NetworkId, SessionId, Subscriber, TransactionResult, WalletIndexed,
+    LedgerStateStorage, NetworkId, SessionId, Subscriber, WalletIndexed, ledger::TransactionResult,
 };
 use log::{debug, warn};
 use std::{
