@@ -14,12 +14,10 @@
 use crate::{
     domain::{
         dust::{
-            AddressType, DustCommitmentEvent, DustCommitmentInfo, DustCommitmentMerkleUpdate,
-            DustCommitmentProgress, DustGenerationEvent, DustGenerationInfo,
-            DustGenerationMerkleUpdate, DustGenerationProgress, DustGenerationStatus,
-            DustMerkleTreeType, DustNullifierTransaction, DustNullifierTransactionEvent,
-            DustNullifierTransactionProgress, DustSystemState, RegistrationAddress,
-            RegistrationUpdate, RegistrationUpdateEvent, RegistrationUpdateProgress,
+            AddressType, DustCommitmentEvent, DustCommitmentInfo, DustGenerationEvent,
+            DustGenerationInfo, DustGenerationStatus, DustMerkleTreeType, DustNullifierTransaction,
+            DustNullifierTransactionEvent, DustSystemState, RegistrationAddress,
+            RegistrationUpdate, RegistrationUpdateEvent,
         },
         storage::dust::DustStorage,
     },
@@ -201,7 +199,7 @@ impl DustStorage for Storage {
             .bind(timestamp as i64)
             .fetch_optional(&*self.pool)
             .await?
-            .map(|(x,)| x.into());
+            .map(|(x,)| x);
 
         Ok(root)
     }
@@ -210,7 +208,7 @@ impl DustStorage for Storage {
         &self,
         dust_address: &indexer_common::domain::DustAddress,
         from_generation_index: i64,
-        from_merkle_index: i64,
+        _from_merkle_index: i64,
         only_active: bool,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send {
@@ -218,7 +216,6 @@ impl DustStorage for Storage {
 
         try_stream! {
             let mut last_index = from_generation_index;
-            let mut last_merkle_index = from_merkle_index;
 
             loop {
                 // Query generation info
@@ -260,51 +257,13 @@ impl DustStorage for Storage {
 
                 for row in rows {
                     last_index = row.id as i64 + 1;
-                    last_merkle_index = row.merkle_index as i64 + 1;
 
                     yield DustGenerationEvent::Info(row.into());
                 }
 
-                // Query merkle updates for this batch.
-                let query = indoc! {r#"
-                        SELECT "index", root, block_height
-                        FROM dust_generation_tree
-                        WHERE "index" >= $1
-                        ORDER BY "index"
-                        LIMIT $2
-                    "#};
-
-                let merkle_rows = sqlx::query_as::<_, MerkleTreeRow>(query)
-                    .bind(last_merkle_index)
-                    .bind(batch_size)
-                    .fetch_all(&*self.pool)
-                    .await?;
-
-                for row in merkle_rows {
-                    yield DustGenerationEvent::MerkleUpdate(DustGenerationMerkleUpdate {
-                        index: row.index as u32,
-                        collapsed_update: row.root.into(),
-                        block_height: row.block_height as u32,
-                    });
-                }
-
-                // Send progress update.
-                let active_count_query = indoc! {"
-                    SELECT COUNT(*)
-                    FROM dust_generation_info
-                    WHERE owner = $1
-                    AND dtime IS NULL
-                "};
-
-                let (active_count,) = sqlx::query_as::<_, (i64,)>(active_count_query)
-                    .bind(dust_address.as_ref())
-                    .fetch_one(&*self.pool)
-                    .await?;
-
-                yield DustGenerationEvent::Progress(DustGenerationProgress {
-                    highest_index: last_merkle_index as u32,
-                    active_generations: active_count as u32,
-                });
+                // TODO: Merkle tree updates are disabled.
+                // Schema mismatch: domain expects 'index' field but table only has 'id'.
+                // Need schema update or domain model change to fix this.
             }
         }
     }
@@ -413,12 +372,6 @@ impl DustStorage for Storage {
                         current_block = last_height + 1;
                     }
 
-                    // Send progress update
-                    let matched_count = rows.len() as u32;
-                    yield DustNullifierTransactionEvent::Progress(DustNullifierTransactionProgress {
-                        highest_block: (current_block as u32).saturating_sub(1),
-                        matched_count,
-                    });
                 }
             }
         };
@@ -478,7 +431,7 @@ impl DustStorage for Storage {
                     where_clause
                 );
 
-                let rows: Vec<DustUtxoRow> =
+                let rows: Vec<DustUtxosRow> =
                     sqlx::query_as(&query)
                         .bind(current_index)
                         .bind(batch_size)
@@ -488,11 +441,14 @@ impl DustStorage for Storage {
                 if rows.is_empty() {
                     has_more = false;
                 } else {
-                    let mut commitment_count = 0;
-
                     for row in rows {
+                        let spent_id = row.spent_at_transaction_id;
+                        current_index = row.id as i64 + 1;
+
+                        let mut commitment_info: DustCommitmentInfo = row.into();
+
                         // Get spent timestamp if spent
-                        let spent_at = if row.spent_at_transaction_id.is_some() {
+                        if let Some(spent_id) = spent_id {
                             let spent_query = indoc! {"
                                 SELECT b.timestamp
                                 FROM transactions t
@@ -501,57 +457,42 @@ impl DustStorage for Storage {
                             "};
 
                             let timestamp = sqlx::query_as::<_, (i64,)>(spent_query)
-                                .bind(row.spent_at_transaction_id.map(|id| id as i64))
+                                .bind(spent_id as i64)
                                 .fetch_optional(&*self.pool)
                                 .await?;
 
-                            timestamp.map(|(t,)| t as u32)
-                        } else {
-                            None
-                        };
+                            commitment_info.spent_at = timestamp.map(|(t,)| t as u32);
+                        }
 
-                        yield DustCommitmentEvent::Commitment(DustCommitmentInfo {
-                            commitment: row.commitment,
-                            nullifier: row.nullifier,
-                            value: row.value,
-                            owner: row.owner,
-                            nonce: row.nonce,
-                            created_at: row.ctime as u32,
-                            spent_at,
-                        });
-
-                        commitment_count += 1;
-                        current_index = row.id as i64 + 1;
+                        yield DustCommitmentEvent::Commitment(commitment_info);
                     }
 
-                    // Query merkle updates
-                    let merkle_query = indoc! {r#"
-                        SELECT "index", root, block_height
-                        FROM dust_commitment_tree
-                        WHERE "index" >= $1
-                        ORDER BY "index"
-                        LIMIT $2
-                    "#};
+                    // TODO: Fix merkle update handling - table schema doesn't have index column
+                    // The dust_commitment_tree table only has 'id' (database PK), not 'index' (merkle position)
+                    // Merkle update functionality is disabled until schema is updated
+                    //
+                    // let merkle_query = indoc! {r#"
+                    //     SELECT "index", root, block_height
+                    //     FROM dust_commitment_tree
+                    //     WHERE "index" >= $1
+                    //     ORDER BY "index"
+                    //     LIMIT $2
+                    // "#};
+                    //
+                    // let merkle_rows: Vec<DustCommitmentTreeRow> = sqlx::query_as(merkle_query)
+                    //     .bind(current_index)
+                    //     .bind(batch_size)
+                    //     .fetch_all(&*self.pool)
+                    //     .await?;
+                    //
+                    // for row in merkle_rows {
+                    //     yield DustCommitmentEvent::MerkleUpdate(DustCommitmentMerkleUpdate {
+                    //         index: row.index as u32,
+                    //         collapsed_update: row.root.into(),
+                    //         block_height: row.block_height as u32,
+                    //     });
+                    // }
 
-                    let merkle_rows: Vec<MerkleTreeRow> = sqlx::query_as(merkle_query)
-                        .bind(current_index)
-                        .bind(batch_size)
-                        .fetch_all(&*self.pool)
-                        .await?;
-
-                    for row in merkle_rows {
-                        yield DustCommitmentEvent::MerkleUpdate(DustCommitmentMerkleUpdate {
-                            index: row.index as u32,
-                            collapsed_update: row.root.into(),
-                            block_height: row.block_height as u32,
-                        });
-                    }
-
-                    // Send progress update
-                    yield DustCommitmentEvent::Progress(DustCommitmentProgress {
-                        highest_index: current_index as u32,
-                        commitment_count,
-                    });
                 }
             }
         };
@@ -620,7 +561,7 @@ impl DustStorage for Storage {
                     conditions.len() + 2
                 );
 
-                let mut query_builder = sqlx::query_as::<_, RegistrationRow>(&query)
+                let mut query_builder = sqlx::query_as::<_, CnightRegistrationsRow>(&query)
                     .bind(last_id);
 
                 for (_, bytes) in &conditions {
@@ -636,35 +577,67 @@ impl DustStorage for Storage {
                 if rows.is_empty() {
                     has_more = false;
                 } else {
-                    let update_count = rows.len() as u32;
+                    let _update_count = rows.len() as u32;
                     let mut latest_timestamp = 0i64;
 
                     for row in rows {
-                        yield RegistrationUpdateEvent::Update(RegistrationUpdate {
-                            cardano_stake_key: row.cardano_address,
-                            dust_address: row.dust_address,
-                            is_active: row.is_valid && row.removed_at.is_none(),
-                            registered_at: row.registered_at as u32,
-                            removed_at: row.removed_at.map(|t| t as u32),
-                        });
+                        let row_id = row.id;
+                        let row_registered_at = row.registered_at;
+                        let row_removed_at = row.removed_at;
 
-                        last_id = row.id as i64;
-                        latest_timestamp = latest_timestamp.max(row.registered_at as i64);
-                        if let Some(removed) = row.removed_at {
+                        yield RegistrationUpdateEvent::Update(row.into());
+
+                        last_id = row_id as i64;
+                        latest_timestamp = latest_timestamp.max(row_registered_at as i64);
+                        if let Some(removed) = row_removed_at {
                             latest_timestamp = latest_timestamp.max(removed as i64);
                         }
                     }
 
-                    // Send progress update
-                    yield RegistrationUpdateEvent::Progress(RegistrationUpdateProgress {
-                        latest_timestamp: latest_timestamp as u32,
-                        update_count,
-                    });
                 }
             }
         };
 
         Ok(stream)
+    }
+
+    #[trace]
+    async fn get_highest_generation_index_for_dust_address(
+        &self,
+        dust_address: &DustAddress,
+    ) -> Result<Option<u64>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT MAX(merkle_index)
+            FROM dust_generation_info
+            WHERE owner = $1
+        "};
+
+        let result: Option<(Option<i64>,)> = sqlx::query_as(query)
+            .bind(dust_address.as_ref())
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        Ok(result.and_then(|(max,)| max).map(|i| i as u64))
+    }
+
+    #[trace]
+    async fn get_active_generation_count_for_dust_address(
+        &self,
+        dust_address: &DustAddress,
+    ) -> Result<u32, sqlx::Error> {
+        let query = indoc! {"
+            SELECT COUNT(*)
+            FROM dust_generation_info
+            WHERE owner = $1
+            AND dtime IS NULL
+        "};
+
+        let (count,): (i64,) = sqlx::query_as(query)
+            .bind(dust_address.as_ref())
+            .fetch_one(&*self.pool)
+            .await?;
+
+        Ok(count as u32)
     }
 }
 
@@ -674,16 +647,13 @@ struct DustGenerationInfoRow {
     #[sqlx(try_from = "i64")]
     id: u64,
 
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     night_utxo_hash: NightUtxoHash,
 
     #[sqlx(try_from = "U128BeBytes")]
     value: u128,
 
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     owner: DustOwner,
 
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     nonce: DustNonce,
 
     #[sqlx(try_from = "i64")]
@@ -721,25 +691,21 @@ impl From<DustGenerationInfoRow> for DustGenerationInfo {
     }
 }
 
-/// Row type for dust utxo queries.
+/// Row type for dust_utxos table queries.
 #[derive(Debug, Clone, FromRow)]
-struct DustUtxoRow {
+struct DustUtxosRow {
     #[sqlx(try_from = "i64")]
     id: u64,
 
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     commitment: indexer_common::domain::DustCommitment,
 
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "SqlxOption<&'a [u8]>"))]
     nullifier: Option<indexer_common::domain::DustNullifier>,
 
     #[sqlx(rename = "initial_value", try_from = "U128BeBytes")]
     value: u128,
 
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     owner: DustOwner,
 
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     nonce: DustNonce,
 
     #[sqlx(try_from = "i64")]
@@ -749,28 +715,67 @@ struct DustUtxoRow {
     spent_at_transaction_id: Option<u64>,
 }
 
-/// Row type for merkle tree queries.
-#[derive(Debug, Clone, FromRow)]
-struct MerkleTreeRow {
-    #[sqlx(try_from = "i64")]
-    index: u32,
+// TODO: Uncomment these when merkle tree functionality is re-enabled
+// /// Row type for dust_commitment_tree table queries.
+// #[derive(Debug, Clone, FromRow)]
+// struct DustCommitmentTreeRow {
+//     #[sqlx(try_from = "i64")]
+//     id: u64,
+//
+//     #[sqlx(try_from = "i64")]
+//     block_height: u32,
+//
+//     root: Vec<u8>,
+//
+//     tree_data: Vec<u8>,
+// }
+//
+// /// Row type for dust_generation_tree table queries.
+// #[derive(Debug, Clone, FromRow)]
+// struct DustGenerationTreeRow {
+//     #[sqlx(try_from = "i64")]
+//     id: u64,
+//
+//     #[sqlx(try_from = "i64")]
+//     block_height: u32,
+//
+//     root: Vec<u8>,
+//
+//     tree_data: Vec<u8>,
+// }
 
-    root: Vec<u8>,
+impl From<DustUtxosRow> for DustCommitmentInfo {
+    fn from(row: DustUtxosRow) -> Self {
+        let DustUtxosRow {
+            commitment,
+            nullifier,
+            value,
+            owner,
+            nonce,
+            ctime,
+            ..
+        } = row;
 
-    #[sqlx(try_from = "i64")]
-    block_height: u32,
+        Self {
+            commitment,
+            nullifier,
+            value,
+            owner,
+            nonce,
+            created_at: ctime,
+            spent_at: None, // This needs to be handled separately with an additional query
+        }
+    }
 }
 
-/// Row type for registration queries.
+/// Row type for cnight_registrations table queries.
 #[derive(Debug, Clone, FromRow)]
-struct RegistrationRow {
+struct CnightRegistrationsRow {
     #[sqlx(try_from = "i64")]
     id: u64,
 
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     cardano_address: CardanoStakeKey,
 
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     dust_address: DustAddress,
 
     is_valid: bool,
@@ -780,4 +785,25 @@ struct RegistrationRow {
 
     #[sqlx(try_from = "SqlxOption<i64>")]
     removed_at: Option<u64>,
+}
+
+impl From<CnightRegistrationsRow> for RegistrationUpdate {
+    fn from(row: CnightRegistrationsRow) -> Self {
+        let CnightRegistrationsRow {
+            cardano_address,
+            dust_address,
+            is_valid,
+            registered_at,
+            removed_at,
+            ..
+        } = row;
+
+        Self {
+            cardano_stake_key: cardano_address,
+            dust_address,
+            is_active: is_valid && removed_at.is_none(),
+            registered_at: registered_at as u32,
+            removed_at: removed_at.map(|t| t as u32),
+        }
+    }
 }

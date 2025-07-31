@@ -16,17 +16,22 @@ use crate::{
     infra::api::{
         ApiError, ApiResult, ContextExt, HexEncoded, InnerApiError, ResultExt,
         v1::dust::{
-            DustCommitmentEvent, DustGenerationEvent, DustNullifierTransactionEvent,
-            RegistrationAddress, RegistrationUpdateEvent,
+            DustCommitmentEvent, DustGenerationEvent, DustGenerationInfo, DustGenerationProgress,
+            DustNullifierTransactionEvent, RegistrationAddress, RegistrationUpdateEvent,
         },
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
-use futures::{Stream, TryStreamExt};
-use std::{marker::PhantomData, num::NonZeroU32, pin::pin};
+use futures::{Stream, StreamExt, TryStreamExt};
+use std::{marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
+use tokio::time::interval;
+use tokio_stream::wrappers::IntervalStream;
 
 // TODO: Make configurable!
 const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
+
+// TODO: Make configurable!
+const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(30);
 
 /// DUST GraphQL subscriptions.
 pub struct DustSubscription<S> {
@@ -53,8 +58,6 @@ where
         from_merkle_index: Option<i32>,
         only_active: Option<bool>,
     ) -> Result<impl Stream<Item = ApiResult<DustGenerationEvent>> + use<'a, S>, ApiError> {
-        let storage = cx.get_storage::<S>();
-
         // Decode the DUST address.
         let dust_address_bytes: indexer_common::domain::DustAddress =
             dust_address.hex_decode().map_err(|e| {
@@ -68,27 +71,24 @@ where
         // Default to true to show only currently active (non-destroyed) generations.
         let only_active = only_active.unwrap_or(true);
 
-        let stream = try_stream! {
-            let dust_generations = storage
-                .get_dust_generations(
-                    &dust_address_bytes,
-                    from_generation_index as i64,
-                    from_merkle_index as i64,
-                    only_active,
-                    BATCH_SIZE,
-                );
-            let mut dust_generations = pin!(dust_generations);
+        // Create data stream from storage
+        let dust_generations = make_dust_generations::<S>(
+            cx,
+            dust_address_bytes,
+            from_generation_index as i64,
+            from_merkle_index as i64,
+            only_active,
+        )
+        .map_ok(DustGenerationEvent::Info);
 
-            while let Some(event) = dust_generations
-                .try_next()
-                .await
-                .map_err_into_server_error(|| "get next DUST generation event")?
-            {
-                yield event.into();
-            }
-        };
+        // Create progress stream - clone the address to avoid lifetime issues
+        let progress_updates = dust_generation_progress_updates::<S>(cx, dust_address_bytes)
+            .map_ok(DustGenerationEvent::Progress);
 
-        Ok(stream)
+        // Merge the streams
+        let events = tokio_stream::StreamExt::merge(dust_generations, progress_updates);
+
+        Ok(events)
     }
 
     /// Stream regular transactions containing DUST nullifiers.
@@ -220,4 +220,83 @@ where
 
         Ok(stream)
     }
+}
+
+fn make_dust_generations<'a, S>(
+    cx: &'a Context<'a>,
+    dust_address: indexer_common::domain::DustAddress,
+    from_generation_index: i64,
+    from_merkle_index: i64,
+    only_active: bool,
+) -> impl Stream<Item = ApiResult<DustGenerationInfo>> + use<'a, S>
+where
+    S: Storage,
+{
+    let storage = cx.get_storage::<S>();
+
+    try_stream! {
+        let dust_generations = storage
+            .get_dust_generations(
+                &dust_address,
+                from_generation_index,
+                from_merkle_index,
+                only_active,
+                BATCH_SIZE,
+            );
+        let mut dust_generations = pin!(dust_generations);
+
+        while let Some(event) = dust_generations
+            .try_next()
+            .await
+            .map_err_into_server_error(|| "get next DUST generation event")?
+        {
+            match event {
+                domain::dust::DustGenerationEvent::Info(info) => yield info.into(),
+                domain::dust::DustGenerationEvent::MerkleUpdate(_) => {
+                    // Skip merkle updates in this stream - they're part of Info events now
+                },
+                domain::dust::DustGenerationEvent::Progress(_) => {
+                    // Skip progress - handled separately
+                },
+            }
+        }
+    }
+}
+
+fn dust_generation_progress_updates<'a, S>(
+    cx: &'a Context<'a>,
+    dust_address: indexer_common::domain::DustAddress,
+) -> impl Stream<Item = ApiResult<DustGenerationProgress>> + use<'a, S>
+where
+    S: Storage,
+{
+    let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
+    intervals
+        .then(move |_| make_dust_generation_progress_update(dust_address, cx.get_storage::<S>()))
+}
+
+async fn make_dust_generation_progress_update<S>(
+    dust_address: indexer_common::domain::DustAddress,
+    storage: &S,
+) -> ApiResult<DustGenerationProgress>
+where
+    S: Storage,
+{
+    // Get highest generation index for this address
+    let highest_index = storage
+        .get_highest_generation_index_for_dust_address(&dust_address)
+        .await
+        .map_err_into_server_error(|| "get highest generation index")?
+        .unwrap_or(0);
+
+    // Get count of active generations
+    let active_count = storage
+        .get_active_generation_count_for_dust_address(&dust_address)
+        .await
+        .map_err_into_server_error(|| "get active generation count")?;
+
+    Ok(DustGenerationProgress {
+        highest_index: highest_index as i32,
+        active_generations: active_count as i32,
+    })
 }

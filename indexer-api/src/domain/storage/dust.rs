@@ -79,6 +79,18 @@ pub trait DustStorage: BlockStorage {
         addresses: &[RegistrationAddress],
         batch_size: NonZeroU32,
     ) -> Result<impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send, sqlx::Error>;
+
+    /// Get highest generation index for a DUST address.
+    async fn get_highest_generation_index_for_dust_address(
+        &self,
+        dust_address: &DustAddress,
+    ) -> Result<Option<u64>, sqlx::Error>;
+
+    /// Get count of active generations for a DUST address.
+    async fn get_active_generation_count_for_dust_address(
+        &self,
+        dust_address: &DustAddress,
+    ) -> Result<u32, sqlx::Error>;
 }
 
 #[allow(unused_variables)]
@@ -144,5 +156,19 @@ impl DustStorage for NoopStorage {
     ) -> Result<impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send, sqlx::Error>
     {
         Ok(stream::empty())
+    }
+
+    async fn get_highest_generation_index_for_dust_address(
+        &self,
+        dust_address: &DustAddress,
+    ) -> Result<Option<u64>, sqlx::Error> {
+        unimplemented!("NoopStorage")
+    }
+
+    async fn get_active_generation_count_for_dust_address(
+        &self,
+        dust_address: &DustAddress,
+    ) -> Result<u32, sqlx::Error> {
+        unimplemented!("NoopStorage")
     }
 }
