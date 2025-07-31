@@ -91,6 +91,9 @@ export interface Transaction {
   protocolVersion?: number;
   raw?: string;
   block?: Block;
+  transactionResult?: TransactionResult;
+  fees?: TransactionFees;
+  merkleTreeRoot?: string;
   contractActions?: ContractAction[];
   unshieldedCreatedOutputs?: UnshieldedUtxo[];
   unshieldedSpentOutputs?: UnshieldedUtxo[];
@@ -206,5 +209,4 @@ export interface DustLedgerEvent {
   raw: string;
   maxId: number;
 }
-
 export type ViewingKey = string & { __brand: 'ViewingKey' };
