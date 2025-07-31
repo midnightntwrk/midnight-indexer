@@ -23,10 +23,13 @@ import type {
   Transaction,
   TransactionOffset,
   TransactionResponse,
-  UnshieldedUtxo,
+  ContractAction,
+  ContractActionOffset,
+  ContractActionResponse,
 } from './indexer-types';
 import { GET_LATEST_BLOCK, GET_BLOCK_BY_OFFSET } from './graphql/block-queries';
 import { GET_TRANSACTION_BY_OFFSET } from './graphql/transaction-queries';
+import { GET_CONTRACT_ACTION, GET_CONTRACT_ACTION_BY_OFFSET } from './graphql/contract-queries';
 
 /**
  * HTTP client for interacting with the Midnight Indexer GraphQL API
@@ -116,6 +119,7 @@ export class IndexerHttpClient {
     queryOverride?: string,
   ): Promise<TransactionResponse> {
     log.debug(`Target URL endpoint ${this.getTargetUrl()}`);
+
     const query = queryOverride || GET_TRANSACTION_BY_OFFSET;
     const variables = { OFFSET: offset };
 
@@ -123,6 +127,40 @@ export class IndexerHttpClient {
     log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
 
     const response = await this.client.rawRequest<{ transactions: Transaction[] }>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  /**
+   * Retrieves a contract action by its address and optional offset from the indexer
+   * @param contractAddress - The contract address to query for
+   * @param offset - The contract action offset to query for (note this could be either a transaction
+   *                 offset or a block offset)
+   * @param queryOverride - Optional custom GraphQL query to override the default contract action query
+   * @returns Promise resolving to the contract action response containing the requested contract action data
+   */
+  async getContractAction(
+    contractAddress: string,
+    offset?: ContractActionOffset,
+    queryOverride?: string,
+  ): Promise<ContractActionResponse> {
+    log.debug(`Target URL endpoint ${this.getTargetUrl()}`);
+
+    const query = queryOverride || offset ? GET_CONTRACT_ACTION : GET_CONTRACT_ACTION_BY_OFFSET;
+    const variables = {
+      ADDRESS: contractAddress,
+      OFFSET: offset,
+    };
+
+    log.debug(`Using query\n${query}`);
+    log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
+
+    const response = await this.client.rawRequest<{ contractAction: ContractAction }>(
       query,
       variables,
     );
