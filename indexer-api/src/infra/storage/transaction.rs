@@ -189,12 +189,9 @@ impl TransactionStorage for Storage {
             ORDER BY transactions.id DESC
         "};
 
-        #[cfg(feature = "standalone")]
-        let hash = hash.as_ref();
-
         #[cfg_attr(feature = "cloud", allow(unused_mut))]
         let mut transactions = sqlx::query_as::<_, Transaction>(query)
-            .bind(hash)
+            .bind(hash.as_ref())
             .fetch_all(&*self.pool)
             .await?;
 
@@ -331,11 +328,8 @@ impl TransactionStorage for Storage {
             WHERE unshielded_utxos.owner = $1
         "};
 
-        #[cfg(feature = "standalone")]
-        let address = address.as_ref();
-
         let (id,) = sqlx::query_as::<_, (Option<i64>,)>(query)
-            .bind(address)
+            .bind(address.as_ref())
             .fetch_one(&*self.pool)
             .await?;
 
@@ -370,12 +364,9 @@ impl TransactionStorage for Storage {
             ) AS max_end_index_for_session
         "};
 
-        #[cfg(feature = "standalone")]
-        let session_id = session_id.as_ref();
-
         let (highest_index, highest_relevant_index, highest_relevant_wallet_index) =
             sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(query)
-                .bind(session_id)
+                .bind(session_id.as_ref())
                 .fetch_one(&*self.pool)
                 .await?;
 
@@ -448,12 +439,9 @@ impl Storage {
             LIMIT $3
         "};
 
-        #[cfg(feature = "standalone")]
-        let session_id = session_id.as_ref();
-
         #[cfg_attr(feature = "cloud", allow(unused_mut))]
         let mut transactions = sqlx::query_as::<_, Transaction>(query)
-            .bind(session_id)
+            .bind(session_id.as_ref())
             .bind(index as i64)
             .bind(batch_size.get() as i64)
             .fetch_all(&*self.pool)

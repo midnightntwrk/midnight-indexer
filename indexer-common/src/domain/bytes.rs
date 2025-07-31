@@ -115,16 +115,6 @@ impl<'r, const N: usize> sqlx::Decode<'r, sqlx::Sqlite> for ByteArray<N> {
     }
 }
 
-#[cfg(feature = "cloud")]
-impl<'q, const N: usize> sqlx::Encode<'q, sqlx::Postgres> for ByteArray<N> {
-    fn encode_by_ref(
-        &self,
-        buf: &mut <sqlx::Postgres as sqlx::Database>::ArgumentBuffer<'q>,
-    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
-        <[u8; N] as ::sqlx::encode::Encode<'q, sqlx::Postgres>>::encode_by_ref(&self.0, buf)
-    }
-}
-
 #[derive(Debug, Error)]
 #[error("cannot create byte array of len {0} from input of len {1}")]
 pub struct ByteArrayLenError(usize, usize);

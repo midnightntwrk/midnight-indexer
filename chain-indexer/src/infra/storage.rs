@@ -225,14 +225,11 @@ async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>
                 ..
             } = block;
 
-            #[cfg(feature = "standalone")]
-            let author = author.as_ref().map(|a| a.as_ref());
-
             q.push_bind(hash.as_ref())
                 .push_bind(*height as i64)
                 .push_bind(protocol_version.0 as i64)
                 .push_bind(parent_hash.as_ref())
-                .push_bind(author)
+                .push_bind(author.as_ref().map(|a| a.as_ref()))
                 .push_bind(*timestamp as i64);
         })
         .push(" RETURNING id")
@@ -403,18 +400,14 @@ async fn save_unshielded_utxos(
                 output_index,
             } = utxo;
 
-            #[cfg(feature = "standalone")]
-            let (owner, token_type, intent_hash) =
-                { (owner.as_ref(), token_type.as_ref(), intent_hash.as_ref()) };
-
             sqlx::query(query)
                 .bind(transaction_id)
                 .bind(transaction_id)
-                .bind(owner)
-                .bind(token_type)
+                .bind(owner.as_ref())
+                .bind(token_type.as_ref())
                 .bind(U128BeBytes::from(value))
                 .bind(output_index as i32)
-                .bind(intent_hash)
+                .bind(intent_hash.as_ref())
                 .execute(&mut **tx)
                 .await?;
         }
@@ -440,16 +433,12 @@ async fn save_unshielded_utxos(
                     output_index,
                 } = utxo;
 
-                #[cfg(feature = "standalone")]
-                let (owner, token_type, intent_hash) =
-                    { (owner.as_ref(), token_type.as_ref(), intent_hash.as_ref()) };
-
                 q.push_bind(transaction_id)
-                    .push_bind(owner)
-                    .push_bind(token_type)
+                    .push_bind(owner.as_ref())
+                    .push_bind(token_type.as_ref())
                     .push_bind(U128BeBytes::from(*value))
                     .push_bind(*output_index as i32)
-                    .push_bind(intent_hash);
+                    .push_bind(intent_hash.as_ref());
             })
             .build()
             .execute(&mut **tx)
@@ -516,14 +505,9 @@ async fn save_contract_balances(
 
         QueryBuilder::new(query)
             .push_values(balances.iter(), |mut q, (action_id, balance)| {
-                let ContractBalance { token_type, amount } = balance;
-
-                #[cfg(feature = "standalone")]
-                let token_type = token_type.as_ref();
-
                 q.push_bind(*action_id)
-                    .push_bind(token_type)
-                    .push_bind(U128BeBytes::from(*amount));
+                    .push_bind(balance.token_type.as_ref())
+                    .push_bind(U128BeBytes::from(balance.amount));
             })
             .build()
             .execute(&mut **tx)

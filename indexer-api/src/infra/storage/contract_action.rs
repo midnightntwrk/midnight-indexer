@@ -108,12 +108,9 @@ impl ContractActionStorage for Storage {
             LIMIT 1
         "};
 
-        #[cfg(feature = "standalone")]
-        let (address, hash) = { (address.as_ref(), hash.as_ref()) };
-
         sqlx::query_as(query)
-            .bind(address)
-            .bind(hash)
+            .bind(address.as_ref())
+            .bind(hash.as_ref())
             .fetch_optional(&*self.pool)
             .await
     }
@@ -174,12 +171,9 @@ impl ContractActionStorage for Storage {
             LIMIT 1
         "};
 
-        #[cfg(feature = "standalone")]
-        let (address, hash) = { (address.as_ref(), hash.as_ref()) };
-
         sqlx::query_as(query)
-            .bind(address)
-            .bind(hash)
+            .bind(address.as_ref())
+            .bind(hash.as_ref())
             .fetch_optional(&*self.pool)
             .await
     }

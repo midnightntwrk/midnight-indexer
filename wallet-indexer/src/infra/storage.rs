@@ -158,12 +158,9 @@ impl domain::storage::Storage for Storage {
             RETURNING id
         "};
 
-        #[cfg(feature = "standalone")]
-        let session_id = session_id.as_ref();
-
         let wallet_id = sqlx::query(query)
             .bind(id)
-            .bind(session_id)
+            .bind(session_id.as_ref())
             .bind(viewing_key)
             .bind(last_indexed_transaction_id as i64)
             .bind(OffsetDateTime::now_utc())
