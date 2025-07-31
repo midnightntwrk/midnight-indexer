@@ -319,6 +319,12 @@ impl TransactionStorage for Storage {
         &self,
         address: RawUnshieldedAddress,
     ) -> Result<Option<u64>, sqlx::Error> {
+        // Debug logging
+        let address_hex = const_hex::encode(address.0);
+        log::debug!(
+            "get_highest_transaction_id_for_unshielded_address called for address: {address_hex}"
+        );
+
         let query = indoc! {"
             SELECT MAX(transactions.id)
             FROM transactions
@@ -336,7 +342,10 @@ impl TransactionStorage for Storage {
             .fetch_one(&*self.pool)
             .await?;
 
-        Ok(id.map(|id| id as u64))
+        let result = id.map(|id| id as u64);
+        log::debug!("Query result for address {address_hex}: {result:?}");
+
+        Ok(result)
     }
 
     #[trace(properties = { "session_id": "{session_id}" })]

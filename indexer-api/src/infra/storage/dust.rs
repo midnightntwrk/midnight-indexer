@@ -199,7 +199,7 @@ impl DustStorage for Storage {
         let timestamp_ms = (timestamp as i64) * 1000;
 
         let root = sqlx::query_as::<_, (DustMerkleRoot,)>(query)
-            .bind(timestamp_ms as i64)
+            .bind(timestamp_ms)
             .fetch_optional(&*self.pool)
             .await?
             .map(|(x,)| x);
@@ -470,31 +470,37 @@ impl DustStorage for Storage {
                         yield DustCommitmentEvent::Commitment(commitment_info);
                     }
 
-                    // TODO: Fix merkle update handling - table schema doesn't have index column
-                    // The dust_commitment_tree table only has 'id' (database PK), not 'index' (merkle position)
-                    // Merkle update functionality is disabled until schema is updated
-                    //
-                    // let merkle_query = indoc! {r#"
-                    //     SELECT "index", root, block_height
-                    //     FROM dust_commitment_tree
-                    //     WHERE "index" >= $1
-                    //     ORDER BY "index"
-                    //     LIMIT $2
-                    // "#};
-                    //
-                    // let merkle_rows: Vec<DustCommitmentTreeRow> = sqlx::query_as(merkle_query)
-                    //     .bind(current_index)
-                    //     .bind(batch_size)
-                    //     .fetch_all(&*self.pool)
-                    //     .await?;
-                    //
-                    // for row in merkle_rows {
-                    //     yield DustCommitmentEvent::MerkleUpdate(DustCommitmentMerkleUpdate {
-                    //         index: row.index as u32,
-                    //         collapsed_update: row.root.into(),
-                    //         block_height: row.block_height as u32,
-                    //     });
-                    // }
+                    // TEMPORARY FIX: Use block_height as a proxy for index
+                    // The dust_commitment_tree table doesn't have index column yet
+                    let merkle_query = indoc! {r#"
+                        SELECT block_height, root
+                        FROM dust_commitment_tree
+                        WHERE block_height >= $1
+                        ORDER BY block_height
+                        LIMIT $2
+                    "#};
+
+                    #[derive(Debug, Clone, FromRow)]
+                    struct TempCommitmentTreeRow {
+                        #[sqlx(try_from = "i64")]
+                        block_height: u64,
+                        root: Vec<u8>,
+                    }
+
+                    let merkle_rows: Vec<TempCommitmentTreeRow> = sqlx::query_as(merkle_query)
+                        .bind(current_index)
+                        .bind(batch_size)
+                        .fetch_all(&*self.pool)
+                        .await?;
+
+                    for row in merkle_rows {
+                        // Use block_height as index temporarily
+                        yield DustCommitmentEvent::MerkleUpdate(crate::domain::dust::DustCommitmentMerkleUpdate {
+                            index: row.block_height as u32,
+                            collapsed_update: row.root.into(),
+                            block_height: row.block_height as u32,
+                        });
+                    }
 
                 }
             }
