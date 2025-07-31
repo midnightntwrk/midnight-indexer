@@ -20,7 +20,7 @@ mod sqlite;
 
 use crate::domain::{ByteArray, ByteArrayLenError};
 use serde::{Deserialize, Serialize};
-use sqlx::{Database, Decode, FromRow, Type, error::BoxDynError};
+use sqlx::{Database, Decode, Type, error::BoxDynError};
 
 /// A helper to use `Option<T>` where T does not implement `sqlx::Type` but a `TryFrom` into a
 /// supported type with `sqlx::FromRow` like this:
@@ -77,6 +77,15 @@ where
     fn decode(value: D::ValueRef<'r>) -> Result<Self, BoxDynError> {
         let option = Option::<T>::decode(value)?;
         Ok(Self(option))
+    }
+}
+
+impl TryFrom<SqlxOption<i64>> for Option<u32> {
+    type Error = BoxDynError;
+
+    fn try_from(value: SqlxOption<i64>) -> Result<Self, Self::Error> {
+        let value = value.0.map(TryInto::try_into).transpose()?;
+        Ok(value)
     }
 }
 

@@ -69,19 +69,17 @@ where
         let only_active = only_active.unwrap_or(true);
 
         let stream = try_stream! {
-            let dust_stream = storage
+            let dust_generations = storage
                 .get_dust_generations(
                     &dust_address_bytes,
                     from_generation_index as i64,
                     from_merkle_index as i64,
                     only_active,
                     BATCH_SIZE,
-                )
-                .await
-                .map_err_into_server_error(|| "start DUST generations stream")?;
-            let mut dust_stream = pin!(dust_stream);
+                );
+            let mut dust_generations = pin!(dust_generations);
 
-            while let Some(event) = dust_stream
+            while let Some(event) = dust_generations
                 .try_next()
                 .await
                 .map_err_into_server_error(|| "get next DUST generation event")?

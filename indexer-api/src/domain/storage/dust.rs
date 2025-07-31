@@ -43,14 +43,14 @@ pub trait DustStorage: BlockStorage {
     ) -> Result<Option<DustMerkleRoot>, sqlx::Error>;
 
     /// Stream DUST generations for a specific address.
-    async fn get_dust_generations(
+    fn get_dust_generations(
         &self,
         dust_address: &DustAddress,
         from_generation_index: i64,
         from_merkle_index: i64,
         only_active: bool,
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send, sqlx::Error>;
+    ) -> impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send;
 
     /// Stream transactions containing DUST nullifiers.
     async fn get_dust_nullifier_transactions(
@@ -102,16 +102,15 @@ impl DustStorage for NoopStorage {
         unimplemented!("NoopStorage")
     }
 
-    async fn get_dust_generations(
+    fn get_dust_generations(
         &self,
         dust_address: &DustAddress,
         from_generation_index: i64,
         from_merkle_index: i64,
         only_active: bool,
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send, sqlx::Error>
-    {
-        Ok(stream::empty())
+    ) -> impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send {
+        stream::empty()
     }
 
     async fn get_dust_nullifier_transactions(
