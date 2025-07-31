@@ -117,21 +117,22 @@ CREATE INDEX ON contract_balances(token_type);
 
 CREATE INDEX ON contract_balances(contract_action_id, token_type);
 
-CREATE TABLE dust_generation_info (
+CREATE TABLE dust_generation_info(
     id BIGSERIAL PRIMARY KEY,
     night_utxo_hash BYTEA NOT NULL,
     value BYTEA NOT NULL,
     owner BYTEA NOT NULL,
     nonce BYTEA NOT NULL,
     ctime BIGINT NOT NULL,
-    index BIGINT NOT NULL,
+    merkle_index BIGINT NOT NULL,
     dtime BIGINT
 );
 
-CREATE INDEX ON dust_generation_info(owner);
+CREATE INDEX ON dust_generation_info(OWNER);
+
 CREATE INDEX ON dust_generation_info(night_utxo_hash);
 
-CREATE TABLE dust_utxos (
+CREATE TABLE dust_utxos(
     id BIGSERIAL PRIMARY KEY,
     generation_info_id BIGINT NOT NULL REFERENCES dust_generation_info(id),
     spent_at_transaction_id BIGINT REFERENCES transactions(id),
@@ -144,40 +145,46 @@ CREATE TABLE dust_utxos (
     nullifier BYTEA
 );
 
-CREATE INDEX ON dust_utxos(owner);
-CREATE INDEX ON dust_utxos(generation_info_id);
-CREATE INDEX ON dust_utxos(spent_at_transaction_id);
-CREATE INDEX ON dust_utxos(substring(nullifier::text, 1, 8)) WHERE nullifier IS NOT NULL;
+CREATE INDEX ON dust_utxos(OWNER);
 
-CREATE TABLE cnight_registrations (
+CREATE INDEX ON dust_utxos(generation_info_id);
+
+CREATE INDEX ON dust_utxos(spent_at_transaction_id);
+
+CREATE INDEX ON dust_utxos(substring(nullifier::TEXT, 1, 8))
+WHERE
+    nullifier IS NOT NULL;
+
+CREATE TABLE cnight_registrations(
     id BIGSERIAL PRIMARY KEY,
     cardano_address BYTEA NOT NULL,
     dust_address BYTEA NOT NULL,
     is_valid BOOLEAN NOT NULL,
     registered_at BIGINT NOT NULL,
     removed_at BIGINT,
-    UNIQUE(cardano_address, dust_address)
+    UNIQUE (cardano_address, dust_address)
 );
 
 CREATE INDEX ON cnight_registrations(cardano_address);
+
 CREATE INDEX ON cnight_registrations(dust_address);
 
 -- TODO: These tables are for future merkle tree storage once ledger integration is complete.
-CREATE TABLE dust_commitment_tree (
+CREATE TABLE dust_commitment_tree(
     id BIGSERIAL PRIMARY KEY,
     block_height BIGINT NOT NULL,
     root BYTEA NOT NULL,
     tree_data BYTEA NOT NULL
 );
 
-CREATE TABLE dust_generation_tree (
+CREATE TABLE dust_generation_tree(
     id BIGSERIAL PRIMARY KEY,
     block_height BIGINT NOT NULL,
     root BYTEA NOT NULL,
     tree_data BYTEA NOT NULL
 );
 
-CREATE TABLE dust_events (
+CREATE TABLE dust_events(
     id BIGSERIAL PRIMARY KEY,
     transaction_id BIGINT NOT NULL REFERENCES transactions(id),
     transaction_hash BYTEA NOT NULL,
@@ -188,5 +195,6 @@ CREATE TABLE dust_events (
 );
 
 CREATE INDEX ON dust_events(transaction_id);
+
 CREATE INDEX ON dust_events(event_type);
 

@@ -176,11 +176,11 @@ type DustCommitment {
 	"""
 	Creation timestamp.
 	"""
-	createdAt: Int!
+	createdAt: String!
 	"""
 	Spend timestamp (if spent).
 	"""
-	spentAt: Int
+	spentAt: String
 }
 
 """
@@ -248,11 +248,11 @@ type DustGenerationInfo {
 	"""
 	Creation time (UNIX timestamp).
 	"""
-	ctime: Int!
+	ctime: String!
 	"""
 	Destruction time. None if still generating.
 	"""
-	dtime: Int
+	dtime: String
 	"""
 	Index in generation Merkle tree.
 	"""
@@ -387,15 +387,15 @@ type DustSystemState {
 	"""
 	Current block height.
 	"""
-	blockHeight: Int!
+	blockHeight: String!
 	"""
 	Current timestamp.
 	"""
-	timestamp: Int!
+	timestamp: String!
 	"""
 	Total number of registrations.
 	"""
-	totalRegistrations: Int!
+	totalRegistrations: String!
 }
 
 scalar HexEncoded
@@ -490,11 +490,11 @@ type RegistrationUpdate {
 	"""
 	Registration timestamp.
 	"""
-	registeredAt: Int!
+	registeredAt: String!
 	"""
 	Removal timestamp (if removed).
 	"""
-	removedAt: Int
+	removedAt: String
 }
 
 """
@@ -509,7 +509,7 @@ type RegistrationUpdateProgress {
 	"""
 	Latest processed timestamp.
 	"""
-	latestTimestamp: Int!
+	latestTimestamp: String!
 	"""
 	Number of updates in batch.
 	"""

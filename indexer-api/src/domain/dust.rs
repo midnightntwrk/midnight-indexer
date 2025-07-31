@@ -27,13 +27,13 @@ pub struct DustSystemState {
     pub generation_tree_root: DustMerkleRoot,
 
     /// Current block height.
-    pub block_height: i32,
+    pub block_height: u32,
 
     /// Current timestamp.
-    pub timestamp: i64,
+    pub timestamp: u64,
 
     /// Total number of registrations.
-    pub total_registrations: i32,
+    pub total_registrations: u32,
 }
 
 /// DUST generation status for a specific Cardano stake key.
@@ -83,36 +83,36 @@ pub struct DustGenerationInfo {
     pub nonce: DustNonce,
 
     /// Creation time (UNIX timestamp).
-    pub ctime: i32,
+    pub ctime: u32,
 
     /// Destruction time. None if still generating.
-    pub dtime: Option<i32>,
+    pub dtime: Option<u32>,
 
     /// Index in generation Merkle tree.
-    pub merkle_index: i32,
+    pub merkle_index: u32,
 }
 
 /// DUST generation Merkle tree update.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DustGenerationMerkleUpdate {
     /// Tree index.
-    pub index: i32,
+    pub index: u32,
 
     /// Collapsed update data.
     pub collapsed_update: DustMerkleUpdate,
 
     /// Block height of update.
-    pub block_height: i32,
+    pub block_height: u32,
 }
 
 /// DUST generation progress information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DustGenerationProgress {
     /// Highest processed index.
-    pub highest_index: i32,
+    pub highest_index: u32,
 
     /// Number of active generations.
-    pub active_generations: i32,
+    pub active_generations: u32,
 }
 
 /// DUST generation event union type.
@@ -133,7 +133,7 @@ pub struct DustNullifierTransaction {
     pub transaction_hash: TransactionHash,
 
     /// Block height.
-    pub block_height: i32,
+    pub block_height: u32,
 
     /// Matching nullifier prefixes.
     pub matching_nullifier_prefixes: Vec<DustPrefix>,
@@ -143,10 +143,10 @@ pub struct DustNullifierTransaction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DustNullifierTransactionProgress {
     /// Highest processed block.
-    pub highest_block: i32,
+    pub highest_block: u32,
 
     /// Number of matched transactions.
-    pub matched_count: i32,
+    pub matched_count: u32,
 }
 
 /// DUST nullifier transaction event union type.
@@ -177,33 +177,33 @@ pub struct DustCommitmentInfo {
     pub nonce: DustNonce,
 
     /// Creation timestamp.
-    pub created_at: i32,
+    pub created_at: u32,
 
     /// Spend timestamp (if spent).
-    pub spent_at: Option<i32>,
+    pub spent_at: Option<u32>,
 }
 
 /// DUST commitment Merkle tree update.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DustCommitmentMerkleUpdate {
     /// Tree index.
-    pub index: i32,
+    pub index: u32,
 
     /// Collapsed update data.
     pub collapsed_update: DustMerkleUpdate,
 
     /// Block height of update.
-    pub block_height: i32,
+    pub block_height: u32,
 }
 
 /// DUST commitment progress information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DustCommitmentProgress {
     /// Highest processed index.
-    pub highest_index: i32,
+    pub highest_index: u32,
 
     /// Number of commitments in batch.
-    pub commitment_count: i32,
+    pub commitment_count: u32,
 }
 
 /// DUST commitment event union type.
@@ -251,20 +251,20 @@ pub struct RegistrationUpdate {
     pub is_active: bool,
 
     /// Registration timestamp.
-    pub registered_at: i32,
+    pub registered_at: u32,
 
     /// Removal timestamp (if removed).
-    pub removed_at: Option<i32>,
+    pub removed_at: Option<u32>,
 }
 
 /// Registration update progress.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationUpdateProgress {
     /// Latest processed timestamp.
-    pub latest_timestamp: i32,
+    pub latest_timestamp: u32,
 
     /// Number of updates in batch.
-    pub update_count: i32,
+    pub update_count: u32,
 }
 
 /// Registration update event union type.

@@ -11,12 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod dust;
 pub mod storage;
 
 mod api;
 mod block;
 mod contract_action;
-pub mod dust;
 mod ledger_state;
 mod transaction;
 mod unshielded;
@@ -25,7 +25,6 @@ mod viewing_key;
 pub use api::*;
 pub use block::*;
 pub use contract_action::*;
-pub use dust::*;
 pub use ledger_state::*;
 pub use transaction::*;
 pub use unshielded::*;

@@ -26,33 +26,31 @@ use std::num::NonZeroU32;
 /// DUST storage abstraction.
 #[trait_variant::make(Send)]
 pub trait DustStorage: BlockStorage {
-    type Error: std::error::Error + Send + Sync + 'static;
-
     /// Get current DUST system state.
-    async fn get_current_dust_state(&self) -> Result<DustSystemState, Self::Error>;
+    async fn get_current_dust_state(&self) -> Result<DustSystemState, sqlx::Error>;
 
     /// Get DUST generation status for specific stake keys.
     async fn get_dust_generation_status(
         &self,
         cardano_stake_keys: &[CardanoStakeKey],
-    ) -> Result<Vec<DustGenerationStatus>, Self::Error>;
+    ) -> Result<Vec<DustGenerationStatus>, sqlx::Error>;
 
     /// Get historical Merkle tree root for a specific timestamp.
     async fn get_dust_merkle_root(
         &self,
         tree_type: DustMerkleTreeType,
         timestamp: i32,
-    ) -> Result<Option<DustMerkleRoot>, Self::Error>;
+    ) -> Result<Option<DustMerkleRoot>, sqlx::Error>;
 
     /// Stream DUST generations for a specific address.
-    async fn get_dust_generations(
+    fn get_dust_generations(
         &self,
         dust_address: &DustAddress,
         from_generation_index: i64,
         from_merkle_index: i64,
         only_active: bool,
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<DustGenerationEvent, Self::Error>> + Send, Self::Error>;
+    ) -> impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send;
 
     /// Stream transactions containing DUST nullifiers.
     async fn get_dust_nullifier_transactions(
@@ -62,8 +60,8 @@ pub trait DustStorage: BlockStorage {
         from_block: i32,
         batch_size: NonZeroU32,
     ) -> Result<
-        impl Stream<Item = Result<DustNullifierTransactionEvent, Self::Error>> + Send,
-        Self::Error,
+        impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send,
+        sqlx::Error,
     >;
 
     /// Stream DUST commitments filtered by prefix.
@@ -73,28 +71,38 @@ pub trait DustStorage: BlockStorage {
         start_index: i32,
         min_prefix_length: i32,
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<DustCommitmentEvent, Self::Error>> + Send, Self::Error>;
+    ) -> Result<impl Stream<Item = Result<DustCommitmentEvent, sqlx::Error>> + Send, sqlx::Error>;
 
     /// Stream registration updates for multiple addresses.
     async fn get_registration_updates(
         &self,
         addresses: &[RegistrationAddress],
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<RegistrationUpdateEvent, Self::Error>> + Send, Self::Error>;
+    ) -> Result<impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send, sqlx::Error>;
+
+    /// Get highest generation index for a DUST address.
+    async fn get_highest_generation_index_for_dust_address(
+        &self,
+        dust_address: &DustAddress,
+    ) -> Result<Option<u64>, sqlx::Error>;
+
+    /// Get count of active generations for a DUST address.
+    async fn get_active_generation_count_for_dust_address(
+        &self,
+        dust_address: &DustAddress,
+    ) -> Result<u32, sqlx::Error>;
 }
 
 #[allow(unused_variables)]
 impl DustStorage for NoopStorage {
-    type Error = std::io::Error;
-
-    async fn get_current_dust_state(&self) -> Result<DustSystemState, Self::Error> {
+    async fn get_current_dust_state(&self) -> Result<DustSystemState, sqlx::Error> {
         unimplemented!("NoopStorage")
     }
 
     async fn get_dust_generation_status(
         &self,
         cardano_stake_keys: &[CardanoStakeKey],
-    ) -> Result<Vec<DustGenerationStatus>, Self::Error> {
+    ) -> Result<Vec<DustGenerationStatus>, sqlx::Error> {
         unimplemented!("NoopStorage")
     }
 
@@ -102,20 +110,19 @@ impl DustStorage for NoopStorage {
         &self,
         tree_type: DustMerkleTreeType,
         timestamp: i32,
-    ) -> Result<Option<DustMerkleRoot>, Self::Error> {
+    ) -> Result<Option<DustMerkleRoot>, sqlx::Error> {
         unimplemented!("NoopStorage")
     }
 
-    async fn get_dust_generations(
+    fn get_dust_generations(
         &self,
         dust_address: &DustAddress,
         from_generation_index: i64,
         from_merkle_index: i64,
         only_active: bool,
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<DustGenerationEvent, Self::Error>> + Send, Self::Error>
-    {
-        Ok(stream::empty())
+    ) -> impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send {
+        stream::empty()
     }
 
     async fn get_dust_nullifier_transactions(
@@ -125,8 +132,8 @@ impl DustStorage for NoopStorage {
         from_block: i32,
         batch_size: NonZeroU32,
     ) -> Result<
-        impl Stream<Item = Result<DustNullifierTransactionEvent, Self::Error>> + Send,
-        Self::Error,
+        impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send,
+        sqlx::Error,
     > {
         Ok(stream::empty())
     }
@@ -137,7 +144,7 @@ impl DustStorage for NoopStorage {
         start_index: i32,
         min_prefix_length: i32,
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<DustCommitmentEvent, Self::Error>> + Send, Self::Error>
+    ) -> Result<impl Stream<Item = Result<DustCommitmentEvent, sqlx::Error>> + Send, sqlx::Error>
     {
         Ok(stream::empty())
     }
@@ -146,8 +153,22 @@ impl DustStorage for NoopStorage {
         &self,
         addresses: &[RegistrationAddress],
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<RegistrationUpdateEvent, Self::Error>> + Send, Self::Error>
+    ) -> Result<impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send, sqlx::Error>
     {
         Ok(stream::empty())
+    }
+
+    async fn get_highest_generation_index_for_dust_address(
+        &self,
+        dust_address: &DustAddress,
+    ) -> Result<Option<u64>, sqlx::Error> {
+        unimplemented!("NoopStorage")
+    }
+
+    async fn get_active_generation_count_for_dust_address(
+        &self,
+        dust_address: &DustAddress,
+    ) -> Result<u32, sqlx::Error> {
+        unimplemented!("NoopStorage")
     }
 }
