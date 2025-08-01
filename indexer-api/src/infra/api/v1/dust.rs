@@ -113,6 +113,17 @@ impl From<DustMerkleTreeType> for domain::dust::DustMerkleTreeType {
     }
 }
 
+/// DUST generation event union type.
+#[derive(Debug, Clone, Union, Serialize, Deserialize)]
+pub enum DustGenerationEvent {
+    /// Generation information.
+    Info(DustGenerationInfo),
+    /// Merkle tree update.
+    MerkleUpdate(DustGenerationMerkleUpdate),
+    /// Progress update.
+    Progress(DustGenerationProgress),
+}
+
 /// DUST generation information.
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustGenerationInfo {
@@ -156,53 +167,53 @@ impl From<domain::dust::DustGenerationInfo> for DustGenerationInfo {
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustGenerationMerkleUpdate {
     /// Tree index.
-    pub index: i32,
+    pub index: u32,
 
     /// Collapsed update data.
     pub collapsed_update: HexEncoded,
 
     /// Block height of update.
-    pub block_height: i32,
+    pub block_height: u32,
 }
 
 impl From<domain::dust::DustGenerationMerkleUpdate> for DustGenerationMerkleUpdate {
     fn from(update: domain::dust::DustGenerationMerkleUpdate) -> Self {
+        let domain::dust::DustGenerationMerkleUpdate {
+            index,
+            collapsed_update,
+            block_height,
+        } = update;
+
         Self {
-            index: update.index as i32,
-            collapsed_update: update.collapsed_update.hex_encode(),
-            block_height: update.block_height as i32,
+            index,
+            collapsed_update: collapsed_update.hex_encode(),
+            block_height,
         }
     }
 }
 
 /// DUST generation progress information.
-#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct DustGenerationProgress {
     /// Highest processed index.
-    pub highest_index: i32,
+    pub highest_index: u32,
 
     /// Number of active generations.
-    pub active_generations: i32,
+    pub active_generation_count: u32,
 }
 
 impl From<domain::dust::DustGenerationProgress> for DustGenerationProgress {
     fn from(progress: domain::dust::DustGenerationProgress) -> Self {
+        let domain::dust::DustGenerationProgress {
+            highest_index,
+            active_generation_count,
+        } = progress;
+
         Self {
-            highest_index: progress.highest_index as i32,
-            active_generations: progress.active_generations as i32,
+            highest_index,
+            active_generation_count,
         }
     }
-}
-
-/// DUST generation event union type.
-#[derive(Debug, Clone, Union, Serialize, Deserialize)]
-pub enum DustGenerationEvent {
-    /// Generation information.
-    Info(DustGenerationInfo),
-    /// Merkle tree update.
-    MerkleUpdate(DustGenerationMerkleUpdate),
-    /// Progress update.
-    Progress(DustGenerationProgress),
 }
 
 impl From<domain::dust::DustGenerationEvent> for DustGenerationEvent {

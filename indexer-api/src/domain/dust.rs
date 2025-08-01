@@ -112,7 +112,7 @@ pub struct DustGenerationProgress {
     pub highest_index: u32,
 
     /// Number of active generations.
-    pub active_generations: u32,
+    pub active_generation_count: u32,
 }
 
 /// DUST generation event union type.

@@ -605,19 +605,20 @@ impl DustStorage for Storage {
     async fn get_highest_generation_index_for_dust_address(
         &self,
         dust_address: &DustAddress,
-    ) -> Result<Option<u64>, sqlx::Error> {
+    ) -> Result<Option<u32>, sqlx::Error> {
         let query = indoc! {"
             SELECT MAX(merkle_index)
             FROM dust_generation_info
             WHERE owner = $1
         "};
 
-        let result: Option<(Option<i64>,)> = sqlx::query_as(query)
+        let max = sqlx::query_as::<_, (i64,)>(query)
             .bind(dust_address.as_ref())
             .fetch_optional(&*self.pool)
-            .await?;
+            .await?
+            .map(|(m,)| m as u32);
 
-        Ok(result.and_then(|(max,)| max).map(|i| i as u64))
+        Ok(max)
     }
 
     #[trace]
@@ -632,7 +633,7 @@ impl DustStorage for Storage {
             AND dtime IS NULL
         "};
 
-        let (count,): (i64,) = sqlx::query_as(query)
+        let (count,) = sqlx::query_as::<_, (i64,)>(query)
             .bind(dust_address.as_ref())
             .fetch_one(&*self.pool)
             .await?;

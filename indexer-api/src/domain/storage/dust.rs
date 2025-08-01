@@ -84,7 +84,7 @@ pub trait DustStorage: BlockStorage {
     async fn get_highest_generation_index_for_dust_address(
         &self,
         dust_address: &DustAddress,
-    ) -> Result<Option<u64>, sqlx::Error>;
+    ) -> Result<Option<u32>, sqlx::Error>;
 
     /// Get count of active generations for a DUST address.
     async fn get_active_generation_count_for_dust_address(
@@ -161,7 +161,7 @@ impl DustStorage for NoopStorage {
     async fn get_highest_generation_index_for_dust_address(
         &self,
         dust_address: &DustAddress,
-    ) -> Result<Option<u64>, sqlx::Error> {
+    ) -> Result<Option<u32>, sqlx::Error> {
         unimplemented!("NoopStorage")
     }
 
