@@ -22,9 +22,11 @@ use crate::{
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
+use drop_stream::DropStreamExt;
 use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::domain::DustAddress;
 use std::{marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
+use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
 
@@ -64,24 +66,29 @@ where
             .hex_decode()
             .map_err_into_client_error(|| "invalid address")?;
 
-        // Default to 0 to start from the beginning of the generation history.
-        let from_generation_index = from_generation_index.unwrap_or(0);
-        // Default to 0 to include all merkle tree updates from the start.
-        let from_merkle_index = from_merkle_index.unwrap_or(0);
         // Default to true to show only currently active (non-destroyed) generations.
         let only_active = only_active.unwrap_or(true);
+
+        // Build a stream of dust generation events by merging dust_generations and
+        // progress_updates. The dust_generations stream should be infinite by definition.
+        // However, if it nevertheless completes, we use a Tripwire to ensure
+        // the progress_updates stream also completes, preventing the merged stream from
+        // hanging indefinitely waiting for both streams to complete.
+        let (trigger, tripwire) = Tripwire::new();
 
         let dust_generations = make_dust_generations::<S>(
             cx,
             dust_address,
-            from_generation_index as i64,
-            from_merkle_index as i64,
+            from_generation_index.unwrap_or(0).max(0) as u64,
+            from_merkle_index.unwrap_or(0).max(0) as u64,
             only_active,
+            trigger,
         )
         .map_ok(DustGenerationEvent::Info);
 
-        let progress_updates =
-            make_progress_updates::<S>(cx, dust_address).map_ok(DustGenerationEvent::Progress);
+        let progress_updates = make_progress_updates::<S>(cx, dust_address)
+            .take_until_if(tripwire)
+            .map_ok(DustGenerationEvent::Progress);
 
         // Merge the streams
         let events = tokio_stream::StreamExt::merge(dust_generations, progress_updates);
@@ -122,7 +129,7 @@ where
 
         let stream = try_stream! {
             let nullifier_stream = storage
-                .get_dust_nullifier_transactions(&binary_prefixes, min_prefix_length, from_block, BATCH_SIZE)
+                .get_dust_nullifier_transactions(&binary_prefixes, min_prefix_length.max(0) as u32, from_block.max(0) as u32, BATCH_SIZE)
                 .await
                 .map_err_into_server_error(|| "start DUST nullifier transactions stream")?;
             let mut nullifier_stream = pin!(nullifier_stream);
@@ -168,7 +175,7 @@ where
 
         let stream = try_stream! {
             let commitment_stream = storage
-                .get_dust_commitments(&binary_prefixes, start_index, min_prefix_length, BATCH_SIZE)
+                .get_dust_commitments(&binary_prefixes, start_index.max(0) as u64, min_prefix_length.max(0) as u32, BATCH_SIZE)
                 .await
                 .map_err_into_server_error(|| "start DUST commitments stream")?;
             let mut commitment_stream = pin!(commitment_stream);
@@ -223,9 +230,10 @@ where
 fn make_dust_generations<'a, S>(
     cx: &'a Context<'a>,
     dust_address: DustAddress,
-    from_generation_index: i64,
-    from_merkle_index: i64,
+    from_generation_index: u64,
+    from_merkle_index: u64,
     only_active: bool,
+    trigger: Trigger,
 ) -> impl Stream<Item = ApiResult<DustGenerationInfo>> + use<'a, S>
 where
     S: Storage,
@@ -259,6 +267,7 @@ where
             }
         }
     }
+    .on_drop(move || drop(trigger))
 }
 
 fn make_progress_updates<'a, S>(
@@ -294,7 +303,7 @@ where
         .map_err_into_server_error(|| "get active generation count")?;
 
     Ok(DustGenerationProgress {
-        highest_index,
+        highest_index: highest_index.to_string(),
         active_generation_count,
     })
 }

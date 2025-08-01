@@ -146,7 +146,7 @@ pub struct DustGenerationInfo {
     pub dtime: Option<String>,
 
     /// Index in generation Merkle tree.
-    pub merkle_index: i32,
+    pub merkle_index: String,
 }
 
 impl From<domain::dust::DustGenerationInfo> for DustGenerationInfo {
@@ -158,7 +158,7 @@ impl From<domain::dust::DustGenerationInfo> for DustGenerationInfo {
             nonce: info.nonce.hex_encode(),
             ctime: info.ctime.to_string(),
             dtime: info.dtime.map(|d| d.to_string()),
-            merkle_index: info.merkle_index as i32,
+            merkle_index: info.merkle_index.to_string(),
         }
     }
 }
@@ -167,7 +167,7 @@ impl From<domain::dust::DustGenerationInfo> for DustGenerationInfo {
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustGenerationMerkleUpdate {
     /// Tree index.
-    pub index: u32,
+    pub index: String,
 
     /// Collapsed update data.
     pub collapsed_update: HexEncoded,
@@ -185,7 +185,7 @@ impl From<domain::dust::DustGenerationMerkleUpdate> for DustGenerationMerkleUpda
         } = update;
 
         Self {
-            index,
+            index: index.to_string(),
             collapsed_update: collapsed_update.hex_encode(),
             block_height,
         }
@@ -196,7 +196,7 @@ impl From<domain::dust::DustGenerationMerkleUpdate> for DustGenerationMerkleUpda
 #[derive(Debug, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct DustGenerationProgress {
     /// Highest processed index.
-    pub highest_index: u32,
+    pub highest_index: String,
 
     /// Number of active generations.
     pub active_generation_count: u32,
@@ -210,7 +210,7 @@ impl From<domain::dust::DustGenerationProgress> for DustGenerationProgress {
         } = progress;
 
         Self {
-            highest_index,
+            highest_index: highest_index.to_string(),
             active_generation_count,
         }
     }
@@ -341,7 +341,7 @@ impl From<domain::dust::DustCommitmentInfo> for DustCommitment {
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustCommitmentMerkleUpdate {
     /// Tree index.
-    pub index: i32,
+    pub index: String,
 
     /// Collapsed update data.
     pub collapsed_update: HexEncoded,
@@ -353,7 +353,7 @@ pub struct DustCommitmentMerkleUpdate {
 impl From<domain::dust::DustCommitmentMerkleUpdate> for DustCommitmentMerkleUpdate {
     fn from(update: domain::dust::DustCommitmentMerkleUpdate) -> Self {
         Self {
-            index: update.index as i32,
+            index: update.index.to_string(),
             collapsed_update: update.collapsed_update.hex_encode(),
             block_height: update.block_height as i32,
         }
@@ -364,7 +364,7 @@ impl From<domain::dust::DustCommitmentMerkleUpdate> for DustCommitmentMerkleUpda
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustCommitmentProgress {
     /// Highest processed index.
-    pub highest_index: i32,
+    pub highest_index: String,
 
     /// Number of commitments in batch.
     pub commitment_count: i32,
@@ -373,7 +373,7 @@ pub struct DustCommitmentProgress {
 impl From<domain::dust::DustCommitmentProgress> for DustCommitmentProgress {
     fn from(progress: domain::dust::DustCommitmentProgress) -> Self {
         Self {
-            highest_index: progress.highest_index as i32,
+            highest_index: progress.highest_index.to_string(),
             commitment_count: progress.commitment_count as i32,
         }
     }

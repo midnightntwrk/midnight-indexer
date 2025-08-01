@@ -258,7 +258,7 @@ where
         let storage = cx.get_storage::<S>();
 
         let root = storage
-            .get_dust_merkle_root(tree_type.into(), timestamp)
+            .get_dust_merkle_root(tree_type.into(), timestamp.max(0) as u64)
             .await
             .map_err_into_server_error(|| "get DUST merkle root")?;
 

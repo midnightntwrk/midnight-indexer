@@ -173,7 +173,7 @@ impl DustStorage for Storage {
     async fn get_dust_merkle_root(
         &self,
         tree_type: DustMerkleTreeType,
-        timestamp: i32,
+        timestamp: u64,
     ) -> Result<Option<DustMerkleRoot>, sqlx::Error> {
         let query = match tree_type {
             DustMerkleTreeType::Commitment => indoc! {"
@@ -207,8 +207,8 @@ impl DustStorage for Storage {
     fn get_dust_generations(
         &self,
         dust_address: &indexer_common::domain::DustAddress,
-        from_generation_index: i64,
-        _from_merkle_index: i64,
+        from_generation_index: u64,
+        _from_merkle_index: u64,
         only_active: bool,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send {
@@ -246,7 +246,7 @@ impl DustStorage for Storage {
 
                 let rows = sqlx::query_as::<_, DustGenerationInfoRow>(query)
                     .bind(dust_address.as_ref())
-                    .bind(last_index)
+                    .bind(last_index as i64)
                     .bind(batch_size)
                     .fetch_all(&*self.pool)
                     .await?;
@@ -256,7 +256,7 @@ impl DustStorage for Storage {
                 }
 
                 for row in rows {
-                    last_index = row.id as i64 + 1;
+                    last_index = row.id + 1;
 
                     yield DustGenerationEvent::Info(row.into());
                 }
@@ -272,8 +272,8 @@ impl DustStorage for Storage {
     async fn get_dust_nullifier_transactions(
         &self,
         prefixes: &[DustPrefix],
-        min_prefix_length: i32,
-        from_block: i32,
+        min_prefix_length: u32,
+        from_block: u32,
         batch_size: NonZeroU32,
     ) -> Result<
         impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send,
@@ -383,8 +383,8 @@ impl DustStorage for Storage {
     async fn get_dust_commitments(
         &self,
         commitment_prefixes: &[DustPrefix],
-        start_index: i32,
-        min_prefix_length: i32,
+        start_index: u64,
+        min_prefix_length: u32,
         batch_size: NonZeroU32,
     ) -> Result<impl Stream<Item = Result<DustCommitmentEvent, sqlx::Error>> + Send, sqlx::Error>
     {
@@ -461,7 +461,7 @@ impl DustStorage for Storage {
                                 .fetch_optional(&*self.pool)
                                 .await?;
 
-                            commitment_info.spent_at = timestamp.map(|(t,)| t as u32);
+                            commitment_info.spent_at = timestamp.map(|(t,)| t as u64);
                         }
 
                         yield DustCommitmentEvent::Commitment(commitment_info);
@@ -605,7 +605,7 @@ impl DustStorage for Storage {
     async fn get_highest_generation_index_for_dust_address(
         &self,
         dust_address: &DustAddress,
-    ) -> Result<Option<u32>, sqlx::Error> {
+    ) -> Result<Option<u64>, sqlx::Error> {
         let query = indoc! {"
             SELECT MAX(merkle_index)
             FROM dust_generation_info
@@ -616,7 +616,7 @@ impl DustStorage for Storage {
             .bind(dust_address.as_ref())
             .fetch_optional(&*self.pool)
             .await?
-            .map(|(m,)| m as u32);
+            .map(|(m,)| m as u64);
 
         Ok(max)
     }
@@ -658,13 +658,13 @@ struct DustGenerationInfoRow {
     nonce: DustNonce,
 
     #[sqlx(try_from = "i64")]
-    ctime: u32,
+    ctime: u64,
 
     #[sqlx(try_from = "SqlxOption<i64>")]
-    dtime: Option<u32>,
+    dtime: Option<u64>,
 
     #[sqlx(try_from = "i64")]
-    merkle_index: u32,
+    merkle_index: u64,
 }
 
 impl From<DustGenerationInfoRow> for DustGenerationInfo {
@@ -710,7 +710,7 @@ struct DustUtxosRow {
     nonce: DustNonce,
 
     #[sqlx(try_from = "i64")]
-    ctime: u32,
+    ctime: u64,
 
     #[sqlx(try_from = "SqlxOption<i64>")]
     spent_at_transaction_id: Option<u64>,
@@ -803,8 +803,8 @@ impl From<CnightRegistrationsRow> for RegistrationUpdate {
             cardano_stake_key: cardano_address,
             dust_address,
             is_active: is_valid && removed_at.is_none(),
-            registered_at: registered_at as u32,
-            removed_at: removed_at.map(|t| t as u32),
+            registered_at,
+            removed_at,
         }
     }
 }

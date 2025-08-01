@@ -39,15 +39,15 @@ pub trait DustStorage: BlockStorage {
     async fn get_dust_merkle_root(
         &self,
         tree_type: DustMerkleTreeType,
-        timestamp: i32,
+        timestamp: u64,
     ) -> Result<Option<DustMerkleRoot>, sqlx::Error>;
 
     /// Stream DUST generations for a specific address.
     fn get_dust_generations(
         &self,
         dust_address: &DustAddress,
-        from_generation_index: i64,
-        from_merkle_index: i64,
+        from_generation_index: u64,
+        from_merkle_index: u64,
         only_active: bool,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send;
@@ -56,8 +56,8 @@ pub trait DustStorage: BlockStorage {
     async fn get_dust_nullifier_transactions(
         &self,
         prefixes: &[DustPrefix],
-        min_prefix_length: i32,
-        from_block: i32,
+        min_prefix_length: u32,
+        from_block: u32,
         batch_size: NonZeroU32,
     ) -> Result<
         impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send,
@@ -68,8 +68,8 @@ pub trait DustStorage: BlockStorage {
     async fn get_dust_commitments(
         &self,
         commitment_prefixes: &[DustPrefix],
-        start_index: i32,
-        min_prefix_length: i32,
+        start_index: u64,
+        min_prefix_length: u32,
         batch_size: NonZeroU32,
     ) -> Result<impl Stream<Item = Result<DustCommitmentEvent, sqlx::Error>> + Send, sqlx::Error>;
 
@@ -84,7 +84,7 @@ pub trait DustStorage: BlockStorage {
     async fn get_highest_generation_index_for_dust_address(
         &self,
         dust_address: &DustAddress,
-    ) -> Result<Option<u32>, sqlx::Error>;
+    ) -> Result<Option<u64>, sqlx::Error>;
 
     /// Get count of active generations for a DUST address.
     async fn get_active_generation_count_for_dust_address(
@@ -109,7 +109,7 @@ impl DustStorage for NoopStorage {
     async fn get_dust_merkle_root(
         &self,
         tree_type: DustMerkleTreeType,
-        timestamp: i32,
+        timestamp: u64,
     ) -> Result<Option<DustMerkleRoot>, sqlx::Error> {
         unimplemented!("NoopStorage")
     }
@@ -117,8 +117,8 @@ impl DustStorage for NoopStorage {
     fn get_dust_generations(
         &self,
         dust_address: &DustAddress,
-        from_generation_index: i64,
-        from_merkle_index: i64,
+        from_generation_index: u64,
+        from_merkle_index: u64,
         only_active: bool,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send {
@@ -128,8 +128,8 @@ impl DustStorage for NoopStorage {
     async fn get_dust_nullifier_transactions(
         &self,
         prefixes: &[DustPrefix],
-        min_prefix_length: i32,
-        from_block: i32,
+        min_prefix_length: u32,
+        from_block: u32,
         batch_size: NonZeroU32,
     ) -> Result<
         impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send,
@@ -141,8 +141,8 @@ impl DustStorage for NoopStorage {
     async fn get_dust_commitments(
         &self,
         commitment_prefixes: &[DustPrefix],
-        start_index: i32,
-        min_prefix_length: i32,
+        start_index: u64,
+        min_prefix_length: u32,
         batch_size: NonZeroU32,
     ) -> Result<impl Stream<Item = Result<DustCommitmentEvent, sqlx::Error>> + Send, sqlx::Error>
     {
@@ -161,7 +161,7 @@ impl DustStorage for NoopStorage {
     async fn get_highest_generation_index_for_dust_address(
         &self,
         dust_address: &DustAddress,
-    ) -> Result<Option<u32>, sqlx::Error> {
+    ) -> Result<Option<u64>, sqlx::Error> {
         unimplemented!("NoopStorage")
     }
 
