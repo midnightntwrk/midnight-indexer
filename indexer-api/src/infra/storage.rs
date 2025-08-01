@@ -13,6 +13,7 @@
 
 mod block;
 mod contract_action;
+mod dust;
 mod transaction;
 mod unshielded;
 mod wallet;
