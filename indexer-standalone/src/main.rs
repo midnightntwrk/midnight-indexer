@@ -39,7 +39,8 @@ async fn main() {
 async fn run() -> anyhow::Result<()> {
     use crate::config::{Config, InfraConfig};
     use anyhow::Context;
-    use chain_indexer::infra::subxt_node::SubxtNode;
+    // Chain-indexer imports removed - not needed in standalone mode
+    // use chain_indexer::infra::subxt_node::SubxtNode;
     use indexer_api::infra::api::AxumApi;
     use indexer_common::{
         cipher::make_cipher,
@@ -76,9 +77,9 @@ async fn run() -> anyhow::Result<()> {
 
     let InfraConfig {
         secret,
-        node_config,
         storage_config,
         api_config,
+        ..  // Other fields ignored
     } = infra_config;
 
     let pool = pool::sqlite::SqlitePool::new(storage_config)
@@ -96,20 +97,25 @@ async fn run() -> anyhow::Result<()> {
 
     let pub_sub = pub_sub::in_mem::InMemPubSub::default();
 
-    let chain_indexer = task::spawn({
-        let node = SubxtNode::new(node_config)
-            .await
-            .context("create SubxtNode")?;
-        let storage = chain_indexer::infra::storage::Storage::new(pool.clone());
+    // Chain-indexer has been excluded from standalone mode because it requires
+    // direct integration with midnight-ledger and midnight-node to function properly.
+    // Standalone mode is designed to work independently without requiring a running
+    // blockchain node. This means:
+    // - No new blocks or transactions will be indexed
+    // - The database will only contain pre-existing data
+    // - wallet-indexer and indexer-api will serve this existing data
+    log::info!(
+        "Running in standalone mode without chain-indexer. \
+         No new blockchain data will be indexed. \
+         Only existing data in the database will be served."
+    );
 
-        chain_indexer::application::run(
-            application_config.into(),
-            node,
-            storage,
-            ledger_state_storage.clone(),
-            pub_sub.publisher(),
-        )
-    });
+    // Original chain-indexer implementation:
+    // let chain_indexer = task::spawn({
+    //     let node = SubxtNode::new(node_config).await.context("create SubxtNode")?;
+    //     let storage = chain_indexer::infra::storage::Storage::new(pool.clone());
+    //     chain_indexer::application::run(...)
+    // });
 
     let indexer_api = task::spawn({
         let storage = indexer_api::infra::storage::Storage::new(cipher.clone(), pool.clone());
@@ -133,7 +139,8 @@ async fn run() -> anyhow::Result<()> {
     });
 
     select! {
-        result = chain_indexer => handle_exit("chain-indexer", result),
+        // Chain-indexer handler removed - see above for explanation
+        // result = chain_indexer => handle_exit("chain-indexer", result),
         result = wallet_indexer => handle_exit("wallet-indexer", result),
         result = indexer_api => handle_exit("indexer-api", result),
     }

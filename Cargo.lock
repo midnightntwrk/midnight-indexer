@@ -3032,7 +3032,6 @@ name = "indexer-standalone"
 version = "1.0.1"
 dependencies = [
  "anyhow",
- "chain-indexer",
  "humantime-serde",
  "indexer-api",
  "indexer-common",

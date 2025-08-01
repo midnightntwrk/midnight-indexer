@@ -17,32 +17,38 @@
 #       and NOT meant for production use!
 
 services:
-  chain-indexer:
-    profiles:
-      - cloud
-    depends_on:
-      postgres:
-        condition: "service_healthy"
-      nats:
-        condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/chain-indexer:${INDEXER_TAG:-latest}"
-    restart: "no"
-    environment:
-      RUST_LOG: "chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
-      APP__INFRA__NODE__URL: "ws://node:9944"
-      APP__INFRA__STORAGE__HOST: "postgres"
-      APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
-      APP__INFRA__PUB_SUB__URL: "nats:4222"
-      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
-      APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: $APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD
-      APP__INFRA__LEDGER_STATE_STORAGE__URL: "nats:4222"
-    healthcheck:
-      test: [ "CMD-SHELL", "cat /var/run/chain-indexer/running" ]
-      start_interval: "2s"
-      start_period: "30s"
-      interval: "5s"
-      timeout: "2s"
-      retries: 2
+#  Chain-indexer service has been disabled in standalone mode.
+#  This service requires direct integration with midnight-ledger and midnight-node
+#  to function properly. Since standalone mode is designed to work independently
+#  without blockchain connectivity, chain-indexer is not included.
+#  The remaining services (wallet-indexer and indexer-api) will work with
+#  existing data in the database without indexing new blockchain data.
+#  chain-indexer:
+#    profiles:
+#      - cloud
+#    depends_on:
+#      postgres:
+#        condition: "service_healthy"
+#      nats:
+#        condition: "service_started"
+#    image: "ghcr.io/midnight-ntwrk/chain-indexer:${INDEXER_TAG:-latest}"
+#    restart: "no"
+#    environment:
+#      RUST_LOG: "chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
+#      APP__INFRA__NODE__URL: "ws://node:9944"
+#      APP__INFRA__STORAGE__HOST: "postgres"
+#      APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+#      APP__INFRA__PUB_SUB__URL: "nats:4222"
+#      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
+#      APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: $APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD
+#      APP__INFRA__LEDGER_STATE_STORAGE__URL: "nats:4222"
+#    healthcheck:
+#      test: [ "CMD-SHELL", "cat /var/run/chain-indexer/running" ]
+#      start_interval: "2s"
+#      start_period: "30s"
+#      interval: "5s"
+#      timeout: "2s"
+#      retries: 2
 
   wallet-indexer:
     profiles:
@@ -52,7 +58,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/wallet-indexer:${INDEXER_TAG:-latest}"
+    image: "ghcr.io/midnight-ntwrk/wallet-indexer:f5ce7d99"
     restart: "no"
     environment:
       RUST_LOG: "wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
@@ -77,7 +83,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/indexer-api:${INDEXER_TAG:-latest}"
+    image: "ghcr.io/midnight-ntwrk/indexer-api:f5ce7d99"
     restart: "no"
     ports:
       - "8088:8088"
@@ -153,16 +159,20 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  node:
-    profiles: [ cloud, standalone ]
-    image: "ghcr.io/midnight-ntwrk/midnight-node:${NODE_TAG:-latest}"
-    restart: "always"
-    ports:
-      - "9944:9944"
-    volumes:
-      - "./target/data/node:/node"
-    environment:
-      SHOW_CONFIG: "false"
-      CFG_PRESET: "dev"
-    security_opt:
-      - no-new-privileges:true
+#  Midnight-node service is disabled as it's not needed when chain-indexer
+#  is excluded. This service would normally provide blockchain data to
+#  chain-indexer, but since standalone mode operates without blockchain
+#  connectivity, the node service is not required.
+#  node:
+#    profiles: [ cloud, standalone ]
+#    image: "ghcr.io/midnight-ntwrk/midnight-node:${NODE_TAG:-latest}"
+#    restart: "always"
+#    ports:
+#      - "9944:9944"
+#    volumes:
+#      - "./target/data/node:/node"
+#    environment:
+#      SHOW_CONFIG: "false"
+#      CFG_PRESET: "dev"
+#    security_opt:
+#      - no-new-privileges:true
