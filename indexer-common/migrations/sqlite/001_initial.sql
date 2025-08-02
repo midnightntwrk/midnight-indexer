@@ -87,7 +87,7 @@ CREATE TABLE unshielded_utxos(
     id INTEGER PRIMARY KEY,
     creating_transaction_id INTEGER NOT NULL,
     spending_transaction_id INTEGER,
-    OWNER BLOB NOT NULL,
+    owner BLOB NOT NULL,
     token_type BLOB NOT NULL,
     value BLOB NOT NULL,
     output_index INTEGER NOT NULL,
@@ -101,7 +101,7 @@ CREATE INDEX unshielded_creating_idx ON unshielded_utxos(creating_transaction_id
 
 CREATE INDEX unshielded_spending_idx ON unshielded_utxos(spending_transaction_id);
 
-CREATE INDEX unshielded_owner_idx ON unshielded_utxos(OWNER);
+CREATE INDEX unshielded_owner_idx ON unshielded_utxos(owner);
 
 CREATE INDEX unshielded_token_type_idx ON unshielded_utxos(token_type);
 
@@ -129,14 +129,14 @@ CREATE TABLE dust_generation_info(
     id INTEGER PRIMARY KEY,
     night_utxo_hash BLOB NOT NULL,
     value BLOB NOT NULL,
-    OWNER BLOB NOT NULL,
+    owner BLOB NOT NULL,
     nonce BLOB NOT NULL,
     ctime INTEGER NOT NULL,
     merkle_index INTEGER NOT NULL,
     dtime INTEGER
 );
 
-CREATE INDEX dust_generation_info_owner_idx ON dust_generation_info(OWNER);
+CREATE INDEX dust_generation_info_owner_idx ON dust_generation_info(owner);
 
 CREATE INDEX dust_generation_info_utxo_idx ON dust_generation_info(night_utxo_hash);
 
@@ -146,7 +146,7 @@ CREATE TABLE dust_utxos(
     spent_at_transaction_id INTEGER,
     commitment BLOB NOT NULL,
     initial_value BLOB NOT NULL,
-    OWNER BLOB NOT NULL,
+    owner BLOB NOT NULL,
     nonce BLOB NOT NULL,
     seq INTEGER NOT NULL,
     ctime INTEGER NOT NULL,
@@ -155,7 +155,7 @@ CREATE TABLE dust_utxos(
     FOREIGN KEY (spent_at_transaction_id) REFERENCES transactions(id)
 );
 
-CREATE INDEX dust_utxos_owner_idx ON dust_utxos(OWNER);
+CREATE INDEX dust_utxos_owner_idx ON dust_utxos(owner);
 
 CREATE INDEX dust_utxos_generation_idx ON dust_utxos(generation_info_id);
 

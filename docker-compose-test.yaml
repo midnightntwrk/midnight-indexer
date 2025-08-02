@@ -1,0 +1,66 @@
+# Test configuration for mock data loading
+services:
+  # Test indexer-api with PostgreSQL
+  postgres-test:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: indexer
+      POSTGRES_PASSWORD: indexer
+      POSTGRES_DB: indexer
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U indexer"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # NATS for pub/sub
+  nats-test:
+    image: nats:2.10-alpine
+    command: "-js"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "4222"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  indexer-api-test:
+    image: midnight-indexer-api-test:local
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      nats-test:
+        condition: service_healthy
+    environment:
+      RUST_LOG: "indexer_api=debug,indexer_common=debug,info"
+      APP__INFRA__STORAGE__HOST: postgres-test
+      APP__INFRA__STORAGE__USER: indexer
+      APP__INFRA__STORAGE__DATABASE: indexer
+      APP__INFRA__STORAGE__PASSWORD: indexer
+      APP__INFRA__PUB_SUB__URL: "nats-test:4222"
+      APP__INFRA__PUB_SUB__PASSWORD: indexer
+      APP__INFRA__LEDGER_STATE_STORAGE__URL: "nats-test:4222"
+      APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: indexer
+      APP__INFRA__SECRET: "303132333435363738393031323334353637383930313233343536373839303132"
+    ports:
+      - "8088:8088"
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /var/run/indexer-api/running"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Test indexer-standalone with SQLite
+  indexer-standalone-test:
+    image: midnight-indexer-standalone-test:local
+    environment:
+      RUST_LOG: "indexer_standalone=debug,indexer_common=debug,info"
+      APP__INFRA__SECRET: "303132333435363738393031323334353637383930313233343536373839303132"
+    ports:
+      - "8089:8088"
+    volumes:
+      - ./target/test-standalone-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /var/run/indexer-standalone/running"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

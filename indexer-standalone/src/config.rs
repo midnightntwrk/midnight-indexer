@@ -53,31 +53,16 @@ pub struct DustConfig {
     pub max_registrations_per_address: usize,
 }
 
-impl From<ApplicationConfig> for chain_indexer::application::Config {
-    fn from(config: ApplicationConfig) -> Self {
-        let ApplicationConfig {
-            network_id,
-            blocks_buffer,
-            save_ledger_state_after,
-            caught_up_max_distance,
-            caught_up_leeway,
-            ..
-        } = config;
-
-        Self {
-            network_id,
-            blocks_buffer,
-            save_ledger_state_after,
-            caught_up_max_distance,
-            caught_up_leeway,
-            dust: chain_indexer::application::DustConfig {
-                merkle_tree_batch_size: config.dust.merkle_tree_batch_size,
-                privacy_prefix_length: config.dust.privacy_prefix_length,
-                max_registrations_per_address: config.dust.max_registrations_per_address,
-            },
-        }
-    }
-}
+// Chain indexer configuration conversion has been removed from standalone mode.
+// The chain-indexer component requires direct integration with midnight-ledger
+// and midnight-node to function, which contradicts the goal of standalone mode
+// to work independently without blockchain connectivity. Standalone mode is
+// intended to serve existing indexed data without requiring a running node.
+//
+// Original implementation:
+// impl From<ApplicationConfig> for chain_indexer::application::Config {
+//     ... configuration mapping ...
+// }
 
 impl From<ApplicationConfig> for indexer_api::application::Config {
     fn from(config: ApplicationConfig) -> Self {
@@ -113,8 +98,12 @@ pub struct InfraConfig {
     #[serde(rename = "storage")]
     pub storage_config: pool::sqlite::Config,
 
-    #[serde(rename = "node")]
-    pub node_config: chain_indexer::infra::subxt_node::Config,
+    // Node configuration is skipped in standalone mode since chain-indexer
+    // is not included. Chain-indexer would normally use this to connect
+    // to a midnight-node instance, but standalone mode operates without
+    // blockchain connectivity.
+    #[serde(rename = "node", skip)]
+    _node_config: Option<()>, // Placeholder, not used without chain-indexer
 
     #[serde(rename = "api")]
     pub api_config: indexer_api::infra::api::Config,
