@@ -137,6 +137,10 @@ docker-indexer-tests profile="dev":
 
 run-chain-indexer node="ws://localhost:9944" network_id="Undeployed":
     docker compose up -d postgres nats
+    # Wait for PostgreSQL to be ready
+    echo "Waiting for PostgreSQL to be ready..."
+    until docker compose exec -T postgres pg_isready -U indexer -d indexer > /dev/null 2>&1; do sleep 1; done
+    echo "PostgreSQL is ready!"
     RUST_LOG=chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
         CONFIG_FILE=chain-indexer/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
@@ -145,6 +149,10 @@ run-chain-indexer node="ws://localhost:9944" network_id="Undeployed":
 
 run-wallet-indexer network_id="Undeployed":
     docker compose up -d postgres nats
+    # Wait for PostgreSQL to be ready
+    echo "Waiting for PostgreSQL to be ready..."
+    until docker compose exec -T postgres pg_isready -U indexer -d indexer > /dev/null 2>&1; do sleep 1; done
+    echo "PostgreSQL is ready!"
     RUST_LOG=wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
         CONFIG_FILE=wallet-indexer/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
@@ -155,6 +163,10 @@ run-indexer-api network_id="Undeployed":
     # Mock data is automatically loaded for development/testing
     # This is a temporary solution until node/ledger integration is available
     docker compose up -d postgres nats
+    # Wait for PostgreSQL to be ready
+    echo "Waiting for PostgreSQL to be ready..."
+    until docker compose exec -T postgres pg_isready -U indexer -d indexer > /dev/null 2>&1; do sleep 1; done
+    echo "PostgreSQL is ready!"
     # Start mock data loading in background after migrations complete
     ( \
         echo "Waiting for indexer-api to start and run migrations..." && \
