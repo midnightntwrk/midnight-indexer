@@ -83,20 +83,20 @@ pub struct DustGenerationInfo {
     pub nonce: DustNonce,
 
     /// Creation time (UNIX timestamp).
-    pub ctime: u32,
+    pub ctime: u64,
 
     /// Destruction time. None if still generating.
-    pub dtime: Option<u32>,
+    pub dtime: Option<u64>,
 
     /// Index in generation Merkle tree.
-    pub merkle_index: u32,
+    pub merkle_index: u64,
 }
 
 /// DUST generation Merkle tree update.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DustGenerationMerkleUpdate {
     /// Tree index.
-    pub index: u32,
+    pub index: u64,
 
     /// Collapsed update data.
     pub collapsed_update: DustMerkleUpdate,
@@ -109,10 +109,10 @@ pub struct DustGenerationMerkleUpdate {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DustGenerationProgress {
     /// Highest processed index.
-    pub highest_index: u32,
+    pub highest_index: u64,
 
     /// Number of active generations.
-    pub active_generations: u32,
+    pub active_generation_count: u32,
 }
 
 /// DUST generation event union type.
@@ -177,10 +177,10 @@ pub struct DustCommitmentInfo {
     pub nonce: DustNonce,
 
     /// Creation timestamp.
-    pub created_at: u32,
+    pub created_at: u64,
 
     /// Spend timestamp (if spent).
-    pub spent_at: Option<u32>,
+    pub spent_at: Option<u64>,
 }
 
 /// DUST commitment Merkle tree update.
@@ -200,7 +200,7 @@ pub struct DustCommitmentMerkleUpdate {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DustCommitmentProgress {
     /// Highest processed index.
-    pub highest_index: u32,
+    pub highest_index: u64,
 
     /// Number of commitments in batch.
     pub commitment_count: u32,
@@ -251,17 +251,17 @@ pub struct RegistrationUpdate {
     pub is_active: bool,
 
     /// Registration timestamp.
-    pub registered_at: u32,
+    pub registered_at: u64,
 
     /// Removal timestamp (if removed).
-    pub removed_at: Option<u32>,
+    pub removed_at: Option<u64>,
 }
 
 /// Registration update progress.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationUpdateProgress {
     /// Latest processed timestamp.
-    pub latest_timestamp: u32,
+    pub latest_timestamp: u64,
 
     /// Number of updates in batch.
     pub update_count: u32,

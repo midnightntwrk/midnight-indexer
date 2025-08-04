@@ -22,8 +22,11 @@ use crate::{
     },
 };
 use async_graphql::{Context, Subscription, async_stream::try_stream};
+use drop_stream::DropStreamExt;
 use futures::{Stream, StreamExt, TryStreamExt};
+use indexer_common::domain::DustAddress;
 use std::{marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
+use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
 
@@ -54,35 +57,37 @@ where
         &self,
         cx: &'a Context<'a>,
         dust_address: HexEncoded,
-        from_generation_index: Option<i32>,
-        from_merkle_index: Option<i32>,
+        from_generation_index: Option<u64>,
+        from_merkle_index: Option<u64>,
         only_active: Option<bool>,
     ) -> Result<impl Stream<Item = ApiResult<DustGenerationEvent>> + use<'a, S>, ApiError> {
         // Decode the DUST address.
-        let dust_address_bytes: indexer_common::domain::DustAddress =
-            dust_address.hex_decode().map_err(|e| {
-                ApiError::Client(InnerApiError(format!("Invalid DUST address: {e}"), None))
-            })?;
+        let dust_address = dust_address
+            .hex_decode()
+            .map_err_into_client_error(|| "invalid address")?;
 
-        // Default to 0 to start from the beginning of the generation history.
-        let from_generation_index = from_generation_index.unwrap_or(0);
-        // Default to 0 to include all merkle tree updates from the start.
-        let from_merkle_index = from_merkle_index.unwrap_or(0);
         // Default to true to show only currently active (non-destroyed) generations.
         let only_active = only_active.unwrap_or(true);
 
-        // Create data stream from storage
+        // Build a stream of dust generation events by merging dust_generations and
+        // progress_updates. The dust_generations stream should be infinite by definition.
+        // However, if it nevertheless completes, we use a Tripwire to ensure
+        // the progress_updates stream also completes, preventing the merged stream from
+        // hanging indefinitely waiting for both streams to complete.
+        let (trigger, tripwire) = Tripwire::new();
+
         let dust_generations = make_dust_generations::<S>(
             cx,
-            dust_address_bytes,
-            from_generation_index as i64,
-            from_merkle_index as i64,
+            dust_address,
+            from_generation_index.unwrap_or(0),
+            from_merkle_index.unwrap_or(0),
             only_active,
+            trigger,
         )
         .map_ok(DustGenerationEvent::Info);
 
-        // Create progress stream - clone the address to avoid lifetime issues
-        let progress_updates = dust_generation_progress_updates::<S>(cx, dust_address_bytes)
+        let progress_updates = make_progress_updates::<S>(cx, dust_address)
+            .take_until_if(tripwire)
             .map_ok(DustGenerationEvent::Progress);
 
         // Merge the streams
@@ -96,8 +101,8 @@ where
         &self,
         cx: &'a Context<'a>,
         prefixes: Vec<HexEncoded>,
-        min_prefix_length: i32,
-        from_block: Option<i32>,
+        min_prefix_length: u32,
+        from_block: Option<u32>,
     ) -> Result<impl Stream<Item = ApiResult<DustNullifierTransactionEvent>> + use<'a, S>, ApiError>
     {
         // Validate minimum prefix length.
@@ -146,8 +151,8 @@ where
         &self,
         cx: &'a Context<'a>,
         commitment_prefixes: Vec<HexEncoded>,
-        start_index: i32,
-        min_prefix_length: i32,
+        start_index: u64,
+        min_prefix_length: u32,
     ) -> Result<impl Stream<Item = ApiResult<DustCommitmentEvent>> + use<'a, S>, ApiError> {
         // Validate minimum prefix length.
         if min_prefix_length < 8 {
@@ -224,10 +229,11 @@ where
 
 fn make_dust_generations<'a, S>(
     cx: &'a Context<'a>,
-    dust_address: indexer_common::domain::DustAddress,
-    from_generation_index: i64,
-    from_merkle_index: i64,
+    dust_address: DustAddress,
+    from_generation_index: u64,
+    from_merkle_index: u64,
     only_active: bool,
+    trigger: Trigger,
 ) -> impl Stream<Item = ApiResult<DustGenerationInfo>> + use<'a, S>
 where
     S: Storage,
@@ -261,11 +267,12 @@ where
             }
         }
     }
+    .on_drop(move || drop(trigger))
 }
 
-fn dust_generation_progress_updates<'a, S>(
+fn make_progress_updates<'a, S>(
     cx: &'a Context<'a>,
-    dust_address: indexer_common::domain::DustAddress,
+    dust_address: DustAddress,
 ) -> impl Stream<Item = ApiResult<DustGenerationProgress>> + use<'a, S>
 where
     S: Storage,
@@ -276,7 +283,7 @@ where
 }
 
 async fn make_dust_generation_progress_update<S>(
-    dust_address: indexer_common::domain::DustAddress,
+    dust_address: DustAddress,
     storage: &S,
 ) -> ApiResult<DustGenerationProgress>
 where
@@ -290,13 +297,13 @@ where
         .unwrap_or(0);
 
     // Get count of active generations
-    let active_count = storage
+    let active_generation_count = storage
         .get_active_generation_count_for_dust_address(&dust_address)
         .await
         .map_err_into_server_error(|| "get active generation count")?;
 
     Ok(DustGenerationProgress {
-        highest_index: highest_index as i32,
-        active_generations: active_count as i32,
+        highest_index,
+        active_generation_count,
     })
 }

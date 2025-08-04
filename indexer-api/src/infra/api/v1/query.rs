@@ -253,7 +253,7 @@ where
         &self,
         cx: &Context<'_>,
         tree_type: DustMerkleTreeType,
-        timestamp: i32,
+        timestamp: u64,
     ) -> ApiResult<Option<HexEncoded>> {
         let storage = cx.get_storage::<S>();
 
