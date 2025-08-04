@@ -187,7 +187,7 @@ pub struct DustCommitmentInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DustCommitmentMerkleUpdate {
     /// Tree index.
-    pub index: u32,
+    pub index: u64,
 
     /// Collapsed update data.
     pub collapsed_update: DustMerkleUpdate,

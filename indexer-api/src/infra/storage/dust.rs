@@ -496,7 +496,7 @@ impl DustStorage for Storage {
                     for row in merkle_rows {
                         // Use block_height as index temporarily
                         yield DustCommitmentEvent::MerkleUpdate(crate::domain::dust::DustCommitmentMerkleUpdate {
-                            index: row.block_height as u32,
+                            index: row.block_height,
                             collapsed_update: row.root.into(),
                             block_height: row.block_height as u32,
                         });
