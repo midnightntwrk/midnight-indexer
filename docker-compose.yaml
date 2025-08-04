@@ -50,30 +50,34 @@ services:
 #      timeout: "2s"
 #      retries: 2
 
-  wallet-indexer:
-    profiles:
-      - cloud
-    depends_on:
-      postgres:
-        condition: "service_healthy"
-      nats:
-        condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/wallet-indexer:f5ce7d99"
-    restart: "no"
-    environment:
-      RUST_LOG: "wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
-      APP__INFRA__SECRET: $APP__INFRA__SECRET
-      APP__INFRA__STORAGE__HOST: "postgres"
-      APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
-      APP__INFRA__PUB_SUB__URL: "nats:4222"
-      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
-    healthcheck:
-      test: [ "CMD-SHELL", "cat /var/run/wallet-indexer/running" ]
-      start_interval: "2s"
-      start_period: "30s"
-      interval: "5s"
-      timeout: "2s"
-      retries: 2
+#  Wallet-indexer service is disabled when using mock data.
+#  This service processes events from chain-indexer via NATS to track wallet-specific
+#  transactions. Since chain-indexer is excluded and we're using static mock data,
+#  wallet-indexer has no events to process and is not needed.
+#  wallet-indexer:
+#    profiles:
+#      - cloud
+#    depends_on:
+#      postgres:
+#        condition: "service_healthy"
+#      nats:
+#        condition: "service_started"
+#    image: "ghcr.io/midnight-ntwrk/wallet-indexer:24394378"
+#    restart: "no"
+#    environment:
+#      RUST_LOG: "wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
+#      APP__INFRA__SECRET: $APP__INFRA__SECRET
+#      APP__INFRA__STORAGE__HOST: "postgres"
+#      APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+#      APP__INFRA__PUB_SUB__URL: "nats:4222"
+#      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
+#    healthcheck:
+#      test: [ "CMD-SHELL", "cat /var/run/wallet-indexer/running" ]
+#      start_interval: "2s"
+#      start_period: "30s"
+#      interval: "5s"
+#      timeout: "2s"
+#      retries: 2
 
   indexer-api:
     profiles:
@@ -83,7 +87,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/indexer-api:f5ce7d99"
+    image: "ghcr.io/midnight-ntwrk/indexer-api:24394378"
     restart: "no"
     ports:
       - "8088:8088"
@@ -105,18 +109,17 @@ services:
       retries: 2
 
   indexer-standalone:
-    depends_on:
-      - node
+    # Note: node dependency removed as chain-indexer is excluded in standalone mode
     profiles:
       - standalone
-    image: "ghcr.io/midnight-ntwrk/indexer-standalone:${INDEXER_TAG:-latest}"
+    image: "ghcr.io/midnight-ntwrk/indexer-standalone:24394378"
     restart: "no"
     ports:
       - "8088:8088"
     environment:
       RUST_LOG: "indexer_standalone=debug,chain_indexer=debug,indexer_api=debug,wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
       APP__INFRA__SECRET: $APP__INFRA__SECRET
-      APP__INFRA__NODE__URL: "ws://node:9944"
+      # Node URL removed as chain-indexer is excluded in standalone mode
     healthcheck:
       test: [ "CMD-SHELL", "cat /var/run/indexer-standalone/running" ]
       start_interval: "2s"
