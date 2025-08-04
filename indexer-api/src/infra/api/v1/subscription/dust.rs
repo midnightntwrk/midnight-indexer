@@ -57,8 +57,8 @@ where
         &self,
         cx: &'a Context<'a>,
         dust_address: HexEncoded,
-        from_generation_index: Option<i32>,
-        from_merkle_index: Option<i32>,
+        from_generation_index: Option<u64>,
+        from_merkle_index: Option<u64>,
         only_active: Option<bool>,
     ) -> Result<impl Stream<Item = ApiResult<DustGenerationEvent>> + use<'a, S>, ApiError> {
         // Decode the DUST address.
@@ -79,8 +79,8 @@ where
         let dust_generations = make_dust_generations::<S>(
             cx,
             dust_address,
-            from_generation_index.unwrap_or(0).max(0) as u64,
-            from_merkle_index.unwrap_or(0).max(0) as u64,
+            from_generation_index.unwrap_or(0),
+            from_merkle_index.unwrap_or(0),
             only_active,
             trigger,
         )
@@ -101,8 +101,8 @@ where
         &self,
         cx: &'a Context<'a>,
         prefixes: Vec<HexEncoded>,
-        min_prefix_length: i32,
-        from_block: Option<i32>,
+        min_prefix_length: u32,
+        from_block: Option<u32>,
     ) -> Result<impl Stream<Item = ApiResult<DustNullifierTransactionEvent>> + use<'a, S>, ApiError>
     {
         // Validate minimum prefix length.
@@ -129,7 +129,7 @@ where
 
         let stream = try_stream! {
             let nullifier_stream = storage
-                .get_dust_nullifier_transactions(&binary_prefixes, min_prefix_length.max(0) as u32, from_block.max(0) as u32, BATCH_SIZE)
+                .get_dust_nullifier_transactions(&binary_prefixes, min_prefix_length, from_block, BATCH_SIZE)
                 .await
                 .map_err_into_server_error(|| "start DUST nullifier transactions stream")?;
             let mut nullifier_stream = pin!(nullifier_stream);
@@ -151,8 +151,8 @@ where
         &self,
         cx: &'a Context<'a>,
         commitment_prefixes: Vec<HexEncoded>,
-        start_index: i32,
-        min_prefix_length: i32,
+        start_index: u64,
+        min_prefix_length: u32,
     ) -> Result<impl Stream<Item = ApiResult<DustCommitmentEvent>> + use<'a, S>, ApiError> {
         // Validate minimum prefix length.
         if min_prefix_length < 8 {
@@ -175,7 +175,7 @@ where
 
         let stream = try_stream! {
             let commitment_stream = storage
-                .get_dust_commitments(&binary_prefixes, start_index.max(0) as u64, min_prefix_length.max(0) as u32, BATCH_SIZE)
+                .get_dust_commitments(&binary_prefixes, start_index, min_prefix_length, BATCH_SIZE)
                 .await
                 .map_err_into_server_error(|| "start DUST commitments stream")?;
             let mut commitment_stream = pin!(commitment_stream);
@@ -303,7 +303,7 @@ where
         .map_err_into_server_error(|| "get active generation count")?;
 
     Ok(DustGenerationProgress {
-        highest_index: highest_index.to_string(),
+        highest_index,
         active_generation_count,
     })
 }

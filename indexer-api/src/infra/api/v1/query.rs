@@ -253,12 +253,12 @@ where
         &self,
         cx: &Context<'_>,
         tree_type: DustMerkleTreeType,
-        timestamp: i32,
+        timestamp: u64,
     ) -> ApiResult<Option<HexEncoded>> {
         let storage = cx.get_storage::<S>();
 
         let root = storage
-            .get_dust_merkle_root(tree_type.into(), timestamp.max(0) as u64)
+            .get_dust_merkle_root(tree_type.into(), timestamp)
             .await
             .map_err_into_server_error(|| "get DUST merkle root")?;
 

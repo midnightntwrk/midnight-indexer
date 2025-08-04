@@ -30,13 +30,13 @@ pub struct DustSystemState {
     pub generation_tree_root: HexEncoded,
 
     /// Current block height.
-    pub block_height: String,
+    pub block_height: u32,
 
     /// Current timestamp.
-    pub timestamp: String,
+    pub timestamp: u64,
 
     /// Total number of registrations.
-    pub total_registrations: String,
+    pub total_registrations: u32,
 }
 
 impl From<domain::dust::DustSystemState> for DustSystemState {
@@ -44,9 +44,9 @@ impl From<domain::dust::DustSystemState> for DustSystemState {
         Self {
             commitment_tree_root: state.commitment_tree_root.hex_encode(),
             generation_tree_root: state.generation_tree_root.hex_encode(),
-            block_height: state.block_height.to_string(),
-            timestamp: state.timestamp.to_string(),
-            total_registrations: state.total_registrations.to_string(),
+            block_height: state.block_height,
+            timestamp: state.timestamp,
+            total_registrations: state.total_registrations,
         }
     }
 }
@@ -140,13 +140,13 @@ pub struct DustGenerationInfo {
     pub nonce: HexEncoded,
 
     /// Creation time (UNIX timestamp).
-    pub ctime: String,
+    pub ctime: u64,
 
     /// Destruction time. None if still generating.
-    pub dtime: Option<String>,
+    pub dtime: Option<u64>,
 
     /// Index in generation Merkle tree.
-    pub merkle_index: String,
+    pub merkle_index: u64,
 }
 
 impl From<domain::dust::DustGenerationInfo> for DustGenerationInfo {
@@ -156,9 +156,9 @@ impl From<domain::dust::DustGenerationInfo> for DustGenerationInfo {
             value: info.value.to_string(),
             owner: info.owner.hex_encode(),
             nonce: info.nonce.hex_encode(),
-            ctime: info.ctime.to_string(),
-            dtime: info.dtime.map(|d| d.to_string()),
-            merkle_index: info.merkle_index.to_string(),
+            ctime: info.ctime,
+            dtime: info.dtime,
+            merkle_index: info.merkle_index,
         }
     }
 }
@@ -167,7 +167,7 @@ impl From<domain::dust::DustGenerationInfo> for DustGenerationInfo {
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustGenerationMerkleUpdate {
     /// Tree index.
-    pub index: String,
+    pub index: u64,
 
     /// Collapsed update data.
     pub collapsed_update: HexEncoded,
@@ -185,7 +185,7 @@ impl From<domain::dust::DustGenerationMerkleUpdate> for DustGenerationMerkleUpda
         } = update;
 
         Self {
-            index: index.to_string(),
+            index,
             collapsed_update: collapsed_update.hex_encode(),
             block_height,
         }
@@ -196,7 +196,7 @@ impl From<domain::dust::DustGenerationMerkleUpdate> for DustGenerationMerkleUpda
 #[derive(Debug, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct DustGenerationProgress {
     /// Highest processed index.
-    pub highest_index: String,
+    pub highest_index: u64,
 
     /// Number of active generations.
     pub active_generation_count: u32,
@@ -210,7 +210,7 @@ impl From<domain::dust::DustGenerationProgress> for DustGenerationProgress {
         } = progress;
 
         Self {
-            highest_index: highest_index.to_string(),
+            highest_index,
             active_generation_count,
         }
     }
@@ -237,7 +237,7 @@ pub struct DustNullifierTransaction {
     pub transaction_hash: HexEncoded,
 
     /// Block height.
-    pub block_height: i32,
+    pub block_height: u32,
 
     /// Matching nullifier prefixes.
     pub matching_nullifier_prefixes: Vec<HexEncoded>,
@@ -247,7 +247,7 @@ impl From<domain::dust::DustNullifierTransaction> for DustNullifierTransaction {
     fn from(tx: domain::dust::DustNullifierTransaction) -> Self {
         Self {
             transaction_hash: tx.transaction_hash.hex_encode(),
-            block_height: tx.block_height as i32,
+            block_height: tx.block_height,
             matching_nullifier_prefixes: tx
                 .matching_nullifier_prefixes
                 .into_iter()
@@ -261,17 +261,17 @@ impl From<domain::dust::DustNullifierTransaction> for DustNullifierTransaction {
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustNullifierTransactionProgress {
     /// Highest processed block.
-    pub highest_block: i32,
+    pub highest_block: u32,
 
     /// Number of matched transactions.
-    pub matched_count: i32,
+    pub matched_count: u32,
 }
 
 impl From<domain::dust::DustNullifierTransactionProgress> for DustNullifierTransactionProgress {
     fn from(progress: domain::dust::DustNullifierTransactionProgress) -> Self {
         Self {
-            highest_block: progress.highest_block as i32,
-            matched_count: progress.matched_count as i32,
+            highest_block: progress.highest_block,
+            matched_count: progress.matched_count,
         }
     }
 }
@@ -317,10 +317,10 @@ pub struct DustCommitment {
     pub nonce: HexEncoded,
 
     /// Creation timestamp.
-    pub created_at: String,
+    pub created_at: u64,
 
     /// Spend timestamp (if spent).
-    pub spent_at: Option<String>,
+    pub spent_at: Option<u64>,
 }
 
 impl From<domain::dust::DustCommitmentInfo> for DustCommitment {
@@ -331,8 +331,8 @@ impl From<domain::dust::DustCommitmentInfo> for DustCommitment {
             value: commitment.value.to_string(),
             owner: commitment.owner.hex_encode(),
             nonce: commitment.nonce.hex_encode(),
-            created_at: commitment.created_at.to_string(),
-            spent_at: commitment.spent_at.map(|s| s.to_string()),
+            created_at: commitment.created_at,
+            spent_at: commitment.spent_at,
         }
     }
 }
@@ -341,21 +341,21 @@ impl From<domain::dust::DustCommitmentInfo> for DustCommitment {
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustCommitmentMerkleUpdate {
     /// Tree index.
-    pub index: String,
+    pub index: u64,
 
     /// Collapsed update data.
     pub collapsed_update: HexEncoded,
 
     /// Block height of update.
-    pub block_height: i32,
+    pub block_height: u32,
 }
 
 impl From<domain::dust::DustCommitmentMerkleUpdate> for DustCommitmentMerkleUpdate {
     fn from(update: domain::dust::DustCommitmentMerkleUpdate) -> Self {
         Self {
-            index: update.index.to_string(),
+            index: update.index,
             collapsed_update: update.collapsed_update.hex_encode(),
-            block_height: update.block_height as i32,
+            block_height: update.block_height,
         }
     }
 }
@@ -364,17 +364,17 @@ impl From<domain::dust::DustCommitmentMerkleUpdate> for DustCommitmentMerkleUpda
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct DustCommitmentProgress {
     /// Highest processed index.
-    pub highest_index: String,
+    pub highest_index: u64,
 
     /// Number of commitments in batch.
-    pub commitment_count: i32,
+    pub commitment_count: u32,
 }
 
 impl From<domain::dust::DustCommitmentProgress> for DustCommitmentProgress {
     fn from(progress: domain::dust::DustCommitmentProgress) -> Self {
         Self {
-            highest_index: progress.highest_index.to_string(),
-            commitment_count: progress.commitment_count as i32,
+            highest_index: progress.highest_index,
+            commitment_count: progress.commitment_count,
         }
     }
 }
@@ -480,10 +480,10 @@ pub struct RegistrationUpdate {
     pub is_active: bool,
 
     /// Registration timestamp.
-    pub registered_at: String,
+    pub registered_at: u64,
 
     /// Removal timestamp (if removed).
-    pub removed_at: Option<String>,
+    pub removed_at: Option<u64>,
 }
 
 impl From<domain::dust::RegistrationUpdate> for RegistrationUpdate {
@@ -492,8 +492,8 @@ impl From<domain::dust::RegistrationUpdate> for RegistrationUpdate {
             cardano_stake_key: update.cardano_stake_key.hex_encode(),
             dust_address: update.dust_address.hex_encode(),
             is_active: update.is_active,
-            registered_at: update.registered_at.to_string(),
-            removed_at: update.removed_at.map(|r| r.to_string()),
+            registered_at: update.registered_at,
+            removed_at: update.removed_at,
         }
     }
 }
@@ -502,17 +502,17 @@ impl From<domain::dust::RegistrationUpdate> for RegistrationUpdate {
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct RegistrationUpdateProgress {
     /// Latest processed timestamp.
-    pub latest_timestamp: String,
+    pub latest_timestamp: u64,
 
     /// Number of updates in batch.
-    pub update_count: i32,
+    pub update_count: u32,
 }
 
 impl From<domain::dust::RegistrationUpdateProgress> for RegistrationUpdateProgress {
     fn from(progress: domain::dust::RegistrationUpdateProgress) -> Self {
         Self {
-            latest_timestamp: progress.latest_timestamp.to_string(),
-            update_count: progress.update_count as i32,
+            latest_timestamp: progress.latest_timestamp,
+            update_count: progress.update_count,
         }
     }
 }
