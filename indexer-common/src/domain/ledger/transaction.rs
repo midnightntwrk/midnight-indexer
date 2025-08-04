@@ -25,7 +25,7 @@ use midnight_ledger::structure::{
     Transaction as TransactionV5,
 };
 use midnight_serialize::deserialize as deserialize_v5;
-use midnight_storage::{DefaultDB as DefaultDBV5, arena::Sp as SpV5};
+use midnight_storage::DefaultDB as DefaultDBV5;
 use midnight_transient_crypto::{encryption::SecretKey as SecretKeyV5, proofs::Proof as ProofV5};
 use midnight_zswap::Offer as OfferV5;
 use std::error::Error as StdError;
@@ -213,18 +213,16 @@ impl Transaction {
                     ..
                 }) => {
                     let secret_key = SecretKeyV5::from_repr(&viewing_key.expose_secret().0)
-                        .expect("SecretKey can be created from repr");
+                        .expect("SecretKeyV5 can be created from repr");
 
                     let can_decrypt_guaranteed_coins = guaranteed_coins
                         .as_ref()
-                        .cloned()
-                        .and_then(SpV5::into_inner)
                         .map(|guaranteed_coins| can_decrypt_v5(&secret_key, guaranteed_coins))
                         .unwrap_or(true);
 
                     let can_decrypt_fallible_coins = fallible_coins
                         .values()
-                        .all(|fallible_coins| can_decrypt_v5(&secret_key, fallible_coins));
+                        .all(|fallible_coins| can_decrypt_v5(&secret_key, &fallible_coins));
 
                     can_decrypt_guaranteed_coins && can_decrypt_fallible_coins
                 }
@@ -273,18 +271,71 @@ fn serialize_contract_address(
     Ok(address.into())
 }
 
-fn can_decrypt_v5(key: &SecretKeyV5, offer: OfferV5<ProofV5, DefaultDBV5>) -> bool {
-    let outputs = offer
-        .outputs
-        .iter()
-        .filter_map(|o| o.ciphertext.as_ref().cloned().and_then(SpV5::into_inner));
-
-    let transient = offer
-        .transient
-        .iter()
-        .filter_map(|o| o.ciphertext.as_ref().cloned().and_then(SpV5::into_inner));
-
+fn can_decrypt_v5(key: &SecretKeyV5, offer: &OfferV5<ProofV5, DefaultDBV5>) -> bool {
+    let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
+    let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
     let mut ciphertexts = outputs.chain(transient);
 
-    ciphertexts.any(|ciphertext| key.decrypt::<InfoV5>(&ciphertext.into()).is_some())
+    ciphertexts.any(|ciphertext| {
+        key.decrypt::<InfoV5>(&(*ciphertext).to_owned().into())
+            .is_some()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::{NetworkId, PROTOCOL_VERSION_000_013_000, ViewingKey, ledger::Transaction};
+    use bip32::{DerivationPath, XPrv};
+    use midnight_zswap::keys::{SecretKeys, Seed};
+    use std::{fs, str::FromStr};
+
+    /// Notice: The raw test data is created with `generate_txs.sh`.
+    #[test]
+    fn test_deserialize_relevant() {
+        let raw_transaction =
+            fs::read(format!("{}/tests/tx_1_2_2.raw", env!("CARGO_MANIFEST_DIR")))
+                .expect("transaction file can be read");
+        let transaction = Transaction::deserialize(
+            raw_transaction,
+            NetworkId::Undeployed,
+            PROTOCOL_VERSION_000_013_000,
+        )
+        .expect("transaction can be deserialized");
+
+        assert!(transaction.relevant(viewing_key(1)));
+        assert!(transaction.relevant(viewing_key(2)));
+        assert!(!transaction.relevant(viewing_key(3)));
+
+        let raw_transaction =
+            fs::read(format!("{}/tests/tx_1_2_3.raw", env!("CARGO_MANIFEST_DIR")))
+                .expect("transaction file can be read");
+        let transaction = Transaction::deserialize(
+            raw_transaction,
+            NetworkId::Undeployed,
+            PROTOCOL_VERSION_000_013_000,
+        )
+        .expect("transaction can be deserialized");
+
+        assert!(transaction.relevant(viewing_key(1)));
+        assert!(transaction.relevant(viewing_key(2)));
+        assert!(!transaction.relevant(viewing_key(3)));
+    }
+
+    fn viewing_key(n: u8) -> ViewingKey {
+        let mut seed = [0; 32];
+        seed[31] = n;
+
+        let derivation_path =
+            DerivationPath::from_str("m/44'/2400'/0'/3/0").expect("derivation path can be created");
+        let derived_seed: [u8; 32] = XPrv::derive_from_path(seed, &derivation_path)
+            .expect("key can be derived")
+            .private_key()
+            .to_bytes()
+            .into();
+
+        SecretKeys::from(Seed::from(derived_seed))
+            .encryption_secret_key
+            .repr()
+            .into()
+    }
 }

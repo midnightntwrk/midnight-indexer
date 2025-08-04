@@ -16,7 +16,6 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 
 [dependencies]
 async-nats                  = { workspace = true, optional = true }
-bip32                       = { workspace = true }
 chacha20poly1305            = { workspace = true, features = [ "std" ] }
 const-hex                   = { workspace = true, features = [ "serde" ] }
 derive_more                 = { workspace = true, features = [ "as_ref", "deref", "display", "from", "into" ] }
@@ -56,6 +55,7 @@ trait-variant               = { workspace = true }
 [dev-dependencies]
 anyhow                 = { workspace = true }
 assert_matches         = { workspace = true }
+bip32                  = { workspace = true }
 reqwest                = { workspace = true }
 testcontainers         = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }
@@ -65,7 +65,6 @@ tokio                  = { workspace = true, features = [ "macros", "rt-multi-th
 [features]
 cloud      = [ "async-nats", "serde_with", "sqlx/postgres" ]
 standalone = [ "sqlx/sqlite" ]
-testing    = [  ]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [ 'cfg(coverage_nightly)' ] }

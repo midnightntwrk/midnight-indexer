@@ -41,7 +41,7 @@ use graphql_client::{GraphQLQuery, Response};
 use indexer_api::infra::api::v1::{
     AsBytesExt, HexEncoded, transaction::TransactionResultStatus, viewing_key::ViewingKey,
 };
-use indexer_common::domain::{ByteArray, NetworkId, PROTOCOL_VERSION_000_013_000};
+use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_013_000};
 use itertools::Itertools;
 use reqwest::Client;
 use serde::Serialize;
@@ -639,8 +639,7 @@ async fn test_connect_mutation(
     network_id: NetworkId,
 ) -> anyhow::Result<()> {
     // Valid viewing key.
-    let viewing_key =
-        ViewingKey::derive_for_testing(seed(1), network_id, PROTOCOL_VERSION_000_013_000);
+    let viewing_key = ViewingKey::from(viewing_key(network_id));
     let variables = connect_mutation::Variables { viewing_key };
     let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
     assert!(response.is_ok());
@@ -798,18 +797,18 @@ async fn test_shielded_transactions_subscription(
         ShieldedTransactionsSubscriptionShieldedTransactionsOnViewingUpdateUpdate as ViewingUpdate,
     };
 
-    let viewing_key =
-        ViewingKey::derive_for_testing(seed(1), network_id, PROTOCOL_VERSION_000_013_000)
-            .try_into_domain(network_id, PROTOCOL_VERSION_000_013_000)?;
-    let session_id = viewing_key.to_session_id().hex_encode();
+    let session_id = ViewingKey::from(viewing_key(network_id))
+        .try_into_domain(network_id, PROTOCOL_VERSION_000_013_000)?
+        .to_session_id()
+        .hex_encode();
 
-    // Collect wallet events until there are no more viewing updates (3s deadline).
+    // Collect shielded transactions events until there are no more viewing updates (3s deadline).
     let mut viewing_update_timestamp = Instant::now();
     let variables = shielded_transactions_subscription::Variables { session_id };
     let events =
         graphql_ws_client::subscribe::<ShieldedTransactionsSubscription>(ws_api_url, variables)
             .await
-            .context("subscribe to wallet")?
+            .context("subscribe to shielded transactions")?
             .map_ok(|data| data.shielded_transactions)
             .try_take_while(|event| {
                 let duration = Instant::now() - viewing_update_timestamp;
@@ -822,7 +821,7 @@ async fn test_shielded_transactions_subscription(
             })
             .try_collect::<Vec<_>>()
             .await
-            .context("collect wallet events")?;
+            .context("collect shielded transactions events")?;
 
     // Filter viewing updates only.
     let viewing_updates = events.into_iter().filter_map(|event| match event {
@@ -1059,10 +1058,21 @@ where
     Ok(data)
 }
 
-fn seed(n: u8) -> ByteArray<32> {
-    let mut seed = [0; 32];
-    seed[31] = n;
-    seed.into()
+fn viewing_key(network_id: NetworkId) -> &'static str {
+    match network_id {
+        NetworkId::Undeployed => {
+            "mn_shield-esk_undeployed1qvqpljf0wrewfdr5k6scfmqtertc4gvu8s2nhkpg8yrmx6n6v4t0evgrqyqw7"
+        }
+        NetworkId::DevNet => {
+            "mn_shield-esk_dev1qvqpljf0wrewfdr5k6scfmqtertc4gvu8s2nhkpg8yrmx6n6v4t0evgc05kh2"
+        }
+        NetworkId::TestNet => {
+            "mn_shield-esk_test1qvqpljf0wrewfdr5k6scfmqtertc4gvu8s2nhkpg8yrmx6n6v4t0evgwk3tj3"
+        }
+        NetworkId::MainNet => {
+            "mn_shield-esk1qvqpljf0wrewfdr5k6scfmqtertc4gvu8s2nhkpg8yrmx6n6v4t0evg8earl9"
+        }
+    }
 }
 
 mod graphql {
