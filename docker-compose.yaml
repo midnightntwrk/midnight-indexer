@@ -87,7 +87,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/indexer-api:24394378"
+    image: "ghcr.io/midnight-ntwrk/indexer-api:dev-mock-data-c9754bc0"
     restart: "no"
     ports:
       - "8088:8088"
@@ -112,7 +112,7 @@ services:
     # Note: node dependency removed as chain-indexer is excluded in standalone mode
     profiles:
       - standalone
-    image: "ghcr.io/midnight-ntwrk/indexer-standalone:24394378"
+    image: "ghcr.io/midnight-ntwrk/indexer-standalone:dev-mock-data-c9754bc0"
     restart: "no"
     ports:
       - "8088:8088"
