@@ -69,13 +69,26 @@ where
     _s: PhantomData<S>,
 }
 
-// Needed to derive `Interface` for `ContractAction`. Weird!
+// Required by async-graphql's Interface derive macro for `ContractAction`.
+// This should never be called in practice as the concrete types (ContractDeploy,
+// ContractCall, ContractUpdate) implement their own transaction resolvers.
+// However, the trait is still required for the interface to compile.
+// Since From trait cannot return Result, we must panic on error.
 impl<S> From<Result<Transaction<S>, ApiError>> for Transaction<S>
 where
     S: Storage,
 {
-    fn from(_value: Result<Transaction<S>, ApiError>) -> Self {
-        unimplemented!()
+    fn from(value: Result<Transaction<S>, ApiError>) -> Self {
+        match value {
+            Ok(transaction) => transaction,
+            Err(err) => {
+                // This panic indicates a bug in async-graphql's interface resolution
+                // or a missing implementation in one of the concrete types
+                panic!(
+                    "Unexpected error resolving transaction for ContractAction interface: {err}. This trait should not be called directly - concrete types should handle their own transaction resolution."
+                )
+            }
+        }
     }
 }
 
