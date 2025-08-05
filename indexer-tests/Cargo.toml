@@ -16,7 +16,7 @@ clap              = { workspace = true, features = [ "derive" ] }
 derive_more       = { workspace = true, features = [ "display" ] }
 futures           = { workspace = true }
 graphql_client    = { workspace = true, features = [ "reqwest-rustls" ] }
-indexer-api       = { path = "../indexer-api", features = [ "testing" ] }
+indexer-api       = { path = "../indexer-api" }
 indexer-common    = { path = "../indexer-common" }
 itertools         = { workspace = true }
 reqwest           = { workspace = true, features = [ "json", "rustls-tls" ] }

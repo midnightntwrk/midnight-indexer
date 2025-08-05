@@ -53,35 +53,11 @@ impl ViewingKey {
             return Err(ViewingKeyFormatError::UnexpectedNetworkId(n, network_id));
         }
 
-        let secret_key = ledger::SecretKey::deserialize(bytes, network_id, protocol_version)?;
+        let secret_key = ledger::SecretKey::deserialize(bytes, protocol_version)?
+            .expose_secret()
+            .into();
 
-        Ok(secret_key.expose_secret().into())
-    }
-
-    /// Derive a bech32m-encoded secret key for testing from the given root seed.
-    #[cfg(feature = "testing")]
-    pub fn derive_for_testing(
-        seed: indexer_common::domain::ByteArray<32>,
-        network_id: NetworkId,
-        protocol_version: ProtocolVersion,
-    ) -> Self {
-        use bech32::{Bech32m, Hrp};
-
-        let key = ledger::SecretKey::derive_for_testing(seed, network_id, protocol_version)
-            .expect("secret key can be derived");
-
-        let hrp = match network_id {
-            NetworkId::Undeployed => "mn_shield-esk_undeployed",
-            NetworkId::DevNet => "mn_shield-esk_dev",
-            NetworkId::TestNet => "mn_shield-esk_test",
-            NetworkId::MainNet => "mn_shield-esk",
-        };
-        let hrp = Hrp::parse(hrp).expect("HRP can be parsed");
-
-        let encoded = bech32::encode::<Bech32m>(hrp, key.as_ref())
-            .expect("viewing key can be bech32m-encoded");
-
-        Self(encoded)
+        Ok(secret_key)
     }
 }
 
@@ -103,37 +79,18 @@ pub enum ViewingKeyFormatError {
     Ledger(#[from] ledger::Error),
 }
 
-#[cfg(all(test, feature = "testing"))]
+#[cfg(test)]
 mod tests {
     use crate::infra::api::v1::viewing_key::ViewingKey;
-    use indexer_common::domain::{ByteArray, NetworkId, PROTOCOL_VERSION_000_013_000, ledger};
+    use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_013_000};
 
     #[test]
     fn test_try_into_domain() {
-        let network_id = NetworkId::Undeployed;
-        let protocol_version = PROTOCOL_VERSION_000_013_000;
-        let seed = seed(1);
-
-        // mn_shield-esk_undeployed1qqpsq87f9ac09e95wjm2rp8vp0yd0z4pns7p2w7c9qus0vm20fj4dl93nu709t
-        let viewing_key = ViewingKey::derive_for_testing(seed, network_id, protocol_version);
-
-        let domain_viewing_key = viewing_key.try_into_domain(network_id, protocol_version);
+        let viewing_key = ViewingKey::from(
+            "mn_shield-esk_undeployed1qvqpljf0wrewfdr5k6scfmqtertc4gvu8s2nhkpg8yrmx6n6v4t0evgrqyqw7",
+        );
+        let domain_viewing_key =
+            viewing_key.try_into_domain(NetworkId::Undeployed, PROTOCOL_VERSION_000_013_000);
         assert!(domain_viewing_key.is_ok());
-        let viewing_key = domain_viewing_key.unwrap();
-
-        let secret_key = ledger::SecretKey::derive_for_testing(seed, network_id, protocol_version)
-            .expect("secret key can be derived");
-        let secret_key = ledger::SecretKey::deserialize(secret_key, network_id, protocol_version)
-            .expect("secret key can be deserialized");
-        let expected_viewing_key =
-            indexer_common::domain::ViewingKey::from(secret_key.expose_secret());
-
-        assert_eq!(viewing_key, expected_viewing_key);
-    }
-
-    fn seed(n: u8) -> ByteArray<32> {
-        let mut seed = [0; 32];
-        seed[31] = n;
-        seed.into()
     }
 }

@@ -26,7 +26,6 @@ sleep 3
 
 docker run \
     --rm \
-    --name generator-generate-txs \
     --network host \
     -v /tmp:/out \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
@@ -34,7 +33,6 @@ docker run \
 
 docker run \
     --rm \
-    --name generator-generate-contract-deploy \
     --network host \
     -v /tmp:/out \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
@@ -44,7 +42,6 @@ docker run \
 
 docker run \
     --rm \
-    --name generator-generate-contract-address \
     --network host \
     -v /tmp:/out \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
@@ -53,7 +50,6 @@ docker run \
 
 docker run \
     --rm \
-    --name generator-send-contract-deploy \
     --network host \
     -v /tmp:/out \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
@@ -62,7 +58,6 @@ docker run \
 
 docker run \
     --rm \
-    --name generator-generate-contract-call \
     --network host \
     -v /tmp:/out \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
@@ -72,7 +67,6 @@ docker run \
 
 docker run \
     --rm \
-    --name generator-generate-contract-maintenance \
     --network host \
     -v /tmp:/out \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
