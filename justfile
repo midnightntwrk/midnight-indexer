@@ -100,6 +100,9 @@ docker-wallet-indexer profile="dev":
         .
 
 docker-indexer-api profile="dev":
+    # Build indexer-api Docker image with mock data support for development/testing
+    # This is a temporary solution until node/ledger integration is available
+    # Mock data will be automatically loaded when the container starts
     tag=$(git rev-parse --short=8 HEAD) && \
     docker build \
         --build-arg "RUST_VERSION={{rust_version}}" \
@@ -134,6 +137,10 @@ docker-indexer-tests profile="dev":
 
 run-chain-indexer node="ws://localhost:9944" network_id="Undeployed":
     docker compose up -d postgres nats
+    # Wait for PostgreSQL to be ready
+    echo "Waiting for PostgreSQL to be ready..."
+    until docker compose exec -T postgres pg_isready -U indexer -d indexer > /dev/null 2>&1; do sleep 1; done
+    echo "PostgreSQL is ready!"
     RUST_LOG=chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
         CONFIG_FILE=chain-indexer/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
@@ -142,20 +149,72 @@ run-chain-indexer node="ws://localhost:9944" network_id="Undeployed":
 
 run-wallet-indexer network_id="Undeployed":
     docker compose up -d postgres nats
+    # Wait for PostgreSQL to be ready
+    echo "Waiting for PostgreSQL to be ready..."
+    until docker compose exec -T postgres pg_isready -U indexer -d indexer > /dev/null 2>&1; do sleep 1; done
+    echo "PostgreSQL is ready!"
     RUST_LOG=wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
         CONFIG_FILE=wallet-indexer/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         cargo run -p wallet-indexer --features {{feature}}
 
 run-indexer-api network_id="Undeployed":
+    # Run indexer-api with PostgreSQL database
+    # Mock data is automatically loaded for development/testing
+    # This is a temporary solution until node/ledger integration is available
     docker compose up -d postgres nats
+    # Wait for PostgreSQL to be ready
+    echo "Waiting for PostgreSQL to be ready..."
+    until docker compose exec -T postgres pg_isready -U indexer -d indexer > /dev/null 2>&1; do sleep 1; done
+    echo "PostgreSQL is ready!"
+    # Start mock data loading in background after migrations complete
+    ( \
+        echo "Waiting for indexer-api to start and run migrations..." && \
+        for i in {1..60}; do \
+            if curl -s http://localhost:8088/ready > /dev/null 2>&1; then \
+                echo "Service is ready, checking if mock data is needed..." && \
+                if [ $(docker compose exec -T postgres psql -U indexer -d indexer -t -c "SELECT COUNT(*) FROM blocks;" 2>/dev/null || echo "0") -eq 0 ]; then \
+                    echo "Loading mock data for development/testing..." && \
+                    docker compose exec -T postgres psql -U indexer -d indexer < indexer-api/test-data/postgres/mock-data.sql && \
+                    echo "Mock data loaded successfully!"; \
+                else \
+                    echo "Mock data already exists, skipping..."; \
+                fi; \
+                break; \
+            fi; \
+            sleep 1; \
+        done \
+    ) &
+    # Start the indexer-api service
     RUST_LOG=indexer_api=debug,indexer_common=debug,info \
         CONFIG_FILE=indexer-api/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         cargo run -p indexer-api --bin indexer-api --features {{feature}}
 
 run-indexer-standalone node="ws://localhost:9944" network_id="Undeployed":
+    # Run indexer-standalone with SQLite database
+    # Mock data is automatically loaded for development/testing
+    # This is a temporary solution until node/ledger integration is available
     mkdir -p target/data
+    # Start mock data loading in background after migrations complete
+    ( \
+        echo "Waiting for indexer-standalone to start and run migrations..." && \
+        for i in {1..60}; do \
+            if [ -f "target/data/indexer.sqlite" ] && [ $(sqlite3 "target/data/indexer.sqlite" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='blocks';" 2>/dev/null || echo "0") -eq 1 ]; then \
+                echo "Database is ready, checking if mock data is needed..." && \
+                if [ $(sqlite3 "target/data/indexer.sqlite" "SELECT COUNT(*) FROM blocks;" 2>/dev/null || echo "0") -eq 0 ]; then \
+                    echo "Loading mock data for development/testing..." && \
+                    DATABASE_FILE=target/data/indexer.sqlite indexer-standalone/test-data/sqlite/mock-data.sh && \
+                    echo "Mock data loaded successfully!"; \
+                else \
+                    echo "Mock data already exists, skipping..."; \
+                fi; \
+                break; \
+            fi; \
+            sleep 1; \
+        done \
+    ) &
+    # Start the indexer-standalone service
     RUST_LOG=indexer=debug,chain_indexer=debug,wallet_indexer=debug,indexer_api=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
         CONFIG_FILE=indexer-standalone/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \

@@ -16,7 +16,11 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 
 [dependencies]
 anyhow          = { workspace = true }
-chain-indexer   = { path = "../chain-indexer", optional = true }
+# chain-indexer is excluded from standalone mode because it requires
+# direct integration with midnight-ledger and midnight-node to function
+# properly. Standalone mode is designed to work independently without
+# requiring a running blockchain node.
+# chain-indexer   = { path = "../chain-indexer", optional = true }
 humantime-serde = { workspace = true }
 indexer-api     = { path = "../indexer-api", optional = true }
 indexer-common  = { path = "../indexer-common", optional = true }
@@ -28,7 +32,8 @@ wallet-indexer  = { path = "../wallet-indexer", optional = true }
 
 [features]
 standalone = [
-    "chain-indexer/standalone",
+    # chain-indexer excluded - see dependencies section for explanation
+    # "chain-indexer/standalone",
     "indexer-api/standalone",
     "indexer-common/standalone",
     "log",

@@ -36,15 +36,30 @@ RUN --mount=type=secret,id=netrc,target=/root/.netrc \
 
 FROM debian:bookworm-slim AS image_stage
 
+# Install PostgreSQL client and curl for mock data loading (development only)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends postgresql-client curl && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN adduser --disabled-password --gecos "" --home "/nonexistent" --shell "/sbin/nologin" --no-create-home --uid "10001" appuser && \
     mkdir /var/run/indexer-api && \
-    chown appuser:appuser /var/run/indexer-api
+    chown appuser:appuser /var/run/indexer-api && \
+    mkdir -p /opt/mock-data/postgres && \
+    chown -R appuser:appuser /opt/mock-data
 
 COPY --from=build_stage --chown=appuser:appuser /build/indexer-api/bin/entrypoint.sh /usr/local/bin/
+COPY --from=build_stage --chown=appuser:appuser /build/indexer-api/bin/entrypoint-with-mock-data.sh /usr/local/bin/
+COPY --from=build_stage --chown=appuser:appuser /build/indexer-api/bin/check-and-load-postgres-mock-data.sh /opt/mock-data/check-and-load-mock-data.sh
 COPY --from=build_stage --chown=appuser:appuser /indexer-api /usr/local/bin/
 COPY --from=build_stage --chown=appuser:appuser /build/indexer-api/config.yaml /opt/indexer-api/
+
+# Copy PostgreSQL mock data for development (temporary until node/ledger integration)
+COPY --from=build_stage --chown=appuser:appuser /build/indexer-api/test-data/postgres/*.sql /opt/mock-data/postgres/
 
 EXPOSE 8088
 USER appuser
 WORKDIR /opt/indexer-api
-ENTRYPOINT ["entrypoint.sh"]
+
+# Use development entrypoint with mock data loading
+# TODO: Switch back to entrypoint.sh when node/ledger integration is ready
+ENTRYPOINT ["entrypoint-with-mock-data.sh"]
