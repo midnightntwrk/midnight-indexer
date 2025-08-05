@@ -21,15 +21,15 @@ use crate::{
         },
         storage::dust::DustStorage,
     },
-    infra::{api::AsBytesExt, storage::Storage},
+    infra::storage::Storage,
 };
 use async_stream::try_stream;
 use fastrace::trace;
 use futures::Stream;
 use indexer_common::{
     domain::{
-        CardanoStakeKey, DustAddress, DustMerkleRoot, DustNonce, DustOwner, DustPrefix,
-        NightUtxoHash,
+        CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustNonce, DustNullifier,
+        DustOwner, DustPrefix, NightUtxoHash,
     },
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
@@ -206,7 +206,7 @@ impl DustStorage for Storage {
 
     fn get_dust_generations(
         &self,
-        dust_address: &indexer_common::domain::DustAddress,
+        dust_address: &DustAddress,
         from_generation_index: u64,
         _from_merkle_index: u64,
         only_active: bool,
@@ -283,29 +283,28 @@ impl DustStorage for Storage {
             let mut current_block = from_block as i64;
 
             loop {
-                // Build prefix conditions for the query
-                let mut conditions = Vec::new();
-                for prefix in prefixes {
-                    if prefix.as_ref().len() >= min_prefix_length {
-                        let hex_prefix = prefix.hex_encode().to_string();
-                        #[cfg(feature = "cloud")]
-                        conditions.push(format!(
-                            "substring(nullifier::text, 1, {}) = '\\\\x{}'::text",
-                            hex_prefix.len(),
-                            hex_prefix
-                        ));
+                // Filter prefixes that meet minimum length requirement
+                let valid_prefixes = prefixes
+                    .iter()
+                    .filter(|prefix| prefix.as_ref().len() >= min_prefix_length)
+                    .collect::<Vec<&DustPrefix>>();
 
-                        #[cfg(feature = "standalone")]
-                        conditions.push(format!(
-                            "substr(hex(nullifier), 1, {}) = '{}'",
-                            hex_prefix.len(),
-                            hex_prefix
-                        ));
-                    }
+                if valid_prefixes.is_empty() {
+                    break;
                 }
 
-                if conditions.is_empty() {
-                    break;
+                // Build conditions with parameter placeholders
+                let mut conditions = Vec::new();
+                for (i, _) in valid_prefixes.iter().enumerate() {
+                    let param_num = 3 + i;
+
+                    #[cfg(feature = "cloud")]
+                    conditions.push(format!("substring(encode(nullifier, 'hex'), 1, {}) = encode(${}, 'hex')",
+                        valid_prefixes[i].as_ref().len() * 2, param_num));
+
+                    #[cfg(feature = "standalone")]
+                    conditions.push(format!("substr(hex(nullifier), 1, {}) = hex(${})",
+                        valid_prefixes[i].as_ref().len() * 2, param_num));
                 }
 
                 let where_clause = conditions.join(" OR ");
@@ -326,11 +325,17 @@ impl DustStorage for Storage {
                     where_clause
                 );
 
-                let rows = sqlx::query_as::<_, (Vec<u8>, i64, i64)>(&query)
+                // Build query with parameter bindings
+                let mut transaction_query = sqlx::query_as::<_, (Vec<u8>, i64, i64)>(&query)
                     .bind(current_block)
-                    .bind(batch_size)
-                    .fetch_all(&*self.pool)
-                    .await?;
+                    .bind(batch_size);
+
+                // Bind binary prefix parameters using .as_ref() pattern
+                for prefix in &valid_prefixes {
+                    transaction_query = transaction_query.bind(prefix.as_ref());
+                }
+
+                let rows = transaction_query.fetch_all(&*self.pool).await?;
 
                 if rows.is_empty() {
                     break;
@@ -354,21 +359,24 @@ impl DustStorage for Storage {
 
                     let mut matching_prefixes = Vec::new();
                     for (nullifier_bytes,) in nullifiers {
-                        let nullifier: indexer_common::domain::DustNullifier =
-                            nullifier_bytes.as_slice().try_into().unwrap();
-                        let nullifier_hex = nullifier.hex_encode().to_string();
-                        for prefix in prefixes {
-                            let hex_prefix = prefix.hex_encode().to_string();
-                            if nullifier_hex.starts_with(&hex_prefix)
-                                && prefix.as_ref().len() >= min_prefix_length
-                            {
-                                matching_prefixes.push(prefix.clone());
+                        // Skip invalid nullifier data instead of panicking
+                        let Ok(nullifier): Result<DustNullifier, _> = nullifier_bytes.as_slice().try_into() else {
+                            continue;
+                        };
+                        for prefix in &valid_prefixes {
+                            if nullifier.as_ref().starts_with(prefix.as_ref()) {
+                                matching_prefixes.push((*prefix).clone());
                             }
                         }
                     }
 
+                    // Skip transaction if hash is invalid
+                    let Ok(transaction_hash) = tx_hash.as_slice().try_into() else {
+                        continue;
+                    };
+
                     yield DustNullifierTransactionEvent::Transaction(DustNullifierTransaction {
-                        transaction_hash: tx_hash.as_slice().try_into().unwrap(),
+                        transaction_hash,
                         block_height: *block_height as u32,
                         matching_nullifier_prefixes: matching_prefixes,
                     });
@@ -383,38 +391,42 @@ impl DustStorage for Storage {
     }
 
     #[trace]
-    async fn get_dust_commitments(
+    fn get_dust_commitments(
         &self,
         commitment_prefixes: &[DustPrefix],
         start_index: u64,
         min_prefix_length: u32,
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<DustCommitmentEvent, sqlx::Error>> + Send, sqlx::Error>
-    {
+    ) -> impl Stream<Item = Result<DustCommitmentEvent, sqlx::Error>> + Send {
         let batch_size = batch_size.get() as i64;
         let min_prefix_length = min_prefix_length as usize;
 
-        let stream = try_stream! {
+        try_stream! {
             let mut current_index = start_index as i64;
-            let mut has_more = true;
 
-            while has_more {
-                // Build prefix conditions
-                let mut conditions = Vec::new();
-                for prefix in commitment_prefixes {
-                    if prefix.as_ref().len() >= min_prefix_length {
-                        let hex_prefix = prefix.hex_encode().to_string();
-                        #[cfg(feature = "cloud")]
-                        conditions.push(format!("substring(commitment::text, 1, {}) = '\\\\x{}'::text",
-                            hex_prefix.len(), hex_prefix));
-                        #[cfg(feature = "standalone")]
-                        conditions.push(format!("substr(hex(commitment), 1, {}) = '{}'",
-                            hex_prefix.len(), hex_prefix));
-                    }
+            loop {
+                // Filter prefixes that meet minimum length requirement
+                let valid_prefixes = commitment_prefixes
+                    .iter()
+                    .filter(|prefix| prefix.as_ref().len() >= min_prefix_length)
+                    .collect::<Vec<&DustPrefix>>();
+
+                if valid_prefixes.is_empty() {
+                    break;
                 }
 
-                if conditions.is_empty() {
-                    break;
+                // Build conditions with parameter placeholders
+                let mut conditions = Vec::new();
+                for (i, _) in valid_prefixes.iter().enumerate() {
+                    let param_num = 3 + i;
+
+                    #[cfg(feature = "cloud")]
+                    conditions.push(format!("substring(encode(commitment, 'hex'), 1, {}) = encode(${}, 'hex')",
+                        valid_prefixes[i].as_ref().len() * 2, param_num));
+
+                    #[cfg(feature = "standalone")]
+                    conditions.push(format!("substr(hex(commitment), 1, {}) = hex(${})",
+                        valid_prefixes[i].as_ref().len() * 2, param_num));
                 }
 
                 let where_clause = conditions.join(" OR ");
@@ -434,16 +446,21 @@ impl DustStorage for Storage {
                     where_clause
                 );
 
-                let rows: Vec<DustUtxosRow> =
-                    sqlx::query_as(&query)
-                        .bind(current_index)
-                        .bind(batch_size)
-                        .fetch_all(&*self.pool)
-                        .await?;
+                // Build query with parameter bindings
+                let mut commitment_query = sqlx::query_as::<_, DustUtxosRow>(&query)
+                    .bind(current_index)
+                    .bind(batch_size);
+
+                // Bind binary prefix parameters using .as_ref() pattern
+                for prefix in &valid_prefixes {
+                    commitment_query = commitment_query.bind(prefix.as_ref());
+                }
+
+                let rows = commitment_query.fetch_all(&*self.pool).await?;
 
                 if rows.is_empty() {
-                    has_more = false;
-                } else {
+                    break;
+                }
                     for row in rows {
                         let spent_id = row.spent_at_transaction_id;
                         current_index = row.id as i64 + 1;
@@ -495,28 +512,22 @@ impl DustStorage for Storage {
                     //         block_height: row.block_height as u32,
                     //     });
                     // }
-
-                }
             }
-        };
-
-        Ok(stream)
+        }
     }
 
     #[trace]
-    async fn get_registration_updates(
+    fn get_registration_updates(
         &self,
         addresses: &[RegistrationAddress],
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send, sqlx::Error>
-    {
+    ) -> impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send {
         let batch_size = batch_size.get() as i64;
 
-        let stream = try_stream! {
+        try_stream! {
             let mut last_id = 0i64;
-            let mut has_more = true;
 
-            while has_more {
+            loop {
                 // Build conditions based on address types
                 let mut conditions = Vec::new();
 
@@ -564,44 +575,29 @@ impl DustStorage for Storage {
                     conditions.len() + 2
                 );
 
-                let mut query_builder = sqlx::query_as::<_, CnightRegistrationsRow>(&query)
+                let mut registration_query = sqlx::query_as::<_, CnightRegistrationsRow>(&query)
                     .bind(last_id);
 
                 for (_, bytes) in &conditions {
-                    query_builder = query_builder.bind(bytes);
+                    registration_query = registration_query.bind(bytes);
                 }
 
-                query_builder = query_builder.bind(batch_size);
+                registration_query = registration_query.bind(batch_size);
 
-                let rows = query_builder
+                let rows = registration_query
                     .fetch_all(&*self.pool)
                     .await?;
 
                 if rows.is_empty() {
-                    has_more = false;
-                } else {
-                    let _update_count = rows.len() as u32;
-                    let mut latest_timestamp = 0i64;
+                    break;
+                }
 
-                    for row in rows {
-                        let row_id = row.id;
-                        let row_registered_at = row.registered_at;
-                        let row_removed_at = row.removed_at;
-
-                        yield RegistrationUpdateEvent::Update(row.into());
-
-                        last_id = row_id as i64;
-                        latest_timestamp = latest_timestamp.max(row_registered_at as i64);
-                        if let Some(removed) = row_removed_at {
-                            latest_timestamp = latest_timestamp.max(removed as i64);
-                        }
-                    }
-
+                for row in rows {
+                    last_id = row.id as i64;
+                    yield RegistrationUpdateEvent::Update(row.into());
                 }
             }
-        };
-
-        Ok(stream)
+        }
     }
 
     #[trace]
@@ -701,9 +697,9 @@ struct DustUtxosRow {
     #[sqlx(try_from = "i64")]
     id: u64,
 
-    commitment: indexer_common::domain::DustCommitment,
+    commitment: DustCommitment,
 
-    nullifier: Option<indexer_common::domain::DustNullifier>,
+    nullifier: Option<DustNullifier>,
 
     #[sqlx(rename = "initial_value", try_from = "U128BeBytes")]
     value: u128,

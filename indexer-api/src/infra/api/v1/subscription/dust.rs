@@ -171,9 +171,7 @@ where
 
         let stream = try_stream! {
             let commitment_stream = storage
-                .get_dust_commitments(&binary_prefixes, start_index, min_prefix_length, BATCH_SIZE)
-                .await
-                .map_err_into_server_error(|| "start DUST commitments stream")?;
+                .get_dust_commitments(&binary_prefixes, start_index, min_prefix_length, BATCH_SIZE);
             let mut commitment_stream = pin!(commitment_stream);
 
             while let Some(event) = commitment_stream
@@ -205,9 +203,7 @@ where
 
         let stream = try_stream! {
             let registration_stream = storage
-                .get_registration_updates(&addresses, BATCH_SIZE)
-                .await
-                .map_err_into_server_error(|| "start registration updates stream")?;
+                .get_registration_updates(&addresses, BATCH_SIZE);
             let mut registration_stream = pin!(registration_stream);
 
             while let Some(event) = registration_stream

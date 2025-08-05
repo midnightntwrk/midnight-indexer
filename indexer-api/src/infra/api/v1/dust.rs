@@ -220,9 +220,11 @@ impl From<domain::dust::DustGenerationEvent> for DustGenerationEvent {
     fn from(event: domain::dust::DustGenerationEvent) -> Self {
         match event {
             domain::dust::DustGenerationEvent::Info(info) => Self::Info(info.into()),
+
             domain::dust::DustGenerationEvent::MerkleUpdate(update) => {
                 Self::MerkleUpdate(update.into())
             }
+
             domain::dust::DustGenerationEvent::Progress(progress) => {
                 Self::Progress(progress.into())
             }
@@ -540,6 +542,7 @@ impl From<domain::dust::RegistrationUpdateEvent> for RegistrationUpdateEvent {
     fn from(event: domain::dust::RegistrationUpdateEvent) -> Self {
         match event {
             domain::dust::RegistrationUpdateEvent::Update(update) => Self::Update(update.into()),
+
             domain::dust::RegistrationUpdateEvent::Progress(progress) => {
                 Self::Progress(progress.into())
             }

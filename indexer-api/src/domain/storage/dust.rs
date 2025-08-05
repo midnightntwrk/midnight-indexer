@@ -62,20 +62,20 @@ pub trait DustStorage: BlockStorage {
     ) -> impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send;
 
     /// Stream DUST commitments filtered by prefix.
-    async fn get_dust_commitments(
+    fn get_dust_commitments(
         &self,
         commitment_prefixes: &[DustPrefix],
         start_index: u64,
         min_prefix_length: u32,
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<DustCommitmentEvent, sqlx::Error>> + Send, sqlx::Error>;
+    ) -> impl Stream<Item = Result<DustCommitmentEvent, sqlx::Error>> + Send;
 
     /// Stream registration updates for multiple addresses.
-    async fn get_registration_updates(
+    fn get_registration_updates(
         &self,
         addresses: &[RegistrationAddress],
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send, sqlx::Error>;
+    ) -> impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send;
 
     /// Get highest generation index for a DUST address.
     async fn get_highest_generation_index_for_dust_address(
@@ -132,24 +132,22 @@ impl DustStorage for NoopStorage {
         stream::empty()
     }
 
-    async fn get_dust_commitments(
+    fn get_dust_commitments(
         &self,
         commitment_prefixes: &[DustPrefix],
         start_index: u64,
         min_prefix_length: u32,
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<DustCommitmentEvent, sqlx::Error>> + Send, sqlx::Error>
-    {
-        Ok(stream::empty())
+    ) -> impl Stream<Item = Result<DustCommitmentEvent, sqlx::Error>> + Send {
+        stream::empty()
     }
 
-    async fn get_registration_updates(
+    fn get_registration_updates(
         &self,
         addresses: &[RegistrationAddress],
         batch_size: NonZeroU32,
-    ) -> Result<impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send, sqlx::Error>
-    {
-        Ok(stream::empty())
+    ) -> impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send {
+        stream::empty()
     }
 
     async fn get_highest_generation_index_for_dust_address(
