@@ -53,16 +53,13 @@ pub trait DustStorage: BlockStorage {
     ) -> impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send;
 
     /// Stream transactions containing DUST nullifiers.
-    async fn get_dust_nullifier_transactions(
+    fn get_dust_nullifier_transactions(
         &self,
         prefixes: &[DustPrefix],
         min_prefix_length: u32,
         from_block: u32,
         batch_size: NonZeroU32,
-    ) -> Result<
-        impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send,
-        sqlx::Error,
-    >;
+    ) -> impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send;
 
     /// Stream DUST commitments filtered by prefix.
     async fn get_dust_commitments(
@@ -125,17 +122,14 @@ impl DustStorage for NoopStorage {
         stream::empty()
     }
 
-    async fn get_dust_nullifier_transactions(
+    fn get_dust_nullifier_transactions(
         &self,
         prefixes: &[DustPrefix],
         min_prefix_length: u32,
         from_block: u32,
         batch_size: NonZeroU32,
-    ) -> Result<
-        impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send,
-        sqlx::Error,
-    > {
-        Ok(stream::empty())
+    ) -> impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send {
+        stream::empty()
     }
 
     async fn get_dust_commitments(

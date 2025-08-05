@@ -15,7 +15,7 @@
 
 use crate::{
     domain,
-    infra::api::{AsBytesExt, HexEncoded},
+    infra::api::{AsBytesExt, HexDecodeError, HexEncoded},
 };
 use async_graphql::{Enum, InputObject, SimpleObject, Union};
 use serde::{Deserialize, Serialize};
@@ -291,6 +291,7 @@ impl From<domain::dust::DustNullifierTransactionEvent> for DustNullifierTransact
             domain::dust::DustNullifierTransactionEvent::Transaction(tx) => {
                 Self::Transaction(tx.into())
             }
+
             domain::dust::DustNullifierTransactionEvent::Progress(progress) => {
                 Self::Progress(progress.into())
             }
@@ -384,8 +385,10 @@ impl From<domain::dust::DustCommitmentProgress> for DustCommitmentProgress {
 pub enum DustCommitmentEvent {
     /// Commitment information.
     Commitment(DustCommitment),
+
     /// Merkle tree update.
     MerkleUpdate(DustCommitmentMerkleUpdate),
+
     /// Progress update.
     Progress(DustCommitmentProgress),
 }
@@ -396,9 +399,11 @@ impl From<domain::dust::DustCommitmentEvent> for DustCommitmentEvent {
             domain::dust::DustCommitmentEvent::Commitment(commitment) => {
                 Self::Commitment(commitment.into())
             }
+
             domain::dust::DustCommitmentEvent::MerkleUpdate(update) => {
                 Self::MerkleUpdate(update.into())
             }
+
             domain::dust::DustCommitmentEvent::Progress(progress) => {
                 Self::Progress(progress.into())
             }
@@ -411,8 +416,10 @@ impl From<domain::dust::DustCommitmentEvent> for DustCommitmentEvent {
 pub enum AddressType {
     /// Night address.
     Night,
+
     /// DUST address.
     Dust,
+
     /// Cardano stake key.
     CardanoStake,
 }
@@ -457,12 +464,14 @@ impl From<domain::dust::RegistrationAddress> for RegistrationAddress {
 }
 
 impl TryFrom<RegistrationAddress> for domain::dust::RegistrationAddress {
-    type Error = anyhow::Error;
+    type Error = HexDecodeError;
 
     fn try_from(address: RegistrationAddress) -> Result<Self, Self::Error> {
+        let value = address.value.hex_decode()?;
+
         Ok(Self {
             address_type: address.address_type.into(),
-            value: address.value.hex_decode()?,
+            value,
         })
     }
 }
@@ -522,6 +531,7 @@ impl From<domain::dust::RegistrationUpdateProgress> for RegistrationUpdateProgre
 pub enum RegistrationUpdateEvent {
     /// Registration update.
     Update(RegistrationUpdate),
+
     /// Progress update.
     Progress(RegistrationUpdateProgress),
 }

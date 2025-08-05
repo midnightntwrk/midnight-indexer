@@ -269,35 +269,38 @@ impl DustStorage for Storage {
     }
 
     #[trace]
-    async fn get_dust_nullifier_transactions(
+    fn get_dust_nullifier_transactions(
         &self,
         prefixes: &[DustPrefix],
         min_prefix_length: u32,
         from_block: u32,
         batch_size: NonZeroU32,
-    ) -> Result<
-        impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send,
-        sqlx::Error,
-    > {
+    ) -> impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send {
         let batch_size = batch_size.get() as i64;
         let min_prefix_length = min_prefix_length as usize;
 
-        let stream = try_stream! {
+        try_stream! {
             let mut current_block = from_block as i64;
-            let mut has_more = true;
 
-            while has_more {
+            loop {
                 // Build prefix conditions for the query
                 let mut conditions = Vec::new();
                 for prefix in prefixes {
                     if prefix.as_ref().len() >= min_prefix_length {
                         let hex_prefix = prefix.hex_encode().to_string();
                         #[cfg(feature = "cloud")]
-                        conditions.push(format!("substring(nullifier::text, 1, {}) = '\\\\x{}'::text",
-                            hex_prefix.len(), hex_prefix));
+                        conditions.push(format!(
+                            "substring(nullifier::text, 1, {}) = '\\\\x{}'::text",
+                            hex_prefix.len(),
+                            hex_prefix
+                        ));
+
                         #[cfg(feature = "standalone")]
-                        conditions.push(format!("substr(hex(nullifier), 1, {}) = '{}'",
-                            hex_prefix.len(), hex_prefix));
+                        conditions.push(format!(
+                            "substr(hex(nullifier), 1, {}) = '{}'",
+                            hex_prefix.len(),
+                            hex_prefix
+                        ));
                     }
                 }
 
@@ -323,18 +326,19 @@ impl DustStorage for Storage {
                     where_clause
                 );
 
-                let rows: Vec<(Vec<u8>, i64, i64)> = sqlx::query_as(&query)
+                let rows = sqlx::query_as::<_, (Vec<u8>, i64, i64)>(&query)
                     .bind(current_block)
                     .bind(batch_size)
                     .fetch_all(&*self.pool)
                     .await?;
 
                 if rows.is_empty() {
-                    has_more = false;
-                } else {
-                    for (tx_hash, _block_id, block_height) in &rows {
-                        // Find matching prefixes for this transaction
-                        let nullifier_query = indoc! {"
+                    break;
+                }
+
+                for (tx_hash, _block_id, block_height) in &rows {
+                    // Find matching prefixes for this transaction
+                    let nullifier_query = indoc! {"
                             SELECT nullifier
                             FROM dust_utxos
                             WHERE spent_at_transaction_id = (
@@ -343,40 +347,39 @@ impl DustStorage for Storage {
                             AND nullifier IS NOT NULL
                         "};
 
-                        let nullifiers = sqlx::query_as::<_, (Vec<u8>,)>(nullifier_query)
-                            .bind(tx_hash)
-                            .fetch_all(&*self.pool)
-                            .await?;
+                    let nullifiers = sqlx::query_as::<_, (Vec<u8>,)>(nullifier_query)
+                        .bind(tx_hash)
+                        .fetch_all(&*self.pool)
+                        .await?;
 
-                        let mut matching_prefixes = Vec::new();
-                        for (nullifier_bytes,) in nullifiers {
-                            let nullifier: indexer_common::domain::DustNullifier = nullifier_bytes.as_slice().try_into().unwrap();
-                            let nullifier_hex = nullifier.hex_encode().to_string();
-                            for prefix in prefixes {
-                                let hex_prefix = prefix.hex_encode().to_string();
-                                if nullifier_hex.starts_with(&hex_prefix) && prefix.as_ref().len() >= min_prefix_length {
-                                    matching_prefixes.push(prefix.clone());
-                                }
+                    let mut matching_prefixes = Vec::new();
+                    for (nullifier_bytes,) in nullifiers {
+                        let nullifier: indexer_common::domain::DustNullifier =
+                            nullifier_bytes.as_slice().try_into().unwrap();
+                        let nullifier_hex = nullifier.hex_encode().to_string();
+                        for prefix in prefixes {
+                            let hex_prefix = prefix.hex_encode().to_string();
+                            if nullifier_hex.starts_with(&hex_prefix)
+                                && prefix.as_ref().len() >= min_prefix_length
+                            {
+                                matching_prefixes.push(prefix.clone());
                             }
                         }
-
-                        yield DustNullifierTransactionEvent::Transaction(DustNullifierTransaction {
-                            transaction_hash: tx_hash.as_slice().try_into().unwrap(),
-                            block_height: *block_height as u32,
-                            matching_nullifier_prefixes: matching_prefixes,
-                        });
                     }
 
-                    // Update current block for next iteration
-                    if let Some((_, _, last_height)) = rows.last() {
-                        current_block = last_height + 1;
-                    }
+                    yield DustNullifierTransactionEvent::Transaction(DustNullifierTransaction {
+                        transaction_hash: tx_hash.as_slice().try_into().unwrap(),
+                        block_height: *block_height as u32,
+                        matching_nullifier_prefixes: matching_prefixes,
+                    });
+                }
 
+                // Update current block for next iteration
+                if let Some((_, _, last_height)) = rows.last() {
+                    current_block = last_height + 1;
                 }
             }
-        };
-
-        Ok(stream)
+        }
     }
 
     #[trace]

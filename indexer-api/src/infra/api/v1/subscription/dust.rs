@@ -24,7 +24,7 @@ use crate::{
 use async_graphql::{Context, Subscription, async_stream::try_stream};
 use drop_stream::DropStreamExt;
 use futures::{Stream, StreamExt, TryStreamExt};
-use indexer_common::domain::DustAddress;
+use indexer_common::domain::{DustAddress, DustPrefix};
 use std::{marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
@@ -108,7 +108,7 @@ where
         // Validate minimum prefix length.
         if min_prefix_length < 8 {
             return Err(ApiError::Client(InnerApiError(
-                "Minimum prefix length must be at least 8".to_string(),
+                "minimum prefix length must be at least 8".to_string(),
                 None,
             )));
         }
@@ -118,20 +118,16 @@ where
         // Convert hex prefixes to binary.
         let binary_prefixes = prefixes
             .into_iter()
-            .map(|p| p.hex_decode::<indexer_common::domain::DustPrefix>())
+            .map(|p| p.hex_decode::<DustPrefix>())
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                ApiError::Client(InnerApiError(format!("Invalid hex prefix: {e}"), None))
-            })?;
+            .map_err_into_client_error(|| "invalid dust prefix")?;
 
         // Default to 0 to start from the genesis block.
         let from_block = from_block.unwrap_or(0);
 
         let stream = try_stream! {
             let nullifier_stream = storage
-                .get_dust_nullifier_transactions(&binary_prefixes, min_prefix_length, from_block, BATCH_SIZE)
-                .await
-                .map_err_into_server_error(|| "start DUST nullifier transactions stream")?;
+                .get_dust_nullifier_transactions(&binary_prefixes, min_prefix_length, from_block, BATCH_SIZE);
             let mut nullifier_stream = pin!(nullifier_stream);
 
             while let Some(event) = nullifier_stream
