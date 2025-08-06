@@ -303,6 +303,10 @@ type Transaction {
 	"""
 	protocolVersion: Int!
 	"""
+	The hex-encoded serialized transaction content.
+	"""
+	raw: HexEncoded!
+	"""
 	The result of applying a transaction to the ledger state.
 	"""
 	transactionResult: TransactionResult!
@@ -314,10 +318,6 @@ type Transaction {
 	The hex-encoded serialized transaction identifiers.
 	"""
 	identifiers: [HexEncoded!]!
-	"""
-	The hex-encoded serialized transaction content.
-	"""
-	raw: HexEncoded!
 	"""
 	The hex-encoded serialized merkle-tree root.
 	"""

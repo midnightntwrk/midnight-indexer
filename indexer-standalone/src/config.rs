@@ -13,6 +13,7 @@
 
 use indexer_common::{domain::NetworkId, infra::pool, telemetry};
 use serde::Deserialize;
+use serde_with::{DisplayFromStr, serde_as};
 use std::{num::NonZeroUsize, time::Duration};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -29,8 +30,10 @@ pub struct Config {
     pub telemetry_config: telemetry::Config,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct ApplicationConfig {
+    #[serde_as(as = "DisplayFromStr")]
     pub network_id: NetworkId,
     pub blocks_buffer: usize,
     pub save_ledger_state_after: u32,
@@ -77,7 +80,6 @@ impl From<ApplicationConfig> for indexer_api::application::Config {
 impl From<ApplicationConfig> for wallet_indexer::application::Config {
     fn from(config: ApplicationConfig) -> Self {
         let ApplicationConfig {
-            network_id,
             active_wallets_repeat_delay,
             active_wallets_ttl,
             transaction_batch_size,
@@ -86,7 +88,6 @@ impl From<ApplicationConfig> for wallet_indexer::application::Config {
         } = config;
 
         Self {
-            network_id,
             active_wallets_repeat_delay,
             active_wallets_ttl,
             transaction_batch_size,

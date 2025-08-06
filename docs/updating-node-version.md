@@ -32,13 +32,18 @@ This creates: `.node/<new-version>/metadata.scale`
 **CRITICAL: Use ripgrep to find ALL occurrences**
 ```bash
 # Find all references to the old version
-rg "0.13.2-rc.2" --type rust --type toml --type yaml
+old=0.13.5-79c649d7 rg --glob '!docs/*' $old
+
+# Bulk replace old version with new version (macOS and fish shell)
+set -l old 0.13.5-79c649d7 && \
+set -l new 0.16.0-f3b64211 && \
+rg -l --glob '!docs/*' $old | xargs sed -i '' "s/$old/$new/g"
 
 # Bulk replace old version with new version (macOS)
-rg -l "0.13.2-rc.2" --type rust --type toml --type yaml | xargs sed -i '' 's/0.13.2-rc.2/0.13.5-79c649d7/g'
+old=0.13.5-79c649d7 new=0.16.0-f3b64211 rg -l --glob '!docs/*' $old | xargs sed -i '' "s/$old/$new/g"
 
 # Bulk replace old version with new version (Linux)
-rg -l "0.13.2-rc.2" --type rust --type toml --type yaml | xargs sed -i 's/0.13.2-rc.2/0.13.5-79c649d7/g'
+old=0.13.5-79c649d7 new=0.16.0-f3b64211 rg -l --glob '!docs/*' $old | xargs sed -i "s/$old/$new/g"
 ```
 
 Files that MUST be updated:

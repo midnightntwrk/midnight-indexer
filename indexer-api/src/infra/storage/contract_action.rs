@@ -194,13 +194,12 @@ impl ContractActionStorage for Storage {
                 chain_state,
                 contract_actions.transaction_id
             FROM contract_actions
-            INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
+            INNER JOIN regular_transactions ON regular_transactions.id = contract_actions.transaction_id
             WHERE address = $1
-            AND $2 = ANY(transactions.identifiers)
+            AND $2 = ANY(regular_transactions.identifiers)
             ORDER BY contract_actions.id DESC
             LIMIT 1
         "};
-
         #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
@@ -211,8 +210,8 @@ impl ContractActionStorage for Storage {
                 chain_state,
                 contract_actions.transaction_id
             FROM contract_actions
-            INNER JOIN transactions ON transactions.id = contract_actions.transaction_id
-            INNER JOIN transaction_identifiers ON transactions.id = transaction_identifiers.transaction_id
+            INNER JOIN regular_transactions ON regular_transactions.id = contract_actions.transaction_id
+            INNER JOIN transaction_identifiers ON regular_transactions.id = transaction_identifiers.transaction_id
             WHERE address = $1
             AND transaction_identifiers.identifier = $2
             ORDER BY contract_actions.id DESC
