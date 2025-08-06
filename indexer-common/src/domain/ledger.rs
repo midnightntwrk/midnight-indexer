@@ -21,15 +21,12 @@ pub use ledger_state::*;
 pub use secret_key::*;
 pub use transaction::*;
 
-use crate::{
-    domain::{NetworkId, ProtocolVersion},
-    error::BoxError,
-};
+use crate::{domain::ProtocolVersion, error::BoxError};
 use fastrace::trace;
 use midnight_base_crypto::signatures::Signature as SignatureV5;
 use midnight_ledger::structure::{ProofMarker as ProofMarkerV5, Transaction as TransactionV5};
 use midnight_serialize::{
-    NetworkId as NetworkIdV5, Serializable as SerializableV5, serialize as serialize_v5,
+    Serializable as SerializableV5, Tagged as TaggedV6, tagged_serialize as tagged_serialize_v5,
 };
 use midnight_storage::DefaultDB as DefaultDBV5;
 use midnight_transient_crypto::{
@@ -67,29 +64,28 @@ where
     Self: SerializableV5,
 {
     /// Serialize this `Serializable` implementation.
-    #[trace(properties = { "network_id": "{network_id}" })]
-    fn serialize(&self, network_id: NetworkId) -> Result<Vec<u8>, io::Error> {
-        let mut bytes = Vec::with_capacity(Self::serialized_size(self) + 1);
-        serialize_v5(self, &mut bytes, network_id.into_ledger_v5())?;
+    #[trace]
+    fn serialize_v6(&self) -> Result<Vec<u8>, io::Error> {
+        let mut bytes = Vec::with_capacity(self.serialized_size() + 32);
+        SerializableV5::serialize(self, &mut bytes)?;
         Ok(bytes)
     }
 }
 
 impl<T> SerializableV5Ext for T where T: SerializableV5 {}
 
-/// Extension methods for network ID.
-trait NetworkIdExt {
-    /// Convert this network ID into a ledger v5 one.
-    fn into_ledger_v5(self) -> NetworkIdV5;
-}
-
-impl NetworkIdExt for NetworkId {
-    fn into_ledger_v5(self) -> NetworkIdV5 {
-        match self {
-            NetworkId::Undeployed => NetworkIdV5::Undeployed,
-            NetworkId::DevNet => NetworkIdV5::DevNet,
-            NetworkId::TestNet => NetworkIdV5::TestNet,
-            NetworkId::MainNet => NetworkIdV5::MainNet,
-        }
+/// Extension methods for `Serializable + Tagged` implementations.
+pub trait TaggedSerializableV5Ext
+where
+    Self: SerializableV5 + TaggedV6 + Sized,
+{
+    /// Serialize this `Serializable + Tagged` implementation.
+    #[trace]
+    fn tagged_serialize_v6(&self) -> Result<Vec<u8>, io::Error> {
+        let mut bytes = Vec::with_capacity(self.serialized_size() + 32);
+        tagged_serialize_v5(self, &mut bytes)?;
+        Ok(bytes)
     }
 }
+
+impl<T> TaggedSerializableV5Ext for T where T: SerializableV5 + TaggedV6 {}

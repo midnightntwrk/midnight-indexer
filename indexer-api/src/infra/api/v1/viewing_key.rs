@@ -14,7 +14,9 @@
 use async_graphql::scalar;
 use derive_more::{Display, derive::From};
 use fastrace::trace;
-use indexer_common::domain::{NetworkId, ProtocolVersion, UnknownNetworkIdError, ledger};
+use indexer_common::domain::{
+    AddressType, DecodeAddressError, NetworkId, ProtocolVersion, decode_address, ledger,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -42,38 +44,18 @@ impl ViewingKey {
         network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Result<indexer_common::domain::ViewingKey, ViewingKeyFormatError> {
-        let (hrp, bytes) = bech32::decode(&self.0).map_err(ViewingKeyFormatError::Decode)?;
-        let hrp = hrp.to_lowercase();
+        let bytes = decode_address(&self.0, AddressType::SecretEncryptionKey, network_id)?;
+        let secret_key = ledger::SecretKey::deserialize(bytes, protocol_version)?;
+        let viewing_key = secret_key.expose_secret().into();
 
-        let Some(n) = hrp.strip_prefix("mn_shield-esk") else {
-            return Err(ViewingKeyFormatError::InvalidHrp(hrp));
-        };
-        let n = n.strip_prefix("_").unwrap_or(n).try_into()?;
-        if n != network_id {
-            return Err(ViewingKeyFormatError::UnexpectedNetworkId(n, network_id));
-        }
-
-        let secret_key = ledger::SecretKey::deserialize(bytes, protocol_version)?
-            .expose_secret()
-            .into();
-
-        Ok(secret_key)
+        Ok(viewing_key)
     }
 }
 
 #[derive(Debug, Error)]
 pub enum ViewingKeyFormatError {
     #[error("cannot bech32m-decode viewing key")]
-    Decode(#[from] bech32::DecodeError),
-
-    #[error("invalid bech32m HRP {0}, expected 'mn_shield-esk' prefix")]
-    InvalidHrp(String),
-
-    #[error(transparent)]
-    UnknownNetworkId(#[from] UnknownNetworkIdError),
-
-    #[error("network ID mismatch: got {0}, expected {1}")]
-    UnexpectedNetworkId(NetworkId, NetworkId),
+    Decode(#[from] DecodeAddressError),
 
     #[error(transparent)]
     Ledger(#[from] ledger::Error),

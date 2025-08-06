@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::domain::{
-    ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion, ViewingKey,
-    ledger::{Error, LedgerTransactionV5, NetworkIdExt, SerializableV5Ext},
+    ByteArray, ByteVec, PROTOCOL_VERSION_000_013_000, ProtocolVersion, ViewingKey,
+    ledger::{Error, LedgerTransactionV5, SerializableV5Ext, TaggedSerializableV5Ext},
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
@@ -24,7 +24,7 @@ use midnight_ledger::structure::{
     ContractAction as ContractActionV5, StandardTransaction as StandardTransactionV5,
     Transaction as TransactionV5,
 };
-use midnight_serialize::deserialize as deserialize_v5;
+use midnight_serialize::tagged_deserialize as tagged_deserialize_v6;
 use midnight_storage::DefaultDB as DefaultDBV5;
 use midnight_transient_crypto::{encryption::SecretKey as SecretKeyV5, proofs::Proof as ProofV5};
 use midnight_zswap::Offer as OfferV5;
@@ -43,20 +43,15 @@ pub enum Transaction {
 }
 
 impl Transaction {
-    /// Deserialize the given raw transaction using the given protocol version and network ID.
-    #[trace(properties = {
-        "network_id": "{network_id}",
-        "protocol_version": "{protocol_version}"
-    })]
+    /// Deserialize the given serialized transaction using the given protocol version.
+    #[trace(properties = { "protocol_version": "{protocol_version}" })]
     pub fn deserialize(
         raw_transaction: impl AsRef<[u8]>,
-        network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-            let transaction =
-                deserialize_v5(&mut raw_transaction.as_ref(), network_id.into_ledger_v5())
-                    .map_err(|error| Error::Io("cannot deserialize LedgerTransactionV5", error))?;
+            let transaction = tagged_deserialize_v6(&mut raw_transaction.as_ref())
+                .map_err(|error| Error::Io("cannot deserialize LedgerTransactionV5", error))?;
             Ok(Self::V5(transaction))
         } else {
             Err(Error::InvalidProtocolVersion(protocol_version))
@@ -71,15 +66,12 @@ impl Transaction {
     }
 
     /// Get the identifiers.
-    pub fn identifiers(
-        &self,
-        network_id: NetworkId,
-    ) -> Result<Vec<SerializedTransactionIdentifier>, Error> {
+    pub fn identifiers(&self) -> Result<Vec<SerializedTransactionIdentifier>, Error> {
         match self {
             Transaction::V5(transaction) => transaction
                 .identifiers()
                 .map(|identifier| {
-                    let identifier = identifier.serialize(network_id).map_err(|error| {
+                    let identifier = identifier.tagged_serialize_v6().map_err(|error| {
                         Error::Io("cannot serialize TransactionIdentifierV5", error)
                     })?;
                     Ok(identifier.into())
@@ -89,11 +81,10 @@ impl Transaction {
     }
 
     /// Get the contract actions; this involves node calls.
-    #[trace(properties = { "network_id": "{network_id}" })]
+    #[trace]
     pub async fn contract_actions<E, F>(
         &self,
         get_contract_state: impl Fn(SerializedContractAddress) -> F,
-        network_id: NetworkId,
     ) -> Result<Vec<ContractAction>, Error>
     where
         E: StdError + 'static + Send + Sync,
@@ -106,8 +97,7 @@ impl Transaction {
                         .then(|(_, contract_action)| async {
                             match contract_action {
                                 ContractActionV5::Deploy(deploy) => {
-                                    let address =
-                                        serialize_contract_address(deploy.address(), network_id)?;
+                                    let address = serialize_contract_address(deploy.address())?;
                                     let state = get_contract_state(address.clone())
                                         .await
                                         .map_err(|error| Error::GetContractState(error.into()))?;
@@ -120,14 +110,13 @@ impl Transaction {
                                 }
 
                                 ContractActionV5::Call(call) => {
-                                    let address =
-                                        serialize_contract_address(call.address, network_id)?;
+                                    let address = serialize_contract_address(call.address)?;
                                     let state = get_contract_state(address.clone())
                                         .await
                                         .map_err(|error| Error::GetContractState(error.into()))?;
                                     let entry_point = call
                                         .entry_point
-                                        .serialize(network_id)
+                                        .serialize_v6()
                                         .map_err(|error| {
                                             Error::Io("cannot serialize EntryPointBufV5", error)
                                         })?
@@ -141,8 +130,7 @@ impl Transaction {
                                 }
 
                                 ContractActionV5::Maintain(update) => {
-                                    let address =
-                                        serialize_contract_address(update.address, network_id)?;
+                                    let address = serialize_contract_address(update.address)?;
                                     let state = get_contract_state(address.clone())
                                         .await
                                         .map_err(|error| Error::GetContractState(error.into()))?;
@@ -161,7 +149,7 @@ impl Transaction {
                     Ok(contract_actions)
                 }
 
-                TransactionV5::ClaimMint(_) => Ok(vec![]),
+                TransactionV5::ClaimRewards(_) => Ok(vec![]),
             },
         }
     }
@@ -192,7 +180,7 @@ impl Transaction {
                     }
                 }
 
-                LedgerTransactionV5::ClaimMint(_) => TransactionStructure {
+                LedgerTransactionV5::ClaimRewards(_) => TransactionStructure {
                     segment_count: 1,
                     estimated_input_count: 1,
                     estimated_output_count: 1,
@@ -227,7 +215,7 @@ impl Transaction {
                     can_decrypt_guaranteed_coins && can_decrypt_fallible_coins
                 }
 
-                TransactionV5::ClaimMint(_) => false,
+                TransactionV5::ClaimRewards(_) => false,
             },
         }
     }
@@ -263,10 +251,9 @@ pub struct TransactionStructure {
 
 fn serialize_contract_address(
     address: ContractAddressV5,
-    network_id: NetworkId,
 ) -> Result<SerializedContractAddress, Error> {
     let address = address
-        .serialize(network_id)
+        .tagged_serialize_v6()
         .map_err(|error| Error::Io("cannot serialize ContractAddressV5", error))?;
     Ok(address.into())
 }
@@ -284,7 +271,7 @@ fn can_decrypt_v5(key: &SecretKeyV5, offer: &OfferV5<ProofV5, DefaultDBV5>) -> b
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{NetworkId, PROTOCOL_VERSION_000_013_000, ViewingKey, ledger::Transaction};
+    use crate::domain::{PROTOCOL_VERSION_000_013_000, ViewingKey, ledger::Transaction};
     use bip32::{DerivationPath, XPrv};
     use midnight_zswap::keys::{SecretKeys, Seed};
     use std::{fs, str::FromStr};
@@ -295,12 +282,8 @@ mod tests {
         let raw_transaction =
             fs::read(format!("{}/tests/tx_1_2_2.raw", env!("CARGO_MANIFEST_DIR")))
                 .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(
-            raw_transaction,
-            NetworkId::Undeployed,
-            PROTOCOL_VERSION_000_013_000,
-        )
-        .expect("transaction can be deserialized");
+        let transaction = Transaction::deserialize(raw_transaction, PROTOCOL_VERSION_000_013_000)
+            .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));
         assert!(transaction.relevant(viewing_key(2)));
@@ -309,12 +292,8 @@ mod tests {
         let raw_transaction =
             fs::read(format!("{}/tests/tx_1_2_3.raw", env!("CARGO_MANIFEST_DIR")))
                 .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(
-            raw_transaction,
-            NetworkId::Undeployed,
-            PROTOCOL_VERSION_000_013_000,
-        )
-        .expect("transaction can be deserialized");
+        let transaction = Transaction::deserialize(raw_transaction, PROTOCOL_VERSION_000_013_000)
+            .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));
         assert!(transaction.relevant(viewing_key(2)));

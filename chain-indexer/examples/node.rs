@@ -18,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 
-    let blocks = node.finalized_blocks(None, NetworkId::Undeployed).take(60);
+    let blocks = node.finalized_blocks(None).take(60);
     let mut blocks = pin!(blocks);
     while let Some(block) = blocks.try_next().await.context("get next block")? {
         println!("## BLOCK: height={}, \thash={}", block.height, block.hash);

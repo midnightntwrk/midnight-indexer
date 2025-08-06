@@ -15,7 +15,7 @@ use crate::domain::{
     ByteArray, PROTOCOL_VERSION_000_013_000, ProtocolVersion, VIEWING_KEY_LEN, ledger::Error,
 };
 use fastrace::trace;
-use midnight_serialize::Deserializable;
+use midnight_serialize::tagged_deserialize as tagged_deserialize_v6;
 use midnight_transient_crypto::encryption::SecretKey as SecretKeyV5;
 
 /// Facade for `SecretKey` from `midnight_ledger` across supported (protocol) versions.
@@ -25,14 +25,14 @@ pub enum SecretKey {
 }
 
 impl SecretKey {
-    /// Deserialize the given raw secret key using the given protocol version and network ID.
+    /// Deserialize the given serialized secret key using the given protocol version.
     #[trace(properties = { "protocol_version": "{protocol_version}" })]
     pub fn deserialize(
         secret_key: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-            let secret_key = SecretKeyV5::deserialize(&mut secret_key.as_ref(), 0)
+            let secret_key = tagged_deserialize_v6(&mut secret_key.as_ref())
                 .map_err(|error| Error::Io("cannot deserialize SecretKeyV5", error))?;
             Ok(Self::V5(secret_key))
         } else {
