@@ -69,13 +69,22 @@ where
     _s: PhantomData<S>,
 }
 
-// Needed to derive `Interface` for `ContractAction`. Weird!
+// Required by async-graphql's Interface derive macro for `ContractAction`.
 impl<S> From<Result<Transaction<S>, ApiError>> for Transaction<S>
 where
     S: Storage,
 {
-    fn from(_value: Result<Transaction<S>, ApiError>) -> Self {
-        unimplemented!()
+    fn from(value: Result<Transaction<S>, ApiError>) -> Self {
+        match value {
+            Ok(transaction) => transaction,
+            Err(error) => {
+                // This panic indicates a bug in async-graphql's interface resolution
+                // or a missing implementation in one of the concrete types.
+                panic!(
+                    "Unexpected error resolving transaction for ContractAction interface: {error}"
+                )
+            }
+        }
     }
 }
 
