@@ -33,7 +33,7 @@ use futures::{
 use indexer_common::domain::{
     LedgerStateStorage, NetworkId, SessionId, Subscriber, WalletIndexed, ledger::TransactionResult,
 };
-use log::{debug, warn};
+use log::{debug, info, warn};
 use std::{
     future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, sync::Arc, time::Duration,
 };
@@ -263,10 +263,21 @@ where
 
         let transactions = storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
         let mut transactions = pin!(transactions);
+
+        // PM-18678 INVESTIGATION: Track transaction count
+        let mut transaction_count = 0;
+        let query_start = std::time::Instant::now();
+
         while let Some(transaction) = get_next_transaction(&mut transactions)
             .await
             .map_err_into_server_error(|| "get next transaction")?
         {
+            transaction_count += 1;
+
+            // PM-18678: Log ViewingUpdate delivery (before move)
+            let transaction_id = transaction.id;
+            let transaction_hash = transaction.hash;
+
             let viewing_update = make_viewing_update(
                 index,
                 transaction,
@@ -276,9 +287,40 @@ where
             )
             .await?;
 
+            info!(
+                "PM-18678: Sending ViewingUpdate to wallet - session_id: {session_id}, index: {index}, transaction_id: {transaction_id}, transaction_hash: {transaction_hash}"
+            );
+
             index = viewing_update.index;
 
             yield viewing_update;
+        }
+
+        // PM-18678 INVESTIGATION: Detect empty results (THE ISSUE™)
+        let query_duration = query_start.elapsed();
+        if transaction_count == 0 {
+            warn!(
+                session_id:%,
+                index,
+                query_duration_ms = query_duration.as_millis();
+                "PM-18678 INVESTIGATION: get_relevant_transactions returned 0 rows for active wallet"
+            );
+
+            // Log which replica this is
+            warn!(
+                "PM-18678 REPLICA INFO: hostname={}, port={}, pid={}",
+                std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
+                std::env::var("APP__INFRA__API__PORT").unwrap_or_else(|_| "8088".to_string()),
+                std::process::id()
+            );
+        } else {
+            debug!(
+                session_id:%,
+                index,
+                transaction_count,
+                query_duration_ms = query_duration.as_millis();
+                "PM-18678: get_relevant_transactions completed with results"
+            );
         }
 
         // Stream live transactions.
@@ -295,10 +337,21 @@ where
             let transactions =
                 storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
             let mut transactions = pin!(transactions);
+
+            // PM-18678 INVESTIGATION: Track live transaction count
+            let mut live_transaction_count = 0;
+            let live_query_start = std::time::Instant::now();
+
             while let Some(transaction) =  get_next_transaction(&mut transactions)
                 .await
                 .map_err_into_server_error(|| "get next transaction")?
             {
+                live_transaction_count += 1;
+
+                // PM-18678: Log live ViewingUpdate delivery (before move)
+                let transaction_id = transaction.id;
+                let transaction_hash = transaction.hash;
+
                 let viewing_update = make_viewing_update(
                     index,
                     transaction,
@@ -308,9 +361,32 @@ where
                 )
                 .await?;
 
+                info!(
+                    "PM-18678: Sending live ViewingUpdate to wallet - session_id: {session_id}, index: {index}, transaction_id: {transaction_id}, transaction_hash: {transaction_hash}"
+                );
+
                 index = viewing_update.index;
 
                 yield viewing_update;
+            }
+
+            // PM-18678: Check if live query returned empty
+            let live_query_duration = live_query_start.elapsed();
+            if live_transaction_count == 0 {
+                debug!(
+                    session_id:%,
+                    index,
+                    query_duration_ms = live_query_duration.as_millis();
+                    "PM-18678: No new live transactions (expected behavior)"
+                );
+            } else {
+                debug!(
+                    session_id:%,
+                    index,
+                    live_transaction_count,
+                    query_duration_ms = live_query_duration.as_millis();
+                    "PM-18678: Live transactions streamed successfully"
+                );
             }
         }
 
@@ -394,6 +470,15 @@ where
     let highest_index = highest_index.unwrap_or_default();
     let highest_relevant_index = highest_relevant_index.unwrap_or_default();
     let highest_relevant_wallet_index = highest_relevant_wallet_index.unwrap_or_default();
+
+    // PM-18678: Log progress update
+    debug!(
+        session_id:%,
+        highest_index,
+        highest_relevant_index,
+        highest_relevant_wallet_index;
+        "PM-18678: Sending ProgressUpdate"
+    );
 
     Ok(ShieldedTransactionsProgress {
         highest_index,

@@ -26,6 +26,8 @@ use indexer_common::{
     stream::flatten_chunks,
 };
 use indoc::indoc;
+#[cfg(feature = "cloud")]
+use log::{error, info};
 use std::num::NonZeroU32;
 
 impl TransactionStorage for Storage {
@@ -390,6 +392,15 @@ impl Storage {
         index: u64,
         batch_size: NonZeroU32,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
+        // PM-18678 INVESTIGATION: Generate unique query ID
+        #[cfg(feature = "cloud")]
+        let query_id = uuid::Uuid::new_v4();
+
+        #[cfg(feature = "cloud")]
+        info!(
+            "PM-18678: Starting get_relevant_transactions query - query_id: {query_id:?}, session_id: {session_id}, index: {index}, batch_size: {batch_size}"
+        );
+
         #[cfg(feature = "cloud")]
         let query = indoc! {"
             SELECT
@@ -451,6 +462,27 @@ impl Storage {
         for transaction in transactions.iter_mut() {
             transaction.identifiers =
                 get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+        }
+
+        // PM-18678 INVESTIGATION: Log query results
+        #[cfg(feature = "cloud")]
+        {
+            if transactions.is_empty() {
+                // THIS IS THE ISSUE! Log everything we can
+                let pool_size = self.pool.size();
+                error!(
+                    "PM-18678 THE ISSUE DETECTED: Query returned 0 rows when it shouldn't! query_id: {query_id:?}, session_id: {session_id}, index: {index}, batch_size: {batch_size}, pool_size: {pool_size}"
+                );
+
+                // Try to query what the database actually has
+                self.debug_query_state(session_id, index).await;
+            } else {
+                let row_count = transactions.len();
+                let pool_size = self.pool.size();
+                info!(
+                    "PM-18678: Query completed successfully - query_id: {query_id:?}, session_id: {session_id}, row_count: {row_count}, pool_size: {pool_size}"
+                );
+            }
         }
 
         Ok(transactions)
@@ -533,6 +565,79 @@ impl Storage {
         }
 
         Ok(transactions)
+    }
+
+    // PM-18678 INVESTIGATION: Debug helper to understand database state
+    #[cfg(feature = "cloud")]
+    async fn debug_query_state(&self, session_id: SessionId, index: u64) {
+        use sqlx::Row;
+
+        // Check if wallet exists
+        let check_wallet = sqlx::query(
+            "SELECT id, session_id, last_indexed_transaction_id FROM wallets WHERE session_id = $1",
+        )
+        .bind(session_id.as_ref())
+        .fetch_optional(&*self.pool)
+        .await;
+
+        match check_wallet {
+            Ok(Some(row)) => {
+                // Get wallet_id as UUID and convert to string for logging
+                let wallet_id: uuid::Uuid = row.get("id");
+                let last_indexed: Option<i64> = row.get("last_indexed_transaction_id");
+                error!(
+                    "PM-18678 DEBUG: Wallet found - id={wallet_id}, last_indexed_transaction_id={last_indexed:?}"
+                );
+            }
+            Ok(None) => {
+                error!("PM-18678 DEBUG: No wallet found for session_id={session_id}");
+            }
+            Err(e) => {
+                error!("PM-18678 DEBUG: Error checking wallet: {e}");
+            }
+        }
+
+        // Check relevant transactions count
+        let check_transactions = sqlx::query(
+            "SELECT COUNT(*) as count FROM relevant_transactions rt 
+             JOIN wallets w ON w.id = rt.wallet_id 
+             WHERE w.session_id = $1",
+        )
+        .bind(session_id.as_ref())
+        .fetch_optional(&*self.pool)
+        .await;
+
+        match check_transactions {
+            Ok(Some(row)) => {
+                let count: i64 = row.get("count");
+                error!("PM-18678 DEBUG: Total relevant_transactions for wallet: {count}");
+            }
+            _ => {
+                error!("PM-18678 DEBUG: Could not count relevant_transactions");
+            }
+        }
+
+        // Check transactions at the requested index
+        let check_at_index = sqlx::query(
+            "SELECT COUNT(*) as count FROM transactions t
+             JOIN relevant_transactions rt ON t.id = rt.transaction_id
+             JOIN wallets w ON w.id = rt.wallet_id
+             WHERE w.session_id = $1 AND t.start_index >= $2",
+        )
+        .bind(session_id.as_ref())
+        .bind(index as i64)
+        .fetch_optional(&*self.pool)
+        .await;
+
+        match check_at_index {
+            Ok(Some(row)) => {
+                let count: i64 = row.get("count");
+                error!("PM-18678 DEBUG: Transactions at index >= {index}: {count}");
+            }
+            _ => {
+                error!("PM-18678 DEBUG: Could not check transactions at index");
+            }
+        }
     }
 }
 
