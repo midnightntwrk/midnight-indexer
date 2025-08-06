@@ -20,10 +20,10 @@ use crate::{
 };
 use async_stream::try_stream;
 use fastrace::trace;
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{
-        BlockAuthor, BlockHash, NetworkId, ProtocolVersion, ScaleDecodeProtocolVersionError,
+        BlockAuthor, BlockHash, ProtocolVersion, ScaleDecodeProtocolVersionError,
         ledger::{self, TransactionHash, UnshieldedUtxo, ZswapStateRoot},
     },
     error::BoxError,
@@ -196,7 +196,6 @@ impl SubxtNode {
         &mut self,
         block: SubxtBlock,
         authorities: &mut Option<Vec<[u8; 32]>>,
-        network_id: NetworkId,
     ) -> Result<Block, SubxtNodeError> {
         let hash = block.hash().0.into();
         let height = block.number();
@@ -232,33 +231,30 @@ impl SubxtNode {
 
         let zswap_state_root =
             runtimes::get_zswap_state_root(online_client, hash, protocol_version).await?;
-        let zswap_state_root =
-            ZswapStateRoot::deserialize(zswap_state_root, protocol_version, network_id)?;
+        let zswap_state_root = ZswapStateRoot::deserialize(zswap_state_root, protocol_version)?;
 
         let extrinsics = block.extrinsics().await.map_err(Box::new)?;
         let events = block.events().await.map_err(Box::new)?;
         let BlockDetails {
             timestamp,
-            raw_transactions,
+            transactions,
             created_unshielded_utxos_by_hash,
             spent_unshielded_utxos_by_hash,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
 
-        let mut transactions = Vec::with_capacity(raw_transactions.len());
-        for raw_transaction in raw_transactions.into_iter() {
-            let transaction = make_transaction(
-                raw_transaction,
-                hash,
-                protocol_version,
-                &created_unshielded_utxos_by_hash,
-                &spent_unshielded_utxos_by_hash,
-                online_client,
-                network_id,
-            )
+        let transactions = stream::iter(transactions)
+            .then(|t| {
+                make_transaction(
+                    t,
+                    hash,
+                    protocol_version,
+                    &created_unshielded_utxos_by_hash,
+                    &spent_unshielded_utxos_by_hash,
+                    online_client,
+                )
+            })
+            .try_collect::<Vec<_>>()
             .await?;
-
-            transactions.push(transaction);
-        }
 
         let block = Block {
             hash,
@@ -305,7 +301,6 @@ impl Node for SubxtNode {
     fn finalized_blocks<'a>(
         &'a mut self,
         after: Option<BlockInfo>,
-        network_id: NetworkId,
     ) -> impl Stream<Item = Result<Block, Self::Error>> + use<'a> {
         let (after_hash, after_height) = after
             .map(|BlockInfo { hash, height }| (hash, height))
@@ -387,12 +382,12 @@ impl Node for SubxtNode {
                         parent_hash:% = block.header().parent_hash;
                         "block fetched"
                     );
-                    yield self.make_block(block, &mut authorities, network_id).await?;
+                    yield self.make_block(block, &mut authorities).await?;
                 }
 
                 // Then we yield the first finalized block.
                 yield self
-                    .make_block(first_block, &mut authorities, network_id)
+                    .make_block(first_block, &mut authorities)
                     .await?;
             }
 
@@ -408,7 +403,7 @@ impl Node for SubxtNode {
                     "block received"
                 );
 
-                yield self.make_block(block, &mut authorities, network_id).await?;
+                yield self.make_block(block, &mut authorities).await?;
             }
         }
     }
@@ -514,31 +509,25 @@ where
 }
 
 async fn make_transaction(
-    raw_transaction: Vec<u8>,
+    transaction: Vec<u8>,
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
     created_unshielded_utxos_by_hash: &HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
     spent_unshielded_utxo_by_hash: &HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
     online_client: &OnlineClient<SubstrateConfig>,
-    network_id: NetworkId,
 ) -> Result<Transaction, SubxtNodeError> {
-    let raw_transaction =
-        const_hex::decode(raw_transaction).map_err(SubxtNodeError::HexDecodeTransaction)?;
-    let ledger_transaction =
-        ledger::Transaction::deserialize(&raw_transaction, network_id, protocol_version)?;
+    let transaction =
+        const_hex::decode(transaction).map_err(SubxtNodeError::HexDecodeTransaction)?;
+    let ledger_transaction = ledger::Transaction::deserialize(&transaction, protocol_version)?;
 
     let hash = ledger_transaction.hash();
 
-    let identifiers = ledger_transaction.identifiers(network_id)?;
+    let identifiers = ledger_transaction.identifiers()?;
 
     let contract_actions = ledger_transaction
-        .contract_actions(
-            |address| async move {
-                runtimes::get_contract_state(online_client, address, block_hash, protocol_version)
-                    .await
-            },
-            network_id,
-        )
+        .contract_actions(|address| async move {
+            runtimes::get_contract_state(online_client, address, block_hash, protocol_version).await
+        })
         .await?
         .into_iter()
         .map(Into::into)
@@ -555,7 +544,7 @@ async fn make_transaction(
 
     let fees = match runtimes::get_transaction_cost(
         online_client,
-        raw_transaction.as_ref(),
+        &transaction,
         block_hash,
         protocol_version,
     )
@@ -568,10 +557,10 @@ async fn make_transaction(
 
         Err(error) => {
             warn!(
-                error:%, block_hash:%, transaction_size = raw_transaction.len();
+                error:%, block_hash:%, transaction_size = transaction.len();
                 "cannot get runtime API fees, using fallback"
             );
-            TransactionFees::from_ledger_transaction(&ledger_transaction, raw_transaction.len())
+            TransactionFees::from_ledger_transaction(&ledger_transaction, transaction.len())
         }
     };
 
@@ -582,7 +571,7 @@ async fn make_transaction(
         protocol_version,
         identifiers,
         contract_actions,
-        raw: raw_transaction.into(),
+        raw: transaction.into(),
         merkle_tree_root: Default::default(),
         start_index: Default::default(),
         end_index: Default::default(),
@@ -605,7 +594,7 @@ mod tests {
     use fs_extra::dir::{CopyOptions, copy};
     use futures::{StreamExt, TryStreamExt};
     use indexer_common::{
-        domain::{NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion, ledger},
+        domain::{PROTOCOL_VERSION_000_014_000, ProtocolVersion, ledger},
         error::BoxError,
     };
     use std::{env, path::Path, pin::pin, time::Duration};
@@ -634,7 +623,7 @@ mod tests {
     #[ignore = "already covered in e2e tests"]
     async fn test_finalized_blocks_0_13() -> Result<(), BoxError> {
         test_finalized_blocks(
-            PROTOCOL_VERSION_000_013_000,
+            PROTOCOL_VERSION_000_014_000,
             "0.13.2-rc.2",
             "023e5fad5b86f1d95258f046edecfaa1c8d5c45097c1c07fcb6c5a518d136285",
             8,
@@ -684,7 +673,7 @@ mod tests {
         // Assert that the first block is genesis if we start fresh!
 
         let mut subxt_node_2 = subxt_node.clone();
-        let blocks = subxt_node_2.finalized_blocks(None, NetworkId::Undeployed);
+        let blocks = subxt_node_2.finalized_blocks(None);
         let mut blocks = pin!(blocks);
         let genesis = blocks.try_next().await?;
         // The genesis block has a "zero" parent hash, i.e. `[0; 32]`.
@@ -696,13 +685,10 @@ mod tests {
             .expect("block hash can be hex-decoded")
             .try_into()
             .expect("block hash has 32 bytes");
-        let blocks = subxt_node.finalized_blocks(
-            Some(BlockInfo {
-                hash,
-                height: before_first_tx_height,
-            }),
-            NetworkId::Undeployed,
-        );
+        let blocks = subxt_node.finalized_blocks(Some(BlockInfo {
+            hash,
+            height: before_first_tx_height,
+        }));
 
         let blocks = blocks
             .take((last_tx_height - before_first_tx_height) as usize)
@@ -757,8 +743,7 @@ mod tests {
         );
         let ledger_transaction = ledger::Transaction::deserialize(
             transactions[0].raw.clone(),
-            NetworkId::Undeployed,
-            PROTOCOL_VERSION_000_013_000,
+            PROTOCOL_VERSION_000_014_000,
         );
         assert!(ledger_transaction.is_ok());
 

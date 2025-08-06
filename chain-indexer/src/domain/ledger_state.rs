@@ -22,7 +22,7 @@ use std::ops::DerefMut;
 use thiserror::Error;
 
 /// New type for ledger state from indexer_common.
-#[derive(Debug, Clone, Default, From, Deref)]
+#[derive(Debug, Clone, From, Deref)]
 pub struct LedgerState(pub indexer_common::domain::ledger::LedgerState);
 
 impl DerefMut for LedgerState {
@@ -32,20 +32,21 @@ impl DerefMut for LedgerState {
 }
 
 impl LedgerState {
-    /// Apply the given raw transactions to this ledger state.
-    #[trace(properties = {
-        "block_parent_hash": "{block_parent_hash}",
-        "network_id": "{network_id}"
-    })]
+    #[allow(missing_docs)]
+    pub fn new(network_id: NetworkId) -> Self {
+        Self(indexer_common::domain::ledger::LedgerState::new(network_id))
+    }
+
+    /// Apply the given serialized transactions to this ledger state.
+    #[trace(properties = { "block_parent_hash": "{block_parent_hash}" })]
     pub fn apply_raw_transactions<'a>(
         &mut self,
         transactions: impl Iterator<Item = &'a SerializedTransaction>,
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
-        network_id: NetworkId,
     ) -> Result<(), Error> {
         for transaction in transactions {
-            self.apply_transaction(transaction, block_parent_hash, block_timestamp, network_id)?;
+            self.apply_transaction(transaction, block_parent_hash, block_timestamp)?;
         }
 
         self.post_apply_transactions(block_timestamp);
@@ -55,24 +56,15 @@ impl LedgerState {
 
     /// Apply the given transactions to this ledger state and also update relevant transaction data
     /// like start_index and end_index.
-    #[trace(properties = {
-        "block_parent_hash": "{block_parent_hash}",
-        "network_id": "{network_id}"
-    })]
+    #[trace(properties = { "block_parent_hash": "{block_parent_hash}" })]
     pub fn apply_and_update_transactions<'a>(
         &mut self,
         transactions: impl Iterator<Item = &'a mut Transaction>,
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
-        network_id: NetworkId,
     ) -> Result<(), Error> {
         for transaction in transactions {
-            self.apply_transaction_mut(
-                transaction,
-                block_parent_hash,
-                block_timestamp,
-                network_id,
-            )?;
+            self.apply_transaction_mut(transaction, block_parent_hash, block_timestamp)?;
         }
 
         self.post_apply_transactions(block_timestamp);
@@ -85,26 +77,18 @@ impl LedgerState {
         (self.zswap_first_free() != 0).then(|| self.zswap_first_free() - 1)
     }
 
-    #[trace(properties = {
-        "block_parent_hash": "{block_parent_hash}",
-        "network_id": "{network_id}"
-    })]
+    #[trace(properties = { "block_parent_hash": "{block_parent_hash}" })]
     fn apply_transaction_mut(
         &mut self,
         transaction: &mut Transaction,
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
-        network_id: NetworkId,
     ) -> Result<(), Error> {
         let start_index = self.zswap_first_free();
         let mut end_index = self.zswap_first_free();
 
-        let transaction_result = self.apply_transaction(
-            &transaction.raw,
-            block_parent_hash,
-            block_timestamp,
-            network_id,
-        )?;
+        let transaction_result =
+            self.apply_transaction(&transaction.raw, block_parent_hash, block_timestamp)?;
 
         // Handle genesis block: extract any pre-funded unshielded UTXOs.
         // Check if this is genesis block by examining parent hash.
@@ -116,38 +100,30 @@ impl LedgerState {
         // Update end_index and contract zswap state if necessary.
         let first_free = self.zswap_first_free();
         if first_free > start_index {
-            self.update_contract_zswap_state(transaction, network_id)?;
+            self.update_contract_zswap_state(transaction)?;
             end_index = first_free - 1;
         }
 
         // Update transaction.
         transaction.transaction_result = transaction_result;
-        transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize(network_id)?;
+        transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize()?;
         transaction.start_index = start_index;
         transaction.end_index = end_index;
 
         // Update extracted balances of contract actions.
         for contract_action in &mut transaction.contract_actions {
-            let contract_state = ContractState::deserialize(
-                &contract_action.state,
-                network_id,
-                transaction.protocol_version,
-            )?;
-            let balances = contract_state.balances(network_id)?;
+            let contract_state =
+                ContractState::deserialize(&contract_action.state, transaction.protocol_version)?;
+            let balances = contract_state.balances()?;
             contract_action.extracted_balances = balances;
         }
 
         Ok(())
     }
 
-    fn update_contract_zswap_state(
-        &self,
-        transaction: &mut Transaction,
-        network_id: NetworkId,
-    ) -> Result<(), Error> {
+    fn update_contract_zswap_state(&self, transaction: &mut Transaction) -> Result<(), Error> {
         for contract_action in transaction.contract_actions.iter_mut() {
-            let zswap_state =
-                self.extract_contract_zswap_state(&contract_action.address, network_id)?;
+            let zswap_state = self.extract_contract_zswap_state(&contract_action.address)?;
             contract_action.chain_state = zswap_state;
         }
 

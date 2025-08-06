@@ -23,7 +23,7 @@ mod runtime_0_13 {}
 
 use crate::infra::subxt_node::SubxtNodeError;
 use indexer_common::domain::{
-    BlockHash, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
+    BlockHash, PROTOCOL_VERSION_000_014_000, ProtocolVersion,
     ledger::{SerializedContractAddress, SerializedContractState, TransactionHash, UnshieldedUtxo},
 };
 use itertools::Itertools;
@@ -34,7 +34,7 @@ use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, u
 /// Runtime specific block details.
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
-    pub raw_transactions: Vec<Vec<u8>>,
+    pub transactions: Vec<Vec<u8>>,
     pub created_unshielded_utxos_by_hash: HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
     pub spent_unshielded_utxos_by_hash: HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
 }
@@ -47,7 +47,7 @@ pub async fn make_block_details(
     protocol_version: ProtocolVersion,
 ) -> Result<BlockDetails, SubxtNodeError> {
     // TODO Replace this often repeated pattern with a macro?
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_014_000) {
         make_block_details_runtime_0_13(extrinsics, events, authorities).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
@@ -59,7 +59,7 @@ pub async fn fetch_authorities(
     online_client: &OnlineClient<SubstrateConfig>,
     protocol_version: ProtocolVersion,
 ) -> Result<Option<Vec<[u8; 32]>>, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_014_000) {
         fetch_authorities_runtime_0_13(online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
@@ -68,7 +68,7 @@ pub async fn fetch_authorities(
 
 /// Decode slot depending on the given protocol version.
 pub fn decode_slot(slot: &[u8], protocol_version: ProtocolVersion) -> Result<u64, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_014_000) {
         decode_slot_runtime_0_13(slot)
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
@@ -82,7 +82,7 @@ pub async fn get_contract_state(
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
 ) -> Result<SerializedContractState, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_014_000) {
         get_contract_state_runtime_0_13(online_client, address, block_hash).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
@@ -94,22 +94,22 @@ pub async fn get_zswap_state_root(
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
 ) -> Result<Vec<u8>, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_014_000) {
         get_zswap_state_root_runtime_0_13(online_client, block_hash).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
 }
 
-/// Get transaction cost depending on the given protocol version.
+/// Get cost for the given serialized transaction depending on the given protocol version.
 pub async fn get_transaction_cost(
     online_client: &OnlineClient<SubstrateConfig>,
-    raw_transaction: &[u8],
+    transaction: impl AsRef<[u8]>,
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
 ) -> Result<u128, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-        get_transaction_cost_runtime_0_13(online_client, raw_transaction, block_hash).await
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_014_000) {
+        get_transaction_cost_runtime_0_13(online_client, transaction.as_ref(), block_hash).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -143,7 +143,7 @@ macro_rules! make_block_details {
                     _ => None,
                 });
 
-                let raw_transactions = calls
+                let transactions = calls
                     .into_iter()
                     .filter_map(|call| match call {
                         Call::Midnight(midnight::Call::send_mn_transaction { midnight_tx }) => {
@@ -224,7 +224,7 @@ macro_rules! make_block_details {
 
                 Ok(BlockDetails {
                     timestamp,
-                    raw_transactions,
+                    transactions,
                     created_unshielded_utxos_by_hash,
                     spent_unshielded_utxos_by_hash,
                 })
@@ -336,12 +336,12 @@ macro_rules! get_transaction_cost {
         paste::paste! {
             async fn [<get_transaction_cost_ $module>](
                 online_client: &OnlineClient<SubstrateConfig>,
-                raw_transaction: &[u8],
+                transaction: &[u8],
                 block_hash: BlockHash,
             ) -> Result<u128, SubxtNodeError> {
                 let get_transaction_cost = $module::apis()
                     .midnight_runtime_api()
-                    .get_transaction_cost(raw_transaction.to_owned());
+                    .get_transaction_cost(transaction.to_owned());
 
                 let (storage_cost, gas_cost) = online_client
                     .runtime_api()

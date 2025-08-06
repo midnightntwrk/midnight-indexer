@@ -16,7 +16,7 @@ use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteArray, ByteVec,
+        BlockHash, ByteVec,
         ledger::{ContractAttributes, ContractBalance, UnshieldedUtxo},
     },
     infra::sqlx::U128BeBytes,
@@ -137,7 +137,7 @@ impl domain::storage::Storage for Storage {
                 .bind(block_height as i64)
                 .fetch_one(&*self.pool)
                 .await?;
-        let block_parent_hash = ByteArray::<32>::try_from(block_parent_hash.as_ref())
+        let block_parent_hash = BlockHash::try_from(block_parent_hash.as_ref())
             .map_err(|error| sqlx::Error::Decode(error.into()))?;
 
         let query = indoc! {"

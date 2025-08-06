@@ -5,7 +5,7 @@ use chain_indexer::{
 };
 use clap::Parser;
 use futures::{Stream, StreamExt, TryStreamExt};
-use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_013_000};
+use indexer_common::domain::PROTOCOL_VERSION_000_014_000;
 use std::{pin::Pin, time::Duration};
 
 #[tokio::main]
@@ -34,13 +34,13 @@ impl Cli {
     async fn run(self) -> anyhow::Result<()> {
         let config = Config {
             url: self.node,
-            genesis_protocol_version: PROTOCOL_VERSION_000_013_000,
+            genesis_protocol_version: PROTOCOL_VERSION_000_014_000,
             reconnect_max_delay: Duration::from_secs(1),
             reconnect_max_attempts: 1,
         };
         let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 
-        let blocks = node.finalized_blocks(None, NetworkId::Undeployed);
+        let blocks = node.finalized_blocks(None);
         let mut blocks: Pin<Box<dyn Stream<Item = Result<Block, _>> + Send>> = Box::pin(blocks);
 
         if let Some(n) = self.skip {

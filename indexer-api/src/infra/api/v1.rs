@@ -36,8 +36,8 @@ use axum::{Router, routing::post_service};
 use const_hex::FromHexError;
 use derive_more::{Debug, Display};
 use indexer_common::domain::{
-    ByteArrayLenError, LedgerStateStorage, NetworkId, NoopLedgerStateStorage, NoopSubscriber,
-    SessionId, Subscriber,
+    ByteArrayLenError, ByteVec, LedgerStateStorage, NetworkId, NoopLedgerStateStorage,
+    NoopSubscriber, SessionId, Subscriber,
 };
 use log::error;
 use serde::{Deserialize, Serialize};
@@ -58,9 +58,9 @@ impl HexEncoded {
     /// Hex-decode this [HexEncoded] into some type that can be made from bytes.
     pub fn hex_decode<T>(&self) -> Result<T, HexDecodeError>
     where
-        T: TryFrom<Vec<u8>>,
+        T: TryFrom<ByteVec>,
     {
-        let bytes = const_hex::decode(&self.0)?;
+        let bytes = ByteVec::from(const_hex::decode(&self.0)?);
         let decoded = bytes
             .try_into()
             .map_err(|_| HexDecodeError::Convert(type_name::<T>()))?;
