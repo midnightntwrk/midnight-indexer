@@ -110,7 +110,7 @@ impl DustStorage for Storage {
         let mut statuses = Vec::new();
 
         for stake_key in cardano_stake_keys {
-            // Query registration info
+            // Query registration info.
             let registration_query = indoc! {"
                 SELECT dust_address, is_valid
                 FROM cnight_registrations
@@ -208,7 +208,10 @@ impl DustStorage for Storage {
         &self,
         dust_address: &DustAddress,
         from_generation_index: u64,
-        _from_merkle_index: u64,
+        _from_merkle_index: u64, /* TODO: Needed for wallet sync - allows resuming from specific
+                                  * merkle tree position when streaming generation events with
+                                  * interleaved merkle updates. Currently unused as merkle
+                                  * functionality is disabled */
         only_active: bool,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send {
@@ -218,7 +221,7 @@ impl DustStorage for Storage {
             let mut last_index = from_generation_index;
 
             loop {
-                // Query generation info
+                // Query generation info.
                 let query = if only_active {
                     indoc! {r#"
                         SELECT 
@@ -283,7 +286,7 @@ impl DustStorage for Storage {
             let mut current_block = from_block as i64;
 
             loop {
-                // Filter prefixes that meet minimum length requirement
+                // Filter prefixes that meet minimum length requirement.
                 let valid_prefixes = prefixes
                     .iter()
                     .filter(|prefix| prefix.as_ref().len() >= min_prefix_length)
@@ -293,23 +296,33 @@ impl DustStorage for Storage {
                     break;
                 }
 
-                // Build conditions with parameter placeholders
-                let mut conditions = Vec::new();
-                for (i, _) in valid_prefixes.iter().enumerate() {
-                    let param_num = 3 + i;
+                // Build conditions with parameter placeholders.
+                let conditions = valid_prefixes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, prefix)| {
+                        let param_num = 3 + i;
+                        let hex_len = prefix.as_ref().len() * 2;
 
-                    #[cfg(feature = "cloud")]
-                    conditions.push(format!("substring(encode(nullifier, 'hex'), 1, {}) = encode(${}, 'hex')",
-                        valid_prefixes[i].as_ref().len() * 2, param_num));
+                        #[cfg(feature = "cloud")]
+                        {
+                            format!(
+                                "substring(encode(nullifier, 'hex'), 1, {hex_len}) = encode(${param_num}, 'hex')"
+                            )
+                        }
 
-                    #[cfg(feature = "standalone")]
-                    conditions.push(format!("substr(hex(nullifier), 1, {}) = hex(${})",
-                        valid_prefixes[i].as_ref().len() * 2, param_num));
-                }
+                        #[cfg(feature = "standalone")]
+                        {
+                            format!(
+                                "substr(hex(nullifier), 1, {hex_len}) = hex(${param_num})"
+                            )
+                        }
+                    })
+                    .collect::<Vec<_>>();
 
                 let where_clause = conditions.join(" OR ");
 
-                // Query transactions with matching nullifiers
+                // Query transactions with matching nullifiers.
                 let query = format!(
                     indoc! {"
                         SELECT DISTINCT t.hash, t.block_id, b.height
@@ -325,12 +338,12 @@ impl DustStorage for Storage {
                     where_clause
                 );
 
-                // Build query with parameter bindings
+                // Build query with parameter bindings.
                 let mut transaction_query = sqlx::query_as::<_, (Vec<u8>, i64, i64)>(&query)
                     .bind(current_block)
                     .bind(batch_size);
 
-                // Bind binary prefix parameters using .as_ref() pattern
+                // Bind binary prefix parameters.
                 for prefix in &valid_prefixes {
                     transaction_query = transaction_query.bind(prefix.as_ref());
                 }
@@ -342,7 +355,7 @@ impl DustStorage for Storage {
                 }
 
                 for (tx_hash, _block_id, block_height) in &rows {
-                    // Find matching prefixes for this transaction
+                    // Find matching prefixes for this transaction.
                     let nullifier_query = indoc! {"
                             SELECT nullifier
                             FROM dust_utxos
@@ -359,10 +372,9 @@ impl DustStorage for Storage {
 
                     let mut matching_prefixes = Vec::new();
                     for (nullifier_bytes,) in nullifiers {
-                        // Skip invalid nullifier data instead of panicking
-                        let Ok(nullifier): Result<DustNullifier, _> = nullifier_bytes.as_slice().try_into() else {
-                            continue;
-                        };
+                        let nullifier = DustNullifier::try_from(nullifier_bytes.as_slice())
+                            .map_err(|_| sqlx::Error::Decode("invalid nullifier format in database".into()))?;
+
                         for prefix in &valid_prefixes {
                             if nullifier.as_ref().starts_with(prefix.as_ref()) {
                                 matching_prefixes.push((*prefix).clone());
@@ -370,10 +382,10 @@ impl DustStorage for Storage {
                         }
                     }
 
-                    // Skip transaction if hash is invalid
-                    let Ok(transaction_hash) = tx_hash.as_slice().try_into() else {
-                        continue;
-                    };
+                    let transaction_hash = tx_hash
+                        .as_slice()
+                        .try_into()
+                        .map_err(|_| sqlx::Error::Decode("invalid transaction hash format in database".into()))?;
 
                     yield DustNullifierTransactionEvent::Transaction(DustNullifierTransaction {
                         transaction_hash,
@@ -382,7 +394,7 @@ impl DustStorage for Storage {
                     });
                 }
 
-                // Update current block for next iteration
+                // Update current block for next iteration.
                 if let Some((_, _, last_height)) = rows.last() {
                     current_block = last_height + 1;
                 }
@@ -405,7 +417,7 @@ impl DustStorage for Storage {
             let mut current_index = start_index as i64;
 
             loop {
-                // Filter prefixes that meet minimum length requirement
+                // Filter prefixes that meet minimum length requirement.
                 let valid_prefixes = commitment_prefixes
                     .iter()
                     .filter(|prefix| prefix.as_ref().len() >= min_prefix_length)
@@ -415,23 +427,33 @@ impl DustStorage for Storage {
                     break;
                 }
 
-                // Build conditions with parameter placeholders
-                let mut conditions = Vec::new();
-                for (i, _) in valid_prefixes.iter().enumerate() {
-                    let param_num = 3 + i;
+                // Build conditions with parameter placeholders.
+                let conditions = valid_prefixes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, prefix)| {
+                        let param_num = 3 + i;
+                        let hex_len = prefix.as_ref().len() * 2;
 
-                    #[cfg(feature = "cloud")]
-                    conditions.push(format!("substring(encode(commitment, 'hex'), 1, {}) = encode(${}, 'hex')",
-                        valid_prefixes[i].as_ref().len() * 2, param_num));
+                        #[cfg(feature = "cloud")]
+                        {
+                            format!(
+                                "substring(encode(commitment, 'hex'), 1, {hex_len}) = encode(${param_num}, 'hex')"
+                            )
+                        }
 
-                    #[cfg(feature = "standalone")]
-                    conditions.push(format!("substr(hex(commitment), 1, {}) = hex(${})",
-                        valid_prefixes[i].as_ref().len() * 2, param_num));
-                }
+                        #[cfg(feature = "standalone")]
+                        {
+                            format!(
+                                "substr(hex(commitment), 1, {hex_len}) = hex(${param_num})"
+                            )
+                        }
+                    })
+                    .collect::<Vec<_>>();
 
                 let where_clause = conditions.join(" OR ");
 
-                // Query commitments
+                // Query commitments.
                 let query = format!(
                     indoc! {"
                         SELECT 
@@ -446,12 +468,12 @@ impl DustStorage for Storage {
                     where_clause
                 );
 
-                // Build query with parameter bindings
+                // Build query with parameter bindings.
                 let mut commitment_query = sqlx::query_as::<_, DustUtxosRow>(&query)
                     .bind(current_index)
                     .bind(batch_size);
 
-                // Bind binary prefix parameters using .as_ref() pattern
+                // Bind binary prefix parameters.
                 for prefix in &valid_prefixes {
                     commitment_query = commitment_query.bind(prefix.as_ref());
                 }
@@ -467,7 +489,7 @@ impl DustStorage for Storage {
 
                         let mut commitment_info: DustCommitmentInfo = row.into();
 
-                        // Get spent timestamp if spent
+                        // Get spent timestamp if spent.
                         if let Some(spent_id) = spent_id {
                             let spent_query = indoc! {"
                                 SELECT b.timestamp
@@ -528,7 +550,7 @@ impl DustStorage for Storage {
             let mut last_id = 0i64;
 
             loop {
-                // Build conditions based on address types
+                // Build conditions based on address types.
                 let mut conditions = Vec::new();
 
                 for addr in addresses {
@@ -553,7 +575,7 @@ impl DustStorage for Storage {
                     break;
                 }
 
-                // Build WHERE clause
+                // Build WHERE clause.
                 let where_parts: Vec<String> = conditions.iter()
                     .enumerate()
                     .map(|(i, (col, _))| format!("{} = ${}", col, i + 2))
