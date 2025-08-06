@@ -15,7 +15,7 @@ use crate::domain::storage::Storage;
 use anyhow::Context;
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, future::ok, stream};
-use indexer_common::domain::{BlockIndexed, NetworkId, Publisher, Subscriber, WalletIndexed};
+use indexer_common::domain::{BlockIndexed, Publisher, Subscriber, WalletIndexed};
 use itertools::Itertools;
 use log::{debug, warn};
 use serde::Deserialize;
@@ -32,8 +32,6 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub network_id: NetworkId,
-
     #[serde(with = "humantime_serde")]
     pub active_wallets_repeat_delay: Duration,
 
@@ -54,7 +52,6 @@ pub async fn run(
     mut sigterm: Signal,
 ) -> anyhow::Result<()> {
     let Config {
-        network_id,
         active_wallets_repeat_delay,
         active_wallets_ttl,
         transaction_batch_size,
@@ -100,7 +97,6 @@ pub async fn run(
                         index_wallet(
                             wallet_id,
                             transaction_batch_size,
-                            network_id,
                             max_transaction_id,
                             &mut publisher,
                             &mut storage,
@@ -144,7 +140,6 @@ fn active_wallets(
 async fn index_wallet(
     wallet_id: Uuid,
     transaction_batch_size: NonZeroUsize,
-    network_id: NetworkId,
     max_transaction_id: Arc<AtomicU64>,
     publisher: &mut impl Publisher,
     storage: &mut impl Storage,
@@ -184,7 +179,7 @@ async fn index_wallet(
             .into_iter()
             .map(|transaction| {
                 transaction
-                    .relevant(&wallet, network_id)
+                    .relevant(&wallet)
                     .with_context(|| {
                         format!("check transaction relevance for wallet ID {wallet_id}")
                     })

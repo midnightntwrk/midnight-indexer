@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, BlockInfo, BlockTransactions};
+use crate::domain::{Block, BlockTransactions, Transaction, node::BlockInfo};
 
 /// Storage abstraction.
 #[trait_variant::make(Send)]
@@ -34,6 +34,10 @@ where
         block_height: u32,
     ) -> Result<BlockTransactions, sqlx::Error>;
 
-    /// Save the given block, update transaction IDs, and return the max transaction ID.
-    async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error>;
+    /// Save the given block and return the max regular transaction ID.
+    async fn save_block(
+        &self,
+        block: &Block,
+        transactions: &[Transaction],
+    ) -> Result<Option<u64>, sqlx::Error>;
 }

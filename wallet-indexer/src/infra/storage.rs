@@ -274,9 +274,8 @@ impl domain::storage::Storage for Storage {
             .fetch_one(&mut **tx)
             .await?;
 
-        (wallet, &self.cipher)
-            .try_into()
-            .map_err(|error: DecryptViewingKeyError| sqlx::Error::Decode(error.into()))
+        domain::Wallet::try_from((wallet, &self.cipher))
+            .map_err(|error| sqlx::Error::Decode(error.into()))
     }
 }
 
