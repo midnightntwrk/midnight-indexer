@@ -29,11 +29,12 @@ use futures::Stream;
 use indexer_common::{
     domain::{
         CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustNonce, DustNullifier,
-        DustOwner, DustPrefix, NightUtxoHash,
+        DustOwner, DustPrefix, NightUtxoHash, TransactionHash,
     },
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
 use indoc::indoc;
+use itertools::Itertools;
 use sqlx::FromRow;
 use std::num::NonZeroU32;
 
@@ -290,7 +291,7 @@ impl DustStorage for Storage {
                 let valid_prefixes = prefixes
                     .iter()
                     .filter(|prefix| prefix.as_ref().len() >= min_prefix_length)
-                    .collect::<Vec<&DustPrefix>>();
+                    .collect::<Vec<_>>();
 
                 if valid_prefixes.is_empty() {
                     break;
@@ -339,9 +340,10 @@ impl DustStorage for Storage {
                 );
 
                 // Build query with parameter bindings.
-                let mut transaction_query = sqlx::query_as::<_, (Vec<u8>, i64, i64)>(&query)
-                    .bind(current_block)
-                    .bind(batch_size);
+                let mut transaction_query =
+                    sqlx::query_as::<_, (TransactionHash, i64, i64)>(&query)
+                        .bind(current_block)
+                        .bind(batch_size);
 
                 // Bind binary prefix parameters.
                 for prefix in &valid_prefixes {
@@ -354,27 +356,24 @@ impl DustStorage for Storage {
                     break;
                 }
 
-                for (tx_hash, _block_id, block_height) in &rows {
+                for (transaction_hash, _block_id, block_height) in &rows {
                     // Find matching prefixes for this transaction.
                     let nullifier_query = indoc! {"
-                            SELECT nullifier
-                            FROM dust_utxos
-                            WHERE spent_at_transaction_id = (
-                                SELECT id FROM transactions WHERE hash = $1
-                            )
-                            AND nullifier IS NOT NULL
-                        "};
+                        SELECT nullifier
+                        FROM dust_utxos
+                        WHERE spent_at_transaction_id = (
+                            SELECT id FROM transactions WHERE hash = $1
+                        )
+                        AND nullifier IS NOT NULL
+                    "};
 
-                    let nullifiers = sqlx::query_as::<_, (Vec<u8>,)>(nullifier_query)
-                        .bind(tx_hash)
+                    let nullifiers = sqlx::query_as::<_, (DustNullifier,)>(nullifier_query)
+                        .bind(transaction_hash)
                         .fetch_all(&*self.pool)
                         .await?;
 
                     let mut matching_prefixes = Vec::new();
-                    for (nullifier_bytes,) in nullifiers {
-                        let nullifier = DustNullifier::try_from(nullifier_bytes.as_slice())
-                            .map_err(|_| sqlx::Error::Decode("invalid nullifier format in database".into()))?;
-
+                    for (nullifier,) in nullifiers {
                         for prefix in &valid_prefixes {
                             if nullifier.as_ref().starts_with(prefix.as_ref()) {
                                 matching_prefixes.push((*prefix).clone());
@@ -382,13 +381,8 @@ impl DustStorage for Storage {
                         }
                     }
 
-                    let transaction_hash = tx_hash
-                        .as_slice()
-                        .try_into()
-                        .map_err(|_| sqlx::Error::Decode("invalid transaction hash format in database".into()))?;
-
                     yield DustNullifierTransactionEvent::Transaction(DustNullifierTransaction {
-                        transaction_hash,
+                        transaction_hash: *transaction_hash,
                         block_height: *block_height as u32,
                         matching_nullifier_prefixes: matching_prefixes,
                     });
@@ -421,7 +415,7 @@ impl DustStorage for Storage {
                 let valid_prefixes = commitment_prefixes
                     .iter()
                     .filter(|prefix| prefix.as_ref().len() >= min_prefix_length)
-                    .collect::<Vec<&DustPrefix>>();
+                    .collect::<Vec<_>>();
 
                 if valid_prefixes.is_empty() {
                     break;
@@ -483,57 +477,59 @@ impl DustStorage for Storage {
                 if rows.is_empty() {
                     break;
                 }
-                    for row in rows {
-                        let spent_id = row.spent_at_transaction_id;
-                        current_index = row.id as i64 + 1;
 
-                        let mut commitment_info: DustCommitmentInfo = row.into();
+                for row in rows {
+                    let spent_id = row.spent_at_transaction_id;
+                    current_index = row.id as i64 + 1;
 
-                        // Get spent timestamp if spent.
-                        if let Some(spent_id) = spent_id {
-                            let spent_query = indoc! {"
-                                SELECT b.timestamp
-                                FROM transactions t
-                                INNER JOIN blocks b ON b.id = t.block_id
-                                WHERE t.id = $1
-                            "};
+                    let mut commitment_info = DustCommitmentInfo::from(row);
 
-                            let timestamp = sqlx::query_as::<_, (i64,)>(spent_query)
-                                .bind(spent_id as i64)
-                                .fetch_optional(&*self.pool)
-                                .await?;
+                    // Get spent timestamp if spent.
+                    if let Some(spent_id) = spent_id {
+                        let spent_query = indoc! {"
+                            SELECT b.timestamp
+                            FROM transactions t
+                            INNER JOIN blocks b ON b.id = t.block_id
+                            WHERE t.id = $1
+                        "};
 
-                            commitment_info.spent_at = timestamp.map(|(t,)| t as u64);
-                        }
+                        let timestamp = sqlx::query_as::<_, (i64,)>(spent_query)
+                            .bind(spent_id as i64)
+                            .fetch_optional(&*self.pool)
+                            .await?;
 
-                        yield DustCommitmentEvent::Commitment(commitment_info);
+                        commitment_info.spent_at = timestamp.map(|(t,)| t as u64);
                     }
 
-                    // TODO: Fix merkle update handling - table schema doesn't have index column
-                    // The dust_commitment_tree table only has 'id' (database PK), not 'index' (merkle position)
-                    // Merkle update functionality is disabled until schema is updated
-                    //
-                    // let merkle_query = indoc! {r#"
-                    //     SELECT "index", root, block_height
-                    //     FROM dust_commitment_tree
-                    //     WHERE "index" >= $1
-                    //     ORDER BY "index"
-                    //     LIMIT $2
-                    // "#};
-                    //
-                    // let merkle_rows: Vec<DustCommitmentTreeRow> = sqlx::query_as(merkle_query)
-                    //     .bind(current_index)
-                    //     .bind(batch_size)
-                    //     .fetch_all(&*self.pool)
-                    //     .await?;
-                    //
-                    // for row in merkle_rows {
-                    //     yield DustCommitmentEvent::MerkleUpdate(DustCommitmentMerkleUpdate {
-                    //         index: row.index as u32,
-                    //         collapsed_update: row.root.into(),
-                    //         block_height: row.block_height as u32,
-                    //     });
-                    // }
+                    yield DustCommitmentEvent::Commitment(commitment_info);
+                }
+
+                // TODO: Fix merkle update handling - table schema doesn't have index column
+                // The dust_commitment_tree table only has 'id' (database PK), not 'index' (merkle
+                // position) Merkle update functionality is disabled until schema is
+                // updated
+                //
+                // let merkle_query = indoc! {r#"
+                //     SELECT "index", root, block_height
+                //     FROM dust_commitment_tree
+                //     WHERE "index" >= $1
+                //     ORDER BY "index"
+                //     LIMIT $2
+                // "#};
+                //
+                // let merkle_rows: Vec<DustCommitmentTreeRow> = sqlx::query_as(merkle_query)
+                //     .bind(current_index)
+                //     .bind(batch_size)
+                //     .fetch_all(&*self.pool)
+                //     .await?;
+                //
+                // for row in merkle_rows {
+                //     yield DustCommitmentEvent::MerkleUpdate(DustCommitmentMerkleUpdate {
+                //         index: row.index as u32,
+                //         collapsed_update: row.root.into(),
+                //         block_height: row.block_height as u32,
+                //     });
+                // }
             }
         }
     }
@@ -551,36 +547,33 @@ impl DustStorage for Storage {
 
             loop {
                 // Build conditions based on address types.
-                let mut conditions = Vec::new();
+                let conditions = addresses
+                    .iter()
+                    .map(|address| {
+                        match address.address_type {
+                            AddressType::CardanoStake => ("cardano_address", &address.value),
 
-                for addr in addresses {
-                    let addr_bytes = addr.value.as_ref();
+                            AddressType::Dust => ("dust_address", &address.value),
 
-                    match addr.address_type {
-                        AddressType::CardanoStake => {
-                            conditions.push(("cardano_address", addr_bytes));
+                            AddressType::Night => {
+                                // Night addresses might map to DUST addresses through some
+                                // mechanism. For now, treat as DUST
+                                // address.
+                                ("dust_address", &address.value)
+                            }
                         }
-                        AddressType::Dust => {
-                            conditions.push(("dust_address", addr_bytes));
-                        }
-                        AddressType::Night => {
-                            // Night addresses might map to DUST addresses through some mechanism
-                            // For now, treat as DUST address
-                            conditions.push(("dust_address", addr_bytes));
-                        }
-                    }
-                }
+                    })
+                    .collect::<Vec<_>>();
 
                 if conditions.is_empty() {
                     break;
                 }
 
-                // Build WHERE clause.
-                let where_parts: Vec<String> = conditions.iter()
+                let where_clause = conditions
+                    .iter()
                     .enumerate()
                     .map(|(i, (col, _))| format!("{} = ${}", col, i + 2))
-                    .collect();
-                let where_clause = where_parts.join(" OR ");
+                    .join(" OR ");
 
                 let query = format!(
                     indoc! {"
@@ -597,8 +590,8 @@ impl DustStorage for Storage {
                     conditions.len() + 2
                 );
 
-                let mut registration_query = sqlx::query_as::<_, CnightRegistrationsRow>(&query)
-                    .bind(last_id);
+                let mut registration_query =
+                    sqlx::query_as::<_, CnightRegistrationsRow>(&query).bind(last_id);
 
                 for (_, bytes) in &conditions {
                     registration_query = registration_query.bind(bytes);
@@ -606,9 +599,7 @@ impl DustStorage for Storage {
 
                 registration_query = registration_query.bind(batch_size);
 
-                let rows = registration_query
-                    .fetch_all(&*self.pool)
-                    .await?;
+                let rows = registration_query.fetch_all(&*self.pool).await?;
 
                 if rows.is_empty() {
                     break;
