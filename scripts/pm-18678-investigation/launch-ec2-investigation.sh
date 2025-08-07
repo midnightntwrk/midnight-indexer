@@ -12,7 +12,6 @@ echo "==========================================================================
 INVESTIGATION_DIR="$HOME/midnight-investigation"
 REPO_URL="https://github.com/midnightntwrk/midnight-indexer.git"
 BRANCH="investigation/PM-18678-hanging-root-cause"
-COMMIT_HASH="9b8cead"
 
 # Parse arguments
 MODE="${1:-reproduce}"  # Default to reproduce mode
@@ -45,17 +44,17 @@ if [ ! -d "$INVESTIGATION_DIR/midnight-indexer" ]; then
     cd midnight-indexer
     git checkout "$BRANCH"
     
-    # Verify we have the investigation commit
-    if ! git log --oneline | grep -q "$COMMIT_HASH"; then
-        echo "Warning: Investigation commit $COMMIT_HASH not found"
-        echo "Current HEAD: $(git rev-parse HEAD)"
-    fi
+    echo "Using latest commit on $BRANCH:"
+    git log --oneline -n 1
 else
     echo "Repository already exists. Updating..."
     cd "$INVESTIGATION_DIR/midnight-indexer"
     git fetch
     git checkout "$BRANCH"
     git pull
+    
+    echo "Using latest commit on $BRANCH:"
+    git log --oneline -n 1
 fi
 
 # ============================================================================
