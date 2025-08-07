@@ -12,7 +12,7 @@ echo "==========================================================================
 INVESTIGATION_DIR="$HOME/midnight-investigation"
 REPO_URL="https://github.com/midnightntwrk/midnight-indexer.git"
 BRANCH="investigation/PM-18678-hanging-root-cause"
-COMMIT_HASH="17a0eb4a"
+COMMIT_HASH="9b8cead"
 
 # Parse arguments
 MODE="${1:-reproduce}"  # Default to reproduce mode
