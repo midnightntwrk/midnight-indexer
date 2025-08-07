@@ -56,7 +56,7 @@ midnight-coin-structure     = { git = "https://github.com/midnightntwrk/midnight
 midnight-ledger             = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.3" }
 midnight-onchain-runtime    = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.3" }
 midnight-serialize          = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.3" }
-midnight-storage            = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.3" }
+midnight-storage            = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-6.0.0-alpha.2" }
 midnight-transient-crypto   = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.3" }
 midnight-zswap              = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-5.0.0-alpha.3" }
 nix                         = { version = "0.30" }
