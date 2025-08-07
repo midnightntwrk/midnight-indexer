@@ -14,16 +14,16 @@ AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
 # Navigate to investigation directory
 cd ~/midnight-investigation/midnight-indexer
 
-# Run the build script
-./scripts/pm-18678-investigation/build-and-run-ec2.sh
+# Run the launch script
+./scripts/pm-18678-investigation/launch-ec2-investigation.sh reproduce
 ```
 
 ## Investigation Status
 
-- **Start Date**: July 28, 2025
-- **Current Status**: Day 9 (as of August 6, 2025)
+- **Start Date**: August 7, 2025 (scheduled)
+- **Current Status**: Not yet started
 - **Critical Window**: Days 7-14 (historically when issue appears)
-- **Issue Reproduced**: Not yet
+- **Issue Reproduced**: TBD
 
 ## Code Modifications Added
 
@@ -62,6 +62,24 @@ PM18678_DISABLE_OPTIMIZATION=true cargo build --release --features cloud
 Or set the environment variable when running:
 ```bash
 PM18678_DISABLE_OPTIMIZATION=true cargo run --release -p wallet-indexer --features cloud
+```
+
+## Automated Scripts
+
+### Main Scripts
+- `launch-ec2-investigation.sh` - One-command setup and launch for EC2
+- `run-investigation.sh` - Main orchestrator that runs all services
+- `analyze-logs.sh` - Log analysis and issue detection
+
+### Using `just` Commands (Preferred)
+```bash
+just pm18678-build         # Build monitoring tool
+just pm18678-run reproduce  # Run investigation
+just pm18678-status        # Check status
+just pm18678-analyze       # Analyze logs
+just pm18678-stop          # Stop investigation
+just pm18678-reset         # Reset environment (preserves logs)
+just pm18678-purge         # Full cleanup including logs
 ```
 
 ## Monitoring Script
@@ -204,7 +222,7 @@ The issue appears related to PostgreSQL connection state, possibly:
 
 ## Notes
 
-- Current test has been running since July 28 (Day 9 as of Aug 6)
-- Approaching critical window where issue historically appeared
-- May need to disable PR #42 optimization to reproduce
+- Test scheduled to start August 7, 2025 on EC2
+- Will run for 3-4 weeks unattended
+- Testing both with and without PR #42 optimization
 - Focus on empirical evidence over theories
