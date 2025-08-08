@@ -657,35 +657,17 @@ mod tests {
     /// Drop guard to ensure container cleanup even on test panic/failure.
     /// This prevents test_finalized_blocks_0_13 from leaving containers that interfere with e2e.rs.
     struct ContainerCleanupGuard {
-        node_version: String,
+        container_id: Option<String>,
     }
 
     impl Drop for ContainerCleanupGuard {
         fn drop(&mut self) {
-            // Clean up any containers from this test run
-            let _ = std::process::Command::new("docker")
-                .args([
-                    "ps",
-                    "-aq",
-                    "--filter",
-                    &format!(
-                        "ancestor=ghcr.io/midnight-ntwrk/midnight-node:{}",
-                        self.node_version
-                    ),
-                    "--filter",
-                    "status=running",
-                ])
-                .output()
-                .map(|output| {
-                    let container_ids = String::from_utf8_lossy(&output.stdout);
-                    for id in container_ids.lines() {
-                        if !id.is_empty() {
-                            let _ = std::process::Command::new("docker")
-                                .args(["rm", "-f", id])
-                                .output();
-                        }
-                    }
-                });
+            if let Some(id) = self.container_id.take() {
+                // Force remove the container (ignore errors)
+                let _ = std::process::Command::new("docker")
+                    .args(["rm", "-f", &id])
+                    .output();
+            }
         }
     }
 
@@ -697,11 +679,6 @@ mod tests {
         first_tx_hash: &'static str,
         last_tx_height: u32,
     ) -> Result<(), BoxError> {
-        // Create cleanup guard that will run even if test panics
-        let _cleanup_guard = ContainerCleanupGuard {
-            node_version: node_version.to_string(),
-        };
-
         let node_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../.node")
             .join(node_version)
@@ -720,6 +697,12 @@ mod tests {
         .with_env_var("CFG_PRESET", "dev")
         .start()
         .await?;
+
+        // Create cleanup guard that will run even if test panics
+        let _cleanup_guard = ContainerCleanupGuard {
+            container_id: Some(node_container.id().to_string()),
+        };
+
         let node_port = node_container.get_host_port_ipv4(9944).await?;
         let node_url = format!("ws://localhost:{node_port}");
 
