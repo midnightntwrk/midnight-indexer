@@ -669,7 +669,6 @@ mod tests {
         .with_env_var("CFG_PRESET", "dev")
         .start()
         .await?;
-
         let node_port = node_container.get_host_port_ipv4(9944).await?;
         let node_url = format!("ws://localhost:{node_port}");
 
