@@ -500,7 +500,7 @@ mod tests {
         parent_hash: ZERO_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: ZswapStateRoot::V5(Faker.fake()),
+        zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
     });
 
@@ -511,7 +511,7 @@ mod tests {
         parent_hash: BLOCK_0_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: ZswapStateRoot::V5(Faker.fake()),
+        zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
     });
 
@@ -522,7 +522,7 @@ mod tests {
         parent_hash: BLOCK_1_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: ZswapStateRoot::V5(Faker.fake()),
+        zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
     });
 
@@ -533,7 +533,7 @@ mod tests {
         parent_hash: BLOCK_2_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: ZswapStateRoot::V5(Faker.fake()),
+        zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
     });
 

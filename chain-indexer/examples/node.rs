@@ -4,7 +4,7 @@ use chain_indexer::{
     infra::subxt_node::{Config, SubxtNode},
 };
 use futures::{StreamExt, TryStreamExt};
-use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_013_000};
+use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_014_000};
 use std::{pin::pin, time::Duration};
 
 /// This program connects to a local node and prints some first blocks and their transactions.
@@ -12,7 +12,7 @@ use std::{pin::pin, time::Duration};
 async fn main() -> anyhow::Result<()> {
     let config = Config {
         url: "ws://localhost:9944".to_string(),
-        genesis_protocol_version: PROTOCOL_VERSION_000_013_000,
+        genesis_protocol_version: PROTOCOL_VERSION_000_014_000,
         reconnect_max_delay: Duration::from_secs(1),
         reconnect_max_attempts: 3,
     };

@@ -595,7 +595,7 @@ mod tests {
     use fs_extra::dir::{CopyOptions, copy};
     use futures::{StreamExt, TryStreamExt};
     use indexer_common::{
-        domain::{PROTOCOL_VERSION_000_013_000, ProtocolVersion, ledger},
+        domain::{PROTOCOL_VERSION_000_014_000, ProtocolVersion, ledger},
         error::BoxError,
     };
     use std::{env, path::Path, pin::pin, time::Duration};
@@ -623,7 +623,7 @@ mod tests {
     #[tokio::test]
     async fn test_finalized_blocks_0_13() -> Result<(), BoxError> {
         test_finalized_blocks(
-            PROTOCOL_VERSION_000_013_000,
+            PROTOCOL_VERSION_000_014_000,
             "0.13.2-rc.2",
             "023e5fad5b86f1d95258f046edecfaa1c8d5c45097c1c07fcb6c5a518d136285",
             8,
@@ -743,7 +743,7 @@ mod tests {
         );
         let ledger_transaction = ledger::Transaction::deserialize(
             transactions[0].raw.clone(),
-            PROTOCOL_VERSION_000_013_000,
+            PROTOCOL_VERSION_000_014_000,
         );
         assert!(ledger_transaction.is_ok());
 

@@ -23,21 +23,21 @@ pub use transaction::*;
 
 use crate::{domain::ProtocolVersion, error::BoxError};
 use fastrace::trace;
-use midnight_base_crypto::signatures::Signature as SignatureV5;
-use midnight_ledger::structure::{ProofMarker as ProofMarkerV5, Transaction as TransactionV5};
+use midnight_base_crypto::signatures::Signature as SignatureV6;
+use midnight_ledger::structure::{ProofMarker as ProofMarkerV6, Transaction as TransactionV6};
 use midnight_serialize::{
-    Serializable as SerializableV5, Tagged as TaggedV6, tagged_serialize as tagged_serialize_v5,
+    Serializable as SerializableV6, Tagged as TaggedV6, tagged_serialize as tagged_serialize_v6,
 };
-use midnight_storage::DefaultDB as DefaultDBV5;
+use midnight_storage::DefaultDB as DefaultDBV6;
 use midnight_transient_crypto::{
-    commitment::PedersenRandomness as PedersenRandomnessV5,
-    merkle_tree::InvalidUpdate as InvalidUpdateV5,
+    commitment::PedersenRandomness as PedersenRandomnessV6,
+    merkle_tree::InvalidUpdate as InvalidUpdateV6,
 };
 use std::io;
 use thiserror::Error;
 
-type LedgerTransactionV5 =
-    TransactionV5<SignatureV5, ProofMarkerV5, PedersenRandomnessV5, DefaultDBV5>;
+type LedgerTransactionV6 =
+    TransactionV6<SignatureV6, ProofMarkerV6, PedersenRandomnessV6, DefaultDBV6>;
 
 /// Ledger related errors.
 #[derive(Debug, Error)]
@@ -55,37 +55,37 @@ pub enum Error {
     TokenTypeLen(usize),
 
     #[error("invalid merkle-tree collapsed update")]
-    InvalidUpdate(#[from] InvalidUpdateV5),
+    InvalidUpdate(#[from] InvalidUpdateV6),
 }
 
 /// Extension methods for `Serializable` implementations.
-pub trait SerializableV5Ext
+pub trait SerializableV6Ext
 where
-    Self: SerializableV5,
+    Self: SerializableV6,
 {
     /// Serialize this `Serializable` implementation.
     #[trace]
     fn serialize_v6(&self) -> Result<Vec<u8>, io::Error> {
         let mut bytes = Vec::with_capacity(self.serialized_size() + 32);
-        SerializableV5::serialize(self, &mut bytes)?;
+        SerializableV6::serialize(self, &mut bytes)?;
         Ok(bytes)
     }
 }
 
-impl<T> SerializableV5Ext for T where T: SerializableV5 {}
+impl<T> SerializableV6Ext for T where T: SerializableV6 {}
 
 /// Extension methods for `Serializable + Tagged` implementations.
-pub trait TaggedSerializableV5Ext
+pub trait TaggedSerializableV6Ext
 where
-    Self: SerializableV5 + TaggedV6 + Sized,
+    Self: SerializableV6 + TaggedV6 + Sized,
 {
     /// Serialize this `Serializable + Tagged` implementation.
     #[trace]
     fn tagged_serialize_v6(&self) -> Result<Vec<u8>, io::Error> {
         let mut bytes = Vec::with_capacity(self.serialized_size() + 32);
-        tagged_serialize_v5(self, &mut bytes)?;
+        tagged_serialize_v6(self, &mut bytes)?;
         Ok(bytes)
     }
 }
 
-impl<T> TaggedSerializableV5Ext for T where T: SerializableV5 + TaggedV6 {}
+impl<T> TaggedSerializableV6Ext for T where T: SerializableV6 + TaggedV6 {}

@@ -41,7 +41,7 @@ use graphql_client::{GraphQLQuery, Response};
 use indexer_api::infra::api::v1::{
     AsBytesExt, HexEncoded, transaction::TransactionResultStatus, viewing_key::ViewingKey,
 };
-use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_013_000};
+use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_014_000};
 use itertools::Itertools;
 use reqwest::Client;
 use serde::Serialize;
@@ -798,7 +798,7 @@ async fn test_shielded_transactions_subscription(
     };
 
     let session_id = ViewingKey::from(viewing_key(network_id))
-        .try_into_domain(network_id, PROTOCOL_VERSION_000_013_000)?
+        .try_into_domain(network_id, PROTOCOL_VERSION_000_014_000)?
         .to_session_id()
         .hex_encode();
 
