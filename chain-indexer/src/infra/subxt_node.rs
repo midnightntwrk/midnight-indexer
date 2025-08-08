@@ -620,10 +620,10 @@ mod tests {
         test_finalized_blocks(
             PROTOCOL_VERSION_000_013_000,
             "0.13.5-533f2816",
-            "023e5fad5b86f1d95258f046edecfaa1c8d5c45097c1c07fcb6c5a518d136285",
-            8,
-            "997d8033e893233a7dd980ee5545023ac52af2c38cfe2128a3fde2fcfd4c4d7b",
-            27,
+            "ebe4dfe1271712b02af124d53eecfac427f1672258aa6aeab0030cf4ff5b0cbe",
+            12,
+            "4fd4682f112120796f7041df4651eae6fbfdcbb73f08e27c2747602672d44e63",
+            41,
         )
         .await
     }
