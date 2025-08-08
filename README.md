@@ -173,6 +173,8 @@ just run-chain-indexer
 - **Just**: A command-runner used for tasks. Install from [GitHub](https://github.com/casey/just).
 - **direnv**: For a reproducible development environment.
 - **Docker**: For integration tests and running services locally.
+- **subxt-cli**: For fetching new metadata from the node ([GitHub](https://github.com/paritytech/subxt?tab=readme-ov-file#downloading-metadata-from-a-substrate-node)). **Note:** Version used must match version in Cargo.toml
+- **cargo-nextest**: For running tests ([GitHub](https://github.com/nextest-rs/nextest/))
 
 ### Environment Variables
 
