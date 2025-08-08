@@ -1021,6 +1021,7 @@ dependencies = [
  "assert_matches",
  "async-stream",
  "byte-unit",
+ "clap",
  "const-hex",
  "derive_more 2.0.1",
  "fake",
