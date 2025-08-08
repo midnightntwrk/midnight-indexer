@@ -615,6 +615,21 @@ mod tests {
         runners::AsyncRunner,
     };
 
+    /// Test for finalized blocks with protocol version 0.13.
+    ///
+    /// ## Updating Test Data After Node/Metadata Changes
+    ///
+    /// When updating the node version or metadata (e.g., in `runtimes.rs`), this test's
+    /// hardcoded values must be updated to match the new chain data:
+    ///
+    /// 1. Update the node_version below to match the new version
+    /// 2. Ensure .node/<version> directory exists with the test chain data
+    /// 3. Run: `cargo run --example node`
+    /// 4. From the output, identify:
+    ///    - The block hash and height before the first transaction appears
+    ///    - The first transaction hash (usually at block 13 in test data)
+    ///    - The last block height containing test transactions/contract actions
+    /// 5. Update the hardcoded values in this test with the new data
     #[tokio::test]
     async fn test_finalized_blocks_0_13() -> Result<(), BoxError> {
         test_finalized_blocks(
