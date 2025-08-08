@@ -13,6 +13,7 @@
 
 mod block;
 mod contract_action;
+mod dust;
 mod shielded;
 mod unshielded;
 
@@ -28,6 +29,7 @@ pub struct Subscription<S, B, Z>(
     contract_action::ContractActionSubscription<S, B>,
     shielded::ShieldedTransactionsSubscription<S, B, Z>,
     unshielded::UnshieldedTransactionsSubscription<S, B>,
+    dust::DustSubscription<S>,
 )
 where
     S: Storage,
@@ -46,6 +48,7 @@ where
             contract_action::ContractActionSubscription::default(),
             shielded::ShieldedTransactionsSubscription::default(),
             unshielded::UnshieldedTransactionsSubscription::default(),
+            dust::DustSubscription::default(),
         )
     }
 }
