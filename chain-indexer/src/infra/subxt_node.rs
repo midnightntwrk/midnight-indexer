@@ -615,6 +615,32 @@ mod tests {
         runners::AsyncRunner,
     };
 
+    /// Test for finalized blocks with protocol version 0.13.
+    ///
+    /// ## Updating Test Data After Node/Metadata Changes
+    ///
+    /// When updating the node version or metadata (e.g., in `runtimes.rs`), this test's
+    /// hardcoded values must be updated to match the new chain data:
+    ///
+    /// 1. Update the node_version below to match the new version
+    /// 2. Ensure .node/<version> directory exists with the test chain data
+    /// 3. Run: `cargo run --example node --manifest-path chain-indexer/Cargo.toml`
+    /// 4. From the output, identify:
+    ///    - The block hash and height before the first transaction appears
+    ///    - The first transaction hash (usually at block 13 in test data)
+    ///    - The last block height containing test transactions/contract actions
+    /// 5. Update the hardcoded values in this test with the new data
+    ///
+    /// ## Important: Test Isolation
+    ///
+    /// This test uses Docker containers via testcontainers. If the test fails due to
+    /// mismatched data, the container cleanup might not complete properly, causing
+    /// interference with other tests (e.g., e2e.rs). To avoid issues:
+    ///
+    /// - Always update test data when changing node versions to prevent failures
+    /// - If tests fail, manually check for orphaned containers: `docker ps`
+    /// - Consider running this test in isolation: `cargo test test_finalized_blocks_0_13`
+    /// - The test will attempt to clean up containers from previous runs on startup
     #[tokio::test]
     async fn test_finalized_blocks_0_13() -> Result<(), BoxError> {
         test_finalized_blocks(
@@ -628,6 +654,41 @@ mod tests {
         .await
     }
 
+    /// Drop guard to ensure container cleanup even on test panic/failure.
+    /// This prevents test_finalized_blocks_0_13 from leaving containers that interfere with e2e.rs.
+    struct ContainerCleanupGuard {
+        node_version: String,
+    }
+
+    impl Drop for ContainerCleanupGuard {
+        fn drop(&mut self) {
+            // Clean up any containers from this test run
+            let _ = std::process::Command::new("docker")
+                .args([
+                    "ps",
+                    "-aq",
+                    "--filter",
+                    &format!(
+                        "ancestor=ghcr.io/midnight-ntwrk/midnight-node:{}",
+                        self.node_version
+                    ),
+                    "--filter",
+                    "status=running",
+                ])
+                .output()
+                .map(|output| {
+                    let container_ids = String::from_utf8_lossy(&output.stdout);
+                    for id in container_ids.lines() {
+                        if !id.is_empty() {
+                            let _ = std::process::Command::new("docker")
+                                .args(["rm", "-f", id])
+                                .output();
+                        }
+                    }
+                });
+        }
+    }
+
     async fn test_finalized_blocks(
         genesis_protocol_version: ProtocolVersion,
         node_version: &'static str,
@@ -636,6 +697,11 @@ mod tests {
         first_tx_hash: &'static str,
         last_tx_height: u32,
     ) -> Result<(), BoxError> {
+        // Create cleanup guard that will run even if test panics
+        let _cleanup_guard = ContainerCleanupGuard {
+            node_version: node_version.to_string(),
+        };
+
         let node_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../.node")
             .join(node_version)
