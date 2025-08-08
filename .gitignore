@@ -4,3 +4,4 @@
 .vscode
 *.check
 target
+.envrc.local
