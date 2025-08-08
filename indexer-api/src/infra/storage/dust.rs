@@ -323,25 +323,34 @@ impl DustStorage for Storage {
 
                 let where_clause = conditions.join(" OR ");
 
-                // Query transactions with matching nullifiers.
+                // Use CTE with two-step query:
+                // 1. First SELECT finds distinct transactions matching our criteria.
+                // 2. Second SELECT fetches all nullifiers for those transactions.
                 let query = format!(
                     indoc! {"
-                        SELECT DISTINCT t.hash, t.block_id, b.height
-                        FROM dust_utxos du
-                        INNER JOIN transactions t ON t.id = du.spent_at_transaction_id
-                        INNER JOIN blocks b ON b.id = t.block_id
+                        WITH matched_transactions AS (
+                            SELECT DISTINCT t.id, t.hash, b.height
+                            FROM dust_utxos du
+                            INNER JOIN transactions t ON t.id = du.spent_at_transaction_id
+                            INNER JOIN blocks b ON b.id = t.block_id
+                            WHERE du.nullifier IS NOT NULL
+                            AND ({})
+                            AND b.height >= $1
+                            ORDER BY b.height
+                            LIMIT $2
+                        )
+                        SELECT mt.hash, mt.height, du.nullifier
+                        FROM matched_transactions mt
+                        INNER JOIN dust_utxos du ON du.spent_at_transaction_id = mt.id
                         WHERE du.nullifier IS NOT NULL
-                        AND ({})
-                        AND b.height >= $1
-                        ORDER BY b.height
-                        LIMIT $2
+                        ORDER BY mt.height, mt.hash
                     "},
                     where_clause
                 );
 
                 // Build query with parameter bindings.
                 let mut transaction_query =
-                    sqlx::query_as::<_, (TransactionHash, i64, i64)>(&query)
+                    sqlx::query_as::<_, (TransactionHash, i64, DustNullifier)>(&query)
                         .bind(current_block)
                         .bind(batch_size);
 
@@ -356,24 +365,28 @@ impl DustStorage for Storage {
                     break;
                 }
 
-                for (transaction_hash, _block_id, block_height) in &rows {
-                    // Find matching prefixes for this transaction.
-                    let nullifier_query = indoc! {"
-                        SELECT nullifier
-                        FROM dust_utxos
-                        WHERE spent_at_transaction_id = (
-                            SELECT id FROM transactions WHERE hash = $1
-                        )
-                        AND nullifier IS NOT NULL
-                    "};
+                // Track the highest block height for pagination.
+                let mut max_height = current_block;
 
-                    let nullifiers = sqlx::query_as::<_, (DustNullifier,)>(nullifier_query)
-                        .bind(transaction_hash)
-                        .fetch_all(&*self.pool)
-                        .await?;
+                // Group by transaction using itertools' chunk_by (not group_by which is deprecated in 0.14),
+                // then collect to avoid Send issues.
+                let grouped: Vec<_> = rows
+                    .into_iter()
+                    .chunk_by(|(hash, height, _)| (*hash, *height as u32))
+                    .into_iter()
+                    .map(|((hash, height), group)| {
+                        let nullifiers = group.collect::<Vec<_>>();
+                        ((hash, height), nullifiers)
+                    })
+                    .collect();
+
+                for ((transaction_hash, block_height), nullifiers) in grouped {
+                    max_height = max_height.max(block_height as i64);
 
                     let mut matching_prefixes = Vec::new();
-                    for (nullifier,) in nullifiers {
+
+                    // Check which prefixes match the nullifiers for this transaction.
+                    for (_, _, nullifier) in nullifiers {
                         for prefix in &valid_prefixes {
                             if nullifier.as_ref().starts_with(prefix.as_ref()) {
                                 matching_prefixes.push((*prefix).clone());
@@ -382,15 +395,15 @@ impl DustStorage for Storage {
                     }
 
                     yield DustNullifierTransactionEvent::Transaction(DustNullifierTransaction {
-                        transaction_hash: *transaction_hash,
-                        block_height: *block_height as u32,
+                        transaction_hash,
+                        block_height,
                         matching_nullifier_prefixes: matching_prefixes,
                     });
                 }
 
                 // Update current block for next iteration.
-                if let Some((_, _, last_height)) = rows.last() {
-                    current_block = last_height + 1;
+                if max_height > current_block {
+                    current_block = max_height + 1;
                 }
             }
         }
