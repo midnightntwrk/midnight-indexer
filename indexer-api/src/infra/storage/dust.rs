@@ -370,7 +370,7 @@ impl DustStorage for Storage {
 
                 // Group by transaction using itertools' chunk_by (not group_by which is deprecated in 0.14),
                 // then collect to avoid Send issues.
-                let grouped: Vec<_> = rows
+                let grouped = rows
                     .into_iter()
                     .chunk_by(|(hash, height, _)| (*hash, *height as u32))
                     .into_iter()
@@ -378,7 +378,7 @@ impl DustStorage for Storage {
                         let nullifiers = group.collect::<Vec<_>>();
                         ((hash, height), nullifiers)
                     })
-                    .collect();
+                    .collect::<Vec<_>>();
 
                 for ((transaction_hash, block_height), nullifiers) in grouped {
                     max_height = max_height.max(block_height as i64);
