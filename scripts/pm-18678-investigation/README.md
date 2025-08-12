@@ -12,6 +12,9 @@ This investigation tracks down a critical production bug where wallet subscripti
 AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
   aws ssm start-session --target i-05f50sdfsdfsdb2 --region eu-central-1
 
+# Navigate to home directory (SSM starts in /var/snap/amazon-ssm-agent/11797)
+cd ~  # Goes to /home/ssm-user
+
 # Download and run the launch script (it will clone the repo and set everything up)
 curl -O https://raw.githubusercontent.com/input-output-hk/midnight-indexer/investigation/PM-18678-hanging-root-cause/scripts/pm-18678-investigation/launch-ec2-investigation.sh
 chmod +x launch-ec2-investigation.sh
