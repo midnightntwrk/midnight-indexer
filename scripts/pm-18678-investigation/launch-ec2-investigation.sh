@@ -106,11 +106,39 @@ if ! command -v cargo &> /dev/null; then
     source "$HOME/.cargo/env"
 fi
 
-# Check for Docker
+# Check for Docker and install if needed
 if ! command -v docker &> /dev/null; then
-    echo "Error: Docker is required but not installed"
-    echo "Install Docker and try again"
-    exit 1
+    echo "Docker not found. Installing Docker..."
+    if command -v apt-get &> /dev/null; then
+        sudo apt-get update
+        sudo apt-get install -y docker.io docker-compose
+        sudo systemctl start docker
+        sudo systemctl enable docker
+        sudo usermod -aG docker $USER
+        echo "Docker installed successfully"
+    elif command -v yum &> /dev/null; then
+        sudo yum install -y docker
+        sudo systemctl start docker
+        sudo systemctl enable docker
+        sudo usermod -aG docker $USER
+        echo "Docker installed successfully"
+    else
+        echo "Error: Cannot install Docker automatically"
+        echo "Please install Docker manually and try again"
+        exit 1
+    fi
+fi
+
+# Check if we need sudo for Docker commands
+DOCKER_CMD="docker"
+if ! docker ps &> /dev/null; then
+    if sudo docker ps &> /dev/null; then
+        echo "Note: Using sudo for Docker commands (group membership will take effect on next login)"
+        DOCKER_CMD="sudo docker"
+    else
+        echo "Error: Cannot access Docker. Please check Docker installation"
+        exit 1
+    fi
 fi
 
 # Check for tmux
@@ -149,8 +177,8 @@ fi
 
 # Stop any existing Docker containers
 echo "Cleaning up Docker containers..."
-docker stop postgres nats 2>/dev/null || true
-docker rm postgres nats 2>/dev/null || true
+$DOCKER_CMD stop postgres nats 2>/dev/null || true
+$DOCKER_CMD rm postgres nats 2>/dev/null || true
 
 # ============================================================================
 # LAUNCH INVESTIGATION
@@ -164,6 +192,9 @@ chmod +x *.sh
 echo ""
 echo "Launching investigation in $MODE mode..."
 echo ""
+
+# Export DOCKER_CMD for run-investigation.sh to use
+export DOCKER_CMD
 
 # Run the main investigation script
 ./run-investigation.sh "$MODE"

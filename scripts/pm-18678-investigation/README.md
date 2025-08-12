@@ -12,6 +12,9 @@ This investigation tracks down a critical production bug where wallet subscripti
 AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
   aws ssm start-session --target i-05f50sdfsdfsdb2 --region eu-central-1
 
+# Start a proper bash shell (SSM doesn't provide full terminal by default)
+bash
+
 # Navigate to home directory (SSM starts in /var/snap/amazon-ssm-agent/11797)
 cd ~  # Goes to /home/ssm-user
 

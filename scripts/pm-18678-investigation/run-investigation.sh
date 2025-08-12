@@ -118,9 +118,12 @@ cd "$INDEXER_DIR"
 
 log_info "Starting infrastructure services..."
 
+# Use DOCKER_CMD from environment or default to "docker"
+DOCKER_CMD="${DOCKER_CMD:-docker}"
+
 # PostgreSQL
-if ! docker ps | grep -q postgres; then
-    docker run -d --name postgres \
+if ! $DOCKER_CMD ps | grep -q postgres; then
+    $DOCKER_CMD run -d --name postgres \
         -e POSTGRES_USER=indexer \
         -e POSTGRES_PASSWORD=postgres \
         -e POSTGRES_DB=indexer \
@@ -130,8 +133,8 @@ if ! docker ps | grep -q postgres; then
 fi
 
 # NATS
-if ! docker ps | grep -q nats; then
-    docker run -d --name nats \
+if ! $DOCKER_CMD ps | grep -q nats; then
+    $DOCKER_CMD run -d --name nats \
         -p 4222:4222 \
         nats:latest -js --user indexer --pass nats
     sleep 5
