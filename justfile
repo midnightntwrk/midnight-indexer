@@ -4,7 +4,7 @@ set shell := ["bash", "-uc"]
 feature := "cloud"
 packages := "indexer-common chain-indexer wallet-indexer indexer-api indexer-standalone indexer-tests"
 rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/'`
-nightly := "nightly-2025-07-01"
+nightly := "nightly-2025-08-07"
 node_version := "0.13.2-rc.2"
 
 check:
