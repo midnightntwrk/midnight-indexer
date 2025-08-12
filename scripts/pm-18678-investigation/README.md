@@ -196,35 +196,49 @@ cd ~/midnight-investigation/midnight-indexer/scripts/pm-18678-investigation
 # Find latest log directory
 LATEST_LOG=$(ls -td ~/midnight-investigation/logs/*/ | head -1)
 
-# Main investigation log
-tail -f $LATEST_LOG/investigation.log
+# OPTION 1: Use 'less' for scrollable viewing (recommended)
+less +F $LATEST_LOG/investigation.log         # Press Ctrl+C to stop following, 'F' to resume
+less $LATEST_LOG/errors.log                   # Use arrows/PgUp/PgDn to scroll, 'q' to quit
+less $LATEST_LOG/issues/the-issue.log         # '/' to search, 'n' for next match
 
-# Check for errors
+# OPTION 2: Use 'tail' for live following (no scrolling)
+tail -f $LATEST_LOG/investigation.log         # Live updates but can't scroll
 tail -f $LATEST_LOG/errors.log
-
-# Check if THE ISSUE™ has been detected
 tail -f $LATEST_LOG/issues/the-issue.log
 
-# Check build progress (if building)
-tail -f $LATEST_LOG/build.log
-
-# Check service logs
-tail -f $LATEST_LOG/services/chain-indexer.log
-tail -f $LATEST_LOG/services/wallet-indexer.log
-tail -f $LATEST_LOG/services/indexer-api-8080.log  # API instance 1
-tail -f $LATEST_LOG/services/indexer-api-8081.log  # API instance 2
-tail -f $LATEST_LOG/services/indexer-api-8082.log  # API instance 3
-tail -f $LATEST_LOG/services/monitor.log
+# Check service logs (use less for scrollable viewing)
+less +F $LATEST_LOG/services/chain-indexer.log
+less +F $LATEST_LOG/services/wallet-indexer.log
+less +F $LATEST_LOG/services/indexer-api-8080.log  # API instance 1
+less +F $LATEST_LOG/services/indexer-api-8081.log  # API instance 2
+less +F $LATEST_LOG/services/indexer-api-8082.log  # API instance 3
+less +F $LATEST_LOG/services/monitor.log
 
 # Check automated analysis results (runs every 6 hours)
-tail -f $LATEST_LOG/monitoring/auto-analysis.log
+less $LATEST_LOG/monitoring/auto-analysis.log
 
 # View PM-18678 specific events
-grep "PM-18678" $LATEST_LOG/services/*.log
+grep "PM-18678" $LATEST_LOG/services/*.log | less
+
+# View last 100 lines of a log
+tail -100 $LATEST_LOG/investigation.log | less
 
 # Quick summary of all logs
 ls -la $LATEST_LOG/
 ```
+
+#### Less Commands Quick Reference
+- `less +F file.log` - Start in follow mode (like tail -f)
+- `Ctrl+C` - Stop following to scroll
+- `Shift+F` - Resume following 
+- `↑↓` or `j/k` - Scroll line by line
+- `PgUp/PgDn` or `Space/b` - Page up/down
+- `G` - Go to end of file
+- `g` - Go to beginning
+- `/pattern` - Search forward
+- `?pattern` - Search backward
+- `n/N` - Next/previous search match
+- `q` - Quit
 
 ## Monitoring Script
 
