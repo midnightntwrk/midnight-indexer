@@ -24,7 +24,16 @@ jobs:
       - name: Run cargo-audit
         run: cargo audit --format sarif > scan.sarif || true
 
-      - name: Upload SARIF
+      - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@86b04fb0e47484f7282357688f21d5d0e32175fe
         with:
           sarif_file: scan.sarif
+      
+      - name: Upload SARIF to Checkmarx
+        uses: midnightntwrk/upload-sarif-github-action@feat/PM-18735-checkmarx-byor-upload
+        with:
+          sarif-file: scan.sarif
+          project-name: midnight-indexer
+          cx-client-id: ${{ secrets.CX_CLIENT_ID }}
+          cx-client-secret: ${{ secrets.CX_CLIENT_SECRET_EU }}
+          cx-tenant: ${{ secrets.CX_TENANT }}
