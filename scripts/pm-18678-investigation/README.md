@@ -32,6 +32,31 @@ screen -S pm18678
 # To reattach: screen -r pm18678
 ```
 
+### Reconnecting After Disconnect
+
+If your SSM session times out or disconnects:
+
+```bash
+# SSH back into EC2
+AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
+  aws ssm start-session --target i-05f50sdfsdfsdb2 --region eu-central-1
+
+# Start bash shell
+bash
+
+# Navigate to home
+cd ~
+
+# Check running screen sessions
+screen -ls
+
+# Reattach to the pm18678 session
+screen -r pm18678
+
+# If screen is attached elsewhere, force reattach
+screen -d -r pm18678
+```
+
 ### Option 2: Repo Already Cloned
 ```bash
 # Navigate to the investigation scripts directory
