@@ -114,14 +114,18 @@ if ! command -v docker &> /dev/null; then
         sudo apt-get install -y docker.io docker-compose
         sudo systemctl start docker
         sudo systemctl enable docker
-        sudo usermod -aG docker $USER
-        echo "Docker installed successfully"
+        # Get current username (fallback to whoami if $USER not set)
+        CURRENT_USER="${USER:-$(whoami)}"
+        sudo usermod -aG docker "$CURRENT_USER"
+        echo "Docker installed successfully for user: $CURRENT_USER"
     elif command -v yum &> /dev/null; then
         sudo yum install -y docker
         sudo systemctl start docker
         sudo systemctl enable docker
-        sudo usermod -aG docker $USER
-        echo "Docker installed successfully"
+        # Get current username (fallback to whoami if $USER not set)
+        CURRENT_USER="${USER:-$(whoami)}"
+        sudo usermod -aG docker "$CURRENT_USER"
+        echo "Docker installed successfully for user: $CURRENT_USER"
     else
         echo "Error: Cannot install Docker automatically"
         echo "Please install Docker manually and try again"
