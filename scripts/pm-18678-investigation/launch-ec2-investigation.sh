@@ -40,18 +40,54 @@ if [ ! -d "$INVESTIGATION_DIR/midnight-indexer" ]; then
     mkdir -p "$INVESTIGATION_DIR"
     cd "$INVESTIGATION_DIR"
     
-    git clone "$REPO_URL"
+    echo "Cloning from: $REPO_URL"
+    echo "Branch: $BRANCH"
+    
+    if ! git clone "$REPO_URL"; then
+        echo ""
+        echo "ERROR: Failed to clone repository"
+        echo "Repository URL: $REPO_URL"
+        echo ""
+        echo "Possible causes:"
+        echo "1. Git is not installed (run: sudo apt-get install git)"
+        echo "2. Network/firewall blocking GitHub access"
+        echo "3. Repository doesn't exist or is private"
+        echo ""
+        echo "To test GitHub access, try:"
+        echo "  curl -I https://github.com"
+        exit 1
+    fi
+    
     cd midnight-indexer
-    git checkout "$BRANCH"
+    
+    if ! git checkout "$BRANCH"; then
+        echo ""
+        echo "ERROR: Failed to checkout branch: $BRANCH"
+        echo "Available branches:"
+        git branch -r
+        exit 1
+    fi
     
     echo "Using latest commit on $BRANCH:"
     git log --oneline -n 1
 else
     echo "Repository already exists. Updating..."
     cd "$INVESTIGATION_DIR/midnight-indexer"
-    git fetch
-    git checkout "$BRANCH"
-    git pull
+    
+    if ! git fetch; then
+        echo "ERROR: Failed to fetch from remote"
+        exit 1
+    fi
+    
+    if ! git checkout "$BRANCH"; then
+        echo "ERROR: Failed to checkout branch: $BRANCH"
+        exit 1
+    fi
+    
+    if ! git pull; then
+        echo "ERROR: Failed to pull latest changes"
+        exit 1
+    fi
     
     echo "Using latest commit on $BRANCH:"
     git log --oneline -n 1

@@ -16,7 +16,7 @@ AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
 cd ~  # Goes to /home/ssm-user
 
 # Download and run the launch script (it will clone the repo and set everything up)
-curl -O https://raw.githubusercontent.com/input-output-hk/midnight-indexer/investigation/PM-18678-hanging-root-cause/scripts/pm-18678-investigation/launch-ec2-investigation.sh
+curl -O https://raw.githubusercontent.com/midnightntwrk/midnight-indexer/investigation/PM-18678-hanging-root-cause/scripts/pm-18678-investigation/launch-ec2-investigation.sh
 chmod +x launch-ec2-investigation.sh
 ./launch-ec2-investigation.sh reproduce
 ```
