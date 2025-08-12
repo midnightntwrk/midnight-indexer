@@ -139,6 +139,90 @@ just pm18678-reset         # Reset environment (preserves logs)
 just pm18678-purge         # Full cleanup including logs
 ```
 
+## Managing the Investigation
+
+### Check Running Services
+
+```bash
+# Check all tmux sessions (should show multiple services)
+tmux ls
+
+# Check Docker containers (use sudo if you get permission denied)
+sudo docker ps
+# Or: newgrp docker && docker ps
+
+# Check specific service logs
+tmux attach -t chain-indexer  # Attach to chain-indexer
+tmux attach -t wallet-indexer # Attach to wallet-indexer
+tmux attach -t monitor        # Attach to monitoring tool
+
+# To detach from tmux (leave it running):
+# Press Ctrl+B then D
+
+# To stop/kill the specific tmux session:
+# Press Ctrl+C to stop the process, then type 'exit'
+
+# Quick status check
+cd ~/midnight-investigation/midnight-indexer/scripts/pm-18678-investigation
+./quick-check.sh
+```
+
+### Stop the Investigation
+
+```bash
+# One command to stop everything
+tmux kill-server; sudo docker stop postgres nats 2>/dev/null; sudo docker rm postgres nats 2>/dev/null
+
+# Or step by step:
+tmux kill-server                   # Stop all tmux sessions
+sudo docker stop postgres nats     # Stop Docker containers
+sudo docker rm postgres nats       # Remove Docker containers
+
+# Or use just command (if in repo directory)
+cd ~/midnight-investigation/midnight-indexer
+just pm18678-stop
+```
+
+### Restart After Stopping
+
+```bash
+cd ~/midnight-investigation/midnight-indexer/scripts/pm-18678-investigation
+./run-investigation.sh reproduce  # or 'control'
+```
+
+### Check Investigation Logs
+
+```bash
+# Find latest log directory
+LATEST_LOG=$(ls -td ~/midnight-investigation/logs/*/ | head -1)
+
+# Main investigation log
+tail -f $LATEST_LOG/investigation.log
+
+# Check for errors
+tail -f $LATEST_LOG/errors.log
+
+# Check if THE ISSUE™ has been detected
+tail -f $LATEST_LOG/issues/the-issue.log
+
+# Check build progress (if building)
+tail -f $LATEST_LOG/build.log
+
+# Check service logs
+tail -f $LATEST_LOG/services/chain-indexer.log
+tail -f $LATEST_LOG/services/wallet-indexer.log
+tail -f $LATEST_LOG/services/monitor.log
+
+# Check automated analysis results (runs every 6 hours)
+tail -f $LATEST_LOG/monitoring/auto-analysis.log
+
+# View PM-18678 specific events
+grep "PM-18678" $LATEST_LOG/services/*.log
+
+# Quick summary of all logs
+ls -la $LATEST_LOG/
+```
+
 ## Monitoring Script
 
 The Rust monitoring script (`pm18678-monitor`) provides:
