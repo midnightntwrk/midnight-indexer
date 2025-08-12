@@ -419,9 +419,14 @@ impl MonitoringState {
             if has_issue {
                 let mut issue_detected = self.issue_detected.write().await;
                 if !issue_detected.contains_key(session_id) {
+                    let runtime_minutes = now.signed_duration_since(wallet.created_at).num_minutes();
                     error!(
-                        "PM-18678 THE ISSUE™ DETECTED! Session: {}, ViewingUpdates: {}, ProgressUpdates: {}",
-                        session_id, wallet.viewing_update_count, wallet.progress_update_count
+                        "PM-18678 THE ISSUE™ DETECTED! Session: {}, ViewingKey: {}, Runtime: {} minutes, ViewingUpdates: {}, ProgressUpdates: {}",
+                        session_id, 
+                        &wallet.viewing_key[..20.min(wallet.viewing_key.len())], // Show first 20 chars of viewing key
+                        runtime_minutes,
+                        wallet.viewing_update_count, 
+                        wallet.progress_update_count
                     );
                     issue_detected.insert(session_id.to_string(), now);
                     
@@ -581,9 +586,11 @@ impl MonitoringState {
                     .map(|t| Utc::now().signed_duration_since(t).num_seconds())
                     .unwrap_or(-1);
                     
+                let runtime_minutes = Utc::now().signed_duration_since(wallet.created_at).num_minutes();
                 info!(
-                    "PM-18678 Wallet {}: viewing_updates: {}, progress_updates: {}, last_viewing: {}s ago, last_progress: {}s ago",
+                    "PM-18678 Wallet {} (created {} min ago): viewing_updates: {}, progress_updates: {}, last_viewing: {}s ago, last_progress: {}s ago",
                     session_id,
+                    runtime_minutes,
                     wallet.viewing_update_count,
                     wallet.progress_update_count,
                     viewing_age,
