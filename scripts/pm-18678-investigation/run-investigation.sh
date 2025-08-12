@@ -305,6 +305,37 @@ tmux new -d -s analyzer "
 "
 
 # ============================================================================
+# AUTOMATED ANALYSIS
+# ============================================================================
+
+# Run analyze-logs.sh periodically to check investigation status
+tmux new -d -s auto-analysis "
+    cd '$INDEXER_DIR/scripts/pm-18678-investigation'
+    while true; do
+        # Run analysis every 6 hours
+        sleep 21600
+        
+        echo \"[$(date '+%Y-%m-%d %H:%M:%S')] Running automated analysis...\" >> '$LOG_DIR/monitoring/auto-analysis.log'
+        
+        # Run the analysis script and capture output
+        ./analyze-logs.sh >> '$LOG_DIR/monitoring/auto-analysis.log' 2>&1
+        
+        # Check if THE ISSUE was detected
+        if grep -q 'THE ISSUE™ DETECTED' '$LOG_DIR/monitoring/auto-analysis.log'; then
+            echo \"\"
+            echo \"============================================================================\"
+            echo \"ALERT: THE ISSUE™ HAS BEEN DETECTED!\"
+            echo \"Check: $LOG_DIR/monitoring/auto-analysis.log\"
+            echo \"============================================================================\"
+            echo \"\" >> '$LOG_DIR/issues/ALERT.txt'
+            
+            # Create a prominent alert file
+            echo \"THE ISSUE™ DETECTED at $(date)\" > '$LOG_DIR/THE_ISSUE_DETECTED.txt'
+        fi
+    done
+"
+
+# ============================================================================
 # COMPLETION
 # ============================================================================
 
@@ -324,12 +355,17 @@ echo "  - Main: $LOG_DIR/investigation.log"
 echo "  - Errors: $LOG_DIR/errors.log"  
 echo "  - THE ISSUE: $LOG_DIR/issues/the-issue.log"
 echo "  - PM-18678 events: $LOG_DIR/monitoring/pm18678.log"
+echo "  - Auto-analysis: $LOG_DIR/monitoring/auto-analysis.log"
 echo "  - Service logs: $LOG_DIR/services/*.log"
+echo ""
+echo "Automated analysis runs every 6 hours. Check:"
+echo "  tail -f $LOG_DIR/monitoring/auto-analysis.log"
 echo ""
 echo "Monitor with:"
 echo "  tail -f $LOG_DIR/issues/the-issue.log    # Watch for THE ISSUE"
 echo "  tail -f $LOG_DIR/monitoring/summary.log  # Watch summary"
 echo "  tmux attach -t monitor                   # Attach to monitor"
+echo "  tmux attach -t auto-analysis             # Watch automated analysis"
 echo ""
 echo "Stop with: tmux kill-server"
 echo "============================================================================"

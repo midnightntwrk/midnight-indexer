@@ -1,4 +1,4 @@
-# PM-18678: THE ISSUE™ Investigation
+m# PM-18678: THE ISSUE™ Investigation
 
 ## Overview
 
@@ -6,17 +6,35 @@ This investigation tracks down a critical production bug where wallet subscripti
 
 ## Quick Start (EC2)
 
+### Option 1: Fresh Setup (No repo cloned)
 ```bash
 # SSH into EC2 instance
 AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
   aws ssm start-session --target i-05f50sdfsdfsdb2 --region eu-central-1
 
-# Navigate to investigation directory
-cd ~/midnight-investigation/midnight-indexer
-
-# Run the launch script
-./scripts/pm-18678-investigation/launch-ec2-investigation.sh reproduce
+# Download and run the launch script (it will clone the repo and set everything up)
+curl -O https://raw.githubusercontent.com/input-output-hk/midnight-indexer/investigation/PM-18678-hanging-root-cause/scripts/pm-18678-investigation/launch-ec2-investigation.sh
+chmod +x launch-ec2-investigation.sh
+./launch-ec2-investigation.sh reproduce
 ```
+
+### Option 2: Repo Already Cloned
+```bash
+# Navigate to the investigation scripts directory
+cd ~/midnight-investigation/midnight-indexer/scripts/pm-18678-investigation
+
+# Run the investigation directly
+./run-investigation.sh reproduce  # or 'control' for PR #42 enabled
+```
+
+The `run-investigation.sh` script will:
+1. Start Docker containers (PostgreSQL, NATS)
+2. Build all services with `--features cloud`
+3. Launch services in tmux sessions (chain-indexer, wallet-indexer, indexer-api)
+4. Start the monitoring tool that creates 30+ wallet subscriptions
+5. Run automated analysis every 6 hours (runs `analyze-logs.sh` automatically)
+6. Run continuously for 3-4 weeks, monitoring for THE ISSUE™
+7. Create alert files when THE ISSUE™ is detected
 
 ## Investigation Status
 
@@ -90,6 +108,20 @@ The Rust monitoring script (`pm18678-monitor`) provides:
 - Database connection monitoring
 - Automatic issue detection
 - Diagnostic capture on first occurrence
+
+## Automated Analysis
+
+The `run-investigation.sh` script runs automated analysis every 6 hours:
+- Executes `analyze-logs.sh` automatically in a tmux session
+- Logs results to `~/midnight-investigation/logs/*/monitoring/auto-analysis.log`
+- Creates alert files when THE ISSUE™ is detected
+- Runs in tmux session `auto-analysis` (attach with `tmux attach -t auto-analysis`)
+
+Manual analysis can still be run anytime:
+```bash
+cd ~/midnight-investigation/midnight-indexer/scripts/pm-18678-investigation
+./analyze-logs.sh
+```
 
 ### Running the Monitor
 ```bash

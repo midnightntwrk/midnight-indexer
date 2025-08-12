@@ -175,6 +175,13 @@ pm18678-analyze log_dir="$HOME/midnight-investigation/logs":
     chmod +x analyze-logs.sh
     ./analyze-logs.sh {{log_dir}}
 
+# Quick check of PM-18678 investigation status
+pm18678-check:
+    #!/usr/bin/env bash
+    cd scripts/pm-18678-investigation
+    chmod +x quick-check.sh
+    ./quick-check.sh
+
 # Quick status check for running investigation
 pm18678-status:
     #!/usr/bin/env bash
