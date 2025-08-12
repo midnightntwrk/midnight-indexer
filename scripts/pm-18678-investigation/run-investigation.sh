@@ -105,6 +105,14 @@ fi
 # ============================================================================
 
 log_info "Building indexer components..."
+
+# Configure cargo to use sparse registry protocol to avoid git issues
+export CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+
+# Also set git to use https without asking for credentials for public repos
+git config --global url."https://github.com/".insteadOf git@github.com:
+git config --global url."https://".insteadOf git://
+
 cargo build --release --features cloud > "$LOG_DIR/build.log" 2>&1
 
 # Build monitoring script
