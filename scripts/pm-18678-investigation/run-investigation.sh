@@ -163,7 +163,12 @@ fi
 
 # Run migrations
 log_info "Running database migrations..."
-cargo run -p chain-indexer -- migrate > "$LOG_DIR/migrations.log" 2>&1
+if ! cargo run -p chain-indexer -- migrate > "$LOG_DIR/migrations.log" 2>&1; then
+    log_error "Migration failed. Check $LOG_DIR/migrations.log for details"
+    tail -20 "$LOG_DIR/migrations.log"
+    exit 1
+fi
+log_info "Migrations completed successfully"
 
 # ============================================================================
 # SERVICE WRAPPER FUNCTION
