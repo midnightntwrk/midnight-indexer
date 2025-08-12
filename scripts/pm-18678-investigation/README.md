@@ -21,10 +21,15 @@ cd ~  # Goes to /home/ssm-user
 # Set GitHub token for private dependencies (midnight-ledger-prototype)
 export GITHUB_TOKEN=your_github_personal_access_token
 
-# Download and run the launch script (it will clone the repo and set everything up)
+# Download the launch script
 curl -O https://raw.githubusercontent.com/midnightntwrk/midnight-indexer/investigation/PM-18678-hanging-root-cause/scripts/pm-18678-investigation/launch-ec2-investigation.sh
 chmod +x launch-ec2-investigation.sh
+
+# Run in screen to prevent SSM timeout (first build takes 10-20 minutes)
+screen -S pm18678
 ./launch-ec2-investigation.sh reproduce
+# Press Ctrl+A then D to detach from screen
+# To reattach: screen -r pm18678
 ```
 
 ### Option 2: Repo Already Cloned
