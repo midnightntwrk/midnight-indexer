@@ -18,7 +18,9 @@ jobs:
     outputs:
       toolchain: ${{steps.set_toolchain.outputs.toolchain}}
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
       - name: Set toolchain
         id: set_toolchain
         env:
@@ -32,7 +34,7 @@ jobs:
     needs: toolchain
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
       - name: Add github.com credentials to netrc
         uses: extractions/netrc@v2
@@ -72,7 +74,8 @@ jobs:
   fmt-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
@@ -95,7 +98,8 @@ jobs:
     runs-on: ubuntu-latest-8-core-x64
     needs: toolchain
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
       - name: Add github.com credentials to netrc
         uses: extractions/netrc@v2
@@ -137,7 +141,8 @@ jobs:
     runs-on: ubuntu-latest-8-core-x64
     needs: toolchain
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
       - name: Add github.com credentials to netrc
         uses: extractions/netrc@v2
@@ -180,7 +185,8 @@ jobs:
   doc:
     runs-on: ubuntu-latest-8-core-x64
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
       - name: Add github.com credentials to netrc
         uses: extractions/netrc@v2
