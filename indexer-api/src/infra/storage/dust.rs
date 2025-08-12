@@ -217,10 +217,9 @@ impl DustStorage for Storage {
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send {
         let batch_size = batch_size.get() as i64;
+        let mut last_index = from_generation_index;
 
         try_stream! {
-            let mut last_index = from_generation_index;
-
             loop {
                 // Query generation info.
                 let query = if only_active {
@@ -261,7 +260,6 @@ impl DustStorage for Storage {
 
                 for row in rows {
                     last_index = row.id + 1;
-
                     yield DustGenerationEvent::Info(row.into());
                 }
 
@@ -282,10 +280,9 @@ impl DustStorage for Storage {
     ) -> impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send {
         let batch_size = batch_size.get() as i64;
         let min_prefix_length = min_prefix_length as usize;
+        let mut current_block = from_block as i64;
 
         try_stream! {
-            let mut current_block = from_block as i64;
-
             loop {
                 // Filter prefixes that meet minimum length requirement.
                 let valid_prefixes = prefixes
@@ -365,11 +362,8 @@ impl DustStorage for Storage {
                     break;
                 }
 
-                // Track the highest block height for pagination.
-                let mut max_height = current_block;
-
-                // Group by transaction using itertools' chunk_by (not group_by which is deprecated in 0.14),
-                // then collect to avoid Send issues.
+                // Group by transaction using itertools' chunk_by (not group_by which is deprecated
+                // in 0.14), then collect to avoid Send issues.
                 let grouped = rows
                     .into_iter()
                     .chunk_by(|(hash, height, _)| (*hash, *height as u32))
@@ -380,12 +374,12 @@ impl DustStorage for Storage {
                     })
                     .collect::<Vec<_>>();
 
+                let mut max_height = current_block;
                 for ((transaction_hash, block_height), nullifiers) in grouped {
                     max_height = max_height.max(block_height as i64);
 
-                    let mut matching_prefixes = Vec::new();
-
                     // Check which prefixes match the nullifiers for this transaction.
+                    let mut matching_prefixes = Vec::new();
                     for (_, _, nullifier) in nullifiers {
                         for prefix in &valid_prefixes {
                             if nullifier.as_ref().starts_with(prefix.as_ref()) {
@@ -419,10 +413,9 @@ impl DustStorage for Storage {
     ) -> impl Stream<Item = Result<DustCommitmentEvent, sqlx::Error>> + Send {
         let batch_size = batch_size.get() as i64;
         let min_prefix_length = min_prefix_length as usize;
+        let mut current_index = start_index as i64;
 
         try_stream! {
-            let mut current_index = start_index as i64;
-
             loop {
                 // Filter prefixes that meet minimum length requirement.
                 let valid_prefixes = commitment_prefixes
@@ -554,10 +547,9 @@ impl DustStorage for Storage {
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send {
         let batch_size = batch_size.get() as i64;
+        let mut last_id = 0;
 
         try_stream! {
-            let mut last_id = 0i64;
-
             loop {
                 // Build conditions based on address types.
                 let conditions = addresses
@@ -604,12 +596,10 @@ impl DustStorage for Storage {
                 );
 
                 let mut registration_query =
-                    sqlx::query_as::<_, CnightRegistrationsRow>(&query).bind(last_id);
-
-                for (_, bytes) in &conditions {
+                    sqlx::query_as::<_, CnightRegistrationsRow>(&query).bind(last_id as i64);
+                for (_, bytes) in conditions {
                     registration_query = registration_query.bind(bytes);
                 }
-
                 registration_query = registration_query.bind(batch_size);
 
                 let rows = registration_query.fetch_all(&*self.pool).await?;
@@ -619,7 +609,7 @@ impl DustStorage for Storage {
                 }
 
                 for row in rows {
-                    last_id = row.id as i64;
+                    last_id = row.id;
                     yield RegistrationUpdateEvent::Update(row.into());
                 }
             }
@@ -641,7 +631,7 @@ impl DustStorage for Storage {
             .bind(dust_address.as_ref())
             .fetch_optional(&*self.pool)
             .await?
-            .map(|(m,)| m as u64);
+            .map(|(max,)| max as u64);
 
         Ok(max)
     }
