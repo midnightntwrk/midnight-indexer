@@ -18,6 +18,9 @@ bash
 # Navigate to home directory (SSM starts in /var/snap/amazon-ssm-agent/11797)
 cd ~  # Goes to /home/ssm-user
 
+# Set GitHub token for private dependencies (midnight-ledger-prototype)
+export GITHUB_TOKEN=your_github_personal_access_token
+
 # Download and run the launch script (it will clone the repo and set everything up)
 curl -O https://raw.githubusercontent.com/midnightntwrk/midnight-indexer/investigation/PM-18678-hanging-root-cause/scripts/pm-18678-investigation/launch-ec2-investigation.sh
 chmod +x launch-ec2-investigation.sh

@@ -109,11 +109,24 @@ log_info "Building indexer components..."
 # Configure cargo to use sparse registry protocol to avoid git issues
 export CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
-# Also set git to use https without asking for credentials for public repos
-git config --global url."https://github.com/".insteadOf git@github.com:
-git config --global url."https://".insteadOf git://
+# Check if we have GitHub token for private repos
+if [ -n "$GITHUB_TOKEN" ]; then
+    log_info "Using GitHub token for private dependencies"
+    git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+else
+    log_error "WARNING: No GITHUB_TOKEN set. Build may fail if private dependencies are required."
+    log_error "To fix: export GITHUB_TOKEN=your_github_personal_access_token"
+    log_error "Create a token at: https://github.com/settings/tokens with 'repo' scope"
+    log_error ""
+    log_error "Attempting build anyway..."
+fi
 
-cargo build --release --features cloud > "$LOG_DIR/build.log" 2>&1
+cargo build --release --features cloud > "$LOG_DIR/build.log" 2>&1 || {
+    log_error "Build failed. Check $LOG_DIR/build.log for details"
+    log_error "If it's asking for GitHub credentials, you need to set GITHUB_TOKEN"
+    tail -20 "$LOG_DIR/build.log"
+    exit 1
+}
 
 # Build monitoring script
 cd "$INDEXER_DIR/scripts/pm-18678-investigation"
