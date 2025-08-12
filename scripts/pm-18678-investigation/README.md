@@ -216,6 +216,14 @@ less $LATEST_LOG/issues/the-issue.log         # '/' to search, 'n' for next matc
 tail -f $LATEST_LOG/investigation.log         # Live updates but can't scroll
 tail -f $LATEST_LOG/errors.log
 tail -f $LATEST_LOG/issues/the-issue.log
+tail -f $LATEST_LOG/build.log
+tail -f $LATEST_LOG/services/chain-indexer.log
+tail -f $LATEST_LOG/services/wallet-indexer.log
+tail -f $LATEST_LOG/services/indexer-api-8080.log
+tail -f $LATEST_LOG/services/indexer-api-8081.log
+tail -f $LATEST_LOG/services/indexer-api-8082.log
+tail -f $LATEST_LOG/services/monitor.log
+tail -f $LATEST_LOG/monitoring/auto-analysis.log
 
 # Check service logs (use less for scrollable viewing)
 less +F $LATEST_LOG/services/chain-indexer.log
