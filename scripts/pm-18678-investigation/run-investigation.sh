@@ -163,7 +163,7 @@ fi
 
 # Run migrations
 log_info "Running database migrations..."
-if ! cargo run -p chain-indexer -- migrate > "$LOG_DIR/migrations.log" 2>&1; then
+if ! cargo run --release -p chain-indexer --features cloud -- migrate > "$LOG_DIR/migrations.log" 2>&1; then
     log_error "Migration failed. Check $LOG_DIR/migrations.log for details"
     tail -20 "$LOG_DIR/migrations.log"
     exit 1
