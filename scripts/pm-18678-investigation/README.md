@@ -12,7 +12,16 @@ This investigation tracks down a critical production bug where wallet subscripti
 AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
   aws ssm start-session --target i-05f50sdfsdfsdb2 --region eu-central-1
 
-# Start a proper bash shell (SSM doesn't provide full terminal by default)
+# Start a better shell environment (SSM has limited terminal capabilities)
+# Option 1: Use screen for scrollback buffer
+screen -S main
+# Now you can scroll: Ctrl+A then ESC, then use arrows/PgUp/PgDn, press ESC to exit scroll mode
+
+# Option 2: Use tmux for better terminal
+tmux new -s main
+# Scroll in tmux: Ctrl+B then [, use arrows/PgUp/PgDn, press q to exit scroll mode
+
+# Option 3: Just use bash (no scrollback)
 bash
 
 # Navigate to home directory (SSM starts in /var/snap/amazon-ssm-agent/11797)
@@ -171,10 +180,12 @@ cd ~/midnight-investigation/midnight-indexer/scripts/pm-18678-investigation
 
 ```bash
 # One command to stop everything
-tmux kill-server; sudo docker stop postgres nats 2>/dev/null; sudo docker rm postgres nats 2>/dev/null
+tmux kill-server; screen -ls | grep -o '[0-9]*\..*' | cut -d. -f1 | xargs -I{} screen -X -S {} quit; sudo docker stop postgres nats 2>/dev/null; sudo docker rm postgres nats 2>/dev/null
 
 # Or step by step:
 tmux kill-server                   # Stop all tmux sessions
+screen -X -S pm18678 quit          # Stop specific screen session
+screen -ls | grep -o '[0-9]*\..*' | cut -d. -f1 | xargs -I{} screen -X -S {} quit  # Stop ALL screen sessions
 sudo docker stop postgres nats     # Stop Docker containers
 sudo docker rm postgres nats       # Remove Docker containers
 
