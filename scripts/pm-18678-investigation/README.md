@@ -211,6 +211,9 @@ tail -f $LATEST_LOG/build.log
 # Check service logs
 tail -f $LATEST_LOG/services/chain-indexer.log
 tail -f $LATEST_LOG/services/wallet-indexer.log
+tail -f $LATEST_LOG/services/indexer-api-8080.log  # API instance 1
+tail -f $LATEST_LOG/services/indexer-api-8081.log  # API instance 2
+tail -f $LATEST_LOG/services/indexer-api-8082.log  # API instance 3
 tail -f $LATEST_LOG/services/monitor.log
 
 # Check automated analysis results (runs every 6 hours)
