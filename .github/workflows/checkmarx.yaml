@@ -2,16 +2,16 @@ name: Checkmarx One Scan
 
 # ↓ lock down top‐level permissions to only what we use
 permissions:
-  contents: read             # we only need to checkout code
-  actions: read              # to query workflows/runs
-  pull-requests: write       # to comment on or label PRs
-  security-events: write     # to upload scan results to github
+  contents: read # we only need to checkout code
+  actions: read # to query workflows/runs
+  pull-requests: write # to comment on or label PRs
+  security-events: write # to upload scan results to github
 
 on:
   pull_request:
-    branches: [ '**' ]
+    branches: ["**"]
   push:
-    branches: [ 'main' ]
+    branches: ["main"]
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref }}
   cancel-in-progress: true
@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@8edcb1bdb4e267140fa742c62e395cd74f332709  #v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
       - name: Install dependencies
         run: |
@@ -95,6 +95,6 @@ jobs:
 
       # Upload report so security issues are viewable from within the github ui
       - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@7273f08caa1dcf2c2837f362f1982de0ab4dc344  # v3.29.2
+        uses: github/codeql-action/upload-sarif@7273f08caa1dcf2c2837f362f1982de0ab4dc344 # v3.29.2
         with:
           sarif_file: cx_result.sarif
