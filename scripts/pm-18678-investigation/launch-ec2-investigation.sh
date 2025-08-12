@@ -99,6 +99,18 @@ fi
 
 echo "Checking dependencies..."
 
+# Check for build essentials (needed for Rust compilation)
+if ! command -v gcc &> /dev/null || ! command -v cc &> /dev/null; then
+    echo "Installing build essentials..."
+    if command -v apt-get &> /dev/null; then
+        sudo apt-get update
+        sudo apt-get install -y build-essential pkg-config libssl-dev
+    elif command -v yum &> /dev/null; then
+        sudo yum groupinstall -y "Development Tools"
+        sudo yum install -y openssl-devel
+    fi
+fi
+
 # Check for Rust
 if ! command -v cargo &> /dev/null; then
     echo "Installing Rust..."
