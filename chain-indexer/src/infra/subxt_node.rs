@@ -631,6 +631,7 @@ mod tests {
     ///    - The last block height containing test transactions/contract actions
     /// 5. Update the hardcoded values in this test with the new data
     #[tokio::test]
+    #[ignore = "already covered in e2e tests"]
     async fn test_finalized_blocks_0_13() -> Result<(), BoxError> {
         test_finalized_blocks(
             PROTOCOL_VERSION_000_013_000,
