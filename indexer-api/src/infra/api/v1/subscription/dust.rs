@@ -14,7 +14,7 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, ContextExt, HexEncoded, InnerApiError, ResultExt,
+        ApiError, ApiResult, ContextExt, HexEncoded, ResultExt,
         v1::dust::{
             DustCommitmentEvent, DustCommitmentProgress, DustGenerationEvent, DustGenerationInfo,
             DustGenerationProgress, DustNullifierTransactionEvent,
@@ -109,10 +109,7 @@ where
     {
         // Validate minimum prefix length.
         if min_prefix_length < 8 {
-            return Err(ApiError::Client(InnerApiError(
-                "minimum prefix length must be at least 8".to_string(),
-                None,
-            )));
+            return Err(ApiError::client("minimum prefix length must be at least 8"));
         }
 
         // Convert hex prefixes to binary.
@@ -157,10 +154,7 @@ where
     ) -> Result<impl Stream<Item = ApiResult<DustCommitmentEvent>> + use<'a, S>, ApiError> {
         // Validate minimum prefix length.
         if min_prefix_length < 8 {
-            return Err(ApiError::Client(InnerApiError(
-                "Minimum prefix length must be at least 8".to_string(),
-                None,
-            )));
+            return Err(ApiError::client("minimum prefix length must be at least 8"));
         }
 
         // Convert hex prefixes to binary.
@@ -168,9 +162,7 @@ where
             .into_iter()
             .map(|p| p.hex_decode::<indexer_common::domain::DustPrefix>())
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                ApiError::Client(InnerApiError(format!("Invalid hex prefix: {e}"), None))
-            })?;
+            .map_err_into_client_error(|| "invalid hex prefix")?;
 
         // Build a stream by merging commitments and progress updates.
         let (trigger, tripwire) = Tripwire::new();
@@ -211,7 +203,7 @@ where
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<Vec<domain::dust::RegistrationAddress>, _>>()
-            .map_err(|e| ApiError::Client(InnerApiError(format!("Invalid address: {e}"), None)))?;
+            .map_err_into_client_error(|| "invalid address")?;
 
         // Build a stream by merging updates and progress.
         let (trigger, tripwire) = Tripwire::new();

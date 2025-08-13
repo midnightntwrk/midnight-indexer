@@ -441,6 +441,16 @@ enum ApiError {
     Server(InnerApiError),
 }
 
+impl ApiError {
+    /// Create a client error with the given message.
+    fn client<S>(message: S) -> Self
+    where
+        S: ToString,
+    {
+        ApiError::Client(InnerApiError(message.to_string(), None))
+    }
+}
+
 /// For client errors, write the full error chain and for server errors, log the full error chain
 /// and write "Internal Server Error".
 impl Display for ApiError {
