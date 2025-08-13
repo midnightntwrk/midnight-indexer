@@ -15,7 +15,10 @@ AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
 # Start a better shell environment (SSM has limited terminal capabilities)
 # Option 1: Use screen for scrollback buffer
 screen -S main
-# Now you can scroll: Ctrl+A then ESC, then use arrows/PgUp/PgDn, press ESC to exit scroll mode
+# Screen commands:
+# - Detach (keep running): Ctrl+A then D
+# - Scroll mode: Ctrl+A then ESC, use arrows/PgUp/PgDn, press ESC to exit
+# - Kill session: Ctrl+A then K
 
 # Option 2: Use tmux for better terminal
 tmux new -s main
@@ -37,8 +40,9 @@ chmod +x launch-ec2-investigation.sh
 # Run in screen to prevent SSM timeout (first build takes 10-20 minutes)
 screen -S pm18678
 ./launch-ec2-investigation.sh reproduce
-# Press Ctrl+A then D to detach from screen
+# Press Ctrl+A then D to detach from screen (keeps it running)
 # To reattach: screen -r pm18678
+# To kill the screen session: Press Ctrl+A then K (or exit the shell)
 ```
 
 ### Reconnecting After Disconnect
