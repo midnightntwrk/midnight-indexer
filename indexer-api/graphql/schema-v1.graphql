@@ -607,7 +607,7 @@ type Subscription {
 	"""
 	Stream registration changes for multiple address types.
 	"""
-	registrationUpdates(addresses: [RegistrationAddress!]!): RegistrationUpdateEvent!
+	dustRegistrationUpdates(addresses: [RegistrationAddress!]!): RegistrationUpdateEvent!
 }
 
 """

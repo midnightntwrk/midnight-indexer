@@ -201,7 +201,7 @@ where
     }
 
     /// Stream registration changes for multiple address types.
-    async fn registration_updates<'a>(
+    async fn dust_registration_updates<'a>(
         &self,
         cx: &'a Context<'a>,
         addresses: Vec<RegistrationAddress>,
