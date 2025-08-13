@@ -478,6 +478,16 @@ impl TryFrom<RegistrationAddress> for domain::dust::RegistrationAddress {
     }
 }
 
+/// Registration update event union type.
+#[derive(Debug, Clone, Union, Serialize, Deserialize)]
+pub enum RegistrationUpdateEvent {
+    /// Registration update.
+    Update(RegistrationUpdate),
+
+    /// Progress update.
+    Progress(RegistrationUpdateProgress),
+}
+
 /// Registration update information.
 #[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
 pub struct RegistrationUpdate {
@@ -517,35 +527,4 @@ pub struct RegistrationUpdateProgress {
 
     /// Number of updates in batch.
     pub update_count: u32,
-}
-
-impl From<domain::dust::RegistrationUpdateProgress> for RegistrationUpdateProgress {
-    fn from(progress: domain::dust::RegistrationUpdateProgress) -> Self {
-        Self {
-            latest_timestamp: progress.latest_timestamp,
-            update_count: progress.update_count,
-        }
-    }
-}
-
-/// Registration update event union type.
-#[derive(Debug, Clone, Union, Serialize, Deserialize)]
-pub enum RegistrationUpdateEvent {
-    /// Registration update.
-    Update(RegistrationUpdate),
-
-    /// Progress update.
-    Progress(RegistrationUpdateProgress),
-}
-
-impl From<domain::dust::RegistrationUpdateEvent> for RegistrationUpdateEvent {
-    fn from(event: domain::dust::RegistrationUpdateEvent) -> Self {
-        match event {
-            domain::dust::RegistrationUpdateEvent::Update(update) => Self::Update(update.into()),
-
-            domain::dust::RegistrationUpdateEvent::Progress(progress) => {
-                Self::Progress(progress.into())
-            }
-        }
-    }
 }

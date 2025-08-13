@@ -14,8 +14,7 @@
 use crate::domain::{
     dust::{
         DustCommitmentEvent, DustGenerationEvent, DustGenerationStatus, DustMerkleTreeType,
-        DustNullifierTransactionEvent, DustSystemState, RegistrationAddress,
-        RegistrationUpdateEvent,
+        DustNullifierTransactionEvent, DustSystemState, RegistrationAddress, RegistrationUpdate,
     },
     storage::{BlockStorage, NoopStorage},
 };
@@ -75,7 +74,7 @@ pub trait DustStorage: BlockStorage {
         &self,
         addresses: &[RegistrationAddress],
         batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send;
+    ) -> impl Stream<Item = Result<RegistrationUpdate, sqlx::Error>> + Send;
 
     /// Get highest generation index for a DUST address.
     async fn get_highest_generation_index_for_dust_address(
@@ -146,7 +145,7 @@ impl DustStorage for NoopStorage {
         &self,
         addresses: &[RegistrationAddress],
         batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send {
+    ) -> impl Stream<Item = Result<RegistrationUpdate, sqlx::Error>> + Send {
         stream::empty()
     }
 

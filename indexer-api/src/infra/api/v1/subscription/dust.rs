@@ -202,16 +202,16 @@ where
             .map_err(|e| ApiError::Client(InnerApiError(format!("Invalid address: {e}"), None)))?;
 
         let stream = try_stream! {
-            let registration_stream = storage
+            let registration_updates = storage
                 .get_registration_updates(&addresses, BATCH_SIZE);
-            let mut registration_stream = pin!(registration_stream);
+            let mut registration_updates = pin!(registration_updates);
 
-            while let Some(event) = registration_stream
+            while let Some(registration_update) = registration_updates
                 .try_next()
                 .await
                 .map_err_into_server_error(|| "get next registration update event")?
             {
-                yield event.into();
+                yield RegistrationUpdateEvent::Update(registration_update.into())
             }
         };
 

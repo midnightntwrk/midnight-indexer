@@ -120,8 +120,10 @@ pub struct DustGenerationProgress {
 pub enum DustGenerationEvent {
     /// Generation information.
     Info(DustGenerationInfo),
+
     /// Merkle tree update.
     MerkleUpdate(DustGenerationMerkleUpdate),
+
     /// Progress update.
     Progress(DustGenerationProgress),
 }
@@ -211,8 +213,10 @@ pub struct DustCommitmentProgress {
 pub enum DustCommitmentEvent {
     /// Commitment information.
     Commitment(DustCommitmentInfo),
+
     /// Merkle tree update.
     MerkleUpdate(DustCommitmentMerkleUpdate),
+
     /// Progress update.
     Progress(DustCommitmentProgress),
 }
@@ -255,23 +259,4 @@ pub struct RegistrationUpdate {
 
     /// Removal timestamp (if removed).
     pub removed_at: Option<u64>,
-}
-
-/// Registration update progress.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegistrationUpdateProgress {
-    /// Latest processed timestamp.
-    pub latest_timestamp: u64,
-
-    /// Number of updates in batch.
-    pub update_count: u32,
-}
-
-/// Registration update event union type.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RegistrationUpdateEvent {
-    /// Registration update.
-    Update(RegistrationUpdate),
-    /// Progress update.
-    Progress(RegistrationUpdateProgress),
 }

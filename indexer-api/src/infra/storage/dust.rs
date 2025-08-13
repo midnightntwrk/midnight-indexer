@@ -17,7 +17,7 @@ use crate::{
             AddressType, DustCommitmentEvent, DustCommitmentInfo, DustGenerationEvent,
             DustGenerationInfo, DustGenerationStatus, DustMerkleTreeType, DustNullifierTransaction,
             DustNullifierTransactionEvent, DustSystemState, RegistrationAddress,
-            RegistrationUpdate, RegistrationUpdateEvent,
+            RegistrationUpdate,
         },
         storage::dust::DustStorage,
     },
@@ -545,7 +545,7 @@ impl DustStorage for Storage {
         &self,
         addresses: &[RegistrationAddress],
         batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<RegistrationUpdateEvent, sqlx::Error>> + Send {
+    ) -> impl Stream<Item = Result<RegistrationUpdate, sqlx::Error>> + Send {
         let batch_size = batch_size.get() as i64;
         let mut last_id = 0;
 
@@ -610,7 +610,7 @@ impl DustStorage for Storage {
 
                 for row in rows {
                     last_id = row.id;
-                    yield RegistrationUpdateEvent::Update(row.into());
+                    yield row.into();
                 }
             }
         }
