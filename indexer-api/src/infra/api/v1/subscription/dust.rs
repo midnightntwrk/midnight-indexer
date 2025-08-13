@@ -16,8 +16,10 @@ use crate::{
     infra::api::{
         ApiError, ApiResult, ContextExt, HexEncoded, InnerApiError, ResultExt,
         v1::dust::{
-            DustCommitmentEvent, DustGenerationEvent, DustGenerationInfo, DustGenerationProgress,
-            DustNullifierTransactionEvent, RegistrationAddress, RegistrationUpdateEvent,
+            DustCommitmentEvent, DustCommitmentProgress, DustGenerationEvent, DustGenerationInfo,
+            DustGenerationProgress, DustNullifierTransactionEvent,
+            DustNullifierTransactionProgress, RegistrationAddress, RegistrationUpdateEvent,
+            RegistrationUpdateProgress,
         },
     },
 };
@@ -90,7 +92,7 @@ where
             .take_until_if(tripwire)
             .map_ok(DustGenerationEvent::Progress);
 
-        // Merge the streams
+        // Merge the streams.
         let events = tokio_stream::StreamExt::merge(dust_generations, progress_updates);
 
         Ok(events)
@@ -113,8 +115,6 @@ where
             )));
         }
 
-        let storage = cx.get_storage::<S>();
-
         // Convert hex prefixes to binary.
         let binary_prefixes = prefixes
             .into_iter()
@@ -125,21 +125,26 @@ where
         // Default to 0 to start from the genesis block.
         let from_block = from_block.unwrap_or(0);
 
-        let stream = try_stream! {
-            let nullifier_stream = storage
-                .get_dust_nullifier_transactions(&binary_prefixes, min_prefix_length, from_block, BATCH_SIZE);
-            let mut nullifier_stream = pin!(nullifier_stream);
+        // Build a stream by merging transactions and progress updates.
+        let (trigger, tripwire) = Tripwire::new();
 
-            while let Some(event) = nullifier_stream
-                .try_next()
-                .await
-                .map_err_into_server_error(|| "get next DUST nullifier transaction event")?
-            {
-                yield event.into();
-            }
-        };
+        let nullifier_transactions = make_dust_nullifier_transactions::<S>(
+            cx,
+            binary_prefixes.clone(),
+            min_prefix_length,
+            from_block,
+            trigger,
+        )
+        .map_ok(|tx| DustNullifierTransactionEvent::Transaction(tx.into()));
 
-        Ok(stream)
+        let progress_updates =
+            make_nullifier_progress_updates::<S>(cx, binary_prefixes, from_block)
+                .take_until_if(tripwire)
+                .map_ok(DustNullifierTransactionEvent::Progress);
+
+        let events = tokio_stream::StreamExt::merge(nullifier_transactions, progress_updates);
+
+        Ok(events)
     }
 
     /// Stream DUST commitments with merkle tree updates, filtered by prefix.
@@ -158,8 +163,6 @@ where
             )));
         }
 
-        let storage = cx.get_storage::<S>();
-
         // Convert hex prefixes to binary.
         let binary_prefixes = commitment_prefixes
             .into_iter()
@@ -169,21 +172,32 @@ where
                 ApiError::Client(InnerApiError(format!("Invalid hex prefix: {e}"), None))
             })?;
 
-        let stream = try_stream! {
-            let commitment_stream = storage
-                .get_dust_commitments(&binary_prefixes, start_index, min_prefix_length, BATCH_SIZE);
-            let mut commitment_stream = pin!(commitment_stream);
+        // Build a stream by merging commitments and progress updates.
+        let (trigger, tripwire) = Tripwire::new();
 
-            while let Some(event) = commitment_stream
-                .try_next()
-                .await
-                .map_err_into_server_error(|| "get next DUST commitment event")?
-            {
-                yield event.into();
+        let commitments = make_dust_commitments::<S>(
+            cx,
+            binary_prefixes.clone(),
+            start_index,
+            min_prefix_length,
+            trigger,
+        )
+        .map_ok(|c| match c {
+            domain::dust::DustCommitmentEvent::Commitment(commitment) => {
+                DustCommitmentEvent::Commitment(commitment.into())
             }
-        };
+            domain::dust::DustCommitmentEvent::MerkleUpdate(update) => {
+                DustCommitmentEvent::MerkleUpdate(update.into())
+            }
+        });
 
-        Ok(stream)
+        let progress_updates = make_commitment_progress_updates::<S>(cx, start_index)
+            .take_until_if(tripwire)
+            .map_ok(DustCommitmentEvent::Progress);
+
+        let events = tokio_stream::StreamExt::merge(commitments, progress_updates);
+
+        Ok(events)
     }
 
     /// Stream registration changes for multiple address types.
@@ -192,8 +206,6 @@ where
         cx: &'a Context<'a>,
         addresses: Vec<RegistrationAddress>,
     ) -> Result<impl Stream<Item = ApiResult<RegistrationUpdateEvent>> + use<'a, S>, ApiError> {
-        let storage = cx.get_storage::<S>();
-
         // Convert API types to domain types.
         let addresses = addresses
             .into_iter()
@@ -201,21 +213,19 @@ where
             .collect::<Result<Vec<domain::dust::RegistrationAddress>, _>>()
             .map_err(|e| ApiError::Client(InnerApiError(format!("Invalid address: {e}"), None)))?;
 
-        let stream = try_stream! {
-            let registration_updates = storage
-                .get_registration_updates(&addresses, BATCH_SIZE);
-            let mut registration_updates = pin!(registration_updates);
+        // Build a stream by merging updates and progress.
+        let (trigger, tripwire) = Tripwire::new();
 
-            while let Some(registration_update) = registration_updates
-                .try_next()
-                .await
-                .map_err_into_server_error(|| "get next registration update event")?
-            {
-                yield RegistrationUpdateEvent::Update(registration_update.into())
-            }
-        };
+        let registration_updates = make_registration_updates::<S>(cx, addresses.clone(), trigger)
+            .map_ok(|update| RegistrationUpdateEvent::Update(update.into()));
 
-        Ok(stream)
+        let progress_updates = make_registration_progress_updates::<S>(cx, addresses)
+            .take_until_if(tripwire)
+            .map_ok(RegistrationUpdateEvent::Progress);
+
+        let events = tokio_stream::StreamExt::merge(registration_updates, progress_updates);
+
+        Ok(events)
     }
 }
 
@@ -251,10 +261,7 @@ where
             match event {
                 domain::dust::DustGenerationEvent::Info(info) => yield info.into(),
                 domain::dust::DustGenerationEvent::MerkleUpdate(_) => {
-                    // Skip merkle updates in this stream - they're part of Info events now
-                },
-                domain::dust::DustGenerationEvent::Progress(_) => {
-                    // Skip progress - handled separately
+                    // Skip merkle updates in this stream - they're part of Info events now.
                 },
             }
         }
@@ -281,14 +288,14 @@ async fn make_dust_generation_progress_update<S>(
 where
     S: Storage,
 {
-    // Get highest generation index for this address
+    // Get highest generation index for this address.
     let highest_index = storage
         .get_highest_generation_index_for_dust_address(&dust_address)
         .await
         .map_err_into_server_error(|| "get highest generation index")?
         .unwrap_or(0);
 
-    // Get count of active generations
+    // Get count of active generations.
     let active_generation_count = storage
         .get_active_generation_count_for_dust_address(&dust_address)
         .await
@@ -297,5 +304,147 @@ where
     Ok(DustGenerationProgress {
         highest_index,
         active_generation_count,
+    })
+}
+
+fn make_dust_nullifier_transactions<'a, S>(
+    cx: &'a Context<'a>,
+    prefixes: Vec<DustPrefix>,
+    min_prefix_length: u32,
+    from_block: u32,
+    trigger: Trigger,
+) -> impl Stream<Item = ApiResult<domain::dust::DustNullifierTransaction>> + use<'a, S>
+where
+    S: Storage,
+{
+    let storage = cx.get_storage::<S>();
+
+    try_stream! {
+        let nullifier_stream = storage
+            .get_dust_nullifier_transactions(&prefixes, min_prefix_length, from_block, BATCH_SIZE);
+        let mut nullifier_stream = pin!(nullifier_stream);
+
+        while let Some(event) = nullifier_stream
+            .try_next()
+            .await
+            .map_err_into_server_error(|| "get next DUST nullifier transaction event")?
+        {
+            match event {
+                domain::dust::DustNullifierTransactionEvent::Transaction(tx) => yield tx,
+            }
+        }
+    }
+    .on_drop(move || drop(trigger))
+}
+
+fn make_nullifier_progress_updates<'a, S>(
+    cx: &'a Context<'a>,
+    _prefixes: Vec<DustPrefix>,
+    from_block: u32,
+) -> impl Stream<Item = ApiResult<DustNullifierTransactionProgress>> + use<'a, S>
+where
+    S: Storage,
+{
+    let _storage = cx.get_storage::<S>();
+    let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
+
+    // For now, return simple progress updates.
+    intervals.map(move |_| {
+        Ok(DustNullifierTransactionProgress {
+            highest_block: from_block,
+            matched_count: 0,
+        })
+    })
+}
+
+fn make_dust_commitments<'a, S>(
+    cx: &'a Context<'a>,
+    prefixes: Vec<DustPrefix>,
+    start_index: u64,
+    min_prefix_length: u32,
+    trigger: Trigger,
+) -> impl Stream<Item = ApiResult<domain::dust::DustCommitmentEvent>> + use<'a, S>
+where
+    S: Storage,
+{
+    let storage = cx.get_storage::<S>();
+
+    try_stream! {
+        let commitment_stream = storage
+            .get_dust_commitments(&prefixes, start_index, min_prefix_length, BATCH_SIZE);
+        let mut commitment_stream = pin!(commitment_stream);
+
+        while let Some(event) = commitment_stream
+            .try_next()
+            .await
+            .map_err_into_server_error(|| "get next DUST commitment event")?
+        {
+            yield event;
+        }
+    }
+    .on_drop(move || drop(trigger))
+}
+
+fn make_commitment_progress_updates<'a, S>(
+    cx: &'a Context<'a>,
+    start_index: u64,
+) -> impl Stream<Item = ApiResult<DustCommitmentProgress>> + use<'a, S>
+where
+    S: Storage,
+{
+    let _storage = cx.get_storage::<S>();
+    let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
+
+    // For now, return simple progress updates.
+    intervals.map(move |_| {
+        Ok(DustCommitmentProgress {
+            highest_index: start_index,
+            commitment_count: 0,
+        })
+    })
+}
+
+fn make_registration_updates<'a, S>(
+    cx: &'a Context<'a>,
+    addresses: Vec<domain::dust::RegistrationAddress>,
+    trigger: Trigger,
+) -> impl Stream<Item = ApiResult<domain::dust::RegistrationUpdate>> + use<'a, S>
+where
+    S: Storage,
+{
+    let storage = cx.get_storage::<S>();
+
+    try_stream! {
+        let registration_updates = storage
+            .get_registration_updates(&addresses, BATCH_SIZE);
+        let mut registration_updates = pin!(registration_updates);
+
+        while let Some(registration_update) = registration_updates
+            .try_next()
+            .await
+            .map_err_into_server_error(|| "get next registration update event")?
+        {
+            yield registration_update;
+        }
+    }
+    .on_drop(move || drop(trigger))
+}
+
+fn make_registration_progress_updates<'a, S>(
+    cx: &'a Context<'a>,
+    _addresses: Vec<domain::dust::RegistrationAddress>,
+) -> impl Stream<Item = ApiResult<RegistrationUpdateProgress>> + use<'a, S>
+where
+    S: Storage,
+{
+    let _storage = cx.get_storage::<S>();
+    let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
+
+    // For now, return simple progress updates.
+    intervals.map(move |_| {
+        Ok(RegistrationUpdateProgress {
+            latest_timestamp: 0,
+            update_count: 0,
+        })
     })
 }

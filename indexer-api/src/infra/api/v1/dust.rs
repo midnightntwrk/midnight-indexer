@@ -202,20 +202,6 @@ pub struct DustGenerationProgress {
     pub active_generation_count: u32,
 }
 
-impl From<domain::dust::DustGenerationProgress> for DustGenerationProgress {
-    fn from(progress: domain::dust::DustGenerationProgress) -> Self {
-        let domain::dust::DustGenerationProgress {
-            highest_index,
-            active_generation_count,
-        } = progress;
-
-        Self {
-            highest_index,
-            active_generation_count,
-        }
-    }
-}
-
 impl From<domain::dust::DustGenerationEvent> for DustGenerationEvent {
     fn from(event: domain::dust::DustGenerationEvent) -> Self {
         match event {
@@ -223,10 +209,6 @@ impl From<domain::dust::DustGenerationEvent> for DustGenerationEvent {
 
             domain::dust::DustGenerationEvent::MerkleUpdate(update) => {
                 Self::MerkleUpdate(update.into())
-            }
-
-            domain::dust::DustGenerationEvent::Progress(progress) => {
-                Self::Progress(progress.into())
             }
         }
     }
@@ -269,15 +251,6 @@ pub struct DustNullifierTransactionProgress {
     pub matched_count: u32,
 }
 
-impl From<domain::dust::DustNullifierTransactionProgress> for DustNullifierTransactionProgress {
-    fn from(progress: domain::dust::DustNullifierTransactionProgress) -> Self {
-        Self {
-            highest_block: progress.highest_block,
-            matched_count: progress.matched_count,
-        }
-    }
-}
-
 /// DUST nullifier transaction event union type.
 #[derive(Debug, Clone, Union, Serialize, Deserialize)]
 pub enum DustNullifierTransactionEvent {
@@ -292,10 +265,6 @@ impl From<domain::dust::DustNullifierTransactionEvent> for DustNullifierTransact
         match event {
             domain::dust::DustNullifierTransactionEvent::Transaction(tx) => {
                 Self::Transaction(tx.into())
-            }
-
-            domain::dust::DustNullifierTransactionEvent::Progress(progress) => {
-                Self::Progress(progress.into())
             }
         }
     }
@@ -373,15 +342,6 @@ pub struct DustCommitmentProgress {
     pub commitment_count: u32,
 }
 
-impl From<domain::dust::DustCommitmentProgress> for DustCommitmentProgress {
-    fn from(progress: domain::dust::DustCommitmentProgress) -> Self {
-        Self {
-            highest_index: progress.highest_index,
-            commitment_count: progress.commitment_count,
-        }
-    }
-}
-
 /// DUST commitment event union type.
 #[derive(Debug, Clone, Union, Serialize, Deserialize)]
 pub enum DustCommitmentEvent {
@@ -404,10 +364,6 @@ impl From<domain::dust::DustCommitmentEvent> for DustCommitmentEvent {
 
             domain::dust::DustCommitmentEvent::MerkleUpdate(update) => {
                 Self::MerkleUpdate(update.into())
-            }
-
-            domain::dust::DustCommitmentEvent::Progress(progress) => {
-                Self::Progress(progress.into())
             }
         }
     }

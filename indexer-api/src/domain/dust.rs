@@ -105,16 +105,6 @@ pub struct DustGenerationMerkleUpdate {
     pub block_height: u32,
 }
 
-/// DUST generation progress information.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DustGenerationProgress {
-    /// Highest processed index.
-    pub highest_index: u64,
-
-    /// Number of active generations.
-    pub active_generation_count: u32,
-}
-
 /// DUST generation event union type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DustGenerationEvent {
@@ -123,9 +113,6 @@ pub enum DustGenerationEvent {
 
     /// Merkle tree update.
     MerkleUpdate(DustGenerationMerkleUpdate),
-
-    /// Progress update.
-    Progress(DustGenerationProgress),
 }
 
 /// Transaction containing DUST nullifiers.
@@ -141,23 +128,11 @@ pub struct DustNullifierTransaction {
     pub matching_nullifier_prefixes: Vec<DustPrefix>,
 }
 
-/// DUST nullifier transaction progress.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DustNullifierTransactionProgress {
-    /// Highest processed block.
-    pub highest_block: u32,
-
-    /// Number of matched transactions.
-    pub matched_count: u32,
-}
-
 /// DUST nullifier transaction event union type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DustNullifierTransactionEvent {
     /// Transaction with nullifiers.
     Transaction(DustNullifierTransaction),
-    /// Progress update.
-    Progress(DustNullifierTransactionProgress),
 }
 
 /// DUST commitment information.
@@ -198,16 +173,6 @@ pub struct DustCommitmentMerkleUpdate {
     pub block_height: u32,
 }
 
-/// DUST commitment progress information.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DustCommitmentProgress {
-    /// Highest processed index.
-    pub highest_index: u64,
-
-    /// Number of commitments in batch.
-    pub commitment_count: u32,
-}
-
 /// DUST commitment event union type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DustCommitmentEvent {
@@ -216,9 +181,6 @@ pub enum DustCommitmentEvent {
 
     /// Merkle tree update.
     MerkleUpdate(DustCommitmentMerkleUpdate),
-
-    /// Progress update.
-    Progress(DustCommitmentProgress),
 }
 
 /// Address type for registration queries.
