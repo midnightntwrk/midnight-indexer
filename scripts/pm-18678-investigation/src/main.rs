@@ -614,7 +614,12 @@ impl MonitoringState {
                     });
                 }
                 Err(e) => {
-                    error!("PM-18678: Failed to create wallet {}: {}", i, e);
+                    error!("PM-18678: Failed to create wallet {} on {}: {}", i, endpoint, e);
+                    // If all endpoints are failing, services might not be ready yet
+                    if i == 0 {
+                        warn!("PM-18678: First wallet failed. Services might still be starting. Will retry in 30s...");
+                        sleep(Duration::from_secs(30)).await;
+                    }
                 }
             }
             

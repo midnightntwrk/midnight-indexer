@@ -133,6 +133,21 @@ cd "$INDEXER_DIR/scripts/pm-18678-investigation"
 cargo build --release >> "$LOG_DIR/build.log" 2>&1
 cd "$INDEXER_DIR"
 
+# Verify all binaries exist
+log_info "Verifying built binaries..."
+for binary in chain-indexer wallet-indexer indexer-api; do
+    if [ ! -f "./target/release/$binary" ]; then
+        log_error "Binary not found: ./target/release/$binary"
+        log_error "Build may have failed. Check $LOG_DIR/build.log"
+        exit 1
+    fi
+done
+if [ ! -f "./scripts/pm-18678-investigation/target/release/pm18678-monitor" ]; then
+    log_error "Monitor binary not found"
+    exit 1
+fi
+log_info "All binaries built successfully"
+
 # ============================================================================
 # START INFRASTRUCTURE
 # ============================================================================
@@ -224,7 +239,7 @@ tmux new -d -s chain-indexer "
     $(declare -f capture_diagnostics)
     $(declare -f run_service)
     export LOG_DIR='$LOG_DIR'
-    run_service 'chain-indexer' 'cargo run --release -p chain-indexer --features cloud'
+    run_service 'chain-indexer' './target/release/chain-indexer'
 "
 
 # Wallet Indexer  
@@ -238,7 +253,7 @@ tmux new -d -s wallet-indexer "
     $(declare -f capture_diagnostics)
     $(declare -f run_service)
     export LOG_DIR='$LOG_DIR'
-    run_service 'wallet-indexer' 'cargo run --release -p wallet-indexer --features cloud'
+    run_service 'wallet-indexer' './target/release/wallet-indexer'
 "
 
 # API Replicas (3 instances)
@@ -254,7 +269,7 @@ for i in 0 1 2; do
         $(declare -f capture_diagnostics)
         $(declare -f run_service)
         export LOG_DIR='$LOG_DIR'
-        run_service 'indexer-api-$PORT' 'cargo run --release -p indexer-api --bin indexer-api --features cloud'
+        run_service 'indexer-api-$PORT' './target/release/indexer-api'
     "
 done
 
