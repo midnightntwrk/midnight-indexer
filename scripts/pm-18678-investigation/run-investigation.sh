@@ -193,33 +193,42 @@ if ! $DOCKER_CMD ps | grep -q nats; then
 fi
 
 # Midnight Node
-if ! $DOCKER_CMD ps | grep -q midnight-node; then
-    log_info "Starting Midnight node..."
-    # Use a public test node or run local node
-    # Option 1: Run local node (requires midnight-node image)
-    # $DOCKER_CMD run -d --name midnight-node \
-    #     -p 9944:9944 \
-    #     ghcr.io/midnight-ntwrk/midnight-node:0.13.2-rc.2
+if ! $DOCKER_CMD ps | grep -q node; then
+    log_info "Starting Midnight node using just run-node..."
     
-    # Option 2: Use public test node (if available)
-    # export APP__INFRA__NODE__URL="wss://testnet.midnight.network:9944"
+    # Remove any existing node container
+    $DOCKER_CMD rm -f node 2>/dev/null || true
     
-    log_error "WARNING: No Midnight node configured!"
-    log_error "Chain-indexer will fail without a node. Options:"
-    log_error "1. Run a local node: docker run -d --name midnight-node -p 9944:9944 ghcr.io/midnight-ntwrk/midnight-node:0.13.2-rc.2"
-    log_error "2. Use a test node by setting: export APP__INFRA__NODE__URL=wss://your-node-url:9944"
-    log_error "3. Skip this if you have a node running elsewhere"
+    # Clean up target/data directory for fresh start
+    if [ -d "$INDEXER_DIR/target/data" ]; then
+        log_info "Cleaning up target/data directory..."
+        rm -rf "$INDEXER_DIR/target/data"
+    fi
+    mkdir -p "$INDEXER_DIR/target/data"
     
-    # For now, try to use a local devnet node if available
-    log_info "Attempting to start local devnet node..."
-    $DOCKER_CMD run -d --name midnight-node \
-        -p 9944:9944 \
-        -p 30333:30333 \
-        ghcr.io/midnight-ntwrk/midnight-node:0.13.2-rc.2 \
-        --dev --ws-external --rpc-external || {
-        log_error "Failed to start midnight-node. Please ensure you have access to the image or provide a node URL"
-    }
-    sleep 10
+    # Use just run-node which is the reliable way
+    cd "$INDEXER_DIR"
+    if command -v just &> /dev/null; then
+        # Run in background using nohup or as a docker command
+        DOCKER_CMD="$DOCKER_CMD" just run-node &
+        JUST_NODE_PID=$!
+        sleep 15  # Give node time to start
+        
+        # Check if node started successfully
+        if ! $DOCKER_CMD ps | grep -q node; then
+            log_error "Failed to start node using just run-node"
+            log_error "Please check Docker permissions and node configuration"
+            exit 1
+        fi
+        log_info "Midnight node started successfully"
+    else
+        log_error "just command not found. Please install just or run node manually"
+        log_error "To install: cargo install just"
+        exit 1
+    fi
+    cd "$INDEXER_DIR/scripts/pm-18678-investigation"
+else
+    log_info "Midnight node already running"
 fi
 
 # Run migrations

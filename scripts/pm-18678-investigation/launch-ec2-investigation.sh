@@ -205,8 +205,12 @@ fi
 
 # Stop any existing Docker containers
 echo "Cleaning up Docker containers..."
-$DOCKER_CMD stop postgres nats 2>/dev/null || true
-$DOCKER_CMD rm postgres nats 2>/dev/null || true
+$DOCKER_CMD stop postgres nats node 2>/dev/null || true
+$DOCKER_CMD rm postgres nats node 2>/dev/null || true
+
+# Clean up target/data directory for fresh start
+echo "Cleaning up target/data directory..."
+rm -rf "$INVESTIGATION_DIR/midnight-indexer/target/data" 2>/dev/null || true
 
 # ============================================================================
 # LAUNCH INVESTIGATION

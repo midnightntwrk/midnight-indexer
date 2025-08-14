@@ -94,16 +94,19 @@ export DOCKER_CMD="sudo docker"
 ```
 
 The `run-investigation.sh` script will:
-1. Start Docker containers (PostgreSQL, NATS, Midnight Node)
-2. Build all services with `--features cloud`
-3. Launch services in tmux sessions (chain-indexer, wallet-indexer, indexer-api)
-4. Start the monitoring tool that creates 30+ wallet subscriptions
-5. Run automated analysis every 6 hours (runs `analyze-logs.sh` automatically)
-6. Run continuously for 3-4 weeks, monitoring for THE ISSUE™
-7. Create alert files when THE ISSUE™ is detected
+1. Clean up `target/data` directory for fresh start
+2. Start Docker containers (PostgreSQL, NATS)
+3. Start Midnight Node using `just run-node` (reliable method)
+4. Build all services with `--features cloud`
+5. Launch services in tmux sessions (chain-indexer, wallet-indexer, indexer-api)
+6. Start the monitoring tool that creates 30+ wallet subscriptions
+7. Run automated analysis every 6 hours (runs `analyze-logs.sh` automatically)
+8. Run continuously for 3-4 weeks, monitoring for THE ISSUE™
+9. Create alert files when THE ISSUE™ is detected
 
-**Note**: The script attempts to start a local Midnight devnet node from GitHub Container Registry. 
+**Note**: The script uses `just run-node` to start the Midnight node (container name: `node`).
 - Requires GitHub token with `read:packages` scope and Docker authentication (see setup above)
+- Cleans up `target/data` directory automatically for each new session
 - If you have access issues with the Docker image, you can:
   - Use an existing node by setting `APP__INFRA__NODE__URL=ws://your-node:9944`
   - Or manually start a node before running the investigation
@@ -222,15 +225,18 @@ cd ~/midnight-investigation/midnight-indexer/scripts/pm-18678-investigation
 
 ```bash
 # One command to stop everything (tmux, screen, and docker)
-tmux kill-server 2>/dev/null; pkill screen 2>/dev/null; sudo docker stop postgres nats midnight-node 2>/dev/null; sudo docker rm postgres nats midnight-node 2>/dev/null
+tmux kill-server 2>/dev/null; pkill screen 2>/dev/null; sudo docker stop postgres nats node 2>/dev/null; sudo docker rm postgres nats node 2>/dev/null
 
 # Or step by step:
 tmux kill-server                        # Stop all tmux sessions
 screen -X -S pm18678 quit               # Stop specific screen session
 pkill screen                            # Kill ALL screen sessions (simple)
 # OR: screen -ls | grep -o '[0-9]*\..*' | cut -d. -f1 | xargs -I{} screen -X -S {} quit  # Stop ALL screen sessions (proper)
-sudo docker stop postgres nats midnight-node    # Stop Docker containers
-sudo docker rm postgres nats midnight-node      # Remove Docker containers
+sudo docker stop postgres nats node    # Stop Docker containers
+sudo docker rm postgres nats node      # Remove Docker containers
+
+# Clean up data directory for next session
+rm -rf ~/midnight-investigation/midnight-indexer/target/data
 
 # Or use just command (if in repo directory)
 cd ~/midnight-investigation/midnight-indexer
