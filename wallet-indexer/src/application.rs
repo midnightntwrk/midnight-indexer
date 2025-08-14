@@ -17,7 +17,7 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, future::ok, stream};
 use indexer_common::domain::{BlockIndexed, NetworkId, Publisher, Subscriber, WalletIndexed};
 use itertools::Itertools;
-use log::{debug, warn};
+use log::{debug, info, warn};
 use serde::Deserialize;
 use std::{
     num::NonZeroUsize,
@@ -166,7 +166,22 @@ async fn index_wallet(
         .with_context(|| format!("get wallet for wallet ID {wallet_id}"))?;
 
     // Only continue if possibly needed.
-    if wallet.last_indexed_transaction_id < max_transaction_id.load(Ordering::Acquire) {
+    // PM-18678: This is the PR #42 optimization that prevents THE ISSUE™
+    // Set PM18678_DISABLE_OPTIMIZATION=true to disable the optimization
+    let should_process = if std::env::var("PM18678_DISABLE_OPTIMIZATION").unwrap_or_default()
+        == "true"
+    {
+        let max_tid = max_transaction_id.load(Ordering::Acquire);
+        info!(
+            "PM-18678: PR #42 optimization DISABLED - always processing. wallet_id: {wallet_id:?}, last_indexed_transaction_id: {}, max_transaction_id: {max_tid}",
+            wallet.last_indexed_transaction_id
+        );
+        true // Always process when testing without optimization
+    } else {
+        wallet.last_indexed_transaction_id < max_transaction_id.load(Ordering::Acquire)
+    };
+
+    if should_process {
         let from = wallet.last_indexed_transaction_id + 1;
         let transactions = storage
             .get_transactions(from, transaction_batch_size, &mut tx)
