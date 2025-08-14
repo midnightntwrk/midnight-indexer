@@ -32,8 +32,13 @@ bash
 # Navigate to home directory (SSM starts in /var/snap/amazon-ssm-agent/11797)
 cd ~  # Goes to /home/ssm-user
 
-# Set GitHub token for private dependencies (midnight-ledger-prototype)
+# Set GitHub token for private dependencies
+# IMPORTANT: Token must have 'read:packages' scope to pull Docker images
+# Create token at: https://github.com/settings/tokens with 'read:packages' permission
 export GITHUB_TOKEN=your_github_personal_access_token
+
+# Authenticate Docker with GitHub Container Registry
+echo $GITHUB_TOKEN | sudo docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
 
 # Download the launch script
 curl -O https://raw.githubusercontent.com/midnightntwrk/midnight-indexer/investigation/PM-18678-hanging-root-cause/scripts/pm-18678-investigation/launch-ec2-investigation.sh
@@ -90,9 +95,11 @@ The `run-investigation.sh` script will:
 6. Run continuously for 3-4 weeks, monitoring for THE ISSUE™
 7. Create alert files when THE ISSUE™ is detected
 
-**Note**: The script attempts to start a local Midnight devnet node. If you have access issues with the Docker image, you can:
-- Use an existing node by setting `APP__INFRA__NODE__URL=ws://your-node:9944`
-- Or manually start a node before running the investigation
+**Note**: The script attempts to start a local Midnight devnet node from GitHub Container Registry. 
+- Requires GitHub token with `read:packages` scope and Docker authentication (see setup above)
+- If you have access issues with the Docker image, you can:
+  - Use an existing node by setting `APP__INFRA__NODE__URL=ws://your-node:9944`
+  - Or manually start a node before running the investigation
 
 ## Investigation Status
 
