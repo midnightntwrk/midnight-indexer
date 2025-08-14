@@ -46,6 +46,10 @@ chmod +x launch-ec2-investigation.sh
 
 # Run in screen to prevent SSM timeout (first build takes 10-20 minutes)
 screen -S pm18678
+
+# If you get Docker permission errors, export DOCKER_CMD first:
+export DOCKER_CMD="sudo docker"
+
 ./launch-ec2-investigation.sh reproduce
 # Press Ctrl+A then D to detach from screen (keeps it running)
 # To reattach: screen -r pm18678
@@ -82,6 +86,9 @@ screen -d -r pm18678
 # Navigate to the investigation scripts directory
 cd ~/midnight-investigation/midnight-indexer/scripts/pm-18678-investigation
 
+# If you get Docker permission errors, export DOCKER_CMD:
+export DOCKER_CMD="sudo docker"
+
 # Run the investigation directly
 ./run-investigation.sh reproduce  # or 'control' for PR #42 enabled
 ```
@@ -100,6 +107,24 @@ The `run-investigation.sh` script will:
 - If you have access issues with the Docker image, you can:
   - Use an existing node by setting `APP__INFRA__NODE__URL=ws://your-node:9944`
   - Or manually start a node before running the investigation
+
+## Common Issues and Solutions
+
+### Docker Permission Denied
+If you see `permission denied while trying to connect to the Docker daemon socket`:
+```bash
+# Quick fix: Use sudo for Docker commands
+export DOCKER_CMD="sudo docker"
+
+# Or permanently fix by adding user to docker group:
+sudo usermod -aG docker $USER
+newgrp docker  # Apply group change without logout
+```
+
+### GitHub Container Registry Access Denied
+If midnight-node image pull fails with `unauthorized`:
+1. Ensure your GitHub token has `read:packages` scope
+2. Authenticate Docker: `echo $GITHUB_TOKEN | sudo docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin`
 
 ## Investigation Status
 
@@ -216,6 +241,10 @@ just pm18678-stop
 
 ```bash
 cd ~/midnight-investigation/midnight-indexer/scripts/pm-18678-investigation
+
+# If you get Docker permission errors:
+export DOCKER_CMD="sudo docker"
+
 ./run-investigation.sh reproduce  # or 'control'
 ```
 
