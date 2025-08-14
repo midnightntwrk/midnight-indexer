@@ -47,7 +47,7 @@ use tokio::time::sleep;
 const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[cfg(any(feature = "cloud", feature = "standalone"))]
-const NODE_VERSION: &str = "0.13.2-rc.2";
+const NODE_VERSION: &str = "0.13.5-79c649d7";
 
 #[cfg(any(feature = "cloud", feature = "standalone"))]
 static WS_DIR: LazyLock<String> = LazyLock::new(|| format!("{}/..", env!("CARGO_MANIFEST_DIR")));
