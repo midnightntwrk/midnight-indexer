@@ -170,6 +170,18 @@ if ! command -v tmux &> /dev/null; then
     fi
 fi
 
+# Check for just (task runner)
+if ! command -v just &> /dev/null; then
+    echo "Installing just task runner..."
+    if command -v snap &> /dev/null; then
+        sudo snap install just --classic
+    elif command -v cargo &> /dev/null; then
+        cargo install just
+    else
+        echo "Warning: Could not install just. You can still use shell scripts directly."
+    fi
+fi
+
 # Check for PostgreSQL client
 if ! command -v psql &> /dev/null; then
     echo "Installing PostgreSQL client..."
