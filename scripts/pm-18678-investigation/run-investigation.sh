@@ -149,6 +149,22 @@ fi
 log_info "All binaries built successfully"
 
 # ============================================================================
+# CHECK DEPENDENCIES
+# ============================================================================
+
+# Check for just (task runner)
+if ! command -v just &> /dev/null; then
+    log_info "Installing just task runner..."
+    if command -v snap &> /dev/null; then
+        sudo snap install just --classic
+    elif command -v cargo &> /dev/null; then
+        cargo install just
+    else
+        log_error "WARNING: Could not install just. You can still use shell scripts directly."
+    fi
+fi
+
+# ============================================================================
 # START INFRASTRUCTURE
 # ============================================================================
 

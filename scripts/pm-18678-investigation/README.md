@@ -18,7 +18,9 @@ screen -S main
 # Screen commands:
 # - Detach (keep running): Ctrl+A then D
 # - Scroll mode: Ctrl+A then ESC, use arrows/PgUp/PgDn, press ESC to exit
-# - Kill session: Ctrl+A then K
+# - Kill current session (while inside): Ctrl+A then K (confirm with 'y')
+# - Or simply type: exit
+# - To stop screen session from inside: Ctrl+D or type 'exit'
 
 # Option 2: Use tmux for better terminal
 tmux new -s main
