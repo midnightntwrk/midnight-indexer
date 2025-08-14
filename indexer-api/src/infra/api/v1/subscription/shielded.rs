@@ -14,7 +14,7 @@
 use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, AsBytesExt, ContextExt, HexEncoded, InnerApiError, ResultExt,
+        ApiError, ApiResult, AsBytesExt, ContextExt, HexEncoded, ResultExt,
         v1::{decode_session_id, subscription::get_next_transaction, transaction::Transaction},
     },
 };
@@ -31,9 +31,7 @@ use indexer_common::domain::{
     LedgerStateStorage, NetworkId, SessionId, Subscriber, TransactionResult, WalletIndexed,
 };
 use log::{debug, warn};
-use std::{
-    future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, sync::Arc, time::Duration,
-};
+use std::{future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
@@ -216,12 +214,7 @@ where
         let storage = cx.get_storage::<S>();
         let set_wallet_active = IntervalStream::new(interval(ACTIVATE_WALLET_INTERVAL))
             .then(move |_| async move { storage.set_wallet_active(session_id).await })
-            .map_err(|error| {
-                ApiError::Server(InnerApiError(
-                    "set wallet active".to_string(),
-                    Some(Arc::new(error)),
-                ))
-            });
+            .map(|item| item.map_err_into_server_error(|| "set wallet active"));
         let events = stream::select(events.map_ok(Some), set_wallet_active.map_ok(|_| None))
             .try_filter_map(ok)
             .on_drop(move || {
