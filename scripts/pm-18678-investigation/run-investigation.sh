@@ -176,6 +176,36 @@ if ! $DOCKER_CMD ps | grep -q nats; then
     sleep 5
 fi
 
+# Midnight Node
+if ! $DOCKER_CMD ps | grep -q midnight-node; then
+    log_info "Starting Midnight node..."
+    # Use a public test node or run local node
+    # Option 1: Run local node (requires midnight-node image)
+    # $DOCKER_CMD run -d --name midnight-node \
+    #     -p 9944:9944 \
+    #     ghcr.io/midnight-ntwrk/midnight-node:0.13.2-rc.2
+    
+    # Option 2: Use public test node (if available)
+    # export APP__INFRA__NODE__URL="wss://testnet.midnight.network:9944"
+    
+    log_error "WARNING: No Midnight node configured!"
+    log_error "Chain-indexer will fail without a node. Options:"
+    log_error "1. Run a local node: docker run -d --name midnight-node -p 9944:9944 ghcr.io/midnight-ntwrk/midnight-node:0.13.2-rc.2"
+    log_error "2. Use a test node by setting: export APP__INFRA__NODE__URL=wss://your-node-url:9944"
+    log_error "3. Skip this if you have a node running elsewhere"
+    
+    # For now, try to use a local devnet node if available
+    log_info "Attempting to start local devnet node..."
+    $DOCKER_CMD run -d --name midnight-node \
+        -p 9944:9944 \
+        -p 30333:30333 \
+        ghcr.io/midnight-ntwrk/midnight-node:0.13.2-rc.2 \
+        --dev --ws-external --rpc-external || {
+        log_error "Failed to start midnight-node. Please ensure you have access to the image or provide a node URL"
+    }
+    sleep 10
+fi
+
 # Run migrations
 log_info "Running database migrations..."
 if ! cargo run --release -p chain-indexer --features cloud -- migrate > "$LOG_DIR/migrations.log" 2>&1; then

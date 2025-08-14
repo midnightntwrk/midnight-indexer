@@ -213,8 +213,8 @@ pm18678-stop:
     #!/usr/bin/env bash
     echo "Stopping PM-18678 investigation..."
     tmux kill-server 2>/dev/null || true
-    docker stop postgres nats 2>/dev/null || true
-    docker rm postgres nats 2>/dev/null || true
+    docker stop postgres nats midnight-node 2>/dev/null || true
+    docker rm postgres nats midnight-node 2>/dev/null || true
     echo "Investigation stopped"
 
 # Test PM-18678 setup without starting services
@@ -313,8 +313,8 @@ pm18678-reset:
         # Stop and remove Docker containers
         echo "2. Cleaning Docker containers..."
         # Stop named containers (from run-investigation.sh)
-        docker stop postgres nats 2>/dev/null || true
-        docker rm postgres nats 2>/dev/null || true
+        docker stop postgres nats midnight-node 2>/dev/null || true
+        docker rm postgres nats midnight-node 2>/dev/null || true
         # Stop docker-compose containers (from development)
         docker stop midnight-indexer-postgres-1 midnight-indexer-nats-1 2>/dev/null || true
         docker rm midnight-indexer-postgres-1 midnight-indexer-nats-1 2>/dev/null || true
@@ -375,8 +375,8 @@ pm18678-purge:
         
         # Remove Docker containers and volumes
         echo "2. Removing Docker containers and volumes..."
-        docker stop postgres nats 2>/dev/null || true
-        docker rm -v postgres nats 2>/dev/null || true
+        docker stop postgres nats midnight-node 2>/dev/null || true
+        docker rm -v postgres nats midnight-node 2>/dev/null || true
         docker compose down -v 2>/dev/null || true
         
         # Remove all data
