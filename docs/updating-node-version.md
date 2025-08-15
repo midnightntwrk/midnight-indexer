@@ -13,7 +13,10 @@ When updating from an old version (e.g., `0.13.2-rc.2`) to a new version (e.g., 
 ### 1. Generate and Add Node Metadata
 ```bash
 # First, update the node_version in justfile to the new version
-# Then start the new node version
+# Then generate the node data
+just generate-node-data
+
+# Start the node
 just run-node
 
 # Generate metadata in a new terminal
@@ -30,6 +33,12 @@ This creates: `.node/<new-version>/metadata.scale`
 ```bash
 # Find all references to the old version
 rg "0.13.2-rc.2" --type rust --type toml --type yaml
+
+# Bulk replace old version with new version (macOS)
+rg -l "0.13.2-rc.2" --type rust --type toml --type yaml | xargs sed -i '' 's/0.13.2-rc.2/0.13.5-79c649d7/g'
+
+# Bulk replace old version with new version (Linux)
+rg -l "0.13.2-rc.2" --type rust --type toml --type yaml | xargs sed -i 's/0.13.2-rc.2/0.13.5-79c649d7/g'
 ```
 
 Files that MUST be updated:
