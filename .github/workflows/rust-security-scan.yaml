@@ -32,6 +32,13 @@ jobs:
       - name: Install Deny
         run: cargo install cargo-deny
 
+      - name: Add github.com credentials to netrc
+        uses: extractions/netrc@v2
+        with:
+          machine: github.com
+          username: MidnightCI
+          password: ${{ secrets.MIDNIGHTCI_REPO }}
+
       - name: Run deny
         run: cargo deny check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed
         # TODO: once everything's open sourced remove -Aunlicensed
