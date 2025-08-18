@@ -22,9 +22,27 @@ jobs:
         run: cargo install --git https://github.com/rustsec/rustsec cargo-audit
 
       - name: Run cargo-audit
-        run: cargo audit --format sarif > scan.sarif || true
+        run: cargo audit --format sarif | tee scan.sarif || true
 
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@7273f08caa1dcf2c2837f362f1982de0ab4dc344
         with:
           sarif_file: scan.sarif
+
+      # TODO: Remove this checkout step once upload-sarif-github-action repo is made public
+      - name: Checkout Upload action repository
+        uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+        with:
+          repository: midnightntwrk/upload-sarif-github-action
+          ref: main
+          path: upload-sarif-github-action
+          token: ${{ secrets.MIDNIGHTCI_REPO }}
+
+      - name: Upload SARIF to Checkmarx
+        uses: ./upload-sarif-github-action
+        with:
+          sarif-file: scan.sarif
+          project-name: midnightntwrk/midnight-indexer
+          cx-client-id: ${{ secrets.CX_CLIENT_ID }}
+          cx-client-secret: ${{ secrets.CX_CLIENT_SECRET_EU }}
+          cx-tenant: ${{ secrets.CX_TENANT }}
