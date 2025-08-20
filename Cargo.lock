@@ -833,7 +833,7 @@ dependencies = [
  "serde_json",
  "serde_repr",
  "serde_urlencoded",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tokio",
  "tokio-util",
  "tower-service",
@@ -1042,7 +1042,7 @@ dependencies = [
  "subxt",
  "tempfile",
  "testcontainers",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tokio",
  "trait-variant",
 ]
@@ -2970,7 +2970,7 @@ dependencies = [
  "serde",
  "sqlx",
  "stream-cancel",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tokio",
  "tokio-stream",
  "tower",
@@ -3020,7 +3020,7 @@ dependencies = [
  "sqlx",
  "testcontainers",
  "testcontainers-modules",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -3652,7 +3652,7 @@ dependencies = [
  "metrics",
  "metrics-util",
  "quanta",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tokio",
  "tracing",
 ]
@@ -4206,7 +4206,7 @@ dependencies = [
  "futures-sink",
  "js-sys",
  "pin-project-lite",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tracing",
 ]
 
@@ -4236,7 +4236,7 @@ dependencies = [
  "opentelemetry_sdk",
  "prost",
  "reqwest 0.12.23",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tokio",
  "tonic",
  "tracing",
@@ -4267,7 +4267,7 @@ dependencies = [
  "percent-encoding",
  "rand 0.9.1",
  "serde_json",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
@@ -4445,7 +4445,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "198db74531d58c70a361c42201efde7e2591e976d518caf7662a47dc5720e7b6"
 dependencies = [
  "memchr",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "ucd-trie",
 ]
 
@@ -4789,7 +4789,7 @@ dependencies = [
  "rustc-hash",
  "rustls 0.23.28",
  "socket2 0.5.10",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tokio",
  "tracing",
  "web-time",
@@ -4810,7 +4810,7 @@ dependencies = [
  "rustls 0.23.28",
  "rustls-pki-types",
  "slab",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tinyvec",
  "tracing",
  "web-time",
@@ -5465,7 +5465,7 @@ dependencies = [
  "scale-decode-derive",
  "scale-type-resolver",
  "smallvec",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
@@ -5492,7 +5492,7 @@ dependencies = [
  "scale-encode-derive",
  "scale-type-resolver",
  "smallvec",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
@@ -5554,7 +5554,7 @@ dependencies = [
  "quote 1.0.40",
  "scale-info",
  "syn 2.0.104",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
@@ -5572,7 +5572,7 @@ dependencies = [
  "scale-encode",
  "scale-type-resolver",
  "serde",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "yap",
 ]
 
@@ -6248,7 +6248,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "smallvec",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "time",
  "tokio",
  "tokio-stream",
@@ -6332,7 +6332,7 @@ dependencies = [
  "smallvec",
  "sqlx-core",
  "stringprep",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "time",
  "tracing",
  "uuid",
@@ -6371,7 +6371,7 @@ dependencies = [
  "smallvec",
  "sqlx-core",
  "stringprep",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "time",
  "tracing",
  "uuid",
@@ -6397,7 +6397,7 @@ dependencies = [
  "serde",
  "serde_urlencoded",
  "sqlx-core",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "time",
  "tracing",
  "url",
@@ -6529,7 +6529,7 @@ dependencies = [
  "subxt-macro",
  "subxt-metadata",
  "subxt-rpcs",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tokio",
  "tokio-util",
  "tracing",
@@ -6552,7 +6552,7 @@ dependencies = [
  "scale-typegen",
  "subxt-metadata",
  "syn 2.0.104",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
@@ -6581,7 +6581,7 @@ dependencies = [
  "serde_json",
  "sp-crypto-hashing",
  "subxt-metadata",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tracing",
 ]
 
@@ -6596,7 +6596,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smoldot-light",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -6631,7 +6631,7 @@ dependencies = [
  "parity-scale-codec",
  "scale-info",
  "sp-crypto-hashing",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
@@ -6653,7 +6653,7 @@ dependencies = [
  "serde_json",
  "subxt-core",
  "subxt-lightclient",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tokio",
  "tokio-util",
  "tracing",
@@ -6668,7 +6668,7 @@ checksum = "8c4fb8fd6b16ecd3537a29d70699f329a68c1e47f70ed1a46d64f76719146563"
 dependencies = [
  "hex",
  "parity-scale-codec",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
@@ -6878,7 +6878,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "tokio",
  "tokio-stream",
  "tokio-tar",
@@ -6906,11 +6906,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.15"
+version = "2.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80d76d3f064b981389ecb4b6b7f45a0bf9fdac1d5b9204c7bd6714fecc302850"
+checksum = "3467d614147380f2e4e374161426ff399c91084acd2363eaf549172b3d5e60c0"
 dependencies = [
- "thiserror-impl 2.0.15",
+ "thiserror-impl 2.0.16",
 ]
 
 [[package]]
@@ -6926,9 +6926,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.15"
+version = "2.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44d29feb33e986b6ea906bd9c3559a856983f92371b3eaa5e83782a351623de0"
+checksum = "6c5e1be1c48b9172ee610da68fd9cd2770e7a4056cb3fc98710ee6906f0c7960"
 dependencies = [
  "proc-macro2",
  "quote 1.0.40",
@@ -7351,7 +7351,7 @@ dependencies = [
  "log",
  "rand 0.9.1",
  "sha1",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "utf-8",
 ]
 
@@ -7370,7 +7370,7 @@ dependencies = [
  "rustls 0.23.28",
  "rustls-pki-types",
  "sha1",
- "thiserror 2.0.15",
+ "thiserror 2.0.16",
  "utf-8",
 ]
 
