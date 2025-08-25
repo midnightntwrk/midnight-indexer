@@ -14,13 +14,15 @@
 use async_graphql::scalar;
 use derive_more::{Display, derive::From};
 use fastrace::trace;
-use indexer_common::domain::{NetworkId, ProtocolVersion, UnknownNetworkIdError, ledger};
+use indexer_common::domain::{
+    AddressType, DecodeAddressError, NetworkId, ProtocolVersion, decode_address, ledger,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Bech32m-encoded viewing key.
 #[derive(Debug, Display, Clone, PartialEq, Eq, Serialize, Deserialize, From)]
-#[from(String, &str)]
+#[from(&str)]
 pub struct ViewingKey(pub String);
 
 scalar!(ViewingKey);
@@ -42,38 +44,18 @@ impl ViewingKey {
         network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Result<indexer_common::domain::ViewingKey, ViewingKeyFormatError> {
-        let (hrp, bytes) = bech32::decode(&self.0).map_err(ViewingKeyFormatError::Decode)?;
-        let hrp = hrp.to_lowercase();
+        let bytes = decode_address(&self.0, AddressType::SecretEncryptionKey, network_id)?;
+        let secret_key = ledger::SecretKey::deserialize(bytes, protocol_version)?;
+        let viewing_key = secret_key.expose_secret().into();
 
-        let Some(n) = hrp.strip_prefix("mn_shield-esk") else {
-            return Err(ViewingKeyFormatError::InvalidHrp(hrp));
-        };
-        let n = n.strip_prefix("_").unwrap_or(n).try_into()?;
-        if n != network_id {
-            return Err(ViewingKeyFormatError::UnexpectedNetworkId(n, network_id));
-        }
-
-        let secret_key = ledger::SecretKey::deserialize(bytes, protocol_version)?
-            .expose_secret()
-            .into();
-
-        Ok(secret_key)
+        Ok(viewing_key)
     }
 }
 
 #[derive(Debug, Error)]
 pub enum ViewingKeyFormatError {
     #[error("cannot bech32m-decode viewing key")]
-    Decode(#[from] bech32::DecodeError),
-
-    #[error("invalid bech32m HRP {0}, expected 'mn_shield-esk' prefix")]
-    InvalidHrp(String),
-
-    #[error(transparent)]
-    UnknownNetworkId(#[from] UnknownNetworkIdError),
-
-    #[error("network ID mismatch: got {0}, expected {1}")]
-    UnexpectedNetworkId(NetworkId, NetworkId),
+    Decode(#[from] DecodeAddressError),
 
     #[error(transparent)]
     Ledger(#[from] ledger::Error),
@@ -82,15 +64,16 @@ pub enum ViewingKeyFormatError {
 #[cfg(test)]
 mod tests {
     use crate::infra::api::v1::viewing_key::ViewingKey;
-    use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_013_000};
+    use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_016_000};
 
     #[test]
     fn test_try_into_domain() {
         let viewing_key = ViewingKey::from(
-            "mn_shield-esk_undeployed1qvqpljf0wrewfdr5k6scfmqtertc4gvu8s2nhkpg8yrmx6n6v4t0evgrqyqw7",
+            "mn_shield-esk_undeployed1d45kgmnfva58gwn9de3hy7tsw35k7m3dwdjkxun9wskkketetdmrzhf6dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsmxqc0u", /* "mn_shield-esk_undeployed1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs9ete5h", */
         );
         let domain_viewing_key =
-            viewing_key.try_into_domain(NetworkId::Undeployed, PROTOCOL_VERSION_000_013_000);
+            viewing_key.try_into_domain(NetworkId::Undeployed, PROTOCOL_VERSION_000_016_000);
+        println!("{domain_viewing_key:?}");
         assert!(domain_viewing_key.is_ok());
     }
 }

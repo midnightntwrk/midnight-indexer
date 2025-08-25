@@ -5,7 +5,7 @@ feature := "cloud"
 packages := "indexer-common chain-indexer wallet-indexer indexer-api indexer-standalone indexer-tests"
 rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/'`
 nightly := "nightly-2025-08-07"
-node_version := "0.13.5-79c649d7"
+node_version := "0.16.0-alpha.2"
 
 check:
     for package in {{packages}}; do \
@@ -88,7 +88,7 @@ build-docker-image package profile="dev":
 
 run-chain-indexer node="ws://localhost:9944" network_id="Undeployed":
     docker compose up -d --wait postgres nats
-    RUST_LOG=chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
+    RUST_LOG=chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,tracing::span=off,midnight_ledger=warn,info \
         CONFIG_FILE=chain-indexer/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         APP__INFRA__NODE__URL={{node}} \

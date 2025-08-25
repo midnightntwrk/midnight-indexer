@@ -11,13 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::Transaction;
+use crate::domain::node;
 use indexer_common::domain::{BlockAuthor, BlockHash, ProtocolVersion, ledger::ZswapStateRoot};
 use std::fmt::Debug;
 
-/// Relevant block data from the perspective of the Chain Indexer.
 #[derive(Debug, Clone)]
 pub struct Block {
+    // These fields come from node::Block.
     pub hash: BlockHash,
     pub height: u32,
     pub protocol_version: ProtocolVersion,
@@ -25,20 +25,21 @@ pub struct Block {
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
     pub zswap_state_root: ZswapStateRoot,
-    pub transactions: Vec<Transaction>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct BlockInfo {
-    pub hash: BlockHash,
-    pub height: u32,
-}
-
-impl From<&Block> for BlockInfo {
-    fn from(block: &Block) -> Self {
-        Self {
+impl From<node::Block> for (Block, Vec<node::Transaction>) {
+    fn from(block: node::Block) -> (Block, Vec<node::Transaction>) {
+        let transactions = block.transactions;
+        let block = Block {
             hash: block.hash,
             height: block.height,
-        }
+            protocol_version: block.protocol_version,
+            parent_hash: block.parent_hash,
+            author: block.author,
+            timestamp: block.timestamp,
+            zswap_state_root: block.zswap_state_root,
+        };
+
+        (block, transactions)
     }
 }

@@ -31,7 +31,7 @@ use futures::{
     stream::{self, TryStreamExt},
 };
 use indexer_common::domain::{
-    LedgerStateStorage, NetworkId, SessionId, Subscriber, WalletIndexed, ledger::TransactionResult,
+    LedgerStateStorage, SessionId, Subscriber, WalletIndexed, ledger::TransactionResult,
 };
 use log::{debug, warn};
 use std::{
@@ -247,7 +247,6 @@ where
     B: Subscriber,
     Z: LedgerStateStorage,
 {
-    let network_id = cx.get_network_id();
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
     let ledger_state_storage = cx.get_ledger_state_storage::<Z>();
@@ -272,7 +271,6 @@ where
                 transaction,
                 ledger_state_storage,
                 zswap_state_cache,
-                network_id,
             )
             .await?;
 
@@ -304,7 +302,6 @@ where
                     transaction,
                     ledger_state_storage,
                     zswap_state_cache,
-                    network_id,
                 )
                 .await?;
 
@@ -325,7 +322,6 @@ async fn make_viewing_update<S, Z>(
     transaction: domain::Transaction,
     ledger_state_storage: &Z,
     zswap_state_cache: &LedgerStateCache,
-    network_id: NetworkId,
 ) -> ApiResult<ViewingUpdate<S>>
 where
     S: Storage,
@@ -340,6 +336,7 @@ where
         transaction.end_index + 1
     };
 
+    debug!(from, transaction:?; "making viewing update");
     let update = if from == transaction.start_index {
         let relevant_transaction = ZswapChainStateUpdate::RelevantTransaction(transaction.into());
         vec![relevant_transaction]
@@ -350,7 +347,6 @@ where
                 from,
                 transaction.start_index - 1,
                 ledger_state_storage,
-                network_id,
                 transaction.protocol_version,
             )
             .await

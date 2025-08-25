@@ -11,10 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, BlockInfo};
+use crate::domain::ContractAction;
 use futures::Stream;
-use indexer_common::domain::NetworkId;
-use std::error::Error as StdError;
+use indexer_common::domain::{
+    BlockAuthor, BlockHash, ProtocolVersion,
+    ledger::{
+        SerializedTransaction, SerializedTransactionIdentifier, TransactionHash, UnshieldedUtxo,
+        ZswapStateRoot,
+    },
+};
+use std::{error::Error as StdError, fmt::Debug};
 
 /// Node abstraction.
 #[trait_variant::make(Send)]
@@ -35,6 +41,57 @@ where
     fn finalized_blocks(
         &mut self,
         after: Option<BlockInfo>,
-        network_id: NetworkId,
     ) -> impl Stream<Item = Result<Block, Self::Error>>;
+}
+
+#[derive(Debug, Clone)]
+pub struct Block {
+    pub hash: BlockHash,
+    pub height: u32,
+    pub protocol_version: ProtocolVersion,
+    pub parent_hash: BlockHash,
+    pub author: Option<BlockAuthor>,
+    pub timestamp: u64,
+    pub zswap_state_root: ZswapStateRoot,
+    pub transactions: Vec<Transaction>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BlockInfo {
+    pub hash: BlockHash,
+    pub height: u32,
+}
+
+impl From<&Block> for BlockInfo {
+    fn from(block: &Block) -> Self {
+        Self {
+            hash: block.hash,
+            height: block.height,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Transaction {
+    Regular(RegularTransaction),
+    System(SystemTransaction),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegularTransaction {
+    pub hash: TransactionHash,
+    pub protocol_version: ProtocolVersion,
+    pub identifiers: Vec<SerializedTransactionIdentifier>,
+    pub raw: SerializedTransaction,
+    pub contract_actions: Vec<ContractAction>,
+    pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
+    pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
+    pub paid_fees: u128,
+    pub estimated_fees: u128,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemTransaction {
+    pub hash: TransactionHash,
+    pub raw: SerializedTransaction,
 }

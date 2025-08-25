@@ -12,28 +12,30 @@
 // limitations under the License.
 
 use crate::domain::{
-    ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_013_000, ProtocolVersion,
+    ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_016_000, ProtocolVersion,
     ledger::{
-        Error, LedgerTransactionV5, NetworkIdExt, SerializableV5Ext, SerializedContractAddress,
+        Error, LedgerTransactionV6, SerializableV6Ext, SerializedContractAddress,
+        TaggedSerializableV6Ext,
     },
 };
 use fastrace::trace;
-use midnight_base_crypto::{hash::HashOutput as HashOutputV5, time::Timestamp as TimestampV5};
-use midnight_coin_structure::contract::ContractAddress as ContractAddressV5;
+use midnight_base_crypto::{hash::HashOutput as HashOutputV6, time::Timestamp as TimestampV6};
+use midnight_coin_structure::contract::ContractAddress as ContractAddressV6;
 use midnight_ledger::{
     semantics::{
-        TransactionContext as TransactionContextV5, TransactionResult as TransactionResultV5,
+        TransactionContext as TransactionContextV6, TransactionResult as TransactionResultV6,
     },
-    structure::LedgerState as LedgerStateV5,
+    structure::{LedgerState as LedgerStateV6, SystemTransaction as LedgerSystemTransactionV6},
+    verify::WellFormedStrictness as WellFormedStrictnessV6,
 };
-use midnight_onchain_runtime::context::BlockContext as BlockContextV5;
-use midnight_serialize::deserialize as deserialize_v5;
-use midnight_storage::DefaultDB as DefaultDBV5;
+use midnight_onchain_runtime::context::BlockContext as BlockContextV6;
+use midnight_serialize::{Deserializable, tagged_deserialize as tagged_deserialize_v6};
+use midnight_storage::DefaultDB as DefaultDBV6;
 use midnight_transient_crypto::merkle_tree::{
-    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV5,
-    MerkleTreeDigest as MerkleTreeDigestV5,
+    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV6,
+    MerkleTreeDigest as MerkleTreeDigestV6,
 };
-use midnight_zswap::ledger::State as ZswapStateV5;
+use midnight_zswap::ledger::State as ZswapStateV6;
 use serde::Deserialize;
 
 pub type IntentHash = ByteArray<32>;
@@ -47,78 +49,87 @@ pub type SerializedZswapStateRoot = ByteVec;
 /// Facade for `LedgerState` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum LedgerState {
-    V5(LedgerStateV5<DefaultDBV5>),
+    V6(LedgerStateV6<DefaultDBV6>),
 }
 
 impl LedgerState {
-    /// Deserialize the given raw ledger state using the given protocol version and network ID.
-    #[trace(properties = {
-        "network_id": "{network_id}",
-        "protocol_version": "{protocol_version}"
-    })]
+    #[allow(missing_docs)]
+    pub fn new(network_id: NetworkId) -> Self {
+        Self::V6(LedgerStateV6::new(network_id))
+    }
+
+    /// Deserialize the given serialized ledger state using the given protocol version.
+    #[trace(properties = { "protocol_version": "{protocol_version}" })]
     pub fn deserialize(
         ledger_state: impl AsRef<[u8]>,
-        network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-            let ledger_state =
-                deserialize_v5(&mut ledger_state.as_ref(), network_id.into_ledger_v5())
-                    .map_err(|error| Error::Io("cannot deserialize LedgerStateV5", error))?;
-            Ok(Self::V5(ledger_state))
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+            let ledger_state = tagged_deserialize_v6(&mut ledger_state.as_ref())
+                .map_err(|error| Error::Io("cannot deserialize LedgerStateV6", error))?;
+            Ok(Self::V6(ledger_state))
         } else {
             Err(Error::InvalidProtocolVersion(protocol_version))
         }
     }
 
-    /// Serialize this ledger state using the given network ID.
-    #[trace(properties = { "network_id": "{network_id}" })]
-    pub fn serialize(&self, network_id: NetworkId) -> Result<SerializedLedgerState, Error> {
+    /// Serialize this ledger state.
+    #[trace]
+    pub fn serialize(&self) -> Result<SerializedLedgerState, Error> {
         match self {
-            LedgerState::V5(ledger_state) => {
+            Self::V6(ledger_state) => {
                 let bytes = ledger_state
-                    .serialize(network_id)
-                    .map_err(|error| Error::Io("cannot serialize LedgerStateV5", error))?;
+                    .tagged_serialize_v6()
+                    .map_err(|error| Error::Io("cannot serialize LedgerStateV6", error))?;
                 Ok(bytes.into())
             }
         }
     }
 
-    /// Apply the given raw transactions to this ledger state.
-    #[trace(properties = { "network_id": "{network_id}" })]
-    pub fn apply_transaction(
+    /// Apply the given serialized regular transaction to this ledger state.
+    #[trace]
+    pub fn apply_regular_transaction(
         &mut self,
         transaction: &SerializedTransaction,
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
-        network_id: NetworkId,
     ) -> Result<TransactionResult, Error> {
         match self {
-            LedgerState::V5(ledger_state) => {
-                let ledger_transaction = deserialize_v5::<LedgerTransactionV5, _>(
-                    &mut transaction.as_ref(),
-                    network_id.into_ledger_v5(),
-                )
-                .map_err(|error| Error::Io("cannot deserialize LedgerTransactionV5", error))?;
+            Self::V6(ledger_state) => {
+                let ledger_transaction =
+                    tagged_deserialize_v6::<LedgerTransactionV6>(&mut transaction.as_ref())
+                        .map_err(|error| {
+                            Error::Io("cannot deserialize LedgerTransactionV6", error)
+                        })?;
 
-                // Apply transaction to ledger state.
-                let cx = TransactionContextV5 {
+                let cx = TransactionContextV6 {
                     ref_state: ledger_state.clone(),
-                    block_context: BlockContextV5 {
-                        tblock: timestamp_v5(block_timestamp),
+                    block_context: BlockContextV6 {
+                        tblock: timestamp_v6(block_timestamp),
                         tblock_err: 30,
-                        parent_block_hash: HashOutputV5(block_parent_hash.0),
+                        parent_block_hash: HashOutputV6(block_parent_hash.0),
                     },
                     whitelist: None,
                 };
+
+                let mut strictness = WellFormedStrictnessV6::default();
+                strictness.enforce_balancing = false;
+                strictness.enforce_limits = false;
+                strictness.verify_contract_proofs = false;
+                strictness.verify_native_proofs = false;
+                strictness.verify_signatures = false;
+                let verified_transaction = ledger_transaction
+                    .well_formed(&cx.ref_state, strictness, cx.block_context.tblock)
+                    .map_err(|error| Error::MalformedTransaction(error.into()))?;
+
                 let (ledger_state, transaction_result) =
-                    ledger_state.apply(&ledger_transaction, &cx);
-                *self = LedgerState::V5(ledger_state);
+                    ledger_state.apply(&verified_transaction, &cx);
+                *self = Self::V6(ledger_state);
 
                 let transaction_result = match transaction_result {
-                    TransactionResultV5::Success => TransactionResult::Success,
+                    TransactionResultV6::Success(_) => TransactionResult::Success,
 
-                    TransactionResultV5::PartialSuccess(segments) => {
+                    TransactionResultV6::PartialSuccess(segments, _) => {
                         let segments = segments
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
@@ -126,7 +137,7 @@ impl LedgerState {
                         TransactionResult::PartialSuccess(segments)
                     }
 
-                    TransactionResultV5::Failure(_) => TransactionResult::Failure,
+                    TransactionResultV6::Failure(_) => TransactionResult::Failure,
                 };
 
                 Ok(transaction_result)
@@ -134,19 +145,49 @@ impl LedgerState {
         }
     }
 
+    /// Apply the given serialized system transaction to this ledger state.
+    #[trace]
+    pub fn apply_system_transaction(
+        &mut self,
+        transaction: &SerializedTransaction,
+        block_timestamp: u64,
+    ) -> Result<(), Error> {
+        match self {
+            Self::V6(ledger_state) => {
+                let ledger_transaction =
+                    tagged_deserialize_v6::<LedgerSystemTransactionV6>(&mut transaction.as_ref())
+                        .map_err(|error| {
+                        Error::Io("cannot deserialize LedgerSystemTransactionV6", error)
+                    })?;
+
+                // TODO Handle events!
+                let (ledger_state, _events) = ledger_state
+                    .apply_system_tx(&ledger_transaction, timestamp_v6(block_timestamp))
+                    .map_err(|error| Error::SystemTransaction(error.into()))?;
+                *self = Self::V6(ledger_state);
+
+                Ok(())
+            }
+        }
+    }
+
     /// Get the first free index of the zswap state.
     pub fn zswap_first_free(&self) -> u64 {
         match self {
-            LedgerState::V5(ledger_state) => ledger_state.zswap.first_free,
+            Self::V6(ledger_state) => ledger_state.zswap.first_free,
         }
     }
 
     /// Get the merkle tree root of the zswap state.
     pub fn zswap_merkle_tree_root(&self) -> ZswapStateRoot {
         match self {
-            LedgerState::V5(ledger_state) => {
-                let root = ledger_state.zswap.coin_coms.root();
-                ZswapStateRoot::V5(root)
+            Self::V6(ledger_state) => {
+                let root = ledger_state
+                    .zswap
+                    .coin_coms
+                    .root()
+                    .expect("zswap merkle tree root should exist");
+                ZswapStateRoot::V6(root)
             }
         }
     }
@@ -155,21 +196,17 @@ impl LedgerState {
     pub fn extract_contract_zswap_state(
         &self,
         address: &SerializedContractAddress,
-        network_id: NetworkId,
     ) -> Result<SerializedZswapState, Error> {
         match self {
-            LedgerState::V5(ledger_state) => {
-                let address = deserialize_v5::<ContractAddressV5, _>(
-                    &mut address.as_ref(),
-                    network_id.into_ledger_v5(),
-                )
-                .map_err(|error| Error::Io("cannot deserialize ContractAddressV5", error))?;
+            Self::V6(ledger_state) => {
+                let address = tagged_deserialize_v6::<ContractAddressV6>(&mut address.as_ref())
+                    .map_err(|error| Error::Io("cannot deserialize ContractAddressV6", error))?;
 
-                let mut contract_zswap_state = ZswapStateV5::new();
+                let mut contract_zswap_state = ZswapStateV6::new();
                 contract_zswap_state.coin_coms = ledger_state.zswap.filter(&[address]);
                 let contract_zswap_state = contract_zswap_state
-                    .serialize(network_id)
-                    .map_err(|error| Error::Io("cannot serialize ZswapStateV5", error))?;
+                    .tagged_serialize_v6()
+                    .map_err(|error| Error::Io("cannot serialize ZswapStateV6", error))?;
 
                 Ok(contract_zswap_state.into())
             }
@@ -179,10 +216,10 @@ impl LedgerState {
     /// Extract the UTXOs.
     pub fn extract_utxos(&self) -> Vec<UnshieldedUtxo> {
         match self {
-            LedgerState::V5(ledger_state) => ledger_state
+            Self::V6(ledger_state) => ledger_state
                 .utxo
                 .utxos
-                .iter()
+                .keys()
                 .map(|utxo| UnshieldedUtxo {
                     value: utxo.value,
                     owner: utxo.owner.0.0.into(),
@@ -195,22 +232,18 @@ impl LedgerState {
     }
 
     /// Extract the serialized merkle-tree collapsed update for the given indices.
-    pub fn collapsed_update(
-        &self,
-        start_index: u64,
-        end_index: u64,
-        network_id: NetworkId,
-    ) -> Result<ByteVec, Error> {
+    pub fn collapsed_update(&self, start_index: u64, end_index: u64) -> Result<ByteVec, Error> {
         match self {
-            LedgerState::V5(ledger_state) => {
-                let update = MerkleTreeCollapsedUpdateV5::new(
+            Self::V6(ledger_state) => {
+                let update = MerkleTreeCollapsedUpdateV6::new(
                     &ledger_state.zswap.coin_coms,
                     start_index,
                     end_index,
-                )?
-                .serialize(network_id)
+                )
+                .map_err(|error| Error::InvalidUpdate(error.into()))?
+                .tagged_serialize_v6()
                 .map_err(|error| {
-                    Error::Io("cannot serialize MerkleTreeCollapsedUpdateV5", error)
+                    Error::Io("cannot serialize MerkleTreeCollapsedUpdateV6", error)
                 })?;
 
                 Ok(update.into())
@@ -221,18 +254,12 @@ impl LedgerState {
     /// To be called after applying transactions.
     pub fn post_apply_transactions(&mut self, block_timestamp: u64) {
         match self {
-            LedgerState::V5(ledger_state) => {
-                let timestamp = timestamp_v5(block_timestamp);
+            Self::V6(ledger_state) => {
+                let timestamp = timestamp_v6(block_timestamp);
                 let ledger_state = ledger_state.post_block_update(timestamp);
-                *self = LedgerState::V5(ledger_state);
+                *self = Self::V6(ledger_state);
             }
         }
-    }
-}
-
-impl Default for LedgerState {
-    fn default() -> Self {
-        LedgerState::V5(Default::default())
     }
 }
 
@@ -263,36 +290,32 @@ pub struct UnshieldedUtxo {
 /// Facade for zswap state root across supported (protocol) versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZswapStateRoot {
-    V5(MerkleTreeDigestV5),
+    V6(MerkleTreeDigestV6),
 }
 
 impl ZswapStateRoot {
-    /// Deserialize the given raw zswap state root using the given protocol version and network ID.
-    #[trace(properties = {
-        "network_id": "{network_id}",
-        "protocol_version": "{protocol_version}"
-    })]
+    /// Deserialize the given serialized zswap state root using the given protocol version.
+    #[trace(properties = { "protocol_version": "{protocol_version}" })]
     pub fn deserialize(
-        raw: impl AsRef<[u8]>,
+        zswap_state_root: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
-        network_id: NetworkId,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-            let digest = deserialize_v5(&mut raw.as_ref(), network_id.into_ledger_v5())
-                .map_err(|error| Error::Io("cannot deserialize MerkleTreeDigestV5", error))?;
-            Ok(ZswapStateRoot::V5(digest))
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+            let digest = MerkleTreeDigestV6::deserialize(&mut zswap_state_root.as_ref(), 0)
+                .map_err(|error| Error::Io("cannot deserialize MerkleTreeDigestV6", error))?;
+            Ok(Self::V6(digest))
         } else {
             Err(Error::InvalidProtocolVersion(protocol_version))
         }
     }
 
-    /// Serialize this zswap state root using the given network ID.
-    #[trace(properties = { "network_id": "{network_id}" })]
-    pub fn serialize(&self, network_id: NetworkId) -> Result<SerializedZswapStateRoot, Error> {
+    /// Serialize this zswap state root.
+    #[trace]
+    pub fn serialize(&self) -> Result<SerializedZswapStateRoot, Error> {
         match self {
-            ZswapStateRoot::V5(digest) => {
+            Self::V6(digest) => {
                 let bytes = digest
-                    .serialize(network_id)
+                    .serialize_v6()
                     .map_err(|error| Error::Io("cannot serialize zswap merkle tree root", error))?;
                 Ok(bytes.into())
             }
@@ -300,6 +323,6 @@ impl ZswapStateRoot {
     }
 }
 
-fn timestamp_v5(block_timestamp: u64) -> TimestampV5 {
-    TimestampV5::from_secs(block_timestamp / 1000)
+fn timestamp_v6(block_timestamp: u64) -> TimestampV6 {
+    TimestampV6::from_secs(block_timestamp / 1000)
 }

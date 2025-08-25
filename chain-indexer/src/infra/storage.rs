@@ -11,12 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{self, Block, BlockInfo, BlockTransactions, ContractAction, Transaction};
+use crate::domain::{
+    self, Block, BlockTransactions, ContractAction, RegularTransaction, SystemTransaction,
+    Transaction, node::BlockInfo,
+};
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteArray, ByteVec,
+        BlockHash, ByteVec,
         ledger::{ContractAttributes, ContractBalance, UnshieldedUtxo},
     },
     infra::sqlx::U128BeBytes,
@@ -24,6 +27,7 @@ use indexer_common::{
 use indoc::indoc;
 use serde::{Deserialize, Serialize};
 use sqlx::{QueryBuilder, Type, types::Json};
+use std::iter;
 
 #[cfg(feature = "cloud")]
 type Tx = sqlx::Transaction<'static, sqlx::Postgres>;
@@ -137,7 +141,7 @@ impl domain::storage::Storage for Storage {
                 .bind(block_height as i64)
                 .fetch_one(&*self.pool)
                 .await?;
-        let block_parent_hash = ByteArray::<32>::try_from(block_parent_hash.as_ref())
+        let block_parent_hash = BlockHash::try_from(block_parent_hash.as_ref())
             .map_err(|error| sqlx::Error::Decode(error.into()))?;
 
         let query = indoc! {"
@@ -162,15 +166,14 @@ impl domain::storage::Storage for Storage {
     }
 
     #[trace]
-    async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error> {
+    async fn save_block(
+        &self,
+        block: &Block,
+        transactions: &[Transaction],
+    ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let (max_transaction_id, transaction_ids) = save_block(block, &mut tx).await?;
+        let max_transaction_id = save_block(block, transactions, &mut tx).await?;
         tx.commit().await?;
-
-        // Update the block's transactions with their database IDs.
-        for (transaction, id) in block.transactions.iter_mut().zip(transaction_ids.iter()) {
-            transaction.id = *id as u64;
-        }
 
         Ok(max_transaction_id)
     }
@@ -201,7 +204,11 @@ impl From<&ContractAttributes> for ContractActionVariant {
 }
 
 #[trace]
-async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
+async fn save_block(
+    block: &Block,
+    transactions: &[Transaction],
+    tx: &mut Tx,
+) -> Result<Option<u64>, sqlx::Error> {
     let query = indoc! {"
         INSERT INTO blocks (
             hash,
@@ -238,7 +245,7 @@ async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>
         .map_ok(|(id,)| id)
         .await?;
 
-    save_transactions(&block.transactions, block_id, tx).await
+    save_transactions(&transactions, block_id, tx).await
 }
 
 #[trace(properties = { "block_id": "{block_id}" })]
@@ -246,11 +253,31 @@ async fn save_transactions(
     transactions: &[Transaction],
     block_id: i64,
     tx: &mut Tx,
-) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
-    if transactions.is_empty() {
-        return Ok((None, vec![]));
+) -> Result<Option<u64>, sqlx::Error> {
+    let mut highest_transaction_id = None;
+
+    for transaction in transactions {
+        match transaction {
+            Transaction::Regular(transaction) => {
+                highest_transaction_id =
+                    Some(save_regular_transaction(transaction, block_id, tx).await?);
+            }
+
+            Transaction::System(transaction) => {
+                save_system_transaction(transaction, block_id, tx).await?
+            }
+        }
     }
 
+    Ok(highest_transaction_id)
+}
+
+#[trace(properties = { "block_id": "{block_id}" })]
+async fn save_regular_transaction(
+    transaction: &RegularTransaction,
+    block_id: i64,
+    tx: &mut Tx,
+) -> Result<u64, sqlx::Error> {
     #[cfg(feature = "cloud")]
     let query = indoc! {"
         INSERT INTO transactions (
@@ -284,10 +311,10 @@ async fn save_transactions(
         )
     "};
 
-    let transaction_ids = QueryBuilder::new(query)
-        .push_values(transactions.iter(), |mut q, transaction| {
+    let transaction_id = QueryBuilder::new(query)
+        .push_values(iter::once(transaction), |mut q, transaction| {
             #[cfg_attr(feature = "standalone", allow(unused_variables))]
-            let Transaction {
+            let RegularTransaction {
                 hash,
                 protocol_version,
                 transaction_result,
@@ -317,50 +344,54 @@ async fn save_transactions(
         })
         .push(" RETURNING id")
         .build_query_as::<(i64,)>()
-        .fetch(&mut **tx)
+        .fetch_one(&mut **tx)
         .map_ok(|(id,)| id)
-        .try_collect::<Vec<_>>()
         .await?;
 
-    for (transaction, &transaction_id) in transactions.iter().zip(transaction_ids.iter()) {
-        #[cfg(feature = "standalone")]
-        save_identifiers(&transaction.identifiers, transaction_id, tx).await?;
+    #[cfg(feature = "standalone")]
+    save_identifiers(&transaction.identifiers, transaction_id, tx).await?;
 
-        let contract_action_ids =
-            save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
+    let contract_action_ids =
+        save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
+    let contract_balances = transaction
+        .contract_actions
+        .iter()
+        .zip(contract_action_ids.iter())
+        .flat_map(|(action, &action_id)| {
+            action
+                .extracted_balances
+                .iter()
+                .map(move |&balance| (action_id, balance))
+        })
+        .collect::<Vec<_>>();
+    save_contract_balances(contract_balances, tx).await?;
 
-        let contract_balances = transaction
-            .contract_actions
-            .iter()
-            .zip(contract_action_ids.iter())
-            .flat_map(|(action, &action_id)| {
-                action
-                    .extracted_balances
-                    .iter()
-                    .map(move |&balance| (action_id, balance))
-            })
-            .collect::<Vec<_>>();
-        save_contract_balances(contract_balances, tx).await?;
+    save_unshielded_utxos(
+        &transaction.created_unshielded_utxos,
+        transaction_id,
+        false,
+        tx,
+    )
+    .await?;
+    save_unshielded_utxos(
+        &transaction.spent_unshielded_utxos,
+        transaction_id,
+        true,
+        tx,
+    )
+    .await?;
 
-        save_unshielded_utxos(
-            &transaction.created_unshielded_utxos,
-            transaction_id,
-            false,
-            tx,
-        )
-        .await?;
+    Ok(transaction_id as u64)
+}
 
-        save_unshielded_utxos(
-            &transaction.spent_unshielded_utxos,
-            transaction_id,
-            true,
-            tx,
-        )
-        .await?;
-    }
-
-    let max_id = transaction_ids.last().map(|&n| n as u64);
-    Ok((max_id, transaction_ids))
+#[trace(properties = { "block_id": "{block_id}" })]
+async fn save_system_transaction(
+    _transaction: &SystemTransaction,
+    block_id: i64,
+    _tx: &mut Tx,
+) -> Result<(), sqlx::Error> {
+    // TODO Actually save the system transaction!
+    Ok(())
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]

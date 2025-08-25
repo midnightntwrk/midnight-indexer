@@ -31,47 +31,47 @@ docker run \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
     generate-txs batches -n 3 -b 2
 
-docker run \
-    --rm \
-    --network host \
-    -v /tmp:/out \
-    ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-    generate-txs --dest-file /out/contract_tx_1_deploy.mn --to-bytes \
-    contract-calls deploy \
-    --rng-seed '0000000000000000000000000000000000000000000000000000000000000037'
+# docker run \
+#     --rm \
+#     --network host \
+#     -v /tmp:/out \
+#     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
+#     generate-txs --dest-file /out/contract_tx_1_deploy.mn --to-bytes \
+#     contract-calls deploy \
+#     --rng-seed '0000000000000000000000000000000000000000000000000000000000000037'
 
-docker run \
-    --rm \
-    --network host \
-    -v /tmp:/out \
-    ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-    contract-address --network undeployed \
-    --src-file /out/contract_tx_1_deploy.mn --dest-file /out/contract_address.mn
+# docker run \
+#     --rm \
+#     --network host \
+#     -v /tmp:/out \
+#     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
+#     contract-address --network undeployed \
+#     --src-file /out/contract_tx_1_deploy.mn --dest-file /out/contract_address.mn
 
-docker run \
-    --rm \
-    --network host \
-    -v /tmp:/out \
-    ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-    generate-txs --src-files /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 \
-    send
+# docker run \
+#     --rm \
+#     --network host \
+#     -v /tmp:/out \
+#     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
+#     generate-txs --src-files /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 \
+#     send
 
-docker run \
-    --rm \
-    --network host \
-    -v /tmp:/out \
-    ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-    generate-txs contract-calls call \
-    --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
-    --contract-address /out/contract_address.mn
+# docker run \
+#     --rm \
+#     --network host \
+#     -v /tmp:/out \
+#     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
+#     generate-txs contract-calls call \
+#     --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
+#     --contract-address /out/contract_address.mn
 
-docker run \
-    --rm \
-    --network host \
-    -v /tmp:/out \
-    ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-    generate-txs contract-calls maintenance \
-    --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
-    --contract-address /out/contract_address.mn
+# docker run \
+#     --rm \
+#     --network host \
+#     -v /tmp:/out \
+#     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
+#     generate-txs contract-calls maintenance \
+#     --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
+#     --contract-address /out/contract_address.mn
 
 docker rm -f node

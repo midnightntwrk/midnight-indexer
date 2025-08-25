@@ -1,11 +1,11 @@
 use anyhow::Context;
 use chain_indexer::{
-    domain::{Block, Node},
+    domain::node::{self, Node},
     infra::subxt_node::{Config, SubxtNode},
 };
 use clap::Parser;
 use futures::{Stream, StreamExt, TryStreamExt};
-use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_013_000};
+use indexer_common::domain::PROTOCOL_VERSION_000_016_000;
 use std::{pin::Pin, time::Duration};
 
 #[tokio::main]
@@ -34,14 +34,15 @@ impl Cli {
     async fn run(self) -> anyhow::Result<()> {
         let config = Config {
             url: self.node,
-            genesis_protocol_version: PROTOCOL_VERSION_000_013_000,
+            genesis_protocol_version: PROTOCOL_VERSION_000_016_000,
             reconnect_max_delay: Duration::from_secs(1),
             reconnect_max_attempts: 1,
         };
         let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 
-        let blocks = node.finalized_blocks(None, NetworkId::Undeployed);
-        let mut blocks: Pin<Box<dyn Stream<Item = Result<Block, _>> + Send>> = Box::pin(blocks);
+        let blocks = node.finalized_blocks(None);
+        let mut blocks: Pin<Box<dyn Stream<Item = Result<node::Block, _>> + Send>> =
+            Box::pin(blocks);
 
         if let Some(n) = self.skip {
             blocks = Box::pin(blocks.skip(n));
@@ -54,10 +55,21 @@ impl Cli {
         while let Some(block) = blocks.try_next().await.context("get next block")? {
             println!("## BLOCK: height={}, \thash={}", block.height, block.hash);
             for transaction in block.transactions {
-                println!(
-                    "    ## TRANSACTION: hash={}, \t{transaction:?}",
-                    transaction.hash
-                );
+                match transaction {
+                    node::Transaction::Regular(transaction) => {
+                        println!(
+                            "    ## REGULAR TRANSACTION: hash={}, \t{transaction:?}",
+                            transaction.hash
+                        );
+                    }
+
+                    node::Transaction::System(transaction) => {
+                        println!(
+                            "    ## SYSTEN TRANSACTION: hash={}, \t{transaction:?}",
+                            transaction.hash
+                        );
+                    }
+                }
             }
         }
         Ok(())

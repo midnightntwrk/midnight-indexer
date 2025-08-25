@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use derive_more::{AsRef, From, Into};
+use derive_more::{AsRef, Deref, From, Into};
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
 use std::fmt::{self, Debug, Display};
@@ -19,7 +19,9 @@ use thiserror::Error;
 
 /// A newtype for a byte vector implementing various traits, amongst others `Debug` and `Display`
 /// returning a hex-encoded string, the former no longer than nine characters.
-#[derive(Default, Clone, PartialEq, Eq, Hash, AsRef, From, Into, Serialize, Deserialize, Type)]
+#[derive(
+    Default, Clone, PartialEq, Eq, Hash, AsRef, Deref, From, Into, Serialize, Deserialize, Type,
+)]
 #[as_ref([u8])]
 #[from(Vec<u8>, &[u8])]
 #[sqlx(transparent)]
@@ -39,7 +41,7 @@ impl Display for ByteVec {
 
 /// A newtype for a byte array implementing various traits, amongst others `Debug` and `Display`
 /// returning a hex-encoded string, the former no longer than nine characters.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRef, From, Into, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRef, Deref, From, Into, Serialize, Deserialize)]
 #[as_ref([u8])]
 #[into([u8; N], Vec<u8>)]
 pub struct ByteArray<const N: usize>(#[serde(with = "const_hex")] pub [u8; N]);
@@ -67,6 +69,14 @@ impl<const N: usize> TryFrom<Vec<u8>> for ByteArray<N> {
 
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
         bytes.as_slice().try_into()
+    }
+}
+
+impl<const N: usize> TryFrom<ByteVec> for ByteArray<N> {
+    type Error = ByteArrayLenError;
+
+    fn try_from(bytes: ByteVec) -> Result<Self, Self::Error> {
+        bytes.as_ref().try_into()
     }
 }
 
