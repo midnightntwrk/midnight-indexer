@@ -422,7 +422,7 @@ tmux new -d -s monitor "
         --database-url postgres://indexer:postgres@localhost:5432/indexer \
         --wallet-count $WALLET_COUNT \
         --network-id undeployed \
-        --heavy-load true \
+        --heavy-load \
         --queries-per-wallet 5 \
         --query-interval-ms 100'
 "

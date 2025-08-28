@@ -59,7 +59,7 @@ struct Args {
     network_id: String,
     
     /// Enable heavy load mode with continuous queries
-    #[arg(long, default_value_t = true)]
+    #[arg(long, action = clap::ArgAction::SetTrue)]
     heavy_load: bool,
     
     /// Number of parallel queries per wallet in heavy load mode
