@@ -23,10 +23,12 @@ indexer-common  = { path = "../indexer-common", optional = true }
 log             = { workspace = true, features = [ "kv" ], optional = true }
 secrecy         = { workspace = true, optional = true }
 serde           = { workspace = true, features = [ "derive" ] }
-tokio           = { workspace = true, features = [ "macros", "rt-multi-thread" ] }
+serde_with      = { workspace = true }
+tokio           = { workspace = true, features = [ "macros", "rt-multi-thread", "signal" ] }
 wallet-indexer  = { path = "../wallet-indexer", optional = true }
 
 [features]
+cloud = [  ]
 standalone = [
     "chain-indexer/standalone",
     "indexer-api/standalone",

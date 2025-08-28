@@ -11,27 +11,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{
-    ContractAttributes, ContractBalance, RawContractAddress, RawContractState, RawZswapState,
+use indexer_common::domain::ledger::{
+    ContractAttributes, ContractBalance, SerializedContractAddress, SerializedContractState,
+    SerializedZswapState,
 };
 
 /// A contract action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {
-    pub address: RawContractAddress,
-    pub state: RawContractState,
+    pub address: SerializedContractAddress,
+    pub state: SerializedContractState,
     pub attributes: ContractAttributes,
-    pub zswap_state: RawZswapState,
+    pub chain_state: SerializedZswapState,
     pub extracted_balances: Vec<ContractBalance>,
 }
 
-impl From<indexer_common::domain::ContractAction> for ContractAction {
-    fn from(contract_action: indexer_common::domain::ContractAction) -> Self {
+impl From<indexer_common::domain::ledger::ContractAction> for ContractAction {
+    fn from(contract_action: indexer_common::domain::ledger::ContractAction) -> Self {
         Self {
             address: contract_action.address,
             state: contract_action.state,
             attributes: contract_action.attributes,
-            zswap_state: Default::default(),
+            chain_state: Default::default(),
             extracted_balances: Default::default(),
         }
     }

@@ -11,8 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{
-    ContractEntryPoint, RawContractAddress, RawContractState, RawZswapState,
+use indexer_common::domain::ledger::{
+    SerializedContractAddress, SerializedContractEntryPoint, SerializedContractState,
+    SerializedZswapState,
 };
 use serde::Deserialize;
 use sqlx::FromRow;
@@ -24,14 +25,14 @@ pub struct ContractAction {
     #[sqlx(try_from = "i64")]
     pub id: u64,
 
-    pub address: RawContractAddress,
+    pub address: SerializedContractAddress,
 
-    pub state: RawContractState,
+    pub state: SerializedContractState,
 
     #[sqlx(json)]
     pub attributes: ContractAttributes,
 
-    pub zswap_state: RawZswapState,
+    pub chain_state: SerializedZswapState,
 
     #[sqlx(try_from = "i64")]
     pub transaction_id: u64,
@@ -44,7 +45,7 @@ pub enum ContractAttributes {
     Deploy,
 
     Call {
-        entry_point: ContractEntryPoint,
+        entry_point: SerializedContractEntryPoint,
     },
 
     Update,

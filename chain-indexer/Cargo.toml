@@ -32,19 +32,17 @@ parity-scale-codec = { workspace = true }
 parking_lot        = { workspace = true }
 paste              = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
+serde_with         = { workspace = true }
 sha2               = { workspace = true }
 sqlx               = { workspace = true, features = [ "runtime-tokio", "time" ] }
 subxt              = { workspace = true, features = [ "reconnecting-rpc-client" ] }
 thiserror          = { workspace = true }
-tokio              = { workspace = true, features = [ "macros", "rt-multi-thread", "time" ] }
+tokio              = { workspace = true, features = [ "macros", "rt-multi-thread", "time", "signal" ] }
 trait-variant      = { workspace = true }
 
 [dev-dependencies]
-assert_matches = { workspace = true }
-fs_extra       = { workspace = true }
+clap           = { workspace = true, features = [ "derive" ] }
 fake           = { workspace = true }
-tempfile       = { workspace = true }
-testcontainers = { workspace = true }
 
 [features]
 cloud      = [ "indexer-common/cloud" ]

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{self, Transaction, storage::Tx},
+    domain::{self, Transaction, storage::SqlxTransaction},
     infra::storage,
 };
 use chacha20poly1305::ChaCha20Poly1305;
@@ -72,7 +72,7 @@ impl domain::storage::Storage for Storage {
     async fn acquire_lock(
         &mut self,
         wallet_id: Uuid,
-    ) -> Result<Option<Tx<Self::Database>>, sqlx::Error> {
+    ) -> Result<Option<SqlxTransaction<Self::Database>>, sqlx::Error> {
         use std::hash::{DefaultHasher, Hash, Hasher};
 
         let mut tx = self.pool.begin().await?;
@@ -98,7 +98,7 @@ impl domain::storage::Storage for Storage {
     async fn acquire_lock(
         &mut self,
         _wallet_id: Uuid,
-    ) -> Result<Option<Tx<Self::Database>>, sqlx::Error> {
+    ) -> Result<Option<SqlxTransaction<Self::Database>>, sqlx::Error> {
         // SQLite doesn't support advisory locks like PostgreSQL. But in standalone mode (single
         // instance) we need not exclude other, i.e. "locking" is always successful.
         let tx = self.pool.begin().await?;
@@ -110,7 +110,7 @@ impl domain::storage::Storage for Storage {
         &self,
         from: u64,
         limit: NonZeroUsize,
-        tx: &mut Tx<Self::Database>,
+        tx: &mut SqlxTransaction<Self::Database>,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -119,6 +119,7 @@ impl domain::storage::Storage for Storage {
                 raw
             FROM transactions
             WHERE id >= $1
+            AND variant = 'Regular'
             ORDER BY id
             LIMIT $2
         "};
@@ -136,7 +137,7 @@ impl domain::storage::Storage for Storage {
         viewing_key: &ViewingKey,
         transactions: &[Transaction],
         last_indexed_transaction_id: u64,
-        tx: &mut Tx<Self::Database>,
+        tx: &mut SqlxTransaction<Self::Database>,
     ) -> Result<(), sqlx::Error> {
         let id = Uuid::now_v7();
         let session_id = viewing_key.to_session_id();
@@ -158,12 +159,9 @@ impl domain::storage::Storage for Storage {
             RETURNING id
         "};
 
-        #[cfg(feature = "standalone")]
-        let session_id = session_id.as_ref();
-
         let wallet_id = sqlx::query(query)
             .bind(id)
-            .bind(session_id)
+            .bind(session_id.as_ref())
             .bind(viewing_key)
             .bind(last_indexed_transaction_id as i64)
             .bind(OffsetDateTime::now_utc())
@@ -261,7 +259,7 @@ impl domain::storage::Storage for Storage {
     async fn get_wallet_by_id(
         &self,
         id: Uuid,
-        tx: &mut Tx<Self::Database>,
+        tx: &mut SqlxTransaction<Self::Database>,
     ) -> Result<domain::Wallet, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -277,9 +275,8 @@ impl domain::storage::Storage for Storage {
             .fetch_one(&mut **tx)
             .await?;
 
-        (wallet, &self.cipher)
-            .try_into()
-            .map_err(|error: DecryptViewingKeyError| sqlx::Error::Decode(error.into()))
+        domain::Wallet::try_from((wallet, &self.cipher))
+            .map_err(|error| sqlx::Error::Decode(error.into()))
     }
 }
 

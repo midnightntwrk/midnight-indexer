@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ByteArray, ByteArrayLenError, SessionId};
+use crate::domain::{ByteArray, ByteArrayLenError, ByteVec};
 use chacha20poly1305::{
     AeadCore, ChaCha20Poly1305,
     aead::{Aead, OsRng, Payload},
@@ -21,6 +21,8 @@ use sha2::{Digest, Sha256};
 use sqlx::types::Uuid;
 use std::fmt::{self, Debug, Display};
 use thiserror::Error;
+
+pub type SessionId = ByteArray<32>;
 
 pub const VIEWING_KEY_LEN: usize = 32;
 
@@ -62,7 +64,7 @@ impl ViewingKey {
         &self,
         id: Uuid,
         cipher: &ChaCha20Poly1305,
-    ) -> Result<Vec<u8>, chacha20poly1305::Error> {
+    ) -> Result<ByteVec, chacha20poly1305::Error> {
         let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
 
         let payload = Payload {
@@ -74,7 +76,7 @@ impl ViewingKey {
         let mut nonce_and_ciphertext = nonce.to_vec();
         nonce_and_ciphertext.append(&mut ciphertext);
 
-        Ok(nonce_and_ciphertext)
+        Ok(nonce_and_ciphertext.into())
     }
 
     /// Return the session ID (Sha256 hash) for this viewing key.

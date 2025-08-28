@@ -18,7 +18,7 @@ use crate::domain::{
         transaction::TransactionStorage, wallet::WalletStorage,
     },
 };
-use indexer_common::domain::RawUnshieldedAddress;
+use indexer_common::domain::ledger::RawUnshieldedAddress;
 use sqlx::Error;
 use std::fmt::Debug;
 
@@ -73,7 +73,6 @@ where
 
 #[allow(unused_variables)]
 impl UnshieldedUtxoStorage for NoopStorage {
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_unshielded_utxos_by_address(
         &self,
         address: RawUnshieldedAddress,
@@ -81,7 +80,6 @@ impl UnshieldedUtxoStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_unshielded_utxos_created_by_transaction(
         &self,
         transaction_id: u64,
@@ -89,7 +87,6 @@ impl UnshieldedUtxoStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_unshielded_utxos_spent_by_transaction(
         &self,
         transaction_id: u64,
@@ -97,7 +94,6 @@ impl UnshieldedUtxoStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_unshielded_utxos_by_address_created_by_transaction(
         &self,
         address: RawUnshieldedAddress,
@@ -106,7 +102,6 @@ impl UnshieldedUtxoStorage for NoopStorage {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_unshielded_utxos_by_address_spent_by_transaction(
         &self,
         address: RawUnshieldedAddress,

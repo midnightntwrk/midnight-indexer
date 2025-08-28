@@ -11,25 +11,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[subxt::subxt(runtime_metadata_path = "../.node/0.13.2-rc.1/metadata.scale")]
-mod runtime_0_13 {}
+#[subxt::subxt(
+    runtime_metadata_path = "../.node/0.16.0-alpha.2/metadata.scale",
+    derive_for_type(
+        path = "sp_consensus_slots::Slot",
+        derive = "parity_scale_codec::Encode, parity_scale_codec::Decode",
+        recursive
+    )
+)]
+mod runtime_0_16 {}
 
 use crate::infra::subxt_node::SubxtNodeError;
 use indexer_common::domain::{
-    BlockHash, PROTOCOL_VERSION_000_013_000, ProtocolVersion, RawContractAddress, RawContractState,
-    TransactionHash, UnshieldedUtxo,
+    BlockHash, ByteVec, PROTOCOL_VERSION_000_016_000, ProtocolVersion,
+    ledger::{SerializedContractAddress, SerializedContractState},
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
-use std::collections::HashMap;
 use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, utils::H256};
 
 /// Runtime specific block details.
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
-    pub raw_transactions: Vec<Vec<u8>>,
-    pub created_unshielded_utxos_by_hash: HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
-    pub spent_unshielded_utxos_by_hash: HashMap<TransactionHash, Vec<UnshieldedUtxo>>,
+    pub transactions: Vec<Transaction>,
+}
+
+/// Runtime specific (serialized) transaction.
+pub enum Transaction {
+    Regular(ByteVec),
+    System(ByteVec),
 }
 
 /// Make block details depending on the given protocol version.
@@ -40,8 +50,8 @@ pub async fn make_block_details(
     protocol_version: ProtocolVersion,
 ) -> Result<BlockDetails, SubxtNodeError> {
     // TODO Replace this often repeated pattern with a macro?
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-        make_block_details_runtime_0_13(extrinsics, events, authorities).await
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        make_block_details_runtime_0_16(extrinsics, events, authorities).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -52,8 +62,8 @@ pub async fn fetch_authorities(
     online_client: &OnlineClient<SubstrateConfig>,
     protocol_version: ProtocolVersion,
 ) -> Result<Option<Vec<[u8; 32]>>, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-        fetch_authorities_runtime_0_13(online_client).await
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        fetch_authorities_runtime_0_16(online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -61,8 +71,8 @@ pub async fn fetch_authorities(
 
 /// Decode slot depending on the given protocol version.
 pub fn decode_slot(slot: &[u8], protocol_version: ProtocolVersion) -> Result<u64, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-        decode_slot_runtime_0_13(slot)
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        decode_slot_runtime_0_16(slot)
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -71,12 +81,12 @@ pub fn decode_slot(slot: &[u8], protocol_version: ProtocolVersion) -> Result<u64
 /// Get contract state depending on the given protocol version.
 pub async fn get_contract_state(
     online_client: &OnlineClient<SubstrateConfig>,
-    address: RawContractAddress,
+    address: SerializedContractAddress,
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
-) -> Result<RawContractState, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-        get_contract_state_runtime_0_13(online_client, address, block_hash).await
+) -> Result<SerializedContractState, SubxtNodeError> {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        get_contract_state_runtime_0_16(online_client, address, block_hash).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -87,22 +97,22 @@ pub async fn get_zswap_state_root(
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
 ) -> Result<Vec<u8>, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-        get_zswap_state_root_runtime_0_13(online_client, block_hash).await
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        get_zswap_state_root_runtime_0_16(online_client, block_hash).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
 }
 
-/// Get transaction cost depending on the given protocol version.
+/// Get cost for the given serialized transaction depending on the given protocol version.
 pub async fn get_transaction_cost(
     online_client: &OnlineClient<SubstrateConfig>,
-    raw_transaction: &[u8],
+    transaction: impl AsRef<[u8]>,
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
 ) -> Result<u128, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_013_000) {
-        get_transaction_cost_runtime_0_13(online_client, raw_transaction, block_hash).await
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        get_transaction_cost_runtime_0_16(online_client, transaction.as_ref(), block_hash).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -117,9 +127,8 @@ macro_rules! make_block_details {
                 authorities: &mut Option<Vec<[u8; 32]>>,
             ) -> Result<BlockDetails, SubxtNodeError> {
                 use self::$module::{
-                    midnight,
-                    runtime_types::pallet_partner_chains_session::pallet as partner_chains_session,
-                    timestamp, Call, Event,
+                    Call, Event, midnight, midnight_system, timestamp,
+                    runtime_types::pallet_partner_chains_session::pallet::Event::NewSession,
                 };
 
                 let calls = extrinsics
@@ -128,7 +137,12 @@ macro_rules! make_block_details {
                         let call = extrinsic.as_root_extrinsic::<Call>().map_err(Box::new)?;
                         Ok(call)
                     })
-                    .filter_ok(|call| matches!(call, Call::Midnight(_) | Call::Timestamp(_)))
+                    .filter_ok(|call|
+                        matches!(
+                            call,
+                            Call::Timestamp(_) | Call::Midnight(_) | Call::MidnightSystem(_)
+                        )
+                    )
                     .collect::<Result<Vec<_>, SubxtNodeError>>()?;
 
                 let timestamp = calls.iter().find_map(|call| match call {
@@ -136,97 +150,42 @@ macro_rules! make_block_details {
                     _ => None,
                 });
 
-                let raw_transactions = calls
+                let transactions = calls
                     .into_iter()
                     .filter_map(|call| match call {
-                        Call::Midnight(midnight::Call::send_mn_transaction { midnight_tx }) => {
-                            Some(midnight_tx.into())
+                        Call::Midnight(
+                            midnight::Call::send_mn_transaction { midnight_tx }
+                        ) => {
+                            Some(Transaction::Regular(midnight_tx.into()))
+                        }
+
+                        Call::MidnightSystem(
+                            midnight_system::Call::send_mn_system_transaction { midnight_system_tx }
+                        ) => {
+                            Some(Transaction::System(midnight_system_tx.into()))
                         }
 
                         _ => None,
                     })
                     .collect();
 
-                let mut created_unshielded_utxos_by_hash = HashMap::new();
-                let mut spent_unshielded_utxos_by_hash = HashMap::new();
-
-                let mut tx_hash = None;
-
                 for event in events.iter().flatten() {
-                    if let Ok(root_event) = event.as_root_event::<Event>() {
-                        match root_event {
-                            Event::Session(partner_chains_session::Event::NewSession { .. }) => {
-                                *authorities = None;
-                            }
-
-                            Event::Midnight(midnight::Event::TxApplied(tx_applied)) => {
-                                tx_hash = Some(tx_applied.tx_hash);
-                            }
-
-                            Event::Midnight(midnight::Event::TxPartialSuccess(tx_partial)) => {
-                                tx_hash = Some(tx_partial.tx_hash);
-                            }
-
-                            Event::Midnight(midnight::Event::UnshieldedTokens(event_data)) => {
-                                // Use transaction hash from preceding TxApplied/TxPartialSuccess
-                                // events or fallback hash [0u8; 32] for system transactions (block
-                                // rewards, minting) that create UTXOs without transaction context.
-                                let transaction_hash = tx_hash.unwrap_or([0u8; 32]).into();
-
-                                if !event_data.created.is_empty() {
-                                    let created = event_data.created
-                                        .into_iter()
-                                        .map(|utxo| UnshieldedUtxo {
-                                            value: utxo.value,
-                                            owner: utxo.address.into(),
-                                            token_type: utxo.token_type.into(),
-                                            intent_hash: utxo.intent_hash.into(),
-                                            output_index: utxo.output_no,
-                                        })
-                                        .collect();
-
-                                    created_unshielded_utxos_by_hash.insert(
-                                        transaction_hash,
-                                        created
-                                    );
-                                }
-
-                                if !event_data.spent.is_empty() {
-                                    let spent = event_data.spent
-                                        .into_iter()
-                                        .map(|utxo| UnshieldedUtxo {
-                                            value: utxo.value,
-                                            owner: utxo.address.into(),
-                                            token_type: utxo.token_type.into(),
-                                            intent_hash: utxo.intent_hash.into(),
-                                            output_index: utxo.output_no,
-                                        })
-                                        .collect();
-
-                                    spent_unshielded_utxos_by_hash.insert(transaction_hash, spent);
-                                }
-
-                                // Reset to prevent stale hash in subsequent events.
-                                tx_hash = None;
-                            }
-
-                            _ => {}
-                        }
+                    let event = event.as_root_event::<Event>();
+                    if let Ok(Event::Session(NewSession { .. })) = event {
+                        *authorities = None;
                     }
                 }
 
                 Ok(BlockDetails {
                     timestamp,
-                    raw_transactions,
-                    created_unshielded_utxos_by_hash,
-                    spent_unshielded_utxos_by_hash,
+                    transactions,
                 })
             }
         }
     };
 }
 
-make_block_details!(runtime_0_13);
+make_block_details!(runtime_0_16);
 
 macro_rules! fetch_authorities {
     ($module:ident) => {
@@ -250,7 +209,7 @@ macro_rules! fetch_authorities {
     };
 }
 
-fetch_authorities!(runtime_0_13);
+fetch_authorities!(runtime_0_16);
 
 macro_rules! decode_slot {
     ($module:ident) => {
@@ -264,16 +223,17 @@ macro_rules! decode_slot {
     };
 }
 
-decode_slot!(runtime_0_13);
+decode_slot!(runtime_0_16);
 
 macro_rules! get_contract_state {
     ($module:ident) => {
         paste::paste! {
             async fn [<get_contract_state_ $module>](
                 online_client: &OnlineClient<SubstrateConfig>,
-                address: RawContractAddress,
+                address: SerializedContractAddress,
                 block_hash: BlockHash,
-            ) -> Result<RawContractState, SubxtNodeError> {
+            ) -> Result<SerializedContractState, SubxtNodeError> {
+                // This returns the serialized contract state.
                 let get_state = $module::apis()
                     .midnight_runtime_api()
                     .get_contract_state(address.into());
@@ -293,7 +253,7 @@ macro_rules! get_contract_state {
     };
 }
 
-get_contract_state!(runtime_0_13);
+get_contract_state!(runtime_0_16);
 
 macro_rules! get_zswap_state_root {
     ($module:ident) => {
@@ -321,19 +281,19 @@ macro_rules! get_zswap_state_root {
     };
 }
 
-get_zswap_state_root!(runtime_0_13);
+get_zswap_state_root!(runtime_0_16);
 
 macro_rules! get_transaction_cost {
     ($module:ident) => {
         paste::paste! {
             async fn [<get_transaction_cost_ $module>](
                 online_client: &OnlineClient<SubstrateConfig>,
-                raw_transaction: &[u8],
+                transaction: &[u8],
                 block_hash: BlockHash,
             ) -> Result<u128, SubxtNodeError> {
                 let get_transaction_cost = $module::apis()
                     .midnight_runtime_api()
-                    .get_transaction_cost(raw_transaction.to_owned());
+                    .get_transaction_cost(transaction.to_owned());
 
                 let (storage_cost, gas_cost) = online_client
                     .runtime_api()
@@ -352,4 +312,4 @@ macro_rules! get_transaction_cost {
     };
 }
 
-get_transaction_cost!(runtime_0_13);
+get_transaction_cost!(runtime_0_16);

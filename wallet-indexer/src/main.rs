@@ -41,8 +41,12 @@ async fn run() -> anyhow::Result<()> {
         infra::{migrations, pool, pub_sub},
         telemetry,
     };
-    use log::{error, info};
+    use log::info;
+    use tokio::signal::unix::{SignalKind, signal};
     use wallet_indexer::{application, config::Config, infra};
+
+    // Register SIGTERM handler.
+    let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
     // Load configuration.
     let config = Config::load().context("load configuration")?;
@@ -87,13 +91,7 @@ async fn run() -> anyhow::Result<()> {
         .context("create NatsSubscriber")?;
 
     // Run indexing.
-    application::run(application_config, storage, publisher, subscriber)
-        .await
-        .context("run application")?;
-
-    error!("wallet-indexer terminated");
-
-    Ok(())
+    application::run(application_config, storage, publisher, subscriber, sigterm).await
 }
 
 #[cfg(not(feature = "cloud"))]

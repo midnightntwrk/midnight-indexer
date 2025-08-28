@@ -39,13 +39,10 @@ impl WalletStorage for Storage {
             DO UPDATE SET active = TRUE, last_active = $4
         "};
 
-        #[cfg(feature = "standalone")]
-        let (session_id, viewing_key) = { (session_id.as_ref(), &viewing_key) };
-
         sqlx::query(query)
             .bind(id)
-            .bind(session_id)
-            .bind(viewing_key)
+            .bind(session_id.as_ref())
+            .bind(&viewing_key)
             .bind(OffsetDateTime::now_utc())
             .execute(&*self.pool)
             .await?;
@@ -61,11 +58,8 @@ impl WalletStorage for Storage {
             WHERE session_id = $1
         "};
 
-        #[cfg(feature = "standalone")]
-        let session_id = session_id.as_ref();
-
         sqlx::query(query)
-            .bind(session_id)
+            .bind(session_id.as_ref())
             .execute(&*self.pool)
             .await?;
 
@@ -80,11 +74,8 @@ impl WalletStorage for Storage {
             WHERE session_id = $1
         "};
 
-        #[cfg(feature = "standalone")]
-        let session_id = session_id.as_ref();
-
         let result = sqlx::query(query)
-            .bind(session_id)
+            .bind(session_id.as_ref())
             .bind(OffsetDateTime::now_utc())
             .execute(&*self.pool)
             .map_ok(|_| ())

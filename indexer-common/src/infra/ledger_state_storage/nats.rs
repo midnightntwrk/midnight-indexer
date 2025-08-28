@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{LedgerStateStorage, ProtocolVersion, RawLedgerState};
+use crate::domain::{LedgerStateStorage, ProtocolVersion, ledger::SerializedLedgerState};
 use async_nats::{
     ConnectError, ConnectOptions,
     jetstream::{
@@ -109,7 +109,7 @@ impl LedgerStateStorage for NatsLedgerStateStorage {
     #[trace]
     async fn load_ledger_state(
         &self,
-    ) -> Result<Option<(RawLedgerState, u32, ProtocolVersion)>, Self::Error> {
+    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, Self::Error> {
         let object_name = self.current_object_name().await?;
         debug!(object_name; "loading ledger state");
 
@@ -141,7 +141,7 @@ impl LedgerStateStorage for NatsLedgerStateStorage {
     #[trace]
     async fn save(
         &mut self,
-        ledger_state: &RawLedgerState,
+        ledger_state: &SerializedLedgerState,
         block_height: u32,
         highest_zswap_state_index: Option<u64>,
         protocol_version: ProtocolVersion,
@@ -249,9 +249,7 @@ async fn create_ledger_state_store(
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{
-            LedgerStateStorage, NetworkId, PROTOCOL_VERSION_000_013_000, ledger::LedgerState,
-        },
+        domain::{ByteVec, LedgerStateStorage, PROTOCOL_VERSION_000_016_000},
         infra::ledger_state_storage::nats::{Config, NatsLedgerStateStorage},
     };
     use anyhow::Context;
@@ -313,11 +311,9 @@ mod tests {
             .context("load ledger state")?;
         assert!(ledger_state.is_none());
 
-        let default_state = LedgerState::default()
-            .serialize(NetworkId::Undeployed)
-            .unwrap();
+        let default_state = ByteVec::default();
         ledger_state_storage
-            .save(&default_state, 0, None, PROTOCOL_VERSION_000_013_000)
+            .save(&default_state, 0, None, PROTOCOL_VERSION_000_016_000)
             .await
             .context("save ledger state")?;
 
@@ -333,17 +329,15 @@ mod tests {
             .context("load ledger state")?;
         assert_matches!(
             ledger_state,
-            Some((state, 0, PROTOCOL_VERSION_000_013_000)) if state == default_state
+            Some((state, 0, PROTOCOL_VERSION_000_016_000)) if state == default_state
         );
 
         ledger_state_storage
             .save(
-                &LedgerState::default()
-                    .serialize(NetworkId::Undeployed)
-                    .unwrap(),
+                &ByteVec::default(),
                 42,
                 Some(42),
-                PROTOCOL_VERSION_000_013_000,
+                PROTOCOL_VERSION_000_016_000,
             )
             .await
             .context("save ledger state")?;

@@ -20,7 +20,6 @@ pub struct Block {
     #[sqlx(try_from = "i64")]
     pub id: u64,
 
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     pub hash: BlockHash,
 
     #[sqlx(try_from = "i64")]
@@ -29,7 +28,6 @@ pub struct Block {
     #[sqlx(try_from = "i64")]
     pub protocol_version: ProtocolVersion,
 
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     pub parent_hash: BlockHash,
 
     #[cfg_attr(

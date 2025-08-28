@@ -19,6 +19,7 @@ pub mod query;
 pub mod subscription;
 pub mod transaction;
 pub mod unshielded;
+pub mod viewing_key;
 
 use crate::{
     domain::{
@@ -26,20 +27,93 @@ use crate::{
         storage::{NoopStorage, Storage},
     },
     infra::api::{
-        ApiResult, HexDecodeError, HexEncoded, Metrics, OptionExt, ResultExt,
+        ApiResult, Metrics, OptionExt, ResultExt,
         v1::{block::BlockOffset, mutation::Mutation, query::Query, subscription::Subscription},
     },
 };
-use async_graphql::{Schema, SchemaBuilder};
+use async_graphql::{Schema, SchemaBuilder, scalar};
 use async_graphql_axum::{GraphQL, GraphQLSubscription};
 use axum::{Router, routing::post_service};
-use derive_more::Debug;
+use const_hex::FromHexError;
+use derive_more::{Debug, Display};
 use indexer_common::domain::{
-    ByteArrayLenError, LedgerStateStorage, NetworkId, NoopLedgerStateStorage, NoopSubscriber,
-    SessionId, Subscriber,
+    ByteArrayLenError, ByteVec, LedgerStateStorage, NetworkId, NoopLedgerStateStorage,
+    NoopSubscriber, SessionId, Subscriber,
 };
-use std::sync::{Arc, atomic::AtomicBool};
+use log::error;
+use serde::{Deserialize, Serialize};
+use std::{
+    any::type_name,
+    sync::{Arc, atomic::AtomicBool},
+};
 use thiserror::Error;
+
+/// Wrapper around hex-encoded bytes.
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[debug("{_0}")]
+pub struct HexEncoded(String);
+
+scalar!(HexEncoded);
+
+impl HexEncoded {
+    /// Hex-decode this [HexEncoded] into some type that can be made from bytes.
+    pub fn hex_decode<T>(&self) -> Result<T, HexDecodeError>
+    where
+        T: TryFrom<ByteVec>,
+    {
+        let bytes = ByteVec::from(const_hex::decode(&self.0)?);
+        let decoded = bytes
+            .try_into()
+            .map_err(|_| HexDecodeError::Convert(type_name::<T>()))?;
+        Ok(decoded)
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum HexDecodeError {
+    #[error("cannot hex-decode")]
+    Decode(#[from] FromHexError),
+
+    #[error("cannot convert to {0}")]
+    Convert(&'static str),
+}
+
+// Needed to derive `Interface` for `ContractAction`. Weird!
+impl From<&HexEncoded> for HexEncoded {
+    fn from(value: &HexEncoded) -> Self {
+        value.to_owned()
+    }
+}
+
+impl TryFrom<String> for HexEncoded {
+    type Error = FromHexError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        const_hex::decode(&s)?;
+        Ok(Self(s))
+    }
+}
+
+impl TryFrom<&str> for HexEncoded {
+    type Error = FromHexError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        const_hex::decode(s)?;
+        Ok(Self(s.to_owned()))
+    }
+}
+
+pub trait AsBytesExt
+where
+    Self: AsRef<[u8]>,
+{
+    /// Hex-encode these bytes.
+    fn hex_encode(&self) -> HexEncoded {
+        HexEncoded(const_hex::encode(self.as_ref()))
+    }
+}
+
+impl<T> AsBytesExt for T where T: AsRef<[u8]> {}
 
 /// Export the GraphQL schema in SDL format.
 pub fn export_schema() -> String {

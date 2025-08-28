@@ -14,7 +14,7 @@
 pub mod v1;
 
 use crate::domain::{Api, LedgerStateCache, storage::Storage};
-use async_graphql::{Context, scalar};
+use async_graphql::Context;
 use axum::{
     Router,
     body::Body,
@@ -23,8 +23,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use const_hex::FromHexError;
-use derive_more::{Debug, Display};
+use derive_more::Debug;
 use fastrace_axum::FastraceLayer;
 use indexer_common::{
     domain::{LedgerStateStorage, NetworkId, Subscriber},
@@ -32,9 +31,8 @@ use indexer_common::{
 };
 use log::{error, info, warn};
 use metrics::{Gauge, gauge};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{
-    any::type_name,
     convert::Infallible,
     error::Error as StdError,
     fmt::{self, Display},
@@ -171,7 +169,7 @@ where
     B: Subscriber,
     Z: LedgerStateStorage,
 {
-    let zswap_state_cache = LedgerStateCache::default();
+    let zswap_state_cache = LedgerStateCache::new(network_id);
 
     let v1_app = v1::make_app(
         network_id,
@@ -242,73 +240,6 @@ async fn shutdown_signal() {
         .recv()
         .await;
 }
-
-/// Wrapper around hex-encoded bytes.
-#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[debug("{_0}")]
-pub struct HexEncoded(String);
-
-scalar!(HexEncoded);
-
-impl HexEncoded {
-    /// Hex-decode this [HexEncoded] into some type that can be made from bytes.
-    pub fn hex_decode<T>(&self) -> Result<T, HexDecodeError>
-    where
-        T: TryFrom<Vec<u8>>,
-    {
-        let bytes = const_hex::decode(&self.0)?;
-        let decoded = bytes
-            .try_into()
-            .map_err(|_| HexDecodeError::Convert(type_name::<T>()))?;
-        Ok(decoded)
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum HexDecodeError {
-    #[error("cannot hex-decode")]
-    Decode(#[from] FromHexError),
-
-    #[error("cannot convert to {0}")]
-    Convert(&'static str),
-}
-
-// Needed to derive `Interface` for `ContractAction`. Weird!
-impl From<&HexEncoded> for HexEncoded {
-    fn from(value: &HexEncoded) -> Self {
-        value.to_owned()
-    }
-}
-
-impl TryFrom<String> for HexEncoded {
-    type Error = FromHexError;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        const_hex::decode(&s)?;
-        Ok(Self(s))
-    }
-}
-
-impl TryFrom<&str> for HexEncoded {
-    type Error = FromHexError;
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        const_hex::decode(s)?;
-        Ok(Self(s.to_owned()))
-    }
-}
-
-pub trait AsBytesExt
-where
-    Self: AsRef<[u8]>,
-{
-    /// Hex-encode these bytes.
-    fn hex_encode(&self) -> HexEncoded {
-        HexEncoded(const_hex::encode(self.as_ref()))
-    }
-}
-
-impl<T> AsBytesExt for T where T: AsRef<[u8]> {}
 
 trait ContextExt {
     fn get_network_id(&self) -> NetworkId;

@@ -20,16 +20,22 @@ use log::debug;
 use thiserror::Error;
 use tokio::sync::RwLock;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct LedgerStateCache(RwLock<LedgerState>);
 
 impl LedgerStateCache {
+    #[allow(missing_docs)]
+    pub fn new(network_id: NetworkId) -> Self {
+        Self(RwLock::new(LedgerState::new(network_id)))
+    }
+
+    /// Create a collapsed update from the given start index to the given end index for the given
+    /// protocol version.
     pub async fn collapsed_update(
         &self,
         start_index: u64,
         end_index: u64,
         ledger_state_storage: &impl LedgerStateStorage,
-        network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, LedgerStateCacheError> {
         // Acquire a read lock.
@@ -63,12 +69,9 @@ impl LedgerStateCache {
 
                 match ledger_state_and_protocol_version {
                     Some((ledger_state, protocol_version)) => {
-                        let ledger_state = ledger::LedgerState::deserialize(
-                            ledger_state,
-                            network_id,
-                            protocol_version,
-                        )?
-                        .into();
+                        let ledger_state =
+                            ledger::LedgerState::deserialize(ledger_state, protocol_version)?
+                                .into();
 
                         *ledger_state_write = ledger_state;
                     }
@@ -82,12 +85,8 @@ impl LedgerStateCache {
 
         debug!(start_index, end_index; "creating collapsed update");
 
-        let collapsed_update = ledger_state_read.collapsed_update(
-            start_index,
-            end_index,
-            network_id,
-            protocol_version,
-        )?;
+        let collapsed_update =
+            ledger_state_read.collapsed_update(start_index, end_index, protocol_version)?;
 
         Ok(collapsed_update)
     }
@@ -106,21 +105,23 @@ pub enum LedgerStateCacheError {
 }
 
 /// Wrapper around LedgerState from indexer_common.
-#[derive(Debug, Clone, Default, From, Deref)]
+#[derive(Debug, Clone, From, Deref)]
 pub struct LedgerState(ledger::LedgerState);
 
 impl LedgerState {
+    #[allow(missing_docs)]
+    pub fn new(network_id: NetworkId) -> Self {
+        Self(ledger::LedgerState::new(network_id))
+    }
+
     /// Produce a collapsed Merkle Tree from this ledger state.
     pub fn collapsed_update(
         &self,
         start_index: u64,
         end_index: u64,
-        network_id: NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, ledger::Error> {
-        let update = self
-            .0
-            .collapsed_update(start_index, end_index, network_id)?;
+        let update = self.0.collapsed_update(start_index, end_index)?;
 
         Ok(MerkleTreeCollapsedUpdate {
             start_index,

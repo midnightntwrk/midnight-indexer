@@ -15,9 +15,9 @@ use crate::domain::storage::Storage;
 use anyhow::Context;
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, future::ok, stream};
-use indexer_common::domain::{BlockIndexed, NetworkId, Publisher, Subscriber, WalletIndexed};
+use indexer_common::domain::{BlockIndexed, Publisher, Subscriber, WalletIndexed};
 use itertools::Itertools;
-use log::debug;
+use log::{debug, warn};
 use serde::Deserialize;
 use std::{
     num::NonZeroUsize,
@@ -27,13 +27,11 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{select, task};
+use tokio::{select, signal::unix::Signal, task};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub network_id: NetworkId,
-
     #[serde(with = "humantime_serde")]
     pub active_wallets_repeat_delay: Duration,
 
@@ -51,9 +49,9 @@ pub async fn run(
     storage: impl Storage,
     publisher: impl Publisher,
     subscriber: impl Subscriber,
+    mut sigterm: Signal,
 ) -> anyhow::Result<()> {
     let Config {
-        network_id,
         active_wallets_repeat_delay,
         active_wallets_ttl,
         transaction_batch_size,
@@ -99,7 +97,6 @@ pub async fn run(
                         index_wallet(
                             wallet_id,
                             transaction_batch_size,
-                            network_id,
                             max_transaction_id,
                             &mut publisher,
                             &mut storage,
@@ -112,9 +109,19 @@ pub async fn run(
     };
 
     select! {
-        result = block_indexed_task => result,
-        result = index_wallets_task => result,
-    }?
+        result = block_indexed_task => result
+            .context("block_indexed_task")
+            .and_then(|r| r.context("block_indexed_task failed")),
+
+        result = index_wallets_task => result
+            .context("index_wallets_task panicked")
+            .and_then(|r| r.context("index_wallets_task failed")),
+
+        _ = sigterm.recv() => {
+            warn!("SIGTERM received");
+            Ok(())
+        }
+    }
 }
 
 fn active_wallets(
@@ -133,7 +140,6 @@ fn active_wallets(
 async fn index_wallet(
     wallet_id: Uuid,
     transaction_batch_size: NonZeroUsize,
-    network_id: NetworkId,
     max_transaction_id: Arc<AtomicU64>,
     publisher: &mut impl Publisher,
     storage: &mut impl Storage,
@@ -173,7 +179,7 @@ async fn index_wallet(
             .into_iter()
             .map(|transaction| {
                 transaction
-                    .relevant(&wallet, network_id)
+                    .relevant(&wallet)
                     .with_context(|| {
                         format!("check transaction relevance for wallet ID {wallet_id}")
                     })
