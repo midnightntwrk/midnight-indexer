@@ -47,7 +47,7 @@ use tokio::time::sleep;
 const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[cfg(any(feature = "cloud", feature = "standalone"))]
-const NODE_VERSION: &str = "0.13.5-79c649d7";
+const NODE_VERSION: &str = "0.16.0-alpha.2";
 
 #[cfg(any(feature = "cloud", feature = "standalone"))]
 static WS_DIR: LazyLock<String> = LazyLock::new(|| format!("{}/..", env!("CARGO_MANIFEST_DIR")));
@@ -301,7 +301,7 @@ async fn start_indexer_api(postgres_port: u16, nats_url: &str) -> anyhow::Result
     Command::new(format!("{}/debug/indexer-api", &*TARGET_DIR))
         .env(
             "RUST_LOG",
-            "indexer_api=warn,fastrace_opentelemetry=off,error",
+            "indexer_api::infra::api::v1::subscription::shielded=DEBUG,indexer_api=warn,fastrace_opentelemetry=off,error",
         )
         .env(
             "CONFIG_FILE",

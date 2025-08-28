@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::ContractAction;
+use crate::domain::{ContractAction, node};
 use indexer_common::domain::{
     ByteArray, ProtocolVersion,
     ledger::{
@@ -19,33 +19,128 @@ use indexer_common::domain::{
         TransactionHash, TransactionResult, UnshieldedUtxo,
     },
 };
-use sqlx::FromRow;
+use sqlx::{FromRow, Type};
 use std::fmt::Debug;
 
-/// Relevant transaction data from the perspective of the Chain Indexer.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Transaction {
-    pub id: u64, // 0 = not yet saved; valid DB IDs start from 1
+pub enum Transaction {
+    Regular(RegularTransaction),
+    System(SystemTransaction),
+}
+
+impl Transaction {
+    pub fn variant(&self) -> TransactionVariant {
+        match self {
+            Transaction::Regular(_) => TransactionVariant::Regular,
+            Transaction::System(_) => TransactionVariant::System,
+        }
+    }
+
+    pub fn hash(&self) -> TransactionHash {
+        match self {
+            Transaction::Regular(transaction) => transaction.hash,
+            Transaction::System(transaction) => transaction.hash,
+        }
+    }
+
+    pub fn protocol_version(&self) -> ProtocolVersion {
+        match self {
+            Transaction::Regular(transaction) => transaction.protocol_version,
+            Transaction::System(transaction) => transaction.protocol_version,
+        }
+    }
+
+    pub fn raw(&self) -> &[u8] {
+        match self {
+            Transaction::Regular(transaction) => &transaction.raw,
+            Transaction::System(transaction) => &transaction.raw,
+        }
+    }
+}
+
+impl From<node::Transaction> for Transaction {
+    fn from(transaction: node::Transaction) -> Self {
+        match transaction {
+            node::Transaction::Regular(regular_transaction) => {
+                Transaction::Regular(regular_transaction.into())
+            }
+
+            node::Transaction::System(system_transaction) => {
+                Transaction::System(system_transaction.into())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegularTransaction {
+    // These fields come from node::Transaction.
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
-    pub transaction_result: TransactionResult,
-    pub identifiers: Vec<SerializedTransactionIdentifier>,
     pub raw: SerializedTransaction,
+    pub identifiers: Vec<SerializedTransactionIdentifier>,
     pub contract_actions: Vec<ContractAction>,
-    pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
-    pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
+    pub paid_fees: u128,
+    pub estimated_fees: u128,
+
+    // These fields come from applying the node transactions to the ledger state.
+    pub transaction_result: TransactionResult,
     pub merkle_tree_root: SerializedZswapStateRoot,
     pub start_index: u64,
     pub end_index: u64,
-    pub paid_fees: u128,
-    pub estimated_fees: u128,
+    pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
+    pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
 }
 
-/// All raw transactions from a single block along with metadata needed for ledger state
+impl From<node::RegularTransaction> for RegularTransaction {
+    fn from(transaction: node::RegularTransaction) -> Self {
+        Self {
+            hash: transaction.hash,
+            protocol_version: transaction.protocol_version,
+            identifiers: transaction.identifiers,
+            raw: transaction.raw,
+            contract_actions: transaction.contract_actions,
+            paid_fees: transaction.paid_fees,
+            estimated_fees: transaction.estimated_fees,
+            transaction_result: Default::default(),
+            merkle_tree_root: Default::default(),
+            start_index: Default::default(),
+            end_index: Default::default(),
+            created_unshielded_utxos: Default::default(),
+            spent_unshielded_utxos: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemTransaction {
+    pub hash: TransactionHash,
+    pub protocol_version: ProtocolVersion,
+    pub raw: SerializedTransaction,
+}
+
+impl From<node::SystemTransaction> for SystemTransaction {
+    fn from(transaction: node::SystemTransaction) -> Self {
+        Self {
+            hash: transaction.hash,
+            protocol_version: transaction.protocol_version,
+            raw: transaction.raw,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[cfg_attr(feature = "cloud", sqlx(type_name = "TRANSACTION_VARIANT"))]
+pub enum TransactionVariant {
+    Regular,
+    System,
+}
+
+/// All serialized transactions from a single block along with metadata needed for ledger state
 /// application.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct BlockTransactions {
-    pub transactions: Vec<SerializedTransaction>,
+    pub transactions: Vec<(TransactionVariant, SerializedTransaction)>,
 
     #[sqlx(try_from = "i64")]
     pub protocol_version: ProtocolVersion,

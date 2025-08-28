@@ -43,6 +43,13 @@ where
     /// The protocol version.
     protocol_version: u32,
 
+    /// The hex-encoded serialized transaction content.
+    #[debug(skip)]
+    raw: HexEncoded,
+
+    #[graphql(skip)]
+    block_hash: BlockHash,
+
     /// The result of applying a transaction to the ledger state.
     transaction_result: TransactionResult,
 
@@ -53,16 +60,9 @@ where
     #[debug(skip)]
     identifiers: Vec<HexEncoded>,
 
-    /// The hex-encoded serialized transaction content.
-    #[debug(skip)]
-    raw: HexEncoded,
-
     /// The hex-encoded serialized merkle-tree root.
     #[debug(skip)]
     merkle_tree_root: HexEncoded,
-
-    #[graphql(skip)]
-    block_hash: BlockHash,
 
     #[graphql(skip)]
     #[debug(skip)]
@@ -171,11 +171,11 @@ where
         let domain::Transaction {
             id,
             hash,
-            block_hash,
             protocol_version: ProtocolVersion(protocol_version),
+            raw,
+            block_hash,
             transaction_result,
             identifiers,
-            raw,
             merkle_tree_root,
             ..
         } = value;
@@ -193,18 +193,18 @@ where
         };
 
         Self {
+            id,
             hash: hash.hex_encode(),
             protocol_version,
+            raw: raw.hex_encode(),
+            block_hash,
             transaction_result: transaction_result.into(),
             fees,
             identifiers: identifiers
                 .into_iter()
                 .map(|identifier| identifier.hex_encode())
                 .collect::<Vec<_>>(),
-            raw: raw.hex_encode(),
             merkle_tree_root: merkle_tree_root.hex_encode(),
-            id,
-            block_hash,
             _s: PhantomData,
         }
     }

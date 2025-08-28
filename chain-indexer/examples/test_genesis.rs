@@ -1,10 +1,10 @@
 use anyhow::Context;
 use chain_indexer::{
-    domain::Node,
+    domain::node::Node,
     infra::subxt_node::{Config, SubxtNode},
 };
 use futures::{StreamExt, TryStreamExt};
-use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_013_000};
+use indexer_common::domain::PROTOCOL_VERSION_000_016_000;
 use std::{pin::pin, time::Duration};
 
 /// Simple test to verify connection to midnight-node and basic block retrieval.
@@ -25,13 +25,13 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config {
         url: "ws://localhost:9944".to_string(),
-        genesis_protocol_version: PROTOCOL_VERSION_000_013_000,
+        genesis_protocol_version: PROTOCOL_VERSION_000_016_000,
         reconnect_max_delay: Duration::from_secs(1),
         reconnect_max_attempts: 3,
     };
     let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 
-    let blocks = node.finalized_blocks(None, NetworkId::Undeployed).take(3);
+    let blocks = node.finalized_blocks(None).take(3);
     let mut blocks = pin!(blocks);
 
     while let Some(block) = blocks.try_next().await.context("get next block")? {
@@ -41,23 +41,23 @@ async fn main() -> anyhow::Result<()> {
         if block.height == 0 {
             println!("*** GENESIS BLOCK DETECTED ***");
 
-            let utxo_count = block
-                .transactions
-                .first()
-                .map(|t| t.created_unshielded_utxos.len())
-                .unwrap_or(0);
+            // let utxo_count = block
+            //     .transactions
+            //     .first()
+            //     .map(|t| t.created_unshielded_utxos.len())
+            //     .unwrap_or(0);
 
-            println!("*** UTXOs: {utxo_count} (extraction requires full indexing pipeline) ***");
+            // println!("*** UTXOs: {utxo_count} (extraction requires full indexing pipeline) ***");
         }
 
-        for transaction in &block.transactions {
-            println!(
-                "    ## TRANSACTION: hash={}, created_utxos={}, spent_utxos={}",
-                transaction.hash,
-                transaction.created_unshielded_utxos.len(),
-                transaction.spent_unshielded_utxos.len()
-            );
-        }
+        // for transaction in &block.transactions {
+        //     println!(
+        //         "    ## TRANSACTION: hash={}, created_utxos={}, spent_utxos={}",
+        //         transaction.hash(),
+        //         transaction.created_unshielded_utxos.len(),
+        //         transaction.spent_unshielded_utxos.len()
+        //     );
+        // }
     }
 
     Ok(())

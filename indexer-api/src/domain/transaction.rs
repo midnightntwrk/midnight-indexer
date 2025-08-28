@@ -32,10 +32,13 @@ pub struct Transaction {
 
     pub hash: TransactionHash,
 
-    pub block_hash: BlockHash,
-
     #[sqlx(try_from = "i64")]
     pub protocol_version: ProtocolVersion,
+
+    #[debug(skip)]
+    pub raw: SerializedTransaction,
+
+    pub block_hash: BlockHash,
 
     #[sqlx(json)]
     pub transaction_result: TransactionResult,
@@ -43,9 +46,6 @@ pub struct Transaction {
     #[debug(skip)]
     #[cfg_attr(feature = "standalone", sqlx(skip))]
     pub identifiers: Vec<SerializedTransactionIdentifier>,
-
-    #[debug(skip)]
-    pub raw: SerializedTransaction,
 
     #[debug(skip)]
     pub merkle_tree_root: SerializedZswapStateRoot,

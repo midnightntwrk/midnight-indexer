@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, ContractAction};
+use crate::domain::{Block, ContractAction, Transaction};
 use indexer_common::domain::ledger::{ContractAttributes, SerializedLedgerState};
 use metrics::{Counter, Gauge, counter, gauge};
 
@@ -61,6 +61,7 @@ impl Metrics {
     pub fn update(
         &self,
         block: &Block,
+        transactions: &[Transaction],
         ledger_state: &SerializedLedgerState,
         node_block_height: u32,
         caught_up: bool,
@@ -71,13 +72,15 @@ impl Metrics {
 
         self.caught_up.set(f64::from(caught_up));
 
-        self.transaction_count
-            .increment(block.transactions.len() as u64);
+        self.transaction_count.increment(transactions.len() as u64);
 
         self.contract_call_count.increment(
-            block
-                .transactions
+            transactions
                 .iter()
+                .filter_map(|t| match t {
+                    Transaction::Regular(t) => Some(t),
+                    Transaction::System(_) => None,
+                })
                 .flat_map(|t| {
                     t.contract_actions.iter().filter(|a| {
                         matches!(
@@ -93,9 +96,12 @@ impl Metrics {
         );
 
         self.contract_deploy_count.increment(
-            block
-                .transactions
+            transactions
                 .iter()
+                .filter_map(|t| match t {
+                    Transaction::Regular(t) => Some(t),
+                    Transaction::System(_) => None,
+                })
                 .flat_map(|t| {
                     t.contract_actions.iter().filter(|a| {
                         matches!(
@@ -111,9 +117,12 @@ impl Metrics {
         );
 
         self.contract_update_count.increment(
-            block
-                .transactions
+            transactions
                 .iter()
+                .filter_map(|t| match t {
+                    Transaction::Regular(t) => Some(t),
+                    Transaction::System(_) => None,
+                })
                 .flat_map(|t| {
                     t.contract_actions.iter().filter(|a| {
                         matches!(

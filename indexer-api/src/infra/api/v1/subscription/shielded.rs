@@ -30,9 +30,7 @@ use futures::{
     future::ok,
     stream::{self, TryStreamExt},
 };
-use indexer_common::domain::{
-    LedgerStateStorage, NetworkId, SessionId, Subscriber, WalletIndexed, ledger::TransactionResult,
-};
+use indexer_common::domain::{LedgerStateStorage, SessionId, Subscriber, WalletIndexed};
 use log::{debug, warn};
 use std::{
     future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, sync::Arc, time::Duration,
@@ -142,11 +140,11 @@ impl<S> From<domain::Transaction> for RelevantTransaction<S>
 where
     S: Storage,
 {
-    fn from(value: domain::Transaction) -> Self {
+    fn from(transaction: domain::Transaction) -> Self {
         Self {
-            start: value.start_index,
-            end: value.end_index,
-            transaction: value.into(),
+            start: transaction.start_index,
+            end: transaction.end_index.saturating_sub(1), // Domain end index is exclusive!
+            transaction: transaction.into(),
         }
     }
 }
@@ -247,7 +245,6 @@ where
     B: Subscriber,
     Z: LedgerStateStorage,
 {
-    let network_id = cx.get_network_id();
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
     let ledger_state_storage = cx.get_ledger_state_storage::<Z>();
@@ -272,7 +269,6 @@ where
                 transaction,
                 ledger_state_storage,
                 zswap_state_cache,
-                network_id,
             )
             .await?;
 
@@ -290,7 +286,7 @@ where
             .map_err_into_server_error(|| "get next WalletIndexed event")?
             .is_some()
         {
-            debug!(index; "streaming next transactions");
+            debug!(index; "streaming next live transactions");
 
             let transactions =
                 storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
@@ -304,7 +300,6 @@ where
                     transaction,
                     ledger_state_storage,
                     zswap_state_cache,
-                    network_id,
                 )
                 .await?;
 
@@ -325,22 +320,16 @@ async fn make_viewing_update<S, Z>(
     transaction: domain::Transaction,
     ledger_state_storage: &Z,
     zswap_state_cache: &LedgerStateCache,
-    network_id: NetworkId,
 ) -> ApiResult<ViewingUpdate<S>>
 where
     S: Storage,
     Z: LedgerStateStorage,
 {
-    // For failures, don't increment the index, because no changes were applied to the zswap state.
-    // Put another way: the next transaction will have the same start_index like this end index.
-    // This avoids "update with end before start" errors when calling `collapsed_update`.
-    let index = if transaction.transaction_result == TransactionResult::Failure {
-        transaction.end_index
-    } else {
-        transaction.end_index + 1
-    };
+    debug!(from, transaction:?; "making viewing update");
 
-    let update = if from == transaction.start_index {
+    let index = transaction.end_index;
+
+    let update = if from == transaction.start_index || transaction.start_index == 0 {
         let relevant_transaction = ZswapChainStateUpdate::RelevantTransaction(transaction.into());
         vec![relevant_transaction]
     } else {
@@ -350,7 +339,6 @@ where
                 from,
                 transaction.start_index - 1,
                 ledger_state_storage,
-                network_id,
                 transaction.protocol_version,
             )
             .await
@@ -363,7 +351,7 @@ where
     };
 
     let viewing_update = ViewingUpdate { index, update };
-    debug!(viewing_update:?; "built viewing update");
+    debug!(viewing_update:?; "made viewing update");
 
     Ok(viewing_update)
 }
