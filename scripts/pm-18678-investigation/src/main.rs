@@ -600,14 +600,72 @@ impl MonitoringState {
         }
     }
 
+    async fn wait_for_services(&self, endpoints: &[String]) -> Result<()> {
+        info!("PM-18678: Checking service readiness...");
+        let client = Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()?;
+        
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: u32 = 60; // 5 minutes total
+        
+        loop {
+            attempts += 1;
+            let mut all_ready = true;
+            
+            for endpoint in endpoints {
+                let query = json!({
+                    "query": "{ __typename }"
+                });
+                
+                match client
+                    .post(format!("{}/graphql", endpoint))
+                    .json(&query)
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.status().is_success() => {
+                        info!("PM-18678: Service {} is ready", endpoint);
+                    }
+                    _ => {
+                        warn!("PM-18678: Service {} not ready yet (attempt {}/{})", 
+                              endpoint, attempts, MAX_ATTEMPTS);
+                        all_ready = false;
+                    }
+                }
+            }
+            
+            if all_ready {
+                info!("PM-18678: All services are ready!");
+                return Ok(());
+            }
+            
+            if attempts >= MAX_ATTEMPTS {
+                return Err(anyhow::anyhow!("Services failed to become ready after {} attempts", MAX_ATTEMPTS));
+            }
+            
+            sleep(Duration::from_secs(5)).await;
+        }
+    }
+    
     async fn generate_load(&self, endpoints: Vec<String>, wallet_count: usize, network_id: &str) {
         info!("PM-18678: Starting load generation with {} wallets", wallet_count);
         
+        // Wait for all services to be ready before creating wallets
+        if let Err(e) = self.wait_for_services(&endpoints).await {
+            error!("PM-18678: Service readiness check failed: {}", e);
+            // Continue anyway, as services might be partially ready
+        }
+        
+        let mut failed_wallets = Vec::new();
+        
+        // First pass: try to create all wallets
         for i in 0..wallet_count {
             let endpoint = &endpoints[i % endpoints.len()];
             
             match self.create_wallet(endpoint, network_id, i).await {
                 Ok(wallet) => {
+                    info!("PM-18678: Successfully created wallet {}", i);
                     let state = self.clone();
                     tokio::spawn(async move {
                         state.monitor_wallet_subscription(wallet).await;
@@ -615,17 +673,56 @@ impl MonitoringState {
                 }
                 Err(e) => {
                     error!("PM-18678: Failed to create wallet {} on {}: {}", i, endpoint, e);
-                    // If all endpoints are failing, services might not be ready yet
-                    if i == 0 {
-                        warn!("PM-18678: First wallet failed. Services might still be starting. Will retry in 30s...");
-                        sleep(Duration::from_secs(30)).await;
-                    }
+                    failed_wallets.push((i, endpoint.clone()));
                 }
             }
             
             // Stagger wallet creation
             sleep(Duration::from_millis(500)).await;
         }
+        
+        // Retry failed wallets with exponential backoff
+        if !failed_wallets.is_empty() {
+            warn!("PM-18678: {} wallets failed to create. Starting retry loop...", failed_wallets.len());
+            
+            let mut retry_delay = Duration::from_secs(10);
+            let max_retry_delay = Duration::from_secs(300); // 5 minutes max
+            
+            while !failed_wallets.is_empty() {
+                sleep(retry_delay).await;
+                
+                let mut still_failed = Vec::new();
+                
+                for (i, endpoint) in failed_wallets {
+                    match self.create_wallet(&endpoint, network_id, i).await {
+                        Ok(wallet) => {
+                            info!("PM-18678: Successfully created wallet {} on retry", i);
+                            let state = self.clone();
+                            tokio::spawn(async move {
+                                state.monitor_wallet_subscription(wallet).await;
+                            });
+                        }
+                        Err(e) => {
+                            warn!("PM-18678: Wallet {} still failing: {}", i, e);
+                            still_failed.push((i, endpoint));
+                        }
+                    }
+                    sleep(Duration::from_millis(200)).await;
+                }
+                
+                failed_wallets = still_failed;
+                
+                if !failed_wallets.is_empty() {
+                    error!("PM-18678: {} wallets still failing. Retrying in {:?}...", 
+                           failed_wallets.len(), retry_delay);
+                    
+                    // Exponential backoff
+                    retry_delay = std::cmp::min(retry_delay * 2, max_retry_delay);
+                }
+            }
+        }
+        
+        info!("PM-18678: Load generation complete. All {} wallets created.", wallet_count);
     }
 }
 

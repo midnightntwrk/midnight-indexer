@@ -129,6 +129,33 @@ If midnight-node image pull fails with `unauthorized`:
 1. Ensure your GitHub token has `read:packages` scope
 2. Authenticate Docker: `echo $GITHUB_TOKEN | sudo docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin`
 
+### Monitor Not Creating Wallets
+If the monitor shows `wallets: 0` for extended periods:
+1. The monitor now includes automatic retry logic with exponential backoff
+2. Check monitor logs for wallet creation status:
+   ```bash
+   tail -f $LATEST_LOG/services/monitor.log | grep -i "wallet\|PM-18678"
+   ```
+3. Verify services are ready:
+   ```bash
+   curl -X POST http://localhost:8080/graphql -H "Content-Type: application/json" -d '{"query": "{ __typename }"}'
+   ```
+4. Test monitor locally:
+   ```bash
+   cd ~/midnight-investigation/midnight-indexer/scripts/pm-18678-investigation
+   ./test-monitor-locally.sh
+   ```
+5. Restart monitor manually with debug logging:
+   ```bash
+   tmux kill-session -t monitor
+   cd ~/midnight-investigation/midnight-indexer/scripts/pm-18678-investigation
+   export RUST_LOG=debug
+   ./target/release/pm18678-monitor \
+     --api-endpoints http://localhost:8080,http://localhost:8081,http://localhost:8082 \
+     --database-url postgres://indexer:postgres@localhost:5432/indexer \
+     --wallet-count 30
+   ```
+
 ## Investigation Status
 
 - **Start Date**: August 7, 2025 (scheduled)

@@ -331,10 +331,61 @@ done
 sleep 30  # Wait for services to start
 
 # ============================================================================
+# VERIFY SERVICES ARE READY
+# ============================================================================
+
+log_info "Verifying all services are ready..."
+
+# Function to check if API endpoint is ready
+check_api_ready() {
+    local port=$1
+    curl -s -X POST http://localhost:$port/graphql \
+        -H "Content-Type: application/json" \
+        -d '{"query": "{ __typename }"}' >/dev/null 2>&1
+}
+
+# Wait for all API services to be ready
+max_attempts=60  # 5 minutes total
+attempt=0
+all_ready=false
+
+while [ $attempt -lt $max_attempts ]; do
+    services_ok=true
+    
+    # Check each API endpoint
+    for port in 8080 8081 8082; do
+        if ! check_api_ready $port; then
+            services_ok=false
+            break
+        fi
+    done
+    
+    if [ "$services_ok" = true ]; then
+        log_info "All API services are ready!"
+        all_ready=true
+        break
+    fi
+    
+    attempt=$((attempt + 1))
+    if [ $((attempt % 10)) -eq 0 ]; then
+        log_info "Waiting for services... (attempt $attempt/$max_attempts)"
+    fi
+    sleep 5
+done
+
+if [ "$all_ready" = false ]; then
+    log_error "WARNING: Services not fully ready after $max_attempts attempts"
+    log_error "Monitor will start anyway and retry wallet creation"
+fi
+
+# Add extra delay for stability
+sleep 10
+
+# ============================================================================
 # START MONITORING
 # ============================================================================
 
-log_info "Starting monitoring script..."
+log_info "Starting monitoring script with enhanced retry logic..."
 
 tmux new -d -s monitor "
     cd '$INDEXER_DIR/scripts/pm-18678-investigation'
@@ -345,6 +396,19 @@ tmux new -d -s monitor "
     $(declare -f capture_diagnostics)
     $(declare -f run_service)
     export LOG_DIR='$LOG_DIR'
+    
+    # Final readiness check in monitor session
+    echo 'Checking service readiness from monitor session...'
+    for i in 1 2 3 4 5; do
+        if curl -s http://localhost:8080/graphql >/dev/null 2>&1; then
+            echo 'Services confirmed ready!'
+            break
+        fi
+        echo \"Attempt \$i/5: Services not ready yet, waiting...\"
+        sleep 10
+    done
+    
+    echo 'Starting PM-18678 monitor with 30 wallet subscriptions...'
     run_service 'monitor' './target/release/pm18678-monitor \
         --api-endpoints http://localhost:8080,http://localhost:8081,http://localhost:8082 \
         --database-url postgres://indexer:postgres@localhost:5432/indexer \
