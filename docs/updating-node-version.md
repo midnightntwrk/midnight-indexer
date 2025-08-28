@@ -30,7 +30,7 @@ This creates: `.node/<new-version>/metadata.scale`
 ### 2. Update Source Code Files
 
 **CRITICAL: Use ripgrep to find ALL occurrences**
-```bash
+```fish
 # Find all references to the old version
 old=0.13.5-79c649d7 rg --glob '!docs/*' $old
 

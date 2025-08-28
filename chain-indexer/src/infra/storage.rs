@@ -30,10 +30,12 @@ use sqlx::{QueryBuilder, Type, types::Json};
 use std::iter;
 
 #[cfg(feature = "cloud")]
-type Tx = sqlx::Transaction<'static, sqlx::Postgres>;
+/// Sqlx transaction for Postgres.
+type SqlxTransaction = sqlx::Transaction<'static, sqlx::Postgres>;
 
 #[cfg(feature = "standalone")]
-type Tx = sqlx::Transaction<'static, sqlx::Sqlite>;
+/// Sqlx transaction for Sqlite.
+type SqlxTransaction = sqlx::Transaction<'static, sqlx::Sqlite>;
 
 /// Unified storage implementation for PostgreSQL (cloud) and SQLite (standalone). Uses Cargo
 /// features to select the appropriate database backend at build time.
@@ -208,7 +210,7 @@ impl From<&ContractAttributes> for ContractActionVariant {
 async fn save_block(
     block: &Block,
     transactions: &[Transaction],
-    tx: &mut Tx,
+    tx: &mut SqlxTransaction,
 ) -> Result<Option<u64>, sqlx::Error> {
     let query = indoc! {"
         INSERT INTO blocks (
@@ -253,7 +255,7 @@ async fn save_block(
 async fn save_transactions(
     transactions: &[Transaction],
     block_id: i64,
-    tx: &mut Tx,
+    tx: &mut SqlxTransaction,
 ) -> Result<Option<u64>, sqlx::Error> {
     let mut highest_transaction_id = None;
 
@@ -304,7 +306,7 @@ async fn save_regular_transaction(
     transaction: &RegularTransaction,
     transaction_id: i64,
     block_id: i64,
-    tx: &mut Tx,
+    tx: &mut SqlxTransaction,
 ) -> Result<u64, sqlx::Error> {
     #[cfg(feature = "cloud")]
     let query = indoc! {"
@@ -391,8 +393,9 @@ async fn save_system_transaction(
     _transaction: &SystemTransaction,
     _transaction_id: i64,
     block_id: i64,
-    _tx: &mut Tx,
+    _tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
+    // TODO: Store DistributeReserve and other (DUST-related) system transactions.
     Ok(())
 }
 
@@ -401,7 +404,7 @@ async fn save_unshielded_utxos(
     utxos: &[UnshieldedUtxo],
     transaction_id: i64,
     spent: bool,
-    tx: &mut Tx,
+    tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     if utxos.is_empty() {
         return Ok(());
@@ -485,7 +488,7 @@ async fn save_unshielded_utxos(
 async fn save_contract_actions(
     contract_actions: &[ContractAction],
     transaction_id: i64,
-    tx: &mut Tx,
+    tx: &mut SqlxTransaction,
 ) -> Result<Vec<i64>, sqlx::Error> {
     if contract_actions.is_empty() {
         return Ok(Vec::new());
@@ -525,7 +528,7 @@ async fn save_contract_actions(
 #[trace]
 async fn save_contract_balances(
     balances: Vec<(i64, ContractBalance)>,
-    tx: &mut Tx,
+    tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     if !balances.is_empty() {
         let query = indoc! {"
@@ -554,7 +557,7 @@ async fn save_contract_balances(
 async fn save_identifiers(
     identifiers: &[indexer_common::domain::ledger::SerializedTransactionIdentifier],
     transaction_id: i64,
-    tx: &mut Tx,
+    tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     if !identifiers.is_empty() {
         let query = indoc! {"
