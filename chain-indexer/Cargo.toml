@@ -40,12 +40,8 @@ tokio              = { workspace = true, features = [ "macros", "rt-multi-thread
 trait-variant      = { workspace = true }
 
 [dev-dependencies]
-assert_matches = { workspace = true }
 clap           = { workspace = true, features = [ "derive" ] }
-fs_extra       = { workspace = true }
 fake           = { workspace = true }
-tempfile       = { workspace = true }
-testcontainers = { workspace = true }
 
 [features]
 cloud      = [ "indexer-common/cloud" ]
