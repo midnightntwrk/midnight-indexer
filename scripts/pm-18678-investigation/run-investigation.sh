@@ -14,7 +14,7 @@ LOG_DIR="$INVESTIGATION_DIR/logs/$(date +%Y%m%d_%H%M%S)"
 BRANCH="investigation/PM-18678-hanging-root-cause"
 
 # Test configuration
-WALLET_COUNT=30
+WALLET_COUNT=50  # Increased for heavy load testing
 TEST_MODE="${1:-reproduce}"  # "reproduce" or "control"
 NODE_URL="${NODE_URL:-ws://localhost:9944}"
 
@@ -408,12 +408,18 @@ tmux new -d -s monitor "
         sleep 10
     done
     
-    echo 'Starting PM-18678 monitor with 30 wallet subscriptions...'
+    echo 'Starting PM-18678 monitor with heavy load mode...'
+    echo 'Configuration: $WALLET_COUNT wallets, 5 parallel queries per wallet, 100ms intervals'
+    echo 'Total load: $(($WALLET_COUNT * 5)) parallel query generators @ 10 qps each'
+    
     run_service 'monitor' './target/release/pm18678-monitor \
         --api-endpoints http://localhost:8080,http://localhost:8081,http://localhost:8082 \
         --database-url postgres://indexer:postgres@localhost:5432/indexer \
         --wallet-count $WALLET_COUNT \
-        --network-id undeployed'
+        --network-id undeployed \
+        --heavy-load true \
+        --queries-per-wallet 5 \
+        --query-interval-ms 100'
 "
 
 # ============================================================================

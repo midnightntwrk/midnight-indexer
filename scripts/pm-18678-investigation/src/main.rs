@@ -57,6 +57,18 @@ struct Args {
     /// Network ID (undeployed, dev, test, mainnet)
     #[arg(long, default_value = "undeployed")]
     network_id: String,
+    
+    /// Enable heavy load mode with continuous queries
+    #[arg(long, default_value_t = true)]
+    heavy_load: bool,
+    
+    /// Number of parallel queries per wallet in heavy load mode
+    #[arg(long, default_value_t = 5)]
+    queries_per_wallet: usize,
+    
+    /// Query interval in milliseconds for heavy load mode
+    #[arg(long, default_value_t = 100)]
+    query_interval_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -234,7 +246,7 @@ impl MonitoringState {
         })
     }
 
-    async fn monitor_wallet_subscription(&self, wallet: Wallet) {
+    async fn monitor_wallet_subscription(&self, wallet: Wallet, heavy_load: bool, queries_per_wallet: usize, query_interval_ms: u64) {
         let session_id = wallet.session_id.clone();
         let endpoint = wallet.replica_endpoint.clone();
         
@@ -244,28 +256,220 @@ impl MonitoringState {
             wallets.insert(session_id.clone(), wallet);
         }
         
+        // Start heavy load generators if enabled
+        if heavy_load {
+            info!("PM-18678: Starting {} parallel query generators for wallet {}", queries_per_wallet, session_id);
+            
+            // Spawn multiple query generators per wallet for heavy load
+            for i in 0..queries_per_wallet {
+                let session_id_clone = session_id.clone();
+                let endpoint_clone = endpoint.clone();
+                let state_clone = self.clone();
+                
+                tokio::spawn(async move {
+                    state_clone.continuous_query_generator(
+                        &session_id_clone,
+                        &endpoint_clone,
+                        i,
+                        query_interval_ms
+                    ).await;
+                });
+            }
+        }
+        
         // Convert HTTP endpoint to WebSocket
         let ws_endpoint = endpoint
             .replace("http://", "ws://")
             .replace("https://", "wss://");
         let ws_url = format!("{}/graphql", ws_endpoint);
         
-        // Start WebSocket subscription
+        let mut consecutive_failures = 0;
+        const MAX_FAILURES: u32 = 10;
+        
+        // Start WebSocket subscription with retry logic
         loop {
+            info!("PM-18678: Starting subscription for wallet {}", session_id);
+            
             match self.run_subscription(&session_id, &ws_url).await {
                 Ok(_) => {
-                    warn!("Subscription ended for wallet {}", session_id);
+                    warn!("PM-18678: Subscription ended normally for wallet {}", session_id);
+                    consecutive_failures = 0;
                 }
                 Err(e) => {
-                    error!("Subscription error for wallet {}: {}", session_id, e);
+                    consecutive_failures += 1;
+                    error!(
+                        "PM-18678: Subscription error for wallet {} (failure {}/{}): {}",
+                        session_id, consecutive_failures, MAX_FAILURES, e
+                    );
+                    
+                    if consecutive_failures >= MAX_FAILURES {
+                        error!(
+                            "PM-18678: Wallet {} exceeded max failures. Removing from monitoring.",
+                            session_id
+                        );
+                        
+                        // Remove failed wallet from state
+                        {
+                            let mut wallets = self.wallets.write().await;
+                            wallets.remove(&session_id);
+                        }
+                        
+                        return; // Exit this wallet's monitoring loop
+                    }
                 }
             }
             
             // Check if we should mark this as THE ISSUE™
             self.check_for_issue(&session_id).await;
             
-            // Reconnect after delay
-            sleep(Duration::from_secs(30)).await;
+            // Exponential backoff for reconnection
+            let delay = std::cmp::min(30 * (2_u64.pow(consecutive_failures)), 300);
+            info!("PM-18678: Reconnecting wallet {} in {} seconds", session_id, delay);
+            sleep(Duration::from_secs(delay)).await;
+        }
+    }
+    
+    async fn continuous_query_generator(&self, session_id: &str, endpoint: &str, generator_id: usize, interval_ms: u64) {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+            
+        let mut query_count = 0u64;
+        let mut error_count = 0u64;
+        let start_time = Instant::now();
+        
+        info!("PM-18678: Query generator {} started for wallet {}", generator_id, session_id);
+        
+        loop {
+            // Mix of different query types for varied load
+            let queries = vec![
+                // Heavy query - get all blocks
+                json!({
+                    "query": r#"
+                        query GetBlocks {
+                            blocks(first: 100) {
+                                hash
+                                height
+                                parentHash
+                                protocolVersion
+                                timestamp
+                                transactions {
+                                    hash
+                                    ordinal
+                                }
+                            }
+                        }
+                    "#
+                }),
+                // Transaction search
+                json!({
+                    "query": r#"
+                        query GetTransactions($sessionId: HexEncoded!) {
+                            transactions(sessionId: $sessionId, first: 50) {
+                                hash
+                                blockHash
+                                blockHeight
+                                ordinal
+                                type
+                            }
+                        }
+                    "#,
+                    "variables": {
+                        "sessionId": session_id
+                    }
+                }),
+                // Contract actions
+                json!({
+                    "query": r#"
+                        query GetContractActions {
+                            contractActions(first: 100) {
+                                contractAddress
+                                actionName
+                                transactionHash
+                                blockHeight
+                            }
+                        }
+                    "#
+                }),
+                // Wallet status
+                json!({
+                    "query": r#"
+                        query WalletStatus($sessionId: HexEncoded!) {
+                            walletStatus(sessionId: $sessionId) {
+                                sessionId
+                                highestIndex
+                                highestRelevantIndex
+                            }
+                        }
+                    "#,
+                    "variables": {
+                        "sessionId": session_id
+                    }
+                }),
+                // Block by height (specific queries)
+                json!({
+                    "query": r#"
+                        query GetBlockByHeight($height: BlockHeight!) {
+                            blockByHeight(height: $height) {
+                                hash
+                                height
+                                timestamp
+                                transactions {
+                                    hash
+                                    type
+                                }
+                            }
+                        }
+                    "#,
+                    "variables": {
+                        "height": query_count % 1000  // Query different blocks
+                    }
+                }),
+            ];
+            
+            // Pick a random query
+            let query = &queries[query_count as usize % queries.len()];
+            
+            // Send the query
+            match client
+                .post(format!("{}/graphql", endpoint))
+                .json(query)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        query_count += 1;
+                        if query_count % 1000 == 0 {
+                            let elapsed = start_time.elapsed().as_secs();
+                            let qps = if elapsed > 0 { query_count / elapsed } else { 0 };
+                            info!(
+                                "PM-18678: Generator {}/{}: {} queries sent ({} qps, {} errors)",
+                                generator_id, session_id, query_count, qps, error_count
+                            );
+                        }
+                    } else {
+                        error_count += 1;
+                        warn!(
+                            "PM-18678: Generator {}/{}: Query failed with status {}",
+                            generator_id, session_id, response.status()
+                        );
+                    }
+                }
+                Err(e) => {
+                    error_count += 1;
+                    if error_count % 100 == 0 {
+                        error!(
+                            "PM-18678: Generator {}/{}: {} errors total. Latest: {}",
+                            generator_id, session_id, error_count, e
+                        );
+                    }
+                }
+            }
+            
+            // Wait before next query
+            sleep(Duration::from_millis(interval_ms)).await;
         }
     }
 
@@ -319,29 +523,66 @@ impl MonitoringState {
         
         write.send(Message::Text(subscribe_msg.to_string())).await?;
         
-        // Process messages
-        while let Some(msg) = read.next().await {
-            match msg? {
-                Message::Text(text) => {
-                    if let Ok(response) = serde_json::from_str::<GraphQLResponse>(&text) {
-                        if response.msg_type == "next" {
-                            if let Some(payload) = response.payload {
-                                self.process_subscription_event(session_id, payload).await;
+        // Process messages with keep-alive
+        let mut last_activity = Instant::now();
+        let mut ping_interval = interval(Duration::from_secs(30));
+        
+        loop {
+            tokio::select! {
+                msg = read.next() => {
+                    match msg {
+                        Some(Ok(Message::Text(text))) => {
+                            last_activity = Instant::now();
+                            if let Ok(response) = serde_json::from_str::<GraphQLResponse>(&text) {
+                                if response.msg_type == "next" || response.msg_type == "data" {
+                                    if let Some(payload) = response.payload {
+                                        self.process_subscription_event(session_id, payload).await;
+                                    }
+                                } else if response.msg_type == "error" {
+                                    error!("PM-18678: Subscription error for {}: {:?}", session_id, response.payload);
+                                    break;
+                                } else if response.msg_type == "complete" {
+                                    info!("PM-18678: Subscription completed for {}", session_id);
+                                    break;
+                                } else if response.msg_type == "ka" {
+                                    // Keep-alive received, no action needed
+                                }
                             }
-                        } else if response.msg_type == "error" {
-                            error!("Subscription error for {}: {:?}", session_id, response.payload);
+                        }
+                        Some(Ok(Message::Ping(data))) => {
+                            last_activity = Instant::now();
+                            write.send(Message::Pong(data)).await?;
+                        }
+                        Some(Ok(Message::Close(_))) => {
+                            info!("PM-18678: WebSocket closed for {}", session_id);
                             break;
-                        } else if response.msg_type == "complete" {
-                            info!("Subscription completed for {}", session_id);
+                        }
+                        None => {
+                            warn!("PM-18678: WebSocket stream ended for {}", session_id);
+                            break;
+                        }
+                        Some(Err(e)) => {
+                            error!("PM-18678: WebSocket error for {}: {}", session_id, e);
+                            return Err(e.into());
+                        }
+                        _ => {}
+                    }
+                }
+                _ = ping_interval.tick() => {
+                    // Send ping if no activity for a while
+                    if last_activity.elapsed() > Duration::from_secs(60) {
+                        if write.send(Message::Ping(vec![])).await.is_err() {
+                            warn!("PM-18678: Failed to send ping for {}", session_id);
                             break;
                         }
                     }
                 }
-                Message::Close(_) => {
-                    info!("WebSocket closed for {}", session_id);
-                    break;
-                }
-                _ => {}
+            }
+            
+            // Check for connection timeout
+            if last_activity.elapsed() > Duration::from_secs(180) {
+                error!("PM-18678: Connection timeout for wallet {} (no activity for 3 minutes)", session_id);
+                break;
             }
         }
         
@@ -570,12 +811,28 @@ impl MonitoringState {
             let wallets = self.wallets.read().await;
             let issues = self.issue_detected.read().await;
             
+            let active_wallets = wallets.iter().filter(|(_, w)| {
+                // Consider wallet active if it received an update in last 5 minutes
+                let last_update = std::cmp::max(
+                    w.last_viewing_update.unwrap_or(DateTime::<Utc>::MIN_UTC),
+                    w.last_progress_update.unwrap_or(DateTime::<Utc>::MIN_UTC),
+                );
+                Utc::now().signed_duration_since(last_update).num_seconds() < 300
+            }).count();
+            
             info!(
-                "PM-18678 Status: uptime: {}h, wallets: {}, issues_detected: {}",
+                "PM-18678 Status: uptime: {}h, wallets: {} (active: {}), issues_detected: {}",
                 uptime.as_secs() / 3600,
                 wallets.len(),
+                active_wallets,
                 issues.len()
             );
+            
+            if wallets.is_empty() {
+                error!("PM-18678 CRITICAL: No wallets in monitoring! Load generation may have failed!");
+            } else if active_wallets == 0 {
+                error!("PM-18678 WARNING: All {} wallets are inactive (no updates in 5 min)!", wallets.len());
+            }
             
             // Log wallet states
             for (session_id, wallet) in wallets.iter() {
@@ -648,7 +905,7 @@ impl MonitoringState {
         }
     }
     
-    async fn generate_load(&self, endpoints: Vec<String>, wallet_count: usize, network_id: &str) {
+    async fn generate_load(&self, endpoints: Vec<String>, wallet_count: usize, network_id: &str, heavy_load: bool, queries_per_wallet: usize, query_interval_ms: u64) {
         info!("PM-18678: Starting load generation with {} wallets", wallet_count);
         
         // Wait for all services to be ready before creating wallets
@@ -667,8 +924,11 @@ impl MonitoringState {
                 Ok(wallet) => {
                     info!("PM-18678: Successfully created wallet {}", i);
                     let state = self.clone();
+                    let heavy_load_clone = heavy_load;
+                    let queries_per_wallet_clone = queries_per_wallet;
+                    let query_interval_ms_clone = query_interval_ms;
                     tokio::spawn(async move {
-                        state.monitor_wallet_subscription(wallet).await;
+                        state.monitor_wallet_subscription(wallet, heavy_load_clone, queries_per_wallet_clone, query_interval_ms_clone).await;
                     });
                 }
                 Err(e) => {
@@ -698,8 +958,11 @@ impl MonitoringState {
                         Ok(wallet) => {
                             info!("PM-18678: Successfully created wallet {} on retry", i);
                             let state = self.clone();
+                            let heavy_load_clone = heavy_load;
+                            let queries_per_wallet_clone = queries_per_wallet;
+                            let query_interval_ms_clone = query_interval_ms;
                             tokio::spawn(async move {
-                                state.monitor_wallet_subscription(wallet).await;
+                                state.monitor_wallet_subscription(wallet, heavy_load_clone, queries_per_wallet_clone, query_interval_ms_clone).await;
                             });
                         }
                         Err(e) => {
@@ -774,7 +1037,77 @@ async fn main() -> Result<()> {
     });
     
     // Start wallet load generation
-    state.generate_load(endpoints, args.wallet_count, &args.network_id).await;
+    let state_for_load = state.clone();
+    let endpoints_for_load = endpoints.clone();
+    let network_id = args.network_id.clone();
+    let target_wallet_count = args.wallet_count;
+    let heavy_load = args.heavy_load;
+    let queries_per_wallet = args.queries_per_wallet;
+    let query_interval_ms = args.query_interval_ms;
+    
+    info!("PM-18678: Heavy load mode: {} ({}x{} queries per wallet every {}ms)", 
+          heavy_load, target_wallet_count, queries_per_wallet, query_interval_ms);
+    info!("PM-18678: Total parallel queries: {}", 
+          if heavy_load { target_wallet_count * queries_per_wallet } else { 0 });
+    
+    tokio::spawn(async move {
+        state_for_load.generate_load(
+            endpoints_for_load, 
+            target_wallet_count, 
+            &network_id,
+            heavy_load,
+            queries_per_wallet,
+            query_interval_ms
+        ).await;
+    });
+    
+    // Start wallet health monitor - ensures we maintain target wallet count
+    let state_for_health = state.clone();
+    let endpoints_for_health = endpoints.clone();
+    let network_id_for_health = args.network_id.clone();
+    tokio::spawn(async move {
+        let mut check_interval = interval(Duration::from_secs(300)); // Check every 5 minutes
+        loop {
+            check_interval.tick().await;
+            
+            let wallet_count = {
+                let wallets = state_for_health.wallets.read().await;
+                wallets.len()
+            };
+            
+            if wallet_count < target_wallet_count {
+                error!(
+                    "PM-18678: Wallet count ({}) below target ({}). Creating {} new wallets...",
+                    wallet_count,
+                    target_wallet_count,
+                    target_wallet_count - wallet_count
+                );
+                
+                // Create missing wallets
+                for i in wallet_count..target_wallet_count {
+                    let endpoint = &endpoints_for_health[i % endpoints_for_health.len()];
+                    
+                    match state_for_health.create_wallet(endpoint, &network_id_for_health, i).await {
+                        Ok(wallet) => {
+                            info!("PM-18678: Created replacement wallet {}", i);
+                            let state_clone = state_for_health.clone();
+                            let heavy_load_clone = heavy_load;
+                            let queries_per_wallet_clone = queries_per_wallet;
+                            let query_interval_ms_clone = query_interval_ms;
+                            tokio::spawn(async move {
+                                state_clone.monitor_wallet_subscription(wallet, heavy_load_clone, queries_per_wallet_clone, query_interval_ms_clone).await;
+                            });
+                        }
+                        Err(e) => {
+                            error!("PM-18678: Failed to create replacement wallet {}: {}", i, e);
+                        }
+                    }
+                    
+                    sleep(Duration::from_millis(500)).await;
+                }
+            }
+        }
+    });
     
     // Keep the main thread alive and check for issues
     loop {
