@@ -48,11 +48,14 @@ impl LedgerState {
         for (variant, transaction) in transactions {
             match variant {
                 TransactionVariant::Regular => {
-                    self.apply_regular_transaction(
-                        transaction,
-                        block_parent_hash,
-                        block_timestamp,
-                    )?;
+                    let (_result, _dust_events, _created_utxos, _spent_utxos) = 
+                        self.apply_regular_transaction(
+                            transaction,
+                            block_parent_hash,
+                            block_timestamp,
+                        )?;
+                    // DUST events and UTXOs are already stored in the ledger state.
+                    // and don't need to be processed here when replaying stored transactions.
                 }
 
                 TransactionVariant::System => {
@@ -125,12 +128,13 @@ impl LedgerState {
 
         // Apply transaction and set start and end indices; end index is exclusive!
         transaction.start_index = self.zswap_first_free();
-        let (transaction_result, created_unshielded_utxos, spent_unshielded_utxos) =
+        let (transaction_result, dust_events, created_unshielded_utxos, spent_unshielded_utxos) =
             self.apply_regular_transaction(&transaction.raw, block_parent_hash, block_timestamp)?;
         transaction.end_index = self.zswap_first_free();
 
         // Update transaction.
         transaction.transaction_result = transaction_result;
+        transaction.dust_events = dust_events;
         transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize()?;
         transaction.created_unshielded_utxos = created_unshielded_utxos;
         transaction.spent_unshielded_utxos = spent_unshielded_utxos;

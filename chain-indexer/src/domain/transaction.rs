@@ -109,6 +109,7 @@ impl From<node::RegularTransaction> for RegularTransaction {
             end_index: Default::default(),
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
+            dust_events: Default::default(),
         }
     }
 }

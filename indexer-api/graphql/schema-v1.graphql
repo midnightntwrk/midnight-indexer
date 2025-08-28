@@ -428,6 +428,159 @@ type DustSystemState {
 	totalRegistrations: Int!
 }
 
+"""
+DUST event from chain processing.
+"""
+type DustEvent {
+	"""
+	Transaction hash containing this event.
+	"""
+	transactionHash: HexEncoded!
+	"""
+	Logical segment within transaction.
+	"""
+	logicalSegment: Int!
+	"""
+	Physical segment within transaction.
+	"""
+	physicalSegment: Int!
+	"""
+	Event type.
+	"""
+	eventType: DustEventType!
+	"""
+	Event details.
+	"""
+	eventDetails: DustEventDetails!
+}
+
+"""
+Type of DUST event.
+"""
+enum DustEventType {
+	"""
+	Initial DUST UTXO creation.
+	"""
+	DUST_INITIAL_UTXO
+	"""
+	DUST generation time update.
+	"""
+	DUST_GENERATION_DTIME_UPDATE
+	"""
+	DUST spend processed.
+	"""
+	DUST_SPEND_PROCESSED
+}
+
+"""
+DUST event details union.
+"""
+union DustEventDetails = DustInitialUtxoDetails | DustGenerationDtimeUpdateDetails | DustSpendProcessedDetails
+
+"""
+Details for initial DUST UTXO creation.
+"""
+type DustInitialUtxoDetails {
+	"""
+	Initial value.
+	"""
+	initialValue: String!
+	"""
+	Owner's DUST public key.
+	"""
+	owner: HexEncoded!
+	"""
+	Nonce.
+	"""
+	nonce: HexEncoded!
+	"""
+	Sequence number.
+	"""
+	seq: Int!
+	"""
+	Creation time.
+	"""
+	ctime: Int!
+	"""
+	Backing Night UTXO nonce.
+	"""
+	backingNight: HexEncoded!
+	"""
+	Merkle tree index.
+	"""
+	mtIndex: Int!
+	"""
+	Generation info.
+	"""
+	generationInfo: DustGenerationInfo!
+	"""
+	Generation index.
+	"""
+	generationIndex: Int!
+}
+
+"""
+Details for DUST generation time update.
+"""
+type DustGenerationDtimeUpdateDetails {
+	"""
+	Updated generation info.
+	"""
+	generationInfo: DustGenerationInfo!
+	"""
+	Generation index.
+	"""
+	generationIndex: Int!
+}
+
+"""
+Details for DUST spend processed.
+"""
+type DustSpendProcessedDetails {
+	"""
+	DUST commitment.
+	"""
+	commitment: HexEncoded!
+	"""
+	Commitment index.
+	"""
+	commitmentIndex: Int!
+	"""
+	DUST nullifier.
+	"""
+	nullifier: HexEncoded!
+	"""
+	Fee amount.
+	"""
+	vFee: String!
+	"""
+	Timestamp.
+	"""
+	time: Int!
+	"""
+	DUST parameters.
+	"""
+	params: DustParametersInfo!
+}
+
+"""
+DUST parameters information.
+"""
+type DustParametersInfo {
+	"""
+	Night to DUST ratio.
+	"""
+	nightDustRatio: Int!
+	"""
+	Generation decay rate.
+	"""
+	generationDecayRate: Int!
+	"""
+	DUST grace period in seconds.
+	"""
+	dustGracePeriod: Int!
+}
+
 scalar HexEncoded
 
 type MerkleTreeCollapsedUpdate {
@@ -485,6 +638,14 @@ type Query {
 	Get historical Merkle tree root for a specific timestamp.
 	"""
 	dustMerkleRoot(treeType: DustMerkleTreeType!, timestamp: Int!): HexEncoded
+	"""
+	Get DUST events by transaction hash.
+	"""
+	dustEventsByTransaction(transactionHash: HexEncoded!): [DustEvent!]!
+	"""
+	Get recent DUST events with optional filtering.
+	"""
+	recentDustEvents(limit: Int, eventType: DustEventType): [DustEvent!]!
 }
 
 """

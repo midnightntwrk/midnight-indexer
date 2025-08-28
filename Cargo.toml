@@ -53,7 +53,9 @@ metrics                     = { version = "0.24" }
 metrics-exporter-prometheus = { version = "0.17", default-features = false }
 midnight-base-crypto        = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-6.0.0-alpha.3" }
 midnight-coin-structure     = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-6.0.0-alpha.3" }
-midnight-ledger             = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-6.0.0-alpha.3", features = ["dust"] }
+# TODO: Enable dust feature when available in ledger-6.0.0-alpha.3 or later version
+# The DUST integration requires the ledger's dust feature to be enabled
+midnight-ledger             = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-6.0.0-alpha.3" }
 midnight-onchain-runtime    = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-6.0.0-alpha.3" }
 midnight-serialize          = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-6.0.0-alpha.3" }
 midnight-storage            = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", tag = "ledger-6.0.0-alpha.3" }

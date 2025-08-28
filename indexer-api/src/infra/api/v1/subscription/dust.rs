@@ -14,7 +14,8 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, ContextExt, HexEncoded, ResultExt,
+        ApiError, ApiResult, ContextExt, ResultExt,
+        v1::HexEncoded,
         v1::dust::{
             DustCommitmentEvent, DustCommitmentProgress, DustGenerationEvent, DustGenerationInfo,
             DustGenerationProgress, DustNullifierTransactionEvent,

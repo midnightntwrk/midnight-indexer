@@ -14,7 +14,7 @@
 use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, ContextExt, InnerApiError, ResultExt,
+        ApiError, ApiResult, ContextExt, ResultExt,
         v1::{
             AsBytesExt, HexEncoded, decode_session_id, subscription::get_next_transaction,
             transaction::Transaction,
@@ -37,13 +37,13 @@ use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
 
-// TODO: Make configurable!
+// TODO: Make configurable.
 const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
 
-// TODO: Make configurable!
+// TODO: Make configurable.
 const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(3);
 
-// TODO: Make configurable!
+// TODO: Make configurable.
 const ACTIVATE_WALLET_INTERVAL: Duration = Duration::from_secs(60);
 
 /// An event of the shielded transactions subscription.

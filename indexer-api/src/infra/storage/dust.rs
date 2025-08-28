@@ -29,7 +29,8 @@ use futures::Stream;
 use indexer_common::{
     domain::{
         CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustNonce, DustNullifier,
-        DustOwner, DustPrefix, NightUtxoHash, TransactionHash,
+        DustOwner, DustPrefix, NightUtxoHash, 
+        ledger::TransactionHash,
     },
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
@@ -153,7 +154,7 @@ impl DustStorage for Storage {
                     // Simplified generation rate calculation (1 Speck per NIGHT per second).
                     generation_rate = value_u128;
                     // Capacity could be calculated based on time since ctime.
-                    current_capacity = 0; // TODO: Calculate based on elapsed time
+                    current_capacity = 0; // TODO: Calculate based on elapsed time.
                 }
             }
 
@@ -510,10 +511,10 @@ impl DustStorage for Storage {
                     yield DustCommitmentEvent::Commitment(commitment_info);
                 }
 
-                // TODO: Fix merkle update handling - table schema doesn't have index column
+                // TODO: Fix merkle update handling - table schema doesn't have index column.
                 // The dust_commitment_tree table only has 'id' (database PK), not 'index' (merkle
                 // position) Merkle update functionality is disabled until schema is
-                // updated
+                // updated.
                 //
                 // let merkle_query = indoc! {r#"
                 //     SELECT "index", root, block_height
@@ -655,6 +656,105 @@ impl DustStorage for Storage {
 
         Ok(count as u32)
     }
+    
+    #[trace]
+    async fn get_dust_events_by_transaction(
+        &self,
+        transaction_hash: indexer_common::domain::ledger::TransactionHash,
+    ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT transaction_hash, logical_segment, physical_segment, event_type, event_data
+            FROM dust_events
+            WHERE transaction_hash = $1
+            ORDER BY logical_segment, physical_segment
+        "};
+        
+        #[derive(FromRow)]
+        struct DustEventRow {
+            transaction_hash: TransactionHash,
+            logical_segment: i32,
+            physical_segment: i32,
+            event_type: indexer_common::domain::dust::DustEventType,
+            event_data: sqlx::types::Json<indexer_common::domain::dust::DustEventDetails>,
+        }
+        
+        let rows = sqlx::query_as::<_, DustEventRow>(query)
+            .bind(transaction_hash.as_ref())
+            .fetch_all(&*self.pool)
+            .await?;
+        
+        Ok(rows
+            .into_iter()
+            .map(|row| indexer_common::domain::dust::DustEvent {
+                transaction_hash: row.transaction_hash,
+                logical_segment: row.logical_segment as u16,
+                physical_segment: row.physical_segment as u16,
+                event_details: row.event_data.0,
+            })
+            .collect())
+    }
+    
+    #[trace]
+    async fn get_recent_dust_events(
+        &self,
+        limit: u32,
+        event_type: Option<indexer_common::domain::dust::DustEventType>,
+    ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error> {
+        let query = if event_type.is_some() {
+            // Filter by event type.
+            indoc! {"
+                SELECT de.transaction_hash, de.logical_segment, de.physical_segment, 
+                       de.event_type, de.event_data
+                FROM dust_events de
+                JOIN transactions t ON t.id = de.transaction_id
+                WHERE de.event_type = $1
+                ORDER BY t.id DESC, de.logical_segment, de.physical_segment
+                LIMIT $2
+            "}
+        } else {
+            // Get all event types.
+            indoc! {"
+                SELECT de.transaction_hash, de.logical_segment, de.physical_segment,
+                       de.event_type, de.event_data
+                FROM dust_events de
+                JOIN transactions t ON t.id = de.transaction_id
+                ORDER BY t.id DESC, de.logical_segment, de.physical_segment
+                LIMIT $1
+            "}
+        };
+        
+        #[derive(FromRow)]
+        struct DustEventRow {
+            transaction_hash: TransactionHash,
+            logical_segment: i32,
+            physical_segment: i32,
+            event_type: indexer_common::domain::dust::DustEventType,
+            event_data: sqlx::types::Json<indexer_common::domain::dust::DustEventDetails>,
+        }
+        
+        let rows = if let Some(event_type) = event_type {
+            sqlx::query_as::<_, DustEventRow>(query)
+                .bind(event_type)
+                .bind(limit as i64)
+                .fetch_all(&*self.pool)
+                .await?
+        } else {
+            sqlx::query_as::<_, DustEventRow>(query)
+                .bind(limit as i64)
+                .fetch_all(&*self.pool)
+                .await?
+        };
+        
+        Ok(rows
+            .into_iter()
+            .map(|row| indexer_common::domain::dust::DustEvent {
+                transaction_hash: row.transaction_hash,
+                logical_segment: row.logical_segment as u16,
+                physical_segment: row.physical_segment as u16,
+                event_details: row.event_data.0,
+            })
+            .collect())
+    }
 }
 
 /// Row type for dust generation info queries.
@@ -731,7 +831,7 @@ struct DustUtxosRow {
     spent_at_transaction_id: Option<u64>,
 }
 
-// TODO: Uncomment these when merkle tree functionality is re-enabled
+// TODO: Uncomment these when merkle tree functionality is re-enabled.
 // /// Row type for dust_commitment_tree table queries.
 // #[derive(Debug, Clone, FromRow)]
 // struct DustCommitmentTreeRow {

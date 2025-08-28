@@ -16,7 +16,8 @@
 use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
-        ContractActionSubscription, DisconnectMutation, ShieldedTransactionsSubscription,
+        ContractActionSubscription, DisconnectMutation, DustEventsByTransactionQuery,
+        RecentDustEventsQuery, ShieldedTransactionsSubscription,
         TransactionsQuery, UnshieldedTransactionsSubscription, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks as BlockSubscriptionBlock,
@@ -104,6 +105,11 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_unshielded_transactions_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test unshielded transactions subscription")?;
+
+    // Test DUST event queries.
+    test_dust_events_queries(&indexer_data, &api_client, &api_url)
+        .await
+        .context("test DUST event queries")?;
 
     println!("Successfully finished e2e testing");
 
@@ -1075,6 +1081,77 @@ fn viewing_key(network_id: NetworkId) -> &'static str {
     }
 }
 
+/// Test DUST event queries (by transaction and recent events).
+async fn test_dust_events_queries(
+    indexer_data: &IndexerData,
+    api_client: &Client,
+    api_url: &str,
+) -> anyhow::Result<()> {
+    use e2e::graphql::{dust_events_by_transaction_query, recent_dust_events_query};
+
+    // Test dustEventsByTransaction for a known transaction.
+    // Since DUST events are only created by CNightGeneratesDust system transactions,
+    // most transactions won't have DUST events.
+    if let Some(first_transaction) = indexer_data.transactions.first() {
+        let variables = dust_events_by_transaction_query::Variables {
+            transaction_hash: first_transaction.hash.to_owned(),
+        };
+        let events = send_query::<DustEventsByTransactionQuery>(api_client, api_url, variables)
+            .await?
+            .dust_events_by_transaction;
+        
+        // Most transactions won't have DUST events, so an empty result is expected.
+        // The query should succeed without errors.
+        println!("DUST events for transaction {}: {} events", 
+                 first_transaction.hash, events.len());
+    }
+
+    // Test recentDustEvents with no filter.
+    let variables = recent_dust_events_query::Variables {
+        limit: Some(10),
+        event_type: None,
+    };
+    let recent_events = send_query::<RecentDustEventsQuery>(api_client, api_url, variables)
+        .await?
+        .recent_dust_events;
+    
+    println!("Recent DUST events (no filter): {} events", recent_events.len());
+
+    // Test recentDustEvents with event type filter.
+    let variables = recent_dust_events_query::Variables {
+        limit: Some(5),
+        event_type: Some(recent_dust_events_query::DustEventType::DustInitialUtxo),
+    };
+    let filtered_events = send_query::<RecentDustEventsQuery>(api_client, api_url, variables)
+        .await?
+        .recent_dust_events;
+    
+    println!("Recent DUST events (DustInitialUtxo): {} events", filtered_events.len());
+
+    // Test with other event types.
+    let variables = recent_dust_events_query::Variables {
+        limit: Some(5),
+        event_type: Some(recent_dust_events_query::DustEventType::DustGenerationDtimeUpdate),
+    };
+    let dtime_events = send_query::<RecentDustEventsQuery>(api_client, api_url, variables)
+        .await?
+        .recent_dust_events;
+    
+    println!("Recent DUST events (DustGenerationDtimeUpdate): {} events", dtime_events.len());
+
+    let variables = recent_dust_events_query::Variables {
+        limit: Some(5),
+        event_type: Some(recent_dust_events_query::DustEventType::DustSpendProcessed),
+    };
+    let spend_events = send_query::<RecentDustEventsQuery>(api_client, api_url, variables)
+        .await?
+        .recent_dust_events;
+    
+    println!("Recent DUST events (DustSpendProcessed): {} events", spend_events.len());
+
+    Ok(())
+}
+
 mod graphql {
     use graphql_client::GraphQLQuery;
     use indexer_api::infra::api::v1::{
@@ -1152,4 +1229,20 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct ShieldedTransactionsSubscription;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustEventsByTransactionQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct RecentDustEventsQuery;
 }

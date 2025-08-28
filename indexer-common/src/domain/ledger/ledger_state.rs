@@ -13,6 +13,7 @@
 
 use crate::domain::{
     ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_016_000, ProtocolVersion,
+    dust::{DustEvent, DustEventDetails, DustGenerationInfo, DustParameters, QualifiedDustOutput},
     ledger::{
         Error, IntentV6, SerializableV6Ext, SerializedContractAddress, TaggedSerializableV6Ext,
         TransactionV6,
@@ -87,14 +88,19 @@ impl LedgerState {
     }
 
     /// Apply the given serialized regular transaction to this ledger state and return the
-    /// transaction result as well as the created and spent unshielded UTXOs.
+    /// transaction result, DUST events, and the created and spent unshielded UTXOs.
     #[trace]
     pub fn apply_regular_transaction(
         &mut self,
         transaction: &SerializedTransaction,
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
-    ) -> Result<(TransactionResult, Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>), Error> {
+    ) -> Result<(
+        TransactionResult,
+        Vec<DustEvent>,
+        Vec<UnshieldedUtxo>,
+        Vec<UnshieldedUtxo>,
+    ), Error> {
         match self {
             Self::V6(ledger_state) => {
                 let ledger_transaction = tagged_deserialize_v6::<TransactionV6>(
@@ -127,22 +133,22 @@ impl LedgerState {
                     ledger_state.apply(&verified_transaction, &cx);
                 *self = Self::V6(ledger_state);
 
-                let transaction_result = match transaction_result {
-                    TransactionResultV6::Success(_events) => {
-                        // TODO: Extract DUST events from _events when ledger support is available.
-                        TransactionResult::Success
+                let (transaction_result, dust_events) = match transaction_result {
+                    TransactionResultV6::Success(events) => {
+                        let dust_events = extract_dust_events_v6(&events);
+                        (TransactionResult::Success, dust_events)
                     }
 
-                    TransactionResultV6::PartialSuccess(segments, _events) => {
-                        // TODO: Extract DUST events from _events when ledger support is available.
+                    TransactionResultV6::PartialSuccess(segments, events) => {
+                        let dust_events = extract_dust_events_v6(&events);
                         let segments = segments
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
                             .collect::<Vec<_>>();
-                        TransactionResult::PartialSuccess(segments)
+                        (TransactionResult::PartialSuccess(segments), dust_events)
                     }
 
-                    TransactionResultV6::Failure(_) => TransactionResult::Failure,
+                    TransactionResultV6::Failure(_) => (TransactionResult::Failure, vec![]),
                 };
 
                 let (created_unshielded_utxos, spent_unshielded_utxos) =
@@ -150,6 +156,7 @@ impl LedgerState {
 
                 Ok((
                     transaction_result,
+                    dust_events,
                     created_unshielded_utxos,
                     spent_unshielded_utxos,
                 ))
@@ -172,7 +179,7 @@ impl LedgerState {
                         Error::Io("cannot deserialize LedgerSystemTransactionV6", error)
                     })?;
 
-                // TODO Handle events!
+                // TODO Handle events.
                 let (ledger_state, _events) = ledger_state
                     .apply_system_tx(&ledger_transaction, timestamp_v6(block_timestamp))
                     .map_err(|error| Error::SystemTransaction(error.into()))?;
@@ -415,4 +422,96 @@ fn extend_v6(
         output_index: spend.output_no,
     });
     inputs.extend(intent_inputs);
+}
+
+/// Extract DUST events from ledger events.
+fn extract_dust_events_v6<D: midnight_storage::db::DB>(
+    events: &[midnight_ledger::events::Event<D>],
+) -> Vec<DustEvent> {
+    use midnight_ledger::events::EventDetails as LedgerEventDetails;
+    
+    events
+        .iter()
+        .filter_map(|event| {
+            let dust_event_details = match &event.content {
+                LedgerEventDetails::DustInitialUtxo {
+                    output,
+                    generation,
+                    generation_index,
+                    block_time: _,
+                } => Some(DustEventDetails::DustInitialUtxo {
+                    output: QualifiedDustOutput {
+                        initial_value: output.initial_value,
+                        owner: output.owner.0.0.to_bytes_le().into(),
+                        nonce: output.nonce.0.to_bytes_le().into(),
+                        seq: output.seq,
+                        ctime: output.ctime.to_secs(),
+                        backing_night: output.backing_night.0.0.into(),
+                        mt_index: output.mt_index,
+                    },
+                    generation_info: DustGenerationInfo {
+                        night_utxo_hash: ByteArray::default(), // TODO: Compute from backing Night UTXO.
+                        value: generation.value,
+                        owner: generation.owner.0.0.to_bytes_le().into(),
+                        nonce: generation.nonce.0.0.into(),
+                        ctime: output.ctime.to_secs(), // Use output's ctime.
+                        dtime: generation.dtime.to_secs(),
+                    },
+                    generation_index: *generation_index,
+                }),
+                
+                LedgerEventDetails::DustGenerationDtimeUpdate {
+                    update,
+                    block_time: _,
+                } => {
+                    // TreeInsertionPath has leaf: (HashOutput, DustGenerationInfo).
+                    let generation = &update.leaf.1;
+                    // Calculate mt_index based on path length.
+                    let mt_index = if update.path.is_empty() {
+                        0
+                    } else {
+                        // The index can be calculated from the path.
+                        // For now, use a placeholder - this needs proper calculation.
+                        0 // TODO: Calculate proper index from path.
+                    };
+                    Some(DustEventDetails::DustGenerationDtimeUpdate {
+                        generation_info: DustGenerationInfo {
+                            night_utxo_hash: ByteArray::default(), // TODO: Compute from backing Night UTXO.
+                            value: generation.value,
+                            owner: generation.owner.0.0.to_bytes_le().into(),
+                            nonce: generation.nonce.0.0.into(),
+                            ctime: 0, // Not available in the event, use placeholder.
+                            dtime: generation.dtime.to_secs(),
+                        },
+                        generation_index: mt_index,
+                    })
+                }
+                
+                LedgerEventDetails::DustSpendProcessed {
+                    commitment,
+                    commitment_index,
+                    nullifier,
+                    v_fee,
+                    declared_time,
+                    block_time: _,
+                } => Some(DustEventDetails::DustSpendProcessed {
+                    commitment: commitment.0.0.to_bytes_le().into(),
+                    commitment_index: *commitment_index,
+                    nullifier: nullifier.0.0.to_bytes_le().into(),
+                    v_fee: *v_fee,
+                    time: declared_time.to_secs(),
+                    params: DustParameters::default(),  // TODO: Get current parameters from ledger state.
+                }),
+                
+                _ => None,
+            };
+            
+            dust_event_details.map(|details| DustEvent {
+                transaction_hash: event.source.transaction_hash.0.0.into(),
+                logical_segment: event.source.logical_segment,
+                physical_segment: event.source.physical_segment,
+                event_details: details,
+            })
+        })
+        .collect()
 }

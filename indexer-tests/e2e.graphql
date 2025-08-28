@@ -464,3 +464,117 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
         }
     }
 }
+
+query DustEventsByTransactionQuery($transactionHash: HexEncoded!) {
+    dustEventsByTransaction(transactionHash: $transactionHash) {
+        transactionHash
+        logicalSegment
+        physicalSegment
+        eventType
+        eventDetails {
+            __typename
+            ... on DustInitialUtxoDetails {
+                initialValue
+                owner
+                nonce
+                seq
+                ctime
+                backingNight
+                mtIndex
+                generationInfo {
+                    nightUtxoHash
+                    value
+                    owner
+                    nonce
+                    ctime
+                    dtime
+                    merkleIndex
+                }
+                generationIndex
+            }
+            __typename
+            ... on DustGenerationDtimeUpdateDetails {
+                generationInfo {
+                    nightUtxoHash
+                    value
+                    owner
+                    nonce
+                    ctime
+                    dtime
+                    merkleIndex
+                }
+                generationIndex
+            }
+            __typename
+            ... on DustSpendProcessedDetails {
+                commitment
+                commitmentIndex
+                nullifier
+                vFee
+                time
+                params {
+                    nightDustRatio
+                    generationDecayRate
+                    dustGracePeriod
+                }
+            }
+        }
+    }
+}
+
+query RecentDustEventsQuery($limit: Int, $eventType: DustEventType) {
+    recentDustEvents(limit: $limit, eventType: $eventType) {
+        transactionHash
+        logicalSegment
+        physicalSegment
+        eventType
+        eventDetails {
+            __typename
+            ... on DustInitialUtxoDetails {
+                initialValue
+                owner
+                nonce
+                seq
+                ctime
+                backingNight
+                mtIndex
+                generationInfo {
+                    nightUtxoHash
+                    value
+                    owner
+                    nonce
+                    ctime
+                    dtime
+                    merkleIndex
+                }
+                generationIndex
+            }
+            __typename
+            ... on DustGenerationDtimeUpdateDetails {
+                generationInfo {
+                    nightUtxoHash
+                    value
+                    owner
+                    nonce
+                    ctime
+                    dtime
+                    merkleIndex
+                }
+                generationIndex
+            }
+            __typename
+            ... on DustSpendProcessedDetails {
+                commitment
+                commitmentIndex
+                nullifier
+                vFee
+                time
+                params {
+                    nightDustRatio
+                    generationDecayRate
+                    dustGracePeriod
+                }
+            }
+        }
+    }
+}

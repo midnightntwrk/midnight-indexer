@@ -570,10 +570,6 @@ async fn make_regular_transaction(
         raw: transaction.into(),
         paid_fees: fees.paid_fees,
         estimated_fees: fees.estimated_fees,
-        // DUST events are execution artifacts generated when transactions are applied to the ledger
-        // state. They're populated in ledger_state.rs::apply_transaction_mut() during block
-        // processing.
-        dust_events: Vec::new(),
     };
 
     Ok(Transaction::Regular(transaction))
