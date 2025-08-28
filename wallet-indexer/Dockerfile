@@ -1,49 +1,29 @@
-# ---------- BUILD STAGE ---------- #
-
 ARG RUST_VERSION
-FROM rust:$RUST_VERSION-bookworm AS build_stage
-
-ARG PROFILE=release
-
+FROM lukemathwalker/cargo-chef:0.1.72-rust-$RUST_VERSION-bookworm AS chef
 WORKDIR /build
 
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+ARG PROFILE=release
 RUN git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
-
-COPY ./Cargo.toml ./Cargo.lock ./rust-toolchain.toml ./
-COPY ./.cargo/ ./.cargo/
-COPY ./indexer-common/Cargo.toml ./indexer-common/
-COPY ./wallet-indexer/Cargo.toml ./wallet-indexer/
-RUN mkdir ./indexer-common/src && \
-    echo "#[allow(unused)] fn lib() {}" > ./indexer-common/src/lib.rs && \
-    mkdir ./wallet-indexer/src && \
-    echo "fn main() {}" > ./wallet-indexer/src/main.rs && \
-    sed -i "/\"chain-indexer\"/s/^/# /" Cargo.toml && \
-    sed -i "/\"indexer-api\"/s/^/# /" Cargo.toml && \
-    sed -i "/\"indexer-standalone\"/s/^/# /" Cargo.toml && \
-    sed -i "/\"indexer-tests\"/s/^/# /" Cargo.toml && \
-    find . -path '*/src/*' | xargs touch -t 197001010000 -m
+COPY --from=planner /build/recipe.json recipe.json
 RUN --mount=type=secret,id=netrc,target=/root/.netrc \
-    cargo build -p wallet-indexer --features cloud --profile $PROFILE && \
-    find ./target | xargs touch -t 197001020000 -m
-
-COPY ./indexer-common/ ./indexer-common/
-COPY ./wallet-indexer/ ./wallet-indexer/
+    cargo chef cook --profile $PROFILE --recipe-path recipe.json
+COPY . .
 RUN --mount=type=secret,id=netrc,target=/root/.netrc \
-    cargo build -p wallet-indexer --locked --features cloud --profile $PROFILE && \
-    mv ./target/$([ "$PROFILE" = "release" ] && echo "release" || echo "debug")/wallet-indexer /
+    cargo build -p indexer-api --locked --features cloud --profile $PROFILE && \
+    mv ./target/$([ "$PROFILE" = "release" ] && echo "release" || echo "debug")/indexer-api /
 
-# ---------- IMAGE STAGE ---------- #
-
-FROM debian:bookworm-slim AS image_stage
-
+FROM debian:bookworm-slim AS runtime
 RUN adduser --disabled-password --gecos "" --home "/nonexistent" --shell "/sbin/nologin" --no-create-home --uid "10001" appuser && \
-    mkdir /var/run/wallet-indexer && \
-    chown appuser:appuser /var/run/wallet-indexer
-
-COPY --from=build_stage --chown=appuser:appuser /build/wallet-indexer/bin/entrypoint.sh /usr/local/bin/
-COPY --from=build_stage --chown=appuser:appuser /wallet-indexer /usr/local/bin/
-COPY --from=build_stage --chown=appuser:appuser /build/wallet-indexer/config.yaml /opt/wallet-indexer/
-
+    mkdir /var/run/indexer-api && \
+    chown appuser:appuser /var/run/indexer-api
+COPY --from=builder --chown=appuser:appuser /build/indexer-api/bin/entrypoint.sh /usr/local/bin/
+COPY --from=builder --chown=appuser:appuser /indexer-api /usr/local/bin/
+COPY --from=builder --chown=appuser:appuser /build/indexer-api/config.yaml /opt/indexer-api/
 USER appuser
-WORKDIR /opt/wallet-indexer
+WORKDIR /opt/indexer-api
 ENTRYPOINT ["entrypoint.sh"]
