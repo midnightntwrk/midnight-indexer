@@ -112,6 +112,7 @@ impl LedgerState {
                     whitelist: None,
                 };
 
+                // Assume midnight-node has already validated included transactions.
                 let mut strictness = WellFormedStrictnessV6::default();
                 strictness.enforce_balancing = false;
                 strictness.enforce_limits = false;
