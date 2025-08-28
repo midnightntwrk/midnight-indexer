@@ -231,13 +231,15 @@ else
     log_info "Midnight node already running"
 fi
 
-# Run migrations
+# Run migrations (from main indexer directory)
 log_info "Running database migrations..."
+cd "$INDEXER_DIR"
 if ! cargo run --release -p chain-indexer --features cloud -- migrate > "$LOG_DIR/migrations.log" 2>&1; then
     log_error "Migration failed. Check $LOG_DIR/migrations.log for details"
     tail -20 "$LOG_DIR/migrations.log"
     exit 1
 fi
+cd "$INDEXER_DIR/scripts/pm-18678-investigation"
 log_info "Migrations completed successfully"
 
 # ============================================================================
@@ -294,6 +296,7 @@ tmux new -d -s chain-indexer "
     $(declare -f capture_diagnostics)
     $(declare -f run_service)
     export LOG_DIR='$LOG_DIR'
+    cd '$INDEXER_DIR'
     run_service 'chain-indexer' './target/release/chain-indexer'
 "
 
@@ -308,6 +311,7 @@ tmux new -d -s wallet-indexer "
     $(declare -f capture_diagnostics)
     $(declare -f run_service)
     export LOG_DIR='$LOG_DIR'
+    cd '$INDEXER_DIR'
     run_service 'wallet-indexer' './target/release/wallet-indexer'
 "
 
@@ -324,6 +328,7 @@ for i in 0 1 2; do
         $(declare -f capture_diagnostics)
         $(declare -f run_service)
         export LOG_DIR='$LOG_DIR'
+        cd '$INDEXER_DIR'
         run_service 'indexer-api-$PORT' './target/release/indexer-api'
     "
 done
