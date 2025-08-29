@@ -1,3 +1,4 @@
+# From .gitignore.
 .DS_Store
 .envrc.local
 .idea
@@ -5,3 +6,7 @@
 .vscode
 *.check
 target
+
+# Additional files.
+.git
+.github
