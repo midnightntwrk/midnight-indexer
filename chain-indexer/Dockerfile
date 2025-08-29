@@ -7,6 +7,7 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
+SHELL ["/bin/bash", "-c"]
 ARG PROFILE=release
 RUN git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
 COPY --from=planner /build/recipe.json recipe.json
@@ -15,7 +16,11 @@ RUN --mount=type=secret,id=netrc,target=/root/.netrc \
 COPY . .
 RUN --mount=type=secret,id=netrc,target=/root/.netrc \
     cargo build -p chain-indexer --locked --features cloud --profile $PROFILE && \
-    mv ./target/$([ "$PROFILE" = "release" ] && echo "release" || echo "debug")/chain-indexer /
+    mkdir -p /runtime/usr/local/bin && \
+    mv "./target/${PROFILE/dev/debug}/chain-indexer" /runtime/usr/local/bin && \
+    mv /build/chain-indexer/bin/entrypoint.sh /runtime/usr/local/bin && \
+    mkdir -p /runtime/opt/chain-indexer && \
+    mv /build/chain-indexer/config.yaml /runtime/opt/chain-indexer
 
 FROM debian:bookworm-slim AS runtime
 ARG CA_CERTIFICATES_VERSION=20230311+deb12u1
@@ -25,9 +30,7 @@ RUN apt-get update && \
 RUN adduser --disabled-password --gecos "" --home "/nonexistent" --shell "/sbin/nologin" --no-create-home --uid "10001" appuser && \
     mkdir /var/run/chain-indexer && \
     chown appuser:appuser /var/run/chain-indexer
-COPY --from=builder --chown=appuser:appuser /build/chain-indexer/bin/entrypoint.sh /usr/local/bin/
-COPY --from=builder --chown=appuser:appuser /chain-indexer /usr/local/bin/
-COPY --from=builder --chown=appuser:appuser /build/chain-indexer/config.yaml /opt/chain-indexer/
+COPY --from=builder --chown=appuser:appuser /runtime /
 USER appuser
 WORKDIR /opt/chain-indexer
 ENTRYPOINT ["entrypoint.sh"]
