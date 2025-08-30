@@ -17,17 +17,19 @@ use crate::domain::{
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
-use midnight_coin_structure::{
+use midnight_coin_structure_v6::{
     coin::Info as InfoV6, contract::ContractAddress as ContractAddressV6,
 };
-use midnight_ledger::structure::{
+use midnight_ledger_v6::structure::{
     ContractAction as ContractActionV6, StandardTransaction as StandardTransactionV6,
     SystemTransaction as LedgerSystemTransactionV6,
 };
-use midnight_serialize::tagged_deserialize as tagged_deserialize_v6;
-use midnight_storage::DefaultDB as DefaultDBV6;
-use midnight_transient_crypto::{encryption::SecretKey as SecretKeyV6, proofs::Proof as ProofV6};
-use midnight_zswap::Offer as OfferV6;
+use midnight_serialize_v6::tagged_deserialize as tagged_deserialize_v6;
+use midnight_storage_v6::DefaultDB as DefaultDBV6;
+use midnight_transient_crypto_v6::{
+    encryption::SecretKey as SecretKeyV6, proofs::Proof as ProofV6,
+};
+use midnight_zswap_v6::Offer as OfferV6;
 use std::error::Error as StdError;
 
 pub type SerializedContractAddress = ByteVec;
@@ -301,7 +303,7 @@ fn can_decrypt_v6(key: &SecretKeyV6, offer: &OfferV6<ProofV6, DefaultDBV6>) -> b
 mod tests {
     use crate::domain::{PROTOCOL_VERSION_000_016_000, ViewingKey, ledger::Transaction};
     use bip32::{DerivationPath, XPrv};
-    use midnight_zswap::keys::{SecretKeys, Seed};
+    use midnight_zswap_v6::keys::{SecretKeys, Seed};
     use std::{fs, str::FromStr};
 
     /// Notice: The raw test data is created with `generate_txs.sh`.
