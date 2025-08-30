@@ -16,10 +16,9 @@ use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
     ByteArray, NetworkId,
-    ledger::{ContractState, SerializedTransaction},
+    ledger::{ContractState, Error, SerializedTransaction},
 };
 use std::ops::DerefMut;
-use thiserror::Error;
 
 /// New type for ledger state from indexer_common.
 #[derive(Debug, Clone, From, Deref)]
@@ -61,7 +60,7 @@ impl LedgerState {
             }
         }
 
-        self.post_apply_transactions(block_timestamp);
+        self.post_apply_transactions(block_timestamp)?;
 
         Ok(())
     }
@@ -81,7 +80,7 @@ impl LedgerState {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        self.post_apply_transactions(block_timestamp);
+        self.post_apply_transactions(block_timestamp)?;
 
         Ok(transactions)
     }
@@ -169,10 +168,4 @@ impl LedgerState {
 
         Ok(Transaction::System(transaction))
     }
-}
-
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("cannot apply transaction")]
-    ApplyTransaction(#[from] indexer_common::domain::ledger::Error),
 }

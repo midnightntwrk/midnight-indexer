@@ -72,6 +72,9 @@ pub enum Error {
 
     #[error("invalid system transaction")]
     SystemTransaction(#[source] BoxError),
+
+    #[error("cannot apply post block update to ledger state")]
+    PostBlockUpdate(#[source] BoxError),
 }
 
 /// Extension methods for `Serializable` implementations.
