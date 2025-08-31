@@ -253,12 +253,15 @@ impl LedgerState {
     }
 
     /// To be called after applying transactions.
-    pub fn post_apply_transactions(&mut self, block_timestamp: u64) {
+    pub fn post_apply_transactions(&mut self, block_timestamp: u64) -> Result<(), Error> {
         match self {
             Self::V6(ledger_state) => {
-                let timestamp = timestamp_v6(block_timestamp);
-                let ledger_state = ledger_state.post_block_update(timestamp);
+                let ledger_state = ledger_state
+                    .post_block_update(timestamp_v6(block_timestamp), Default::default())
+                    .map_err(|error| Error::PostBlockUpdate(error.into()))?;
                 *self = Self::V6(ledger_state);
+
+                Ok(())
             }
         }
     }
