@@ -15,8 +15,8 @@ use crate::domain::{
     ByteArray, PROTOCOL_VERSION_000_016_000, ProtocolVersion, VIEWING_KEY_LEN, ledger::Error,
 };
 use fastrace::trace;
-use midnight_serialize::tagged_deserialize as tagged_deserialize_v6;
-use midnight_transient_crypto::encryption::SecretKey as SecretKeyV6;
+use midnight_serialize_v6::tagged_deserialize as tagged_deserialize_v6;
+use midnight_transient_crypto_v6::encryption::SecretKey as SecretKeyV6;
 
 /// Facade for `SecretKey` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
