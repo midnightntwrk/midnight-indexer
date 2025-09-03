@@ -19,8 +19,9 @@ docker run \
     -p 9944:9944 \
     -e SHOW_CONFIG=false \
     -e CFG_PRESET=dev \
-    # Required for DUST fee distribution after fees were enabled in 0.16.0-da0b6c69
-    # This address receives DUST fees from transactions (matches toolkit-e2e.sh)
+    # Specifies the wallet that receives block rewards and transaction fees (DUST)
+    # Required after fees were enabled in 0.16.0-da0b6c69
+    # This hex value is a public key that matches the one used in toolkit-e2e.sh
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
     -v ./.node/$node_version:/node \
     ghcr.io/midnight-ntwrk/midnight-node:$node_version
@@ -76,6 +77,10 @@ docker run \
     -v /tmp:/out \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
     generate-txs contract-calls call \
+    # The 'store' function inserts data into a Merkle tree in the test contract
+    # (see midnight-node MerkleTreeContract). We need this to generate contract
+    # action events in the test data so the indexer can verify it properly tracks
+    # and indexes contract state changes.
     --call-key store \
     --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
     --contract-address /out/contract_address.mn
