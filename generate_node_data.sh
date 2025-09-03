@@ -19,12 +19,19 @@ docker run \
     -p 9944:9944 \
     -e SHOW_CONFIG=false \
     -e CFG_PRESET=dev \
+    # Required for DUST fee distribution after fees were enabled in 0.16.0-da0b6c69
+    # This address receives DUST fees from transactions (matches toolkit-e2e.sh)
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
     -v ./.node/$node_version:/node \
     ghcr.io/midnight-ntwrk/midnight-node:$node_version
 
 sleep 10
 
+# Generate batches
+# Note: Reduced from -n 3 -b 2 to -n 1 -b 1 to minimize DUST requirements
+# after fees were enabled in node 0.16.0-da0b6c69. Larger batch sizes fail with:
+# "Balancing TX failed: Insufficient DUST (trying to spend X, need Y more)"
+# This matches the approach used in midnight-node's toolkit-e2e.sh CI tests.
 docker run \
     --rm \
     --network host \

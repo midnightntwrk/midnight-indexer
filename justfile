@@ -129,6 +129,8 @@ run-node:
         -p 9944:9944 \
         -e SHOW_CONFIG=false \
         -e CFG_PRESET=dev \
+        # Required for DUST fee distribution after fees were enabled in 0.16.0-da0b6c69
+        # This address receives DUST fees from transactions (matches toolkit-e2e.sh)
         -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
         -v $node_dir:/node \
         ghcr.io/midnight-ntwrk/midnight-node:{{node_version}}
