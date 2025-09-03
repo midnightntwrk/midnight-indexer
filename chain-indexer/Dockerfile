@@ -22,10 +22,9 @@ RUN --mount=type=secret,id=netrc,target=/root/.netrc \
     mkdir -p /runtime/opt/chain-indexer && \
     mv /build/chain-indexer/config.yaml /runtime/opt/chain-indexer
 
-FROM debian:bookworm-slim AS runtime
-ARG CA_CERTIFICATES_VERSION=20230311+deb12u1
+FROM debian:bookworm-slim@sha256:b1a741487078b369e78119849663d7f1a5341ef2768798f7b7406c4240f86aef AS runtime
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates=${CA_CERTIFICATES_VERSION} && \
+    apt-get install -y --no-install-recommends ca-certificates=20230311+deb12u1 && \
     rm -rf /var/lib/apt/lists/*
 RUN adduser --disabled-password --gecos "" --home "/nonexistent" --shell "/sbin/nologin" --no-create-home --uid "10001" appuser && \
     mkdir /var/run/chain-indexer && \

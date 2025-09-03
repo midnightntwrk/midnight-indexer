@@ -22,7 +22,7 @@ RUN --mount=type=secret,id=netrc,target=/root/.netrc \
     mkdir -p /runtime/opt/wallet-indexer && \
     mv /build/wallet-indexer/config.yaml /runtime/opt/wallet-indexer
 
-FROM debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim@sha256:b1a741487078b369e78119849663d7f1a5341ef2768798f7b7406c4240f86aef AS runtime
 RUN adduser --disabled-password --gecos "" --home "/nonexistent" --shell "/sbin/nologin" --no-create-home --uid "10001" appuser && \
     mkdir /var/run/wallet-indexer && \
     chown appuser:appuser /var/run/wallet-indexer
