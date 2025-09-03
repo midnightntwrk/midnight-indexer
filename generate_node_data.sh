@@ -19,17 +19,18 @@ docker run \
     -p 9944:9944 \
     -e SHOW_CONFIG=false \
     -e CFG_PRESET=dev \
+    -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
     -v ./.node/$node_version:/node \
     ghcr.io/midnight-ntwrk/midnight-node:$node_version
 
-sleep 3
+sleep 10
 
 docker run \
     --rm \
     --network host \
     -v /tmp:/out \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-    generate-txs batches -n 3 -b 2
+    generate-txs batches -n 1 -b 1
 
 docker run \
     --rm \
@@ -48,6 +49,9 @@ docker run \
     contract-address --network undeployed \
     --src-file /out/contract_tx_1_deploy.mn --dest-file /out/contract_address.mn
 
+# Add delay to work around PM-19168 (ctime > tblock validation issue)
+sleep 2
+
 docker run \
     --rm \
     --network host \
@@ -56,14 +60,24 @@ docker run \
     generate-txs --src-files /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 \
     send
 
+# Add delay to work around PM-19168
+sleep 2
+
 docker run \
     --rm \
     --network host \
     -v /tmp:/out \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
     generate-txs contract-calls call \
+    --call-key store \
     --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
     --contract-address /out/contract_address.mn
+
+# Wait for the contract call to be finalized before running maintenance
+sleep 15
+
+# Add longer delay for maintenance to work around PM-19168
+sleep 5
 
 docker run \
     --rm \

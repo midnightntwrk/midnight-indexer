@@ -5,7 +5,7 @@ feature := "cloud"
 packages := "indexer-common chain-indexer wallet-indexer indexer-api indexer-standalone indexer-tests"
 rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/'`
 nightly := "nightly-2025-08-07"
-node_version := "0.16.0-alpha.2"
+node_version := "0.16.0-da0b6c69"
 
 check:
     for package in {{packages}}; do \
@@ -129,6 +129,7 @@ run-node:
         -p 9944:9944 \
         -e SHOW_CONFIG=false \
         -e CFG_PRESET=dev \
+        -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
         -v $node_dir:/node \
         ghcr.io/midnight-ntwrk/midnight-node:{{node_version}}
 
