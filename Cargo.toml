@@ -74,7 +74,7 @@ serde_with                   = { version = "3.14" }
 sha2                         = { version = "0.10" }
 sqlx                         = { version = "0.8" }
 stream-cancel                = { version = "0.8" }
-subxt                        = { version = "0.43" }
+subxt                        = { version = "0.44" }
 tempfile                     = { version = "3.21" }
 testcontainers               = { version = "0.25" }
 testcontainers-modules       = { version = "0.13" }

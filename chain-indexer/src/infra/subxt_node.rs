@@ -327,8 +327,8 @@ impl Node for SubxtNode {
             // unless the highest stored block matches the first finalized block.
             if first_block.hash().0 != after_hash.0 {
                 // If we have not already stored the first finalized block, we fetch all blocks
-                // starting with the one with the parent hash of the first finalized block, until
-                // we arrive at the highest stored block hash (excluded) or at genesis (included).
+                // walking backwards from the one with the parent hash of the first finalized block
+                // until we arrive at the highest stored block (excluded) or at genesis (included).
                 // For these we store the hashes; one hash is 32 bytes, i.e. one year is ~ 156MB.
                 let genesis_parent_hash = self
                     .fetch_block(self.default_online_client.genesis_hash())
@@ -378,9 +378,7 @@ impl Node for SubxtNode {
                 }
 
                 // Then we yield the first finalized block.
-                yield self
-                    .make_block(first_block, &mut authorities)
-                    .await?;
+                yield self.make_block(first_block, &mut authorities).await?;
             }
 
             // Finally we emit all other finalized ones.
