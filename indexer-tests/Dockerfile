@@ -39,7 +39,7 @@ RUN --mount=type=secret,id=netrc,target=/root/.netrc \
 
 # ---------- IMAGE STAGE ---------- #
 
-FROM debian:bookworm-slim AS image_stage
+FROM debian:bookworm-slim@sha256:b1a741487078b369e78119849663d7f1a5341ef2768798f7b7406c4240f86aef AS image_stage
 
 RUN adduser --disabled-password --gecos "" --home "/nonexistent" --shell "/sbin/nologin" --no-create-home --uid "10001" appuser && \
     mkdir /var/run/indexer-tests && \
