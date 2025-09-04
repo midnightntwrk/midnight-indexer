@@ -1037,6 +1037,7 @@ dependencies = [
  "log",
  "metrics",
  "midnight-base-crypto",
+ "midnight-ledger",
  "midnight-transient-crypto",
  "parity-scale-codec",
  "parking_lot",
