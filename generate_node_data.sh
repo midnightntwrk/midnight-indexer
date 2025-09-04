@@ -13,15 +13,15 @@ if [ -d ./.node/$node_version ]; then
     rm -r ./.node/$node_version;
 fi
 
+# SIDECHAIN_BLOCK_BENEFICIARY specifies the wallet that receives block rewards and transaction fees (DUST).
+# Required after fees were enabled in 0.16.0-da0b6c69.
+# This hex value is a public key that matches the one used in toolkit-e2e.sh.
 docker run \
     -d \
     --name node \
     -p 9944:9944 \
     -e SHOW_CONFIG=false \
     -e CFG_PRESET=dev \
-    # Specifies the wallet that receives block rewards and transaction fees (DUST)
-    # Required after fees were enabled in 0.16.0-da0b6c69
-    # This hex value is a public key that matches the one used in toolkit-e2e.sh
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
     -v ./.node/$node_version:/node \
     ghcr.io/midnight-ntwrk/midnight-node:$node_version
@@ -57,7 +57,7 @@ docker run \
     contract-address --network undeployed \
     --src-file /out/contract_tx_1_deploy.mn --dest-file /out/contract_address.mn
 
-# Add delay to work around PM-19168 (ctime > tblock validation issue)
+# Add delay to work around PM-19168 (ctime > tblock validation issue).
 sleep 2
 
 docker run \
@@ -68,7 +68,7 @@ docker run \
     generate-txs --src-files /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 \
     send
 
-# Add delay to work around PM-19168
+# Add delay to work around PM-19168.
 sleep 2
 
 docker run \
@@ -85,10 +85,10 @@ docker run \
     --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
     --contract-address /out/contract_address.mn
 
-# Wait for the contract call to be finalized before running maintenance
+# Wait for the contract call to be finalized before running maintenance.
 sleep 15
 
-# Add longer delay for maintenance to work around PM-19168
+# Add longer delay for maintenance to work around PM-19168.
 sleep 5
 
 docker run \
