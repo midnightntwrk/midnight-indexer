@@ -28,7 +28,6 @@ indoc              = { workspace = true }
 itertools          = { workspace = true }
 log                = { workspace = true, features = [ "kv_std" ] }
 metrics            = { workspace = true }
-midnight-ledger    = { workspace = true }
 parity-scale-codec = { workspace = true }
 parking_lot        = { workspace = true }
 paste              = { workspace = true }
@@ -42,10 +41,10 @@ tokio              = { workspace = true, features = [ "macros", "rt-multi-thread
 trait-variant      = { workspace = true }
 
 [dev-dependencies]
-clap                      = { workspace = true, features = [ "derive" ] }
-fake                      = { workspace = true }
-midnight-base-crypto      = { workspace = true }
-midnight-transient-crypto = { workspace = true }
+clap                          = { workspace = true, features = [ "derive" ] }
+fake                          = { workspace = true }
+midnight-base-crypto_v6       = { workspace = true }
+midnight-transient-crypto_v6  = { workspace = true }
 
 [features]
 cloud      = [ "indexer-common/cloud" ]

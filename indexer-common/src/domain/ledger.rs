@@ -26,23 +26,23 @@ use crate::{
     error::BoxError,
 };
 use fastrace::trace;
-use midnight_base_crypto::signatures::Signature as SignatureV6;
-use midnight_ledger::structure::ProofMarker as ProofMarkerV6;
-use midnight_serialize::{
+use midnight_base_crypto_v6::signatures::Signature as SignatureV6;
+use midnight_ledger_v6::structure::ProofMarker as ProofMarkerV6;
+use midnight_serialize_v6::{
     Serializable as SerializableV6, Tagged as TaggedV6, tagged_serialize as tagged_serialize_v6,
 };
-use midnight_storage::DefaultDB as DefaultDBV6;
-use midnight_transient_crypto::commitment::PedersenRandomness as PedersenRandomnessV6;
+use midnight_storage_v6::DefaultDB as DefaultDBV6;
+use midnight_transient_crypto_v6::commitment::PedersenRandomness as PedersenRandomnessV6;
 use std::io;
 use thiserror::Error;
 
-type TransactionV6 = midnight_ledger::structure::Transaction<
+type TransactionV6 = midnight_ledger_v6::structure::Transaction<
     SignatureV6,
     ProofMarkerV6,
     PedersenRandomnessV6,
     DefaultDBV6,
 >;
-type IntentV6 = midnight_ledger::structure::Intent<
+type IntentV6 = midnight_ledger_v6::structure::Intent<
     SignatureV6,
     ProofMarkerV6,
     PedersenRandomnessV6,

@@ -20,25 +20,25 @@ use crate::domain::{
     },
 };
 use fastrace::trace;
-use midnight_base_crypto::{hash::HashOutput as HashOutputV6, time::Timestamp as TimestampV6};
-use midnight_coin_structure::{
+use midnight_base_crypto_v6::{hash::HashOutput as HashOutputV6, time::Timestamp as TimestampV6};
+use midnight_coin_structure_v6::{
     coin::UserAddress as UserAddressV6, contract::ContractAddress as ContractAddressV6,
 };
-use midnight_ledger::{
+use midnight_ledger_v6::{
     semantics::{
         TransactionContext as TransactionContextV6, TransactionResult as TransactionResultV6,
     },
     structure::{LedgerState as LedgerStateV6, SystemTransaction as LedgerSystemTransactionV6},
     verify::WellFormedStrictness as WellFormedStrictnessV6,
 };
-use midnight_onchain_runtime::context::BlockContext as BlockContextV6;
-use midnight_serialize::{Deserializable, tagged_deserialize as tagged_deserialize_v6};
-use midnight_storage::DefaultDB as DefaultDBV6;
-use midnight_transient_crypto::merkle_tree::{
+use midnight_onchain_runtime_v6::context::BlockContext as BlockContextV6;
+use midnight_serialize_v6::{Deserializable, tagged_deserialize as tagged_deserialize_v6};
+use midnight_storage_v6::DefaultDB as DefaultDBV6;
+use midnight_transient_crypto_v6::merkle_tree::{
     MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV6,
     MerkleTreeDigest as MerkleTreeDigestV6,
 };
-use midnight_zswap::ledger::State as ZswapStateV6;
+use midnight_zswap_v6::ledger::State as ZswapStateV6;
 use serde::Deserialize;
 use std::collections::HashSet;
 
@@ -425,10 +425,10 @@ fn extend_v6(
 }
 
 /// Extract DUST events from ledger events.
-fn extract_dust_events_v6<D: midnight_storage::db::DB>(
-    events: &[midnight_ledger::events::Event<D>],
+fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
+    events: &[midnight_ledger_v6::events::Event<D>],
 ) -> Vec<DustEvent> {
-    use midnight_ledger::events::EventDetails as LedgerEventDetails;
+    use midnight_ledger_v6::events::EventDetails as LedgerEventDetails;
     
     events
         .iter()

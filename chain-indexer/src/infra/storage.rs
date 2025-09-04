@@ -32,7 +32,7 @@ use indexer_common::{
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
-use midnight_ledger::structure::{
+use midnight_ledger_v6::structure::{
     CNightGeneratesDustActionType, CNightGeneratesDustEvent,
     SystemTransaction as LedgerSystemTransaction,
 };
@@ -974,10 +974,10 @@ async fn save_dust_utxos(
 mod tests {
     use super::*;
     use indexer_common::domain::ledger::TransactionHash;
-    use midnight_base_crypto::time::Timestamp;
-    use midnight_ledger::dust::{DustPublicKey, InitialNonce};
-    use midnight_ledger::structure::{CNightGeneratesDustActionType, CNightGeneratesDustEvent};
-    use midnight_transient_crypto::{curve::Fr, hash::HashOutput};
+    use midnight_base_crypto_v6::time::Timestamp;
+    use midnight_ledger_v6::dust::{DustPublicKey, InitialNonce};
+    use midnight_ledger_v6::structure::{CNightGeneratesDustActionType, CNightGeneratesDustEvent};
+    use midnight_transient_crypto_v6::{curve::Fr, hash::HashOutput};
     
     #[test]
     fn test_convert_cnight_events_to_dust_events() {

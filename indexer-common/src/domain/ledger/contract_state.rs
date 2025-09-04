@@ -16,10 +16,10 @@ use crate::domain::{
     ledger::{Error, RawTokenType, TaggedSerializableV6Ext},
 };
 use fastrace::trace;
-use midnight_coin_structure::coin::TokenType as TokenTypeV6;
-use midnight_onchain_runtime::state::ContractState as ContractStateV6;
-use midnight_serialize::tagged_deserialize as tagged_deserialize_v6;
-use midnight_storage::{DefaultDB as DefaultDBV6, arena::Sp as SpV6};
+use midnight_coin_structure_v6::coin::TokenType as TokenTypeV6;
+use midnight_onchain_runtime_v6::state::ContractState as ContractStateV6;
+use midnight_serialize_v6::tagged_deserialize as tagged_deserialize_v6;
+use midnight_storage_v6::{DefaultDB as DefaultDBV6, arena::Sp as SpV6};
 
 /// Facade for `ContractState` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
