@@ -12,7 +12,7 @@
 // limitations under the License.
 
 #[subxt::subxt(
-    runtime_metadata_path = "../.node/0.16.0-alpha.2/metadata.scale",
+    runtime_metadata_path = "../.node/0.16.0-da0b6c69/metadata.scale",
     derive_for_type(
         path = "sp_consensus_slots::Slot",
         derive = "parity_scale_codec::Encode, parity_scale_codec::Decode",
