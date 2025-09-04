@@ -96,7 +96,7 @@ where
                 let transactions = storage
                     .get_transactions_by_hash(hash)
                     .await
-                    .map_err_into_server_error(|| format!("get transaction by hash {hash}"))?
+                    .map_err_into_server_error(|| format!("get transactions by hash {hash}"))?
                     .into_iter()
                     .map(Into::into)
                     .collect::<Vec<_>>();
