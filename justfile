@@ -5,7 +5,7 @@ feature := "cloud"
 packages := "indexer-common chain-indexer wallet-indexer indexer-api indexer-standalone indexer-tests"
 rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/'`
 nightly := "nightly-2025-08-07"
-node_version := "0.16.0-da0b6c69"
+node_version := "0.16.1-3c73f8c4"
 
 check:
     for package in {{packages}}; do \
@@ -140,8 +140,8 @@ run-node:
         ghcr.io/midnight-ntwrk/midnight-node:{{node_version}}
 
 get-node-metadata:
-    mkdir -p ./.node/{{node_version}}
+    mkdir -p ./.node/{{node_version}}-2
     subxt metadata \
         -f bytes \
         --url ws://localhost:9944 > \
-        ./.node/{{node_version}}/metadata.scale
+        ./.node/{{node_version}}-2/metadata.scale
