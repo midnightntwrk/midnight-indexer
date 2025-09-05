@@ -792,18 +792,16 @@ async fn test_shielded_transactions_subscription(
     ws_api_url: &str,
     network_id: NetworkId,
 ) -> anyhow::Result<()> {
-    use shielded_transactions_subscription::{
-        ShieldedTransactionsSubscriptionShieldedTransactions as ShieldedTransactions,
-        ShieldedTransactionsSubscriptionShieldedTransactionsOnViewingUpdateUpdate as ViewingUpdate,
-    };
+    use shielded_transactions_subscription::ShieldedTransactionsSubscriptionShieldedTransactions as ShieldedTransactions;
 
     let session_id = ViewingKey::from(viewing_key(network_id))
         .try_into_domain(network_id, PROTOCOL_VERSION_000_016_000)?
         .to_session_id()
         .hex_encode();
 
-    // Collect shielded transactions events until there are no more viewing updates (3s deadline).
-    let mut viewing_update_timestamp = Instant::now();
+    // Collect shielded transactions events until there are no more relevant transactions (3s
+    // deadline).
+    let mut relevant_transaction_timestamp = Instant::now();
     let variables = shielded_transactions_subscription::Variables { session_id };
     let events =
         graphql_ws_client::subscribe::<ShieldedTransactionsSubscription>(ws_api_url, variables)
@@ -811,10 +809,10 @@ async fn test_shielded_transactions_subscription(
             .context("subscribe to shielded transactions")?
             .map_ok(|data| data.shielded_transactions)
             .try_take_while(|event| {
-                let duration = Instant::now() - viewing_update_timestamp;
+                let duration = Instant::now() - relevant_transaction_timestamp;
 
-                if let ShieldedTransactions::ViewingUpdate(_) = event {
-                    viewing_update_timestamp = Instant::now()
+                if let ShieldedTransactions::RelevantTransaction(_) = event {
+                    relevant_transaction_timestamp = Instant::now()
                 }
 
                 ok(duration < Duration::from_secs(3))
@@ -824,35 +822,30 @@ async fn test_shielded_transactions_subscription(
             .context("collect shielded transactions events")?;
 
     // Filter viewing updates only.
-    let viewing_updates = events.into_iter().filter_map(|event| match event {
-        ShieldedTransactions::ViewingUpdate(viewing_update) => Some(viewing_update),
+    let relevant_transactions = events.into_iter().filter_map(|event| match event {
+        ShieldedTransactions::RelevantTransaction(relevant_transaction) => {
+            Some(relevant_transaction)
+        }
         _ => None,
     });
 
     // Verify that there are no index gaps.
-    let mut expected_start = 0;
-    for viewing_update in viewing_updates {
-        for update in viewing_update.update {
-            match update {
-                ViewingUpdate::MerkleTreeCollapsedUpdate(collapsed_update) => {
-                    assert_eq!(collapsed_update.start, expected_start);
-                    assert!(collapsed_update.end >= collapsed_update.start);
+    let mut expected_start_index = 0;
+    for relevant_transaction in relevant_transactions {
+        if let Some(collapsed_merkle_tree) = relevant_transaction.collapsed_merkle_tree {
+            assert_eq!(collapsed_merkle_tree.start_index, expected_start_index);
+            assert!(collapsed_merkle_tree.end_index >= collapsed_merkle_tree.start_index);
 
-                    expected_start = collapsed_update.end + 1;
-                }
-
-                ViewingUpdate::RelevantTransaction(relevant_transaction) => {
-                    assert!(relevant_transaction.start == expected_start);
-                    assert!(relevant_transaction.end >= relevant_transaction.start);
-                    assert!(
-                        viewing_update.index == relevant_transaction.end
-                            || viewing_update.index == relevant_transaction.end + 1
-                    );
-
-                    expected_start = viewing_update.index;
-                }
-            }
+            expected_start_index = collapsed_merkle_tree.end_index + 1;
         }
+
+        assert!(relevant_transaction.transaction.start_index == expected_start_index);
+        assert!(
+            relevant_transaction.transaction.end_index
+                >= relevant_transaction.transaction.start_index
+        );
+
+        expected_start_index = relevant_transaction.transaction.end_index;
     }
 
     Ok(())

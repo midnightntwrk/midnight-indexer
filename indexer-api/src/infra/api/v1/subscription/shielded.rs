@@ -51,57 +51,51 @@ const ACTIVATE_WALLET_INTERVAL: Duration = Duration::from_secs(60);
 /// An event of the shielded transactions subscription.
 #[derive(Debug, Union)]
 pub enum ShieldedTransactionsEvent<S: Storage> {
-    ViewingUpdate(ViewingUpdate<S>),
+    // Boxing RelevantTransaction to reduce variant size (clippy warning).
+    RelevantTransaction(Box<RelevantTransaction<S>>),
     ShieldedTransactionsProgress(ShieldedTransactionsProgress),
 }
 
-/// Aggregates a relevant transaction with the next start index and an optional collapsed
-/// Merkle-Tree update.
+/// A transaction relevant for the subscribing wallet and an optional collapsed merkle tree.
 #[derive(Debug, SimpleObject)]
-pub struct ViewingUpdate<S>
+pub struct RelevantTransaction<S>
 where
     S: Storage,
 {
-    /// Next start index into the zswap state to be queried. Usually the end index of the included
-    /// relevant transaction plus one unless that is a failure in which case just its end
-    /// index.
-    pub index: u64,
+    /// A transaction relevant for the subscribing wallet.
+    pub transaction: Transaction<S>,
 
-    /// Relevant transaction for the wallet and maybe a collapsed Merkle-Tree update.
-    pub update: Vec<ZswapChainStateUpdate<S>>,
+    /// An optional collapsed merkle tree.
+    pub collapsed_merkle_tree: Option<CollapsedMerkleTree>,
 }
 
 /// Aggregates information about the shielded transactions indexing progress.
 #[derive(Debug, SimpleObject)]
 pub struct ShieldedTransactionsProgress {
-    /// The highest end index into the zswap state of all currently known transactions.
-    pub highest_index: u64,
+    /// The highest zswap state end index (see `end_index` of `Transaction`) of all transactions.
+    /// It represents the known state of the blockchain.
+    pub highest_end_index: u64,
 
-    /// The highest end index into the zswap state of all currently known relevant transactions,
-    /// i.e. those that belong to any known wallet. Less or equal `highest_index`.
-    pub highest_relevant_index: u64,
+    /// The highest zswap state end index (see `end_index` of `Transaction`) of all transactions
+    /// checked for relevance for the subscribing wallet. Initially less than and eventually (when
+    /// the subscribing wallet has been fully indexed) equal to `highest_index`.
+    pub highest_checked_end_index: u64,
 
-    /// The highest end index into the zswap state of all currently known relevant transactions for
-    /// a particular wallet. Less or equal `highest_relevant_index`.
-    pub highest_relevant_wallet_index: u64,
-}
-
-#[derive(Debug, Union)]
-#[allow(clippy::large_enum_variant)]
-pub enum ZswapChainStateUpdate<S: Storage> {
-    MerkleTreeCollapsedUpdate(MerkleTreeCollapsedUpdate),
-    RelevantTransaction(RelevantTransaction<S>),
+    /// The highest zswap state end index of all relevant transactions for the subscribing wallet.
+    /// Usually less than `highest_checked_index` unless the latest checked transaction is relevant
+    /// for the subscribing wallet.
+    pub highest_relevant_end_index: u64,
 }
 
 #[derive(Debug, SimpleObject)]
-pub struct MerkleTreeCollapsedUpdate {
-    /// The start index into the zswap state.
-    start: u64,
+pub struct CollapsedMerkleTree {
+    /// The zswap state start index.
+    start_index: u64,
 
-    /// The end index into the zswap state.
-    end: u64,
+    /// The zswap state end index.
+    end_index: u64,
 
-    /// The hex-encoded merkle-tree collapsed update.
+    /// The hex-encoded value.
     #[debug(skip)]
     update: HexEncoded,
 
@@ -109,7 +103,7 @@ pub struct MerkleTreeCollapsedUpdate {
     protocol_version: u32,
 }
 
-impl From<domain::MerkleTreeCollapsedUpdate> for MerkleTreeCollapsedUpdate {
+impl From<domain::MerkleTreeCollapsedUpdate> for CollapsedMerkleTree {
     fn from(value: domain::MerkleTreeCollapsedUpdate) -> Self {
         let domain::MerkleTreeCollapsedUpdate {
             start_index,
@@ -119,38 +113,10 @@ impl From<domain::MerkleTreeCollapsedUpdate> for MerkleTreeCollapsedUpdate {
         } = value;
 
         Self {
-            start: start_index,
-            end: end_index,
+            start_index,
+            end_index,
             update: update.hex_encode(),
             protocol_version: protocol_version.0,
-        }
-    }
-}
-
-#[derive(Debug, SimpleObject)]
-pub struct RelevantTransaction<S>
-where
-    S: Storage,
-{
-    /// Relevant transaction for the wallet.
-    transaction: Transaction<S>,
-
-    /// The start index.
-    start: u64,
-
-    /// The end index.
-    end: u64,
-}
-
-impl<S> From<domain::Transaction> for RelevantTransaction<S>
-where
-    S: Storage,
-{
-    fn from(transaction: domain::Transaction) -> Self {
-        Self {
-            start: transaction.start_index,
-            end: transaction.end_index.saturating_sub(1), // Domain end index is exclusive!
-            transaction: transaction.into(),
         }
     }
 }
@@ -185,7 +151,6 @@ where
         cx: &'a Context<'a>,
         session_id: HexEncoded,
         index: Option<u64>,
-        send_progress_updates: Option<bool>,
     ) -> Result<
         impl Stream<Item = ApiResult<ShieldedTransactionsEvent<S>>> + use<'a, S, B, Z>,
         ApiError,
@@ -195,28 +160,27 @@ where
         let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
         let index = index.unwrap_or_default();
-        let send_progress_updates = send_progress_updates.unwrap_or(true);
 
-        // Build a stream of shielded transaction events by merging ViewingUpdates and
-        // ProgressUpdates. The ViewingUpdates stream should be infinite by definition (see
-        // the trait). However, if it nevertheless completes, we use a Tripwire to ensure
-        // the ProgressUpdates stream also completes, preventing the merged stream from
-        // hanging indefinitely waiting for both streams to complete.
+        // Build a stream of shielded transaction events by merging relevant transactions and
+        // progress items. The relevant transactions stream should be infinite by definition (see
+        // the trait). However, if it nevertheless completes, we use a tripwire to ensure the
+        // progress stream also completes, preventing the merged stream from hanging indefinitely
+        // waiting for both streams to complete.
         let (trigger, tripwire) = Tripwire::new();
 
-        let viewing_updates = make_viewing_updates::<S, B, Z>(cx, session_id, index, trigger)
-            .map_ok(ShieldedTransactionsEvent::ViewingUpdate);
+        let relevant_transactions = make_relevant_transactions::<S, B, Z>(
+            cx, session_id, index, trigger,
+        )
+        .map_ok(|relevant_transaction| {
+            ShieldedTransactionsEvent::RelevantTransaction(relevant_transaction.into())
+        });
 
-        let progress_updates = if send_progress_updates {
-            make_progress_updates::<S>(cx, session_id)
-                .take_until_if(tripwire)
-                .map_ok(ShieldedTransactionsEvent::ShieldedTransactionsProgress)
-                .boxed()
-        } else {
-            stream::empty().boxed()
-        };
+        let progress = make_progress::<S>(cx, session_id)
+            .take_until_if(tripwire)
+            .map_ok(ShieldedTransactionsEvent::ShieldedTransactionsProgress)
+            .boxed();
 
-        let events = tokio_stream::StreamExt::merge(viewing_updates, progress_updates);
+        let events = tokio_stream::StreamExt::merge(relevant_transactions, progress);
 
         // As long as the subscription is alive, the wallet is periodically set active, even if
         // there are no new transactions.
@@ -240,12 +204,12 @@ where
     }
 }
 
-fn make_viewing_updates<'a, S, B, Z>(
+fn make_relevant_transactions<'a, S, B, Z>(
     cx: &'a Context<'a>,
     session_id: SessionId,
     mut index: u64,
     trigger: Trigger,
-) -> impl Stream<Item = ApiResult<ViewingUpdate<S>>> + use<'a, S, B, Z>
+) -> impl Stream<Item = ApiResult<RelevantTransaction<S>>> + use<'a, S, B, Z>
 where
     S: Storage,
     B: Subscriber,
@@ -270,7 +234,7 @@ where
             .await
             .map_err_into_server_error(|| "get next transaction")?
         {
-            let viewing_update = make_viewing_update(
+            let relevant_transaction = make_relevant_transaction(
                 index,
                 transaction,
                 ledger_state_storage,
@@ -278,9 +242,9 @@ where
             )
             .await?;
 
-            index = viewing_update.index;
+            index = relevant_transaction.transaction.end_index;
 
-            yield viewing_update;
+            yield relevant_transaction;
         }
 
         // Stream live transactions.
@@ -301,7 +265,7 @@ where
                 .await
                 .map_err_into_server_error(|| "get next transaction")?
             {
-                let viewing_update = make_viewing_update(
+                let relevant_transaction = make_relevant_transaction(
                     index,
                     transaction,
                     ledger_state_storage,
@@ -309,9 +273,9 @@ where
                 )
                 .await?;
 
-                index = viewing_update.index;
+                index = relevant_transaction.transaction.end_index;
 
-                yield viewing_update;
+                yield relevant_transaction;
             }
         }
 
@@ -321,26 +285,22 @@ where
 }
 
 #[trace(properties = { "from": "{from:?}" })]
-async fn make_viewing_update<S, Z>(
+async fn make_relevant_transaction<S, Z>(
     from: u64,
     transaction: domain::Transaction,
     ledger_state_storage: &Z,
     zswap_state_cache: &LedgerStateCache,
-) -> ApiResult<ViewingUpdate<S>>
+) -> ApiResult<RelevantTransaction<S>>
 where
     S: Storage,
     Z: LedgerStateStorage,
 {
     debug!(from, transaction:?; "making viewing update");
 
-    let index = transaction.end_index;
-
-    let update = if from == transaction.start_index || transaction.start_index == 0 {
-        let relevant_transaction = ZswapChainStateUpdate::RelevantTransaction(transaction.into());
-        vec![relevant_transaction]
+    let collapsed_merkle_tree = if from == transaction.start_index || transaction.start_index == 0 {
+        None
     } else {
-        // We calculate the collapsed update BEFORE the start index of the transaction, hence `- 1`!
-        let collapsed_update = zswap_state_cache
+        let collapsed_merkle_tree = zswap_state_cache
             .collapsed_update(
                 from,
                 transaction.start_index - 1,
@@ -348,21 +308,21 @@ where
                 transaction.protocol_version,
             )
             .await
-            .map_err_into_server_error(|| "create collapsed update")?;
-
-        vec![
-            ZswapChainStateUpdate::MerkleTreeCollapsedUpdate(collapsed_update.into()),
-            ZswapChainStateUpdate::RelevantTransaction(transaction.into()),
-        ]
+            .map_err_into_server_error(|| "create collapsed update")?
+            .into();
+        Some(collapsed_merkle_tree)
     };
 
-    let viewing_update = ViewingUpdate { index, update };
-    debug!(viewing_update:?; "made viewing update");
+    let relevant_transaction = RelevantTransaction {
+        transaction: transaction.into(),
+        collapsed_merkle_tree,
+    };
+    debug!(relevant_transaction:?; "made relevant transaction");
 
-    Ok(viewing_update)
+    Ok(relevant_transaction)
 }
 
-fn make_progress_updates<'a, S>(
+fn make_progress<'a, S>(
     cx: &'a Context<'a>,
     session_id: SessionId,
 ) -> impl Stream<Item = ApiResult<ShieldedTransactionsProgress>> + use<'a, S>
@@ -385,13 +345,13 @@ where
         .await
         .map_err_into_server_error(|| "get highest indices")?;
 
-    let highest_index = highest_index.unwrap_or_default();
-    let highest_relevant_index = highest_relevant_index.unwrap_or_default();
-    let highest_relevant_wallet_index = highest_relevant_wallet_index.unwrap_or_default();
+    let highest_end_index = highest_index.unwrap_or_default();
+    let highest_checked_end_index = highest_relevant_index.unwrap_or_default();
+    let highest_relevant_end_index = highest_relevant_wallet_index.unwrap_or_default();
 
     Ok(ShieldedTransactionsProgress {
-        highest_index,
-        highest_relevant_index,
-        highest_relevant_wallet_index,
+        highest_end_index,
+        highest_checked_end_index,
+        highest_relevant_end_index,
     })
 }
