@@ -193,6 +193,93 @@ type Mutation {
 	disconnect(sessionId: HexEncoded!): Unit!
 }
 
+"""
+An event of the shielded transactions subscription.
+"""
+union NewShieldedTransactionsEvent = TransactionContext | NewShieldedTransactionsProgress
+
+"""
+Aggregates information about the shielded transactions indexing progress.
+"""
+type NewShieldedTransactionsProgress {
+	"""
+	The highest zswap state end index of all transactions.
+	"""
+	highestIndex: Int!
+	"""
+	The highest zswap state end index of all transactions that have been checked for relevance
+	for the subscribing wallet. Less or equal `highest_index`.
+	"""
+	highestCheckedIndex: Int!
+	"""
+	The highest zswap state end index of all relevant transactions for the subscribing wallet.
+	Less or equal `highest_checked_index`.
+	"""
+	highestRelevantIndex: Int!
+}
+
+"""
+A transaction with its relevant data.
+"""
+type NewTransaction {
+	"""
+	The transaction ID.
+	"""
+	id: Int!
+	"""
+	The hex-encoded transaction hash.
+	"""
+	hash: HexEncoded!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The hex-encoded serialized transaction content.
+	"""
+	raw: HexEncoded!
+	"""
+	The result of applying a transaction to the ledger state.
+	"""
+	transactionResult: TransactionResult!
+	"""
+	Fee information for this transaction.
+	"""
+	fees: TransactionFees!
+	"""
+	The hex-encoded serialized transaction identifiers.
+	"""
+	identifiers: [HexEncoded!]!
+	"""
+	The hex-encoded serialized merkle-tree root.
+	"""
+	merkleTreeRoot: HexEncoded!
+	"""
+	The zswap stat start index.
+	"""
+	start: Int!
+	"""
+	The zswap stat end index.
+	"""
+	end: Int!
+	"""
+	The block for this transaction.
+	"""
+	block: Block!
+	"""
+	The contract actions.
+	"""
+	contractActions: [ContractAction!]!
+	"""
+	Unshielded UTXOs created by this transaction.
+	"""
+	unshieldedCreatedOutputs: [UnshieldedUtxo!]!
+	"""
+	Unshielded UTXOs spent (consumed) by this transaction.
+	"""
+	unshieldedSpentOutputs: [UnshieldedUtxo!]!
+}
+
 type Query {
 	"""
 	Find a block for the given optional offset; if not present, the latest block is returned.
@@ -279,6 +366,7 @@ type Subscription {
 	or at zero if omitted.
 	"""
 	shieldedTransactions(sessionId: HexEncoded!, index: Int, sendProgressUpdates: Boolean): ShieldedTransactionsEvent!
+	newShieldedTransactions(sessionId: HexEncoded!, index: Int): NewShieldedTransactionsEvent!
 	"""
 	Subscribe unshielded transaction events for the given address and the given transaction ID
 	or zero if omitted.
@@ -338,6 +426,14 @@ type Transaction {
 	Unshielded UTXOs spent (consumed) by this transaction.
 	"""
 	unshieldedSpentOutputs: [UnshieldedUtxo!]!
+}
+
+"""
+A transaction relevant for the subscribing wallet and an optional collapsed merkle tree.
+"""
+type TransactionContext {
+	transaction: NewTransaction!
+	collapsedMerkleTree: MerkleTreeCollapsedUpdate
 }
 
 """
