@@ -31,9 +31,9 @@ docker run \
     -v ./target:/out \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
     get-tx-from-context \
-    --src-file ./target/tx_1_2_2.mn \
+    --src-file /out/tx_1_2_2.mn \
     --network undeployed \
-    --dest-file ./target/tx_1_2_2.raw \
+    --dest-file /out/tx_1_2_2.raw \
     --from-bytes
 
 # 1 to 2/3
@@ -43,7 +43,7 @@ docker run \
     -v ./target:/out \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
     generate-txs \
-    --dest-file ./target/tx_1_2_3.mn \
+    --dest-file /out/tx_1_2_3.mn \
     --to-bytes \
     single-tx \
     --shielded-amount 10 \
@@ -58,7 +58,7 @@ docker run \
     -v ./target:/out \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
     get-tx-from-context \
-    --src-file ./target/tx_1_2_3.mn \
+    --src-file /out/tx_1_2_3.mn \
     --network undeployed \
-    --dest-file ./target/tx_1_2_3.raw \
+    --dest-file /out/tx_1_2_3.raw \
     --from-bytes
