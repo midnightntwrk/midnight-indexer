@@ -205,13 +205,15 @@ impl Transaction {
                     let can_decrypt_guaranteed_coins = guaranteed_coins
                         .as_ref()
                         .map(|guaranteed_coins| can_decrypt_v6(&secret_key, guaranteed_coins))
-                        .unwrap_or(true);
+                        .unwrap_or_default();
 
-                    let can_decrypt_fallible_coins = fallible_coins
-                        .values()
-                        .all(|fallible_coins| can_decrypt_v6(&secret_key, &fallible_coins));
+                    let can_decrypt_fallible_coins = || {
+                        fallible_coins
+                            .values()
+                            .any(|fallible_coins| can_decrypt_v6(&secret_key, &fallible_coins))
+                    };
 
-                    can_decrypt_guaranteed_coins && can_decrypt_fallible_coins
+                    can_decrypt_guaranteed_coins || can_decrypt_fallible_coins()
                 }
 
                 TransactionV6::ClaimRewards(_) => false,
