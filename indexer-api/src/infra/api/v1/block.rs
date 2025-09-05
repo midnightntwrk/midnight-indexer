@@ -14,7 +14,8 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiResult, AsBytesExt, ContextExt, HexEncoded, ResultExt, v1::transaction::Transaction,
+        ApiResult, ContextExt, ResultExt,
+        v1::{AsBytesExt, HexEncoded, transaction::Transaction},
     },
 };
 use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject};
@@ -41,7 +42,7 @@ where
     /// The UNIX timestamp.
     timestamp: u64,
 
-    /// The block author.
+    /// The hex-encoded block author.
     author: Option<HexEncoded>,
 
     #[graphql(skip)]

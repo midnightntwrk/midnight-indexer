@@ -12,11 +12,8 @@ publish       = { workspace = true }
 
 [dependencies]
 anyhow            = { workspace = true }
-assert_matches    = { workspace = true }
-chain-indexer     = { path = "../chain-indexer" }
 clap              = { workspace = true, features = [ "derive" ] }
 derive_more       = { workspace = true, features = [ "display" ] }
-fake              = { workspace = true }
 futures           = { workspace = true }
 graphql_client    = { workspace = true, features = [ "reqwest-rustls" ] }
 indexer-api       = { path = "../indexer-api" }
@@ -25,25 +22,16 @@ itertools         = { workspace = true }
 reqwest           = { workspace = true, features = [ "json", "rustls-tls" ] }
 serde             = { workspace = true, features = [ "derive" ] }
 serde_json        = { workspace = true }
-sqlx              = { workspace = true }
 tokio             = { workspace = true, features = [ "macros", "process", "rt-multi-thread" ] }
 tokio-tungstenite = { workspace = true, features = [ "rustls-tls-webpki-roots" ] }
 
 [dev-dependencies]
-fake                   = { workspace = true }
 fs_extra               = { workspace = true }
-sqlx                   = { workspace = true, features = [ "postgres" ] }
+nix                    = { workspace = true, features = [ "signal" ] }
 tempfile               = { workspace = true }
 testcontainers         = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }
 
 [features]
-cloud = [
-    "chain-indexer/cloud",
-    "indexer-api/cloud",
-    "testcontainers-modules/postgres",
-]
-standalone = [
-    "chain-indexer/standalone",
-    "indexer-api/standalone",
-]
+cloud      = [  ]
+standalone = [  ]

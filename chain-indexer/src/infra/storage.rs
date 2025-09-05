@@ -2,7 +2,7 @@
 // Copyright (C) 2025 Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
+// You may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 // http://www.apache.org/licenses/LICENSE-2.0
 // Unless required by applicable law or agreed to in writing, software
@@ -11,27 +11,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{self, Block, BlockInfo, BlockTransactions, ContractAction, Transaction};
+use crate::domain::{
+    self, Block, BlockTransactions, ContractAction, RegularTransaction, SystemTransaction,
+    Transaction, TransactionVariant, node::BlockInfo,
+};
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteArray, ByteVec, ContractActionVariant, ContractBalance, DustCommitment,
-        DustNullifier, UnshieldedUtxo,
-        dust::{
-            DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, QualifiedDustOutput,
-        },
+        BlockHash, ByteVec,
+        ledger::{ContractAttributes, ContractBalance, UnshieldedUtxo},
     },
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
-use sqlx::{QueryBuilder, types::Json};
+use serde::{Deserialize, Serialize};
+use sqlx::{QueryBuilder, Type, types::Json};
+use std::iter;
 
 #[cfg(feature = "cloud")]
-type Tx = sqlx::Transaction<'static, sqlx::Postgres>;
+/// Sqlx transaction for Postgres.
+type SqlxTransaction = sqlx::Transaction<'static, sqlx::Postgres>;
 
 #[cfg(feature = "standalone")]
-type Tx = sqlx::Transaction<'static, sqlx::Sqlite>;
+/// Sqlx transaction for Sqlite.
+type SqlxTransaction = sqlx::Transaction<'static, sqlx::Sqlite>;
 
 /// Unified storage implementation for PostgreSQL (cloud) and SQLite (standalone). Uses Cargo
 /// features to select the appropriate database backend at build time.
@@ -139,19 +143,20 @@ impl domain::storage::Storage for Storage {
                 .bind(block_height as i64)
                 .fetch_one(&*self.pool)
                 .await?;
-        let block_parent_hash = ByteArray::<32>::try_from(block_parent_hash.as_ref())
+        let block_parent_hash = BlockHash::try_from(block_parent_hash.as_ref())
             .map_err(|error| sqlx::Error::Decode(error.into()))?;
 
         let query = indoc! {"
-            SELECT raw
+            SELECT
+                variant,
+                raw
             FROM transactions
             WHERE block_id = $1
         "};
 
-        let transactions = sqlx::query_as::<_, (ByteVec,)>(query)
+        let transactions = sqlx::query_as::<_, (TransactionVariant, ByteVec)>(query)
             .bind(block_id)
             .fetch(&*self.pool)
-            .map_ok(|(t,)| t)
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -164,22 +169,49 @@ impl domain::storage::Storage for Storage {
     }
 
     #[trace]
-    async fn save_block(&self, block: &mut Block) -> Result<Option<u64>, sqlx::Error> {
+    async fn save_block(
+        &self,
+        block: &Block,
+        transactions: &[Transaction],
+    ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let (max_transaction_id, transaction_ids) = save_block(block, &mut tx).await?;
+        let max_transaction_id = save_block(block, transactions, &mut tx).await?;
         tx.commit().await?;
-
-        // Update the block's transactions with their database IDs.
-        for (transaction, id) in block.transactions.iter_mut().zip(transaction_ids.iter()) {
-            transaction.id = *id as u64;
-        }
 
         Ok(max_transaction_id)
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[cfg_attr(feature = "cloud", sqlx(type_name = "CONTRACT_ACTION_VARIANT"))]
+enum ContractActionVariant {
+    /// A contract deployment.
+    #[default]
+    Deploy,
+
+    /// A contract call.
+    Call,
+
+    /// A contract update.
+    Update,
+}
+
+impl From<&ContractAttributes> for ContractActionVariant {
+    fn from(attributes: &ContractAttributes) -> Self {
+        match attributes {
+            ContractAttributes::Deploy => Self::Deploy,
+            ContractAttributes::Call { .. } => Self::Call,
+            ContractAttributes::Update => Self::Update,
+        }
+    }
+}
+
 #[trace]
-async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
+async fn save_block(
+    block: &Block,
+    transactions: &[Transaction],
+    tx: &mut SqlxTransaction,
+) -> Result<Option<u64>, sqlx::Error> {
     let query = indoc! {"
         INSERT INTO blocks (
             hash,
@@ -203,14 +235,11 @@ async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>
                 ..
             } = block;
 
-            #[cfg(feature = "standalone")]
-            let author = author.as_ref().map(|a| a.as_ref());
-
             q.push_bind(hash.as_ref())
                 .push_bind(*height as i64)
                 .push_bind(protocol_version.0 as i64)
                 .push_bind(parent_hash.as_ref())
-                .push_bind(author)
+                .push_bind(author.as_ref().map(|a| a.as_ref()))
                 .push_bind(*timestamp as i64);
         })
         .push(" RETURNING id")
@@ -219,27 +248,71 @@ async fn save_block(block: &Block, tx: &mut Tx) -> Result<(Option<u64>, Vec<i64>
         .map_ok(|(id,)| id)
         .await?;
 
-    save_transactions(&block.transactions, block_id, tx).await
+    save_transactions(transactions, block_id, tx).await
 }
 
 #[trace(properties = { "block_id": "{block_id}" })]
 async fn save_transactions(
     transactions: &[Transaction],
     block_id: i64,
-    tx: &mut Tx,
-) -> Result<(Option<u64>, Vec<i64>), sqlx::Error> {
-    if transactions.is_empty() {
-        return Ok((None, vec![]));
+    tx: &mut SqlxTransaction,
+) -> Result<Option<u64>, sqlx::Error> {
+    let mut highest_transaction_id = None;
+
+    for transaction in transactions {
+        let query = indoc! {"
+            INSERT INTO transactions (
+                block_id,
+                variant,
+                hash,
+                protocol_version,
+                raw
+            )
+        "};
+
+        let hash = transaction.hash();
+        let transaction_id = QueryBuilder::new(query)
+            .push_values(iter::once(transaction), |mut q, transaction| {
+                q.push_bind(block_id)
+                    .push_bind(transaction.variant())
+                    .push_bind(hash.as_ref())
+                    .push_bind(transaction.protocol_version().0 as i64)
+                    .push_bind(transaction.raw());
+            })
+            .push(" RETURNING id")
+            .build_query_as::<(i64,)>()
+            .fetch_one(&mut **tx)
+            .map_ok(|(id,)| id)
+            .await?;
+
+        match transaction {
+            Transaction::Regular(transaction) => {
+                highest_transaction_id = Some(
+                    save_regular_transaction(transaction, transaction_id, block_id, tx).await?,
+                );
+            }
+
+            Transaction::System(transaction) => {
+                save_system_transaction(transaction, transaction_id, block_id, tx).await?
+            }
+        }
     }
 
+    Ok(highest_transaction_id)
+}
+
+#[trace(properties = { "block_id": "{block_id}" })]
+async fn save_regular_transaction(
+    transaction: &RegularTransaction,
+    transaction_id: i64,
+    block_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<u64, sqlx::Error> {
     #[cfg(feature = "cloud")]
     let query = indoc! {"
-        INSERT INTO transactions (
-            block_id,
-            hash,
-            protocol_version,
+        INSERT INTO regular_transactions (
+            id,
             transaction_result,
-            raw,
             merkle_tree_root,
             start_index,
             end_index,
@@ -248,15 +321,11 @@ async fn save_transactions(
             identifiers
         )
     "};
-
     #[cfg(feature = "standalone")]
     let query = indoc! {"
-        INSERT INTO transactions (
-            block_id,
-            hash,
-            protocol_version,
+        INSERT INTO regular_transactions (
+            id,
             transaction_result,
-            raw,
             merkle_tree_root,
             start_index,
             end_index,
@@ -265,87 +334,69 @@ async fn save_transactions(
         )
     "};
 
-    let transaction_ids = QueryBuilder::new(query)
-        .push_values(transactions.iter(), |mut q, transaction| {
-            #[cfg_attr(feature = "standalone", allow(unused_variables))]
-            let Transaction {
-                hash,
-                protocol_version,
-                transaction_result,
-                identifiers,
-                raw,
-                merkle_tree_root,
-                start_index,
-                end_index,
-                paid_fees,
-                estimated_fees,
-                ..
-            } = transaction;
-
-            q.push_bind(block_id)
-                .push_bind(hash.as_ref())
-                .push_bind(protocol_version.0 as i64)
-                .push_bind(Json(transaction_result))
-                .push_bind(raw)
-                .push_bind(merkle_tree_root)
-                .push_bind(*start_index as i64)
-                .push_bind(*end_index as i64)
-                .push_bind(U128BeBytes::from(*paid_fees))
-                .push_bind(U128BeBytes::from(*estimated_fees));
-
+    let transaction_id = QueryBuilder::new(query)
+        .push_values(iter::once(transaction), |mut q, transaction| {
+            q.push_bind(transaction_id)
+                .push_bind(Json(&transaction.transaction_result))
+                .push_bind(&transaction.merkle_tree_root)
+                .push_bind(transaction.start_index as i64)
+                .push_bind(transaction.end_index as i64)
+                .push_bind(U128BeBytes::from(transaction.paid_fees))
+                .push_bind(U128BeBytes::from(transaction.estimated_fees));
             #[cfg(feature = "cloud")]
-            q.push_bind(identifiers);
+            q.push_bind(&transaction.identifiers);
         })
         .push(" RETURNING id")
         .build_query_as::<(i64,)>()
-        .fetch(&mut **tx)
+        .fetch_one(&mut **tx)
         .map_ok(|(id,)| id)
-        .try_collect::<Vec<_>>()
         .await?;
 
-    for (transaction, &transaction_id) in transactions.iter().zip(transaction_ids.iter()) {
-        #[cfg(feature = "standalone")]
-        save_identifiers(&transaction.identifiers, transaction_id, tx).await?;
+    #[cfg(feature = "standalone")]
+    save_identifiers(&transaction.identifiers, transaction_id, tx).await?;
 
-        let contract_action_ids =
-            save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
+    let contract_action_ids =
+        save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
+    let contract_balances = transaction
+        .contract_actions
+        .iter()
+        .zip(contract_action_ids.iter())
+        .flat_map(|(action, &action_id)| {
+            action
+                .extracted_balances
+                .iter()
+                .map(move |&balance| (action_id, balance))
+        })
+        .collect::<Vec<_>>();
+    save_contract_balances(contract_balances, tx).await?;
 
-        let contract_balances = transaction
-            .contract_actions
-            .iter()
-            .zip(contract_action_ids.iter())
-            .flat_map(|(action, &action_id)| {
-                action
-                    .extracted_balances
-                    .iter()
-                    .map(move |&balance| (action_id, balance))
-            })
-            .collect::<Vec<_>>();
-        save_contract_balances(contract_balances, tx).await?;
+    save_unshielded_utxos(
+        &transaction.created_unshielded_utxos,
+        transaction_id,
+        false,
+        tx,
+    )
+    .await?;
+    save_unshielded_utxos(
+        &transaction.spent_unshielded_utxos,
+        transaction_id,
+        true,
+        tx,
+    )
+    .await?;
 
-        save_unshielded_utxos(
-            &transaction.created_unshielded_utxos,
-            transaction_id,
-            false,
-            tx,
-        )
-        .await?;
+    Ok(transaction_id as u64)
+}
 
-        save_unshielded_utxos(
-            &transaction.spent_unshielded_utxos,
-            transaction_id,
-            true,
-            tx,
-        )
-        .await?;
-
-        process_dust_events(&transaction.dust_events, transaction_id, tx).await?;
-
-        save_dust_events(&transaction.dust_events, transaction_id, tx).await?;
-    }
-
-    let max_id = transaction_ids.last().map(|&n| n as u64);
-    Ok((max_id, transaction_ids))
+#[trace(properties = { "block_id": "{block_id}" })]
+async fn save_system_transaction(
+    _transaction: &SystemTransaction,
+    _transaction_id: i64,
+    block_id: i64,
+    _tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    // TODO: Store DistributeReserve and other (DUST-related) system transactions.
+    Ok(())
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
@@ -353,7 +404,7 @@ async fn save_unshielded_utxos(
     utxos: &[UnshieldedUtxo],
     transaction_id: i64,
     spent: bool,
-    tx: &mut Tx,
+    tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     if utxos.is_empty() {
         return Ok(());
@@ -437,7 +488,7 @@ async fn save_unshielded_utxos(
 async fn save_contract_actions(
     contract_actions: &[ContractAction],
     transaction_id: i64,
-    tx: &mut Tx,
+    tx: &mut SqlxTransaction,
 ) -> Result<Vec<i64>, sqlx::Error> {
     if contract_actions.is_empty() {
         return Ok(Vec::new());
@@ -446,10 +497,10 @@ async fn save_contract_actions(
     let query = indoc! {"
         INSERT INTO contract_actions (
             transaction_id,
+            variant,
             address,
             state,
-            zswap_state,
-            variant,
+            chain_state,
             attributes
         )
     "};
@@ -457,10 +508,10 @@ async fn save_contract_actions(
     let contract_action_ids = QueryBuilder::new(query)
         .push_values(contract_actions.iter(), |mut q, action| {
             q.push_bind(transaction_id)
+                .push_bind(ContractActionVariant::from(&action.attributes))
                 .push_bind(&action.address)
                 .push_bind(&action.state)
-                .push_bind(&action.zswap_state)
-                .push_bind(ContractActionVariant::from(&action.attributes))
+                .push_bind(&action.chain_state)
                 .push_bind(Json(&action.attributes));
         })
         .push(" RETURNING id")
@@ -477,7 +528,7 @@ async fn save_contract_actions(
 #[trace]
 async fn save_contract_balances(
     balances: Vec<(i64, ContractBalance)>,
-    tx: &mut Tx,
+    tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     if !balances.is_empty() {
         let query = indoc! {"
@@ -490,11 +541,9 @@ async fn save_contract_balances(
 
         QueryBuilder::new(query)
             .push_values(balances.iter(), |mut q, (action_id, balance)| {
-                let ContractBalance { token_type, amount } = balance;
-
                 q.push_bind(*action_id)
-                    .push_bind(token_type.as_ref())
-                    .push_bind(U128BeBytes::from(*amount));
+                    .push_bind(balance.token_type.as_ref())
+                    .push_bind(U128BeBytes::from(balance.amount));
             })
             .build()
             .execute(&mut **tx)
@@ -506,9 +555,9 @@ async fn save_contract_balances(
 
 #[cfg(feature = "standalone")]
 async fn save_identifiers(
-    identifiers: &[indexer_common::domain::RawTransactionIdentifier],
+    identifiers: &[indexer_common::domain::ledger::SerializedTransactionIdentifier],
     transaction_id: i64,
-    tx: &mut Tx,
+    tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     if !identifiers.is_empty() {
         let query = indoc! {"
@@ -529,291 +578,3 @@ async fn save_identifiers(
 
     Ok(())
 }
-
-#[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn process_dust_events(
-    dust_events: &[DustEvent],
-    transaction_id: i64,
-    tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    let mut generation_dtime_and_index = None;
-
-    for dust_event in dust_events {
-        match &dust_event.event_details {
-            DustEventDetails::DustInitialUtxo {
-                output,
-                generation_info,
-                generation_index,
-            } => {
-                let generation_info_id =
-                    save_dust_generation_info(generation_info, *generation_index, tx).await?;
-                save_dust_utxos(output, generation_info_id, tx).await?;
-            }
-
-            DustEventDetails::DustGenerationDtimeUpdate {
-                generation_info,
-                generation_index,
-            } => generation_dtime_and_index = Some((generation_info.dtime, *generation_index)),
-
-            DustEventDetails::DustSpendProcessed {
-                commitment,
-                nullifier,
-                ..
-            } => {
-                mark_dust_utxo_spent(*commitment, *nullifier, transaction_id, tx).await?;
-            } /* TODO: Handle registration events when node team implements them.
-               * These will come from system transactions created by the node,
-               * not from the ledger events.
-               * See PM-17951 for node integration work. */
-        }
-    }
-
-    if let Some((dtime, index)) = generation_dtime_and_index {
-        update_dust_generation_dtime(dtime, index, tx).await?;
-    }
-
-    Ok(())
-}
-
-#[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn save_dust_events(
-    dust_events: &[DustEvent],
-    transaction_id: i64,
-    tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    if dust_events.is_empty() {
-        return Ok(());
-    }
-
-    let query = indoc! {"
-        INSERT INTO dust_events (
-            transaction_id,
-            transaction_hash,
-            logical_segment,
-            physical_segment,
-            event_type,
-            event_data
-        )
-    "};
-
-    QueryBuilder::new(query)
-        .push_values(dust_events.iter(), |mut q, event| {
-            let event_type = DustEventType::from(&event.event_details);
-            q.push_bind(transaction_id)
-                .push_bind(event.transaction_hash.as_ref())
-                .push_bind(event.logical_segment as i32)
-                .push_bind(event.physical_segment as i32)
-                .push_bind(event_type)
-                .push_bind(Json(&event.event_details));
-        })
-        .build()
-        .execute(&mut **tx)
-        .await?;
-
-    Ok(())
-}
-
-#[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn mark_dust_utxo_spent(
-    commitment: DustCommitment,
-    nullifier: DustNullifier,
-    transaction_id: i64,
-    tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    let query = indoc! {"
-        UPDATE dust_utxos
-        SET nullifier = $1, spent_at_transaction_id = $2
-        WHERE nullifier IS NULL
-        AND commitment = $3
-    "};
-
-    sqlx::query(query)
-        .bind(nullifier.as_ref())
-        .bind(transaction_id)
-        .bind(commitment.as_ref())
-        .execute(&mut **tx)
-        .await?;
-
-    Ok(())
-}
-
-#[trace]
-async fn update_dust_generation_dtime(
-    dtime: u64,
-    index: u64,
-    tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    let query = indoc! {"
-        UPDATE dust_generation_info
-        SET dtime = $1
-        WHERE index = $2
-    "};
-
-    sqlx::query(query)
-        .bind(dtime as i64)
-        .bind(index as i64)
-        .execute(&mut **tx)
-        .await?;
-
-    Ok(())
-}
-
-#[cfg_attr(feature = "cloud", trace)]
-async fn save_dust_generation_info(
-    generation: &DustGenerationInfo,
-    generation_index: u64,
-    tx: &mut Tx,
-) -> Result<u64, sqlx::Error> {
-    let query = indoc! {"
-        INSERT INTO dust_generation_info (
-            night_utxo_hash,
-            value,
-            owner,
-            nonce,
-            ctime,
-            index,
-            dtime
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id
-    "};
-
-    let (id,) = sqlx::query_as::<_, (i64,)>(query)
-        .bind(generation.night_utxo_hash.as_ref())
-        .bind(U128BeBytes::from(generation.value))
-        .bind(generation.owner.as_ref())
-        .bind(generation.nonce.as_ref())
-        .bind(generation.ctime as i64)
-        .bind(generation_index as i64)
-        .bind(generation.dtime as i64)
-        .fetch_one(&mut **tx)
-        .await?;
-
-    Ok(id as u64)
-}
-
-#[cfg_attr(feature = "cloud", trace)]
-async fn save_dust_utxos(
-    output: &QualifiedDustOutput,
-    generation_info_id: u64,
-    tx: &mut Tx,
-) -> Result<(), sqlx::Error> {
-    let query = indoc! {"
-        INSERT INTO dust_utxos (
-            commitment,
-            initial_value,
-            owner,
-            nonce,
-            seq,
-            ctime,
-            generation_info_id
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-    "};
-
-    // TODO: Implement proper cryptographic commitment calculation once the new ledger
-    // and node versions with DUST features are available. The commitment algorithm
-    // must match the node's implementation to ensure consistency across the system.
-    // For now, using a deterministic SHA256 placeholder based on all DUST UTXO fields
-    // to enable tracking functionality for PM-16218.
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(output.owner.as_ref());
-    hasher.update(output.nonce.as_ref());
-    hasher.update(output.initial_value.to_be_bytes());
-    hasher.update(output.seq.to_be_bytes());
-    hasher.update(output.ctime.to_be_bytes());
-    hasher.update(output.backing_night.as_ref());
-    hasher.update(output.mt_index.to_be_bytes());
-    let commitment_bytes: [u8; 32] = hasher.finalize().into();
-    let commitment = DustCommitment::from(commitment_bytes);
-
-    sqlx::query(query)
-        .bind(commitment.as_ref())
-        .bind(U128BeBytes::from(output.initial_value))
-        .bind(output.owner.as_ref())
-        .bind(output.nonce.as_ref())
-        .bind(output.seq as i64)
-        .bind(output.ctime as i64)
-        .bind(generation_info_id as i64)
-        .execute(&mut **tx)
-        .await?;
-
-    Ok(())
-}
-
-// TODO: Uncomment this function when node team implements registration events.
-// Registration events will be emitted by the node when it detects Cardano stake
-// key registrations/deregistrations. See PM-17951 for node integration work.
-//
-// #[trace]
-// async fn save_cnight_registration(
-//     cardano_stake_key: &str,
-//     dust_address: DustOwner,
-//     is_registration: bool,
-//     tx: &mut Tx,
-// ) -> Result<(), sqlx::Error> {
-//     // TODO: Implement cNIGHT registration tracking once the new ledger and node
-//     // versions with DUST features are available. The registration event format
-//     // and validation logic will be determined by the node implementation.
-//     // For now, this is a placeholder to handle registration events when they
-//     // are eventually emitted by the node.
-//
-//     if is_registration {
-//         // Handle registration: insert new registration or update existing one
-//         let query = indoc! {"
-//             INSERT INTO cnight_registrations (
-//                 cardano_address,
-//                 dust_address,
-//                 is_valid,
-//                 registered_at
-//             )
-//             VALUES ($1, $2, $3, $4)
-//             ON CONFLICT (cardano_address, dust_address)
-//             DO UPDATE SET
-//                 is_valid = $3,
-//                 registered_at = $4,
-//                 removed_at = NULL
-//         "};
-//
-//         let dust_address_bytes = dust_address.as_ref();
-//
-//         // TODO: Use proper timestamp from the event when available.
-//         let current_time = std::time::SystemTime::now()
-//             .duration_since(std::time::UNIX_EPOCH)
-//             .unwrap()
-//             .as_secs() as i64;
-//
-//         sqlx::query(query)
-//             .bind(cardano_stake_key.as_bytes())
-//             .bind(dust_address_bytes)
-//             .bind(true)
-//             .bind(current_time)
-//             .execute(&mut **tx)
-//             .await?;
-//     } else {
-//         // Handle deregistration: mark as invalid
-//         let query = indoc! {"
-//             UPDATE cnight_registrations
-//             SET is_valid = false, removed_at = $1
-//             WHERE cardano_address = $2 AND dust_address = $3 AND is_valid = true
-//         "};
-//
-//         let dust_address_bytes = dust_address.as_ref();
-//
-//         // TODO: Use proper timestamp from the event when available.
-//         let current_time = std::time::SystemTime::now()
-//             .duration_since(std::time::UNIX_EPOCH)
-//             .unwrap()
-//             .as_secs() as i64;
-//
-//         sqlx::query(query)
-//             .bind(current_time)
-//             .bind(cardano_stake_key.as_bytes())
-//             .bind(dust_address_bytes)
-//             .execute(&mut **tx)
-//             .await?;
-//     }
-//
-//     Ok(())
-// }

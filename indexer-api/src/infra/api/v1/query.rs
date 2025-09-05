@@ -14,11 +14,11 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ApiError, ApiResult, AsBytesExt, ContextExt, HexEncoded, ResultExt,
+        ApiResult, ContextExt, ResultExt,
         v1::{
+            HexEncoded,
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
-            dust::{DustGenerationStatus, DustMerkleTreeType, DustSystemState},
             transaction::{Transaction, TransactionOffset},
         },
     },
@@ -96,7 +96,7 @@ where
                 let transactions = storage
                     .get_transactions_by_hash(hash)
                     .await
-                    .map_err_into_server_error(|| format!("get transaction by hash {hash}"))?
+                    .map_err_into_server_error(|| format!("get transactions by hash {hash}"))?
                     .into_iter()
                     .map(Into::into)
                     .collect::<Vec<_>>();
@@ -199,66 +199,5 @@ where
         };
 
         Ok(contract_action.map(Into::into))
-    }
-
-    /// Get current DUST system state.
-    #[trace]
-    async fn current_dust_state(&self, cx: &Context<'_>) -> ApiResult<DustSystemState> {
-        let storage = cx.get_storage::<S>();
-
-        let state = storage
-            .get_current_dust_state()
-            .await
-            .map_err_into_server_error(|| "get current DUST state")?;
-
-        Ok(state.into())
-    }
-
-    /// Get DUST generation status for specific stake keys (DOS protected).
-    async fn dust_generation_status(
-        &self,
-        cx: &Context<'_>,
-        cardano_stake_keys: Vec<HexEncoded>,
-    ) -> ApiResult<Vec<DustGenerationStatus>> {
-        // DOS protection: limit to 10 keys.
-        if cardano_stake_keys.len() > 10 {
-            return Err(ApiError::client(
-                "maximum 10 stake keys allowed per request",
-            ));
-        }
-
-        let storage = cx.get_storage::<S>();
-
-        // Convert HexEncoded to binary.
-        let binary_keys = cardano_stake_keys
-            .into_iter()
-            .map(|key| key.hex_decode::<indexer_common::domain::CardanoStakeKey>())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err_into_client_error(|| "invalid stake key")?;
-
-        let statuses = storage
-            .get_dust_generation_status(&binary_keys)
-            .await
-            .map_err_into_server_error(|| "get DUST generation status")?;
-
-        Ok(statuses.into_iter().map(Into::into).collect())
-    }
-
-    /// Get historical Merkle tree root for a specific timestamp.
-    #[trace(properties = { "tree_type": "{tree_type:?}", "timestamp": "{timestamp}" })]
-    async fn dust_merkle_root(
-        &self,
-        cx: &Context<'_>,
-        tree_type: DustMerkleTreeType,
-        timestamp: u64,
-    ) -> ApiResult<Option<HexEncoded>> {
-        let storage = cx.get_storage::<S>();
-
-        let root = storage
-            .get_dust_merkle_root(tree_type.into(), timestamp)
-            .await
-            .map_err_into_server_error(|| "get DUST merkle root")?;
-
-        Ok(root.map(|bytes| bytes.hex_encode()))
     }
 }

@@ -15,43 +15,42 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiResult, AsBytesExt, ContextExt, HexEncoded, OptionExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v1::{
+            AsBytesExt, HexEncoded,
             block::BlockOffset,
             transaction::{Transaction, TransactionOffset},
         },
     },
 };
 use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject, scalar};
-use bech32::{Bech32m, Hrp};
-use derive_more::Debug;
+use derive_more::{Debug, From};
 use indexer_common::domain::{
-    ByteArrayLenError, NetworkId, RawUnshieldedAddress, UnknownNetworkIdError,
+    AddressType, ByteArrayLenError, DecodeAddressError, NetworkId, decode_address, encode_address,
+    ledger::RawUnshieldedAddress,
 };
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use thiserror::Error;
 
-const HRP_UNSHIELDED_BASE: &str = "mn_addr";
-
 /// Represents an unshielded UTXO.
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
 pub struct UnshieldedUtxo<S: Storage> {
-    /// Owner address (Bech32m, `mn_addr…`)
+    /// Owner Bech32m-encoded address.
     owner: UnshieldedAddress,
 
-    /// Token type (hex-encoded)
+    /// Token hex-encoded serialized token type.
     token_type: HexEncoded,
 
-    /// UTXO value (quantity) as a string to support u128
+    /// UTXO value (quantity) as a string to support u128.
     value: String,
 
-    /// Index of this output within its creating transaction
+    /// Index of this output within its creating transaction.
     output_index: u32,
 
-    /// The hash of the intent that created this output (hex-encoded)
+    /// The hex-encoded serialized intent hash.
     intent_hash: HexEncoded,
 
     #[graphql(skip)]
@@ -99,8 +98,10 @@ impl<S: Storage> UnshieldedUtxo<S> {
 
 impl<S: Storage> From<(domain::UnshieldedUtxo, NetworkId)> for UnshieldedUtxo<S> {
     fn from((utxo, network_id): (domain::UnshieldedUtxo, NetworkId)) -> Self {
+        let owner = encode_address(utxo.owner, AddressType::Unshielded, network_id).into();
+
         Self {
-            owner: UnshieldedAddress::bech32m_encode(utxo.owner, network_id),
+            owner,
             token_type: utxo.token_type.hex_encode(),
             value: utxo.value.to_string(),
             output_index: utxo.output_index,
@@ -131,7 +132,7 @@ pub enum UnshieldedOffset {
 /// - Undeployed: `mn_addr_undeployed` + bech32m data
 ///
 /// The inner string is validated to ensure proper bech32m-encoding and correct HRP prefix.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, From, Serialize, Deserialize)]
 pub struct UnshieldedAddress(pub String);
 
 scalar!(UnshieldedAddress);
@@ -148,53 +149,17 @@ impl UnshieldedAddress {
         &self,
         network_id: NetworkId,
     ) -> Result<RawUnshieldedAddress, UnshieldedAddressFormatError> {
-        let (hrp, bytes) = bech32::decode(&self.0).map_err(UnshieldedAddressFormatError::Decode)?;
-        let hrp = hrp.to_lowercase();
-
-        let Some(n) = hrp.strip_prefix(HRP_UNSHIELDED_BASE) else {
-            return Err(UnshieldedAddressFormatError::InvalidHrp(hrp));
-        };
-        let n = n.strip_prefix("_").unwrap_or(n).try_into()?;
-        if n != network_id {
-            return Err(UnshieldedAddressFormatError::UnexpectedNetworkId(
-                n, network_id,
-            ));
-        }
-
-        let address = bytes.try_into()?;
+        let bytes = decode_address(&self.0, AddressType::Unshielded, network_id)?;
+        let address = bytes.0.try_into()?;
 
         Ok(address)
-    }
-
-    /// Encode raw bytes into a Bech32m-encoded address.
-    pub fn bech32m_encode(bytes: impl AsRef<[u8]>, network_id: NetworkId) -> Self {
-        let hrp = match network_id {
-            NetworkId::MainNet => HRP_UNSHIELDED_BASE.to_string(),
-            NetworkId::DevNet => format!("{HRP_UNSHIELDED_BASE}_dev"),
-            NetworkId::TestNet => format!("{HRP_UNSHIELDED_BASE}_test"),
-            NetworkId::Undeployed => format!("{HRP_UNSHIELDED_BASE}_undeployed"),
-        };
-        let hrp = Hrp::parse(&hrp).expect("unshielded address HRP can be parsed");
-
-        let encoded = bech32::encode::<Bech32m>(hrp, bytes.as_ref())
-            .expect("bytes for unshielded address can be Bech32m-encoded");
-        Self(encoded)
     }
 }
 
 #[derive(Debug, Error)]
 pub enum UnshieldedAddressFormatError {
     #[error("cannot bech32m-decode unshielded address")]
-    Decode(#[from] bech32::DecodeError),
-
-    #[error("invalid bech32m HRP {0}, expected 'mn_addr' prefix")]
-    InvalidHrp(String),
-
-    #[error(transparent)]
-    UnknownNetworkId(#[from] UnknownNetworkIdError),
-
-    #[error("network ID mismatch: got {0}, expected {1}")]
-    UnexpectedNetworkId(NetworkId, NetworkId),
+    Decode(#[from] DecodeAddressError),
 
     #[error("cannot convert into unshielded address")]
     ByteArrayLen(#[from] ByteArrayLenError),

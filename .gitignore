@@ -1,13 +1,8 @@
-.DS_Store
-.idea
-.vscode
 *.check
-target
-.midnight-indexer.envrc
-
-# ts-tests
-ts-tests/node_modules
-ts-tests/reports
-ts-tests/**/logs
-ts-tests/**/managed
+.DS_Store
 .envrc.local
+.idea
+.sync_cache
+.vscode
+.zed
+target

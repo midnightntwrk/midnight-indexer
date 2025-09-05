@@ -45,7 +45,11 @@ async fn run() -> anyhow::Result<()> {
         infra::{ledger_state_storage, migrations, pool, pub_sub},
         telemetry,
     };
-    use log::{error, info};
+    use log::info;
+    use tokio::signal::unix::{SignalKind, signal};
+
+    // Register SIGTERM handler.
+    let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
     // Load configuration.
     let config = Config::load().context("load configuration")?;
@@ -101,13 +105,9 @@ async fn run() -> anyhow::Result<()> {
         storage,
         ledger_state_storage,
         publisher,
+        sigterm,
     )
     .await
-    .context("run application")?;
-
-    error!("chain-indexer terminated");
-
-    Ok(())
 }
 
 #[cfg(not(feature = "cloud"))]

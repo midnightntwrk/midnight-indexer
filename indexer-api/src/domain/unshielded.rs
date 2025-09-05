@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use indexer_common::{
-    domain::{IntentHash, RawTokenType, RawUnshieldedAddress},
+    domain::ledger::{IntentHash, RawTokenType, RawUnshieldedAddress},
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
 use sqlx::FromRow;
@@ -29,11 +29,9 @@ pub struct UnshieldedUtxo {
     pub spending_transaction_id: Option<u64>,
 
     /// The unshielded address that owns this UTXO.
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     pub owner: RawUnshieldedAddress,
 
     /// Type of token (e.g. NIGHT has all-zero bytes).
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     pub token_type: RawTokenType,
 
     /// Amount (big-endian bytes in DB -> u128 here).
@@ -45,7 +43,6 @@ pub struct UnshieldedUtxo {
     pub output_index: u32,
 
     /// Hash of the intent that created this UTXO.
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     pub intent_hash: IntentHash,
 }
 
@@ -53,7 +50,6 @@ pub struct UnshieldedUtxo {
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct ContractBalance {
     /// Token type identifier.
-    #[cfg_attr(feature = "standalone", sqlx(try_from = "&'a [u8]"))]
     pub token_type: RawTokenType,
 
     /// Balance amount.

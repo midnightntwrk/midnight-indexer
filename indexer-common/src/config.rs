@@ -46,10 +46,7 @@ impl<T> ConfigExt for T where T: for<'de> Deserialize<'de> {}
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        config::{CONFIG_FILE, ConfigExt},
-        telemetry,
-    };
+    use crate::config::{CONFIG_FILE, ConfigExt};
     use assert_matches::assert_matches;
     use serde::Deserialize;
     use std::env;
@@ -63,8 +60,7 @@ mod tests {
         let config = MainConfig::load();
         assert_matches!(
             config,
-            Ok(MainConfig { config: Config { api: api::Config { port, .. } }, tracing_config })
-            if port == 4242 && tracing_config.otlp_exporter_endpoint == "http://localhost:4317"
+            Ok(MainConfig { config: Config { api: api::Config { port, .. } } }) if port == 4242
         );
 
         unsafe {
@@ -73,15 +69,12 @@ mod tests {
         let config = Config::load();
         assert!(config.is_err());
     }
+
     #[derive(Debug, Clone, Deserialize)]
     pub struct MainConfig {
         /// Application sepcific configuration.
         #[serde(flatten)]
         pub config: Config,
-
-        /// Tracing configuration.
-        #[serde(rename = "tracing", default)]
-        pub tracing_config: telemetry::TracingConfig,
     }
 
     /// Application sepcific configuration.

@@ -40,22 +40,18 @@ where
 
 #[allow(unused_variables)]
 impl BlockStorage for NoopStorage {
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_latest_block(&self) -> Result<Option<Block>, sqlx::Error> {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>, sqlx::Error> {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_block_by_height(&self, height: u32) -> Result<Option<Block>, sqlx::Error> {
         unimplemented!()
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     fn get_blocks(
         &self,
         height: u32,

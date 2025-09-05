@@ -19,7 +19,10 @@ use async_stream::try_stream;
 use fastrace::trace;
 use futures::Stream;
 use indexer_common::{
-    domain::{RawTransactionIdentifier, RawUnshieldedAddress, SessionId, TransactionHash},
+    domain::{
+        SessionId,
+        ledger::{RawUnshieldedAddress, SerializedTransactionIdentifier, TransactionHash},
+    },
     stream::flatten_chunks,
 };
 use indoc::indoc;
@@ -33,37 +36,38 @@ impl TransactionStorage for Storage {
             SELECT
                 transactions.id,
                 transactions.hash,
-                blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.transaction_result,
-                transactions.identifiers,
                 transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                transactions.paid_fees,
-                transactions.estimated_fees
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees,
+                regular_transactions.identifiers
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.id = $1
         "};
-
         #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
                 transactions.id,
                 transactions.hash,
-                blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.transaction_result,
                 transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                transactions.paid_fees,
-                transactions.estimated_fees
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.id = $1
         "};
 
@@ -89,38 +93,39 @@ impl TransactionStorage for Storage {
             SELECT
                 transactions.id,
                 transactions.hash,
-                blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.transaction_result,
-                transactions.identifiers,
                 transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                transactions.paid_fees,
-                transactions.estimated_fees
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees,
+                regular_transactions.identifiers
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.block_id = $1
             ORDER BY transactions.id
         "};
-
         #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
                 transactions.id,
                 transactions.hash,
-                blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.transaction_result,
                 transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                transactions.paid_fees,
-                transactions.estimated_fees
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.block_id = $1
             ORDER BY transactions.id
         "};
@@ -150,48 +155,46 @@ impl TransactionStorage for Storage {
             SELECT
                 transactions.id,
                 transactions.hash,
-                blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.transaction_result,
-                transactions.identifiers,
                 transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                transactions.paid_fees,
-                transactions.estimated_fees
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees,
+                regular_transactions.identifiers
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.hash = $1
             ORDER BY transactions.id DESC
         "};
-
         #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
                 transactions.id,
                 transactions.hash,
-                blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.transaction_result,
                 transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                transactions.paid_fees,
-                transactions.estimated_fees
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.hash = $1
             ORDER BY transactions.id DESC
         "};
 
-        #[cfg(feature = "standalone")]
-        let hash = hash.as_ref();
-
         #[cfg_attr(feature = "cloud", allow(unused_mut))]
         let mut transactions = sqlx::query_as::<_, Transaction>(query)
-            .bind(hash)
+            .bind(hash.as_ref())
             .fetch_all(&*self.pool)
             .await?;
 
@@ -207,45 +210,46 @@ impl TransactionStorage for Storage {
     #[trace(properties = { "identifier": "{identifier}" })]
     async fn get_transactions_by_identifier(
         &self,
-        identifier: &RawTransactionIdentifier,
+        identifier: &SerializedTransactionIdentifier,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
         #[cfg(feature = "cloud")]
         let query = indoc! {"
             SELECT
                 transactions.id,
                 transactions.hash,
-                blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.transaction_result,
-                transactions.identifiers,
                 transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                transactions.paid_fees,
-                transactions.estimated_fees
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees,
+                regular_transactions.identifiers
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
-            WHERE $1 = ANY(transactions.identifiers)
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
+            WHERE $1 = ANY(regular_transactions.identifiers)
             ORDER BY transactions.id
         "};
-
         #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
                 transactions.id,
                 transactions.hash,
-                blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.transaction_result,
                 transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                transactions.paid_fees,
-                transactions.estimated_fees
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             INNER JOIN transaction_identifiers ON transactions.id = transaction_identifiers.transaction_id
             WHERE transaction_identifiers.identifier = $1
             ORDER BY transactions.id
@@ -322,17 +326,14 @@ impl TransactionStorage for Storage {
         let query = indoc! {"
             SELECT MAX(transactions.id)
             FROM transactions
-            INNER JOIN unshielded_utxos ON 
+            INNER JOIN unshielded_utxos ON
                 unshielded_utxos.creating_transaction_id = transactions.id OR
                 unshielded_utxos.spending_transaction_id = transactions.id
             WHERE unshielded_utxos.owner = $1
         "};
 
-        #[cfg(feature = "standalone")]
-        let address = address.as_ref();
-
         let (id,) = sqlx::query_as::<_, (Option<i64>,)>(query)
-            .bind(address)
+            .bind(address.as_ref())
             .fetch_one(&*self.pool)
             .await?;
 
@@ -346,33 +347,30 @@ impl TransactionStorage for Storage {
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error> {
         let query = indoc! {"
             SELECT (
-                SELECT MAX(end_index) FROM transactions
-            ) AS highest_end_index,
+                SELECT MAX(end_index) FROM regular_transactions
+            ) AS highest_index,
             (
                 SELECT end_index
-                FROM transactions
+                FROM regular_transactions
                 WHERE id = (
                     SELECT MAX(last_indexed_transaction_id)
                     FROM wallets
                 )
-            ) AS highest_relevant_end_index,
+            ) AS highest_relevant_index,
             (
                 SELECT end_index
-                FROM transactions
-                INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
+                FROM regular_transactions
+                INNER JOIN relevant_transactions ON regular_transactions.id = relevant_transactions.transaction_id
                 INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
                 WHERE wallets.session_id = $1
                 ORDER BY end_index DESC
                 LIMIT 1
-            ) AS max_end_index_for_session
+            ) AS highest_relevant_wallet_index
         "};
-
-        #[cfg(feature = "standalone")]
-        let session_id = session_id.as_ref();
 
         let (highest_index, highest_relevant_index, highest_relevant_wallet_index) =
             sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(query)
-                .bind(session_id)
+                .bind(session_id.as_ref())
                 .fetch_one(&*self.pool)
                 .await?;
 
@@ -401,56 +399,54 @@ impl Storage {
             SELECT
                 transactions.id,
                 transactions.hash,
-                blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.transaction_result,
-                transactions.identifiers,
                 transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                transactions.paid_fees,
-                transactions.estimated_fees
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees,
+                regular_transactions.identifiers
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
             INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
             WHERE wallets.session_id = $1
-            AND transactions.start_index >= $2
+            AND regular_transactions.start_index >= $2
             ORDER BY transactions.id
             LIMIT $3
         "};
-
         #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
                 transactions.id,
                 transactions.hash,
-                blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.transaction_result,
                 transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                transactions.paid_fees,
-                transactions.estimated_fees
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
             INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
             WHERE wallets.session_id = $1
-            AND transactions.start_index >= $2
+            AND regular_transactions.start_index >= $2
             ORDER BY transactions.id
             LIMIT $3
         "};
 
-        #[cfg(feature = "standalone")]
-        let session_id = session_id.as_ref();
-
         #[cfg_attr(feature = "cloud", allow(unused_mut))]
         let mut transactions = sqlx::query_as::<_, Transaction>(query)
-            .bind(session_id)
+            .bind(session_id.as_ref())
             .bind(index as i64)
             .bind(batch_size.get() as i64)
             .fetch_all(&*self.pool)
@@ -481,18 +477,19 @@ impl Storage {
             SELECT DISTINCT
                 transactions.id,
                 transactions.hash,
-                blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.transaction_result,
-                transactions.identifiers,
                 transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                transactions.paid_fees,
-                transactions.estimated_fees
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees,
+                regular_transactions.identifiers
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             INNER JOIN unshielded_utxos ON
                 unshielded_utxos.creating_transaction_id = transactions.id OR
                 unshielded_utxos.spending_transaction_id = transactions.id
@@ -501,23 +498,23 @@ impl Storage {
             ORDER BY transactions.id
             LIMIT $3
         "};
-
         #[cfg(feature = "standalone")]
         let query = indoc! {"
-            SELECT DISTINCT
+            SELECT
                 transactions.id,
                 transactions.hash,
-                blocks.hash AS block_hash,
                 transactions.protocol_version,
-                transactions.transaction_result,
                 transactions.raw,
-                transactions.merkle_tree_root,
-                transactions.start_index,
-                transactions.end_index,
-                transactions.paid_fees,
-                transactions.estimated_fees
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             INNER JOIN unshielded_utxos ON
                 unshielded_utxos.creating_transaction_id = transactions.id OR
                 unshielded_utxos.spending_transaction_id = transactions.id
@@ -549,7 +546,7 @@ impl Storage {
 async fn get_identifiers_for_transaction(
     transaction_id: u64,
     pool: &indexer_common::infra::pool::sqlite::SqlitePool,
-) -> Result<Vec<RawTransactionIdentifier>, sqlx::Error> {
+) -> Result<Vec<SerializedTransactionIdentifier>, sqlx::Error> {
     use futures::TryStreamExt;
 
     let query = indoc! {"
@@ -558,7 +555,7 @@ async fn get_identifiers_for_transaction(
         WHERE transaction_id = $1
     "};
 
-    sqlx::query_as::<_, (RawTransactionIdentifier,)>(query)
+    sqlx::query_as::<_, (SerializedTransactionIdentifier,)>(query)
         .bind(transaction_id as i64)
         .fetch(&**pool)
         .map_ok(|(identifier,)| identifier)

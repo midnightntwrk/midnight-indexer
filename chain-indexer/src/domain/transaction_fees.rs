@@ -19,10 +19,7 @@
 //! 3. Basic size-based calculation (tertiary) - Fallback using transaction size
 //! 4. Minimum fees (final) - Ensures non-zero fees for all transactions
 
-use indexer_common::domain::{
-    TransactionStructure,
-    ledger::{self},
-};
+use indexer_common::domain::ledger::{self, TransactionStructure};
 
 // Fee calculation constants
 const BASE_OVERHEAD: u128 = 1000; // Base transaction overhead in smallest DUST unit

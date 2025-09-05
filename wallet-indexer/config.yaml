@@ -1,7 +1,6 @@
 run_migrations: true
 
 application:
-  network_id: "Undeployed"
   active_wallets_repeat_delay: "100ms"
   active_wallets_ttl: "30m"
   transaction_batch_size: 10

@@ -173,12 +173,14 @@ just run-chain-indexer
 - **Just**: A command-runner used for tasks. Install from [GitHub](https://github.com/casey/just).
 - **direnv**: For a reproducible development environment.
 - **Docker**: For integration tests and running services locally.
+- **subxt-cli**: For fetching new metadata from the node ([GitHub](https://github.com/paritytech/subxt?tab=readme-ov-file#downloading-metadata-from-a-substrate-node)). **Note:** Version used must match version in Cargo.toml
+- **cargo-nextest**: For running tests ([GitHub](https://github.com/nextest-rs/nextest/))
 
 ### Environment Variables
 
 As we allow zero secrets in the git repository, you need to define a couple of environment variables for build (tests) and runtime (tests). Notice that the values are just used locally for testing and can be chosen arbitrarily; `APP__INFRA__SECRET` must be a hex-encoded 32-byte value.
 
-It is recommended to provide these environment variables via an `~/.midnight-indexer.envrc` file which is sourced by the `.envrc` file:
+It is recommended to provide these environment variables via a `~/.midnight-indexer.envrc` or `./.envrc.local` file which is sourced by the `.envrc` file:
 
 ```bash
 export APP__INFRA__STORAGE__PASSWORD=postgres

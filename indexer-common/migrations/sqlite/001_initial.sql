@@ -11,15 +11,10 @@ CREATE TABLE blocks(
 CREATE TABLE transactions(
     id INTEGER PRIMARY KEY,
     block_id INTEGER NOT NULL,
+    variant TEXT CHECK (variant IN ('Regular', 'System')) NOT NULL,
     hash BLOB NOT NULL,
     protocol_version INTEGER NOT NULL,
-    transaction_result TEXT NOT NULL,
     raw BLOB NOT NULL,
-    merkle_tree_root BLOB NOT NULL,
-    start_index INTEGER NOT NULL,
-    end_index INTEGER NOT NULL,
-    paid_fees BLOB,
-    estimated_fees BLOB,
     FOREIGN KEY (block_id) REFERENCES blocks(id)
 );
 
@@ -27,17 +22,28 @@ CREATE INDEX transactions_block_id ON transactions(block_id);
 
 CREATE INDEX transactions_hash ON transactions(hash);
 
-CREATE INDEX transactions_transaction_result ON transactions(transaction_result);
+CREATE TABLE regular_transactions(
+    id INTEGER PRIMARY KEY,
+    transaction_result TEXT NOT NULL,
+    merkle_tree_root BLOB NOT NULL,
+    start_index INTEGER NOT NULL,
+    end_index INTEGER NOT NULL,
+    paid_fees BLOB,
+    estimated_fees BLOB,
+    FOREIGN KEY (id) REFERENCES transactions(id)
+);
 
-CREATE INDEX transactions_start_index ON transactions(start_index);
+CREATE INDEX transactions_transaction_result ON regular_transactions(transaction_result);
 
-CREATE INDEX transactions_end_index ON transactions(end_index);
+CREATE INDEX transactions_start_index ON regular_transactions(start_index);
+
+CREATE INDEX transactions_end_index ON regular_transactions(end_index);
 
 CREATE TABLE transaction_identifiers(
     id INTEGER PRIMARY KEY,
     transaction_id INTEGER NOT NULL,
     identifier BLOB NOT NULL,
-    FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+    FOREIGN KEY (transaction_id) REFERENCES regular_transactions(id)
 );
 
 CREATE INDEX transaction_identifiers_transaction_id ON transaction_identifiers(transaction_id);
@@ -47,10 +53,10 @@ CREATE INDEX transaction_identifiers_identifier ON transaction_identifiers(ident
 CREATE TABLE contract_actions(
     id INTEGER PRIMARY KEY,
     transaction_id INTEGER NOT NULL,
+    variant TEXT CHECK (variant IN ('Deploy', 'Call', 'Update')) NOT NULL,
     address BLOB NOT NULL,
     state BLOB NOT NULL,
-    zswap_state BLOB NOT NULL,
-    variant TEXT CHECK (variant IN ('Deploy', 'Call', 'Update')) NOT NULL,
+    chain_state BLOB NOT NULL,
     attributes TEXT NOT NULL,
     FOREIGN KEY (transaction_id) REFERENCES transactions(id)
 );

@@ -15,20 +15,28 @@ use crate::domain::Api;
 use anyhow::Context as AnyhowContext;
 use futures::{TryStreamExt, future::ok};
 use indexer_common::domain::{BlockIndexed, NetworkId, Subscriber};
-use log::debug;
+use log::{debug, warn};
 use serde::Deserialize;
+use serde_with::{DisplayFromStr, serde_as};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use tokio::{select, task};
+use tokio::{select, signal::unix::Signal, task};
 
+#[serde_as]
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct Config {
+    #[serde_as(as = "DisplayFromStr")]
     pub network_id: NetworkId,
 }
 
-pub async fn run(config: Config, api: impl Api, subscriber: impl Subscriber) -> anyhow::Result<()> {
+pub async fn run(
+    config: Config,
+    api: impl Api,
+    subscriber: impl Subscriber,
+    mut sigterm: Signal,
+) -> anyhow::Result<()> {
     let Config { network_id } = config;
 
     let caught_up = Arc::new(AtomicBool::new(false));
@@ -62,7 +70,17 @@ pub async fn run(config: Config, api: impl Api, subscriber: impl Subscriber) -> 
     };
 
     select! {
-        result = block_indexed_task => result,
-        result = serve_api_task => result,
-    }?
+        result = block_indexed_task => result
+            .context("block_indexed_task panicked")
+            .and_then(|r| r.context("block_indexed_task failed")),
+
+        result = serve_api_task => result
+            .context("serve_api_task panicked")
+            .and_then(|r| r.context("serve_api_task failed")),
+
+        _ = sigterm.recv() => {
+            warn!("SIGTERM received");
+            Ok(())
+        }
+    }
 }

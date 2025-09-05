@@ -22,25 +22,32 @@ pub use secret_key::*;
 pub use transaction::*;
 
 use crate::{
-    domain::{NetworkId, ProtocolVersion},
+    domain::{ByteVec, ProtocolVersion},
     error::BoxError,
 };
 use fastrace::trace;
-use midnight_base_crypto::signatures::Signature as SignatureV5;
-use midnight_ledger::structure::{ProofMarker as ProofMarkerV5, Transaction as TransactionV5};
-use midnight_serialize::{
-    NetworkId as NetworkIdV5, Serializable as SerializableV5, serialize as serialize_v5,
+use midnight_base_crypto_v6::signatures::Signature as SignatureV6;
+use midnight_ledger_v6::structure::ProofMarker as ProofMarkerV6;
+use midnight_serialize_v6::{
+    Serializable as SerializableV6, Tagged as TaggedV6, tagged_serialize as tagged_serialize_v6,
 };
-use midnight_storage::DefaultDB as DefaultDBV5;
-use midnight_transient_crypto::{
-    commitment::PedersenRandomness as PedersenRandomnessV5,
-    merkle_tree::InvalidUpdate as InvalidUpdateV5,
-};
+use midnight_storage_v6::DefaultDB as DefaultDBV6;
+use midnight_transient_crypto_v6::commitment::PedersenRandomness as PedersenRandomnessV6;
 use std::io;
 use thiserror::Error;
 
-type LedgerTransactionV5 =
-    TransactionV5<SignatureV5, ProofMarkerV5, PedersenRandomnessV5, DefaultDBV5>;
+type TransactionV6 = midnight_ledger_v6::structure::Transaction<
+    SignatureV6,
+    ProofMarkerV6,
+    PedersenRandomnessV6,
+    DefaultDBV6,
+>;
+type IntentV6 = midnight_ledger_v6::structure::Intent<
+    SignatureV6,
+    ProofMarkerV6,
+    PedersenRandomnessV6,
+    DefaultDBV6,
+>;
 
 /// Ledger related errors.
 #[derive(Debug, Error)]
@@ -58,38 +65,43 @@ pub enum Error {
     TokenTypeLen(usize),
 
     #[error("invalid merkle-tree collapsed update")]
-    InvalidUpdate(#[from] InvalidUpdateV5),
+    InvalidUpdate(#[source] BoxError),
+
+    #[error("malformed transaction")]
+    MalformedTransaction(#[source] BoxError),
+
+    #[error("invalid system transaction")]
+    SystemTransaction(#[source] BoxError),
 }
 
 /// Extension methods for `Serializable` implementations.
-pub trait SerializableV5Ext
+pub trait SerializableV6Ext
 where
-    Self: SerializableV5,
+    Self: SerializableV6,
 {
     /// Serialize this `Serializable` implementation.
-    #[trace(properties = { "network_id": "{network_id}" })]
-    fn serialize(&self, network_id: NetworkId) -> Result<Vec<u8>, io::Error> {
-        let mut bytes = Vec::with_capacity(Self::serialized_size(self) + 1);
-        serialize_v5(self, &mut bytes, network_id.into_ledger_v5())?;
-        Ok(bytes)
+    #[trace]
+    fn serialize_v6(&self) -> Result<ByteVec, io::Error> {
+        let mut bytes = Vec::with_capacity(self.serialized_size() + 32);
+        SerializableV6::serialize(self, &mut bytes)?;
+        Ok(bytes.into())
     }
 }
 
-impl<T> SerializableV5Ext for T where T: SerializableV5 {}
+impl<T> SerializableV6Ext for T where T: SerializableV6 {}
 
-/// Extension methods for network ID.
-trait NetworkIdExt {
-    /// Convert this network ID into a ledger v5 one.
-    fn into_ledger_v5(self) -> NetworkIdV5;
-}
-
-impl NetworkIdExt for NetworkId {
-    fn into_ledger_v5(self) -> NetworkIdV5 {
-        match self {
-            NetworkId::Undeployed => NetworkIdV5::Undeployed,
-            NetworkId::DevNet => NetworkIdV5::DevNet,
-            NetworkId::TestNet => NetworkIdV5::TestNet,
-            NetworkId::MainNet => NetworkIdV5::MainNet,
-        }
+/// Extension methods for `Serializable + Tagged` implementations.
+pub trait TaggedSerializableV6Ext
+where
+    Self: SerializableV6 + TaggedV6 + Sized,
+{
+    /// Serialize this `Serializable + Tagged` implementation.
+    #[trace]
+    fn tagged_serialize_v6(&self) -> Result<ByteVec, io::Error> {
+        let mut bytes = Vec::with_capacity(self.serialized_size() + 32);
+        tagged_serialize_v6(self, &mut bytes)?;
+        Ok(bytes.into())
     }
 }
+
+impl<T> TaggedSerializableV6Ext for T where T: SerializableV6 + TaggedV6 {}

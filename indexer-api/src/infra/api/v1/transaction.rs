@@ -14,8 +14,11 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, AsBytesExt, ContextExt, HexEncoded, OptionExt, ResultExt,
-        v1::{block::Block, contract_action::ContractAction, unshielded::UnshieldedUtxo},
+        ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
+        v1::{
+            AsBytesExt, HexEncoded, block::Block, contract_action::ContractAction,
+            unshielded::UnshieldedUtxo,
+        },
     },
 };
 use async_graphql::{ComplexObject, Context, Enum, OneofObject, SimpleObject};
@@ -34,11 +37,18 @@ where
     /// The transaction ID.
     id: u64,
 
-    /// The transaction hash.
+    /// The hex-encoded transaction hash.
     hash: HexEncoded,
 
     /// The protocol version.
     protocol_version: u32,
+
+    /// The hex-encoded serialized transaction content.
+    #[debug(skip)]
+    raw: HexEncoded,
+
+    #[graphql(skip)]
+    block_hash: BlockHash,
 
     /// The result of applying a transaction to the ledger state.
     transaction_result: TransactionResult,
@@ -46,33 +56,35 @@ where
     /// Fee information for this transaction.
     fees: TransactionFees,
 
-    /// The transaction identifiers.
+    /// The hex-encoded serialized transaction identifiers.
     #[debug(skip)]
     identifiers: Vec<HexEncoded>,
 
-    /// The raw transaction content.
-    #[debug(skip)]
-    raw: HexEncoded,
-
-    /// The merkle-tree root.
+    /// The hex-encoded serialized merkle-tree root.
     #[debug(skip)]
     merkle_tree_root: HexEncoded,
-
-    #[graphql(skip)]
-    block_hash: BlockHash,
 
     #[graphql(skip)]
     #[debug(skip)]
     _s: PhantomData<S>,
 }
 
-// Needed to derive `Interface` for `ContractAction`. Weird!
+// Required by async-graphql's Interface derive macro for `ContractAction`.
 impl<S> From<Result<Transaction<S>, ApiError>> for Transaction<S>
 where
     S: Storage,
 {
-    fn from(_value: Result<Transaction<S>, ApiError>) -> Self {
-        unimplemented!()
+    fn from(value: Result<Transaction<S>, ApiError>) -> Self {
+        match value {
+            Ok(transaction) => transaction,
+            Err(error) => {
+                // This panic indicates a bug in async-graphql's interface resolution
+                // or a missing implementation in one of the concrete types.
+                panic!(
+                    "Unexpected error resolving transaction for ContractAction interface: {error}"
+                )
+            }
+        }
     }
 }
 
@@ -159,11 +171,11 @@ where
         let domain::Transaction {
             id,
             hash,
-            block_hash,
             protocol_version: ProtocolVersion(protocol_version),
+            raw,
+            block_hash,
             transaction_result,
             identifiers,
-            raw,
             merkle_tree_root,
             ..
         } = value;
@@ -181,18 +193,18 @@ where
         };
 
         Self {
+            id,
             hash: hash.hex_encode(),
             protocol_version,
+            raw: raw.hex_encode(),
+            block_hash,
             transaction_result: transaction_result.into(),
             fees,
             identifiers: identifiers
                 .into_iter()
                 .map(|identifier| identifier.hex_encode())
                 .collect::<Vec<_>>(),
-            raw: raw.hex_encode(),
             merkle_tree_root: merkle_tree_root.hex_encode(),
-            id,
-            block_hash,
             _s: PhantomData,
         }
     }
@@ -262,15 +274,15 @@ pub struct SegmentResult {
     success: bool,
 }
 
-impl From<indexer_common::domain::TransactionResult> for TransactionResult {
-    fn from(transaction_result: indexer_common::domain::TransactionResult) -> Self {
+impl From<indexer_common::domain::ledger::TransactionResult> for TransactionResult {
+    fn from(transaction_result: indexer_common::domain::ledger::TransactionResult) -> Self {
         match transaction_result {
-            indexer_common::domain::TransactionResult::Success => Self {
+            indexer_common::domain::ledger::TransactionResult::Success => Self {
                 status: TransactionResultStatus::Success,
                 segments: None,
             },
 
-            indexer_common::domain::TransactionResult::PartialSuccess(segments) => {
+            indexer_common::domain::ledger::TransactionResult::PartialSuccess(segments) => {
                 let segments = segments
                     .into_iter()
                     .map(|(id, success)| Segment { id, success })
@@ -282,7 +294,7 @@ impl From<indexer_common::domain::TransactionResult> for TransactionResult {
                 }
             }
 
-            indexer_common::domain::TransactionResult::Failure => Self {
+            indexer_common::domain::ledger::TransactionResult::Failure => Self {
                 status: TransactionResultStatus::Failure,
                 segments: None,
             },

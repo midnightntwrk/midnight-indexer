@@ -1,0 +1,12 @@
+# From .gitignore.
+.DS_Store
+.envrc.local
+.idea
+.sync_cache
+.vscode
+*.check
+target
+
+# Additional files.
+.git
+.github

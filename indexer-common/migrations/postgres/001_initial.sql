@@ -4,10 +4,9 @@ CREATE TYPE CONTRACT_ACTION_VARIANT AS ENUM(
     'Update'
 );
 
-CREATE TYPE DUST_EVENT_TYPE AS ENUM(
-    'DustInitialUtxo',
-    'DustGenerationDtimeUpdate',
-    'DustSpendProcessed'
+CREATE TYPE TRANSACTION_VARIANT AS ENUM(
+    'Regular',
+    'System'
 );
 
 CREATE TABLE blocks(
@@ -23,37 +22,42 @@ CREATE TABLE blocks(
 CREATE TABLE transactions(
     id BIGSERIAL PRIMARY KEY,
     block_id BIGINT NOT NULL REFERENCES blocks(id),
+    variant TRANSACTION_VARIANT NOT NULL,
     hash BYTEA NOT NULL,
     protocol_version BIGINT NOT NULL,
-    transaction_result JSONB NOT NULL,
-    identifiers BYTEA[] NOT NULL,
-    raw BYTEA NOT NULL,
-    merkle_tree_root BYTEA NOT NULL,
-    start_index BIGINT NOT NULL,
-    end_index BIGINT NOT NULL,
-    paid_fees BYTEA,
-    estimated_fees BYTEA
+    raw BYTEA NOT NULL
 );
 
 CREATE INDEX ON transactions(block_id);
 
 CREATE INDEX ON transactions(hash);
 
-CREATE INDEX ON transactions(transaction_result);
+CREATE TABLE regular_transactions(
+    id BIGINT PRIMARY KEY REFERENCES transactions(id),
+    transaction_result JSONB NOT NULL,
+    merkle_tree_root BYTEA NOT NULL,
+    start_index BIGINT NOT NULL,
+    end_index BIGINT NOT NULL,
+    paid_fees BYTEA,
+    estimated_fees BYTEA,
+    identifiers BYTEA[] NOT NULL
+);
 
-CREATE INDEX ON transactions(start_index);
+CREATE INDEX ON regular_transactions(transaction_result);
 
-CREATE INDEX ON transactions(end_index);
+CREATE INDEX ON regular_transactions USING GIN(transaction_result);
 
-CREATE INDEX ON transactions USING GIN(transaction_result);
+CREATE INDEX ON regular_transactions(start_index);
+
+CREATE INDEX ON regular_transactions(end_index);
 
 CREATE TABLE contract_actions(
     id BIGSERIAL PRIMARY KEY,
     transaction_id BIGINT NOT NULL REFERENCES transactions(id),
+    variant CONTRACT_ACTION_VARIANT NOT NULL,
     address BYTEA NOT NULL,
     state BYTEA NOT NULL,
-    zswap_state BYTEA NOT NULL,
-    variant CONTRACT_ACTION_VARIANT NOT NULL,
+    chain_state BYTEA NOT NULL,
     attributes JSONB NOT NULL
 );
 
@@ -116,85 +120,4 @@ CREATE INDEX ON contract_balances(contract_action_id);
 CREATE INDEX ON contract_balances(token_type);
 
 CREATE INDEX ON contract_balances(contract_action_id, token_type);
-
-CREATE TABLE dust_generation_info(
-    id BIGSERIAL PRIMARY KEY,
-    night_utxo_hash BYTEA NOT NULL,
-    value BYTEA NOT NULL,
-    owner BYTEA NOT NULL,
-    nonce BYTEA NOT NULL,
-    ctime BIGINT NOT NULL,
-    merkle_index BIGINT NOT NULL,
-    dtime BIGINT
-);
-
-CREATE INDEX ON dust_generation_info(OWNER);
-
-CREATE INDEX ON dust_generation_info(night_utxo_hash);
-
-CREATE TABLE dust_utxos(
-    id BIGSERIAL PRIMARY KEY,
-    generation_info_id BIGINT NOT NULL REFERENCES dust_generation_info(id),
-    spent_at_transaction_id BIGINT REFERENCES transactions(id),
-    commitment BYTEA NOT NULL,
-    initial_value BYTEA NOT NULL,
-    owner BYTEA NOT NULL,
-    nonce BYTEA NOT NULL,
-    seq INTEGER NOT NULL,
-    ctime BIGINT NOT NULL,
-    nullifier BYTEA
-);
-
-CREATE INDEX ON dust_utxos(OWNER);
-
-CREATE INDEX ON dust_utxos(generation_info_id);
-
-CREATE INDEX ON dust_utxos(spent_at_transaction_id);
-
-CREATE INDEX ON dust_utxos(substring(nullifier::TEXT, 1, 8))
-WHERE
-    nullifier IS NOT NULL;
-
-CREATE TABLE cnight_registrations(
-    id BIGSERIAL PRIMARY KEY,
-    cardano_address BYTEA NOT NULL,
-    dust_address BYTEA NOT NULL,
-    is_valid BOOLEAN NOT NULL,
-    registered_at BIGINT NOT NULL,
-    removed_at BIGINT,
-    UNIQUE (cardano_address, dust_address)
-);
-
-CREATE INDEX ON cnight_registrations(cardano_address);
-
-CREATE INDEX ON cnight_registrations(dust_address);
-
--- TODO: These tables are for future merkle tree storage once ledger integration is complete.
-CREATE TABLE dust_commitment_tree(
-    id BIGSERIAL PRIMARY KEY,
-    block_height BIGINT NOT NULL,
-    root BYTEA NOT NULL,
-    tree_data BYTEA NOT NULL
-);
-
-CREATE TABLE dust_generation_tree(
-    id BIGSERIAL PRIMARY KEY,
-    block_height BIGINT NOT NULL,
-    root BYTEA NOT NULL,
-    tree_data BYTEA NOT NULL
-);
-
-CREATE TABLE dust_events(
-    id BIGSERIAL PRIMARY KEY,
-    transaction_id BIGINT NOT NULL REFERENCES transactions(id),
-    transaction_hash BYTEA NOT NULL,
-    logical_segment INTEGER NOT NULL,
-    physical_segment INTEGER NOT NULL,
-    event_type DUST_EVENT_TYPE NOT NULL,
-    event_data JSONB NOT NULL
-);
-
-CREATE INDEX ON dust_events(transaction_id);
-
-CREATE INDEX ON dust_events(event_type);
 

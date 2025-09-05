@@ -47,7 +47,7 @@ impl From<U128BeBytes> for u128 {
 }
 
 /// A helper to use `Option<u64>` with `sqlx::FromRow` like this:
-/// ```
+/// ```ignore
 /// #[sqlx(try_from = "SqlxOption<&'a [u8]>")]
 /// pub author: Option<ByteArray>,
 /// ```
