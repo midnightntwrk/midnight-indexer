@@ -71,16 +71,16 @@ docker run \
 # Add delay to work around PM-19168.
 sleep 2
 
+# The 'store' function inserts data into a Merkle tree in the test contract
+# (see midnight-node MerkleTreeContract). We need this to generate contract
+# action events in the test data so the indexer can verify it properly tracks
+# and indexes contract state changes.
 docker run \
     --rm \
     --network host \
     -v /tmp:/out \
     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
     generate-txs contract-calls call \
-    # The 'store' function inserts data into a Merkle tree in the test contract
-    # (see midnight-node MerkleTreeContract). We need this to generate contract
-    # action events in the test data so the indexer can verify it properly tracks
-    # and indexes contract state changes.
     --call-key store \
     --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
     --contract-address /out/contract_address.mn
