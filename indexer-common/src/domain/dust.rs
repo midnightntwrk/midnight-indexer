@@ -11,14 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use crate::domain::{
-    DustCommitment, DustNullifier,
-};
+pub use crate::domain::{DustCommitment, DustNullifier};
 
-use crate::domain::{
-    DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce,
-    ledger::TransactionHash,
-};
+use crate::domain::{DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce, ledger::TransactionHash};
 use serde::{Deserialize, Serialize};
 
 /// DUST event for the indexer domain.
@@ -133,11 +128,12 @@ pub struct DustParameters {
 
 impl Default for DustParameters {
     fn default() -> Self {
-        // Initial DUST parameters from the ledger
+        // Initial DUST parameters from the ledger.
         Self {
-            night_dust_ratio: 5_000_000_000, // 5 DUST per NIGHT
-            generation_decay_rate: 8_267,    // Works out to a generation time of approximately 1 week
-            dust_grace_period: 3 * 60 * 60,  // 3 hours in seconds
+            night_dust_ratio: 5_000_000_000, // 5 DUST per NIGHT.
+            generation_decay_rate: 8_267,    /* Works out to a generation time of approximately 1
+                                              * week. */
+            dust_grace_period: 3 * 60 * 60, // 3 hours in seconds.
         }
     }
 }

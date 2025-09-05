@@ -87,13 +87,13 @@ pub trait DustStorage: BlockStorage {
         &self,
         dust_address: &DustAddress,
     ) -> Result<u32, sqlx::Error>;
-    
+
     /// Get DUST events by transaction hash.
     async fn get_dust_events_by_transaction(
         &self,
         transaction_hash: indexer_common::domain::ledger::TransactionHash,
     ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error>;
-    
+
     /// Get recent DUST events with optional filtering.
     async fn get_recent_dust_events(
         &self,
@@ -175,14 +175,14 @@ impl DustStorage for NoopStorage {
     ) -> Result<u32, sqlx::Error> {
         unimplemented!("NoopStorage")
     }
-    
+
     async fn get_dust_events_by_transaction(
         &self,
         transaction_hash: indexer_common::domain::ledger::TransactionHash,
     ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error> {
         unimplemented!("NoopStorage")
     }
-    
+
     async fn get_recent_dust_events(
         &self,
         limit: u32,

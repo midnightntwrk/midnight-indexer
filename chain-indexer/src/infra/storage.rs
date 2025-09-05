@@ -21,7 +21,7 @@ use indexer_common::{
     domain::{
         BlockHash, ByteArray, ByteVec,
         dust::{
-            DustCommitment, DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, 
+            DustCommitment, DustEvent, DustEventDetails, DustEventType, DustGenerationInfo,
             DustNullifier, QualifiedDustOutput,
         },
         ledger::{
@@ -418,31 +418,32 @@ async fn save_system_transaction(
         Ok(tx) => tx,
         Err(_) => return Ok(()), // Continue processing other transactions.
     };
-    
+
     // Handle the V6 variant to access the inner ledger transaction.
     match system_tx {
         DomainSystemTransaction::V6(ledger_tx) => {
             match ledger_tx {
                 LedgerSystemTransaction::CNightGeneratesDustUpdate { events } => {
                     // Process and save DUST events..
-                    let dust_events = convert_cnight_events_to_dust_events(&events, &transaction.hash);
+                    let dust_events =
+                        convert_cnight_events_to_dust_events(&events, &transaction.hash);
                     if !dust_events.is_empty() {
                         process_dust_events(&dust_events, transaction_id, tx).await?;
                         save_dust_events(&dust_events, transaction_id, tx).await?;
                     }
                 }
-                
+
                 LedgerSystemTransaction::DistributeReserve(_amount) => {
                     // TODO: Store reserve distribution information when needed.
                 }
-                
+
                 _ => {
                     // Other system transaction types not yet handled.
                 }
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -463,9 +464,10 @@ fn convert_cnight_events_to_dust_events(
                             initial_value: event.value,
                             owner: event.owner.0.0.to_bytes_le().into(),
                             nonce: event.nonce.0.0.into(), // InitialNonce wraps HashOutput.
-                            seq: 0, // Initial sequence number.
+                            seq: 0,                        // Initial sequence number.
                             ctime: event.time.to_secs(),
-                            backing_night: event.nonce.0.0.into(), // Use nonce as backing reference.
+                            backing_night: event.nonce.0.0.into(), /* Use nonce as backing
+                                                                    * reference. */
                             mt_index: 0, // Will be set by ledger processing.
                         },
                         generation_info: DustGenerationInfo {
@@ -485,13 +487,13 @@ fn convert_cnight_events_to_dust_events(
                         commitment: DustCommitment::default(), // Not available in CNGD event.
                         commitment_index: 0,
                         nullifier: DustNullifier::default(), // Not available in CNGD event.
-                        v_fee: 0, // No fee for system-initiated destroy.
+                        v_fee: 0,                            // No fee for system-initiated destroy.
                         time: event.time.to_secs(),
                         params: indexer_common::domain::dust::DustParameters::default(),
                     }
                 }
             };
-            
+
             DustEvent {
                 transaction_hash: *transaction_hash,
                 logical_segment: index as u16,
@@ -975,15 +977,17 @@ mod tests {
     use super::*;
     use indexer_common::domain::ledger::TransactionHash;
     use midnight_base_crypto_v6::time::Timestamp;
-    use midnight_ledger_v6::dust::{DustPublicKey, InitialNonce};
-    use midnight_ledger_v6::structure::{CNightGeneratesDustActionType, CNightGeneratesDustEvent};
+    use midnight_ledger_v6::{
+        dust::{DustPublicKey, InitialNonce},
+        structure::{CNightGeneratesDustActionType, CNightGeneratesDustEvent},
+    };
     use midnight_transient_crypto_v6::{curve::Fr, hash::HashOutput};
-    
+
     #[test]
     fn test_convert_cnight_events_to_dust_events() {
         // Create a test transaction hash.
         let tx_hash = TransactionHash::from([1u8; 32]);
-        
+
         // Create test CNGD events.
         let events = vec![
             CNightGeneratesDustEvent {
@@ -1001,32 +1005,36 @@ mod tests {
                 time: Timestamp::from_secs(1234567900),
             },
         ];
-        
+
         // Convert to DUST events.
         let dust_events = convert_cnight_events_to_dust_events(&events, &tx_hash);
-        
+
         // Verify the conversion.
         assert_eq!(dust_events.len(), 2);
-        
+
         // Check first event (Create).
         assert_eq!(dust_events[0].transaction_hash, tx_hash);
         assert_eq!(dust_events[0].logical_segment, 0);
         assert_eq!(dust_events[0].physical_segment, 0);
-        
+
         match &dust_events[0].event_details {
-            DustEventDetails::DustInitialUtxo { output, generation_info, .. } => {
+            DustEventDetails::DustInitialUtxo {
+                output,
+                generation_info,
+                ..
+            } => {
                 assert_eq!(output.initial_value, 1000);
                 assert_eq!(generation_info.value, 1000);
                 assert_eq!(output.ctime, 1234567890);
             }
             _ => panic!("Expected DustInitialUtxo event"),
         }
-        
+
         // Check second event (Destroy).
         assert_eq!(dust_events[1].transaction_hash, tx_hash);
         assert_eq!(dust_events[1].logical_segment, 1);
         assert_eq!(dust_events[1].physical_segment, 1);
-        
+
         match &dust_events[1].event_details {
             DustEventDetails::DustSpendProcessed { time, v_fee, .. } => {
                 assert_eq!(*time, 1234567900);

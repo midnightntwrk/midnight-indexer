@@ -15,12 +15,14 @@ use crate::{
     domain::{self, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
-        v1::HexEncoded,
-        v1::dust::{
-            DustCommitmentEvent, DustCommitmentProgress, DustGenerationEvent, DustGenerationInfo,
-            DustGenerationProgress, DustNullifierTransactionEvent,
-            DustNullifierTransactionProgress, RegistrationAddress, RegistrationUpdateEvent,
-            RegistrationUpdateProgress,
+        v1::{
+            HexEncoded,
+            dust::{
+                DustCommitmentEvent, DustCommitmentProgress, DustGenerationEvent,
+                DustGenerationInfo, DustGenerationProgress, DustNullifierTransactionEvent,
+                DustNullifierTransactionProgress, RegistrationAddress, RegistrationUpdateEvent,
+                RegistrationUpdateProgress,
+            },
         },
     },
 };

@@ -490,16 +490,16 @@ pub struct RegistrationUpdateProgress {
 pub struct DustEvent {
     /// Transaction hash containing this event.
     pub transaction_hash: HexEncoded,
-    
+
     /// Logical segment within transaction.
     pub logical_segment: u16,
-    
+
     /// Physical segment within transaction.
     pub physical_segment: u16,
-    
+
     /// Event type.
     pub event_type: DustEventType,
-    
+
     /// Event details.
     pub event_details: DustEventDetails,
 }
@@ -509,10 +509,10 @@ pub struct DustEvent {
 pub enum DustEventType {
     /// Initial DUST UTXO creation.
     DustInitialUtxo,
-    
+
     /// DUST generation time update.
     DustGenerationDtimeUpdate,
-    
+
     /// DUST spend processed.
     DustSpendProcessed,
 }
@@ -532,10 +532,10 @@ impl From<DustEventType> for indexer_common::domain::dust::DustEventType {
 pub enum DustEventDetails {
     /// Initial DUST UTXO creation.
     InitialUtxo(DustInitialUtxoDetails),
-    
+
     /// DUST generation time update.
     GenerationDtimeUpdate(DustGenerationDtimeUpdateDetails),
-    
+
     /// DUST spend processed.
     SpendProcessed(DustSpendProcessedDetails),
 }
@@ -545,28 +545,28 @@ pub enum DustEventDetails {
 pub struct DustInitialUtxoDetails {
     /// Initial value.
     pub initial_value: String,
-    
+
     /// Owner's DUST public key.
     pub owner: HexEncoded,
-    
+
     /// Nonce.
     pub nonce: HexEncoded,
-    
+
     /// Sequence number.
     pub seq: u32,
-    
+
     /// Creation time.
     pub ctime: u64,
-    
+
     /// Backing Night UTXO nonce.
     pub backing_night: HexEncoded,
-    
+
     /// Merkle tree index.
     pub mt_index: u64,
-    
+
     /// Generation info.
     pub generation_info: DustGenerationInfo,
-    
+
     /// Generation index.
     pub generation_index: u64,
 }
@@ -576,7 +576,7 @@ pub struct DustInitialUtxoDetails {
 pub struct DustGenerationDtimeUpdateDetails {
     /// Updated generation info.
     pub generation_info: DustGenerationInfo,
-    
+
     /// Generation index.
     pub generation_index: u64,
 }
@@ -586,19 +586,19 @@ pub struct DustGenerationDtimeUpdateDetails {
 pub struct DustSpendProcessedDetails {
     /// DUST commitment.
     pub commitment: HexEncoded,
-    
+
     /// Commitment index.
     pub commitment_index: u64,
-    
+
     /// DUST nullifier.
     pub nullifier: HexEncoded,
-    
+
     /// Fee amount.
     pub v_fee: String,
-    
+
     /// Timestamp.
     pub time: u64,
-    
+
     /// DUST parameters.
     pub params: DustParametersInfo,
 }
@@ -608,10 +608,10 @@ pub struct DustSpendProcessedDetails {
 pub struct DustParametersInfo {
     /// Night to DUST ratio.
     pub night_dust_ratio: u64,
-    
+
     /// Generation decay rate.
     pub generation_decay_rate: u32,
-    
+
     /// DUST grace period in seconds.
     pub dust_grace_period: u64,
 }
@@ -619,65 +619,75 @@ pub struct DustParametersInfo {
 impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
     fn from(event: indexer_common::domain::dust::DustEvent) -> Self {
         use indexer_common::domain::dust::DustEventDetails as DomainDetails;
-        
+
         let event_type = match &event.event_details {
             DomainDetails::DustInitialUtxo { .. } => DustEventType::DustInitialUtxo,
-            DomainDetails::DustGenerationDtimeUpdate { .. } => DustEventType::DustGenerationDtimeUpdate,
+            DomainDetails::DustGenerationDtimeUpdate { .. } => {
+                DustEventType::DustGenerationDtimeUpdate
+            }
             DomainDetails::DustSpendProcessed { .. } => DustEventType::DustSpendProcessed,
         };
-        
+
         let event_details = match event.event_details {
-            DomainDetails::DustInitialUtxo { output, generation_info, generation_index } => {
-                DustEventDetails::InitialUtxo(DustInitialUtxoDetails {
-                    initial_value: output.initial_value.to_string(),
-                    owner: output.owner.hex_encode(),
-                    nonce: output.nonce.hex_encode(),
-                    seq: output.seq,
-                    ctime: output.ctime,
-                    backing_night: output.backing_night.hex_encode(),
-                    mt_index: output.mt_index,
-                    generation_info: DustGenerationInfo {
-                        night_utxo_hash: generation_info.night_utxo_hash.hex_encode(),
-                        value: generation_info.value.to_string(),
-                        owner: generation_info.owner.hex_encode(),
-                        nonce: generation_info.nonce.hex_encode(),
-                        ctime: generation_info.ctime,
-                        dtime: Some(generation_info.dtime),
-                        merkle_index: generation_index,
-                    },
-                    generation_index,
-                })
-            }
-            DomainDetails::DustGenerationDtimeUpdate { generation_info, generation_index } => {
-                DustEventDetails::GenerationDtimeUpdate(DustGenerationDtimeUpdateDetails {
-                    generation_info: DustGenerationInfo {
-                        night_utxo_hash: generation_info.night_utxo_hash.hex_encode(),
-                        value: generation_info.value.to_string(),
-                        owner: generation_info.owner.hex_encode(),
-                        nonce: generation_info.nonce.hex_encode(),
-                        ctime: generation_info.ctime,
-                        dtime: Some(generation_info.dtime),
-                        merkle_index: generation_index,
-                    },
-                    generation_index,
-                })
-            }
-            DomainDetails::DustSpendProcessed { commitment, commitment_index, nullifier, v_fee, time, params } => {
-                DustEventDetails::SpendProcessed(DustSpendProcessedDetails {
-                    commitment: commitment.hex_encode(),
-                    commitment_index,
-                    nullifier: nullifier.hex_encode(),
-                    v_fee: v_fee.to_string(),
-                    time,
-                    params: DustParametersInfo {
-                        night_dust_ratio: params.night_dust_ratio,
-                        generation_decay_rate: params.generation_decay_rate,
-                        dust_grace_period: params.dust_grace_period,
-                    },
-                })
-            }
+            DomainDetails::DustInitialUtxo {
+                output,
+                generation_info,
+                generation_index,
+            } => DustEventDetails::InitialUtxo(DustInitialUtxoDetails {
+                initial_value: output.initial_value.to_string(),
+                owner: output.owner.hex_encode(),
+                nonce: output.nonce.hex_encode(),
+                seq: output.seq,
+                ctime: output.ctime,
+                backing_night: output.backing_night.hex_encode(),
+                mt_index: output.mt_index,
+                generation_info: DustGenerationInfo {
+                    night_utxo_hash: generation_info.night_utxo_hash.hex_encode(),
+                    value: generation_info.value.to_string(),
+                    owner: generation_info.owner.hex_encode(),
+                    nonce: generation_info.nonce.hex_encode(),
+                    ctime: generation_info.ctime,
+                    dtime: Some(generation_info.dtime),
+                    merkle_index: generation_index,
+                },
+                generation_index,
+            }),
+            DomainDetails::DustGenerationDtimeUpdate {
+                generation_info,
+                generation_index,
+            } => DustEventDetails::GenerationDtimeUpdate(DustGenerationDtimeUpdateDetails {
+                generation_info: DustGenerationInfo {
+                    night_utxo_hash: generation_info.night_utxo_hash.hex_encode(),
+                    value: generation_info.value.to_string(),
+                    owner: generation_info.owner.hex_encode(),
+                    nonce: generation_info.nonce.hex_encode(),
+                    ctime: generation_info.ctime,
+                    dtime: Some(generation_info.dtime),
+                    merkle_index: generation_index,
+                },
+                generation_index,
+            }),
+            DomainDetails::DustSpendProcessed {
+                commitment,
+                commitment_index,
+                nullifier,
+                v_fee,
+                time,
+                params,
+            } => DustEventDetails::SpendProcessed(DustSpendProcessedDetails {
+                commitment: commitment.hex_encode(),
+                commitment_index,
+                nullifier: nullifier.hex_encode(),
+                v_fee: v_fee.to_string(),
+                time,
+                params: DustParametersInfo {
+                    night_dust_ratio: params.night_dust_ratio,
+                    generation_decay_rate: params.generation_decay_rate,
+                    dust_grace_period: params.dust_grace_period,
+                },
+            }),
         };
-        
+
         Self {
             transaction_hash: event.transaction_hash.hex_encode(),
             logical_segment: event.logical_segment,

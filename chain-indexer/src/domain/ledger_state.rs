@@ -48,8 +48,8 @@ impl LedgerState {
         for (variant, transaction) in transactions {
             match variant {
                 TransactionVariant::Regular => {
-                    let (_result, _dust_events, _created_utxos, _spent_utxos) = 
-                        self.apply_regular_transaction(
+                    let (_result, _dust_events, _created_utxos, _spent_utxos) = self
+                        .apply_regular_transaction(
                             transaction,
                             block_parent_hash,
                             block_timestamp,

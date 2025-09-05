@@ -95,12 +95,7 @@ impl LedgerState {
         transaction: &SerializedTransaction,
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
-    ) -> Result<(
-        TransactionResult,
-        Vec<DustEvent>,
-        Vec<UnshieldedUtxo>,
-        Vec<UnshieldedUtxo>,
-    ), Error> {
+    ) -> Result<RegularTransactionResult, Error> {
         match self {
             Self::V6(ledger_state) => {
                 let ledger_transaction = tagged_deserialize_v6::<TransactionV6>(
@@ -299,6 +294,14 @@ pub struct UnshieldedUtxo {
     pub output_index: u32,
 }
 
+/// Result of applying a regular transaction to the ledger state.
+type RegularTransactionResult = (
+    TransactionResult,
+    Vec<DustEvent>,
+    Vec<UnshieldedUtxo>,
+    Vec<UnshieldedUtxo>,
+);
+
 /// Facade for zswap state root across supported (protocol) versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZswapStateRoot {
@@ -429,7 +432,7 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
     events: &[midnight_ledger_v6::events::Event<D>],
 ) -> Vec<DustEvent> {
     use midnight_ledger_v6::events::EventDetails as LedgerEventDetails;
-    
+
     events
         .iter()
         .filter_map(|event| {
@@ -450,7 +453,8 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
                         mt_index: output.mt_index,
                     },
                     generation_info: DustGenerationInfo {
-                        night_utxo_hash: ByteArray::default(), // TODO: Compute from backing Night UTXO.
+                        night_utxo_hash: ByteArray::default(), /* TODO: Compute from backing
+                                                                * Night UTXO. */
                         value: generation.value,
                         owner: generation.owner.0.0.to_bytes_le().into(),
                         nonce: generation.nonce.0.0.into(),
@@ -459,7 +463,7 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
                     },
                     generation_index: *generation_index,
                 }),
-                
+
                 LedgerEventDetails::DustGenerationDtimeUpdate {
                     update,
                     block_time: _,
@@ -476,7 +480,8 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
                     };
                     Some(DustEventDetails::DustGenerationDtimeUpdate {
                         generation_info: DustGenerationInfo {
-                            night_utxo_hash: ByteArray::default(), // TODO: Compute from backing Night UTXO.
+                            night_utxo_hash: ByteArray::default(), /* TODO: Compute from backing
+                                                                    * Night UTXO. */
                             value: generation.value,
                             owner: generation.owner.0.0.to_bytes_le().into(),
                             nonce: generation.nonce.0.0.into(),
@@ -486,7 +491,7 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
                         generation_index: mt_index,
                     })
                 }
-                
+
                 LedgerEventDetails::DustSpendProcessed {
                     commitment,
                     commitment_index,
@@ -500,12 +505,13 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
                     nullifier: nullifier.0.0.to_bytes_le().into(),
                     v_fee: *v_fee,
                     time: declared_time.to_secs(),
-                    params: DustParameters::default(),  // TODO: Get current parameters from ledger state.
+                    params: DustParameters::default(), /* TODO: Get current parameters from
+                                                        * ledger state. */
                 }),
-                
+
                 _ => None,
             };
-            
+
             dust_event_details.map(|details| DustEvent {
                 transaction_hash: event.source.transaction_hash.0.0.into(),
                 logical_segment: event.source.logical_segment,

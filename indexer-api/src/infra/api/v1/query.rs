@@ -19,7 +19,9 @@ use crate::{
             AsBytesExt, HexEncoded,
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
-            dust::{DustGenerationStatus, DustMerkleTreeType, DustSystemState, DustEvent, DustEventType},
+            dust::{
+                DustEvent, DustEventType, DustGenerationStatus, DustMerkleTreeType, DustSystemState,
+            },
             transaction::{Transaction, TransactionOffset},
         },
     },
@@ -262,7 +264,7 @@ where
 
         Ok(root.map(|bytes| bytes.hex_encode()))
     }
-    
+
     /// Get DUST events by transaction hash.
     #[trace(properties = { "transaction_hash": "{transaction_hash}" })]
     async fn dust_events_by_transaction(
@@ -271,19 +273,19 @@ where
         transaction_hash: HexEncoded,
     ) -> ApiResult<Vec<DustEvent>> {
         let storage = cx.get_storage::<S>();
-        
+
         let hash = transaction_hash
             .hex_decode()
             .map_err_into_client_error(|| "invalid transaction hash")?;
-        
+
         let events = storage
             .get_dust_events_by_transaction(hash)
             .await
             .map_err_into_server_error(|| format!("get DUST events for transaction {hash}"))?;
-        
+
         Ok(events.into_iter().map(Into::into).collect())
     }
-    
+
     /// Get recent DUST events with optional filtering.
     #[trace(properties = { "limit": "{limit:?}", "event_type": "{event_type:?}" })]
     async fn recent_dust_events(
@@ -293,15 +295,15 @@ where
         event_type: Option<DustEventType>,
     ) -> ApiResult<Vec<DustEvent>> {
         let storage = cx.get_storage::<S>();
-        
+
         // Limit to 100 events for DOS protection.
         let limit = limit.unwrap_or(10).min(100);
-        
+
         let events = storage
             .get_recent_dust_events(limit, event_type.map(Into::into))
             .await
             .map_err_into_server_error(|| "get recent DUST events")?;
-        
+
         Ok(events.into_iter().map(Into::into).collect())
     }
 }

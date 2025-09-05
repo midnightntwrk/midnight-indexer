@@ -578,3 +578,137 @@ query RecentDustEventsQuery($limit: Int, $eventType: DustEventType) {
         }
     }
 }
+
+
+query CurrentDustStateQuery {
+    currentDustState {
+        commitmentTreeRoot
+        generationTreeRoot
+        blockHeight
+        timestamp
+        totalRegistrations
+    }
+}
+
+query DustGenerationStatusQuery($cardanoStakeKeys: [HexEncoded!]!) {
+    dustGenerationStatus(cardanoStakeKeys: $cardanoStakeKeys) {
+        cardanoStakeKey
+        dustAddress
+        isRegistered
+        generationRate
+        currentCapacity
+        lastUpdated
+    }
+}
+
+query DustMerkleRootQuery($treeType: DustMerkleTreeType!, $timestamp: Int!) {
+    dustMerkleRoot(treeType: $treeType, timestamp: $timestamp)
+}
+
+subscription DustGenerationsSubscription(
+    $dustAddress: HexEncoded!,
+    $fromGenerationIndex: Int,
+    $fromMerkleIndex: Int,
+    $onlyActive: Boolean
+) {
+    dustGenerations(
+        dustAddress: $dustAddress,
+        fromGenerationIndex: $fromGenerationIndex,
+        fromMerkleIndex: $fromMerkleIndex,
+        onlyActive: $onlyActive
+    ) {
+        __typename
+        ... on DustGenerationInfo {
+            nightUtxoHash
+            value
+            owner
+            nonce
+            generationIndex
+            dtime
+            merkleIndex
+        }
+        ... on DustGenerationMerkleUpdate {
+            treeIndex
+            root
+            proof
+            timestamp
+        }
+        ... on DustGenerationProgress {
+            highestIndex
+            activeGenerationCount
+        }
+    }
+}
+
+subscription DustNullifierTransactionsSubscription(
+    $prefixes: [HexEncoded!]!,
+    $minPrefixLength: Int!,
+    $fromBlock: Int
+) {
+    dustNullifierTransactions(
+        prefixes: $prefixes,
+        minPrefixLength: $minPrefixLength,
+        fromBlock: $fromBlock
+    ) {
+        __typename
+        ... on DustNullifierTransaction {
+            transactionHash
+            blockNumber
+            nullifiers
+        }
+        ... on DustNullifierTransactionProgress {
+            highestBlock
+            matchedCount
+        }
+    }
+}
+
+subscription DustCommitmentsSubscription(
+    $commitmentPrefixes: [HexEncoded!]!,
+    $startIndex: Int!,
+    $minPrefixLength: Int!
+) {
+    dustCommitments(
+        commitmentPrefixes: $commitmentPrefixes,
+        startIndex: $startIndex,
+        minPrefixLength: $minPrefixLength
+    ) {
+        __typename
+        ... on DustCommitment {
+            commitment
+            nullifier
+            value
+            owner
+            generationIndex
+            commitmentIndex
+        }
+        ... on DustCommitmentMerkleUpdate {
+            treeIndex
+            root
+            proof
+            timestamp
+        }
+        ... on DustCommitmentProgress {
+            highestIndex
+            commitmentCount
+        }
+    }
+}
+
+subscription DustRegistrationUpdatesSubscription(
+    $addresses: [RegistrationAddress!]!
+) {
+    dustRegistrationUpdates(addresses: $addresses) {
+        __typename
+        ... on DustRegistration {
+            cardanoStakeKey
+            dustAddress
+            isActive
+            registrationTime
+        }
+        ... on RegistrationUpdateProgress {
+            latestTimestamp
+            updateCount
+        }
+    }
+}

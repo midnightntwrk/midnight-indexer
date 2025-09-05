@@ -29,8 +29,7 @@ use futures::Stream;
 use indexer_common::{
     domain::{
         CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustNonce, DustNullifier,
-        DustOwner, DustPrefix, NightUtxoHash, 
-        ledger::TransactionHash,
+        DustOwner, DustPrefix, NightUtxoHash, ledger::TransactionHash,
     },
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
@@ -656,7 +655,7 @@ impl DustStorage for Storage {
 
         Ok(count as u32)
     }
-    
+
     #[trace]
     async fn get_dust_events_by_transaction(
         &self,
@@ -668,7 +667,7 @@ impl DustStorage for Storage {
             WHERE transaction_hash = $1
             ORDER BY logical_segment, physical_segment
         "};
-        
+
         #[derive(FromRow)]
         struct DustEventRow {
             transaction_hash: TransactionHash,
@@ -677,12 +676,12 @@ impl DustStorage for Storage {
             event_type: indexer_common::domain::dust::DustEventType,
             event_data: sqlx::types::Json<indexer_common::domain::dust::DustEventDetails>,
         }
-        
+
         let rows = sqlx::query_as::<_, DustEventRow>(query)
             .bind(transaction_hash.as_ref())
             .fetch_all(&*self.pool)
             .await?;
-        
+
         Ok(rows
             .into_iter()
             .map(|row| indexer_common::domain::dust::DustEvent {
@@ -693,7 +692,7 @@ impl DustStorage for Storage {
             })
             .collect())
     }
-    
+
     #[trace]
     async fn get_recent_dust_events(
         &self,
@@ -722,7 +721,7 @@ impl DustStorage for Storage {
                 LIMIT $1
             "}
         };
-        
+
         #[derive(FromRow)]
         struct DustEventRow {
             transaction_hash: TransactionHash,
@@ -731,7 +730,7 @@ impl DustStorage for Storage {
             event_type: indexer_common::domain::dust::DustEventType,
             event_data: sqlx::types::Json<indexer_common::domain::dust::DustEventDetails>,
         }
-        
+
         let rows = if let Some(event_type) = event_type {
             sqlx::query_as::<_, DustEventRow>(query)
                 .bind(event_type)
@@ -744,7 +743,7 @@ impl DustStorage for Storage {
                 .fetch_all(&*self.pool)
                 .await?
         };
-        
+
         Ok(rows
             .into_iter()
             .map(|row| indexer_common::domain::dust::DustEvent {
