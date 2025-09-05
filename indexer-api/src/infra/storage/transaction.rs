@@ -326,7 +326,7 @@ impl TransactionStorage for Storage {
         let query = indoc! {"
             SELECT MAX(transactions.id)
             FROM transactions
-            INNER JOIN unshielded_utxos ON 
+            INNER JOIN unshielded_utxos ON
                 unshielded_utxos.creating_transaction_id = transactions.id OR
                 unshielded_utxos.spending_transaction_id = transactions.id
             WHERE unshielded_utxos.owner = $1
@@ -348,7 +348,7 @@ impl TransactionStorage for Storage {
         let query = indoc! {"
             SELECT (
                 SELECT MAX(end_index) FROM regular_transactions
-            ) AS highest_end_index,
+            ) AS highest_index,
             (
                 SELECT end_index
                 FROM regular_transactions
@@ -356,7 +356,7 @@ impl TransactionStorage for Storage {
                     SELECT MAX(last_indexed_transaction_id)
                     FROM wallets
                 )
-            ) AS highest_relevant_end_index,
+            ) AS highest_relevant_index,
             (
                 SELECT end_index
                 FROM regular_transactions
@@ -365,7 +365,7 @@ impl TransactionStorage for Storage {
                 WHERE wallets.session_id = $1
                 ORDER BY end_index DESC
                 LIMIT 1
-            ) AS max_end_index_for_session
+            ) AS highest_relevant_wallet_index
         "};
 
         let (highest_index, highest_relevant_index, highest_relevant_wallet_index) =
