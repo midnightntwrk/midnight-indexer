@@ -120,6 +120,9 @@ run-indexer-standalone node="ws://localhost:9944" network_id="Undeployed":
 generate-node-data:
     ./generate_node_data.sh {{node_version}}
 
+generate-txs:
+    ./generate_txs.sh {{node_version}}
+
 run-node:
     #!/usr/bin/env bash
     node_dir=$(mktemp -d)

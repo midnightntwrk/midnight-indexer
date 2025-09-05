@@ -17,7 +17,7 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, future::ok, stream};
 use indexer_common::domain::{BlockIndexed, Publisher, Subscriber, WalletIndexed};
 use itertools::Itertools;
-use log::{debug, warn};
+use log::warn;
 use serde::Deserialize;
 use std::{
     num::NonZeroUsize,
@@ -153,8 +153,6 @@ async fn index_wallet(
         return Ok(());
     };
 
-    debug!(wallet_id:%; "indexing wallet");
-
     let wallet = storage
         .get_wallet_by_id(wallet_id, &mut tx)
         .await
@@ -171,7 +169,6 @@ async fn index_wallet(
         let last_indexed_transaction_id = if let Some(transaction) = transactions.last() {
             transaction.id
         } else {
-            debug!(wallet_id:%; "no transactions for wallet");
             return Ok(());
         };
 
@@ -199,11 +196,9 @@ async fn index_wallet(
             .with_context(|| format!("save relevant transactions for wallet ID {wallet_id}"))?;
 
         tx.commit().await.context("commit database transaction")?;
-        debug!(wallet_id:%, from, transaction_batch_size; "wallet indexed");
 
         if !relevant_transactions.is_empty() {
             let session_id = wallet.viewing_key.to_session_id();
-
             publisher
                 .publish(&WalletIndexed { session_id })
                 .await
