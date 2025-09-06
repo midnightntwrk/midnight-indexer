@@ -16,8 +16,9 @@ use crate::{
     infra::api::{
         ApiError, ApiResult, ContextExt, InnerApiError, ResultExt,
         v1::{
-            AsBytesExt, HexEncoded, decode_session_id, subscription::get_next_transaction,
-            transaction::Transaction,
+            AsBytesExt, HexEncoded, decode_session_id,
+            subscription::get_next_transaction,
+            transaction::{NewTransaction, Transaction},
         },
     },
 };
@@ -50,6 +51,13 @@ const ACTIVATE_WALLET_INTERVAL: Duration = Duration::from_secs(60);
 
 /// An event of the shielded transactions subscription.
 #[derive(Debug, Union)]
+pub enum NewShieldedTransactionsEvent<S: Storage> {
+    TransactionContext(TransactionContext<S>),
+    ShieldedTransactionsProgress(NewShieldedTransactionsProgress),
+}
+
+/// An event of the shielded transactions subscription.
+#[derive(Debug, Union)]
 pub enum ShieldedTransactionsEvent<S: Storage> {
     ViewingUpdate(ViewingUpdate<S>),
     ShieldedTransactionsProgress(ShieldedTransactionsProgress),
@@ -68,6 +76,13 @@ pub struct ViewingUpdate<S: Storage> {
     pub update: Vec<ZswapChainStateUpdate<S>>,
 }
 
+/// A transaction relevant for the subscribing wallet and an optional collapsed merkle tree.
+#[derive(Debug, SimpleObject)]
+pub struct TransactionContext<S: Storage> {
+    transaction: NewTransaction<S>,
+    collapsed_merkle_tree: Option<MerkleTreeCollapsedUpdate>,
+}
+
 /// Aggregates information about the shielded transactions indexing progress.
 #[derive(Debug, SimpleObject)]
 pub struct ShieldedTransactionsProgress {
@@ -81,6 +96,21 @@ pub struct ShieldedTransactionsProgress {
     /// The highest end index into the zswap state of all currently known relevant transactions for
     /// a particular wallet. Less or equal `highest_relevant_index`.
     pub highest_relevant_wallet_index: u64,
+}
+
+/// Aggregates information about the shielded transactions indexing progress.
+#[derive(Debug, SimpleObject)]
+pub struct NewShieldedTransactionsProgress {
+    /// The highest zswap state end index of all transactions.
+    pub highest_index: u64,
+
+    /// The highest zswap state end index of all transactions that have been checked for relevance
+    /// for the subscribing wallet. Less or equal `highest_index`.
+    pub highest_checked_index: u64,
+
+    /// The highest zswap state end index of all relevant transactions for the subscribing wallet.
+    /// Less or equal `highest_checked_index`.
+    pub highest_relevant_index: u64,
 }
 
 #[derive(Debug, Union)]
@@ -98,7 +128,7 @@ pub struct MerkleTreeCollapsedUpdate {
     /// The end index into the zswap state.
     end: u64,
 
-    /// The hex-encoded merkle-tree collapsed update.
+    /// The hex-encoded value.
     #[debug(skip)]
     update: HexEncoded,
 
@@ -231,6 +261,18 @@ where
             });
 
         Ok(events)
+    }
+
+    pub async fn new_shielded_transactions<'a>(
+        &self,
+        cx: &'a Context<'a>,
+        session_id: HexEncoded,
+        index: Option<u64>,
+    ) -> Result<
+        impl Stream<Item = ApiResult<NewShieldedTransactionsEvent<S>>> + use<'a, S, B, Z>,
+        ApiError,
+    > {
+        Ok(futures::stream::empty())
     }
 }
 

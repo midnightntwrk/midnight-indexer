@@ -69,6 +69,54 @@ where
     _s: PhantomData<S>,
 }
 
+/// A Midnight transaction.
+#[derive(Debug, Clone, SimpleObject)]
+#[graphql(complex)]
+pub struct NewTransaction<S>
+where
+    S: Storage,
+{
+    /// The transaction ID.
+    id: u64,
+
+    /// The hex-encoded transaction hash.
+    hash: HexEncoded,
+
+    /// The protocol version.
+    protocol_version: u32,
+
+    /// The hex-encoded serialized transaction content.
+    #[debug(skip)]
+    raw: HexEncoded,
+
+    #[graphql(skip)]
+    block_hash: BlockHash,
+
+    /// The result of applying a transaction to the ledger state.
+    transaction_result: TransactionResult,
+
+    /// Fee information for this transaction.
+    fees: TransactionFees,
+
+    /// The hex-encoded serialized transaction identifiers.
+    #[debug(skip)]
+    identifiers: Vec<HexEncoded>,
+
+    /// The hex-encoded serialized merkle-tree root.
+    #[debug(skip)]
+    merkle_tree_root: HexEncoded,
+
+    /// The zswap stat start index.
+    zswap_start_index: u64,
+
+    /// The zswap stat end index.
+    zswap_end_index: u64,
+
+    #[graphql(skip)]
+    #[debug(skip)]
+    _s: PhantomData<S>,
+}
+
 // Required by async-graphql's Interface derive macro for `ContractAction`.
 impl<S> From<Result<Transaction<S>, ApiError>> for Transaction<S>
 where
@@ -90,6 +138,81 @@ where
 
 #[ComplexObject]
 impl<S> Transaction<S>
+where
+    S: Storage,
+{
+    /// The block for this transaction.
+    async fn block(&self, cx: &Context<'_>) -> ApiResult<Block<S>> {
+        let block = cx
+            .get_storage::<S>()
+            .get_block_by_hash(self.block_hash)
+            .await
+            .map_err_into_server_error(|| format!("get block by hash {}", self.block_hash))?
+            .ok_or_server_error(|| format!("block with hash {} not found", self.block_hash))?;
+
+        Ok(block.into())
+    }
+
+    /// The contract actions.
+    async fn contract_actions(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractAction<S>>> {
+        let id = self.id;
+
+        let contract_actions = cx
+            .get_storage::<S>()
+            .get_contract_actions_by_transaction_id(id)
+            .await
+            .map_err_into_server_error(|| {
+                format!("cannot get contract actions by transaction ID {id}")
+            })?;
+
+        Ok(contract_actions.into_iter().map(Into::into).collect())
+    }
+
+    /// Unshielded UTXOs created by this transaction.
+    async fn unshielded_created_outputs(
+        &self,
+        cx: &Context<'_>,
+    ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
+        let id = self.id;
+
+        let utxos = cx
+            .get_storage::<S>()
+            .get_unshielded_utxos_created_by_transaction(id)
+            .await
+            .map_err_into_server_error(|| {
+                format!("cannot get unshielded UTXOs created by transaction with ID {id}")
+            })?
+            .into_iter()
+            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, cx.get_network_id())))
+            .collect();
+
+        Ok(utxos)
+    }
+
+    /// Unshielded UTXOs spent (consumed) by this transaction.
+    async fn unshielded_spent_outputs(
+        &self,
+        cx: &Context<'_>,
+    ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
+        let id = self.id;
+
+        let utxos = cx
+            .get_storage::<S>()
+            .get_unshielded_utxos_spent_by_transaction(id)
+            .await
+            .map_err_into_server_error(|| {
+                format!("cannot get unshielded UTXOs spent by transaction with ID {id}")
+            })?
+            .into_iter()
+            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, cx.get_network_id())))
+            .collect();
+
+        Ok(utxos)
+    }
+}
+
+#[ComplexObject]
+impl<S> NewTransaction<S>
 where
     S: Storage,
 {
