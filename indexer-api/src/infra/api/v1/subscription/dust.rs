@@ -14,7 +14,7 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, ContextExt, ResultExt,
+        ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         v1::{
             HexEncoded,
             dust::{
@@ -111,9 +111,9 @@ where
     ) -> Result<impl Stream<Item = ApiResult<DustNullifierTransactionEvent>> + use<'a, S>, ApiError>
     {
         // Validate minimum prefix length.
-        if min_prefix_length < 8 {
-            return Err(ApiError::client("minimum prefix length must be at least 8"));
-        }
+        Some(())
+            .filter(|_| min_prefix_length >= 8)
+            .ok_or_client_error(|| "minimum prefix length must be at least 8")?;
 
         // Convert hex prefixes to binary.
         let binary_prefixes = prefixes
@@ -156,9 +156,9 @@ where
         min_prefix_length: u32,
     ) -> Result<impl Stream<Item = ApiResult<DustCommitmentEvent>> + use<'a, S>, ApiError> {
         // Validate minimum prefix length.
-        if min_prefix_length < 8 {
-            return Err(ApiError::client("minimum prefix length must be at least 8"));
-        }
+        Some(())
+            .filter(|_| min_prefix_length >= 8)
+            .ok_or_client_error(|| "minimum prefix length must be at least 8")?;
 
         // Convert hex prefixes to binary.
         let binary_prefixes = commitment_prefixes

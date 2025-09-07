@@ -14,7 +14,7 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ApiError, ApiResult, ContextExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v1::{
             AsBytesExt, HexEncoded,
             block::{Block, BlockOffset},
@@ -224,11 +224,9 @@ where
         cardano_stake_keys: Vec<HexEncoded>,
     ) -> ApiResult<Vec<DustGenerationStatus>> {
         // DOS protection: limit to 10 keys.
-        if cardano_stake_keys.len() > 10 {
-            return Err(ApiError::client(
-                "maximum 10 stake keys allowed per request",
-            ));
-        }
+        Some(())
+            .filter(|_| cardano_stake_keys.len() <= 10)
+            .ok_or_client_error(|| "maximum 10 stake keys allowed per request")?;
 
         let storage = cx.get_storage::<S>();
 
