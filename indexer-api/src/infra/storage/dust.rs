@@ -684,11 +684,30 @@ impl DustStorage for Storage {
 
         Ok(rows
             .into_iter()
-            .map(|row| indexer_common::domain::dust::DustEvent {
-                transaction_hash: row.transaction_hash,
-                logical_segment: row.logical_segment as u16,
-                physical_segment: row.physical_segment as u16,
-                event_details: row.event_data.0,
+            .map(|row| {
+                // Validate that event_type matches event_details.
+                let expected_type = match &row.event_data.0 {
+                    indexer_common::domain::dust::DustEventDetails::DustInitialUtxo { .. } => {
+                        indexer_common::domain::dust::DustEventType::DustInitialUtxo
+                    }
+                    indexer_common::domain::dust::DustEventDetails::DustGenerationDtimeUpdate {
+                        ..
+                    } => indexer_common::domain::dust::DustEventType::DustGenerationDtimeUpdate,
+                    indexer_common::domain::dust::DustEventDetails::DustSpendProcessed {
+                        ..
+                    } => indexer_common::domain::dust::DustEventType::DustSpendProcessed,
+                };
+                debug_assert_eq!(
+                    row.event_type, expected_type,
+                    "Event type mismatch in database"
+                );
+
+                indexer_common::domain::dust::DustEvent {
+                    transaction_hash: row.transaction_hash,
+                    logical_segment: row.logical_segment as u16,
+                    physical_segment: row.physical_segment as u16,
+                    event_details: row.event_data.0,
+                }
             })
             .collect())
     }
@@ -746,11 +765,30 @@ impl DustStorage for Storage {
 
         Ok(rows
             .into_iter()
-            .map(|row| indexer_common::domain::dust::DustEvent {
-                transaction_hash: row.transaction_hash,
-                logical_segment: row.logical_segment as u16,
-                physical_segment: row.physical_segment as u16,
-                event_details: row.event_data.0,
+            .map(|row| {
+                // Validate that event_type matches event_details.
+                let expected_type = match &row.event_data.0 {
+                    indexer_common::domain::dust::DustEventDetails::DustInitialUtxo { .. } => {
+                        indexer_common::domain::dust::DustEventType::DustInitialUtxo
+                    }
+                    indexer_common::domain::dust::DustEventDetails::DustGenerationDtimeUpdate {
+                        ..
+                    } => indexer_common::domain::dust::DustEventType::DustGenerationDtimeUpdate,
+                    indexer_common::domain::dust::DustEventDetails::DustSpendProcessed {
+                        ..
+                    } => indexer_common::domain::dust::DustEventType::DustSpendProcessed,
+                };
+                debug_assert_eq!(
+                    row.event_type, expected_type,
+                    "Event type mismatch in database"
+                );
+
+                indexer_common::domain::dust::DustEvent {
+                    transaction_hash: row.transaction_hash,
+                    logical_segment: row.logical_segment as u16,
+                    physical_segment: row.physical_segment as u16,
+                    event_details: row.event_data.0,
+                }
             })
             .collect())
     }

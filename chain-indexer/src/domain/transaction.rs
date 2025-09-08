@@ -24,7 +24,7 @@ use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Transaction {
-    Regular(RegularTransaction),
+    Regular(Box<RegularTransaction>),
     System(SystemTransaction),
 }
 
@@ -62,7 +62,7 @@ impl From<node::Transaction> for Transaction {
     fn from(transaction: node::Transaction) -> Self {
         match transaction {
             node::Transaction::Regular(regular_transaction) => {
-                Transaction::Regular(regular_transaction.into())
+                Transaction::Regular(Box::new(regular_transaction.into()))
             }
 
             node::Transaction::System(system_transaction) => {
@@ -90,7 +90,7 @@ pub struct RegularTransaction {
     pub end_index: u64,
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
-    pub dust_events: Vec<DustEvent>,
+    pub dust_events: Box<Vec<DustEvent>>,
 }
 
 impl From<node::RegularTransaction> for RegularTransaction {
@@ -109,7 +109,7 @@ impl From<node::RegularTransaction> for RegularTransaction {
             end_index: Default::default(),
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
-            dust_events: Default::default(),
+            dust_events: Box::default(),
         }
     }
 }

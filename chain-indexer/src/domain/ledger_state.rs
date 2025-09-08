@@ -134,7 +134,7 @@ impl LedgerState {
 
         // Update transaction.
         transaction.transaction_result = transaction_result;
-        transaction.dust_events = dust_events;
+        transaction.dust_events = Box::new(dust_events);
         transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize()?;
         transaction.created_unshielded_utxos = created_unshielded_utxos;
         transaction.spent_unshielded_utxos = spent_unshielded_utxos;
@@ -151,7 +151,7 @@ impl LedgerState {
         let dust_events = Vec::new();
 
         // Store DUST events
-        transaction.dust_events = dust_events;
+        transaction.dust_events = Box::new(dust_events);
 
         // Update extracted balances of contract actions.
         for contract_action in &mut transaction.contract_actions {
@@ -161,7 +161,7 @@ impl LedgerState {
             contract_action.extracted_balances = balances;
         }
 
-        Ok(Transaction::Regular(transaction))
+        Ok(Transaction::Regular(Box::new(transaction)))
     }
 
     #[trace(properties = {
