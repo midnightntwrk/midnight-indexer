@@ -14,7 +14,7 @@ if [ -d ./.node/$node_version ]; then
 fi
 
 # SIDECHAIN_BLOCK_BENEFICIARY specifies the wallet that receives block rewards and transaction fees (DUST).
-# Required after fees were enabled in 0.16.0-da0b6c69.
+# Required after fees were enabled.
 # This hex value is a public key that matches the one used in toolkit-e2e.sh.
 docker run \
     -d \
@@ -29,8 +29,8 @@ docker run \
 sleep 10
 
 # Generate batches
-# Note: Reduced from -n 3 -b 2 to -n 1 -b 1 to minimize DUST requirements
-# after fees were enabled in node 0.16.0-da0b6c69. Larger batch sizes fail with:
+# Note: Reduced from -n 3 -b 2 to -n 1 -b 1 to minimize DUST requirements.
+# Larger batch sizes fail with:
 # "Balancing TX failed: Insufficient DUST (trying to spend X, need Y more)"
 # This matches the approach used in midnight-node's toolkit-e2e.sh CI tests.
 docker run \

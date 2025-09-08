@@ -5,7 +5,7 @@ feature := "cloud"
 packages := "indexer-common chain-indexer wallet-indexer indexer-api indexer-standalone indexer-tests"
 rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/'`
 nightly := "nightly-2025-08-07"
-node_version := "0.16.0-da0b6c69"
+node_version := "0.16.1-2d361261"
 
 check:
     for package in {{packages}}; do \
@@ -128,7 +128,6 @@ run-node:
     node_dir=$(mktemp -d)
     cp -r ./.node/{{node_version}}/ $node_dir
     # SIDECHAIN_BLOCK_BENEFICIARY specifies the wallet that receives block rewards and transaction fees (DUST).
-    # Required after fees were enabled in 0.16.0-da0b6c69.
     # This hex value is a public key that matches the one used in toolkit-e2e.sh.
     docker run \
         --name node \
