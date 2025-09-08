@@ -178,7 +178,7 @@ macro_rules! make_block_details {
                     .collect();
 
                 let mut system_transactions = Vec::new();
-                
+
                 for event in events.iter().flatten() {
                     let event = event.as_root_event::<Event>();
                     match event {

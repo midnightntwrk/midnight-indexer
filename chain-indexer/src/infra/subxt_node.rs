@@ -248,14 +248,15 @@ impl SubxtNode {
             .then(|t| make_transaction(t, hash, protocol_version, online_client))
             .try_collect::<Vec<_>>()
             .await?;
-        
+
         for sys_tx_event in system_transactions {
             if let Some(serialized_tx) = sys_tx_event.serialized_transaction {
                 let tx = make_system_transaction_with_hash(
                     serialized_tx.into(),
                     sys_tx_event.hash.into(),
-                    protocol_version
-                ).await?;
+                    protocol_version,
+                )
+                .await?;
                 transactions.push(tx);
             }
         }
@@ -612,7 +613,7 @@ async fn make_system_transaction_with_hash(
 ) -> Result<Transaction, SubxtNodeError> {
     let transaction =
         const_hex::decode(transaction).map_err(SubxtNodeError::HexDecodeTransaction)?;
-    
+
     // Validate that we can deserialize the transaction
     let _ledger_transaction =
         ledger::SystemTransaction::deserialize(&transaction, protocol_version)?;

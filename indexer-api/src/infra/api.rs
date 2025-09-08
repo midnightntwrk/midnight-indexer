@@ -210,7 +210,7 @@ async fn transform_lentgh_limit_exceeded(
     next: axum::middleware::Next,
 ) -> Response<Body> {
     let response = next.run(req).await;
-    
+
     if response.status() == StatusCode::BAD_REQUEST {
         let (mut head, body) = response.into_parts();
 
@@ -221,10 +221,7 @@ async fn transform_lentgh_limit_exceeded(
 
         if &*bytes == LENGTH_LIMIT_EXCEEDED_BODY {
             head.status = StatusCode::PAYLOAD_TOO_LARGE;
-            Response::from_parts(
-                head,
-                Body::from("length limit exceeded"),
-            )
+            Response::from_parts(head, Body::from("length limit exceeded"))
         } else {
             Response::from_parts(head, Body::from(bytes))
         }
@@ -370,7 +367,6 @@ enum ApiError {
     /// An internal server error.
     Server(InnerApiError),
 }
-
 
 /// For client errors, write the full error chain and for server errors, log the full error chain
 /// and write "Internal Server Error".
