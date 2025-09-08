@@ -611,9 +611,7 @@ async fn make_system_transaction_with_hash(
     hash: TransactionHash,
     protocol_version: ProtocolVersion,
 ) -> Result<Transaction, SubxtNodeError> {
-    let transaction =
-        const_hex::decode(transaction).map_err(SubxtNodeError::HexDecodeTransaction)?;
-
+    // Transaction is already raw bytes, no need to decode
     // Validate that we can deserialize the transaction
     let _ledger_transaction =
         ledger::SystemTransaction::deserialize(&transaction, protocol_version)?;
@@ -621,7 +619,7 @@ async fn make_system_transaction_with_hash(
     let transaction = SystemTransaction {
         hash,
         protocol_version,
-        raw: transaction.into(),
+        raw: transaction,
     };
 
     Ok(Transaction::System(transaction))
