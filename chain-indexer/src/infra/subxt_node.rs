@@ -216,11 +216,14 @@ impl SubxtNode {
             "making block"
         );
 
+        let online_client = self
+            .compatible_online_client(protocol_version, hash)
+            .await?;
+
         // Fetch authorities if `None`, either initially or because of a `NewSession` event (below).
         if authorities.is_none() {
-            // Safe to use self.online_client? Probably yes, because using storage at latest block.
             *authorities =
-                runtimes::fetch_authorities(&self.default_online_client, protocol_version).await?;
+                runtimes::fetch_authorities(hash, protocol_version, online_client).await?;
         }
         let author = authorities
             .as_ref()
@@ -228,12 +231,8 @@ impl SubxtNode {
             .transpose()?
             .flatten();
 
-        let online_client = self
-            .compatible_online_client(protocol_version, hash)
-            .await?;
-
         let zswap_state_root =
-            runtimes::get_zswap_state_root(online_client, hash, protocol_version).await?;
+            runtimes::get_zswap_state_root(hash, protocol_version, online_client).await?;
         let zswap_state_root = ZswapStateRoot::deserialize(zswap_state_root, protocol_version)?;
 
         let extrinsics = block.extrinsics().await.map_err(Box::new)?;
@@ -531,7 +530,7 @@ async fn make_regular_transaction(
 
     let contract_actions = ledger_transaction
         .contract_actions(|address| async move {
-            runtimes::get_contract_state(online_client, address, block_hash, protocol_version).await
+            runtimes::get_contract_state(address, block_hash, protocol_version, online_client).await
         })
         .await?
         .into_iter()
@@ -539,10 +538,10 @@ async fn make_regular_transaction(
         .collect();
 
     let fees = match runtimes::get_transaction_cost(
-        online_client,
         &transaction,
         block_hash,
         protocol_version,
+        online_client,
     )
     .await
     {
