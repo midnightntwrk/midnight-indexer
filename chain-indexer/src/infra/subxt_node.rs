@@ -534,8 +534,7 @@ async fn make_regular_transaction(
     protocol_version: ProtocolVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Transaction, SubxtNodeError> {
-    let transaction =
-        const_hex::decode(transaction).map_err(SubxtNodeError::HexDecodeTransaction)?;
+    // Transaction is already raw bytes, no hex decoding needed
     let ledger_transaction = ledger::Transaction::deserialize(&transaction, protocol_version)?;
 
     let hash = ledger_transaction.hash();
@@ -573,37 +572,36 @@ async fn make_regular_transaction(
         }
     };
 
-    let transaction = RegularTransaction {
+    let regular_transaction = RegularTransaction {
         hash,
         protocol_version,
         identifiers,
         contract_actions,
-        raw: transaction.into(),
+        raw: transaction,
         paid_fees: fees.paid_fees,
         estimated_fees: fees.estimated_fees,
     };
 
-    Ok(Transaction::Regular(transaction))
+    Ok(Transaction::Regular(regular_transaction))
 }
 
 async fn make_system_transaction(
     transaction: ByteVec,
     protocol_version: ProtocolVersion,
 ) -> Result<Transaction, SubxtNodeError> {
-    let transaction =
-        const_hex::decode(transaction).map_err(SubxtNodeError::HexDecodeTransaction)?;
+    // Transaction is already raw bytes, no hex decoding needed
     let ledger_transaction =
         ledger::SystemTransaction::deserialize(&transaction, protocol_version)?;
 
     let hash = ledger_transaction.hash();
 
-    let transaction = SystemTransaction {
+    let system_transaction = SystemTransaction {
         hash,
         protocol_version,
-        raw: transaction.into(),
+        raw: transaction,
     };
 
-    Ok(Transaction::System(transaction))
+    Ok(Transaction::System(system_transaction))
 }
 
 async fn make_system_transaction_with_hash(
@@ -616,11 +614,11 @@ async fn make_system_transaction_with_hash(
     let _ledger_transaction =
         ledger::SystemTransaction::deserialize(&transaction, protocol_version)?;
 
-    let transaction = SystemTransaction {
+    let system_transaction = SystemTransaction {
         hash,
         protocol_version,
         raw: transaction,
     };
 
-    Ok(Transaction::System(transaction))
+    Ok(Transaction::System(system_transaction))
 }
