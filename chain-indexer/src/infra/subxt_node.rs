@@ -241,12 +241,25 @@ impl SubxtNode {
         let BlockDetails {
             timestamp,
             transactions,
+            system_transactions,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
 
-        let transactions = stream::iter(transactions)
+        let mut transactions = stream::iter(transactions)
             .then(|t| make_transaction(t, hash, protocol_version, online_client))
             .try_collect::<Vec<_>>()
             .await?;
+        
+        for sys_tx_event in system_transactions {
+            if let Some(serialized_tx) = sys_tx_event.serialized_transaction {
+                let tx = make_transaction(
+                    runtimes::Transaction::System(serialized_tx.into()),
+                    hash,
+                    protocol_version,
+                    online_client
+                ).await?;
+                transactions.push(tx);
+            }
+        }
 
         let block = Block {
             hash,

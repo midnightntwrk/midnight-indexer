@@ -34,6 +34,14 @@ use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, u
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
     pub transactions: Vec<Transaction>,
+    pub system_transactions: Vec<SystemTransactionEvent>,
+}
+
+/// System transaction event from pallets.
+#[derive(Debug, Clone)]
+pub struct SystemTransactionEvent {
+    pub hash: [u8; 32],
+    pub serialized_transaction: Option<Vec<u8>>,
 }
 
 /// Runtime specific (serialized) transaction.
@@ -169,16 +177,42 @@ macro_rules! make_block_details {
                     })
                     .collect();
 
+                let mut system_transactions = Vec::new();
+                
                 for event in events.iter().flatten() {
                     let event = event.as_root_event::<Event>();
-                    if let Ok(Event::Session(NewSession { .. })) = event {
-                        *authorities = None;
+                    match event {
+                        Ok(Event::Session(NewSession { .. })) => {
+                            *authorities = None;
+                        }
+                        Ok(Event::MidnightSystem(
+                            $module::runtime_types::pallet_midnight_system::pallet::Event::SystemTransactionApplied(
+                                sys_tx_applied
+                            )
+                        )) => {
+                            system_transactions.push(SystemTransactionEvent {
+                                hash: sys_tx_applied.hash,
+                                serialized_transaction: Some(sys_tx_applied.serialized_system_transaction),
+                            });
+                        }
+                        Ok(Event::NativeTokenObservation(
+                            $module::runtime_types::pallet_native_token_observation::pallet::Event::SystemTransactionApplied(
+                                sys_tx_applied
+                            )
+                        )) => {
+                            system_transactions.push(SystemTransactionEvent {
+                                hash: sys_tx_applied.system_transaction_hash,
+                                serialized_transaction: None,
+                            });
+                        }
+                        _ => {}
                     }
                 }
 
                 Ok(BlockDetails {
                     timestamp,
                     transactions,
+                    system_transactions,
                 })
             }
         }
