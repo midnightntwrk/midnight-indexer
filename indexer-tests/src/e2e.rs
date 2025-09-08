@@ -1234,11 +1234,8 @@ async fn test_dust_comprehensive_coverage(
         // Note: block_height is not available in DustEvent type
 
         // Type-specific validation through event_details field
-        match event.event_type {
-            recent_dust_events_query::DustEventType::DUST_INITIAL_UTXO => {
-                // Event details validation would go here if needed
-            }
-            _ => {}
+        if let recent_dust_events_query::DustEventType::DUST_INITIAL_UTXO = event.event_type {
+            // Event details validation would go here if needed
         }
     }
 
@@ -1545,14 +1542,6 @@ mod graphql {
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
-    pub struct DustGenerationStatusQuery;
-
-    #[derive(GraphQLQuery)]
-    #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
-        query_path = "./e2e.graphql",
-        response_derives = "Debug, Clone, Serialize"
-    )]
     pub struct DustMerkleRootQuery;
 
     #[derive(GraphQLQuery)]
@@ -1578,12 +1567,4 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct DustCommitmentsSubscription;
-
-    #[derive(GraphQLQuery)]
-    #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
-        query_path = "./e2e.graphql",
-        response_derives = "Debug, Clone, Serialize"
-    )]
-    pub struct DustRegistrationUpdatesSubscription;
 }

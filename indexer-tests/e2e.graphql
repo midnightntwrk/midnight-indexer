@@ -584,16 +584,6 @@ query CurrentDustStateQuery {
     }
 }
 
-query DustGenerationStatusQuery($cardanoStakeKeys: [HexEncoded!]!) {
-    dustGenerationStatus(cardanoStakeKeys: $cardanoStakeKeys) {
-        cardanoStakeKey
-        dustAddress
-        isRegistered
-        generationRate
-        currentCapacity
-    }
-}
-
 query DustMerkleRootQuery($treeType: DustMerkleTreeType!, $timestamp: Int!) {
     dustMerkleRoot(treeType: $treeType, timestamp: $timestamp)
 }
@@ -679,24 +669,6 @@ subscription DustCommitmentsSubscription(
         ... on DustCommitmentProgress {
             highestIndex
             commitmentCount
-        }
-    }
-}
-
-subscription DustRegistrationUpdatesSubscription(
-    $addresses: [RegistrationAddress!]!
-) {
-    dustRegistrationUpdates(addresses: $addresses) {
-        __typename
-        ... on RegistrationUpdate {
-            cardanoStakeKey
-            dustAddress
-            isActive
-            registeredAt
-        }
-        ... on RegistrationUpdateProgress {
-            latestTimestamp
-            updateCount
         }
     }
 }
