@@ -490,7 +490,6 @@ query DustEventsByTransactionQuery($transactionHash: HexEncoded!) {
                     dtime
                     merkleIndex
                 }
-                generationIndex
             }
             __typename
             ... on DustGenerationDtimeUpdateDetails {
@@ -503,12 +502,10 @@ query DustEventsByTransactionQuery($transactionHash: HexEncoded!) {
                     dtime
                     merkleIndex
                 }
-                generationIndex
             }
             __typename
             ... on DustSpendProcessedDetails {
                 commitment
-                commitmentIndex
                 nullifier
                 vFee
                 time
@@ -547,7 +544,6 @@ query RecentDustEventsQuery($limit: Int, $eventType: DustEventType) {
                     dtime
                     merkleIndex
                 }
-                generationIndex
             }
             __typename
             ... on DustGenerationDtimeUpdateDetails {
@@ -560,12 +556,10 @@ query RecentDustEventsQuery($limit: Int, $eventType: DustEventType) {
                     dtime
                     merkleIndex
                 }
-                generationIndex
             }
             __typename
             ... on DustSpendProcessedDetails {
                 commitment
-                commitmentIndex
                 nullifier
                 vFee
                 time
@@ -597,7 +591,6 @@ query DustGenerationStatusQuery($cardanoStakeKeys: [HexEncoded!]!) {
         isRegistered
         generationRate
         currentCapacity
-        lastUpdated
     }
 }
 
@@ -623,15 +616,13 @@ subscription DustGenerationsSubscription(
             value
             owner
             nonce
-            generationIndex
             dtime
             merkleIndex
         }
         ... on DustGenerationMerkleUpdate {
-            treeIndex
-            root
-            proof
-            timestamp
+            index
+            collapsedUpdate
+            blockHeight
         }
         ... on DustGenerationProgress {
             highestIndex
@@ -653,8 +644,8 @@ subscription DustNullifierTransactionsSubscription(
         __typename
         ... on DustNullifierTransaction {
             transactionHash
-            blockNumber
-            nullifiers
+            blockHeight
+            matchingNullifierPrefixes
         }
         ... on DustNullifierTransactionProgress {
             highestBlock
@@ -679,14 +670,11 @@ subscription DustCommitmentsSubscription(
             nullifier
             value
             owner
-            generationIndex
-            commitmentIndex
         }
         ... on DustCommitmentMerkleUpdate {
-            treeIndex
-            root
-            proof
-            timestamp
+            index
+            collapsedUpdate
+            blockHeight
         }
         ... on DustCommitmentProgress {
             highestIndex
