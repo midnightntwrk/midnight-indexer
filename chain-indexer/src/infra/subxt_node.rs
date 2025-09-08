@@ -27,7 +27,7 @@ use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{
         BlockAuthor, BlockHash, ByteVec, ProtocolVersion, ScaleDecodeProtocolVersionError,
-        ledger::{self, ZswapStateRoot},
+        ledger::{self, TransactionHash, ZswapStateRoot},
     },
     error::BoxError,
 };
@@ -251,11 +251,10 @@ impl SubxtNode {
         
         for sys_tx_event in system_transactions {
             if let Some(serialized_tx) = sys_tx_event.serialized_transaction {
-                let tx = make_transaction(
-                    runtimes::Transaction::System(serialized_tx.into()),
-                    hash,
-                    protocol_version,
-                    online_client
+                let tx = make_system_transaction_with_hash(
+                    serialized_tx.into(),
+                    sys_tx_event.hash.into(),
+                    protocol_version
                 ).await?;
                 transactions.push(tx);
             }
@@ -596,6 +595,27 @@ async fn make_system_transaction(
         ledger::SystemTransaction::deserialize(&transaction, protocol_version)?;
 
     let hash = ledger_transaction.hash();
+
+    let transaction = SystemTransaction {
+        hash,
+        protocol_version,
+        raw: transaction.into(),
+    };
+
+    Ok(Transaction::System(transaction))
+}
+
+async fn make_system_transaction_with_hash(
+    transaction: ByteVec,
+    hash: TransactionHash,
+    protocol_version: ProtocolVersion,
+) -> Result<Transaction, SubxtNodeError> {
+    let transaction =
+        const_hex::decode(transaction).map_err(SubxtNodeError::HexDecodeTransaction)?;
+    
+    // Validate that we can deserialize the transaction
+    let _ledger_transaction =
+        ledger::SystemTransaction::deserialize(&transaction, protocol_version)?;
 
     let transaction = SystemTransaction {
         hash,
