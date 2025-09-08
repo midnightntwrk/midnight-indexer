@@ -688,11 +688,11 @@ subscription DustRegistrationUpdatesSubscription(
 ) {
     dustRegistrationUpdates(addresses: $addresses) {
         __typename
-        ... on DustRegistration {
+        ... on RegistrationUpdate {
             cardanoStakeKey
             dustAddress
             isActive
-            registrationTime
+            registeredAt
         }
         ... on RegistrationUpdateProgress {
             latestTimestamp
