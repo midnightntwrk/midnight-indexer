@@ -251,6 +251,69 @@ type DustCommitmentProgress {
 }
 
 """
+DUST event from chain processing.
+"""
+type DustEvent {
+	"""
+	Transaction hash containing this event.
+	"""
+	transactionHash: HexEncoded!
+	"""
+	Logical segment within transaction.
+	"""
+	logicalSegment: Int!
+	"""
+	Physical segment within transaction.
+	"""
+	physicalSegment: Int!
+	"""
+	Event type.
+	"""
+	eventType: DustEventType!
+	"""
+	Event details.
+	"""
+	eventDetails: DustEventDetails!
+}
+
+"""
+DUST event details union.
+"""
+union DustEventDetails = DustInitialUtxoDetails | DustGenerationDtimeUpdateDetails | DustSpendProcessedDetails
+
+"""
+Type of DUST event.
+"""
+enum DustEventType {
+	"""
+	Initial DUST UTXO creation.
+	"""
+	DUST_INITIAL_UTXO
+	"""
+	DUST generation time update.
+	"""
+	DUST_GENERATION_DTIME_UPDATE
+	"""
+	DUST spend processed.
+	"""
+	DUST_SPEND_PROCESSED
+}
+
+"""
+Details for DUST generation time update.
+"""
+type DustGenerationDtimeUpdateDetails {
+	"""
+	Updated generation info.
+	"""
+	generationInfo: DustGenerationInfo!
+	"""
+	Generation index.
+	"""
+	generationIndex: Int!
+}
+
+"""
 DUST generation event union type.
 """
 union DustGenerationEvent = DustGenerationInfo | DustGenerationMerkleUpdate | DustGenerationProgress
@@ -352,6 +415,48 @@ type DustGenerationStatus {
 }
 
 """
+Details for initial DUST UTXO creation.
+"""
+type DustInitialUtxoDetails {
+	"""
+	Initial value.
+	"""
+	initialValue: String!
+	"""
+	Owner's DUST public key.
+	"""
+	owner: HexEncoded!
+	"""
+	Nonce.
+	"""
+	nonce: HexEncoded!
+	"""
+	Sequence number.
+	"""
+	seq: Int!
+	"""
+	Creation time.
+	"""
+	ctime: Int!
+	"""
+	Backing Night UTXO nonce.
+	"""
+	backingNight: HexEncoded!
+	"""
+	Merkle tree index.
+	"""
+	mtIndex: Int!
+	"""
+	Generation info.
+	"""
+	generationInfo: DustGenerationInfo!
+	"""
+	Generation index.
+	"""
+	generationIndex: Int!
+}
+
+"""
 Type of Merkle tree.
 """
 enum DustMerkleTreeType {
@@ -403,134 +508,21 @@ type DustNullifierTransactionProgress {
 }
 
 """
-DUST system state containing current Merkle tree roots and statistics.
+DUST parameters information.
 """
-type DustSystemState {
+type DustParametersInfo {
 	"""
-	Current commitment tree root.
+	Night to DUST ratio.
 	"""
-	commitmentTreeRoot: HexEncoded!
+	nightDustRatio: Int!
 	"""
-	Current generation tree root.
+	Generation decay rate.
 	"""
-	generationTreeRoot: HexEncoded!
+	generationDecayRate: Int!
 	"""
-	Current block height.
+	DUST grace period in seconds.
 	"""
-	blockHeight: Int!
-	"""
-	Current timestamp.
-	"""
-	timestamp: Int!
-	"""
-	Total number of registrations.
-	"""
-	totalRegistrations: Int!
-}
-
-"""
-DUST event from chain processing.
-"""
-type DustEvent {
-	"""
-	Transaction hash containing this event.
-	"""
-	transactionHash: HexEncoded!
-	"""
-	Logical segment within transaction.
-	"""
-	logicalSegment: Int!
-	"""
-	Physical segment within transaction.
-	"""
-	physicalSegment: Int!
-	"""
-	Event type.
-	"""
-	eventType: DustEventType!
-	"""
-	Event details.
-	"""
-	eventDetails: DustEventDetails!
-}
-
-"""
-Type of DUST event.
-"""
-enum DustEventType {
-	"""
-	Initial DUST UTXO creation.
-	"""
-	DUST_INITIAL_UTXO
-	"""
-	DUST generation time update.
-	"""
-	DUST_GENERATION_DTIME_UPDATE
-	"""
-	DUST spend processed.
-	"""
-	DUST_SPEND_PROCESSED
-}
-
-"""
-DUST event details union.
-"""
-union DustEventDetails = DustInitialUtxoDetails | DustGenerationDtimeUpdateDetails | DustSpendProcessedDetails
-
-"""
-Details for initial DUST UTXO creation.
-"""
-type DustInitialUtxoDetails {
-	"""
-	Initial value.
-	"""
-	initialValue: String!
-	"""
-	Owner's DUST public key.
-	"""
-	owner: HexEncoded!
-	"""
-	Nonce.
-	"""
-	nonce: HexEncoded!
-	"""
-	Sequence number.
-	"""
-	seq: Int!
-	"""
-	Creation time.
-	"""
-	ctime: Int!
-	"""
-	Backing Night UTXO nonce.
-	"""
-	backingNight: HexEncoded!
-	"""
-	Merkle tree index.
-	"""
-	mtIndex: Int!
-	"""
-	Generation info.
-	"""
-	generationInfo: DustGenerationInfo!
-	"""
-	Generation index.
-	"""
-	generationIndex: Int!
-}
-
-"""
-Details for DUST generation time update.
-"""
-type DustGenerationDtimeUpdateDetails {
-	"""
-	Updated generation info.
-	"""
-	generationInfo: DustGenerationInfo!
-	"""
-	Generation index.
-	"""
-	generationIndex: Int!
+	dustGracePeriod: Int!
 }
 
 """
@@ -564,21 +556,29 @@ type DustSpendProcessedDetails {
 }
 
 """
-DUST parameters information.
+DUST system state containing current Merkle tree roots and statistics.
 """
-type DustParametersInfo {
+type DustSystemState {
 	"""
-	Night to DUST ratio.
+	Current commitment tree root.
 	"""
-	nightDustRatio: Int!
+	commitmentTreeRoot: HexEncoded!
 	"""
-	Generation decay rate.
+	Current generation tree root.
 	"""
-	generationDecayRate: Int!
+	generationTreeRoot: HexEncoded!
 	"""
-	DUST grace period in seconds.
+	Current block height.
 	"""
-	dustGracePeriod: Int!
+	blockHeight: Int!
+	"""
+	Current timestamp.
+	"""
+	timestamp: Int!
+	"""
+	Total number of registrations.
+	"""
+	totalRegistrations: Int!
 }
 
 scalar HexEncoded
