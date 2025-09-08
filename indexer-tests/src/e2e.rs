@@ -16,7 +16,10 @@
 use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
-        ContractActionSubscription, DisconnectMutation, DustEventsByTransactionQuery,
+        ContractActionSubscription, CurrentDustStateQuery, DisconnectMutation, 
+        DustCommitmentsSubscription, DustEventsByTransactionQuery,
+        DustGenerationsSubscription, DustGenerationStatusQuery, DustMerkleRootQuery,
+        DustNullifierTransactionsSubscription, DustRegistrationUpdatesSubscription,
         RecentDustEventsQuery, ShieldedTransactionsSubscription, TransactionsQuery,
         UnshieldedTransactionsSubscription, block_query,
         block_subscription::{
@@ -31,12 +34,15 @@ use crate::{
             self, ContractActionQueryContractAction,
             TransactionResultStatus as ContractActionQueryTransactionResultStatus,
         },
-        contract_action_subscription, disconnect_mutation, shielded_transactions_subscription,
+        contract_action_subscription, disconnect_mutation, dust_events_by_transaction_query,
+        recent_dust_events_query, current_dust_state_query, dust_merkle_root_query,
+        dust_generations_subscription, dust_nullifier_transactions_subscription,
+        dust_commitments_subscription, shielded_transactions_subscription, 
         transactions_query, unshielded_transactions_subscription,
     },
     graphql_ws_client,
 };
-use anyhow::{Context, Ok, bail};
+use anyhow::{Context, bail};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::infra::api::v1::{
@@ -1216,12 +1222,11 @@ async fn test_dust_events_queries(
 async fn test_dust_comprehensive_coverage(
     api_client: &Client,
     api_url: &str,
-    recent_events: &[e2e::graphql::recent_dust_events_query::RecentDustEventsRecentDustEvents],
+    recent_events: &[recent_dust_events_query::RecentDustEventsQueryRecentDustEvents],
     indexer_data: &IndexerData,
     system_tx_count: usize,
     fee_paying_tx_count: usize,
 ) -> anyhow::Result<()> {
-    use e2e::graphql::recent_dust_events_query;
 
     // 1. Test all DUST event type filters.
     let event_types = [
@@ -1334,14 +1339,13 @@ async fn test_dust_comprehensive_coverage(
     test_additional_dust_queries(api_client, api_url).await?;
 
     // 8. Test DUST subscriptions.
-    test_dust_subscriptions(&ws_api_url).await?;
+    test_dust_subscriptions(&api_url).await?;
 
     Ok(())
 }
 
 /// Test additional DUST GraphQL queries.
 async fn test_additional_dust_queries(api_client: &Client, api_url: &str) -> anyhow::Result<()> {
-    use e2e::graphql::{CurrentDustStateQuery, DustGenerationStatusQuery, DustMerkleRootQuery};
     use graphql_client::GraphQLQuery;
 
     // Test currentDustState query.
@@ -1389,12 +1393,6 @@ async fn test_additional_dust_queries(api_client: &Client, api_url: &str) -> any
 /// Test DUST GraphQL subscriptions.
 async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
     use crate::graphql_ws_client;
-    use e2e::graphql::{
-        DustCommitmentsSubscription, DustGenerationsSubscription,
-        DustNullifierTransactionsSubscription, DustRegistrationUpdatesSubscription,
-        dust_commitments_subscription, dust_generations_subscription,
-        dust_nullifier_transactions_subscription, dust_registration_updates_subscription,
-    };
     use futures::StreamExt;
 
     // Test dustGenerations subscription.
