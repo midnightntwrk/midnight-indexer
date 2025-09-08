@@ -122,7 +122,10 @@ pub struct ContractDeploy<S: Storage> {
 }
 
 #[ComplexObject]
-impl<S: Storage> ContractDeploy<S> {
+impl<S> ContractDeploy<S>
+where
+    S: Storage,
+{
     async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
     }
@@ -175,7 +178,10 @@ pub struct ContractCall<S: Storage> {
 }
 
 #[ComplexObject]
-impl<S: Storage> ContractCall<S> {
+impl<S> ContractCall<S>
+where
+    S: Storage,
+{
     async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
     }
@@ -239,7 +245,10 @@ pub struct ContractUpdate<S: Storage> {
 }
 
 #[ComplexObject]
-impl<S: Storage> ContractUpdate<S> {
+impl<S> ContractUpdate<S>
+where
+    S: Storage,
+{
     async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
     }
