@@ -163,22 +163,27 @@ async fn start_node() -> anyhow::Result<NodeHandle> {
     use fs_extra::dir::{CopyOptions, copy};
 
     let node_dir = Path::new(&format!("{}/../.node", env!("CARGO_MANIFEST_DIR")))
-        .join(NODE_VERSION)
+        .join(NODE_VERSION.trim())
         .canonicalize()
         .context("create path to node directory")?;
     let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
     copy(&node_dir, &temp_dir, &CopyOptions::default())
         .context("copy .node directory into tempdir")?;
-    let node_path = temp_dir.path().join(NODE_VERSION).display().to_string();
+    let node_path = temp_dir
+        .path()
+        .join(NODE_VERSION.trim())
+        .display()
+        .to_string();
 
-    let node_container = GenericImage::new("ghcr.io/midnight-ntwrk/midnight-node", NODE_VERSION)
-        .with_wait_for(WaitFor::message_on_stderr("9944"))
-        .with_mount(Mount::bind_mount(node_path, "/node"))
-        .with_env_var("SHOW_CONFIG", "false")
-        .with_env_var("CFG_PRESET", "dev")
-        .start()
-        .await
-        .context("start node container")?;
+    let node_container =
+        GenericImage::new("ghcr.io/midnight-ntwrk/midnight-node", NODE_VERSION.trim())
+            .with_wait_for(WaitFor::message_on_stderr("9944"))
+            .with_mount(Mount::bind_mount(node_path, "/node"))
+            .with_env_var("SHOW_CONFIG", "false")
+            .with_env_var("CFG_PRESET", "dev")
+            .start()
+            .await
+            .context("start node container")?;
 
     let node_port = node_container
         .get_host_port_ipv4(9944)

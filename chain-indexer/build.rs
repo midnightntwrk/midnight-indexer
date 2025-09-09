@@ -140,6 +140,5 @@ fn validate_and_sanitize_version(version: &str) -> String {
         );
     }
 
-    // Return the validated version (no need to sanitize further as we've validated allowed characters)
     version.to_string()
 }
