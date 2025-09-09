@@ -46,7 +46,7 @@ cargo test -p indexer-tests native_e2e
 ### 5. Verify Changes
 
 Before creating PR, verify:
-- [ ] `NODE_VESRION` file updated
+- [ ] `NODE_VERSION` file updated
 - [ ] Metadata file exists at `.node/<new-version>/metadata.scale`
 - [ ] All tests pass
 - [ ] No references to old version remain (check with ripgrep)
