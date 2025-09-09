@@ -37,7 +37,8 @@ fn main() {
 
     // Generate the subxt macro call
     let generated_code = format!(
-        r#"#[subxt::subxt(
+        r#"
+#[subxt::subxt(
     runtime_metadata_path = "{}",
     derive_for_type(
         path = "sp_consensus_slots::Slot",
