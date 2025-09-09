@@ -184,14 +184,14 @@ jobs:
 
       - name: Set up Node Tag to target
         run: |
-          # Use workflow dispatch input if provided, otherwise read from justfile
+          # Use workflow dispatch input if provided, otherwise read from NODE_VERSION file
           if [ -n "${{ github.event.inputs.node_tag }}" ]; then
             echo "Using node tag from workflow dispatch: ${{ github.event.inputs.node_tag }}"
             echo "NODE_TAG=${{ github.event.inputs.node_tag }}" >> $GITHUB_ENV
           else
-            echo "Reading node tag from justfile..."
-            node_tag=$(grep '^node_version :=' justfile | sed -E 's/node_version := "(.*)"/\1/')
-            echo "Using node tag from justfile: $node_tag"
+            echo "Reading node tag from NODE_VERSION file..."
+            node_tag=$(cat NODE_VERSION)
+            echo "Using node tag: $node_tag"
             echo "NODE_TAG=$node_tag" >> $GITHUB_ENV
           fi
 
