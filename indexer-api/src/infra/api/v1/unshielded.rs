@@ -37,7 +37,10 @@ use thiserror::Error;
 /// Represents an unshielded UTXO.
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
-pub struct UnshieldedUtxo<S: Storage> {
+pub struct UnshieldedUtxo<S>
+where
+    S: Storage,
+{
     /// Owner Bech32m-encoded address.
     owner: UnshieldedAddress,
 
@@ -64,7 +67,10 @@ pub struct UnshieldedUtxo<S: Storage> {
 }
 
 #[ComplexObject]
-impl<S: Storage> UnshieldedUtxo<S> {
+impl<S> UnshieldedUtxo<S>
+where
+    S: Storage,
+{
     /// Transaction that created this UTXO.
     async fn created_at_transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         let id = self.creating_transaction_id;
@@ -96,7 +102,10 @@ impl<S: Storage> UnshieldedUtxo<S> {
     }
 }
 
-impl<S: Storage> From<(domain::UnshieldedUtxo, NetworkId)> for UnshieldedUtxo<S> {
+impl<S> From<(domain::UnshieldedUtxo, NetworkId)> for UnshieldedUtxo<S>
+where
+    S: Storage,
+{
     fn from((utxo, network_id): (domain::UnshieldedUtxo, NetworkId)) -> Self {
         let owner = encode_address(utxo.owner, AddressType::Unshielded, network_id).into();
 

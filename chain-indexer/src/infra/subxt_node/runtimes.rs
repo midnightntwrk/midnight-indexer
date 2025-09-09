@@ -11,15 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[subxt::subxt(
-    runtime_metadata_path = "../.node/0.16.0-da0b6c69/metadata.scale",
-    derive_for_type(
-        path = "sp_consensus_slots::Slot",
-        derive = "parity_scale_codec::Encode, parity_scale_codec::Decode",
-        recursive
-    )
-)]
-mod runtime_0_16 {}
+// To see how this is generated, look in build.rs
+include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
 
 use crate::infra::subxt_node::SubxtNodeError;
 use indexer_common::domain::{
@@ -59,11 +52,12 @@ pub async fn make_block_details(
 
 /// Fetch authorities depending on the given protocol version.
 pub async fn fetch_authorities(
-    online_client: &OnlineClient<SubstrateConfig>,
+    block_hash: BlockHash,
     protocol_version: ProtocolVersion,
+    online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<Vec<[u8; 32]>>, SubxtNodeError> {
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
-        fetch_authorities_runtime_0_16(online_client).await
+        fetch_authorities_runtime_0_16(block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -80,25 +74,25 @@ pub fn decode_slot(slot: &[u8], protocol_version: ProtocolVersion) -> Result<u64
 
 /// Get contract state depending on the given protocol version.
 pub async fn get_contract_state(
-    online_client: &OnlineClient<SubstrateConfig>,
     address: SerializedContractAddress,
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
+    online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<SerializedContractState, SubxtNodeError> {
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
-        get_contract_state_runtime_0_16(online_client, address, block_hash).await
+        get_contract_state_runtime_0_16(address, block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
 }
 
 pub async fn get_zswap_state_root(
-    online_client: &OnlineClient<SubstrateConfig>,
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
+    online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Vec<u8>, SubxtNodeError> {
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
-        get_zswap_state_root_runtime_0_16(online_client, block_hash).await
+        get_zswap_state_root_runtime_0_16(block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -106,13 +100,13 @@ pub async fn get_zswap_state_root(
 
 /// Get cost for the given serialized transaction depending on the given protocol version.
 pub async fn get_transaction_cost(
-    online_client: &OnlineClient<SubstrateConfig>,
     transaction: impl AsRef<[u8]>,
     block_hash: BlockHash,
     protocol_version: ProtocolVersion,
+    online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<u128, SubxtNodeError> {
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
-        get_transaction_cost_runtime_0_16(online_client, transaction.as_ref(), block_hash).await
+        get_transaction_cost_runtime_0_16(transaction.as_ref(), block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -191,13 +185,12 @@ macro_rules! fetch_authorities {
     ($module:ident) => {
         paste::paste! {
             async fn [<fetch_authorities_ $module>](
+                block_hash: BlockHash,
                 online_client: &OnlineClient<SubstrateConfig>,
             ) -> Result<Option<Vec<[u8; 32]>>, SubxtNodeError> {
                 let authorities = online_client
                     .storage()
-                    .at_latest()
-                    .await
-                    .map_err(Box::new)?
+                    .at(H256(block_hash.0))
                     .fetch(&$module::storage().aura().authorities())
                     .await
                     .map_err(Box::new)?
@@ -229,9 +222,9 @@ macro_rules! get_contract_state {
     ($module:ident) => {
         paste::paste! {
             async fn [<get_contract_state_ $module>](
-                online_client: &OnlineClient<SubstrateConfig>,
                 address: SerializedContractAddress,
                 block_hash: BlockHash,
+                online_client: &OnlineClient<SubstrateConfig>,
             ) -> Result<SerializedContractState, SubxtNodeError> {
                 // This returns the serialized contract state.
                 let get_state = $module::apis()
@@ -259,8 +252,8 @@ macro_rules! get_zswap_state_root {
     ($module:ident) => {
         paste::paste! {
             async fn [<get_zswap_state_root_ $module>](
-                online_client: &OnlineClient<SubstrateConfig>,
                 block_hash: BlockHash,
+                online_client: &OnlineClient<SubstrateConfig>,
             ) -> Result<Vec<u8>, SubxtNodeError> {
                 let get_zswap_state_root = $module::apis()
                     .midnight_runtime_api()
@@ -287,9 +280,9 @@ macro_rules! get_transaction_cost {
     ($module:ident) => {
         paste::paste! {
             async fn [<get_transaction_cost_ $module>](
-                online_client: &OnlineClient<SubstrateConfig>,
                 transaction: &[u8],
                 block_hash: BlockHash,
+                online_client: &OnlineClient<SubstrateConfig>,
             ) -> Result<u128, SubxtNodeError> {
                 let get_transaction_cost = $module::apis()
                     .midnight_runtime_api()
