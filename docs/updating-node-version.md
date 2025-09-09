@@ -15,7 +15,7 @@ When updating from an old version (e.g., `0.13.2-rc.2`) to a new version (e.g., 
 # First, update the NODE_VERSION file to the new version
 echo "0.13.5-79c649d7" > NODE_VERSION
 
-# Then generate node data for the new version (will verify image exists first)
+# Then generate node data for the new version
 just update-node
 ```
 
