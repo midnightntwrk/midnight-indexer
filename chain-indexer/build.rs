@@ -17,9 +17,13 @@ const NODE_VERSION_FILE: &str = "../NODE_VERSION";
 
 fn main() {
     let node_version = read_node_version();
-    let metadata_path = format!("../.node/{node_version}/metadata.scale");
-    if !Path::new(&metadata_path).exists() {
-        panic!("metadata file not found at {metadata_path}");
+
+    let metadata_path = Path::new("..")
+        .join(".node")
+        .join(&node_version)
+        .join("metadata.scale");
+    if !metadata_path.exists() {
+        panic!("metadata file not found at {}", metadata_path.display());
     }
 
     // Extract version for module name (replace dots and hyphens with underscores).
@@ -33,16 +37,17 @@ fn main() {
     // Generate the code with the subxt macro call.
     let generated_code = format!(
         r#"
-        #[subxt::subxt(
-            runtime_metadata_path = "{metadata_path}",
-            derive_for_type(
-                path = "sp_consensus_slots::Slot",
-                derive = "parity_scale_codec::Encode, parity_scale_codec::Decode",
-                recursive
-            )
-        )]
-        pub mod runtime_{module_suffix} {{}}
-    "#
+            #[subxt::subxt(
+                runtime_metadata_path = "{}",
+                derive_for_type(
+                    path = "sp_consensus_slots::Slot",
+                    derive = "parity_scale_codec::Encode, parity_scale_codec::Decode",
+                    recursive
+                )
+            )]
+            pub mod runtime_{module_suffix} {{}}
+        "#,
+        metadata_path.display()
     );
 
     // Write generated code to file in OUT_DIR.
@@ -54,7 +59,7 @@ fn main() {
     // 1. The NODE_VERSION file changes.
     println!("cargo:rerun-if-changed={}", NODE_VERSION_FILE);
     // 2. The metadata file itself changes.
-    println!("cargo:rerun-if-changed={}", metadata_path);
+    println!("cargo:rerun-if-changed={}", metadata_path.display());
     // 3. The .node directory structure changes.
     println!("cargo:rerun-if-changed=../.node");
 
