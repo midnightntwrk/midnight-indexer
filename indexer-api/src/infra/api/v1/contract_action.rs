@@ -101,7 +101,10 @@ where
 /// A contract deployment.
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
-pub struct ContractDeploy<S: Storage> {
+pub struct ContractDeploy<S>
+where
+    S: Storage,
+{
     /// The hex-encoded serialized address.
     address: HexEncoded,
 
@@ -122,7 +125,10 @@ pub struct ContractDeploy<S: Storage> {
 }
 
 #[ComplexObject]
-impl<S: Storage> ContractDeploy<S> {
+impl<S> ContractDeploy<S>
+where
+    S: Storage,
+{
     async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
     }
@@ -148,7 +154,10 @@ impl<S: Storage> ContractDeploy<S> {
 /// A contract call.
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
-pub struct ContractCall<S: Storage> {
+pub struct ContractCall<S>
+where
+    S: Storage,
+{
     /// The hex-encoded serialized address.
     address: HexEncoded,
 
@@ -175,7 +184,10 @@ pub struct ContractCall<S: Storage> {
 }
 
 #[ComplexObject]
-impl<S: Storage> ContractCall<S> {
+impl<S> ContractCall<S>
+where
+    S: Storage,
+{
     async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
     }
@@ -218,7 +230,10 @@ impl<S: Storage> ContractCall<S> {
 /// A contract update.
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
-pub struct ContractUpdate<S: Storage> {
+pub struct ContractUpdate<S>
+where
+    S: Storage,
+{
     /// The hex-encoded serialized address.
     address: HexEncoded,
 
@@ -239,7 +254,10 @@ pub struct ContractUpdate<S: Storage> {
 }
 
 #[ComplexObject]
-impl<S: Storage> ContractUpdate<S> {
+impl<S> ContractUpdate<S>
+where
+    S: Storage,
+{
     async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
     }
