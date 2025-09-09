@@ -38,7 +38,7 @@ use midnight_transient_crypto_v6::merkle_tree::{
     MerkleTreeDigest as MerkleTreeDigestV6,
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 pub type IntentHash = ByteArray<32>;
@@ -265,7 +265,7 @@ impl LedgerState {
 }
 
 /// The result of applying a transaction to the ledger state.
-#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransactionResult {
     /// All guaranteed and fallible coins succeeded.
     Success,
