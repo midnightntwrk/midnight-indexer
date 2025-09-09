@@ -15,7 +15,7 @@ When updating from an old version (e.g., `0.13.2-rc.2`) to a new version (e.g., 
 # First, update the NODE_VERSION file to the new version
 echo "0.13.5-79c649d7" > NODE_VERSION
 
-# Then generate node data for the new version
+# Then generate node data for the new version (will verify image exists first)
 just update-node
 ```
 
@@ -60,10 +60,29 @@ Before creating PR, verify:
 
 ## Breaking Changes
 
-If the new node version includes breaking changes (e.g., removed fields like `new_registrations`):
-1. Check node release notes for breaking changes
-2. Update domain types if needed
-3. Consider backward compatibility requirements
+If the new node version includes breaking changes, follow these steps:
+
+### Common Breaking Change Scenarios
+
+#### Field Removal
+Example: Node removes `new_registrations` field
+1. **Compilation error**: `error[E0560]: struct has no field named 'new_registrations'`
+2. **Fix**: Update domain types in `indexer-common/src/domain/`
+3. **GraphQL**: Update schema if the field was exposed
+4. **Database**: Consider migration if the field was stored
+
+#### Transaction Format Change
+Example: Node changes from hex-encoded to binary transactions
+1. **Runtime error**: `cannot hex-decode transaction: odd number of digits`
+2. **Fix**: Update parsing in `chain-indexer/src/infra/subxt_node/`
+3. **Test**: Verify with real transactions from the new node
+
+#### Event Structure Change
+Example: Event adds/removes fields
+1. **Compilation error**: Missing or extra fields in event destructuring
+2. **Fix**: Update event handling in `chain-indexer/src/domain/`
+3. **Storage**: Update database schema if events are stored
+
 
 ## CI Considerations
 
@@ -79,7 +98,3 @@ If issues are discovered after deployment:
 2. Keep the new metadata file (doesn't hurt)
 3. Ensure all references point back to working version
 4. Investigate and fix before re-attempting
-
----
-
-*Last updated: August 2025*
