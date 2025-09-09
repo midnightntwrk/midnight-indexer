@@ -1036,6 +1036,7 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "metrics",
+ "midnight-node-metadata",
  "parity-scale-codec",
  "parking_lot",
  "paste",
@@ -3771,6 +3772,15 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "midnight-node-metadata"
+version = "0.16.1"
+source = "git+https://github.com/midnightntwrk/midnight-node?rev=1651ef30e21e7f437b912fd93ec720ad36faa8dd#1651ef30e21e7f437b912fd93ec720ad36faa8dd"
+dependencies = [
+ "parity-scale-codec",
+ "subxt",
 ]
 
 [[package]]

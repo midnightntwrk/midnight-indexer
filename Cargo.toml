@@ -59,6 +59,7 @@ midnight-serialize_v6        = { git = "https://github.com/midnightntwrk/midnigh
 midnight-storage_v6          = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-storage", tag = "ledger-6.0.0-alpha.3" }
 midnight-transient-crypto_v6 = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-transient-crypto", tag = "ledger-6.0.0-alpha.3" }
 midnight-zswap_v6            = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-zswap", tag = "ledger-6.0.0-alpha.3" }
+midnight-node-metadata       = { git = "https://github.com/midnightntwrk/midnight-node", package = "midnight-node-metadata", rev = "1651ef30e21e7f437b912fd93ec720ad36faa8dd" }
 nix                          = { version = "0.30" }
 opentelemetry                = { version = "0.30" }
 opentelemetry-otlp           = { version = "0.30" }
