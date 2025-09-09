@@ -11,9 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::env;
-use std::fs;
-use std::path::Path;
+use std::{env, fs, path::Path};
 
 // Configure the path to the node version file
 const NODE_VERSION_FILE: &str = "../NODE_VERSION";
