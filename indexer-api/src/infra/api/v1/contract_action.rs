@@ -101,7 +101,10 @@ where
 /// A contract deployment.
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
-pub struct ContractDeploy<S: Storage> {
+pub struct ContractDeploy<S>
+where
+    S: Storage,
+{
     /// The hex-encoded serialized address.
     address: HexEncoded,
 
@@ -151,7 +154,10 @@ where
 /// A contract call.
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
-pub struct ContractCall<S: Storage> {
+pub struct ContractCall<S>
+where
+    S: Storage,
+{
     /// The hex-encoded serialized address.
     address: HexEncoded,
 
@@ -224,7 +230,10 @@ where
 /// A contract update.
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
-pub struct ContractUpdate<S: Storage> {
+pub struct ContractUpdate<S>
+where
+    S: Storage,
+{
     /// The hex-encoded serialized address.
     address: HexEncoded,
 
