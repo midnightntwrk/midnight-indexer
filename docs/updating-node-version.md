@@ -12,58 +12,11 @@ When updating from an old version (e.g., `0.13.2-rc.2`) to a new version (e.g., 
 
 ### 1. Generate and Add Node Metadata
 ```bash
-# First, update the node_version in justfile to the new version
-# Then generate the node data
-just generate-node-data
+# First, update the NODE_VERSION file to the new version
+echo "0.13.5-79c649d7" > NODE_VERSION
 
-# Start the node
-just run-node
-
-# Generate metadata in a new terminal
-just get-node-metadata
-```
-
-This creates: `.node/<new-version>/metadata.scale`
-
-**Note**: The `just get-node-metadata` command uses the `node_version` variable from `justfile`, so update that first.
-
-### 2. Update Source Code Files
-
-**CRITICAL: Use ripgrep to find ALL occurrences**
-```fish
-# Find all references to the old version
-old=0.13.5-79c649d7 rg --glob '!docs/*' $old
-
-# Bulk replace old version with new version (macOS and fish shell)
-set -l old 0.13.5-79c649d7 && \
-set -l new 0.16.0-f3b64211 && \
-rg -l --glob '!docs/*' $old | xargs sed -i '' "s/$old/$new/g"
-
-# Bulk replace old version with new version (macOS)
-old=0.13.5-79c649d7 new=0.16.0-f3b64211 rg -l --glob '!docs/*' $old | xargs sed -i '' "s/$old/$new/g"
-
-# Bulk replace old version with new version (Linux)
-old=0.13.5-79c649d7 new=0.16.0-f3b64211 rg -l --glob '!docs/*' $old | xargs sed -i "s/$old/$new/g"
-```
-
-Files that MUST be updated:
-
-#### `chain-indexer/src/infra/subxt_node/runtimes.rs`
-```rust
-// Line ~15: Update the metadata path
-runtime_metadata_path = "../.node/<new-version>/metadata.scale"
-```
-
-#### `indexer-tests/tests/native_e2e.rs`
-```rust
-// Line ~50: Update the test node version
-const NODE_VERSION: &str = "<new-version>";
-```
-
-#### `justfile`
-```bash
-# Line ~8: Update the default node version
-node_version := "<new-version>"
+# Then generate node data for the new version
+just update-node
 ```
 
 #### Test Files (if present)
@@ -93,10 +46,8 @@ cargo test -p indexer-tests native_e2e
 ### 5. Verify Changes
 
 Before creating PR, verify:
+- [ ] `NODE_VERSION` file updated
 - [ ] Metadata file exists at `.node/<new-version>/metadata.scale`
-- [ ] `runtimes.rs` points to new metadata path
-- [ ] `native_e2e.rs` uses new version constant
-- [ ] `justfile` default version updated
 - [ ] All tests pass
 - [ ] No references to old version remain (check with ripgrep)
 

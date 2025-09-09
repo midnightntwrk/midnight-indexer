@@ -11,15 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[subxt::subxt(
-    runtime_metadata_path = "../.node/0.16.0-da0b6c69/metadata.scale",
-    derive_for_type(
-        path = "sp_consensus_slots::Slot",
-        derive = "parity_scale_codec::Encode, parity_scale_codec::Decode",
-        recursive
-    )
-)]
-mod runtime_0_16 {}
+// To see how this is generated, look in build.rs
+include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
 
 use crate::infra::subxt_node::SubxtNodeError;
 use indexer_common::domain::{

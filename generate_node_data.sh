@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -eo pipefail
+set -euxo pipefail
 
 if [ -z "$1" ]; then
     echo "Error: node version parameter is required" >&2
@@ -12,6 +12,8 @@ node_version="$1"
 if [ -d ./.node/$node_version ]; then
     rm -r ./.node/$node_version;
 fi
+
+mkdir -p ./.node/$node_version
 
 # SIDECHAIN_BLOCK_BENEFICIARY specifies the wallet that receives block rewards and transaction fees (DUST).
 # Required after fees were enabled in 0.16.0-da0b6c69.
@@ -58,7 +60,7 @@ docker run \
     --src-file /out/contract_tx_1_deploy.mn --dest-file /out/contract_address.mn
 
 # Add delay to work around PM-19168 (ctime > tblock validation issue).
-sleep 2
+sleep 6
 
 docker run \
     --rm \
@@ -69,7 +71,7 @@ docker run \
     send
 
 # Add delay to work around PM-19168.
-sleep 2
+sleep 6
 
 # The 'store' function inserts data into a Merkle tree in the test contract
 # (see midnight-node MerkleTreeContract). We need this to generate contract
@@ -89,7 +91,7 @@ docker run \
 sleep 15
 
 # Add longer delay for maintenance to work around PM-19168.
-sleep 5
+sleep 6
 
 docker run \
     --rm \
