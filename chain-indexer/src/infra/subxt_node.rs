@@ -454,8 +454,8 @@ pub enum SubxtNodeError {
     #[error("invalid protocol version {0}")]
     InvalidProtocolVersion(ProtocolVersion),
 
-    #[error("cannot hex-decode transaction")]
-    HexDecodeTransaction(#[source] const_hex::FromHexError),
+    #[error("cannot hex-decode system transaction")]
+    HexDecodeSystemTransaction(#[source] const_hex::FromHexError),
 }
 
 #[trace]
@@ -520,8 +520,6 @@ async fn make_regular_transaction(
     protocol_version: ProtocolVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Transaction, SubxtNodeError> {
-    let transaction =
-        const_hex::decode(transaction).map_err(SubxtNodeError::HexDecodeTransaction)?;
     let ledger_transaction = ledger::Transaction::deserialize(&transaction, protocol_version)?;
 
     let hash = ledger_transaction.hash();
@@ -564,7 +562,7 @@ async fn make_regular_transaction(
         protocol_version,
         identifiers,
         contract_actions,
-        raw: transaction.into(),
+        raw: transaction,
         paid_fees: fees.paid_fees,
         estimated_fees: fees.estimated_fees,
     };
@@ -576,8 +574,9 @@ async fn make_system_transaction(
     transaction: ByteVec,
     protocol_version: ProtocolVersion,
 ) -> Result<Transaction, SubxtNodeError> {
-    let transaction =
-        const_hex::decode(transaction).map_err(SubxtNodeError::HexDecodeTransaction)?;
+    let transaction = const_hex::decode(&transaction)
+        .map_err(SubxtNodeError::HexDecodeSystemTransaction)?
+        .into();
     let ledger_transaction =
         ledger::SystemTransaction::deserialize(&transaction, protocol_version)?;
 
@@ -586,7 +585,7 @@ async fn make_system_transaction(
     let transaction = SystemTransaction {
         hash,
         protocol_version,
-        raw: transaction.into(),
+        raw: transaction,
     };
 
     Ok(Transaction::System(transaction))

@@ -30,6 +30,7 @@ use midnight_transient_crypto_v6::{
     encryption::SecretKey as SecretKeyV6, proofs::Proof as ProofV6,
 };
 use midnight_zswap_v6::Offer as OfferV6;
+use serde::Serialize;
 use std::error::Error as StdError;
 
 pub type SerializedContractAddress = ByteVec;
@@ -231,7 +232,7 @@ pub struct ContractAction {
 }
 
 /// Attributes for a specific contract action.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum ContractAttributes {
     Deploy,
     Call {
