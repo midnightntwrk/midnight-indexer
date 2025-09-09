@@ -56,7 +56,10 @@ pub enum ShieldedTransactionsEvent<S: Storage> {
 /// Aggregates a relevant transaction with the next start index and an optional collapsed
 /// Merkle-Tree update.
 #[derive(Debug, SimpleObject)]
-pub struct ViewingUpdate<S: Storage> {
+pub struct ViewingUpdate<S>
+where
+    S: Storage,
+{
     /// Next start index into the zswap state to be queried. Usually the end index of the included
     /// relevant transaction plus one unless that is a failure in which case just its end
     /// index.
@@ -123,7 +126,10 @@ impl From<domain::MerkleTreeCollapsedUpdate> for MerkleTreeCollapsedUpdate {
 }
 
 #[derive(Debug, SimpleObject)]
-pub struct RelevantTransaction<S: Storage> {
+pub struct RelevantTransaction<S>
+where
+    S: Storage,
+{
     /// Relevant transaction for the wallet.
     transaction: Transaction<S>,
 

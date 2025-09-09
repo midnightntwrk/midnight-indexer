@@ -26,7 +26,7 @@ use std::marker::PhantomData;
 /// A block with its relevant data.
 #[derive(Debug, SimpleObject)]
 #[graphql(complex)]
-pub struct Block<S: Storage>
+pub struct Block<S>
 where
     S: Storage,
 {

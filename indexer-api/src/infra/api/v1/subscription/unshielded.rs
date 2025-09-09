@@ -53,7 +53,10 @@ pub enum UnshieldedTransactionsEvent<S: Storage> {
 
 /// A transaction that created and/or spent UTXOs alongside these and other information.
 #[derive(Debug, SimpleObject)]
-pub struct UnshieldedTransaction<S: Storage> {
+pub struct UnshieldedTransaction<S>
+where
+    S: Storage,
+{
     /// The transaction that created and/or spent UTXOs.
     pub transaction: Transaction<S>,
 

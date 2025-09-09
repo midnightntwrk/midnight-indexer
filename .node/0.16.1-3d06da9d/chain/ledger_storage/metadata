@@ -1,5 +1,9 @@
 version=9
+<<<<<<<< HEAD:.node/0.16.1-2d361261/chain/ledger_storage/metadata
 salt=e2039e5a688c45dba8a9a6b1b539c2f8c40b59f453b33d1abe163d0b727d717c
+========
+salt=a7b3eca4c6cda7a29c46df323328c5b9b0dcea2ccd954bb5bf1b227e8cad7aa9
+>>>>>>>> origin/main:.node/0.16.1-3d06da9d/chain/ledger_storage/metadata
 col0=preimage: false, uniform: false, refc: false, compression: 0, ordered: true, multitree: false, append_only: false, allow_direct_node_access: false
 col1=preimage: false, uniform: false, refc: false, compression: 0, ordered: true, multitree: false, append_only: false, allow_direct_node_access: false
 col2=preimage: false, uniform: false, refc: false, compression: 0, ordered: true, multitree: false, append_only: false, allow_direct_node_access: false

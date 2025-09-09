@@ -27,7 +27,7 @@ use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{
         BlockAuthor, BlockHash, ByteVec, ProtocolVersion, ScaleDecodeProtocolVersionError,
-        ledger::{self, TransactionHash, ZswapStateRoot},
+        ledger::{self, ZswapStateRoot},
     },
     error::BoxError,
 };
@@ -216,11 +216,14 @@ impl SubxtNode {
             "making block"
         );
 
+        let online_client = self
+            .compatible_online_client(protocol_version, hash)
+            .await?;
+
         // Fetch authorities if `None`, either initially or because of a `NewSession` event (below).
         if authorities.is_none() {
-            // Safe to use self.online_client? Probably yes, because using storage at latest block.
             *authorities =
-                runtimes::fetch_authorities(&self.default_online_client, protocol_version).await?;
+                runtimes::fetch_authorities(hash, protocol_version, online_client).await?;
         }
         let author = authorities
             .as_ref()
@@ -228,12 +231,8 @@ impl SubxtNode {
             .transpose()?
             .flatten();
 
-        let online_client = self
-            .compatible_online_client(protocol_version, hash)
-            .await?;
-
         let zswap_state_root =
-            runtimes::get_zswap_state_root(online_client, hash, protocol_version).await?;
+            runtimes::get_zswap_state_root(hash, protocol_version, online_client).await?;
         let zswap_state_root = ZswapStateRoot::deserialize(zswap_state_root, protocol_version)?;
 
         let extrinsics = block.extrinsics().await.map_err(Box::new)?;
@@ -241,25 +240,12 @@ impl SubxtNode {
         let BlockDetails {
             timestamp,
             transactions,
-            system_transactions,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
 
-        let mut transactions = stream::iter(transactions)
+        let transactions = stream::iter(transactions)
             .then(|t| make_transaction(t, hash, protocol_version, online_client))
             .try_collect::<Vec<_>>()
             .await?;
-
-        for sys_tx_event in system_transactions {
-            if let Some(serialized_tx) = sys_tx_event.serialized_transaction {
-                let tx = make_system_transaction_with_hash(
-                    serialized_tx.into(),
-                    sys_tx_event.hash.into(),
-                    protocol_version,
-                )
-                .await?;
-                transactions.push(tx);
-            }
-        }
 
         let block = Block {
             hash,
@@ -468,8 +454,8 @@ pub enum SubxtNodeError {
     #[error("invalid protocol version {0}")]
     InvalidProtocolVersion(ProtocolVersion),
 
-    #[error("cannot hex-decode transaction")]
-    HexDecodeTransaction(#[source] const_hex::FromHexError),
+    #[error("cannot hex-decode system transaction")]
+    HexDecodeSystemTransaction(#[source] const_hex::FromHexError),
 }
 
 #[trace]
@@ -534,7 +520,6 @@ async fn make_regular_transaction(
     protocol_version: ProtocolVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Transaction, SubxtNodeError> {
-    // Transaction is already raw bytes, no hex decoding needed
     let ledger_transaction = ledger::Transaction::deserialize(&transaction, protocol_version)?;
 
     let hash = ledger_transaction.hash();
@@ -543,7 +528,7 @@ async fn make_regular_transaction(
 
     let contract_actions = ledger_transaction
         .contract_actions(|address| async move {
-            runtimes::get_contract_state(online_client, address, block_hash, protocol_version).await
+            runtimes::get_contract_state(address, block_hash, protocol_version, online_client).await
         })
         .await?
         .into_iter()
@@ -551,10 +536,10 @@ async fn make_regular_transaction(
         .collect();
 
     let fees = match runtimes::get_transaction_cost(
-        online_client,
         &transaction,
         block_hash,
         protocol_version,
+        online_client,
     )
     .await
     {
@@ -572,7 +557,7 @@ async fn make_regular_transaction(
         }
     };
 
-    let regular_transaction = RegularTransaction {
+    let transaction = RegularTransaction {
         hash,
         protocol_version,
         identifiers,
@@ -582,43 +567,26 @@ async fn make_regular_transaction(
         estimated_fees: fees.estimated_fees,
     };
 
-    Ok(Transaction::Regular(regular_transaction))
+    Ok(Transaction::Regular(transaction))
 }
 
 async fn make_system_transaction(
     transaction: ByteVec,
     protocol_version: ProtocolVersion,
 ) -> Result<Transaction, SubxtNodeError> {
-    // Transaction is already raw bytes, no hex decoding needed
+    let transaction = const_hex::decode(&transaction)
+        .map_err(SubxtNodeError::HexDecodeSystemTransaction)?
+        .into();
     let ledger_transaction =
         ledger::SystemTransaction::deserialize(&transaction, protocol_version)?;
 
     let hash = ledger_transaction.hash();
 
-    let system_transaction = SystemTransaction {
+    let transaction = SystemTransaction {
         hash,
         protocol_version,
         raw: transaction,
     };
 
-    Ok(Transaction::System(system_transaction))
-}
-
-async fn make_system_transaction_with_hash(
-    transaction: ByteVec,
-    hash: TransactionHash,
-    protocol_version: ProtocolVersion,
-) -> Result<Transaction, SubxtNodeError> {
-    // Transaction is already raw bytes, no need to decode
-    // Validate that we can deserialize the transaction
-    let _ledger_transaction =
-        ledger::SystemTransaction::deserialize(&transaction, protocol_version)?;
-
-    let system_transaction = SystemTransaction {
-        hash,
-        protocol_version,
-        raw: transaction,
-    };
-
-    Ok(Transaction::System(system_transaction))
+    Ok(Transaction::System(transaction))
 }
