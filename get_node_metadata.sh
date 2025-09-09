@@ -53,7 +53,7 @@ docker run \
 # Wait for port to be available (max 30 seconds)
 echo "Waiting for node to be ready..."
 for i in {1..30}; do
-    if nc -z localhost 9944 2>/dev/null; then
+    if curl -f http://localhost:9944/health/readiness 2>/dev/null; then
         echo "Node is ready"
         sleep 2  # Give it a moment to fully initialize
         break

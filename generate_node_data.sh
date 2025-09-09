@@ -17,10 +17,6 @@ if [ -z "$1" ]; then
 fi
 node_version="$1"
 
-# Configurable delays for PM-19168 workaround
-DELAY_BEFORE_SEND=${DELAY_BEFORE_SEND:-6}
-DELAY_BEFORE_MAINTENANCE=${DELAY_BEFORE_MAINTENANCE:-6}
-
 # Function to run all toolkit commands
 run_toolkit_commands() {
     # Generate batches
@@ -34,7 +30,7 @@ run_toolkit_commands() {
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
         generate-txs batches -n 1 -b 1
-    
+
     docker run \
         --rm \
         --network host \
@@ -43,7 +39,7 @@ run_toolkit_commands() {
         generate-txs --dest-file /out/contract_tx_1_deploy.mn --to-bytes \
         contract-calls deploy \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037'
-    
+
     docker run \
         --rm \
         --network host \
@@ -51,10 +47,7 @@ run_toolkit_commands() {
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
         contract-address --network undeployed \
         --src-file /out/contract_tx_1_deploy.mn --dest-file /out/contract_address.mn
-    
-    # Add delay to work around PM-19168 (ctime > tblock validation issue).
-    sleep $DELAY_BEFORE_SEND
-    
+
     docker run \
         --rm \
         --network host \
@@ -62,10 +55,7 @@ run_toolkit_commands() {
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
         generate-txs --src-files /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 \
         send
-    
-    # Add delay to work around PM-19168.
-    sleep $DELAY_BEFORE_SEND
-    
+
     # The 'store' function inserts data into a Merkle tree in the test contract
     # (see midnight-node MerkleTreeContract). We need this to generate contract
     # action events in the test data so the indexer can verify it properly tracks
@@ -79,13 +69,10 @@ run_toolkit_commands() {
         --call-key store \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
         --contract-address /out/contract_address.mn
-    
+
     # Wait for the contract call to be finalized before running maintenance.
     sleep 15
-    
-    # Add longer delay for maintenance to work around PM-19168.
-    sleep $DELAY_BEFORE_MAINTENANCE
-    
+
     docker run \
         --rm \
         --network host \
@@ -120,7 +107,7 @@ docker run \
 # Wait for node to be ready (max 30 seconds)
 echo "Waiting for node to be ready..."
 for i in {1..30}; do
-    if nc -z localhost 9944 2>/dev/null; then
+    if curl -f http://localhost:9944/health/readiness 2>/dev/null; then
         echo "Node is ready"
         sleep 2  # Give it a moment to fully initialize
         break
@@ -139,15 +126,15 @@ attempt=1
 
 while [ $attempt -le $max_attempts ]; do
     echo "Running toolkit commands (attempt $attempt of $max_attempts)..."
-    
+
     # Try to run all toolkit commands
     if run_toolkit_commands; then
         echo "Successfully generated node data"
         exit 0
     fi
-    
+
     echo "Toolkit commands failed on attempt $attempt" >&2
-    
+
     # If this wasn't the last attempt, clean up and retry
     if [ $attempt -lt $max_attempts ]; then
         echo "Cleaning up node data folder for retry..." >&2
@@ -155,7 +142,7 @@ while [ $attempt -le $max_attempts ]; do
         echo "Waiting before retry..." >&2
         sleep $((attempt * 5))
     fi
-    
+
     attempt=$((attempt + 1))
 done
 
