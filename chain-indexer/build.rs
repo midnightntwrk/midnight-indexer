@@ -92,6 +92,8 @@ fn read_node_version() -> String {
                 );
             }
 
+            let version = validate_and_sanitize_version(&version);
+
             println!(
                 "cargo:warning=Read node version from {}: {}",
                 NODE_VERSION_FILE, version
@@ -102,4 +104,42 @@ fn read_node_version() -> String {
             panic!("Failed to read {} file: {}", NODE_VERSION_FILE, e);
         }
     }
+}
+
+fn validate_and_sanitize_version(version: &str) -> String {
+    const PERMITTED_SPECIAL_CHARS: [char; 3] = ['.', '-', '_'];
+    const MAX_VERSION_LENGTH: usize = 64;
+    if version.len() > MAX_VERSION_LENGTH {
+        panic!(
+            "Node version too long (max {} characters): length is {}",
+            MAX_VERSION_LENGTH,
+            version.len()
+        );
+    }
+
+    // Validate that the version contains only allowed characters
+    // Node versions typically follow patterns like: "0.16.0-da0b6c69", "1.2.3-abc123def456"
+    let allowed_chars =
+        |c: char| -> bool { c.is_ascii_alphanumeric() || PERMITTED_SPECIAL_CHARS.contains(&c) };
+
+    if !version.chars().all(allowed_chars) {
+        panic!(
+            "Invalid characters in node version. Only {PERMITTED_SPECIAL_CHARS:?} are allowed. Got: '{}'",
+            version
+                .chars()
+                .filter(|c| !allowed_chars(*c))
+                .collect::<String>()
+        );
+    }
+
+    // Additional validation: ensure it's not empty and doesn't start/end with special chars
+    if version.starts_with(PERMITTED_SPECIAL_CHARS) || version.ends_with(PERMITTED_SPECIAL_CHARS) {
+        panic!(
+            "Node version cannot start or end with {PERMITTED_SPECIAL_CHARS:?}. Got: '{}'",
+            version
+        );
+    }
+
+    // Return the validated version (no need to sanitize further as we've validated allowed characters)
+    version.to_string()
 }
