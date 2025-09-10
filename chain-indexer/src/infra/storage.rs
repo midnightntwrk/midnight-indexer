@@ -454,9 +454,10 @@ async fn save_system_transaction(
 
                 _ => {
                     // Other system transactions (OverwriteParameters, DistributeNight,
-                    // PayBlockRewardsToTreasury, PayFromTreasuryShielded, PayFromTreasuryUnshielded)
-                    // have their effects already captured through ledger state application.
-                    // No additional storage needed.
+                    // PayBlockRewardsToTreasury, PayFromTreasuryShielded,
+                    // PayFromTreasuryUnshielded) have their effects already
+                    // captured through ledger state application. No additional
+                    // storage needed.
                 }
             }
         }
@@ -475,38 +476,34 @@ fn convert_cnight_events_to_dust_events(
         .enumerate()
         .map(|(index, event)| {
             let event_details = match event.action {
-                CNightGeneratesDustActionType::Create => {
-                    DustEventDetails::DustInitialUtxo {
-                        output: QualifiedDustOutput {
-                            initial_value: event.value,
-                            owner: event.owner.0.0.to_bytes_le().into(),
-                            nonce: event.nonce.0.0.into(),
-                            seq: 0,
-                            ctime: event.time.to_secs(),
-                            backing_night: event.nonce.0.0.into(),
-                            mt_index: 0,
-                        },
-                        generation_info: DustGenerationInfo {
-                            night_utxo_hash: ByteArray::default(),
-                            value: event.value,
-                            owner: event.owner.0.0.to_bytes_le().into(),
-                            nonce: event.nonce.0.0.into(),
-                            ctime: event.time.to_secs(),
-                            dtime: 0,
-                        },
-                        generation_index: 0,
-                    }
-                }
-                CNightGeneratesDustActionType::Destroy => {
-                    DustEventDetails::DustSpendProcessed {
-                        commitment: DustCommitment::default(),
-                        commitment_index: 0,
-                        nullifier: DustNullifier::default(),
-                        v_fee: 0,
-                        time: event.time.to_secs(),
-                        params: indexer_common::domain::dust::DustParameters::default(),
-                    }
-                }
+                CNightGeneratesDustActionType::Create => DustEventDetails::DustInitialUtxo {
+                    output: QualifiedDustOutput {
+                        initial_value: event.value,
+                        owner: event.owner.0.0.to_bytes_le().into(),
+                        nonce: event.nonce.0.0.into(),
+                        seq: 0,
+                        ctime: event.time.to_secs(),
+                        backing_night: event.nonce.0.0.into(),
+                        mt_index: 0,
+                    },
+                    generation_info: DustGenerationInfo {
+                        night_utxo_hash: ByteArray::default(),
+                        value: event.value,
+                        owner: event.owner.0.0.to_bytes_le().into(),
+                        nonce: event.nonce.0.0.into(),
+                        ctime: event.time.to_secs(),
+                        dtime: 0,
+                    },
+                    generation_index: 0,
+                },
+                CNightGeneratesDustActionType::Destroy => DustEventDetails::DustSpendProcessed {
+                    commitment: DustCommitment::default(),
+                    commitment_index: 0,
+                    nullifier: DustNullifier::default(),
+                    v_fee: 0,
+                    time: event.time.to_secs(),
+                    params: indexer_common::domain::dust::DustParameters::default(),
+                },
             };
 
             DustEvent {
@@ -880,7 +877,6 @@ async fn save_reserve_distribution(
 
     Ok(())
 }
-
 
 #[cfg_attr(feature = "cloud", trace)]
 async fn save_dust_utxos(

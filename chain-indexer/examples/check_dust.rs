@@ -4,7 +4,9 @@ use chain_indexer::{
     infra::subxt_node::{Config, SubxtNode},
 };
 use futures::{StreamExt, TryStreamExt};
-use indexer_common::domain::{ledger::SystemTransaction as LedgerSystemTransaction, PROTOCOL_VERSION_000_016_000};
+use indexer_common::domain::{
+    PROTOCOL_VERSION_000_016_000, ledger::SystemTransaction as LedgerSystemTransaction,
+};
 use std::time::Duration;
 
 #[tokio::main]
@@ -27,8 +29,12 @@ async fn main() -> anyhow::Result<()> {
     let mut fee_paying_tx_count = 0;
 
     while let Some(block) = blocks.try_next().await.context("get next block")? {
-        println!("Block {}: {} transactions", block.height, block.transactions.len());
-        
+        println!(
+            "Block {}: {} transactions",
+            block.height,
+            block.transactions.len()
+        );
+
         for transaction in block.transactions {
             if let node::Transaction::System(sys_tx) = transaction {
                 // Try to deserialize the system transaction
@@ -42,7 +48,10 @@ async fn main() -> anyhow::Result<()> {
                                 match v6_tx {
                                     V6SystemTx::CNightGeneratesDustUpdate { events } => {
                                         cnight_count += 1;
-                                        println!("  CNightGeneratesDust with {} events", events.len());
+                                        println!(
+                                            "  CNightGeneratesDust with {} events",
+                                            events.len()
+                                        );
                                     }
                                     V6SystemTx::DistributeReserve(amount) => {
                                         distribute_reserve_count += 1;
@@ -93,11 +102,14 @@ async fn main() -> anyhow::Result<()> {
 
     println!("\nSummary:");
     println!("  CNightGeneratesDust transactions: {}", cnight_count);
-    println!("  DistributeReserve transactions: {}", distribute_reserve_count);
+    println!(
+        "  DistributeReserve transactions: {}",
+        distribute_reserve_count
+    );
     println!("  Other system transactions: {}", other_count);
     println!("  Fee-paying regular transactions: {}", fee_paying_tx_count);
     println!("  Total fees paid: {} DUST", total_fees_paid);
-    
+
     if fee_paying_tx_count > 0 && cnight_count == 0 {
         println!("\nNote: Fees were paid but no CNightGeneratesDust occurred.");
         println!("This is expected without cNIGHT token holders.");

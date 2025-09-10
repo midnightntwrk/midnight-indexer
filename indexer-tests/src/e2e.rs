@@ -1123,10 +1123,10 @@ async fn test_dust_events_queries(
                 // Validate segment numbers are non-negative.
                 assert!(event.logical_segment >= 0);
                 assert!(event.physical_segment >= 0);
-                
+
                 // Validate transaction hash matches.
                 assert_eq!(event.transaction_hash, transaction.hash);
-                
+
                 // Validate and count event types.
                 match event.event_type {
                     dust_events_by_transaction_query::DustEventType::DUST_INITIAL_UTXO => {
@@ -1156,15 +1156,17 @@ async fn test_dust_events_queries(
     // cNIGHT UTXO events from Cardano (asset creates/spends, redemptions, registrations).
     // In a fresh test environment without such events, there won't be any DUST events.
     if dust_generating_tx_count == 0 {
-        println!("No DUST-generating transactions found - this is expected in a fresh test environment without cNIGHT UTXO events");
+        println!(
+            "No DUST-generating transactions found - this is expected in a fresh test environment without cNIGHT UTXO events"
+        );
     } else {
         // Validate DUST events were generated and distributed properly.
         assert!(total_dust_events > 0);
-        
+
         // When DUST events exist, validate we have a reasonable distribution.
         // At minimum, we should have initial UTXO events.
         assert!(dust_initial_utxo_count > 0);
-        
+
         // Validate total counts match.
         assert_eq!(
             total_dust_events,
@@ -1278,7 +1280,9 @@ async fn test_dust_comprehensive_coverage(
     // Note: DUST distribution only happens when there are cNIGHT UTXO events from Cardano.
     // Fees alone don't trigger DUST distribution in the absence of such events.
     if fee_paying_tx_count > 0 && dust_generating_tx_count == 0 {
-        println!("Fees were paid but no DUST distribution occurred - this is expected without cNIGHT UTXO events");
+        println!(
+            "Fees were paid but no DUST distribution occurred - this is expected without cNIGHT UTXO events"
+        );
     }
 
     // 5. Test block height consistency.
@@ -1320,7 +1324,9 @@ async fn test_dust_comprehensive_coverage(
         // 8. Test DUST subscriptions.
         test_dust_subscriptions(ws_api_url).await?;
     } else {
-        println!("Skipping additional DUST queries and subscription tests - no DUST events available");
+        println!(
+            "Skipping additional DUST queries and subscription tests - no DUST events available"
+        );
     }
 
     Ok(())
@@ -1346,11 +1352,13 @@ async fn test_additional_dust_queries(api_client: &Client, api_url: &str) -> any
     if !dust_state.is_null() && dust_state.is_object() {
         // Only validate fields if we have DUST data.
         assert!(
-            dust_state["commitmentTreeRoot"].is_string() || dust_state["commitmentTreeRoot"].is_null(),
+            dust_state["commitmentTreeRoot"].is_string()
+                || dust_state["commitmentTreeRoot"].is_null(),
             "commitmentTreeRoot should be string or null"
         );
         assert!(
-            dust_state["generationTreeRoot"].is_string() || dust_state["generationTreeRoot"].is_null(),
+            dust_state["generationTreeRoot"].is_string()
+                || dust_state["generationTreeRoot"].is_null(),
             "generationTreeRoot should be string or null"
         );
         assert!(
@@ -1393,7 +1401,7 @@ async fn test_additional_dust_queries(api_client: &Client, api_url: &str) -> any
 async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
     use crate::graphql_ws_client;
     use futures::StreamExt;
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
 
     // Test dustGenerations subscription.
     // Need a valid DUST address for this test.
@@ -1413,7 +1421,7 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
     // Add timeout to prevent hanging when no DUST events exist.
     let mut event_count = 0;
     let timeout_duration = Duration::from_secs(5);
-    
+
     loop {
         match timeout(timeout_duration, stream.next()).await {
             Ok(Some(result)) => {
@@ -1437,7 +1445,9 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
             Ok(None) => break, // Stream ended
             Err(_) => {
                 // Timeout - no DUST events available
-                println!("No DUST generation events received within timeout - this is expected without cNIGHT UTXO events");
+                println!(
+                    "No DUST generation events received within timeout - this is expected without cNIGHT UTXO events"
+                );
                 break;
             }
         }
@@ -1470,10 +1480,12 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
                 Err(e) => return Err(e),
             }
         }
-        Ok(None) => {}, // Stream ended
+        Ok(None) => {} // Stream ended
         Err(_) => {
             // Timeout - no events
-            println!("No DUST nullifier transaction events received within timeout - this is expected without cNIGHT UTXO events");
+            println!(
+                "No DUST nullifier transaction events received within timeout - this is expected without cNIGHT UTXO events"
+            );
         }
     }
 
@@ -1502,10 +1514,12 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
                 Err(e) => return Err(e),
             }
         }
-        Ok(None) => {}, // Stream ended
+        Ok(None) => {} // Stream ended
         Err(_) => {
             // Timeout - no events
-            println!("No DUST commitment events received within timeout - this is expected without cNIGHT UTXO events");
+            println!(
+                "No DUST commitment events received within timeout - this is expected without cNIGHT UTXO events"
+            );
         }
     }
 
