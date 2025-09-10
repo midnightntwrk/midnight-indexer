@@ -69,21 +69,24 @@ where
     pub collapsed_merkle_tree: Option<CollapsedMerkleTree>,
 }
 
-/// Aggregates information about the shielded transactions indexing progress.
+/// Information about the shielded transactions indexing progress.
 #[derive(Debug, SimpleObject)]
 pub struct ShieldedTransactionsProgress {
-    /// The highest zswap state end index (see `end_index` of `Transaction`) of all transactions.
-    /// It represents the known state of the blockchain.
+    /// The highest zswap state end index (see `endIndex` of `Transaction`) of all transactions. It
+    /// represents the known state of the blockchain. A value of zero (completely unlikely) means
+    /// that no shielded transactions have been indexed yet.
     pub highest_end_index: u64,
 
-    /// The highest zswap state end index (see `end_index` of `Transaction`) of all transactions
-    /// checked for relevance for the subscribing wallet. Initially less than and eventually (when
-    /// the subscribing wallet has been fully indexed) equal to `highest_index`.
+    /// The highest zswap state end index (see `endIndex` of `Transaction`) of all transactions
+    /// checked for relevance. Initially less than and eventually (when some wallet has been fully
+    /// indexed) equal to `highest_end_index`. A value of zero (very unlikely) means that no wallet
+    /// has subscribed before and indexing for the subscribing wallet has not yet started.
     pub highest_checked_end_index: u64,
 
-    /// The highest zswap state end index of all relevant transactions for the subscribing wallet.
-    /// Usually less than `highest_checked_index` unless the latest checked transaction is relevant
-    /// for the subscribing wallet.
+    /// The highest zswap state end index (see `endIndex` of `Transaction`) of all relevant
+    /// transactions for the subscribing wallet. Usually less than `highest_checked_end_index`
+    /// unless the latest checked transaction is relevant for the subscribing wallet. A value of
+    /// zero means that no relevant transactions have been indexed for the subscribing wallet.
     pub highest_relevant_end_index: u64,
 }
 
@@ -295,7 +298,7 @@ where
     S: Storage,
     Z: LedgerStateStorage,
 {
-    debug!(from, transaction:?; "making viewing update");
+    debug!(from, transaction:?; "making relevant transaction");
 
     let collapsed_merkle_tree = if from == transaction.start_index || transaction.start_index == 0 {
         None
@@ -340,18 +343,14 @@ async fn make_progress_update<S>(
 where
     S: Storage,
 {
-    let (highest_index, highest_relevant_index, highest_relevant_wallet_index) = storage
+    let (highest_end_index, highest_checked_end_index, highest_relevant_end_index) = storage
         .get_highest_end_indices(session_id)
         .await
         .map_err_into_server_error(|| "get highest indices")?;
 
-    let highest_end_index = highest_index.unwrap_or_default();
-    let highest_checked_end_index = highest_relevant_index.unwrap_or_default();
-    let highest_relevant_end_index = highest_relevant_wallet_index.unwrap_or_default();
-
     Ok(ShieldedTransactionsProgress {
-        highest_end_index,
-        highest_checked_end_index,
-        highest_relevant_end_index,
+        highest_end_index: highest_end_index.unwrap_or_default(),
+        highest_checked_end_index: highest_checked_end_index.unwrap_or_default(),
+        highest_relevant_end_index: highest_relevant_end_index.unwrap_or_default(),
     })
 }

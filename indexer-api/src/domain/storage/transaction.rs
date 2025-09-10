@@ -72,8 +72,8 @@ where
     /// Get a tuple of end indices:
     /// - the highest zswap state end index of all transactions,
     /// - the highest zswap state end index of all transactions checked for relevance and
-    /// - the highest zswap state end index of all relevant transactions for a wallet identified by
-    ///   the given session ID.
+    /// - the highest zswap state end index of all relevant transactions for the wallet identified
+    ///   by the given session ID.
     async fn get_highest_end_indices(
         &self,
         session_id: SessionId,

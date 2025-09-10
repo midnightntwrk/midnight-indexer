@@ -347,8 +347,9 @@ impl TransactionStorage for Storage {
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error> {
         let query = indoc! {"
             SELECT (
-                SELECT MAX(end_index) FROM regular_transactions
-            ) AS highest_index,
+                SELECT MAX(end_index)
+                FROM regular_transactions
+            ),
             (
                 SELECT end_index
                 FROM regular_transactions
@@ -356,7 +357,7 @@ impl TransactionStorage for Storage {
                     SELECT MAX(last_indexed_transaction_id)
                     FROM wallets
                 )
-            ) AS highest_relevant_index,
+            ),
             (
                 SELECT end_index
                 FROM regular_transactions
@@ -365,19 +366,19 @@ impl TransactionStorage for Storage {
                 WHERE wallets.session_id = $1
                 ORDER BY end_index DESC
                 LIMIT 1
-            ) AS highest_relevant_wallet_index
+            )
         "};
 
-        let (highest_index, highest_relevant_index, highest_relevant_wallet_index) =
+        let (highest_end_index, highest_checked_end_index, highest_relevant_end_index) =
             sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(query)
                 .bind(session_id.as_ref())
                 .fetch_one(&*self.pool)
                 .await?;
 
         Ok((
-            highest_index.map(|n| n as u64),
-            highest_relevant_index.map(|n| n as u64),
-            highest_relevant_wallet_index.map(|n| n as u64),
+            highest_end_index.map(|n| n as u64),
+            highest_checked_end_index.map(|n| n as u64),
+            highest_relevant_end_index.map(|n| n as u64),
         ))
     }
 }

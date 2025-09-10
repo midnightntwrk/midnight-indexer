@@ -821,7 +821,7 @@ async fn test_shielded_transactions_subscription(
             .await
             .context("collect shielded transactions events")?;
 
-    // Filter viewing updates only.
+    // Filter relevant transactions only.
     let relevant_transactions = events.into_iter().filter_map(|event| match event {
         ShieldedTransactions::RelevantTransaction(relevant_transaction) => {
             Some(relevant_transaction)
