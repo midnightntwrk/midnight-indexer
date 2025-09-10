@@ -51,8 +51,6 @@ log                          = { version = "0.4" }
 logforth                     = { version = "0.27" }
 metrics                      = { version = "0.24" }
 metrics-exporter-prometheus  = { version = "0.17", default-features = false }
-# TODO: Enable dust feature when available in ledger-6.0.0-alpha.3 or later version
-# The DUST integration requires the ledger's dust feature to be enabled
 midnight-base-crypto_v6      = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-base-crypto", tag = "ledger-6.0.0-alpha.3" }
 midnight-coin-structure_v6   = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-coin-structure", tag = "ledger-6.0.0-alpha.3" }
 midnight-ledger_v6           = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-ledger", tag = "ledger-6.0.0-alpha.3" }

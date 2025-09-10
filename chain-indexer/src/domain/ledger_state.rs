@@ -145,14 +145,6 @@ impl LedgerState {
             }
         }
 
-        // TODO: Extract DUST events from ledger when support is available.
-        // Currently, the ledger doesn't provide events through apply_transaction.
-        // In the future, we'll need to re-apply transactions to extract events.
-        let dust_events = Vec::new();
-
-        // Store DUST events
-        transaction.dust_events = Box::new(dust_events);
-
         // Update extracted balances of contract actions.
         for contract_action in &mut transaction.contract_actions {
             let contract_state =
