@@ -410,13 +410,25 @@ async fn save_system_transaction(
     _block_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Deserialize the system transaction.
+    // Deserialize the system transaction to extract additional metadata.
+    // Note: The transaction has already been successfully applied to the ledger state,
+    // so failure here only affects our ability to store additional indexing metadata.
     let system_tx = match DomainSystemTransaction::deserialize(
         &transaction.raw,
         transaction.protocol_version,
     ) {
         Ok(tx) => tx,
-        Err(_) => return Ok(()), // Continue processing other transactions.
+        Err(error) => {
+            // Log and continue - we don't want to fail the entire block processing
+            // just because we can't extract metadata from a system transaction.
+            // This could happen with newer protocol versions we don't yet support.
+            log::warn!(
+                "cannot extract metadata from system transaction {}: {}",
+                transaction.hash,
+                error
+            );
+            return Ok(());
+        }
     };
 
     // Handle the V6 variant to access the inner ledger transaction.
@@ -424,7 +436,7 @@ async fn save_system_transaction(
         DomainSystemTransaction::V6(ledger_tx) => {
             match ledger_tx {
                 LedgerSystemTransaction::CNightGeneratesDustUpdate { events } => {
-                    // Process and save DUST events..
+                    // Process and save DUST events.
                     let dust_events =
                         convert_cnight_events_to_dust_events(&events, &transaction.hash);
                     if !dust_events.is_empty() {
@@ -433,12 +445,18 @@ async fn save_system_transaction(
                     }
                 }
 
-                LedgerSystemTransaction::DistributeReserve(_amount) => {
-                    // TODO: Store reserve distribution information when needed.
+                LedgerSystemTransaction::DistributeReserve(amount) => {
+                    // Store reserve distribution for tracking and auditing.
+                    // Note: The ledger state is already updated, but we track these
+                    // events separately for analytics and historical queries.
+                    save_reserve_distribution(transaction_id, amount, tx).await?;
                 }
 
                 _ => {
-                    // Other system transaction types not yet handled.
+                    // Other system transactions (OverwriteParameters, DistributeNight,
+                    // PayBlockRewardsToTreasury, PayFromTreasuryShielded, PayFromTreasuryUnshielded)
+                    // have their effects already captured through ledger state application.
+                    // No additional storage needed.
                 }
             }
         }
@@ -456,38 +474,35 @@ fn convert_cnight_events_to_dust_events(
         .iter()
         .enumerate()
         .map(|(index, event)| {
-            // Create DUST event based on action type.
             let event_details = match event.action {
                 CNightGeneratesDustActionType::Create => {
                     DustEventDetails::DustInitialUtxo {
                         output: QualifiedDustOutput {
                             initial_value: event.value,
                             owner: event.owner.0.0.to_bytes_le().into(),
-                            nonce: event.nonce.0.0.into(), // InitialNonce wraps HashOutput.
-                            seq: 0,                        // Initial sequence number.
+                            nonce: event.nonce.0.0.into(),
+                            seq: 0,
                             ctime: event.time.to_secs(),
-                            backing_night: event.nonce.0.0.into(), /* Use nonce as backing
-                                                                    * reference. */
-                            mt_index: 0, // Will be set by ledger processing.
+                            backing_night: event.nonce.0.0.into(),
+                            mt_index: 0,
                         },
                         generation_info: DustGenerationInfo {
-                            night_utxo_hash: ByteArray::default(), // Not available in CNGD event.
+                            night_utxo_hash: ByteArray::default(),
                             value: event.value,
                             owner: event.owner.0.0.to_bytes_le().into(),
                             nonce: event.nonce.0.0.into(),
                             ctime: event.time.to_secs(),
-                            dtime: 0, // Will be set when Night is spent.
+                            dtime: 0,
                         },
-                        generation_index: 0, // Will be set by ledger processing.
+                        generation_index: 0,
                     }
                 }
                 CNightGeneratesDustActionType::Destroy => {
-                    // For destroy events, we treat them as spend events.
                     DustEventDetails::DustSpendProcessed {
-                        commitment: DustCommitment::default(), // Not available in CNGD event.
+                        commitment: DustCommitment::default(),
                         commitment_index: 0,
-                        nullifier: DustNullifier::default(), // Not available in CNGD event.
-                        v_fee: 0,                            // No fee for system-initiated destroy.
+                        nullifier: DustNullifier::default(),
+                        v_fee: 0,
                         time: event.time.to_secs(),
                         params: indexer_common::domain::dust::DustParameters::default(),
                     }
@@ -715,10 +730,7 @@ async fn process_dust_events(
                 ..
             } => {
                 mark_dust_utxo_spent(*commitment, *nullifier, transaction_id, tx).await?;
-            } /* TODO: Handle registration events when node team implements them.
-               * These will come from system transactions created by the node,
-               * not from the ledger events.
-               * See PM-17951 for node integration work. */
+            }
         }
     }
 
@@ -845,6 +857,30 @@ async fn save_dust_generation_info(
 
     Ok(id as u64)
 }
+
+#[trace]
+async fn save_reserve_distribution(
+    transaction_id: i64,
+    amount: u128,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO reserve_distributions (
+            transaction_id,
+            amount
+        )
+        VALUES ($1, $2)
+    "};
+
+    sqlx::query(query)
+        .bind(transaction_id)
+        .bind(U128BeBytes::from(amount))
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
 
 #[cfg_attr(feature = "cloud", trace)]
 async fn save_dust_utxos(

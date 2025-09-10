@@ -215,3 +215,16 @@ CREATE INDEX dust_events_transaction_idx ON dust_events(transaction_id);
 
 CREATE INDEX dust_events_type_idx ON dust_events(event_type);
 
+-- Reserve distribution tracking
+-- Tracks when and how much NIGHT is distributed from the reserve pool
+CREATE TABLE IF NOT EXISTS reserve_distributions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id INTEGER NOT NULL,
+    amount BLOB NOT NULL, -- u128 as 16 bytes
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX reserve_distributions_transaction_idx ON reserve_distributions(transaction_id);
+CREATE INDEX reserve_distributions_created_at_idx ON reserve_distributions(created_at);
+
