@@ -812,7 +812,7 @@ async fn update_dust_generation_dtime(
     let query = indoc! {"
         UPDATE dust_generation_info
         SET dtime = $1
-        WHERE index = $2
+        WHERE merkle_index = $2
     "};
 
     sqlx::query(query)
@@ -837,7 +837,7 @@ async fn save_dust_generation_info(
             owner,
             nonce,
             ctime,
-            index,
+            merkle_index,
             dtime
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7)
