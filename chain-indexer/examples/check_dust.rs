@@ -18,11 +18,13 @@ async fn main() -> anyhow::Result<()> {
     let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 
     let blocks = node.finalized_blocks(None);
-    let mut blocks = Box::pin(blocks.take(5)); // Check first 5 blocks
+    let mut blocks = Box::pin(blocks.take(30)); // Check first 30 blocks to see fee transactions
 
     let mut cnight_count = 0;
     let mut distribute_reserve_count = 0;
     let mut other_count = 0;
+    let mut total_fees_paid = 0u128;
+    let mut fee_paying_tx_count = 0;
 
     while let Some(block) = blocks.try_next().await.context("get next block")? {
         println!("Block {}: {} transactions", block.height, block.transactions.len());
@@ -78,6 +80,13 @@ async fn main() -> anyhow::Result<()> {
                         println!("  Failed to deserialize system tx: {}", e);
                     }
                 }
+            } else if let node::Transaction::Regular(reg_tx) = transaction {
+                // Check if regular transaction paid fees
+                if reg_tx.paid_fees > 0 {
+                    fee_paying_tx_count += 1;
+                    total_fees_paid += reg_tx.paid_fees;
+                    println!("  Regular tx paid fees: {} DUST", reg_tx.paid_fees);
+                }
             }
         }
     }
@@ -86,6 +95,13 @@ async fn main() -> anyhow::Result<()> {
     println!("  CNightGeneratesDust transactions: {}", cnight_count);
     println!("  DistributeReserve transactions: {}", distribute_reserve_count);
     println!("  Other system transactions: {}", other_count);
+    println!("  Fee-paying regular transactions: {}", fee_paying_tx_count);
+    println!("  Total fees paid: {} DUST", total_fees_paid);
+    
+    if fee_paying_tx_count > 0 && cnight_count == 0 {
+        println!("\nNote: Fees were paid but no CNightGeneratesDust occurred.");
+        println!("This is expected without cNIGHT token holders.");
+    }
 
     Ok(())
 }
