@@ -27,7 +27,7 @@ use indexer_common::domain::{BlockHash, ProtocolVersion};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
-/// A transaction with its relevant data.
+/// A Midnight transaction.
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
 pub struct Transaction<S>
@@ -63,6 +63,12 @@ where
     /// The hex-encoded serialized merkle-tree root.
     #[debug(skip)]
     merkle_tree_root: HexEncoded,
+
+    /// The zswap state start index.
+    start_index: u64,
+
+    /// The zswap state end index.
+    pub end_index: u64,
 
     #[graphql(skip)]
     #[debug(skip)]
@@ -177,6 +183,8 @@ where
             transaction_result,
             identifiers,
             merkle_tree_root,
+            start_index,
+            end_index,
             ..
         } = value;
 
@@ -205,6 +213,8 @@ where
                 .map(|identifier| identifier.hex_encode())
                 .collect::<Vec<_>>(),
             merkle_tree_root: merkle_tree_root.hex_encode(),
+            start_index,
+            end_index,
             _s: PhantomData,
         }
     }

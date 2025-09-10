@@ -116,7 +116,7 @@ impl<T> AsBytesExt for T where T: AsRef<[u8]> {}
 
 /// Export the GraphQL schema in SDL format.
 pub fn export_schema() -> String {
-    //Once traits with async functions are object safe, `NoopStorage` can be replaced with
+    // Once traits with async functions are object safe, `NoopStorage` can be replaced with
     // `<Box<dyn Storage>`.
     schema_builder::<NoopStorage, NoopSubscriber, NoopLedgerStateStorage>()
         .finish()
