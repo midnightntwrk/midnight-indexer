@@ -1094,13 +1094,18 @@ async fn test_dust_events_queries(
     api_url: &str,
     ws_api_url: &str,
 ) -> anyhow::Result<()> {
-    // Track system transactions and fee-paying transactions.
-    let mut system_tx_count = 0;
+    // Track DUST-generating transactions and fee-paying transactions.
+    // Note: System transactions are not exposed via the API, so we infer
+    // their presence from DUST events.
+    let mut dust_generating_tx_count = 0;
     let mut fee_paying_tx_count = 0;
     let mut total_dust_events = 0;
+    let mut dust_initial_utxo_count = 0;
+    let mut dust_generation_update_count = 0;
+    let mut dust_spend_processed_count = 0;
 
     for transaction in &indexer_data.transactions {
-        // Check if this transaction has DUST events (system transaction).
+        // Check if this transaction has DUST events.
         let variables = dust_events_by_transaction_query::Variables {
             transaction_hash: transaction.hash.to_owned(),
         };
@@ -1109,17 +1114,29 @@ async fn test_dust_events_queries(
             .dust_events_by_transaction;
 
         if !events.is_empty() {
-            // This is a CNightGeneratesDust system transaction.
-            system_tx_count += 1;
+            // Transaction with DUST events (likely from CNightGeneratesDust system transaction).
+            dust_generating_tx_count += 1;
             total_dust_events += events.len();
 
-            // Validate DUST event types are correct.
+            // Validate DUST event structure and data.
             for event in &events {
+                // Validate segment numbers are non-negative.
+                assert!(event.logical_segment >= 0);
+                assert!(event.physical_segment >= 0);
+                
+                // Validate transaction hash matches.
+                assert_eq!(event.transaction_hash, transaction.hash);
+                
+                // Validate and count event types.
                 match event.event_type {
-                    dust_events_by_transaction_query::DustEventType::DUST_INITIAL_UTXO
-                    | dust_events_by_transaction_query::DustEventType::DUST_GENERATION_DTIME_UPDATE
-                    | dust_events_by_transaction_query::DustEventType::DUST_SPEND_PROCESSED => {
-                        // Valid DUST event type.
+                    dust_events_by_transaction_query::DustEventType::DUST_INITIAL_UTXO => {
+                        dust_initial_utxo_count += 1;
+                    }
+                    dust_events_by_transaction_query::DustEventType::DUST_GENERATION_DTIME_UPDATE => {
+                        dust_generation_update_count += 1;
+                    }
+                    dust_events_by_transaction_query::DustEventType::DUST_SPEND_PROCESSED => {
+                        dust_spend_processed_count += 1;
                     }
                     _ => {
                         panic!("Invalid DUST event type: {:?}", event.event_type);
@@ -1135,16 +1152,23 @@ async fn test_dust_events_queries(
         }
     }
 
-    // Note: CNightGeneratesDust system transactions are only created when there are
+    // Note: CNightGeneratesDust system transactions only create DUST events when there are
     // cNIGHT UTXO events from Cardano (asset creates/spends, redemptions, registrations).
     // In a fresh test environment without such events, there won't be any DUST events.
-    if system_tx_count == 0 {
-        println!("No CNightGeneratesDust system transactions found - this is expected in a fresh test environment without cNIGHT UTXO events");
+    if dust_generating_tx_count == 0 {
+        println!("No DUST-generating transactions found - this is expected in a fresh test environment without cNIGHT UTXO events");
     } else {
-        // Validate DUST events were generated.
-        assert!(
-            total_dust_events > 0,
-            "CNightGeneratesDust transactions must generate DUST events"
+        // Validate DUST events were generated and distributed properly.
+        assert!(total_dust_events > 0);
+        
+        // When DUST events exist, validate we have a reasonable distribution.
+        // At minimum, we should have initial UTXO events.
+        assert!(dust_initial_utxo_count > 0);
+        
+        // Validate total counts match.
+        assert_eq!(
+            total_dust_events,
+            dust_initial_utxo_count + dust_generation_update_count + dust_spend_processed_count
         );
     }
 
@@ -1174,9 +1198,9 @@ async fn test_dust_events_queries(
         .await?
         .recent_dust_events;
 
-    // Should have recent DUST events if system transactions exist.
-    if system_tx_count > 0 {
-        assert!(!recent_events.is_empty(), "Should have recent DUST events");
+    // Should have recent DUST events if DUST-generating transactions exist.
+    if dust_generating_tx_count > 0 {
+        assert!(!recent_events.is_empty());
     }
 
     // Note: Cannot validate event ordering without block_height field in DustEvent
@@ -1188,7 +1212,7 @@ async fn test_dust_events_queries(
         ws_api_url,
         &recent_events,
         indexer_data,
-        system_tx_count,
+        dust_generating_tx_count,
         fee_paying_tx_count,
     )
     .await?;
@@ -1203,7 +1227,7 @@ async fn test_dust_comprehensive_coverage(
     ws_api_url: &str,
     recent_events: &[recent_dust_events_query::RecentDustEventsQueryRecentDustEvents],
     indexer_data: &IndexerData,
-    system_tx_count: usize,
+    dust_generating_tx_count: usize,
     fee_paying_tx_count: usize,
 ) -> anyhow::Result<()> {
     // 1. Test all DUST event type filters.
@@ -1248,12 +1272,12 @@ async fn test_dust_comprehensive_coverage(
     let limited_events = send_query::<RecentDustEventsQuery>(api_client, api_url, variables)
         .await?
         .recent_dust_events;
-    assert!(limited_events.len() <= 1, "Limit parameter must work");
+    assert!(limited_events.len() <= 1);
 
     // 4. Validate fee and DUST correlation.
     // Note: DUST distribution only happens when there are cNIGHT UTXO events from Cardano.
     // Fees alone don't trigger DUST distribution in the absence of such events.
-    if fee_paying_tx_count > 0 && system_tx_count == 0 {
+    if fee_paying_tx_count > 0 && dust_generating_tx_count == 0 {
         println!("Fees were paid but no DUST distribution occurred - this is expected without cNIGHT UTXO events");
     }
 
@@ -1272,7 +1296,7 @@ async fn test_dust_comprehensive_coverage(
     // 6. Validate SIDECHAIN_BLOCK_BENEFICIARY receives rewards.
     // In each block with fees, the beneficiary should get DUST events.
     // This is handled by CNightGeneratesDust system transactions.
-    if system_tx_count > 0 {
+    if dust_generating_tx_count > 0 {
         // At least some DUST events should be for block rewards.
         let has_reward_events = recent_events.iter().any(|e| {
             matches!(
@@ -1291,7 +1315,7 @@ async fn test_dust_comprehensive_coverage(
 
     // 7. Test additional DUST queries.
     // Only test DUST functionality if we have DUST events
-    if system_tx_count > 0 {
+    if dust_generating_tx_count > 0 {
         test_additional_dust_queries(api_client, api_url).await?;
         // 8. Test DUST subscriptions.
         test_dust_subscriptions(ws_api_url).await?;
