@@ -1,0 +1,28 @@
+#!/bin/bash
+
+set -e
+
+CHAIN=$1
+if [ -z "$CHAIN" ]; then
+    echo "Please provide a chain id"
+    echo "Usage: $0 <chain_id>"
+    exit 1
+fi
+if [ "$CHAIN" != "undeployed" ] && [ "$CHAIN" != "devnet" ] && [ "$CHAIN" != "testnet02" ] && [ "$CHAIN" != "nodedev01" ]; then
+    echo "Please provide a valid chain id (undeployed, devnet, testnet02, nodedev01)"
+    echo "Usage: $0 <chain_id>"
+    exit 1
+fi
+
+CONTAINER_NAME="toolkit-${CHAIN}"
+
+docker stop $CONTAINER_NAME
+docker rm $CONTAINER_NAME
+
+
+
+
+
+
+
+
