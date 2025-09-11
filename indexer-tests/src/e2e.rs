@@ -38,8 +38,7 @@ use crate::{
         dust_commitments_subscription, dust_events_by_transaction_query,
         dust_generation_status_query, dust_generations_subscription, dust_merkle_root_query,
         dust_nullifier_transactions_subscription, dust_registration_updates_subscription,
-        recent_dust_events_query,
-        shielded_transactions_subscription, transactions_query,
+        recent_dust_events_query, shielded_transactions_subscription, transactions_query,
         unshielded_transactions_subscription,
     },
     graphql_ws_client,
@@ -1236,7 +1235,7 @@ async fn test_dust_events_queries(
     println!("Testing recentDustEvents query...");
     let variables = recent_dust_events_query::Variables {
         limit: Some(10),
-        event_type: None,  // Get all event types.
+        event_type: None, // Get all event types.
     };
     let recent_events = send_query::<RecentDustEventsQuery>(api_client, api_url, variables)
         .await?
@@ -1245,7 +1244,7 @@ async fn test_dust_events_queries(
         "recentDustEvents query completed, got {} events",
         recent_events.len()
     );
-    
+
     // Just validate structure if we have events.
     for event in &recent_events {
         // Each event should have these fields (validation done by type system).
@@ -1422,21 +1421,20 @@ async fn test_additional_dust_queries(api_client: &Client, api_url: &str) -> any
     if dust_state.is_object() {
         // Validate structure when DUST data exists.
         assert!(
-            dust_state["commitmentTreeRoot"].is_string() || dust_state["commitmentTreeRoot"].is_null()
+            dust_state["commitmentTreeRoot"].is_string()
+                || dust_state["commitmentTreeRoot"].is_null()
         );
         assert!(
-            dust_state["generationTreeRoot"].is_string() || dust_state["generationTreeRoot"].is_null()
+            dust_state["generationTreeRoot"].is_string()
+                || dust_state["generationTreeRoot"].is_null()
         );
+        assert!(dust_state["blockHeight"].is_number() || dust_state["blockHeight"].is_null());
+        assert!(dust_state["timestamp"].is_number() || dust_state["timestamp"].is_null());
         assert!(
-            dust_state["blockHeight"].is_number() || dust_state["blockHeight"].is_null()
+            dust_state["totalRegistrations"].is_number()
+                || dust_state["totalRegistrations"].is_null()
         );
-        assert!(
-            dust_state["timestamp"].is_number() || dust_state["timestamp"].is_null()
-        );
-        assert!(
-            dust_state["totalRegistrations"].is_number() || dust_state["totalRegistrations"].is_null()
-        );
-        
+
         // If we have numeric values, validate they're reasonable.
         if let Some(height) = dust_state["blockHeight"].as_i64() {
             assert!(height >= 0);
@@ -1454,10 +1452,14 @@ async fn test_additional_dust_queries(api_client: &Client, api_url: &str) -> any
     // Test dustGenerationStatus query.
     // Using test stake keys - actual values don't matter for structural testing.
     let test_stake_keys = vec![
-        "0x0000000000000000000000000000000000000000000000000000000000000001".try_into().unwrap(),
-        "0x0000000000000000000000000000000000000000000000000000000000000002".try_into().unwrap(),
+        "0x0000000000000000000000000000000000000000000000000000000000000001"
+            .try_into()
+            .unwrap(),
+        "0x0000000000000000000000000000000000000000000000000000000000000002"
+            .try_into()
+            .unwrap(),
     ];
-    
+
     let variables = dust_generation_status_query::Variables {
         cardano_stake_keys: test_stake_keys,
     };
@@ -1469,31 +1471,23 @@ async fn test_additional_dust_queries(api_client: &Client, api_url: &str) -> any
         .await?
         .json()
         .await?;
-    
+
     // Verify response structure.
     if let Some(status_array) = response["data"]["dustGenerationStatus"].as_array() {
         // Should return status for all requested addresses.
         assert!(!status_array.is_empty());
-        
+
         for status in status_array {
             // Validate each status has required fields.
             assert!(status["cardanoStakeKey"].is_string());
             assert!(status["isRegistered"].is_boolean());
-            
+
             // Other fields can be null for unregistered addresses.
-            assert!(
-                status["dustAddress"].is_string() || status["dustAddress"].is_null()
-            );
-            assert!(
-                status["generationRate"].is_string() || status["generationRate"].is_null()
-            );
-            assert!(
-                status["currentCapacity"].is_string() || status["currentCapacity"].is_null()
-            );
-            assert!(
-                status["nightBalance"].is_string() || status["nightBalance"].is_null()
-            );
-            
+            assert!(status["dustAddress"].is_string() || status["dustAddress"].is_null());
+            assert!(status["generationRate"].is_string() || status["generationRate"].is_null());
+            assert!(status["currentCapacity"].is_string() || status["currentCapacity"].is_null());
+            assert!(status["nightBalance"].is_string() || status["nightBalance"].is_null());
+
             // If registered, dustAddress should be present.
             if status["isRegistered"].as_bool().unwrap_or(false) {
                 assert!(status["dustAddress"].is_string());
@@ -1543,8 +1537,8 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
 
     // Verify subscription behavior.
     let mut generation_events = 0;
-    let mut merkle_updates = 0;
-    let mut progress_events = 0;
+    let _merkle_updates = 0;
+    let _progress_events = 0;
     let timeout_duration = Duration::from_secs(5);
 
     loop {
@@ -1557,10 +1551,10 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
                         // - DustGenerationMerkleUpdate (merkle tree updates)
                         // - DustGenerationProgress (progress indicator)
                         let _ = &data.dust_generations;
-                        
+
                         // Count different event types (would need proper matching in real code).
                         generation_events += 1;
-                        
+
                         // Stop after receiving a reasonable sample.
                         if generation_events >= 5 {
                             break;
@@ -1622,13 +1616,12 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
 
     // Test dustRegistrationUpdates subscription.
     let variables = dust_registration_updates_subscription::Variables {
-        addresses: vec![],  // Empty array to subscribe to all addresses.
+        addresses: vec![], // Empty array to subscribe to all addresses.
     };
 
-    let mut stream = graphql_ws_client::subscribe::<DustRegistrationUpdatesSubscription>(
-        ws_api_url, variables,
-    )
-    .await?;
+    let mut stream =
+        graphql_ws_client::subscribe::<DustRegistrationUpdatesSubscription>(ws_api_url, variables)
+            .await?;
 
     // Verify the subscription can stream multiple events without errors.
     // We collect up to 3 events to ensure:
@@ -1638,21 +1631,22 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
     // If no events arrive within 5 seconds, that's also valid (no registrations in test data).
     let mut events_received = 0;
     let timeout_duration = Duration::from_secs(5);
-    
+
     loop {
         match timeout(timeout_duration, stream.next()).await {
             Ok(Some(result)) => {
                 if let Ok(data) = result {
                     events_received += 1;
-                    
+
                     // Validate the union type structure.
-                    // The subscription returns either RegistrationUpdate or RegistrationUpdateProgress.
-                    // Just accessing the field validates it exists and has the right type.
+                    // The subscription returns either RegistrationUpdate or
+                    // RegistrationUpdateProgress. Just accessing the field
+                    // validates it exists and has the right type.
                     let _ = &data.dust_registration_updates;
-                    
+
                     // Could be either a registration update or a progress update.
                     // Both are valid responses from this subscription.
-                    
+
                     // Take a few events to ensure streaming works properly.
                     if events_received >= 3 {
                         break;
@@ -1668,7 +1662,9 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
                 if events_received > 0 {
                     println!("Received {} registration update events", events_received);
                 } else {
-                    println!("No DUST registration events - expected if no registrations in test data");
+                    println!(
+                        "No DUST registration events - expected if no registrations in test data"
+                    );
                 }
                 break;
             }
