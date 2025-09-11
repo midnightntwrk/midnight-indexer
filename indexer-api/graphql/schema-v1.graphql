@@ -341,6 +341,10 @@ type DustGenerationDtimeUpdateDetails {
 	Generation index.
 	"""
 	generationIndex: Int!
+	"""
+	Merkle tree path (if available from the ledger).
+	"""
+	merklePath: [DustMerklePathEntry!]
 }
 
 """
@@ -398,6 +402,10 @@ type DustGenerationMerkleUpdate {
 	Block height of update.
 	"""
 	blockHeight: Int!
+	"""
+	Merkle tree path (if available from dtime update).
+	"""
+	merklePath: [DustMerklePathEntry!]
 }
 
 """
@@ -520,6 +528,20 @@ type DustMappingRemovedDetails {
 	UTXO identifier.
 	"""
 	utxoId: HexEncoded!
+}
+
+"""
+Merkle tree path entry for DUST trees.
+"""
+type DustMerklePathEntry {
+	"""
+	The hash of the sibling at this level (if available).
+	"""
+	siblingHash: HexEncoded
+	"""
+	Whether the path goes left at this level.
+	"""
+	goesLeft: Boolean!
 }
 
 """
