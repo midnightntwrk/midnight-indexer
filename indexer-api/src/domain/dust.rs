@@ -103,6 +103,9 @@ pub struct DustGenerationMerkleUpdate {
 
     /// Block height of update.
     pub block_height: u32,
+
+    /// Merkle tree path (if available from dtime update).
+    pub merkle_path: Option<Vec<indexer_common::domain::dust::DustMerklePathEntry>>,
 }
 
 /// DUST generation event union type.

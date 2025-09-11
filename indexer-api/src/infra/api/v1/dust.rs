@@ -113,6 +113,25 @@ impl From<DustMerkleTreeType> for domain::dust::DustMerkleTreeType {
     }
 }
 
+/// Merkle tree path entry for DUST trees.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustMerklePathEntry {
+    /// The hash of the sibling at this level (if available).
+    pub sibling_hash: Option<HexEncoded>,
+    
+    /// Whether the path goes left at this level.
+    pub goes_left: bool,
+}
+
+impl From<indexer_common::domain::dust::DustMerklePathEntry> for DustMerklePathEntry {
+    fn from(entry: indexer_common::domain::dust::DustMerklePathEntry) -> Self {
+        Self {
+            sibling_hash: entry.sibling_hash.map(|bytes| HexEncoded(const_hex::encode(bytes))),
+            goes_left: entry.goes_left,
+        }
+    }
+}
+
 /// DUST generation event union type.
 #[derive(Debug, Clone, Union, Serialize, Deserialize)]
 pub enum DustGenerationEvent {
@@ -174,6 +193,9 @@ pub struct DustGenerationMerkleUpdate {
 
     /// Block height of update.
     pub block_height: u32,
+
+    /// Merkle tree path (if available from dtime update).
+    pub merkle_path: Option<Vec<DustMerklePathEntry>>,
 }
 
 impl From<domain::dust::DustGenerationMerkleUpdate> for DustGenerationMerkleUpdate {
@@ -182,12 +204,16 @@ impl From<domain::dust::DustGenerationMerkleUpdate> for DustGenerationMerkleUpda
             index,
             collapsed_update,
             block_height,
+            merkle_path,
         } = update;
 
         Self {
             index,
             collapsed_update: collapsed_update.hex_encode(),
             block_height,
+            merkle_path: merkle_path.map(|path| {
+                path.into_iter().map(Into::into).collect()
+            }),
         }
     }
 }
@@ -734,6 +760,7 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
             DomainDetails::DustGenerationDtimeUpdate {
                 generation_info,
                 generation_index,
+                merkle_path: _,  // Ignore merkle_path here as it's handled differently
             } => DustEventDetails::GenerationDtimeUpdate(DustGenerationDtimeUpdateDetails {
                 generation_info: DustGenerationInfo {
                     night_utxo_hash: generation_info.night_utxo_hash.hex_encode(),

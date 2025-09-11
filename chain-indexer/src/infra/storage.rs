@@ -693,6 +693,7 @@ async fn save_identifiers(
 async fn process_dust_events(
     dust_events: &[DustEvent],
     transaction_id: i64,
+    block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     let mut generation_dtime_and_index = None;
@@ -712,7 +713,17 @@ async fn process_dust_events(
             DustEventDetails::DustGenerationDtimeUpdate {
                 generation_info,
                 generation_index,
-            } => generation_dtime_and_index = Some((generation_info.dtime, *generation_index)),
+                merkle_path,
+            } => {
+                generation_dtime_and_index = Some((generation_info.dtime, *generation_index));
+                // Store merkle path in dust_generation_tree table
+                save_dust_generation_tree_update(
+                    *generation_index,
+                    merkle_path,
+                    block_height,
+                    tx
+                ).await?;
+            }
 
             DustEventDetails::DustSpendProcessed {
                 commitment,
@@ -824,6 +835,44 @@ async fn update_dust_generation_dtime(
 }
 
 #[cfg_attr(feature = "cloud", trace)]
+async fn save_dust_generation_tree_update(
+    merkle_index: u64,
+    merkle_path: &[DustMerklePathEntry],
+    block_height: u32,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    // Serialize the merkle path to store as tree_data
+    let tree_data = serde_json::to_vec(merkle_path).unwrap_or_default();
+    
+    // Calculate the root hash from the path (placeholder for now)
+    // In a real implementation, we'd calculate the actual root from the path
+    let root = vec![0u8; 32]; // Placeholder root
+    
+    let query = indoc! {"
+        INSERT INTO dust_generation_tree (
+            block_height,
+            merkle_index,
+            root,
+            tree_data
+        )
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (merkle_index) DO UPDATE SET
+            block_height = EXCLUDED.block_height,
+            root = EXCLUDED.root,
+            tree_data = EXCLUDED.tree_data
+    "};
+    
+    sqlx::query(query)
+        .bind(block_height as i64)
+        .bind(merkle_index as i64)
+        .bind(&root)
+        .bind(&tree_data)
+        .execute(&mut **tx)
+        .await?;
+    
+    Ok(())
+}
+
 async fn save_dust_generation_info(
     generation: &DustGenerationInfo,
     generation_index: u64,

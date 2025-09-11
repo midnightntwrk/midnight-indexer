@@ -46,6 +46,8 @@ pub enum DustEventDetails {
         generation_info: DustGenerationInfo,
         /// Merkle tree index for generation.
         generation_index: u64,
+        /// Merkle tree path for this update.
+        merkle_path: Vec<DustMerklePathEntry>,
     },
 
     /// DUST spend processed.
@@ -124,6 +126,15 @@ pub struct QualifiedDustOutput {
 
     /// Merkle tree index.
     pub mt_index: u64,
+}
+
+/// Merkle tree path entry for DUST trees.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DustMerklePathEntry {
+    /// The hash of the sibling at this level (if available).
+    pub sibling_hash: Option<Vec<u8>>,
+    /// Whether the path goes left at this level.
+    pub goes_left: bool,
 }
 
 /// DUST generation information.

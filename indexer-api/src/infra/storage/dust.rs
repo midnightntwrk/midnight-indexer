@@ -282,7 +282,7 @@ impl DustStorage for Storage {
 
                 // Query merkle tree updates in the same range.
                 let merkle_query = indoc! {"
-                    SELECT merkle_index, root, block_height
+                    SELECT merkle_index, root, block_height, tree_data
                     FROM dust_generation_tree
                     WHERE merkle_index >= $1
                     ORDER BY merkle_index
@@ -297,10 +297,18 @@ impl DustStorage for Storage {
 
                 for row in merkle_rows {
                     last_merkle_index = row.merkle_index + 1;
+                    // Deserialize merkle path from tree_data if available
+                    let merkle_path = if !row.tree_data.is_empty() {
+                        serde_json::from_slice(&row.tree_data).ok()
+                    } else {
+                        None
+                    };
+                    
                     yield DustGenerationEvent::MerkleUpdate(DustGenerationMerkleUpdate {
                         index: row.merkle_index,
                         collapsed_update: DustMerkleUpdate::from(row.root),
                         block_height: row.block_height,
+                        merkle_path,
                     });
                 }
             }
@@ -1119,6 +1127,8 @@ struct DustGenerationTreeRow {
     merkle_index: u64,
 
     root: Vec<u8>,
+    
+    tree_data: Vec<u8>,
 }
 
 impl From<DustUtxosRow> for DustCommitmentInfo {
