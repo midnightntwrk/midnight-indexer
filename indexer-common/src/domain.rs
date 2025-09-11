@@ -43,6 +43,7 @@ pub type CardanoStakeKey = ByteVec;
 pub type DustMerkleRoot = ByteArray<32>;
 pub type DustPrefix = ByteVec;
 pub type DustMerkleUpdate = ByteVec;
+pub type DustMerkleTreeData = ByteVec;  // Serialized merkle tree path data
 pub type NightUtxoHash = ByteArray<32>;
 pub type NightUtxoNonce = ByteArray<32>;
 pub type DustUtxoId = ByteVec;
