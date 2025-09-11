@@ -26,13 +26,15 @@ use indexer_common::{
         },
         ledger::{
             ContractAttributes, ContractBalance, SystemTransaction as DomainSystemTransaction,
-            UnshieldedUtxo,
+            TransactionHash, UnshieldedUtxo,
         },
     },
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
-use midnight_ledger_v6::structure::SystemTransaction as LedgerSystemTransaction;
+use midnight_ledger_v6::structure::{
+    CNightGeneratesDustActionType, CNightGeneratesDustEvent, SystemTransaction as LedgerSystemTransaction,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::{QueryBuilder, Type, types::Json};
 use std::iter;
@@ -1287,24 +1289,20 @@ async fn save_dust_registration_events(
 /// This function handles the conversion of CNightGeneratesDust system transaction events
 /// that are emitted by the node when distributing DUST to cNIGHT holders.
 fn convert_cnight_events_to_dust_events(
-    events: &[midnight_ledger_v6::structure::CNightGeneratesDustEvent],
-    tx_hash: &indexer_common::domain::ledger::TransactionHash,
-) -> Vec<indexer_common::domain::dust::DustEvent> {
-    use indexer_common::domain::dust::{
-        DustEvent, DustEventDetails, DustGenerationInfo, QualifiedDustOutput,
-    };
+    events: &[CNightGeneratesDustEvent],
+    tx_hash: &TransactionHash,
+) -> Vec<DustEvent> {
 
     events
         .iter()
         .enumerate()
         .map(|(index, event)| {
             let owner_bytes = event.owner.0.as_le_bytes();
-            let owner_array: [u8; 32] = owner_bytes.try_into().expect("DustPublicKey should be 32 bytes");
-            let owner = DustOwner::from(owner_array);
+            let owner = DustOwner::try_from(owner_bytes).expect("dust public key should be 32 bytes");
             let nonce = DustNonce::from(event.nonce.0.0);
 
             let event_details = match event.action {
-                midnight_ledger_v6::structure::CNightGeneratesDustActionType::Create => {
+                CNightGeneratesDustActionType::Create => {
                     // Create a new DUST UTXO
                     DustEventDetails::DustInitialUtxo {
                         output: QualifiedDustOutput {
@@ -1327,7 +1325,7 @@ fn convert_cnight_events_to_dust_events(
                         generation_index: index as u64,
                     }
                 }
-                midnight_ledger_v6::structure::CNightGeneratesDustActionType::Destroy => {
+                CNightGeneratesDustActionType::Destroy => {
                     // System-initiated DUST destruction when cNIGHT holder's tokens are burned.
                     // Unlike user-initiated spends, system destroys bypass the normal spend flow.
                     DustEventDetails::DustSpendProcessed {
@@ -1406,7 +1404,7 @@ mod tests {
                 assert_eq!(generation_info.value, 1000);
                 assert_eq!(output.ctime, 1234567890);
             }
-            _ => panic!("Expected DustInitialUtxo event"),
+            _ => panic!("expected DustInitialUtxo event"),
         }
 
         // Check second event (Destroy).
@@ -1423,7 +1421,7 @@ mod tests {
                 assert_eq!(*time, 1234567900);
                 assert_eq!(*v_fee, 0); // No fee for system-initiated destroy.
             }
-            _ => panic!("Expected DustSpendProcessed event"),
+            _ => panic!("expected DustSpendProcessed event"),
         }
     }
 }
