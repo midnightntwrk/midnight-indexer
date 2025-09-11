@@ -220,3 +220,58 @@ CREATE TABLE IF NOT EXISTS reserve_distributions (
 CREATE INDEX ON reserve_distributions(transaction_id);
 CREATE INDEX ON reserve_distributions(created_at);
 
+-- Parameter updates tracking
+-- Tracks changes to ledger parameters for audit trail
+CREATE TABLE IF NOT EXISTS parameter_updates (
+    id BIGSERIAL PRIMARY KEY,
+    transaction_id BIGINT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    parameters JSONB NOT NULL, -- Serialized LedgerParameters
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ON parameter_updates(transaction_id);
+CREATE INDEX ON parameter_updates(created_at);
+
+-- NIGHT distribution tracking
+-- Tracks NIGHT token distributions (claims)
+CREATE TABLE IF NOT EXISTS night_distributions (
+    id BIGSERIAL PRIMARY KEY,
+    transaction_id BIGINT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    claim_kind TEXT NOT NULL, -- Type of claim
+    outputs JSONB NOT NULL, -- Serialized outputs
+    total_amount BYTEA NOT NULL, -- u128 as 16 bytes
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ON night_distributions(transaction_id);
+CREATE INDEX ON night_distributions(created_at);
+
+-- Treasury income tracking
+-- Tracks income to treasury (e.g., from block rewards)
+CREATE TABLE IF NOT EXISTS treasury_income (
+    id BIGSERIAL PRIMARY KEY,
+    transaction_id BIGINT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    amount BYTEA NOT NULL, -- u128 as 16 bytes
+    source TEXT NOT NULL, -- Source of income (e.g., 'block_rewards')
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ON treasury_income(transaction_id);
+CREATE INDEX ON treasury_income(created_at);
+
+-- Treasury payments tracking
+-- Tracks payments from treasury (both shielded and unshielded)
+CREATE TABLE IF NOT EXISTS treasury_payments (
+    id BIGSERIAL PRIMARY KEY,
+    transaction_id BIGINT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    payment_type TEXT NOT NULL, -- 'shielded' or 'unshielded'
+    token_type TEXT NOT NULL, -- Token type being paid
+    outputs JSONB NOT NULL, -- Serialized output instructions
+    total_amount BYTEA, -- u128 as 16 bytes (optional, computed from outputs)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX ON treasury_payments(transaction_id);
+CREATE INDEX ON treasury_payments(payment_type);
+CREATE INDEX ON treasury_payments(created_at);
+

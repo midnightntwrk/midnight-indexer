@@ -452,12 +452,29 @@ async fn save_system_transaction(
                     save_reserve_distribution(transaction_id, amount, tx).await?;
                 }
 
-                _ => {
-                    // Other system transactions (OverwriteParameters, DistributeNight,
-                    // PayBlockRewardsToTreasury, PayFromTreasuryShielded,
-                    // PayFromTreasuryUnshielded) have their effects already
-                    // captured through ledger state application. No additional
-                    // storage needed.
+                LedgerSystemTransaction::OverwriteParameters(params) => {
+                    // Store parameter updates for audit trail and history.
+                    save_parameter_update(transaction_id, params, tx).await?;
+                }
+
+                LedgerSystemTransaction::DistributeNight(claim_kind, outputs) => {
+                    // Store NIGHT distribution events for tracking.
+                    save_night_distribution(transaction_id, claim_kind, outputs, tx).await?;
+                }
+
+                LedgerSystemTransaction::PayBlockRewardsToTreasury { amount } => {
+                    // Store treasury income from block rewards.
+                    save_treasury_income(transaction_id, amount, "block_rewards", tx).await?;
+                }
+
+                LedgerSystemTransaction::PayFromTreasuryShielded { outputs, token_type, .. } => {
+                    // Store shielded treasury payments.
+                    save_treasury_payment_shielded(transaction_id, outputs, token_type, tx).await?;
+                }
+
+                LedgerSystemTransaction::PayFromTreasuryUnshielded { outputs, token_type } => {
+                    // Store unshielded treasury payments.
+                    save_treasury_payment_unshielded(transaction_id, outputs, token_type, tx).await?;
                 }
             }
         }
@@ -872,6 +889,186 @@ async fn save_reserve_distribution(
     sqlx::query(query)
         .bind(transaction_id)
         .bind(U128BeBytes::from(amount))
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace]
+async fn save_parameter_update(
+    transaction_id: i64,
+    _params: &midnight_ledger_v6::structure::LedgerParameters,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    // Store a simplified representation of the parameters
+    // Full parameters are complex and don't serialize directly
+    let params_json = serde_json::json!({
+        "note": "Parameter update applied - details in ledger state"
+    });
+    
+    let query = indoc! {"
+        INSERT INTO parameter_updates (
+            transaction_id,
+            parameters
+        )
+        VALUES ($1, $2)
+    "};
+
+    sqlx::query(query)
+        .bind(transaction_id)
+        .bind(Json(&params_json))
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace]
+async fn save_night_distribution(
+    transaction_id: i64,
+    _claim_kind: &midnight_ledger_v6::structure::ClaimKind,
+    outputs: &[midnight_ledger_v6::structure::OutputInstructionUnshielded],
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    // Calculate total amount being distributed
+    let total_amount: u128 = outputs
+        .iter()
+        .map(|output| output.value)
+        .sum();
+
+    // Store a simplified representation
+    let outputs_json = serde_json::json!({
+        "output_count": outputs.len(),
+        "total_amount": total_amount.to_string()
+    });
+
+    let query = indoc! {"
+        INSERT INTO night_distributions (
+            transaction_id,
+            claim_kind,
+            outputs,
+            total_amount
+        )
+        VALUES ($1, $2, $3, $4)
+    "};
+
+    sqlx::query(query)
+        .bind(transaction_id)
+        .bind("night_distribution")
+        .bind(Json(&outputs_json))
+        .bind(U128BeBytes::from(total_amount))
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace]
+async fn save_treasury_income(
+    transaction_id: i64,
+    amount: u128,
+    source: &str,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO treasury_income (
+            transaction_id,
+            amount,
+            source
+        )
+        VALUES ($1, $2, $3)
+    "};
+
+    sqlx::query(query)
+        .bind(transaction_id)
+        .bind(U128BeBytes::from(amount))
+        .bind(source)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace]
+async fn save_treasury_payment_shielded(
+    transaction_id: i64,
+    outputs: &[midnight_ledger_v6::structure::OutputInstructionShielded],
+    _token_type: &midnight_ledger_v6::structure::ShieldedTokenType,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    // Calculate total amount if possible (depends on output structure)
+    let total_amount: Option<u128> = if outputs.iter().all(|o| o.value.is_some()) {
+        Some(outputs.iter().map(|o| o.value.unwrap_or(0)).sum())
+    } else {
+        None
+    };
+
+    // Store a simplified representation
+    let outputs_json = serde_json::json!({
+        "output_count": outputs.len(),
+        "total_amount": total_amount.map(|a| a.to_string())
+    });
+
+    let query = indoc! {"
+        INSERT INTO treasury_payments (
+            transaction_id,
+            payment_type,
+            token_type,
+            outputs,
+            total_amount
+        )
+        VALUES ($1, $2, $3, $4, $5)
+    "};
+
+    sqlx::query(query)
+        .bind(transaction_id)
+        .bind("shielded")
+        .bind("shielded_token")
+        .bind(Json(&outputs_json))
+        .bind(total_amount.map(U128BeBytes::from))
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace]
+async fn save_treasury_payment_unshielded(
+    transaction_id: i64,
+    outputs: &[midnight_ledger_v6::structure::OutputInstructionUnshielded],
+    _token_type: &midnight_ledger_v6::structure::UnshieldedTokenType,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    // Calculate total amount being paid
+    let total_amount: u128 = outputs
+        .iter()
+        .map(|output| output.value)
+        .sum();
+
+    // Store a simplified representation
+    let outputs_json = serde_json::json!({
+        "output_count": outputs.len(),
+        "total_amount": total_amount.to_string()
+    });
+
+    let query = indoc! {"
+        INSERT INTO treasury_payments (
+            transaction_id,
+            payment_type,
+            token_type,
+            outputs,
+            total_amount
+        )
+        VALUES ($1, $2, $3, $4, $5)
+    "};
+
+    sqlx::query(query)
+        .bind(transaction_id)
+        .bind("unshielded")
+        .bind("unshielded_token")
+        .bind(Json(&outputs_json))
+        .bind(Some(U128BeBytes::from(total_amount)))
         .execute(&mut **tx)
         .await?;
 

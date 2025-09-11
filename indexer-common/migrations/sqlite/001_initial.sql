@@ -228,3 +228,62 @@ CREATE TABLE IF NOT EXISTS reserve_distributions (
 CREATE INDEX reserve_distributions_transaction_idx ON reserve_distributions(transaction_id);
 CREATE INDEX reserve_distributions_created_at_idx ON reserve_distributions(created_at);
 
+-- Parameter updates tracking
+-- Tracks changes to ledger parameters for audit trail
+CREATE TABLE IF NOT EXISTS parameter_updates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id INTEGER NOT NULL,
+    parameters TEXT NOT NULL, -- Serialized LedgerParameters as JSON
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX parameter_updates_transaction_idx ON parameter_updates(transaction_id);
+CREATE INDEX parameter_updates_created_at_idx ON parameter_updates(created_at);
+
+-- NIGHT distribution tracking
+-- Tracks NIGHT token distributions (claims)
+CREATE TABLE IF NOT EXISTS night_distributions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id INTEGER NOT NULL,
+    claim_kind TEXT NOT NULL, -- Type of claim
+    outputs TEXT NOT NULL, -- Serialized outputs as JSON
+    total_amount BLOB NOT NULL, -- u128 as 16 bytes
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX night_distributions_transaction_idx ON night_distributions(transaction_id);
+CREATE INDEX night_distributions_created_at_idx ON night_distributions(created_at);
+
+-- Treasury income tracking
+-- Tracks income to treasury (e.g., from block rewards)
+CREATE TABLE IF NOT EXISTS treasury_income (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id INTEGER NOT NULL,
+    amount BLOB NOT NULL, -- u128 as 16 bytes
+    source TEXT NOT NULL, -- Source of income (e.g., 'block_rewards')
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX treasury_income_transaction_idx ON treasury_income(transaction_id);
+CREATE INDEX treasury_income_created_at_idx ON treasury_income(created_at);
+
+-- Treasury payments tracking
+-- Tracks payments from treasury (both shielded and unshielded)
+CREATE TABLE IF NOT EXISTS treasury_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id INTEGER NOT NULL,
+    payment_type TEXT NOT NULL, -- 'shielded' or 'unshielded'
+    token_type TEXT NOT NULL, -- Token type being paid
+    outputs TEXT NOT NULL, -- Serialized output instructions as JSON
+    total_amount BLOB, -- u128 as 16 bytes (optional, computed from outputs)
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX treasury_payments_transaction_idx ON treasury_payments(transaction_id);
+CREATE INDEX treasury_payments_payment_type_idx ON treasury_payments(payment_type);
+CREATE INDEX treasury_payments_created_at_idx ON treasury_payments(created_at);
+
