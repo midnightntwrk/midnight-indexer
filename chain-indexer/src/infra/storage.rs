@@ -513,8 +513,8 @@ async fn save_system_transaction(
                 #[allow(unreachable_patterns)]
                 unknown_variant => {
                     log::warn!(
-                        "Encountered new system transaction variant in tx {}: {:?}. \
-                        Update indexer to handle this variant.",
+                        "encountered new system transaction variant in tx {}: {:?}. \
+                        update indexer to handle this variant",
                         transaction.hash,
                         std::any::type_name_of_val(&unknown_variant)
                     );
