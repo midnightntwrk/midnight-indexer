@@ -207,7 +207,7 @@ CREATE TABLE dust_commitment_tree(
     block_height BIGINT NOT NULL,
     merkle_index BIGINT NOT NULL,
     root BYTEA NOT NULL,
-    tree_data BYTEA NOT NULL
+    tree_data JSONB NOT NULL
 );
 
 CREATE TABLE dust_generation_tree(
@@ -215,7 +215,7 @@ CREATE TABLE dust_generation_tree(
     block_height BIGINT NOT NULL,
     merkle_index BIGINT NOT NULL,
     root BYTEA NOT NULL,
-    tree_data BYTEA NOT NULL
+    tree_data JSONB NOT NULL
 );
 
 CREATE INDEX ON dust_commitment_tree(merkle_index);

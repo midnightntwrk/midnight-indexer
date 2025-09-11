@@ -29,7 +29,7 @@ use fastrace::trace;
 use futures::Stream;
 use indexer_common::{
     domain::{
-        CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustMerkleTreeData,
+        CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot,
         DustMerkleUpdate, DustNonce, DustNullifier, DustOwner, DustPrefix, NightUtxoHash,
         dust::DustMerklePathEntry, ledger::TransactionHash,
     },
@@ -298,23 +298,9 @@ impl DustStorage for Storage {
 
                 for row in merkle_rows {
                     last_merkle_index = row.merkle_index + 1;
-                    // Manual deserialization: each entry is 33 bytes (32 for hash + 1 for goes_left)
-                    let merkle_path = if !row.tree_data.is_empty() && row.tree_data.len() % 33 == 0 {
-                        let mut entries = Vec::new();
-                        for chunk in row.tree_data.chunks_exact(33) {
-                            let hash_bytes = &chunk[0..32];
-                            let sibling_hash = if hash_bytes == &[0u8; 32] {
-                                None
-                            } else {
-                                Some(hash_bytes.to_vec())
-                            };
-                            let goes_left = chunk[32] != 0;
-                            entries.push(DustMerklePathEntry {
-                                sibling_hash,
-                                goes_left,
-                            });
-                        }
-                        Some(entries)
+                    // Extract merkle path from Json wrapper
+                    let merkle_path = if !row.tree_data.0.is_empty() {
+                        Some(row.tree_data.0)
                     } else {
                         None
                     };
@@ -1143,7 +1129,7 @@ struct DustGenerationTreeRow {
 
     root: DustMerkleUpdate, // This is actually the collapsed update data, not a root hash
 
-    tree_data: DustMerkleTreeData, // Merkle path data stored as serialized bytes
+    tree_data: sqlx::types::Json<Vec<DustMerklePathEntry>>, // Merkle path data stored as JSON
 }
 
 impl From<DustUtxosRow> for DustCommitmentInfo {

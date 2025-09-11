@@ -213,7 +213,7 @@ CREATE TABLE dust_commitment_tree(
     block_height INTEGER NOT NULL,
     merkle_index INTEGER NOT NULL,
     root BLOB NOT NULL,
-    tree_data BLOB NOT NULL
+    tree_data TEXT NOT NULL -- JSON stored as TEXT in SQLite
 );
 
 CREATE TABLE dust_generation_tree(
@@ -221,7 +221,7 @@ CREATE TABLE dust_generation_tree(
     block_height INTEGER NOT NULL,
     merkle_index INTEGER NOT NULL,
     root BLOB NOT NULL,
-    tree_data BLOB NOT NULL
+    tree_data TEXT NOT NULL -- JSON stored as TEXT in SQLite
 );
 
 CREATE INDEX dust_commitment_tree_merkle_idx ON dust_commitment_tree(merkle_index);
