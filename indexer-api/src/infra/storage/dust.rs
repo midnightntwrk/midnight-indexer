@@ -30,7 +30,8 @@ use futures::Stream;
 use indexer_common::{
     domain::{
         CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustMerkleUpdate, DustNonce,
-        DustNullifier, DustOwner, DustPrefix, NightUtxoHash, dust::DustMerklePathEntry,
+        DustNullifier, DustOwner, DustPrefix, NightUtxoHash,
+        dust::{DustEvent, DustEventDetails, DustEventType, DustMerklePathEntry},
         ledger::TransactionHash,
     },
     infra::sqlx::{SqlxOption, U128BeBytes},
@@ -701,8 +702,8 @@ impl DustStorage for Storage {
     #[trace]
     async fn get_dust_events_by_transaction(
         &self,
-        transaction_hash: indexer_common::domain::ledger::TransactionHash,
-    ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error> {
+        transaction_hash: TransactionHash,
+    ) -> Result<Vec<DustEvent>, sqlx::Error> {
         let query = indoc! {"
             SELECT transaction_hash, logical_segment, physical_segment, event_type, event_data
             FROM dust_events
@@ -715,8 +716,8 @@ impl DustStorage for Storage {
             transaction_hash: TransactionHash,
             logical_segment: i32,
             physical_segment: i32,
-            event_type: indexer_common::domain::dust::DustEventType,
-            event_data: sqlx::types::Json<indexer_common::domain::dust::DustEventDetails>,
+            event_type: DustEventType,
+            event_data: sqlx::types::Json<DustEventDetails>,
         }
 
         let rows = sqlx::query_as::<_, DustEventRow>(query)
@@ -729,34 +730,34 @@ impl DustStorage for Storage {
             .map(|row| {
                 // Validate that event_type matches event_details.
                 let expected_type = match &row.event_data.0 {
-                    indexer_common::domain::dust::DustEventDetails::DustInitialUtxo { .. } => {
-                        indexer_common::domain::dust::DustEventType::DustInitialUtxo
+                    DustEventDetails::DustInitialUtxo { .. } => {
+                        DustEventType::DustInitialUtxo
                     }
-                    indexer_common::domain::dust::DustEventDetails::DustGenerationDtimeUpdate {
+                    DustEventDetails::DustGenerationDtimeUpdate {
                         ..
-                    } => indexer_common::domain::dust::DustEventType::DustGenerationDtimeUpdate,
-                    indexer_common::domain::dust::DustEventDetails::DustSpendProcessed {
+                    } => DustEventType::DustGenerationDtimeUpdate,
+                    DustEventDetails::DustSpendProcessed {
                         ..
-                    } => indexer_common::domain::dust::DustEventType::DustSpendProcessed,
-                    indexer_common::domain::dust::DustEventDetails::DustRegistration { .. } => {
-                        indexer_common::domain::dust::DustEventType::DustRegistration
+                    } => DustEventType::DustSpendProcessed,
+                    DustEventDetails::DustRegistration { .. } => {
+                        DustEventType::DustRegistration
                     }
-                    indexer_common::domain::dust::DustEventDetails::DustDeregistration {
+                    DustEventDetails::DustDeregistration {
                         ..
-                    } => indexer_common::domain::dust::DustEventType::DustDeregistration,
-                    indexer_common::domain::dust::DustEventDetails::DustMappingAdded { .. } => {
-                        indexer_common::domain::dust::DustEventType::DustMappingAdded
+                    } => DustEventType::DustDeregistration,
+                    DustEventDetails::DustMappingAdded { .. } => {
+                        DustEventType::DustMappingAdded
                     }
-                    indexer_common::domain::dust::DustEventDetails::DustMappingRemoved {
+                    DustEventDetails::DustMappingRemoved {
                         ..
-                    } => indexer_common::domain::dust::DustEventType::DustMappingRemoved,
+                    } => DustEventType::DustMappingRemoved,
                 };
                 debug_assert_eq!(
                     row.event_type, expected_type,
                     "Event type mismatch in database"
                 );
 
-                indexer_common::domain::dust::DustEvent {
+                DustEvent {
                     transaction_hash: row.transaction_hash,
                     logical_segment: row.logical_segment as u16,
                     physical_segment: row.physical_segment as u16,
@@ -770,8 +771,8 @@ impl DustStorage for Storage {
     async fn get_recent_dust_events(
         &self,
         limit: u32,
-        event_type: Option<indexer_common::domain::dust::DustEventType>,
-    ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error> {
+        event_type: Option<DustEventType>,
+    ) -> Result<Vec<DustEvent>, sqlx::Error> {
         let query = if event_type.is_some() {
             // Filter by event type.
             indoc! {"
@@ -800,8 +801,8 @@ impl DustStorage for Storage {
             transaction_hash: TransactionHash,
             logical_segment: i32,
             physical_segment: i32,
-            event_type: indexer_common::domain::dust::DustEventType,
-            event_data: sqlx::types::Json<indexer_common::domain::dust::DustEventDetails>,
+            event_type: DustEventType,
+            event_data: sqlx::types::Json<DustEventDetails>,
         }
 
         let rows = if let Some(event_type) = event_type {
@@ -822,34 +823,34 @@ impl DustStorage for Storage {
             .map(|row| {
                 // Validate that event_type matches event_details.
                 let expected_type = match &row.event_data.0 {
-                    indexer_common::domain::dust::DustEventDetails::DustInitialUtxo { .. } => {
-                        indexer_common::domain::dust::DustEventType::DustInitialUtxo
+                    DustEventDetails::DustInitialUtxo { .. } => {
+                        DustEventType::DustInitialUtxo
                     }
-                    indexer_common::domain::dust::DustEventDetails::DustGenerationDtimeUpdate {
+                    DustEventDetails::DustGenerationDtimeUpdate {
                         ..
-                    } => indexer_common::domain::dust::DustEventType::DustGenerationDtimeUpdate,
-                    indexer_common::domain::dust::DustEventDetails::DustSpendProcessed {
+                    } => DustEventType::DustGenerationDtimeUpdate,
+                    DustEventDetails::DustSpendProcessed {
                         ..
-                    } => indexer_common::domain::dust::DustEventType::DustSpendProcessed,
-                    indexer_common::domain::dust::DustEventDetails::DustRegistration { .. } => {
-                        indexer_common::domain::dust::DustEventType::DustRegistration
+                    } => DustEventType::DustSpendProcessed,
+                    DustEventDetails::DustRegistration { .. } => {
+                        DustEventType::DustRegistration
                     }
-                    indexer_common::domain::dust::DustEventDetails::DustDeregistration {
+                    DustEventDetails::DustDeregistration {
                         ..
-                    } => indexer_common::domain::dust::DustEventType::DustDeregistration,
-                    indexer_common::domain::dust::DustEventDetails::DustMappingAdded { .. } => {
-                        indexer_common::domain::dust::DustEventType::DustMappingAdded
+                    } => DustEventType::DustDeregistration,
+                    DustEventDetails::DustMappingAdded { .. } => {
+                        DustEventType::DustMappingAdded
                     }
-                    indexer_common::domain::dust::DustEventDetails::DustMappingRemoved {
+                    DustEventDetails::DustMappingRemoved {
                         ..
-                    } => indexer_common::domain::dust::DustEventType::DustMappingRemoved,
+                    } => DustEventType::DustMappingRemoved,
                 };
                 debug_assert_eq!(
                     row.event_type, expected_type,
                     "Event type mismatch in database"
                 );
 
-                indexer_common::domain::dust::DustEvent {
+                DustEvent {
                     transaction_hash: row.transaction_hash,
                     logical_segment: row.logical_segment as u16,
                     physical_segment: row.physical_segment as u16,
