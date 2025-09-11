@@ -19,7 +19,7 @@ use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteArray, ByteVec, DustNullifier,
+        BlockHash, ByteVec, DustNullifier, DustOwner, DustNonce, NightUtxoHash, NightUtxoNonce,
         dust::{
             DustCommitment, DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, QualifiedDustOutput,
         },
@@ -1223,7 +1223,8 @@ fn convert_cnight_events_to_dust_events(
         .map(|(index, event)| {
             let owner_bytes = event.owner.0.as_le_bytes();
             let owner_array: [u8; 32] = owner_bytes.try_into().expect("DustPublicKey should be 32 bytes");
-            let nonce_bytes = event.nonce.0.0;
+            let owner = DustOwner::from(owner_array);
+            let nonce = DustNonce::from(event.nonce.0.0);
             
             let event_details = match event.action {
                 midnight_ledger_v6::structure::CNightGeneratesDustActionType::Create => {
@@ -1231,20 +1232,20 @@ fn convert_cnight_events_to_dust_events(
                     DustEventDetails::DustInitialUtxo {
                         output: QualifiedDustOutput {
                             initial_value: event.value,
-                            owner: ByteArray::from(owner_array),
-                            nonce: ByteArray::from(nonce_bytes),
+                            owner,
+                            nonce,
                             seq: 0, // Initial sequence number
                             ctime: event.time.to_secs(),
-                            backing_night: ByteArray::default(), // No backing NIGHT for system-generated DUST
+                            backing_night: NightUtxoNonce::default(), // No backing NIGHT for system-generated DUST
                             mt_index: 0, // Will be set when added to merkle tree
                         },
                         generation_info: DustGenerationInfo {
                             value: event.value,
-                            owner: ByteArray::from(owner_array),
-                            nonce: ByteArray::from(nonce_bytes),
+                            owner,
+                            nonce,
                             ctime: event.time.to_secs(),
                             dtime: u64::MAX, // Never destroyed initially
-                            night_utxo_hash: ByteArray::default(), // No backing NIGHT UTXO
+                            night_utxo_hash: NightUtxoHash::default(), // No backing NIGHT UTXO
                         },
                         generation_index: index as u64,
                     }
