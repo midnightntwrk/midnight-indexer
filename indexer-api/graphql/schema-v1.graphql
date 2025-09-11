@@ -251,6 +251,20 @@ type DustCommitmentProgress {
 }
 
 """
+Details for DUST deregistration event.
+"""
+type DustDeregistrationDetails {
+	"""
+	Cardano stake key address.
+	"""
+	cardanoAddress: HexEncoded!
+	"""
+	DUST address.
+	"""
+	dustAddress: HexEncoded!
+}
+
+"""
 DUST event from chain processing.
 """
 type DustEvent {
@@ -279,7 +293,7 @@ type DustEvent {
 """
 DUST event details union.
 """
-union DustEventDetails = DustInitialUtxoDetails | DustGenerationDtimeUpdateDetails | DustSpendProcessedDetails
+union DustEventDetails = DustInitialUtxoDetails | DustGenerationDtimeUpdateDetails | DustSpendProcessedDetails | DustRegistrationDetails | DustDeregistrationDetails | DustMappingAddedDetails | DustMappingRemovedDetails
 
 """
 Type of DUST event.
@@ -297,6 +311,22 @@ enum DustEventType {
 	DUST spend processed.
 	"""
 	DUST_SPEND_PROCESSED
+	"""
+	Registration event.
+	"""
+	DUST_REGISTRATION
+	"""
+	Deregistration event.
+	"""
+	DUST_DEREGISTRATION
+	"""
+	Mapping added event.
+	"""
+	DUST_MAPPING_ADDED
+	"""
+	Mapping removed event.
+	"""
+	DUST_MAPPING_REMOVED
 }
 
 """
@@ -457,6 +487,42 @@ type DustInitialUtxoDetails {
 }
 
 """
+Details for DUST mapping added event.
+"""
+type DustMappingAddedDetails {
+	"""
+	Cardano stake key address.
+	"""
+	cardanoAddress: HexEncoded!
+	"""
+	DUST address.
+	"""
+	dustAddress: HexEncoded!
+	"""
+	UTXO identifier.
+	"""
+	utxoId: HexEncoded!
+}
+
+"""
+Details for DUST mapping removed event.
+"""
+type DustMappingRemovedDetails {
+	"""
+	Cardano stake key address.
+	"""
+	cardanoAddress: HexEncoded!
+	"""
+	DUST address.
+	"""
+	dustAddress: HexEncoded!
+	"""
+	UTXO identifier.
+	"""
+	utxoId: HexEncoded!
+}
+
+"""
 Type of Merkle tree.
 """
 enum DustMerkleTreeType {
@@ -523,6 +589,20 @@ type DustParametersInfo {
 	DUST grace period in seconds.
 	"""
 	dustGracePeriod: Int!
+}
+
+"""
+Details for DUST registration event.
+"""
+type DustRegistrationDetails {
+	"""
+	Cardano stake key address.
+	"""
+	cardanoAddress: HexEncoded!
+	"""
+	DUST address.
+	"""
+	dustAddress: HexEncoded!
 }
 
 """
