@@ -13,11 +13,11 @@
 
 pub use crate::domain::{DustCommitment, DustNullifier};
 
-use crate::domain::{DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce, ledger::TransactionHash};
+use crate::domain::{ByteVec, DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce, ledger::TransactionHash};
 use serde::{Deserialize, Serialize};
 
 /// DUST event for the indexer domain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustEvent {
     pub transaction_hash: TransactionHash,
     pub logical_segment: u16,
@@ -26,7 +26,7 @@ pub struct DustEvent {
 }
 
 /// DUST event details.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DustEventDetails {
     /// Initial DUST UTXO creation.
     DustInitialUtxo {
@@ -61,9 +61,42 @@ pub enum DustEventDetails {
         /// DUST parameters.
         params: DustParameters,
     },
-    // TODO: Registration events will be provided by the node team, not the ledger.
-    // These events will track mappings between Cardano stake keys and DUST addresses.
-    // See PM-17951 for node team's integration work.
+
+    /// Registration event - Cardano address registered with DUST address.
+    DustRegistration {
+        /// Cardano stake key address.
+        cardano_address: crate::domain::CardanoStakeKey,
+        /// DUST address (32 bytes).
+        dust_address: crate::domain::DustAddress,
+    },
+
+    /// Deregistration event - Cardano address deregistered from DUST address.
+    DustDeregistration {
+        /// Cardano stake key address.
+        cardano_address: crate::domain::CardanoStakeKey,
+        /// DUST address (32 bytes).
+        dust_address: crate::domain::DustAddress,
+    },
+
+    /// Mapping added - UTXO mapping added for registration.
+    DustMappingAdded {
+        /// Cardano stake key address.
+        cardano_address: crate::domain::CardanoStakeKey,
+        /// DUST address.
+        dust_address: ByteVec,
+        /// UTXO identifier.
+        utxo_id: ByteVec,
+    },
+
+    /// Mapping removed - UTXO mapping removed for registration.
+    DustMappingRemoved {
+        /// Cardano stake key address.
+        cardano_address: crate::domain::CardanoStakeKey,
+        /// DUST address.
+        dust_address: ByteVec,
+        /// UTXO identifier.
+        utxo_id: ByteVec,
+    },
 }
 
 /// Qualified DUST output information.
@@ -150,7 +183,18 @@ pub enum DustEventType {
 
     /// DUST spend processed.
     DustSpendProcessed,
-    // TODO: Registration event type will be added when node team implements registration events.
+    
+    /// Registration event.
+    DustRegistration,
+    
+    /// Deregistration event.
+    DustDeregistration,
+    
+    /// Mapping added event.
+    DustMappingAdded,
+    
+    /// Mapping removed event.
+    DustMappingRemoved,
 }
 
 impl From<&DustEventDetails> for DustEventType {
@@ -159,6 +203,10 @@ impl From<&DustEventDetails> for DustEventType {
             DustEventDetails::DustInitialUtxo { .. } => Self::DustInitialUtxo,
             DustEventDetails::DustGenerationDtimeUpdate { .. } => Self::DustGenerationDtimeUpdate,
             DustEventDetails::DustSpendProcessed { .. } => Self::DustSpendProcessed,
+            DustEventDetails::DustRegistration { .. } => Self::DustRegistration,
+            DustEventDetails::DustDeregistration { .. } => Self::DustDeregistration,
+            DustEventDetails::DustMappingAdded { .. } => Self::DustMappingAdded,
+            DustEventDetails::DustMappingRemoved { .. } => Self::DustMappingRemoved,
         }
     }
 }

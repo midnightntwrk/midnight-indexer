@@ -515,6 +515,18 @@ pub enum DustEventType {
 
     /// DUST spend processed.
     DustSpendProcessed,
+
+    /// Registration event.
+    DustRegistration,
+
+    /// Deregistration event.
+    DustDeregistration,
+
+    /// Mapping added event.
+    DustMappingAdded,
+
+    /// Mapping removed event.
+    DustMappingRemoved,
 }
 
 impl From<DustEventType> for indexer_common::domain::dust::DustEventType {
@@ -523,6 +535,10 @@ impl From<DustEventType> for indexer_common::domain::dust::DustEventType {
             DustEventType::DustInitialUtxo => Self::DustInitialUtxo,
             DustEventType::DustGenerationDtimeUpdate => Self::DustGenerationDtimeUpdate,
             DustEventType::DustSpendProcessed => Self::DustSpendProcessed,
+            DustEventType::DustRegistration => Self::DustRegistration,
+            DustEventType::DustDeregistration => Self::DustDeregistration,
+            DustEventType::DustMappingAdded => Self::DustMappingAdded,
+            DustEventType::DustMappingRemoved => Self::DustMappingRemoved,
         }
     }
 }
@@ -538,6 +554,18 @@ pub enum DustEventDetails {
 
     /// DUST spend processed.
     SpendProcessed(DustSpendProcessedDetails),
+
+    /// Registration event.
+    Registration(DustRegistrationDetails),
+
+    /// Deregistration event.
+    Deregistration(DustDeregistrationDetails),
+
+    /// Mapping added event.
+    MappingAdded(DustMappingAddedDetails),
+
+    /// Mapping removed event.
+    MappingRemoved(DustMappingRemovedDetails),
 }
 
 /// Details for initial DUST UTXO creation.
@@ -616,6 +644,52 @@ pub struct DustParametersInfo {
     pub dust_grace_period: u64,
 }
 
+/// Details for DUST registration event.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustRegistrationDetails {
+    /// Cardano stake key address.
+    pub cardano_address: HexEncoded,
+
+    /// DUST address.
+    pub dust_address: HexEncoded,
+}
+
+/// Details for DUST deregistration event.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustDeregistrationDetails {
+    /// Cardano stake key address.
+    pub cardano_address: HexEncoded,
+
+    /// DUST address.
+    pub dust_address: HexEncoded,
+}
+
+/// Details for DUST mapping added event.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustMappingAddedDetails {
+    /// Cardano stake key address.
+    pub cardano_address: HexEncoded,
+
+    /// DUST address.
+    pub dust_address: HexEncoded,
+
+    /// UTXO identifier.
+    pub utxo_id: HexEncoded,
+}
+
+/// Details for DUST mapping removed event.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustMappingRemovedDetails {
+    /// Cardano stake key address.
+    pub cardano_address: HexEncoded,
+
+    /// DUST address.
+    pub dust_address: HexEncoded,
+
+    /// UTXO identifier.
+    pub utxo_id: HexEncoded,
+}
+
 impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
     fn from(event: indexer_common::domain::dust::DustEvent) -> Self {
         use indexer_common::domain::dust::DustEventDetails as DomainDetails;
@@ -626,6 +700,10 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
                 DustEventType::DustGenerationDtimeUpdate
             }
             DomainDetails::DustSpendProcessed { .. } => DustEventType::DustSpendProcessed,
+            DomainDetails::DustRegistration { .. } => DustEventType::DustRegistration,
+            DomainDetails::DustDeregistration { .. } => DustEventType::DustDeregistration,
+            DomainDetails::DustMappingAdded { .. } => DustEventType::DustMappingAdded,
+            DomainDetails::DustMappingRemoved { .. } => DustEventType::DustMappingRemoved,
         };
 
         let event_details = match event.event_details {
@@ -687,6 +765,38 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
                     generation_decay_rate: params.generation_decay_rate,
                     dust_grace_period: params.dust_grace_period,
                 },
+            }),
+            DomainDetails::DustRegistration {
+                cardano_address,
+                dust_address,
+            } => DustEventDetails::Registration(DustRegistrationDetails {
+                cardano_address: cardano_address.hex_encode(),
+                dust_address: dust_address.hex_encode(),
+            }),
+            DomainDetails::DustDeregistration {
+                cardano_address,
+                dust_address,
+            } => DustEventDetails::Deregistration(DustDeregistrationDetails {
+                cardano_address: cardano_address.hex_encode(),
+                dust_address: dust_address.hex_encode(),
+            }),
+            DomainDetails::DustMappingAdded {
+                cardano_address,
+                dust_address,
+                utxo_id,
+            } => DustEventDetails::MappingAdded(DustMappingAddedDetails {
+                cardano_address: cardano_address.hex_encode(),
+                dust_address: dust_address.hex_encode(),
+                utxo_id: utxo_id.hex_encode(),
+            }),
+            DomainDetails::DustMappingRemoved {
+                cardano_address,
+                dust_address,
+                utxo_id,
+            } => DustEventDetails::MappingRemoved(DustMappingRemovedDetails {
+                cardano_address: cardano_address.hex_encode(),
+                dust_address: dust_address.hex_encode(),
+                utxo_id: utxo_id.hex_encode(),
             }),
         };
 
