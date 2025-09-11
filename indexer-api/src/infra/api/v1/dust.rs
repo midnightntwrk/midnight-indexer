@@ -633,6 +633,9 @@ pub struct DustGenerationDtimeUpdateDetails {
 
     /// Generation index.
     pub generation_index: u64,
+
+    /// Merkle tree path (if available from the ledger).
+    pub merkle_path: Option<Vec<DustMerklePathEntry>>,
 }
 
 /// Details for DUST spend processed.
@@ -760,7 +763,7 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
             DomainDetails::DustGenerationDtimeUpdate {
                 generation_info,
                 generation_index,
-                merkle_path: _,  // Ignore merkle_path here as it's handled differently
+                merkle_path,
             } => DustEventDetails::GenerationDtimeUpdate(DustGenerationDtimeUpdateDetails {
                 generation_info: DustGenerationInfo {
                     night_utxo_hash: generation_info.night_utxo_hash.hex_encode(),
@@ -773,6 +776,11 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
                     merkle_index: generation_index,
                 },
                 generation_index,
+                merkle_path: if merkle_path.is_empty() {
+                    None
+                } else {
+                    Some(merkle_path.into_iter().map(Into::into).collect())
+                },
             }),
             DomainDetails::DustSpendProcessed {
                 commitment,
