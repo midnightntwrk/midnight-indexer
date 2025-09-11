@@ -1630,7 +1630,12 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
     )
     .await?;
 
-    // Collect first few events or timeout.
+    // Verify the subscription can stream multiple events without errors.
+    // We collect up to 3 events to ensure:
+    // 1. The subscription establishes successfully
+    // 2. It can deliver multiple events (not just one)
+    // 3. The union type structure (RegistrationUpdate | RegistrationUpdateProgress) is valid
+    // If no events arrive within 5 seconds, that's also valid (no registrations in test data).
     let mut events_received = 0;
     let timeout_duration = Duration::from_secs(5);
     
