@@ -508,8 +508,8 @@ async fn save_system_transaction(
                     save_treasury_payment_unshielded(transaction_id, &outputs, tx).await?;
                 }
 
-                // REQUIRED: SystemTransaction is #[non_exhaustive] - compiler mandates catch-all
-                // We handle all 7 known variants above. This catches future additions.
+                // REQUIRED: LedgerSystemTransaction (from midnight-ledger-prototype) is #[non_exhaustive]
+                // Compiler mandates catch-all. We handle all 7 known variants above.
                 #[allow(unreachable_patterns)]
                 unknown_variant => {
                     log::warn!(
