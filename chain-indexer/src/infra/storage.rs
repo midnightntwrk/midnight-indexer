@@ -1243,7 +1243,7 @@ fn convert_cnight_events_to_dust_events(
             let owner_array: [u8; 32] = owner_bytes.try_into().expect("DustPublicKey should be 32 bytes");
             let owner = DustOwner::from(owner_array);
             let nonce = DustNonce::from(event.nonce.0.0);
-            
+
             let event_details = match event.action {
                 midnight_ledger_v6::structure::CNightGeneratesDustActionType::Create => {
                     // Create a new DUST UTXO
@@ -1281,7 +1281,7 @@ fn convert_cnight_events_to_dust_events(
                     }
                 }
             };
-            
+
             DustEvent {
                 transaction_hash: *tx_hash,
                 logical_segment: index as u16,

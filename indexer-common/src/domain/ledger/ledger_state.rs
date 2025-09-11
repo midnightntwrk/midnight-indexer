@@ -457,89 +457,88 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
     events
         .iter()
         .filter_map(|event| {
-            let dust_event_details = match &event.content {
-                LedgerEventDetails::DustInitialUtxo {
-                    output,
-                    generation,
-                    generation_index,
-                    block_time: _,
-                } => Some(DustEventDetails::DustInitialUtxo {
-                    output: QualifiedDustOutput {
-                        initial_value: output.initial_value,
-                        owner: output.owner.0.0.to_bytes_le().into(),
-                        nonce: output.nonce.0.to_bytes_le().into(),
-                        seq: output.seq,
-                        ctime: output.ctime.to_secs(),
-                        backing_night: output.backing_night.0.0.into(),
-                        mt_index: output.mt_index,
-                    },
-                    generation_info: DustGenerationInfo {
-                        night_utxo_hash: output.backing_night.0.0.into(), /* The backing_night is
-                                                                           * already the hash. */
-                        value: generation.value,
-                        owner: generation.owner.0.0.to_bytes_le().into(),
-                        nonce: generation.nonce.0.0.into(),
-                        ctime: output.ctime.to_secs(), // Use output's ctime.
-                        dtime: generation.dtime.to_secs(),
-                    },
-                    generation_index: *generation_index,
-                }),
+            let dust_event_details =
+                match &event.content {
+                    LedgerEventDetails::DustInitialUtxo {
+                        output,
+                        generation,
+                        generation_index,
+                        block_time: _,
+                    } => Some(DustEventDetails::DustInitialUtxo {
+                        output: QualifiedDustOutput {
+                            initial_value: output.initial_value,
+                            owner: output.owner.0.0.to_bytes_le().into(),
+                            nonce: output.nonce.0.to_bytes_le().into(),
+                            seq: output.seq,
+                            ctime: output.ctime.to_secs(),
+                            backing_night: output.backing_night.0.0.into(),
+                            mt_index: output.mt_index,
+                        },
+                        generation_info: DustGenerationInfo {
+                            night_utxo_hash: output.backing_night.0.0.into(), /* The backing_night is
+                                                                               * already the
+                                                                               * hash. */
+                            value: generation.value,
+                            owner: generation.owner.0.0.to_bytes_le().into(),
+                            nonce: generation.nonce.0.0.into(),
+                            ctime: output.ctime.to_secs(), // Use output's ctime.
+                            dtime: generation.dtime.to_secs(),
+                        },
+                        generation_index: *generation_index,
+                    }),
 
-                LedgerEventDetails::DustGenerationDtimeUpdate {
-                    update,
-                    block_time: _,
-                } => {
-                    // TreeInsertionPath has leaf: (HashOutput, DustGenerationInfo).
-                    let generation = &update.leaf.1;
-                    // Calculate mt_index from the path.
-                    // The path is from leaf up, so we need to process it in reverse.
-                    // Each goes_left: false adds a power of 2 to the index.
-                    let mt_index =
-                        update
-                            .path
-                            .iter()
-                            .rev()
-                            .enumerate()
-                            .fold(0u64, |acc, (depth, entry)| {
+                    LedgerEventDetails::DustGenerationDtimeUpdate {
+                        update,
+                        block_time: _,
+                    } => {
+                        // TreeInsertionPath has leaf: (HashOutput, DustGenerationInfo).
+                        let generation = &update.leaf.1;
+                        // Calculate mt_index from the path.
+                        // The path is from leaf up, so we need to process it in reverse.
+                        // Each goes_left: false adds a power of 2 to the index.
+                        let mt_index = update.path.iter().rev().enumerate().fold(
+                            0u64,
+                            |acc, (depth, entry)| {
                                 if !entry.goes_left {
                                     acc | (1u64 << depth)
                                 } else {
                                     acc
                                 }
-                            });
-                    Some(DustEventDetails::DustGenerationDtimeUpdate {
-                        generation_info: DustGenerationInfo {
-                            night_utxo_hash: generation.nonce.0.0.into(), /* nonce is the
-                                                                           * InitialNonce/
-                                                                           * backing_night. */
-                            value: generation.value,
-                            owner: generation.owner.0.0.to_bytes_le().into(),
-                            nonce: generation.nonce.0.0.into(),
-                            ctime: 0, // Not available in the event, use placeholder.
-                            dtime: generation.dtime.to_secs(),
-                        },
-                        generation_index: mt_index,
-                    })
-                }
+                            },
+                        );
+                        Some(DustEventDetails::DustGenerationDtimeUpdate {
+                            generation_info: DustGenerationInfo {
+                                night_utxo_hash: generation.nonce.0.0.into(), /* nonce is the
+                                                                               * InitialNonce/
+                                                                               * backing_night. */
+                                value: generation.value,
+                                owner: generation.owner.0.0.to_bytes_le().into(),
+                                nonce: generation.nonce.0.0.into(),
+                                ctime: 0, // Not available in the event, use placeholder.
+                                dtime: generation.dtime.to_secs(),
+                            },
+                            generation_index: mt_index,
+                        })
+                    }
 
-                LedgerEventDetails::DustSpendProcessed {
-                    commitment,
-                    commitment_index,
-                    nullifier,
-                    v_fee,
-                    declared_time,
-                    block_time: _,
-                } => Some(DustEventDetails::DustSpendProcessed {
-                    commitment: commitment.0.0.to_bytes_le().into(),
-                    commitment_index: *commitment_index,
-                    nullifier: nullifier.0.0.to_bytes_le().into(),
-                    v_fee: *v_fee,
-                    time: declared_time.to_secs(),
-                    params: dust_params.clone(),
-                }),
+                    LedgerEventDetails::DustSpendProcessed {
+                        commitment,
+                        commitment_index,
+                        nullifier,
+                        v_fee,
+                        declared_time,
+                        block_time: _,
+                    } => Some(DustEventDetails::DustSpendProcessed {
+                        commitment: commitment.0.0.to_bytes_le().into(),
+                        commitment_index: *commitment_index,
+                        nullifier: nullifier.0.0.to_bytes_le().into(),
+                        v_fee: *v_fee,
+                        time: declared_time.to_secs(),
+                        params: dust_params.clone(),
+                    }),
 
-                _ => None,
-            };
+                    _ => None,
+                };
 
             dust_event_details.map(|details| DustEvent {
                 transaction_hash: event.source.transaction_hash.0.0.into(),
