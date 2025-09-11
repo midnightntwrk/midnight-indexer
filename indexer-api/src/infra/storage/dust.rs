@@ -998,3 +998,178 @@ impl From<CnightRegistrationsRow> for RegistrationUpdate {
         }
     }
 }
+
+#[cfg(feature = "cloud")]
+impl DustStorage for crate::infra::postgres::PostgresStorage {
+    #[trace]
+    async fn get_dust_nullifier_progress(
+        &self,
+        prefixes: &[DustPrefix],
+        min_prefix_length: u32,
+        from_block: u32,
+    ) -> Result<(u32, u32), sqlx::Error> {
+        // Get the highest block that has nullifiers matching the prefixes
+        let min_prefix_length = min_prefix_length as usize;
+        let valid_prefixes = prefixes
+            .iter()
+            .filter(|prefix| prefix.as_ref().len() >= min_prefix_length)
+            .collect::<Vec<_>>();
+
+        if valid_prefixes.is_empty() {
+            return Ok((from_block, 0));
+        }
+
+        // Build conditions for prefix matching
+        let conditions = valid_prefixes
+            .iter()
+            .enumerate()
+            .map(|(i, prefix)| {
+                let param_num = 2 + i;
+                let hex_len = prefix.as_ref().len() * 2;
+                format!(
+                    "substring(encode(nullifier, 'hex'), 1, {hex_len}) = encode(${param_num}, 'hex')"
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let where_clause = conditions.join(" OR ");
+
+        let query = format!(
+            indoc! {"
+                SELECT COALESCE(MAX(b.height), $1) as highest_block, COUNT(DISTINCT t.id) as matched_count
+                FROM dust_utxos du
+                INNER JOIN transactions t ON t.id = du.spent_at_transaction_id
+                INNER JOIN blocks b ON b.id = t.block_id
+                WHERE du.nullifier IS NOT NULL
+                AND ({})
+                AND b.height >= $1
+            "},
+            where_clause
+        );
+
+        let mut progress_query = sqlx::query_as::<_, (i64, i64)>(&query)
+            .bind(from_block as i64);
+
+        for prefix in &valid_prefixes {
+            progress_query = progress_query.bind(prefix.as_ref());
+        }
+
+        let (highest_block, matched_count) = progress_query
+            .fetch_one(&*self.pool)
+            .await?;
+
+        Ok((highest_block as u32, matched_count as u32))
+    }
+
+    #[trace]
+    async fn get_dust_commitment_progress(
+        &self,
+        commitment_prefixes: &[DustPrefix],
+        min_prefix_length: u32,
+        start_index: u64,
+    ) -> Result<(u64, u32), sqlx::Error> {
+        let min_prefix_length = min_prefix_length as usize;
+        let valid_prefixes = commitment_prefixes
+            .iter()
+            .filter(|prefix| prefix.as_ref().len() >= min_prefix_length)
+            .collect::<Vec<_>>();
+
+        if valid_prefixes.is_empty() {
+            return Ok((start_index, 0));
+        }
+
+        // Build conditions for prefix matching
+        let conditions = valid_prefixes
+            .iter()
+            .enumerate()
+            .map(|(i, prefix)| {
+                let param_num = 2 + i;
+                let hex_len = prefix.as_ref().len() * 2;
+                format!(
+                    "substring(encode(commitment, 'hex'), 1, {hex_len}) = encode(${param_num}, 'hex')"
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let where_clause = conditions.join(" OR ");
+
+        let query = format!(
+            indoc! {"
+                SELECT COALESCE(MAX(merkle_index), $1) as highest_index, COUNT(*) as commitment_count
+                FROM dust_utxos
+                WHERE merkle_index >= $1
+                AND ({})
+            "},
+            where_clause
+        );
+
+        let mut progress_query = sqlx::query_as::<_, (i64, i64)>(&query)
+            .bind(start_index as i64);
+
+        for prefix in &valid_prefixes {
+            progress_query = progress_query.bind(prefix.as_ref());
+        }
+
+        let (highest_index, commitment_count) = progress_query
+            .fetch_one(&*self.pool)
+            .await?;
+
+        Ok((highest_index as u64, commitment_count as u32))
+    }
+
+    #[trace]
+    async fn get_registration_progress(
+        &self,
+        addresses: &[RegistrationAddress],
+    ) -> Result<(u64, u32), sqlx::Error> {
+        if addresses.is_empty() {
+            return Ok((0, 0));
+        }
+
+        // Build conditions for address matching
+        let conditions = addresses
+            .iter()
+            .enumerate()
+            .map(|(i, address)| {
+                match address {
+                    RegistrationAddress::CardanoStakeKey(_) => {
+                        format!("cardano_stake_key = ${}", i + 1)
+                    }
+                    RegistrationAddress::DustAddress(_) => {
+                        format!("dust_address = ${}", i + 1)
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let where_clause = conditions.join(" OR ");
+
+        let query = format!(
+            indoc! {"
+                SELECT COALESCE(MAX(registered_at), 0) as latest_timestamp, COUNT(*) as update_count
+                FROM dust_registrations
+                WHERE {}
+            "},
+            where_clause
+        );
+
+        let mut progress_query = sqlx::query_as::<_, (i64, i64)>(&query);
+
+        for address in addresses {
+            match address {
+                RegistrationAddress::CardanoStakeKey(key) => {
+                    progress_query = progress_query.bind(key.as_ref());
+                }
+                RegistrationAddress::DustAddress(addr) => {
+                    progress_query = progress_query.bind(addr.as_ref());
+                }
+            }
+        }
+
+        let (latest_timestamp, update_count) = progress_query
+            .fetch_one(&*self.pool)
+            .await?;
+
+        Ok((latest_timestamp as u64, update_count as u32))
+    }
+}
