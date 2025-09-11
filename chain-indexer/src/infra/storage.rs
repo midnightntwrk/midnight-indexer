@@ -852,6 +852,10 @@ async fn save_dust_generation_tree_update(
     // In a real implementation, we'd calculate the actual root from the path
     let root = vec![0u8; 32]; // Placeholder root
 
+    // Serialize merkle_path as JSON bytes for storage in bytea column
+    // We use bincode for efficient binary serialization
+    let tree_data = bincode::serialize(merkle_path).unwrap_or_default();
+
     let query = indoc! {"
         INSERT INTO dust_generation_tree (
             block_height,
@@ -870,7 +874,7 @@ async fn save_dust_generation_tree_update(
         .bind(block_height as i64)
         .bind(merkle_index as i64)
         .bind(&root)
-        .bind(Json(merkle_path)) // Use Json wrapper for serialization
+        .bind(&tree_data) // Store as raw bytes
         .execute(&mut **tx)
         .await?;
 

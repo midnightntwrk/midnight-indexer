@@ -29,9 +29,9 @@ use fastrace::trace;
 use futures::Stream;
 use indexer_common::{
     domain::{
-        CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustMerkleUpdate,
-        DustNonce, DustNullifier, DustOwner, DustPrefix, NightUtxoHash,
-        dust::DustMerklePathEntry, ledger::TransactionHash,
+        CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustMerkleUpdate, DustNonce,
+        DustNullifier, DustOwner, DustPrefix, NightUtxoHash, dust::DustMerklePathEntry,
+        ledger::TransactionHash,
     },
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
@@ -298,9 +298,9 @@ impl DustStorage for Storage {
 
                 for row in merkle_rows {
                     last_merkle_index = row.merkle_index + 1;
-                    // Extract merkle path from Json wrapper
-                    let merkle_path = if !row.tree_data.0.is_empty() {
-                        Some(row.tree_data.0)
+                    // Deserialize merkle path from bytea if available
+                    let merkle_path = if !row.tree_data.is_empty() {
+                        bincode::deserialize::<Vec<DustMerklePathEntry>>(&row.tree_data).ok()
                     } else {
                         None
                     };
@@ -1129,7 +1129,7 @@ struct DustGenerationTreeRow {
 
     root: DustMerkleUpdate, // This is actually the collapsed update data, not a root hash
 
-    tree_data: sqlx::types::Json<Vec<DustMerklePathEntry>>, // Merkle path data stored as JSON
+    tree_data: Vec<u8>, // Merkle path data stored as serialized bytes
 }
 
 impl From<DustUtxosRow> for DustCommitmentInfo {
