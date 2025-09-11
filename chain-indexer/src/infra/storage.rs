@@ -1298,7 +1298,8 @@ fn convert_cnight_events_to_dust_events(
         .enumerate()
         .map(|(index, event)| {
             let owner_bytes = event.owner.0.as_le_bytes();
-            let owner = DustOwner::try_from(owner_bytes).expect("dust public key should be 32 bytes");
+            let owner =
+                DustOwner::try_from(owner_bytes).expect("dust public key should be 32 bytes");
             let nonce = DustNonce::from(event.nonce.0.0);
 
             let event_details = match event.action {
@@ -1332,7 +1333,7 @@ fn convert_cnight_events_to_dust_events(
                         commitment: DustCommitment::default(), // System destroys don't track original commitment
                         commitment_index: 0, // Merkle tree position not tracked for system destroys
                         nullifier: DustNullifier::default(), // No nullifier generated for system destroys
-                        v_fee: 0, // System operations don't pay fees
+                        v_fee: 0,                            // System operations don't pay fees
                         time: event.time.to_secs(),
                         params: indexer_common::domain::dust::DustParameters::default(), // Use default parameters for system operations
                     }
