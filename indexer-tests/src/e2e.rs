@@ -1233,12 +1233,10 @@ async fn test_dust_events_queries(
     }
 
     // Test recentDustEvents query works correctly.
-    // This query should return empty results in test environment (no DUST events),
-    // but will return events in production when cNIGHT holders and fees exist.
     println!("Testing recentDustEvents query...");
     let variables = recent_dust_events_query::Variables {
         limit: Some(10),
-        event_type: None,
+        event_type: None,  // Get all event types.
     };
     let recent_events = send_query::<RecentDustEventsQuery>(api_client, api_url, variables)
         .await?
@@ -1247,6 +1245,15 @@ async fn test_dust_events_queries(
         "recentDustEvents query completed, got {} events",
         recent_events.len()
     );
+    
+    // Just validate structure if we have events.
+    for event in &recent_events {
+        // Each event should have these fields (validation done by type system).
+        // Just access them to ensure they exist.
+        let _ = &event.transaction_hash;
+        let _ = &event.event_type;
+        let _ = &event.event_details;
+    }
 
     // Verify consistency: events should exist only if we found DUST-generating transactions.
     // Note: There may be pre-existing DUST events in the database from genesis or prior runs.
@@ -1410,38 +1417,50 @@ async fn test_additional_dust_queries(api_client: &Client, api_url: &str) -> any
         .json()
         .await?;
 
-    // Verify response has expected fields.
-    // Note: When there's no DUST data, currentDustState may be null or have null fields.
+    // Verify response has expected structure.
     let dust_state = &response["data"]["currentDustState"];
-    if !dust_state.is_null() && dust_state.is_object() {
-        // Only validate fields if we have DUST data.
+    if dust_state.is_object() {
+        // Validate structure when DUST data exists.
         assert!(
-            dust_state["commitmentTreeRoot"].is_string()
-                || dust_state["commitmentTreeRoot"].is_null(),
+            dust_state["commitmentTreeRoot"].is_string() || dust_state["commitmentTreeRoot"].is_null(),
             "commitmentTreeRoot should be string or null"
         );
         assert!(
-            dust_state["generationTreeRoot"].is_string()
-                || dust_state["generationTreeRoot"].is_null(),
+            dust_state["generationTreeRoot"].is_string() || dust_state["generationTreeRoot"].is_null(),
             "generationTreeRoot should be string or null"
         );
         assert!(
-            dust_state["totalCommitments"].is_number() || dust_state["totalCommitments"].is_null(),
-            "totalCommitments should be number or null"
+            dust_state["blockHeight"].is_number() || dust_state["blockHeight"].is_null(),
+            "blockHeight should be number or null"
         );
         assert!(
-            dust_state["totalGenerations"].is_number() || dust_state["totalGenerations"].is_null(),
-            "totalGenerations should be number or null"
+            dust_state["timestamp"].is_number() || dust_state["timestamp"].is_null(),
+            "timestamp should be number or null"
         );
+        assert!(
+            dust_state["totalRegistrations"].is_number() || dust_state["totalRegistrations"].is_null(),
+            "totalRegistrations should be number or null"
+        );
+        
+        // If we have numeric values, validate they're reasonable.
+        if let Some(height) = dust_state["blockHeight"].as_i64() {
+            assert!(height >= 0, "blockHeight should be non-negative");
+        }
+        if let Some(ts) = dust_state["timestamp"].as_i64() {
+            assert!(ts >= 0, "timestamp should be non-negative");
+        }
+        if let Some(regs) = dust_state["totalRegistrations"].as_i64() {
+            assert!(regs >= 0, "totalRegistrations should be non-negative");
+        }
     } else {
         println!("No DUST state available - this is expected without cNIGHT UTXO events");
     }
 
     // Test dustGenerationStatus query.
-    // Using dummy stake keys for testing - will return empty or error in test environment.
+    // Using test stake keys - actual values don't matter for structural testing.
     let test_stake_keys = vec![
-        "stake_test1uzpq2pktpnj54e5e9zx3ult72nzj27xzq5qz2vxcg24qzqgu4c6qj".try_into().unwrap(),
-        "stake_test1uqpq2pktpnj54e5e9zx3ult72nzj27xzq5qz2vxcg24qzqg7ujf9z".try_into().unwrap(),
+        "0x0000000000000000000000000000000000000000000000000000000000000001".try_into().unwrap(),
+        "0x0000000000000000000000000000000000000000000000000000000000000002".try_into().unwrap(),
     ];
     
     let variables = dust_generation_status_query::Variables {
@@ -1456,13 +1475,38 @@ async fn test_additional_dust_queries(api_client: &Client, api_url: &str) -> any
         .json()
         .await?;
     
-    // Check response structure - may be empty array or have data.
+    // Verify response structure.
     if let Some(status_array) = response["data"]["dustGenerationStatus"].as_array() {
+        // Should return status for all requested addresses.
+        assert!(!status_array.is_empty(), "Should return status for requested addresses");
+        
         for status in status_array {
-            // Validate structure if we have data.
-            assert!(status["cardanoStakeKey"].is_string());
-            assert!(status["isRegistered"].is_boolean());
-            // Other fields may be null.
+            // Validate each status has required fields.
+            assert!(status["cardanoStakeKey"].is_string(), "cardanoStakeKey should be string");
+            assert!(status["isRegistered"].is_boolean(), "isRegistered should be boolean");
+            
+            // Other fields can be null for unregistered addresses.
+            assert!(
+                status["dustAddress"].is_string() || status["dustAddress"].is_null(),
+                "dustAddress should be string or null"
+            );
+            assert!(
+                status["generationRate"].is_string() || status["generationRate"].is_null(),
+                "generationRate should be string or null"
+            );
+            assert!(
+                status["currentCapacity"].is_string() || status["currentCapacity"].is_null(),
+                "currentCapacity should be string or null"
+            );
+            assert!(
+                status["nightBalance"].is_string() || status["nightBalance"].is_null(),
+                "nightBalance should be string or null"
+            );
+            
+            // If registered, dustAddress should be present.
+            if status["isRegistered"].as_bool().unwrap_or(false) {
+                assert!(status["dustAddress"].is_string(), "Registered address should have dustAddress");
+            }
         }
     }
 
@@ -1494,9 +1538,8 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
     use tokio::time::{Duration, timeout};
 
     // Test dustGenerations subscription.
-    // Need a valid DUST address for this test.
-    // Using a dummy address for now - in real test would use actual address.
-    let dust_address = "0000000000000000000000000000000000000000000000000000000000000000";
+    // Using dummy address - actual value doesn't matter for structural testing.
+    let dust_address = "0x0000000000000000000000000000000000000000000000000000000000000000";
     let variables = dust_generations_subscription::Variables {
         dust_address: dust_address.try_into().unwrap(),
         from_generation_index: Some(0),
@@ -1581,7 +1624,7 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
 
     // Test dustRegistrationUpdates subscription.
     let variables = dust_registration_updates_subscription::Variables {
-        addresses: vec![], // Empty array to subscribe to all addresses.
+        addresses: vec![],  // Empty array to subscribe to all addresses.
     };
 
     let mut stream = graphql_ws_client::subscribe::<DustRegistrationUpdatesSubscription>(
