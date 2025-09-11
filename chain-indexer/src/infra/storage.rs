@@ -22,7 +22,7 @@ use indexer_common::{
         BlockHash, ByteVec, DustNonce, DustNullifier, DustOwner, NightUtxoHash, NightUtxoNonce,
         dust::{
             DustCommitment, DustEvent, DustEventDetails, DustEventType, DustGenerationInfo,
-            QualifiedDustOutput,
+            DustMerklePathEntry, QualifiedDustOutput,
         },
         ledger::{
             ContractAttributes, ContractBalance, SystemTransaction as DomainSystemTransaction,
@@ -34,6 +34,7 @@ use indexer_common::{
 use indoc::indoc;
 use midnight_ledger_v6::structure::SystemTransaction as LedgerSystemTransaction;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use sqlx::{QueryBuilder, Type, types::Json};
 use std::iter;
 
@@ -270,13 +271,14 @@ async fn save_block(
         .await?;
     }
 
-    save_transactions(transactions, block_id, tx).await
+    save_transactions(transactions, block_id, block.height, tx).await
 }
 
 #[trace(properties = { "block_id": "{block_id}" })]
 async fn save_transactions(
     transactions: &[Transaction],
     block_id: i64,
+    block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<Option<u64>, sqlx::Error> {
     let mut highest_transaction_id = None;
@@ -310,12 +312,12 @@ async fn save_transactions(
         match transaction {
             Transaction::Regular(transaction) => {
                 highest_transaction_id = Some(
-                    save_regular_transaction(transaction, transaction_id, block_id, tx).await?,
+                    save_regular_transaction(transaction, transaction_id, block_id, block_height, tx).await?,
                 );
             }
 
             Transaction::System(transaction) => {
-                save_system_transaction(transaction, transaction_id, block_id, tx).await?
+                save_system_transaction(transaction, transaction_id, block_id, block_height, tx).await?
             }
         }
     }
@@ -328,6 +330,7 @@ async fn save_regular_transaction(
     transaction: &RegularTransaction,
     transaction_id: i64,
     block_id: i64,
+    block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<u64, sqlx::Error> {
     #[cfg(feature = "cloud")]
@@ -408,7 +411,7 @@ async fn save_regular_transaction(
     .await?;
 
     // Process and save DUST events.
-    process_dust_events(&transaction.dust_events, transaction_id, tx).await?;
+    process_dust_events(&transaction.dust_events, transaction_id, block_height, tx).await?;
     save_dust_events(&transaction.dust_events, transaction_id, tx).await?;
 
     Ok(transaction_id as u64)
@@ -419,6 +422,7 @@ async fn save_system_transaction(
     transaction: &SystemTransaction,
     transaction_id: i64,
     _block_id: i64,
+    block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     // Process and save DUST events from system transactions.
@@ -426,7 +430,7 @@ async fn save_system_transaction(
     // including CNightGeneratesDustUpdate events which create DustInitialUtxo
     // and DustGenerationDtimeUpdate events.
     if !transaction.dust_events.is_empty() {
-        process_dust_events(&transaction.dust_events, transaction_id, tx).await?;
+        process_dust_events(&transaction.dust_events, transaction_id, block_height, tx).await?;
         save_dust_events(&transaction.dust_events, transaction_id, tx).await?;
     }
 
@@ -461,7 +465,7 @@ async fn save_system_transaction(
                     let dust_events =
                         convert_cnight_events_to_dust_events(&events, &transaction.hash);
                     if !dust_events.is_empty() {
-                        process_dust_events(&dust_events, transaction_id, tx).await?;
+                        process_dust_events(&dust_events, transaction_id, block_height, tx).await?;
                         save_dust_events(&dust_events, transaction_id, tx).await?;
                     }
                 }
@@ -717,12 +721,8 @@ async fn process_dust_events(
             } => {
                 generation_dtime_and_index = Some((generation_info.dtime, *generation_index));
                 // Store merkle path in dust_generation_tree table
-                save_dust_generation_tree_update(
-                    *generation_index,
-                    merkle_path,
-                    block_height,
-                    tx
-                ).await?;
+                save_dust_generation_tree_update(*generation_index, merkle_path, block_height, tx)
+                    .await?;
             }
 
             DustEventDetails::DustSpendProcessed {
@@ -843,11 +843,11 @@ async fn save_dust_generation_tree_update(
 ) -> Result<(), sqlx::Error> {
     // Serialize the merkle path to store as tree_data
     let tree_data = serde_json::to_vec(merkle_path).unwrap_or_default();
-    
+
     // Calculate the root hash from the path (placeholder for now)
     // In a real implementation, we'd calculate the actual root from the path
     let root = vec![0u8; 32]; // Placeholder root
-    
+
     let query = indoc! {"
         INSERT INTO dust_generation_tree (
             block_height,
@@ -861,7 +861,7 @@ async fn save_dust_generation_tree_update(
             root = EXCLUDED.root,
             tree_data = EXCLUDED.tree_data
     "};
-    
+
     sqlx::query(query)
         .bind(block_height as i64)
         .bind(merkle_index as i64)
@@ -869,7 +869,7 @@ async fn save_dust_generation_tree_update(
         .bind(&tree_data)
         .execute(&mut **tx)
         .await?;
-    
+
     Ok(())
 }
 

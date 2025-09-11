@@ -304,7 +304,7 @@ impl DustStorage for Storage {
                     } else {
                         None
                     };
-                    
+
                     yield DustGenerationEvent::MerkleUpdate(DustGenerationMerkleUpdate {
                         index: row.merkle_index,
                         collapsed_update: row.root.clone(),
@@ -1113,7 +1113,7 @@ struct DustCommitmentTreeRow {
     #[sqlx(try_from = "i64")]
     merkle_index: u64,
 
-    root: DustMerkleUpdate,  // This is actually the collapsed update data, not a root hash
+    root: DustMerkleUpdate, // This is actually the collapsed update data, not a root hash
 }
 
 /// Row type for dust_generation_tree table queries.
@@ -1127,9 +1127,9 @@ struct DustGenerationTreeRow {
     #[sqlx(try_from = "i64")]
     merkle_index: u64,
 
-    root: DustMerkleUpdate,  // This is actually the collapsed update data, not a root hash
-    
-    tree_data: DustMerkleTreeData,  // Serialized merkle path data
+    root: DustMerkleUpdate, // This is actually the collapsed update data, not a root hash
+
+    tree_data: DustMerkleTreeData, // Serialized merkle path data
 }
 
 impl From<DustUtxosRow> for DustCommitmentInfo {

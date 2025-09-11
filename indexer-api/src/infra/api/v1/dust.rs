@@ -118,7 +118,7 @@ impl From<DustMerkleTreeType> for domain::dust::DustMerkleTreeType {
 pub struct DustMerklePathEntry {
     /// The hash of the sibling at this level (if available).
     pub sibling_hash: Option<HexEncoded>,
-    
+
     /// Whether the path goes left at this level.
     pub goes_left: bool,
 }
@@ -126,7 +126,9 @@ pub struct DustMerklePathEntry {
 impl From<indexer_common::domain::dust::DustMerklePathEntry> for DustMerklePathEntry {
     fn from(entry: indexer_common::domain::dust::DustMerklePathEntry) -> Self {
         Self {
-            sibling_hash: entry.sibling_hash.map(|bytes| HexEncoded(const_hex::encode(bytes))),
+            sibling_hash: entry
+                .sibling_hash
+                .map(|bytes| HexEncoded(const_hex::encode(bytes))),
             goes_left: entry.goes_left,
         }
     }
@@ -211,9 +213,7 @@ impl From<domain::dust::DustGenerationMerkleUpdate> for DustGenerationMerkleUpda
             index,
             collapsed_update: collapsed_update.hex_encode(),
             block_height,
-            merkle_path: merkle_path.map(|path| {
-                path.into_iter().map(Into::into).collect()
-            }),
+            merkle_path: merkle_path.map(|path| path.into_iter().map(Into::into).collect()),
         }
     }
 }

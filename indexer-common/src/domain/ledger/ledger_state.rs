@@ -13,7 +13,10 @@
 
 use crate::domain::{
     ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_016_000, ProtocolVersion,
-    dust::{DustEvent, DustEventDetails, DustGenerationInfo, DustMerklePathEntry, DustParameters, QualifiedDustOutput},
+    dust::{
+        DustEvent, DustEventDetails, DustGenerationInfo, DustMerklePathEntry, DustParameters,
+        QualifiedDustOutput,
+    },
     ledger::{
         Error, IntentV6, SerializableV6Ext, SerializedContractAddress, TaggedSerializableV6Ext,
         TransactionV6,
@@ -506,19 +509,23 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
                                 }
                             },
                         );
-                        
+
                         // Preserve the merkle path!
-                        let merkle_path = update.path.iter().map(|entry| {
-                            DustMerklePathEntry {
-                                // MerkleTreeDigest(Fr) - serialize Fr to bytes
-                                sibling_hash: entry.hash.map(|h| {
-                                    // Fr has an inner field that can be converted to bytes
-                                    h.0.0.to_bytes_le().to_vec()
-                                }),
-                                goes_left: entry.goes_left,
-                            }
-                        }).collect();
-                        
+                        let merkle_path = update
+                            .path
+                            .iter()
+                            .map(|entry| {
+                                DustMerklePathEntry {
+                                    // MerkleTreeDigest(Fr) - serialize Fr to bytes
+                                    sibling_hash: entry.hash.map(|h| {
+                                        // Fr has an inner field that can be converted to bytes
+                                        h.0.0.to_bytes_le().to_vec()
+                                    }),
+                                    goes_left: entry.goes_left,
+                                }
+                            })
+                            .collect();
+
                         Some(DustEventDetails::DustGenerationDtimeUpdate {
                             generation_info: DustGenerationInfo {
                                 night_utxo_hash: generation.nonce.0.0.into(), /* nonce is the
