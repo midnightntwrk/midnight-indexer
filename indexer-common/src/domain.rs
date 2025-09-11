@@ -45,3 +45,4 @@ pub type DustPrefix = ByteVec;
 pub type DustMerkleUpdate = ByteVec;
 pub type NightUtxoHash = ByteArray<32>;
 pub type NightUtxoNonce = ByteArray<32>;
+pub type DustUtxoId = ByteVec;

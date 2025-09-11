@@ -12,7 +12,7 @@
 // limitations under the License.
 
 mod header;
-pub mod runtimes;
+mod runtimes;
 
 use crate::{
     domain::{
@@ -247,6 +247,13 @@ impl SubxtNode {
             .then(|t| make_transaction(t, hash, protocol_version, online_client))
             .try_collect::<Vec<_>>()
             .await?;
+
+        // Convert infra DustRegistrationEvent to domain type
+        let dust_registration_events: Vec<crate::domain::DustRegistrationEvent> =
+            dust_registration_events
+                .into_iter()
+                .map(Into::into)
+                .collect();
 
         let block = Block {
             hash,

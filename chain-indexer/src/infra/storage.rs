@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::domain::{
-    self, Block, BlockTransactions, ContractAction, RegularTransaction, SystemTransaction,
-    Transaction, TransactionVariant, node::BlockInfo,
+    self, Block, BlockTransactions, ContractAction, DustRegistrationEvent, RegularTransaction,
+    SystemTransaction, Transaction, TransactionVariant, node::BlockInfo,
 };
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
@@ -181,7 +181,7 @@ impl domain::storage::Storage for Storage {
         &self,
         block: &Block,
         transactions: &[Transaction],
-        dust_registration_events: &[crate::infra::subxt_node::runtimes::DustRegistrationEvent],
+        dust_registration_events: &[DustRegistrationEvent],
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         let max_transaction_id =
@@ -220,7 +220,7 @@ impl From<&ContractAttributes> for ContractActionVariant {
 async fn save_block(
     block: &Block,
     transactions: &[Transaction],
-    dust_registration_events: &[crate::infra::subxt_node::runtimes::DustRegistrationEvent],
+    dust_registration_events: &[DustRegistrationEvent],
     tx: &mut SqlxTransaction,
 ) -> Result<Option<u64>, sqlx::Error> {
     let query = indoc! {"
@@ -1111,13 +1111,11 @@ async fn save_dust_utxos(
 /// for DUST distribution. See PM-17951 for details.
 #[trace]
 async fn save_dust_registration_events(
-    events: &[crate::infra::subxt_node::runtimes::DustRegistrationEvent],
+    events: &[DustRegistrationEvent],
     block_id: i64,
     block_timestamp: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    use crate::infra::subxt_node::runtimes::DustRegistrationEvent;
-
     for event in events {
         match event {
             DustRegistrationEvent::Registration {
@@ -1143,8 +1141,8 @@ async fn save_dust_registration_events(
                 "};
 
                 sqlx::query(query)
-                    .bind(cardano_address.as_slice())
-                    .bind(dust_address.as_slice())
+                    .bind(cardano_address.0.as_slice())
+                    .bind(dust_address.0.as_slice())
                     .bind(true)
                     .bind(block_timestamp)
                     .bind(block_id)
@@ -1165,8 +1163,8 @@ async fn save_dust_registration_events(
 
                 sqlx::query(query)
                     .bind(block_timestamp)
-                    .bind(cardano_address.as_slice())
-                    .bind(dust_address.as_slice())
+                    .bind(cardano_address.0.as_slice())
+                    .bind(dust_address.0.as_slice())
                     .execute(&mut **tx)
                     .await?;
             }
@@ -1190,9 +1188,9 @@ async fn save_dust_registration_events(
                 "};
 
                 sqlx::query(query)
-                    .bind(cardano_address.as_slice())
-                    .bind(dust_address.as_bytes())
-                    .bind(utxo_id.as_bytes())
+                    .bind(cardano_address.0.as_slice())
+                    .bind(dust_address.0.as_slice())
+                    .bind(utxo_id.0.as_slice())
                     .bind(block_timestamp)
                     .bind(block_id)
                     .execute(&mut **tx)
@@ -1213,7 +1211,7 @@ async fn save_dust_registration_events(
 
                 sqlx::query(query)
                     .bind(block_timestamp)
-                    .bind(utxo_id.as_bytes())
+                    .bind(utxo_id.0.as_slice())
                     .execute(&mut **tx)
                     .await?;
             }

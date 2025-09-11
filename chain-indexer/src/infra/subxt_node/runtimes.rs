@@ -30,9 +30,9 @@ pub struct BlockDetails {
     pub dust_registration_events: Vec<DustRegistrationEvent>,
 }
 
-/// DUST registration events from NativeTokenObservation pallet.
+/// Infrastructure representation of DUST registration event from the NativeTokenObservation pallet.
 #[derive(Debug, Clone)]
-pub enum DustRegistrationEvent {
+pub(super) enum DustRegistrationEvent {
     Registration {
         cardano_address: Vec<u8>,
         dust_address: Vec<u8>,
@@ -51,6 +51,54 @@ pub enum DustRegistrationEvent {
         dust_address: String,
         utxo_id: String,
     },
+}
+
+impl From<DustRegistrationEvent> for crate::domain::DustRegistrationEvent {
+    fn from(event: DustRegistrationEvent) -> Self {
+        use indexer_common::domain::{ByteArray, ByteVec};
+
+        match event {
+            DustRegistrationEvent::Registration {
+                cardano_address,
+                dust_address,
+            } => crate::domain::DustRegistrationEvent::Registration {
+                cardano_address: ByteVec::from(cardano_address),
+                dust_address: ByteArray::try_from(dust_address)
+                    .expect("DUST address should be 32 bytes"),
+            },
+            DustRegistrationEvent::Deregistration {
+                cardano_address,
+                dust_address,
+            } => crate::domain::DustRegistrationEvent::Deregistration {
+                cardano_address: ByteVec::from(cardano_address),
+                dust_address: ByteArray::try_from(dust_address)
+                    .expect("DUST address should be 32 bytes"),
+            },
+            DustRegistrationEvent::MappingAdded {
+                cardano_address,
+                dust_address,
+                utxo_id,
+            } => {
+                // dust_address and utxo_id are String in MappingAdded/Removed
+                crate::domain::DustRegistrationEvent::MappingAdded {
+                    cardano_address: ByteVec::from(cardano_address),
+                    dust_address: ByteArray::try_from(dust_address.into_bytes())
+                        .expect("DUST address string should be 32 bytes"),
+                    utxo_id: ByteVec::from(utxo_id.into_bytes()),
+                }
+            }
+            DustRegistrationEvent::MappingRemoved {
+                cardano_address,
+                dust_address,
+                utxo_id,
+            } => crate::domain::DustRegistrationEvent::MappingRemoved {
+                cardano_address: ByteVec::from(cardano_address),
+                dust_address: ByteArray::try_from(dust_address.into_bytes())
+                    .expect("DUST address string should be 32 bytes"),
+                utxo_id: ByteVec::from(utxo_id.into_bytes()),
+            },
+        }
+    }
 }
 
 /// Runtime specific (serialized) transaction.
