@@ -14,7 +14,7 @@
 use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, ContextExt, ResultExt,
+        ApiError, ApiResult, ContextExt, InnerApiError, ResultExt,
         v1::{
             AsBytesExt, HexEncoded, decode_session_id, subscription::get_next_transaction,
             transaction::Transaction,
@@ -32,18 +32,20 @@ use futures::{
 };
 use indexer_common::domain::{LedgerStateStorage, SessionId, Subscriber, WalletIndexed};
 use log::{debug, warn};
-use std::{future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
+use std::{
+    future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, sync::Arc, time::Duration,
+};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
 
-// TODO: Make configurable.
+// TODO: Make configurable!
 const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
 
-// TODO: Make configurable.
+// TODO: Make configurable!
 const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(3);
 
-// TODO: Make configurable.
+// TODO: Make configurable!
 const ACTIVATE_WALLET_INTERVAL: Duration = Duration::from_secs(60);
 
 /// An event of the shielded transactions subscription.
@@ -221,7 +223,12 @@ where
         let storage = cx.get_storage::<S>();
         let set_wallet_active = IntervalStream::new(interval(ACTIVATE_WALLET_INTERVAL))
             .then(move |_| async move { storage.set_wallet_active(session_id).await })
-            .map(|item| item.map_err_into_server_error(|| "set wallet active"));
+            .map_err(|error| {
+                ApiError::Server(InnerApiError(
+                    "set wallet active".to_string(),
+                    Some(Arc::new(error)),
+                ))
+            });
         let events = stream::select(events.map_ok(Some), set_wallet_active.map_ok(|_| None))
             .try_filter_map(ok)
             .on_drop(move || {

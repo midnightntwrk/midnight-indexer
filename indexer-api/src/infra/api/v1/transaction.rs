@@ -180,7 +180,7 @@ where
             ..
         } = value;
 
-        // Use fees information from database (calculated by chain-indexer).
+        // Use fees information from database (calculated by chain-indexer)
         let fees = TransactionFees {
             paid_fees: value
                 .paid_fees
