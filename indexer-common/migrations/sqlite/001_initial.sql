@@ -189,6 +189,7 @@ CREATE INDEX cnight_registrations_dust_addr_idx ON cnight_registrations(dust_add
 CREATE TABLE dust_commitment_tree(
     id INTEGER PRIMARY KEY,
     block_height INTEGER NOT NULL,
+    merkle_index INTEGER NOT NULL,
     root BLOB NOT NULL,
     tree_data BLOB NOT NULL
 );
@@ -196,9 +197,13 @@ CREATE TABLE dust_commitment_tree(
 CREATE TABLE dust_generation_tree(
     id INTEGER PRIMARY KEY,
     block_height INTEGER NOT NULL,
+    merkle_index INTEGER NOT NULL,
     root BLOB NOT NULL,
     tree_data BLOB NOT NULL
 );
+
+CREATE INDEX dust_commitment_tree_merkle_idx ON dust_commitment_tree(merkle_index);
+CREATE INDEX dust_generation_tree_merkle_idx ON dust_generation_tree(merkle_index);
 
 CREATE TABLE dust_events(
     id INTEGER PRIMARY KEY,

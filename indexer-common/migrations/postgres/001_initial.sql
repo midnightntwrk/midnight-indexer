@@ -183,6 +183,7 @@ CREATE INDEX ON cnight_registrations(dust_address);
 CREATE TABLE dust_commitment_tree(
     id BIGSERIAL PRIMARY KEY,
     block_height BIGINT NOT NULL,
+    merkle_index BIGINT NOT NULL,
     root BYTEA NOT NULL,
     tree_data BYTEA NOT NULL
 );
@@ -190,9 +191,13 @@ CREATE TABLE dust_commitment_tree(
 CREATE TABLE dust_generation_tree(
     id BIGSERIAL PRIMARY KEY,
     block_height BIGINT NOT NULL,
+    merkle_index BIGINT NOT NULL,
     root BYTEA NOT NULL,
     tree_data BYTEA NOT NULL
 );
+
+CREATE INDEX ON dust_commitment_tree(merkle_index);
+CREATE INDEX ON dust_generation_tree(merkle_index);
 
 CREATE TABLE dust_events(
     id BIGSERIAL PRIMARY KEY,
