@@ -747,13 +747,14 @@ async fn process_dust_events(
                 mark_dust_utxo_spent(*commitment, *nullifier, transaction_id, tx).await?;
             }
 
-            // Registration events are handled separately in save_dust_registration_events
+            // Registration events were already processed at block level (line 264)
+            // They come from NODE's NativeTokenObservation pallet and are stored via
+            // save_dust_registration_events(). We skip them here to avoid double-processing.
             DustEventDetails::DustRegistration { .. }
             | DustEventDetails::DustDeregistration { .. }
             | DustEventDetails::DustMappingAdded { .. }
             | DustEventDetails::DustMappingRemoved { .. } => {
-                // These events are captured from the NativeTokenObservation pallet
-                // and stored in the cnight_registrations table
+                // Intentionally empty - already handled at block level
             }
         }
     }
