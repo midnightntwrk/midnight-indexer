@@ -68,7 +68,7 @@ async function subscribeToUnshieldedTransactionEvents(
   const unshieldedTransactionSubscriptionHandler: SubscriptionHandlers<UnshieldedTxSubscriptionResponse> =
     {
       next: (payload) => {
-        log.debug('Received data:\n', JSON.stringify(payload, null, 2));
+        log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
         receivedUnshieldedTransactions.push(payload);
         if (stopCondition(receivedUnshieldedTransactions)) {
           stopListening();
@@ -129,7 +129,7 @@ describe('unshielded utxo subscriptions', async () => {
 
       expect(messages.length).toBeGreaterThanOrEqual(1);
       messages.forEach((transaction) => {
-        log.info('transaction', JSON.stringify(transaction, null, 2));
+        log.info(`transaction ${JSON.stringify(transaction, null, 2)}`);
       });
     });
 

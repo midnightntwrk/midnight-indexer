@@ -25,6 +25,7 @@ import {
   GraphQLCompleteMessage,
 } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
+import type { TestContext } from 'vitest';
 
 /**
  * Utility function that waits for all events to be received or timeout after a given number of milliseconds
@@ -77,7 +78,7 @@ describe('block subscriptions', () => {
       const receivedBlocks: BlockSubscriptionResponse[] = [];
       const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
         next: (payload: BlockSubscriptionResponse) => {
-          log.debug('Received data:\n', JSON.stringify(payload));
+          log.debug(`Received data:\n${JSON.stringify(payload)}`);
           receivedBlocks.push(payload);
           if (receivedBlocks.length === 2) {
             eventCoordinator.notify('twoBlocksReceived');
@@ -129,13 +130,13 @@ describe('block subscriptions', () => {
       const messagesReceived: BlockSubscriptionResponse[] = [];
       const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
         next: (payload: BlockSubscriptionResponse) => {
-          log.debug('Received data:', JSON.stringify(payload));
+          log.debug(`Received data: ${JSON.stringify(payload)}`);
 
           messagesReceived.push(payload);
 
           if (payload.errors) {
             eventCoordinator.notify('error');
-            log.error('Error received:', JSON.stringify(payload.errors));
+            log.error(`Error received: ${JSON.stringify(payload.errors)}`);
           }
 
           if (messagesReceived.length === 10) {
@@ -187,7 +188,7 @@ describe('block subscriptions', () => {
 
       const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
         next: (payload: BlockSubscriptionResponse) => {
-          log.debug('Received data:', JSON.stringify(payload));
+          log.debug(`Received data: ${JSON.stringify(payload)}`);
           messagesReceived.push(payload);
           if (payload.errors !== undefined) {
             log.debug('Received the expected error message');
@@ -195,7 +196,7 @@ describe('block subscriptions', () => {
           }
         },
         complete: (message) => {
-          log.debug('Complete message:', JSON.stringify(message));
+          log.debug(`Complete message: ${JSON.stringify(message)}`);
           completionMessage = message;
           eventCoordinator.notify('completion');
         },
@@ -238,7 +239,7 @@ describe('block subscriptions', () => {
 
       const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
         next: (payload: BlockSubscriptionResponse) => {
-          log.debug('Received data:', JSON.stringify(payload));
+          log.debug(`Received data: ${JSON.stringify(payload)}`);
           messagesReceived.push(payload);
           if (payload.errors !== undefined) {
             log.debug('Received the expected error message');
@@ -246,7 +247,7 @@ describe('block subscriptions', () => {
           }
         },
         complete: (message) => {
-          log.debug('Complete message:', JSON.stringify(message));
+          log.debug(`Complete message: ${JSON.stringify(message)}`);
           completionMessage = message;
           eventCoordinator.notify('completion');
         },
@@ -283,7 +284,7 @@ describe('block subscriptions', () => {
      */
     test('should stream blocks from the block with that height, given that height exists', async ({
       skip,
-    }) => {
+    }: TestContext) => {
       const latestBlockResponse = await indexerHttpClient.getLatestBlock();
       expect(latestBlockResponse).toBeSuccess();
       const latestBlock = latestBlockResponse.data?.block;
@@ -294,7 +295,7 @@ describe('block subscriptions', () => {
       // So we need to make sure there are at least 20 blocks on chain, if not
       // we skip the test becausee the precondition is not met
       if (latestBlock?.height && latestBlock?.height < 20) {
-        skip('Skipping as we want at least 20 blocks to be produced');
+        skip?.('Skipping as we want at least 20 blocks to be produced');
       }
 
       const blockMessagesReceived: BlockSubscriptionResponse[] = [];
@@ -306,7 +307,7 @@ describe('block subscriptions', () => {
       const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
         next: (payload) => {
           blockMessagesReceived.push(payload);
-          log.debug('Received data:', JSON.stringify(payload));
+          log.debug(`Received data: ${JSON.stringify(payload)}`);
           if (blockMessagesReceived.length === 20) {
             log.debug('Stop receiving blocks');
             eventCoordinator.notify('expectedBlocksReceived');
@@ -361,7 +362,7 @@ describe('block subscriptions', () => {
       const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
         next: (payload) => {
           blockMessagesReceived.push(payload);
-          log.debug('Received data:', JSON.stringify(payload));
+          log.debug(`Received data: ${JSON.stringify(payload)}`);
           if (payload.errors !== undefined) {
             log.debug('Received the expected error message');
             eventCoordinator.notify('error');
@@ -400,14 +401,14 @@ describe('block subscriptions', () => {
       const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
         next: (payload) => {
           blockMessagesReceived.push(payload);
-          log.debug('Received data:', JSON.stringify(payload));
+          log.debug(`Received data: ${JSON.stringify(payload)}`);
           if (payload.errors !== undefined) {
             log.debug('Received the expected error message');
             eventCoordinator.notify('error');
           }
         },
         complete: (message) => {
-          log.debug('Complete message:', JSON.stringify(message));
+          log.debug(`Complete message: ${JSON.stringify(message)}`);
           eventCoordinator.notify('completion');
           completionMessage = message;
         },
@@ -448,14 +449,14 @@ describe('block subscriptions', () => {
       const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
         next: (payload) => {
           blockMessagesReceived.push(payload);
-          log.debug('Received data:', JSON.stringify(payload));
+          log.debug(`Received data: ${JSON.stringify(payload)}`);
           if (payload.errors !== undefined) {
             log.debug('Received the expected error message');
             eventCoordinator.notify('error');
           }
         },
         complete: (message) => {
-          log.debug('Complete message:', JSON.stringify(message));
+          log.debug(`Complete message: ${JSON.stringify(message)}`);
           eventCoordinator.notify('completion');
           completionMessage = message;
         },

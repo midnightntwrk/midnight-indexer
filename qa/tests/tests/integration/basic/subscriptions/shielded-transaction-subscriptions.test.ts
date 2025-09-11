@@ -174,7 +174,7 @@ describe('shielded transaction subscriptions', () => {
       const receivedEvents: ShieldedTxSubscriptionResponse[] = [];
       const shieldedTxSubscriptionHandler: SubscriptionHandlers<ShieldedTxSubscriptionResponse> = {
         next: (payload) => {
-          log.debug('Received data:\n', JSON.stringify(payload));
+          log.debug(`Received data:\n${JSON.stringify(payload)}`);
           if (payload.data) {
             receivedEvents.push(payload);
           }
