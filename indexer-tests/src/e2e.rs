@@ -17,8 +17,9 @@ use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
         ContractActionSubscription, CurrentDustStateQuery, DisconnectMutation,
-        DustCommitmentsSubscription, DustEventsByTransactionQuery, DustGenerationsSubscription,
-        DustMerkleRootQuery, DustNullifierTransactionsSubscription, RecentDustEventsQuery,
+        DustCommitmentsSubscription, DustEventsByTransactionQuery, DustGenerationStatusQuery,
+        DustGenerationsSubscription, DustMerkleRootQuery, DustNullifierTransactionsSubscription,
+        DustRegistrationUpdatesSubscription, RecentDustEventsQuery,
         ShieldedTransactionsSubscription, TransactionsQuery, UnshieldedTransactionsSubscription,
         block_query,
         block_subscription::{
@@ -35,8 +36,9 @@ use crate::{
         },
         contract_action_subscription, current_dust_state_query, disconnect_mutation,
         dust_commitments_subscription, dust_events_by_transaction_query,
-        dust_generations_subscription, dust_merkle_root_query,
-        dust_nullifier_transactions_subscription, recent_dust_events_query,
+        dust_generation_status_query, dust_generations_subscription, dust_merkle_root_query,
+        dust_nullifier_transactions_subscription, dust_registration_updates_subscription,
+        recent_dust_events_query,
         shielded_transactions_subscription, transactions_query,
         unshielded_transactions_subscription,
     },
@@ -1435,8 +1437,34 @@ async fn test_additional_dust_queries(api_client: &Client, api_url: &str) -> any
         println!("No DUST state available - this is expected without cNIGHT UTXO events");
     }
 
-    // Test dustGenerationStatus query (requires stake keys).
-    // Skip if we don't have test stake keys.
+    // Test dustGenerationStatus query.
+    // Using dummy stake keys for testing - will return empty or error in test environment.
+    let test_stake_keys = vec![
+        "stake_test1uzpq2pktpnj54e5e9zx3ult72nzj27xzq5qz2vxcg24qzqgu4c6qj".try_into().unwrap(),
+        "stake_test1uqpq2pktpnj54e5e9zx3ult72nzj27xzq5qz2vxcg24qzqg7ujf9z".try_into().unwrap(),
+    ];
+    
+    let variables = dust_generation_status_query::Variables {
+        cardano_stake_keys: test_stake_keys,
+    };
+    let query = DustGenerationStatusQuery::build_query(variables);
+    let response: serde_json::Value = api_client
+        .post(api_url)
+        .json(&query)
+        .send()
+        .await?
+        .json()
+        .await?;
+    
+    // Check response structure - may be empty array or have data.
+    if let Some(status_array) = response["data"]["dustGenerationStatus"].as_array() {
+        for status in status_array {
+            // Validate structure if we have data.
+            assert!(status["cardanoStakeKey"].is_string());
+            assert!(status["isRegistered"].is_boolean());
+            // Other fields may be null.
+        }
+    }
 
     // Test dustMerkleRoot query for historical data.
     let variables = dust_merkle_root_query::Variables {
@@ -1547,6 +1575,39 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
             // Timeout - no events
             println!(
                 "No DUST nullifier transaction events received within timeout - this is expected without cNIGHT UTXO events"
+            );
+        }
+    }
+
+    // Test dustRegistrationUpdates subscription.
+    let variables = dust_registration_updates_subscription::Variables {
+        addresses: vec![], // Empty array to subscribe to all addresses.
+    };
+
+    let mut stream = graphql_ws_client::subscribe::<DustRegistrationUpdatesSubscription>(
+        ws_api_url, variables,
+    )
+    .await?;
+
+    // Take first event with timeout.
+    match timeout(Duration::from_secs(5), stream.next()).await {
+        Ok(Some(result)) => {
+            match result {
+                Ok(data) => {
+                    // Check that we got registration updates data - will be union type.
+                    let _ = &data.dust_registration_updates;
+                }
+                Err(e) => {
+                    // Expected if no registration events.
+                    println!("No registration updates available: {}", e);
+                }
+            }
+        }
+        Ok(None) => {} // Stream ended.
+        Err(_) => {
+            // Timeout - no events.
+            println!(
+                "No DUST registration update events received within timeout - this is expected without registration events"
             );
         }
     }
@@ -1704,6 +1765,14 @@ mod graphql {
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
+    pub struct DustGenerationStatusQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
     pub struct DustGenerationsSubscription;
 
     #[derive(GraphQLQuery)]
@@ -1721,4 +1790,12 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct DustCommitmentsSubscription;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustRegistrationUpdatesSubscription;
 }

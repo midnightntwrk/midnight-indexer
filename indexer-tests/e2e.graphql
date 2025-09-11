@@ -588,6 +588,17 @@ query DustMerkleRootQuery($treeType: DustMerkleTreeType!, $timestamp: Int!) {
     dustMerkleRoot(treeType: $treeType, timestamp: $timestamp)
 }
 
+query DustGenerationStatusQuery($cardanoStakeKeys: [HexEncoded!]!) {
+    dustGenerationStatus(cardanoStakeKeys: $cardanoStakeKeys) {
+        cardanoStakeKey
+        dustAddress
+        isRegistered
+        generationRate
+        currentCapacity
+        nightBalance
+    }
+}
+
 subscription DustGenerationsSubscription(
     $dustAddress: HexEncoded!,
     $fromGenerationIndex: Int,
@@ -613,6 +624,10 @@ subscription DustGenerationsSubscription(
             index
             collapsedUpdate
             blockHeight
+            merklePath {
+                siblingHash
+                goesLeft
+            }
         }
         ... on DustGenerationProgress {
             highestIndex
@@ -665,10 +680,33 @@ subscription DustCommitmentsSubscription(
             index
             collapsedUpdate
             blockHeight
+            merklePath {
+                siblingHash
+                goesLeft
+            }
         }
         ... on DustCommitmentProgress {
             highestIndex
             commitmentCount
+        }
+    }
+}
+
+subscription DustRegistrationUpdatesSubscription(
+    $addresses: [RegistrationAddress!]!
+) {
+    dustRegistrationUpdates(addresses: $addresses) {
+        __typename
+        ... on RegistrationUpdate {
+            cardanoStakeKey
+            dustAddress
+            isActive
+            registeredAt
+            removedAt
+        }
+        ... on RegistrationUpdateProgress {
+            latestTimestamp
+            updateCount
         }
     }
 }
