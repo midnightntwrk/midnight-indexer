@@ -80,23 +80,59 @@ impl From<DustRegistrationEvent> for crate::domain::DustRegistrationEvent {
                 utxo_id,
             } => {
                 // dust_address and utxo_id are String in MappingAdded/Removed
+                // Check if dust_address is hex-encoded or raw UTF-8 bytes
+                let dust_addr_bytes = if dust_address.len() == 64
+                    && dust_address.chars().all(|c| c.is_ascii_hexdigit())
+                {
+                    // It's hex-encoded
+                    const_hex::decode(&dust_address).expect("DUST address should be valid hex")
+                } else {
+                    // It's raw bytes as UTF-8 string
+                    dust_address.into_bytes()
+                };
+
                 crate::domain::DustRegistrationEvent::MappingAdded {
                     cardano_address: ByteVec::from(cardano_address),
-                    dust_address: ByteArray::try_from(dust_address.into_bytes())
-                        .expect("DUST address string should be 32 bytes"),
-                    utxo_id: ByteVec::from(utxo_id.into_bytes()),
+                    dust_address: ByteArray::try_from(dust_addr_bytes)
+                        .expect("DUST address should be 32 bytes"),
+                    utxo_id: if utxo_id.chars().all(|c| c.is_ascii_hexdigit()) {
+                        ByteVec::from(
+                            const_hex::decode(&utxo_id).expect("UTXO ID should be valid hex"),
+                        )
+                    } else {
+                        ByteVec::from(utxo_id.into_bytes())
+                    },
                 }
             }
             DustRegistrationEvent::MappingRemoved {
                 cardano_address,
                 dust_address,
                 utxo_id,
-            } => crate::domain::DustRegistrationEvent::MappingRemoved {
-                cardano_address: ByteVec::from(cardano_address),
-                dust_address: ByteArray::try_from(dust_address.into_bytes())
-                    .expect("DUST address string should be 32 bytes"),
-                utxo_id: ByteVec::from(utxo_id.into_bytes()),
-            },
+            } => {
+                // Check if dust_address is hex-encoded or raw UTF-8 bytes
+                let dust_addr_bytes = if dust_address.len() == 64
+                    && dust_address.chars().all(|c| c.is_ascii_hexdigit())
+                {
+                    // It's hex-encoded
+                    const_hex::decode(&dust_address).expect("DUST address should be valid hex")
+                } else {
+                    // It's raw bytes as UTF-8 string
+                    dust_address.into_bytes()
+                };
+
+                crate::domain::DustRegistrationEvent::MappingRemoved {
+                    cardano_address: ByteVec::from(cardano_address),
+                    dust_address: ByteArray::try_from(dust_addr_bytes)
+                        .expect("DUST address should be 32 bytes"),
+                    utxo_id: if utxo_id.chars().all(|c| c.is_ascii_hexdigit()) {
+                        ByteVec::from(
+                            const_hex::decode(&utxo_id).expect("UTXO ID should be valid hex"),
+                        )
+                    } else {
+                        ByteVec::from(utxo_id.into_bytes())
+                    },
+                }
+            }
         }
     }
 }
