@@ -126,16 +126,24 @@ impl LedgerState {
 
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_transaction, &cx);
+                
+                // Get DUST parameters before updating self.
+                let dust_params = DustParameters {
+                    night_dust_ratio: ledger_state.parameters.dust.night_dust_ratio,
+                    generation_decay_rate: ledger_state.parameters.dust.generation_decay_rate,
+                    dust_grace_period: ledger_state.parameters.dust.dust_grace_period.as_seconds() as u64,
+                };
+                
                 *self = Self::V6(ledger_state);
 
                 let (transaction_result, dust_events) = match transaction_result {
                     TransactionResultV6::Success(events) => {
-                        let dust_events = extract_dust_events_v6(&events);
+                        let dust_events = extract_dust_events_v6(&events, &dust_params);
                         (TransactionResult::Success, dust_events)
                     }
 
                     TransactionResultV6::PartialSuccess(segments, events) => {
-                        let dust_events = extract_dust_events_v6(&events);
+                        let dust_events = extract_dust_events_v6(&events, &dust_params);
                         let segments = segments
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
@@ -159,13 +167,13 @@ impl LedgerState {
         }
     }
 
-    /// Apply the given serialized system transaction to this ledger state.
+    /// Apply the given serialized system transaction to this ledger state and return any DUST events.
     #[trace]
     pub fn apply_system_transaction(
         &mut self,
         transaction: &SerializedTransaction,
         block_timestamp: u64,
-    ) -> Result<(), Error> {
+    ) -> Result<Vec<DustEvent>, Error> {
         match self {
             Self::V6(ledger_state) => {
                 let ledger_transaction =
@@ -174,13 +182,22 @@ impl LedgerState {
                         Error::Io("cannot deserialize LedgerSystemTransactionV6", error)
                     })?;
 
-                // TODO Handle events.
-                let (ledger_state, _events) = ledger_state
+                let (ledger_state, events) = ledger_state
                     .apply_system_tx(&ledger_transaction, timestamp_v6(block_timestamp))
                     .map_err(|error| Error::SystemTransaction(error.into()))?;
+                
+                // Get DUST parameters before updating self.
+                let dust_params = DustParameters {
+                    night_dust_ratio: ledger_state.parameters.dust.night_dust_ratio,
+                    generation_decay_rate: ledger_state.parameters.dust.generation_decay_rate,
+                    dust_grace_period: ledger_state.parameters.dust.dust_grace_period.as_seconds() as u64,
+                };
+                
                 *self = Self::V6(ledger_state);
 
-                Ok(())
+                // Extract DUST events from system transaction events.
+                let dust_events = extract_dust_events_v6(&events, &dust_params);
+                Ok(dust_events)
             }
         }
     }
@@ -430,6 +447,7 @@ fn extend_v6(
 /// Extract DUST events from ledger events.
 fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
     events: &[midnight_ledger_v6::events::Event<D>],
+    dust_params: &DustParameters,
 ) -> Vec<DustEvent> {
     use midnight_ledger_v6::events::EventDetails as LedgerEventDetails;
 
@@ -453,8 +471,7 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
                         mt_index: output.mt_index,
                     },
                     generation_info: DustGenerationInfo {
-                        night_utxo_hash: ByteArray::default(), /* TODO: Compute from backing
-                                                                * Night UTXO. */
+                        night_utxo_hash: output.backing_night.0.0.into(), // The backing_night is already the hash.
                         value: generation.value,
                         owner: generation.owner.0.0.to_bytes_le().into(),
                         nonce: generation.nonce.0.0.into(),
@@ -470,18 +487,19 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
                 } => {
                     // TreeInsertionPath has leaf: (HashOutput, DustGenerationInfo).
                     let generation = &update.leaf.1;
-                    // Calculate mt_index based on path length.
-                    let mt_index = if update.path.is_empty() {
-                        0
-                    } else {
-                        // The index can be calculated from the path.
-                        // For now, use a placeholder - this needs proper calculation.
-                        0 // TODO: Calculate proper index from path.
-                    };
+                    // Calculate mt_index from the path.
+                    // The path is from leaf up, so we need to process it in reverse.
+                    // Each goes_left: false adds a power of 2 to the index.
+                    let mt_index = update.path.iter().rev().enumerate().fold(0u64, |acc, (depth, entry)| {
+                        if !entry.goes_left {
+                            acc | (1u64 << depth)
+                        } else {
+                            acc
+                        }
+                    });
                     Some(DustEventDetails::DustGenerationDtimeUpdate {
                         generation_info: DustGenerationInfo {
-                            night_utxo_hash: ByteArray::default(), /* TODO: Compute from backing
-                                                                    * Night UTXO. */
+                            night_utxo_hash: generation.nonce.0.0.into(), // nonce is the InitialNonce/backing_night.
                             value: generation.value,
                             owner: generation.owner.0.0.to_bytes_le().into(),
                             nonce: generation.nonce.0.0.into(),
@@ -505,8 +523,7 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
                     nullifier: nullifier.0.0.to_bytes_le().into(),
                     v_fee: *v_fee,
                     time: declared_time.to_secs(),
-                    params: DustParameters::default(), /* TODO: Get current parameters from
-                                                        * ledger state. */
+                    params: dust_params.clone(),
                 }),
 
                 _ => None,

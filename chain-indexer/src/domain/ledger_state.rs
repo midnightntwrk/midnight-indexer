@@ -168,7 +168,10 @@ impl LedgerState {
     ) -> Result<Transaction, Error> {
         let transaction = SystemTransaction::from(transaction);
 
-        self.apply_system_transaction(&transaction.raw, block_timestamp)?;
+        // Apply system transaction. DUST events from system transactions
+        // (e.g., CNightGeneratesDustUpdate) are handled by the storage layer
+        // and don't need to be stored in the transaction object.
+        let _dust_events = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
 
         Ok(Transaction::System(transaction))
     }
