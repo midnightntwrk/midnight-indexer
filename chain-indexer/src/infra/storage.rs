@@ -19,9 +19,10 @@ use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteVec, DustNullifier, DustOwner, DustNonce, NightUtxoHash, NightUtxoNonce,
+        BlockHash, ByteVec, DustNonce, DustNullifier, DustOwner, NightUtxoHash, NightUtxoNonce,
         dust::{
-            DustCommitment, DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, QualifiedDustOutput,
+            DustCommitment, DustEvent, DustEventDetails, DustEventType, DustGenerationInfo,
+            QualifiedDustOutput,
         },
         ledger::{
             ContractAttributes, ContractBalance, SystemTransaction as DomainSystemTransaction,
@@ -183,7 +184,8 @@ impl domain::storage::Storage for Storage {
         dust_registration_events: &[crate::infra::subxt_node::runtimes::DustRegistrationEvent],
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let max_transaction_id = save_block(block, transactions, dust_registration_events, &mut tx).await?;
+        let max_transaction_id =
+            save_block(block, transactions, dust_registration_events, &mut tx).await?;
         tx.commit().await?;
 
         Ok(max_transaction_id)
@@ -259,7 +261,13 @@ async fn save_block(
 
     // Save DUST registration events if any
     if !dust_registration_events.is_empty() {
-        save_dust_registration_events(dust_registration_events, block_id, block.timestamp as i64, tx).await?;
+        save_dust_registration_events(
+            dust_registration_events,
+            block_id,
+            block.timestamp as i64,
+            tx,
+        )
+        .await?;
     }
 
     save_transactions(transactions, block_id, tx).await
@@ -421,7 +429,7 @@ async fn save_system_transaction(
         process_dust_events(&transaction.dust_events, transaction_id, tx).await?;
         save_dust_events(&transaction.dust_events, transaction_id, tx).await?;
     }
-    
+
     // Deserialize the system transaction to extract additional metadata for storage.
     // Note: The transaction has already been successfully applied to the ledger state,
     // so failure here only affects our ability to store additional indexing metadata.
@@ -450,7 +458,8 @@ async fn save_system_transaction(
                 LedgerSystemTransaction::CNightGeneratesDustUpdate { events } => {
                     // Convert CNightGeneratesDust events to DUST events and save them.
                     // These events represent DUST distributions to cNIGHT holders.
-                    let dust_events = convert_cnight_events_to_dust_events(&events, &transaction.hash);
+                    let dust_events =
+                        convert_cnight_events_to_dust_events(&events, &transaction.hash);
                     if !dust_events.is_empty() {
                         process_dust_events(&dust_events, transaction_id, tx).await?;
                         save_dust_events(&dust_events, transaction_id, tx).await?;
@@ -488,7 +497,7 @@ async fn save_system_transaction(
                     // Store unshielded treasury payments.
                     save_treasury_payment_unshielded(transaction_id, &outputs, tx).await?;
                 }
-                
+
                 // Catch-all for any new system transaction types
                 _ => {
                     // Log or ignore unknown system transaction types
@@ -712,12 +721,12 @@ async fn process_dust_events(
             } => {
                 mark_dust_utxo_spent(*commitment, *nullifier, transaction_id, tx).await?;
             }
-            
+
             // Registration events are handled separately in save_dust_registration_events
-            DustEventDetails::DustRegistration { .. } |
-            DustEventDetails::DustDeregistration { .. } |
-            DustEventDetails::DustMappingAdded { .. } |
-            DustEventDetails::DustMappingRemoved { .. } => {
+            DustEventDetails::DustRegistration { .. }
+            | DustEventDetails::DustDeregistration { .. }
+            | DustEventDetails::DustMappingAdded { .. }
+            | DustEventDetails::DustMappingRemoved { .. } => {
                 // These events are captured from the NativeTokenObservation pallet
                 // and stored in the cnight_registrations table
             }
@@ -886,7 +895,7 @@ async fn save_parameter_update(
     let params_json = Json(ParamsData {
         note: "Parameter update applied - details in ledger state",
     });
-    
+
     let query = indoc! {"
         INSERT INTO parameter_updates (
             transaction_id,
@@ -912,10 +921,7 @@ async fn save_night_distribution(
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     // Calculate total amount being distributed
-    let total_amount: u128 = outputs
-        .iter()
-        .map(|output| output.amount)
-        .sum();
+    let total_amount: u128 = outputs.iter().map(|output| output.amount).sum();
 
     // Store a simplified representation
     #[derive(Serialize)]
@@ -1026,10 +1032,7 @@ async fn save_treasury_payment_unshielded(
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     // Calculate total amount being paid
-    let total_amount: u128 = outputs
-        .iter()
-        .map(|output| output.amount)
-        .sum();
+    let total_amount: u128 = outputs.iter().map(|output| output.amount).sum();
 
     // Store a simplified representation
     #[derive(Serialize)]
@@ -1085,7 +1088,8 @@ async fn save_dust_utxos(
     "};
 
     // Use the commitment from the output
-    // Generate commitment from the output data - this will be replaced by the actual commitment from the ledger
+    // Generate commitment from the output data - this will be replaced by the actual commitment
+    // from the ledger
     let commitment = DustCommitment::default();
 
     sqlx::query(query)
@@ -1113,10 +1117,13 @@ async fn save_dust_registration_events(
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     use crate::infra::subxt_node::runtimes::DustRegistrationEvent;
-    
+
     for event in events {
         match event {
-            DustRegistrationEvent::Registration { cardano_address, dust_address } => {
+            DustRegistrationEvent::Registration {
+                cardano_address,
+                dust_address,
+            } => {
                 // Handle registration: insert new registration or update existing one
                 let query = indoc! {"
                     INSERT INTO cnight_registrations (
@@ -1144,8 +1151,11 @@ async fn save_dust_registration_events(
                     .execute(&mut **tx)
                     .await?;
             }
-            
-            DustRegistrationEvent::Deregistration { cardano_address, dust_address } => {
+
+            DustRegistrationEvent::Deregistration {
+                cardano_address,
+                dust_address,
+            } => {
                 // Handle deregistration: mark as invalid
                 let query = indoc! {"
                     UPDATE cnight_registrations
@@ -1160,8 +1170,12 @@ async fn save_dust_registration_events(
                     .execute(&mut **tx)
                     .await?;
             }
-            
-            DustRegistrationEvent::MappingAdded { cardano_address, dust_address, utxo_id } => {
+
+            DustRegistrationEvent::MappingAdded {
+                cardano_address,
+                dust_address,
+                utxo_id,
+            } => {
                 // Store UTXO mapping for tracking
                 let query = indoc! {"
                     INSERT INTO dust_utxo_mappings (
@@ -1184,8 +1198,12 @@ async fn save_dust_registration_events(
                     .execute(&mut **tx)
                     .await?;
             }
-            
-            DustRegistrationEvent::MappingRemoved { cardano_address: _, dust_address: _, utxo_id } => {
+
+            DustRegistrationEvent::MappingRemoved {
+                cardano_address: _,
+                dust_address: _,
+                utxo_id,
+            } => {
                 // Remove UTXO mapping
                 let query = indoc! {"
                     UPDATE dust_utxo_mappings
@@ -1201,12 +1219,12 @@ async fn save_dust_registration_events(
             }
         }
     }
-    
+
     Ok(())
 }
 
 /// Convert CNightGeneratesDust events to DUST events for storage.
-/// 
+///
 /// This function handles the conversion of CNightGeneratesDust system transaction events
 /// that are emitted by the node when distributing DUST to cNIGHT holders.
 fn convert_cnight_events_to_dust_events(
@@ -1216,7 +1234,7 @@ fn convert_cnight_events_to_dust_events(
     use indexer_common::domain::dust::{
         DustEvent, DustEventDetails, DustGenerationInfo, QualifiedDustOutput,
     };
-    
+
     events
         .iter()
         .enumerate()
@@ -1338,7 +1356,11 @@ mod tests {
         assert_eq!(dust_events[1].physical_segment, 1);
 
         match &dust_events[1].event_details {
-            indexer_common::domain::dust::DustEventDetails::DustSpendProcessed { time, v_fee, .. } => {
+            indexer_common::domain::dust::DustEventDetails::DustSpendProcessed {
+                time,
+                v_fee,
+                ..
+            } => {
                 assert_eq!(*time, 1234567900);
                 assert_eq!(*v_fee, 0); // No fee for system-initiated destroy.
             }

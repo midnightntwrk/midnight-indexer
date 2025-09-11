@@ -1095,12 +1095,12 @@ fn viewing_key(network_id: NetworkId) -> &'static str {
 /// to cNIGHT token holders. For this to occur, two prerequisites must be met:
 ///
 /// 1. cNIGHT Token Holders: There must be cNIGHT holders registered on the Midnight blockchain.
-///    These come from observing Cardano UTXO events (asset creates/spends, redemptions, registrations).
-///    In production, the node observes the Cardano chain via its postgres DB sync connection.
+///    These come from observing Cardano UTXO events (asset creates/spends, redemptions,
+///    registrations). In production, the node observes the Cardano chain via its postgres DB sync
+///    connection.
 ///
-/// 2. Fee-Paying Transactions: Transactions must actually pay fees in DUST.
-///    This requires wallets to have DUST balance. Without DUST, transactions execute
-///    with 0 fees in dev mode.
+/// 2. Fee-Paying Transactions: Transactions must actually pay fees in DUST. This requires wallets
+///    to have DUST balance. Without DUST, transactions execute with 0 fees in dev mode.
 ///
 /// Test Environment Limitations:
 /// -----------------------------
@@ -1241,7 +1241,10 @@ async fn test_dust_events_queries(
     let recent_events = send_query::<RecentDustEventsQuery>(api_client, api_url, variables)
         .await?
         .recent_dust_events;
-    println!("recentDustEvents query completed, got {} events", recent_events.len());
+    println!(
+        "recentDustEvents query completed, got {} events",
+        recent_events.len()
+    );
 
     // Verify consistency: events should exist only if we found DUST-generating transactions.
     // Note: There may be pre-existing DUST events in the database from genesis or prior runs.
@@ -1249,7 +1252,10 @@ async fn test_dust_events_queries(
         assert!(!recent_events.is_empty());
     } else if recent_events.len() > 0 {
         // Pre-existing DUST events found (e.g., from genesis initialization)
-        println!("Found {} pre-existing DUST events in database", recent_events.len());
+        println!(
+            "Found {} pre-existing DUST events in database",
+            recent_events.len()
+        );
     }
 
     // Test comprehensive DUST functionality with specific filters.

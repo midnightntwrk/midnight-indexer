@@ -204,7 +204,10 @@ CREATE INDEX dust_utxo_mappings_cardano_addr_idx ON dust_utxo_mappings(cardano_a
 CREATE INDEX dust_utxo_mappings_dust_addr_idx ON dust_utxo_mappings(dust_address);
 CREATE INDEX dust_utxo_mappings_block_id_idx ON dust_utxo_mappings(block_id);
 
--- TODO: These tables are for future merkle tree storage once ledger integration is complete.
+-- TODO: These tables are prepared for merkle tree storage but not populated yet.
+-- The node needs to expose merkle tree update events before we can populate them.
+-- The ledger has internal MerkleTree<DustGenerationInfo> and MerkleTree<()> for commitments,
+-- but doesn't expose tree updates as events yet.
 CREATE TABLE dust_commitment_tree(
     id INTEGER PRIMARY KEY,
     block_height INTEGER NOT NULL,

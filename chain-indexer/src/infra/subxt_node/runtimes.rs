@@ -190,7 +190,7 @@ macro_rules! make_block_details {
                 // Also collect system transactions from events (e.g., CNightGeneratesDust)
                 // and DUST registration events from NativeTokenObservation pallet
                 let mut dust_registration_events = Vec::new();
-                
+
                 for event in events.iter().flatten() {
                     let event = event.as_root_event::<Event>();
                     match event {

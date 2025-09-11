@@ -126,14 +126,15 @@ impl LedgerState {
 
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_transaction, &cx);
-                
+
                 // Get DUST parameters before updating self.
                 let dust_params = DustParameters {
                     night_dust_ratio: ledger_state.parameters.dust.night_dust_ratio,
                     generation_decay_rate: ledger_state.parameters.dust.generation_decay_rate,
-                    dust_grace_period: ledger_state.parameters.dust.dust_grace_period.as_seconds() as u64,
+                    dust_grace_period: ledger_state.parameters.dust.dust_grace_period.as_seconds()
+                        as u64,
                 };
-                
+
                 *self = Self::V6(ledger_state);
 
                 let (transaction_result, dust_events) = match transaction_result {
@@ -167,7 +168,8 @@ impl LedgerState {
         }
     }
 
-    /// Apply the given serialized system transaction to this ledger state and return any DUST events.
+    /// Apply the given serialized system transaction to this ledger state and return any DUST
+    /// events.
     #[trace]
     pub fn apply_system_transaction(
         &mut self,
@@ -185,14 +187,15 @@ impl LedgerState {
                 let (ledger_state, events) = ledger_state
                     .apply_system_tx(&ledger_transaction, timestamp_v6(block_timestamp))
                     .map_err(|error| Error::SystemTransaction(error.into()))?;
-                
+
                 // Get DUST parameters before updating self.
                 let dust_params = DustParameters {
                     night_dust_ratio: ledger_state.parameters.dust.night_dust_ratio,
                     generation_decay_rate: ledger_state.parameters.dust.generation_decay_rate,
-                    dust_grace_period: ledger_state.parameters.dust.dust_grace_period.as_seconds() as u64,
+                    dust_grace_period: ledger_state.parameters.dust.dust_grace_period.as_seconds()
+                        as u64,
                 };
-                
+
                 *self = Self::V6(ledger_state);
 
                 // Extract DUST events from system transaction events.
@@ -471,7 +474,8 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
                         mt_index: output.mt_index,
                     },
                     generation_info: DustGenerationInfo {
-                        night_utxo_hash: output.backing_night.0.0.into(), // The backing_night is already the hash.
+                        night_utxo_hash: output.backing_night.0.0.into(), /* The backing_night is
+                                                                           * already the hash. */
                         value: generation.value,
                         owner: generation.owner.0.0.to_bytes_le().into(),
                         nonce: generation.nonce.0.0.into(),
@@ -490,16 +494,24 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
                     // Calculate mt_index from the path.
                     // The path is from leaf up, so we need to process it in reverse.
                     // Each goes_left: false adds a power of 2 to the index.
-                    let mt_index = update.path.iter().rev().enumerate().fold(0u64, |acc, (depth, entry)| {
-                        if !entry.goes_left {
-                            acc | (1u64 << depth)
-                        } else {
-                            acc
-                        }
-                    });
+                    let mt_index =
+                        update
+                            .path
+                            .iter()
+                            .rev()
+                            .enumerate()
+                            .fold(0u64, |acc, (depth, entry)| {
+                                if !entry.goes_left {
+                                    acc | (1u64 << depth)
+                                } else {
+                                    acc
+                                }
+                            });
                     Some(DustEventDetails::DustGenerationDtimeUpdate {
                         generation_info: DustGenerationInfo {
-                            night_utxo_hash: generation.nonce.0.0.into(), // nonce is the InitialNonce/backing_night.
+                            night_utxo_hash: generation.nonce.0.0.into(), /* nonce is the
+                                                                           * InitialNonce/
+                                                                           * backing_night. */
                             value: generation.value,
                             owner: generation.owner.0.0.to_bytes_le().into(),
                             nonce: generation.nonce.0.0.into(),

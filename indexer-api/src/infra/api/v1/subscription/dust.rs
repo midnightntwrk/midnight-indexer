@@ -186,9 +186,10 @@ where
             }
         });
 
-        let progress_updates = make_commitment_progress_updates::<S>(cx, binary_prefixes.clone(), start_index)
-            .take_until_if(tripwire)
-            .map_ok(DustCommitmentEvent::Progress);
+        let progress_updates =
+            make_commitment_progress_updates::<S>(cx, binary_prefixes.clone(), start_index)
+                .take_until_if(tripwire)
+                .map_ok(DustCommitmentEvent::Progress);
 
         let events = tokio_stream::StreamExt::merge(commitments, progress_updates);
 
@@ -344,22 +345,21 @@ where
     let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
 
     // Get real progress updates from storage.
-    intervals
-        .then(move |_| {
-            let storage = storage.clone();
-            let prefixes = prefixes.clone();
-            async move {
-                let (highest_block, matched_count) = storage
-                    .get_dust_nullifier_progress(&prefixes, 8, from_block)
-                    .await
-                    .map_err_into_server_error(|| "get nullifier progress")?;
+    intervals.then(move |_| {
+        let storage = storage.clone();
+        let prefixes = prefixes.clone();
+        async move {
+            let (highest_block, matched_count) = storage
+                .get_dust_nullifier_progress(&prefixes, 8, from_block)
+                .await
+                .map_err_into_server_error(|| "get nullifier progress")?;
 
-                Ok(DustNullifierTransactionProgress {
-                    highest_block,
-                    matched_count,
-                })
-            }
-        })
+            Ok(DustNullifierTransactionProgress {
+                highest_block,
+                matched_count,
+            })
+        }
+    })
 }
 
 fn make_dust_commitments<'a, S>(
@@ -402,22 +402,21 @@ where
     let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
 
     // Get real progress updates from storage.
-    intervals
-        .then(move |_| {
-            let storage = storage.clone();
-            let prefixes = commitment_prefixes.clone();
-            async move {
-                let (highest_index, commitment_count) = storage
-                    .get_dust_commitment_progress(&prefixes, 8, start_index)
-                    .await
-                    .map_err_into_server_error(|| "get commitment progress")?;
+    intervals.then(move |_| {
+        let storage = storage.clone();
+        let prefixes = commitment_prefixes.clone();
+        async move {
+            let (highest_index, commitment_count) = storage
+                .get_dust_commitment_progress(&prefixes, 8, start_index)
+                .await
+                .map_err_into_server_error(|| "get commitment progress")?;
 
-                Ok(DustCommitmentProgress {
-                    highest_index,
-                    commitment_count,
-                })
-            }
-        })
+            Ok(DustCommitmentProgress {
+                highest_index,
+                commitment_count,
+            })
+        }
+    })
 }
 
 fn make_registration_updates<'a, S>(
@@ -457,20 +456,19 @@ where
     let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
 
     // Get real progress updates from storage.
-    intervals
-        .then(move |_| {
-            let storage = storage.clone();
-            let addresses = addresses.clone();
-            async move {
-                let (latest_timestamp, update_count) = storage
-                    .get_registration_progress(&addresses)
-                    .await
-                    .map_err_into_server_error(|| "get registration progress")?;
+    intervals.then(move |_| {
+        let storage = storage.clone();
+        let addresses = addresses.clone();
+        async move {
+            let (latest_timestamp, update_count) = storage
+                .get_registration_progress(&addresses)
+                .await
+                .map_err_into_server_error(|| "get registration progress")?;
 
-                Ok(RegistrationUpdateProgress {
-                    latest_timestamp,
-                    update_count,
-                })
-            }
-        })
+            Ok(RegistrationUpdateProgress {
+                latest_timestamp,
+                update_count,
+            })
+        }
+    })
 }

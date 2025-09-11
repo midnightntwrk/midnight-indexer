@@ -152,7 +152,7 @@ impl DustStorage for Storage {
                     night_balance = value_u128;
                     // Simplified generation rate calculation (1 Speck per NIGHT per second).
                     generation_rate = value_u128;
-                    
+
                     // Calculate current capacity based on elapsed time since creation.
                     // Get current timestamp from latest block.
                     let current_time_query = indoc! {"
@@ -161,16 +161,16 @@ impl DustStorage for Storage {
                         ORDER BY height DESC
                         LIMIT 1
                     "};
-                    
+
                     let current_timestamp = sqlx::query_as::<_, (i64,)>(current_time_query)
                         .fetch_optional(&*self.pool)
                         .await?
                         .map(|(t,)| t)
                         .unwrap_or(ctime);
-                    
+
                     // Calculate elapsed seconds since creation.
                     let elapsed_seconds = ((current_timestamp - ctime).max(0) as u128) / 1000; // Convert from ms to seconds
-                    
+
                     // Capacity = NIGHT balance * elapsed_seconds (1 Speck per NIGHT per second).
                     current_capacity = value_u128.saturating_mul(elapsed_seconds);
                 }
@@ -732,15 +732,15 @@ impl DustStorage for Storage {
                     indexer_common::domain::dust::DustEventDetails::DustRegistration { .. } => {
                         indexer_common::domain::dust::DustEventType::DustRegistration
                     }
-                    indexer_common::domain::dust::DustEventDetails::DustDeregistration { .. } => {
-                        indexer_common::domain::dust::DustEventType::DustDeregistration
-                    }
+                    indexer_common::domain::dust::DustEventDetails::DustDeregistration {
+                        ..
+                    } => indexer_common::domain::dust::DustEventType::DustDeregistration,
                     indexer_common::domain::dust::DustEventDetails::DustMappingAdded { .. } => {
                         indexer_common::domain::dust::DustEventType::DustMappingAdded
                     }
-                    indexer_common::domain::dust::DustEventDetails::DustMappingRemoved { .. } => {
-                        indexer_common::domain::dust::DustEventType::DustMappingRemoved
-                    }
+                    indexer_common::domain::dust::DustEventDetails::DustMappingRemoved {
+                        ..
+                    } => indexer_common::domain::dust::DustEventType::DustMappingRemoved,
                 };
                 debug_assert_eq!(
                     row.event_type, expected_type,
@@ -825,15 +825,15 @@ impl DustStorage for Storage {
                     indexer_common::domain::dust::DustEventDetails::DustRegistration { .. } => {
                         indexer_common::domain::dust::DustEventType::DustRegistration
                     }
-                    indexer_common::domain::dust::DustEventDetails::DustDeregistration { .. } => {
-                        indexer_common::domain::dust::DustEventType::DustDeregistration
-                    }
+                    indexer_common::domain::dust::DustEventDetails::DustDeregistration {
+                        ..
+                    } => indexer_common::domain::dust::DustEventType::DustDeregistration,
                     indexer_common::domain::dust::DustEventDetails::DustMappingAdded { .. } => {
                         indexer_common::domain::dust::DustEventType::DustMappingAdded
                     }
-                    indexer_common::domain::dust::DustEventDetails::DustMappingRemoved { .. } => {
-                        indexer_common::domain::dust::DustEventType::DustMappingRemoved
-                    }
+                    indexer_common::domain::dust::DustEventDetails::DustMappingRemoved {
+                        ..
+                    } => indexer_common::domain::dust::DustEventType::DustMappingRemoved,
                 };
                 debug_assert_eq!(
                     row.event_type, expected_type,
@@ -896,16 +896,13 @@ impl DustStorage for Storage {
             where_clause
         );
 
-        let mut progress_query = sqlx::query_as::<_, (i64, i64)>(&query)
-            .bind(from_block as i64);
+        let mut progress_query = sqlx::query_as::<_, (i64, i64)>(&query).bind(from_block as i64);
 
         for prefix in &valid_prefixes {
             progress_query = progress_query.bind(prefix.as_ref());
         }
 
-        let (highest_block, matched_count) = progress_query
-            .fetch_one(&*self.pool)
-            .await?;
+        let (highest_block, matched_count) = progress_query.fetch_one(&*self.pool).await?;
 
         Ok((highest_block as u32, matched_count as u32))
     }
@@ -952,16 +949,13 @@ impl DustStorage for Storage {
             where_clause
         );
 
-        let mut progress_query = sqlx::query_as::<_, (i64, i64)>(&query)
-            .bind(start_index as i64);
+        let mut progress_query = sqlx::query_as::<_, (i64, i64)>(&query).bind(start_index as i64);
 
         for prefix in &valid_prefixes {
             progress_query = progress_query.bind(prefix.as_ref());
         }
 
-        let (highest_index, commitment_count) = progress_query
-            .fetch_one(&*self.pool)
-            .await?;
+        let (highest_index, commitment_count) = progress_query.fetch_one(&*self.pool).await?;
 
         Ok((highest_index as u64, commitment_count as u32))
     }
@@ -1019,9 +1013,7 @@ impl DustStorage for Storage {
             }
         }
 
-        let (latest_timestamp, update_count) = progress_query
-            .fetch_one(&*self.pool)
-            .await?;
+        let (latest_timestamp, update_count) = progress_query.fetch_one(&*self.pool).await?;
 
         Ok((latest_timestamp as u64, update_count as u32))
     }
@@ -1102,28 +1094,24 @@ struct DustUtxosRow {
 }
 
 /// Row type for dust_commitment_tree table queries.
+/// TODO: This table is not populated yet - waiting for node to expose merkle tree events.
+/// TODO: Add `id` and `tree_data` fields when node provides full merkle tree updates.
 #[derive(Debug, Clone, FromRow)]
 struct DustCommitmentTreeRow {
     #[sqlx(try_from = "i64")]
-    id: u64,
-
-    #[sqlx(try_from = "i64")]
     block_height: u32,
 
     #[sqlx(try_from = "i64")]
     merkle_index: u64,
 
     root: Vec<u8>,
-
-    tree_data: Vec<u8>,
 }
 
 /// Row type for dust_generation_tree table queries.
+/// TODO: This table is not populated yet - waiting for node to expose merkle tree events.
+/// TODO: Add `id` and `tree_data` fields when node provides full merkle tree updates.
 #[derive(Debug, Clone, FromRow)]
 struct DustGenerationTreeRow {
-    #[sqlx(try_from = "i64")]
-    id: u64,
-
     #[sqlx(try_from = "i64")]
     block_height: u32,
 
@@ -1131,8 +1119,6 @@ struct DustGenerationTreeRow {
     merkle_index: u64,
 
     root: Vec<u8>,
-
-    tree_data: Vec<u8>,
 }
 
 impl From<DustUtxosRow> for DustCommitmentInfo {

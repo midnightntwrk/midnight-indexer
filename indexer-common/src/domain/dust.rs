@@ -13,7 +13,9 @@
 
 pub use crate::domain::{DustCommitment, DustNullifier};
 
-use crate::domain::{ByteVec, DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce, ledger::TransactionHash};
+use crate::domain::{
+    ByteVec, DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce, ledger::TransactionHash,
+};
 use serde::{Deserialize, Serialize};
 
 /// DUST event for the indexer domain.
@@ -183,16 +185,16 @@ pub enum DustEventType {
 
     /// DUST spend processed.
     DustSpendProcessed,
-    
+
     /// Registration event.
     DustRegistration,
-    
+
     /// Deregistration event.
     DustDeregistration,
-    
+
     /// Mapping added event.
     DustMappingAdded,
-    
+
     /// Mapping removed event.
     DustMappingRemoved,
 }

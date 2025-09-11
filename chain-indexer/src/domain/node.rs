@@ -56,8 +56,20 @@ pub struct Block {
     pub dust_registration_events: Vec<crate::infra::subxt_node::runtimes::DustRegistrationEvent>,
 }
 
-impl From<Block> for (domain::Block, Vec<Transaction>, Vec<crate::infra::subxt_node::runtimes::DustRegistrationEvent>) {
-    fn from(block: Block) -> (domain::Block, Vec<Transaction>, Vec<crate::infra::subxt_node::runtimes::DustRegistrationEvent>) {
+impl From<Block>
+    for (
+        domain::Block,
+        Vec<Transaction>,
+        Vec<crate::infra::subxt_node::runtimes::DustRegistrationEvent>,
+    )
+{
+    fn from(
+        block: Block,
+    ) -> (
+        domain::Block,
+        Vec<Transaction>,
+        Vec<crate::infra::subxt_node::runtimes::DustRegistrationEvent>,
+    ) {
         let transactions = block.transactions;
         let dust_registration_events = block.dust_registration_events;
         let block = domain::Block {
