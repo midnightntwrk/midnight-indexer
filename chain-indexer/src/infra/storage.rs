@@ -870,7 +870,7 @@ async fn save_dust_generation_tree_update(
         .bind(block_height as i64)
         .bind(merkle_index as i64)
         .bind(&root)
-        .bind(Json(merkle_path))  // Use Json wrapper for serialization
+        .bind(Json(merkle_path)) // Use Json wrapper for serialization
         .execute(&mut **tx)
         .await?;
 
