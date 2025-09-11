@@ -1422,35 +1422,30 @@ async fn test_additional_dust_queries(api_client: &Client, api_url: &str) -> any
     if dust_state.is_object() {
         // Validate structure when DUST data exists.
         assert!(
-            dust_state["commitmentTreeRoot"].is_string() || dust_state["commitmentTreeRoot"].is_null(),
-            "commitmentTreeRoot should be string or null"
+            dust_state["commitmentTreeRoot"].is_string() || dust_state["commitmentTreeRoot"].is_null()
         );
         assert!(
-            dust_state["generationTreeRoot"].is_string() || dust_state["generationTreeRoot"].is_null(),
-            "generationTreeRoot should be string or null"
+            dust_state["generationTreeRoot"].is_string() || dust_state["generationTreeRoot"].is_null()
         );
         assert!(
-            dust_state["blockHeight"].is_number() || dust_state["blockHeight"].is_null(),
-            "blockHeight should be number or null"
+            dust_state["blockHeight"].is_number() || dust_state["blockHeight"].is_null()
         );
         assert!(
-            dust_state["timestamp"].is_number() || dust_state["timestamp"].is_null(),
-            "timestamp should be number or null"
+            dust_state["timestamp"].is_number() || dust_state["timestamp"].is_null()
         );
         assert!(
-            dust_state["totalRegistrations"].is_number() || dust_state["totalRegistrations"].is_null(),
-            "totalRegistrations should be number or null"
+            dust_state["totalRegistrations"].is_number() || dust_state["totalRegistrations"].is_null()
         );
         
         // If we have numeric values, validate they're reasonable.
         if let Some(height) = dust_state["blockHeight"].as_i64() {
-            assert!(height >= 0, "blockHeight should be non-negative");
+            assert!(height >= 0);
         }
         if let Some(ts) = dust_state["timestamp"].as_i64() {
-            assert!(ts >= 0, "timestamp should be non-negative");
+            assert!(ts >= 0);
         }
         if let Some(regs) = dust_state["totalRegistrations"].as_i64() {
-            assert!(regs >= 0, "totalRegistrations should be non-negative");
+            assert!(regs >= 0);
         }
     } else {
         println!("No DUST state available - this is expected without cNIGHT UTXO events");
@@ -1478,34 +1473,30 @@ async fn test_additional_dust_queries(api_client: &Client, api_url: &str) -> any
     // Verify response structure.
     if let Some(status_array) = response["data"]["dustGenerationStatus"].as_array() {
         // Should return status for all requested addresses.
-        assert!(!status_array.is_empty(), "Should return status for requested addresses");
+        assert!(!status_array.is_empty());
         
         for status in status_array {
             // Validate each status has required fields.
-            assert!(status["cardanoStakeKey"].is_string(), "cardanoStakeKey should be string");
-            assert!(status["isRegistered"].is_boolean(), "isRegistered should be boolean");
+            assert!(status["cardanoStakeKey"].is_string());
+            assert!(status["isRegistered"].is_boolean());
             
             // Other fields can be null for unregistered addresses.
             assert!(
-                status["dustAddress"].is_string() || status["dustAddress"].is_null(),
-                "dustAddress should be string or null"
+                status["dustAddress"].is_string() || status["dustAddress"].is_null()
             );
             assert!(
-                status["generationRate"].is_string() || status["generationRate"].is_null(),
-                "generationRate should be string or null"
+                status["generationRate"].is_string() || status["generationRate"].is_null()
             );
             assert!(
-                status["currentCapacity"].is_string() || status["currentCapacity"].is_null(),
-                "currentCapacity should be string or null"
+                status["currentCapacity"].is_string() || status["currentCapacity"].is_null()
             );
             assert!(
-                status["nightBalance"].is_string() || status["nightBalance"].is_null(),
-                "nightBalance should be string or null"
+                status["nightBalance"].is_string() || status["nightBalance"].is_null()
             );
             
             // If registered, dustAddress should be present.
             if status["isRegistered"].as_bool().unwrap_or(false) {
-                assert!(status["dustAddress"].is_string(), "Registered address should have dustAddress");
+                assert!(status["dustAddress"].is_string());
             }
         }
     }
