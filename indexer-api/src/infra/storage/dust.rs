@@ -298,9 +298,23 @@ impl DustStorage for Storage {
 
                 for row in merkle_rows {
                     last_merkle_index = row.merkle_index + 1;
-                    // Deserialize merkle path from bytea if available
-                    let merkle_path = if !row.tree_data.is_empty() {
-                        bincode::deserialize::<Vec<DustMerklePathEntry>>(&row.tree_data).ok()
+                    // Manual deserialization: each entry is 33 bytes (32 for hash + 1 for goes_left)
+                    let merkle_path = if !row.tree_data.is_empty() && row.tree_data.len() % 33 == 0 {
+                        let mut entries = Vec::new();
+                        for chunk in row.tree_data.chunks_exact(33) {
+                            let hash_bytes = &chunk[0..32];
+                            let sibling_hash = if hash_bytes == &[0u8; 32] {
+                                None
+                            } else {
+                                Some(hash_bytes.to_vec())
+                            };
+                            let goes_left = chunk[32] != 0;
+                            entries.push(DustMerklePathEntry {
+                                sibling_hash,
+                                goes_left,
+                            });
+                        }
+                        Some(entries)
                     } else {
                         None
                     };
