@@ -249,11 +249,10 @@ impl SubxtNode {
             .await?;
 
         // Convert infra DustRegistrationEvent to domain type
-        let dust_registration_events: Vec<crate::domain::DustRegistrationEvent> =
-            dust_registration_events
-                .into_iter()
-                .map(Into::into)
-                .collect();
+        let dust_registration_events = dust_registration_events
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, _>>()?;
 
         let block = Block {
             hash,
@@ -465,6 +464,9 @@ pub enum SubxtNodeError {
 
     #[error("cannot hex-decode system transaction")]
     HexDecodeSystemTransaction(#[source] const_hex::FromHexError),
+
+    #[error("invalid dust address: {0}")]
+    InvalidDustAddress(String),
 }
 
 #[trace]

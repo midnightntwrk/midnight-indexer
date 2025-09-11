@@ -53,60 +53,64 @@ pub(super) enum DustRegistrationEvent {
     },
 }
 
-impl From<DustRegistrationEvent> for crate::domain::DustRegistrationEvent {
-    fn from(event: DustRegistrationEvent) -> Self {
+impl TryFrom<DustRegistrationEvent> for crate::domain::DustRegistrationEvent {
+    type Error = SubxtNodeError;
+
+    fn try_from(event: DustRegistrationEvent) -> Result<Self, Self::Error> {
         use indexer_common::domain::{ByteArray, ByteVec};
 
-        match event {
+        Ok(match event {
             DustRegistrationEvent::Registration {
                 cardano_address,
                 dust_address,
             } => crate::domain::DustRegistrationEvent::Registration {
                 cardano_address: ByteVec::from(cardano_address),
-                dust_address: ByteArray::try_from(dust_address)
-                    .expect("DUST address should be 32 bytes"),
+                dust_address: ByteArray::try_from(dust_address).map_err(|_| {
+                    SubxtNodeError::InvalidDustAddress(
+                        "registration: DUST address must be 32 bytes".into(),
+                    )
+                })?,
             },
             DustRegistrationEvent::Deregistration {
                 cardano_address,
                 dust_address,
             } => crate::domain::DustRegistrationEvent::Deregistration {
                 cardano_address: ByteVec::from(cardano_address),
-                dust_address: ByteArray::try_from(dust_address)
-                    .expect("DUST address should be 32 bytes"),
+                dust_address: ByteArray::try_from(dust_address).map_err(|_| {
+                    SubxtNodeError::InvalidDustAddress(
+                        "deregistration: DUST address must be 32 bytes".into(),
+                    )
+                })?,
             },
             DustRegistrationEvent::MappingAdded {
                 cardano_address,
                 dust_address,
                 utxo_id,
             } => {
-                // dust_address and utxo_id are String in MappingAdded/Removed
-                // Always treat as hex-encoded - the String type suggests it's a hex representation
-                let dust_addr_bytes = const_hex::decode(&dust_address).unwrap_or_else(|_| {
-                    panic!(
-                        "DUST address should be valid hex, got: {:?} (len={})",
-                        dust_address,
-                        dust_address.len()
-                    )
-                });
+                // dust_address and utxo_id are hex-encoded strings
+                let dust_addr_bytes = const_hex::decode(&dust_address).map_err(|e| {
+                    SubxtNodeError::InvalidDustAddress(format!(
+                        "mapping added: invalid hex encoding for DUST address: {}",
+                        e
+                    ))
+                })?;
+
+                let utxo_id_bytes = const_hex::decode(&utxo_id).map_err(|e| {
+                    SubxtNodeError::InvalidDustAddress(format!(
+                        "mapping added: invalid hex encoding for UTXO ID: {}",
+                        e
+                    ))
+                })?;
 
                 crate::domain::DustRegistrationEvent::MappingAdded {
                     cardano_address: ByteVec::from(cardano_address),
-                    dust_address: ByteArray::try_from(dust_addr_bytes.clone()).unwrap_or_else(
-                        |e| {
-                            panic!(
-                                "DUST address should be 32 bytes, got {} bytes. Error: {:?}",
-                                dust_addr_bytes.len(),
-                                e
-                            )
-                        },
-                    ),
-                    utxo_id: ByteVec::from(const_hex::decode(&utxo_id).unwrap_or_else(|_| {
-                        panic!(
-                            "UTXO ID should be valid hex, got: {:?} (len={})",
-                            utxo_id,
-                            utxo_id.len()
-                        )
-                    })),
+                    dust_address: ByteArray::try_from(dust_addr_bytes).map_err(|e| {
+                        SubxtNodeError::InvalidDustAddress(format!(
+                            "mapping added: DUST address must be 32 bytes: {:?}",
+                            e
+                        ))
+                    })?,
+                    utxo_id: ByteVec::from(utxo_id_bytes),
                 }
             }
             DustRegistrationEvent::MappingRemoved {
@@ -114,36 +118,33 @@ impl From<DustRegistrationEvent> for crate::domain::DustRegistrationEvent {
                 dust_address,
                 utxo_id,
             } => {
-                // Always treat as hex-encoded - the String type suggests it's a hex representation
-                let dust_addr_bytes = const_hex::decode(&dust_address).unwrap_or_else(|_| {
-                    panic!(
-                        "DUST address should be valid hex, got: {:?} (len={})",
-                        dust_address,
-                        dust_address.len()
-                    )
-                });
+                // dust_address and utxo_id are hex-encoded strings
+                let dust_addr_bytes = const_hex::decode(&dust_address).map_err(|e| {
+                    SubxtNodeError::InvalidDustAddress(format!(
+                        "mapping removed: invalid hex encoding for DUST address: {}",
+                        e
+                    ))
+                })?;
+
+                let utxo_id_bytes = const_hex::decode(&utxo_id).map_err(|e| {
+                    SubxtNodeError::InvalidDustAddress(format!(
+                        "mapping removed: invalid hex encoding for UTXO ID: {}",
+                        e
+                    ))
+                })?;
 
                 crate::domain::DustRegistrationEvent::MappingRemoved {
                     cardano_address: ByteVec::from(cardano_address),
-                    dust_address: ByteArray::try_from(dust_addr_bytes.clone()).unwrap_or_else(
-                        |e| {
-                            panic!(
-                                "DUST address should be 32 bytes, got {} bytes. Error: {:?}",
-                                dust_addr_bytes.len(),
-                                e
-                            )
-                        },
-                    ),
-                    utxo_id: ByteVec::from(const_hex::decode(&utxo_id).unwrap_or_else(|_| {
-                        panic!(
-                            "UTXO ID should be valid hex, got: {:?} (len={})",
-                            utxo_id,
-                            utxo_id.len()
-                        )
-                    })),
+                    dust_address: ByteArray::try_from(dust_addr_bytes).map_err(|e| {
+                        SubxtNodeError::InvalidDustAddress(format!(
+                            "mapping removed: DUST address must be 32 bytes: {:?}",
+                            e
+                        ))
+                    })?,
+                    utxo_id: ByteVec::from(utxo_id_bytes),
                 }
             }
-        }
+        })
     }
 }
 
