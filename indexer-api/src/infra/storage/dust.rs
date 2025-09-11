@@ -904,7 +904,7 @@ impl DustStorage for Storage {
         }
 
         let (highest_block, matched_count) = progress_query
-            .fetch_one(&self.pool)
+            .fetch_one(&*self.pool)
             .await?;
 
         Ok((highest_block as u32, matched_count as u32))
@@ -960,7 +960,7 @@ impl DustStorage for Storage {
         }
 
         let (highest_index, commitment_count) = progress_query
-            .fetch_one(&self.pool)
+            .fetch_one(&*self.pool)
             .await?;
 
         Ok((highest_index as u64, commitment_count as u32))
@@ -1020,7 +1020,7 @@ impl DustStorage for Storage {
         }
 
         let (latest_timestamp, update_count) = progress_query
-            .fetch_one(&self.pool)
+            .fetch_one(&*self.pool)
             .await?;
 
         Ok((latest_timestamp as u64, update_count as u32))

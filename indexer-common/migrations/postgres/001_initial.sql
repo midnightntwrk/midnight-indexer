@@ -172,12 +172,31 @@ CREATE TABLE cnight_registrations(
     is_valid BOOLEAN NOT NULL,
     registered_at BIGINT NOT NULL,
     removed_at BIGINT,
+    block_id BIGINT REFERENCES blocks(id),
     UNIQUE (cardano_address, dust_address)
 );
 
 CREATE INDEX ON cnight_registrations(cardano_address);
 
 CREATE INDEX ON cnight_registrations(dust_address);
+
+CREATE INDEX ON cnight_registrations(block_id);
+
+-- Create dust_utxo_mappings table for tracking UTXO-to-registration mappings
+CREATE TABLE IF NOT EXISTS dust_utxo_mappings(
+    id BIGSERIAL PRIMARY KEY,
+    cardano_address BYTEA NOT NULL,
+    dust_address BYTEA NOT NULL,
+    utxo_id BYTEA NOT NULL,
+    added_at BIGINT NOT NULL,
+    removed_at BIGINT,
+    block_id BIGINT REFERENCES blocks(id),
+    UNIQUE (utxo_id)
+);
+
+CREATE INDEX ON dust_utxo_mappings(cardano_address);
+CREATE INDEX ON dust_utxo_mappings(dust_address);
+CREATE INDEX ON dust_utxo_mappings(block_id);
 
 -- TODO: These tables are for future merkle tree storage once ledger integration is complete.
 CREATE TABLE dust_commitment_tree(

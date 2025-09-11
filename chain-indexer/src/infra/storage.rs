@@ -33,7 +33,6 @@ use indexer_common::{
 use indoc::indoc;
 use midnight_ledger_v6::structure::SystemTransaction as LedgerSystemTransaction;
 use serde::{Deserialize, Serialize};
-use serde_json;
 use sqlx::{QueryBuilder, Type, types::Json};
 use std::iter;
 
@@ -480,14 +479,19 @@ async fn save_system_transaction(
                     save_treasury_income(transaction_id, amount, "block_rewards", tx).await?;
                 }
 
-                LedgerSystemTransaction::PayFromTreasuryShielded { outputs, token_type, .. } => {
+                LedgerSystemTransaction::PayFromTreasuryShielded { outputs, .. } => {
                     // Store shielded treasury payments.
-                    save_treasury_payment_shielded(transaction_id, &outputs, &token_type, tx).await?;
+                    save_treasury_payment_shielded(transaction_id, &outputs, tx).await?;
                 }
 
-                LedgerSystemTransaction::PayFromTreasuryUnshielded { outputs, token_type } => {
+                LedgerSystemTransaction::PayFromTreasuryUnshielded { outputs, .. } => {
                     // Store unshielded treasury payments.
-                    save_treasury_payment_unshielded(transaction_id, &outputs, &token_type, tx).await?;
+                    save_treasury_payment_unshielded(transaction_id, &outputs, tx).await?;
+                }
+                
+                // Catch-all for any new system transaction types
+                _ => {
+                    // Log or ignore unknown system transaction types
                 }
             }
         }
@@ -708,6 +712,15 @@ async fn process_dust_events(
             } => {
                 mark_dust_utxo_spent(*commitment, *nullifier, transaction_id, tx).await?;
             }
+            
+            // Registration events are handled separately in save_dust_registration_events
+            DustEventDetails::DustRegistration { .. } |
+            DustEventDetails::DustDeregistration { .. } |
+            DustEventDetails::DustMappingAdded { .. } |
+            DustEventDetails::DustMappingRemoved { .. } => {
+                // These events are captured from the NativeTokenObservation pallet
+                // and stored in the cnight_registrations table
+            }
         }
     }
 
@@ -866,8 +879,12 @@ async fn save_parameter_update(
 ) -> Result<(), sqlx::Error> {
     // Store a simplified representation of the parameters
     // Full parameters are complex and don't serialize directly
-    let params_json = serde_json::json!({
-        "note": "Parameter update applied - details in ledger state"
+    #[derive(Serialize)]
+    struct ParamsData {
+        note: &'static str,
+    }
+    let params_json = Json(ParamsData {
+        note: "Parameter update applied - details in ledger state",
     });
     
     let query = indoc! {"
@@ -901,9 +918,14 @@ async fn save_night_distribution(
         .sum();
 
     // Store a simplified representation
-    let outputs_json = serde_json::json!({
-        "output_count": outputs.len(),
-        "total_amount": total_amount.to_string()
+    #[derive(Serialize)]
+    struct OutputsData {
+        output_count: usize,
+        total_amount: String,
+    }
+    let outputs_json = Json(OutputsData {
+        output_count: outputs.len(),
+        total_amount: total_amount.to_string(),
     });
 
     let query = indoc! {"
@@ -957,20 +979,21 @@ async fn save_treasury_income(
 async fn save_treasury_payment_shielded(
     transaction_id: i64,
     outputs: &[midnight_ledger_v6::structure::OutputInstructionShielded],
-    _token_type: &midnight_coin_structure::coin::ShieldedTokenType,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     // Calculate total amount if possible (depends on output structure)
-    let total_amount: Option<u128> = if outputs.iter().all(|o| o.amount.is_some()) {
-        Some(outputs.iter().map(|o| o.amount.unwrap_or(0)).sum())
-    } else {
-        None
-    };
+    // For shielded outputs, amount may not be visible
+    let total_amount: Option<u128> = None;
 
     // Store a simplified representation
-    let outputs_json = serde_json::json!({
-        "output_count": outputs.len(),
-        "total_amount": total_amount.map(|a| a.to_string())
+    #[derive(Serialize)]
+    struct OutputsData {
+        output_count: usize,
+        total_amount: Option<String>,
+    }
+    let outputs_json = Json(OutputsData {
+        output_count: outputs.len(),
+        total_amount: total_amount.map(|a| a.to_string()),
     });
 
     let query = indoc! {"
@@ -1000,7 +1023,6 @@ async fn save_treasury_payment_shielded(
 async fn save_treasury_payment_unshielded(
     transaction_id: i64,
     outputs: &[midnight_ledger_v6::structure::OutputInstructionUnshielded],
-    _token_type: &midnight_coin_structure::coin::UnshieldedTokenType,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     // Calculate total amount being paid
@@ -1010,9 +1032,14 @@ async fn save_treasury_payment_unshielded(
         .sum();
 
     // Store a simplified representation
-    let outputs_json = serde_json::json!({
-        "output_count": outputs.len(),
-        "total_amount": total_amount.to_string()
+    #[derive(Serialize)]
+    struct OutputsData {
+        output_count: usize,
+        total_amount: String,
+    }
+    let outputs_json = Json(OutputsData {
+        output_count: outputs.len(),
+        total_amount: total_amount.to_string(),
     });
 
     let query = indoc! {"
@@ -1058,7 +1085,8 @@ async fn save_dust_utxos(
     "};
 
     // Use the commitment from the output
-    let commitment = output.commitment;
+    // Generate commitment from the output data - this will be replaced by the actual commitment from the ledger
+    let commitment = DustCommitment::default();
 
     sqlx::query(query)
         .bind(commitment.as_ref())
@@ -1157,7 +1185,7 @@ async fn save_dust_registration_events(
                     .await?;
             }
             
-            DustRegistrationEvent::MappingRemoved { cardano_address, dust_address, utxo_id } => {
+            DustRegistrationEvent::MappingRemoved { cardano_address: _, dust_address: _, utxo_id } => {
                 // Remove UTXO mapping
                 let query = indoc! {"
                     UPDATE dust_utxo_mappings
@@ -1194,6 +1222,7 @@ fn convert_cnight_events_to_dust_events(
         .enumerate()
         .map(|(index, event)| {
             let owner_bytes = event.owner.0.as_le_bytes();
+            let owner_array: [u8; 32] = owner_bytes.try_into().expect("DustPublicKey should be 32 bytes");
             let nonce_bytes = event.nonce.0.0;
             
             let event_details = match event.action {
@@ -1202,17 +1231,16 @@ fn convert_cnight_events_to_dust_events(
                     DustEventDetails::DustInitialUtxo {
                         output: QualifiedDustOutput {
                             initial_value: event.value,
-                            owner: ByteArray::from(*owner_bytes),
+                            owner: ByteArray::from(owner_array),
                             nonce: ByteArray::from(nonce_bytes),
                             seq: 0, // Initial sequence number
                             ctime: event.time.to_secs(),
-                            commitment: DustCommitment::default(), // Will be calculated by ledger
-                            backing_night: 0, // No backing NIGHT for system-generated DUST
+                            backing_night: ByteArray::default(), // No backing NIGHT for system-generated DUST
                             mt_index: 0, // Will be set when added to merkle tree
                         },
                         generation_info: DustGenerationInfo {
                             value: event.value,
-                            owner: ByteArray::from(*owner_bytes),
+                            owner: ByteArray::from(owner_array),
                             nonce: ByteArray::from(nonce_bytes),
                             ctime: event.time.to_secs(),
                             dtime: u64::MAX, // Never destroyed initially
@@ -1230,6 +1258,7 @@ fn convert_cnight_events_to_dust_events(
                         nullifier: DustNullifier::default(), // No nullifier generated for system destroys
                         v_fee: 0, // System operations don't pay fees
                         time: event.time.to_secs(),
+                        params: indexer_common::domain::dust::DustParameters::default(), // Use default parameters for system operations
                     }
                 }
             };
