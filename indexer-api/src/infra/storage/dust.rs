@@ -737,27 +737,21 @@ impl DustStorage for Storage {
             .map(|row| {
                 // Validate that event_type matches event_details.
                 let expected_type = match &row.event_data.0 {
-                    DustEventDetails::DustInitialUtxo { .. } => {
-                        DustEventType::DustInitialUtxo
+                    DustEventDetails::DustInitialUtxo { .. } => DustEventType::DustInitialUtxo,
+                    DustEventDetails::DustGenerationDtimeUpdate { .. } => {
+                        DustEventType::DustGenerationDtimeUpdate
                     }
-                    DustEventDetails::DustGenerationDtimeUpdate {
-                        ..
-                    } => DustEventType::DustGenerationDtimeUpdate,
-                    DustEventDetails::DustSpendProcessed {
-                        ..
-                    } => DustEventType::DustSpendProcessed,
-                    DustEventDetails::DustRegistration { .. } => {
-                        DustEventType::DustRegistration
+                    DustEventDetails::DustSpendProcessed { .. } => {
+                        DustEventType::DustSpendProcessed
                     }
-                    DustEventDetails::DustDeregistration {
-                        ..
-                    } => DustEventType::DustDeregistration,
-                    DustEventDetails::DustMappingAdded { .. } => {
-                        DustEventType::DustMappingAdded
+                    DustEventDetails::DustRegistration { .. } => DustEventType::DustRegistration,
+                    DustEventDetails::DustDeregistration { .. } => {
+                        DustEventType::DustDeregistration
                     }
-                    DustEventDetails::DustMappingRemoved {
-                        ..
-                    } => DustEventType::DustMappingRemoved,
+                    DustEventDetails::DustMappingAdded { .. } => DustEventType::DustMappingAdded,
+                    DustEventDetails::DustMappingRemoved { .. } => {
+                        DustEventType::DustMappingRemoved
+                    }
                 };
                 debug_assert_eq!(
                     row.event_type, expected_type,
@@ -830,27 +824,21 @@ impl DustStorage for Storage {
             .map(|row| {
                 // Validate that event_type matches event_details.
                 let expected_type = match &row.event_data.0 {
-                    DustEventDetails::DustInitialUtxo { .. } => {
-                        DustEventType::DustInitialUtxo
+                    DustEventDetails::DustInitialUtxo { .. } => DustEventType::DustInitialUtxo,
+                    DustEventDetails::DustGenerationDtimeUpdate { .. } => {
+                        DustEventType::DustGenerationDtimeUpdate
                     }
-                    DustEventDetails::DustGenerationDtimeUpdate {
-                        ..
-                    } => DustEventType::DustGenerationDtimeUpdate,
-                    DustEventDetails::DustSpendProcessed {
-                        ..
-                    } => DustEventType::DustSpendProcessed,
-                    DustEventDetails::DustRegistration { .. } => {
-                        DustEventType::DustRegistration
+                    DustEventDetails::DustSpendProcessed { .. } => {
+                        DustEventType::DustSpendProcessed
                     }
-                    DustEventDetails::DustDeregistration {
-                        ..
-                    } => DustEventType::DustDeregistration,
-                    DustEventDetails::DustMappingAdded { .. } => {
-                        DustEventType::DustMappingAdded
+                    DustEventDetails::DustRegistration { .. } => DustEventType::DustRegistration,
+                    DustEventDetails::DustDeregistration { .. } => {
+                        DustEventType::DustDeregistration
                     }
-                    DustEventDetails::DustMappingRemoved {
-                        ..
-                    } => DustEventType::DustMappingRemoved,
+                    DustEventDetails::DustMappingAdded { .. } => DustEventType::DustMappingAdded,
+                    DustEventDetails::DustMappingRemoved { .. } => {
+                        DustEventType::DustMappingRemoved
+                    }
                 };
                 debug_assert_eq!(
                     row.event_type, expected_type,

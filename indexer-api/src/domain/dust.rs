@@ -13,8 +13,8 @@
 
 use indexer_common::domain::{
     ByteVec, CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustMerkleUpdate,
-    DustNonce, DustNullifier, DustOwner, DustPrefix, NightUtxoHash,
-    dust::DustMerklePathEntry, ledger::TransactionHash,
+    DustNonce, DustNullifier, DustOwner, DustPrefix, NightUtxoHash, dust::DustMerklePathEntry,
+    ledger::TransactionHash,
 };
 use serde::{Deserialize, Serialize};
 

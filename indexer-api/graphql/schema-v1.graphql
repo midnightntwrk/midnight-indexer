@@ -234,6 +234,10 @@ type DustCommitmentMerkleUpdate {
 	Block height of update.
 	"""
 	blockHeight: Int!
+	"""
+	Merkle tree path (if available).
+	"""
+	merklePath: [DustMerklePathEntry!]
 }
 
 """

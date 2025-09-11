@@ -33,7 +33,8 @@ use indexer_common::{
 };
 use indoc::indoc;
 use midnight_ledger_v6::structure::{
-    CNightGeneratesDustActionType, CNightGeneratesDustEvent, SystemTransaction as LedgerSystemTransaction,
+    CNightGeneratesDustActionType, CNightGeneratesDustEvent,
+    SystemTransaction as LedgerSystemTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{QueryBuilder, Type, types::Json};
@@ -325,8 +326,7 @@ async fn save_transactions(
             }
 
             Transaction::System(transaction) => {
-                save_system_transaction(transaction, transaction_id, block_height, tx)
-                    .await?
+                save_system_transaction(transaction, transaction_id, block_height, tx).await?
             }
         }
     }
@@ -510,8 +510,9 @@ async fn save_system_transaction(
                     save_treasury_payment_unshielded(transaction_id, &outputs, tx).await?;
                 }
 
-                // REQUIRED: LedgerSystemTransaction (from midnight-ledger-prototype) is #[non_exhaustive]
-                // Compiler mandates catch-all. We handle all 7 known variants above.
+                // REQUIRED: LedgerSystemTransaction (from midnight-ledger-prototype) is
+                // #[non_exhaustive] Compiler mandates catch-all. We handle all 7
+                // known variants above.
                 #[allow(unreachable_patterns)]
                 unknown_variant => {
                     log::warn!(
@@ -1292,7 +1293,6 @@ fn convert_cnight_events_to_dust_events(
     events: &[CNightGeneratesDustEvent],
     tx_hash: &TransactionHash,
 ) -> Vec<DustEvent> {
-
     events
         .iter()
         .enumerate()

@@ -357,7 +357,9 @@ impl From<domain::dust::DustCommitmentMerkleUpdate> for DustCommitmentMerkleUpda
             index: update.index,
             collapsed_update: update.collapsed_update.hex_encode(),
             block_height: update.block_height,
-            merkle_path: update.merkle_path.map(|path| path.into_iter().map(Into::into).collect()),
+            merkle_path: update
+                .merkle_path
+                .map(|path| path.into_iter().map(Into::into).collect()),
         }
     }
 }
