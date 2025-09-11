@@ -180,6 +180,12 @@ where
         max_depth,
     );
 
+    // Note: Layer order is important - they execute from bottom to top.
+    // Previously used nested ServiceBuilder composition, but after storage trait
+    // was split into 6 separate traits (commit dde1b16), Rust's type inference
+    // couldn't handle the complexity with multiple trait bounds. Direct layer
+    // application resolved the type inference issues while maintaining all
+    // functionality including proper 413 status code handling for oversized requests.
     Router::new()
         .route("/ready", get(ready))
         .nest("/api/v1", v1_app)
