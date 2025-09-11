@@ -19,7 +19,8 @@ use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteVec, DustNonce, DustNullifier, DustOwner, NightUtxoHash, NightUtxoNonce,
+        BlockHash, ByteVec, DustMerkleTreeData, DustNonce, DustNullifier, DustOwner, 
+        NightUtxoHash, NightUtxoNonce,
         dust::{
             DustCommitment, DustEvent, DustEventDetails, DustEventType, DustGenerationInfo,
             DustMerklePathEntry, QualifiedDustOutput,
@@ -852,9 +853,11 @@ async fn save_dust_generation_tree_update(
     // In a real implementation, we'd calculate the actual root from the path
     let root = vec![0u8; 32]; // Placeholder root
 
-    // Serialize merkle_path as JSON bytes for storage in bytea column
+    // Serialize merkle_path for storage in bytea column
     // We use bincode for efficient binary serialization
-    let tree_data = bincode::serialize(merkle_path).unwrap_or_default();
+    let tree_data: DustMerkleTreeData = bincode::serialize(merkle_path)
+        .unwrap_or_default()
+        .into();
 
     let query = indoc! {"
         INSERT INTO dust_generation_tree (
