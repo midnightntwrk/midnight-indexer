@@ -39,5 +39,6 @@ where
         &self,
         block: &Block,
         transactions: &[Transaction],
+        dust_registration_events: &[crate::infra::subxt_node::runtimes::DustRegistrationEvent],
     ) -> Result<Option<u64>, sqlx::Error>;
 }

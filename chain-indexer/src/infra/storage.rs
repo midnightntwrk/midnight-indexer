@@ -180,9 +180,10 @@ impl domain::storage::Storage for Storage {
         &self,
         block: &Block,
         transactions: &[Transaction],
+        dust_registration_events: &[crate::infra::subxt_node::runtimes::DustRegistrationEvent],
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let max_transaction_id = save_block(block, transactions, &mut tx).await?;
+        let max_transaction_id = save_block(block, transactions, dust_registration_events, &mut tx).await?;
         tx.commit().await?;
 
         Ok(max_transaction_id)
@@ -217,6 +218,7 @@ impl From<&ContractAttributes> for ContractActionVariant {
 async fn save_block(
     block: &Block,
     transactions: &[Transaction],
+    dust_registration_events: &[crate::infra::subxt_node::runtimes::DustRegistrationEvent],
     tx: &mut SqlxTransaction,
 ) -> Result<Option<u64>, sqlx::Error> {
     let query = indoc! {"
@@ -254,6 +256,11 @@ async fn save_block(
         .fetch_one(&mut **tx)
         .map_ok(|(id,)| id)
         .await?;
+
+    // Save DUST registration events if any
+    if !dust_registration_events.is_empty() {
+        save_dust_registration_events(dust_registration_events, block_id, block.timestamp as i64, tx).await?;
+    }
 
     save_transactions(transactions, block_id, tx).await
 }
@@ -1091,81 +1098,108 @@ async fn save_dust_utxos(
     Ok(())
 }
 
-// TODO: Uncomment this function when node team implements registration events.
-// Registration events will be emitted by the node when it detects Cardano stake
-// key registrations/deregistrations. See PM-17951 for node integration work.
-//
-// #[trace]
-// async fn save_cnight_registration(
-//     cardano_stake_key: &str,
-//     dust_address: DustOwner,
-//     is_registration: bool,
-//     tx: &mut SqlxTransaction,
-// ) -> Result<(), sqlx::Error> {
-//     // TODO: Implement cNIGHT registration tracking once the new ledger and node
-//     // versions with DUST features are available. The registration event format
-//     // and validation logic will be determined by the node implementation.
-//     // For now, this is a placeholder to handle registration events when they
-//     // are eventually emitted by the node.
-//
-//     if is_registration {
-//         // Handle registration: insert new registration or update existing one
-//         let query = indoc! {"
-//             INSERT INTO cnight_registrations (
-//                 cardano_address,
-//                 dust_address,
-//                 is_valid,
-//                 registered_at
-//             )
-//             VALUES ($1, $2, $3, $4)
-//             ON CONFLICT (cardano_address, dust_address)
-//             DO UPDATE SET
-//                 is_valid = $3,
-//                 registered_at = $4,
-//                 removed_at = NULL
-//         "};
-//
-//         let dust_address_bytes = dust_address.as_ref();
-//
-//         // TODO: Use proper timestamp from the event when available.
-//         let current_time = std::time::SystemTime::now()
-//             .duration_since(std::time::UNIX_EPOCH)
-//             .unwrap()
-//             .as_secs() as i64;
-//
-//         sqlx::query(query)
-//             .bind(cardano_stake_key.as_bytes())
-//             .bind(dust_address_bytes)
-//             .bind(true)
-//             .bind(current_time)
-//             .execute(&mut **tx)
-//             .await?;
-//     } else {
-//         // Handle deregistration: mark as invalid
-//         let query = indoc! {"
-//             UPDATE cnight_registrations
-//             SET is_valid = false, removed_at = $1
-//             WHERE cardano_address = $2 AND dust_address = $3 AND is_valid = true
-//         "};
-//
-//         let dust_address_bytes = dust_address.as_ref();
-//
-//         // TODO: Use proper timestamp from the event when available.
-//         let current_time = std::time::SystemTime::now()
-//             .duration_since(std::time::UNIX_EPOCH)
-//             .unwrap()
-//             .as_secs() as i64;
-//
-//         sqlx::query(query)
-//             .bind(current_time)
-//             .bind(cardano_stake_key.as_bytes())
-//             .bind(dust_address_bytes)
-//             .execute(&mut **tx)
-//             .await?;
-//     }
-//
-//     Ok(())
-// }
+/// Save cNIGHT registration events from the NativeTokenObservation pallet.
+/// These events are emitted when Cardano stake keys are registered or deregistered
+/// for DUST distribution. See PM-17951 for details.
+#[trace]
+async fn save_dust_registration_events(
+    events: &[crate::infra::subxt_node::runtimes::DustRegistrationEvent],
+    block_id: i64,
+    block_timestamp: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    use crate::infra::subxt_node::runtimes::DustRegistrationEvent;
+    
+    for event in events {
+        match event {
+            DustRegistrationEvent::Registration { cardano_address, dust_address } => {
+                // Handle registration: insert new registration or update existing one
+                let query = indoc! {"
+                    INSERT INTO cnight_registrations (
+                        cardano_address,
+                        dust_address,
+                        is_valid,
+                        registered_at,
+                        block_id
+                    )
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (cardano_address, dust_address)
+                    DO UPDATE SET
+                        is_valid = $3,
+                        registered_at = $4,
+                        removed_at = NULL,
+                        block_id = $5
+                "};
+
+                sqlx::query(query)
+                    .bind(cardano_address.as_slice())
+                    .bind(dust_address.as_slice())
+                    .bind(true)
+                    .bind(block_timestamp)
+                    .bind(block_id)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+            
+            DustRegistrationEvent::Deregistration { cardano_address, dust_address } => {
+                // Handle deregistration: mark as invalid
+                let query = indoc! {"
+                    UPDATE cnight_registrations
+                    SET is_valid = false, removed_at = $1
+                    WHERE cardano_address = $2 AND dust_address = $3 AND is_valid = true
+                "};
+
+                sqlx::query(query)
+                    .bind(block_timestamp)
+                    .bind(cardano_address.as_slice())
+                    .bind(dust_address.as_slice())
+                    .execute(&mut **tx)
+                    .await?;
+            }
+            
+            DustRegistrationEvent::MappingAdded { cardano_address, dust_address, utxo_id } => {
+                // Store UTXO mapping for tracking
+                let query = indoc! {"
+                    INSERT INTO dust_utxo_mappings (
+                        cardano_address,
+                        dust_address,
+                        utxo_id,
+                        added_at,
+                        block_id
+                    )
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (utxo_id) DO NOTHING
+                "};
+
+                sqlx::query(query)
+                    .bind(cardano_address.as_slice())
+                    .bind(dust_address.as_bytes())
+                    .bind(utxo_id.as_bytes())
+                    .bind(block_timestamp)
+                    .bind(block_id)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+            
+            DustRegistrationEvent::MappingRemoved { cardano_address, dust_address, utxo_id } => {
+                // Remove UTXO mapping
+                let query = indoc! {"
+                    UPDATE dust_utxo_mappings
+                    SET removed_at = $1
+                    WHERE utxo_id = $2 AND removed_at IS NULL
+                "};
+
+                sqlx::query(query)
+                    .bind(block_timestamp)
+                    .bind(utxo_id.as_bytes())
+                    .execute(&mut **tx)
+                    .await?;
+            }
+        }
+    }
+    
+    Ok(())
+}
 
 /// Convert CNightGeneratesDust events to DUST events for storage.
 /// 

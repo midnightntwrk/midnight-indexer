@@ -27,6 +27,30 @@ use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, u
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
     pub transactions: Vec<Transaction>,
+    pub dust_registration_events: Vec<DustRegistrationEvent>,
+}
+
+/// DUST registration events from NativeTokenObservation pallet.
+#[derive(Debug, Clone)]
+pub enum DustRegistrationEvent {
+    Registration {
+        cardano_address: Vec<u8>,
+        dust_address: Vec<u8>,
+    },
+    Deregistration {
+        cardano_address: Vec<u8>,
+        dust_address: Vec<u8>,
+    },
+    MappingAdded {
+        cardano_address: Vec<u8>,
+        dust_address: String,
+        utxo_id: String,
+    },
+    MappingRemoved {
+        cardano_address: Vec<u8>,
+        dust_address: String,
+        utxo_id: String,
+    },
 }
 
 /// Runtime specific (serialized) transaction.
@@ -121,7 +145,7 @@ macro_rules! make_block_details {
                 authorities: &mut Option<Vec<[u8; 32]>>,
             ) -> Result<BlockDetails, SubxtNodeError> {
                 use self::$module::{
-                    Call, Event, midnight, midnight_system, timestamp,
+                    Call, Event, midnight, midnight_system, timestamp, native_token_observation,
                     runtime_types::pallet_partner_chains_session::pallet::Event::NewSession,
                 };
 
@@ -164,6 +188,9 @@ macro_rules! make_block_details {
                     .collect();
 
                 // Also collect system transactions from events (e.g., CNightGeneratesDust)
+                // and DUST registration events from NativeTokenObservation pallet
+                let mut dust_registration_events = Vec::new();
+                
                 for event in events.iter().flatten() {
                     let event = event.as_root_event::<Event>();
                     match event {
@@ -174,6 +201,38 @@ macro_rules! make_block_details {
                             // System transactions created by the node (not from extrinsics)
                             transactions.push(Transaction::System(e.serialized_system_transaction.clone().into()));
                         }
+                        Ok(Event::NativeTokenObservation(native_event)) => {
+                            // Handle DUST registration events
+                            match native_event {
+                                native_token_observation::Event::Registration(reg) => {
+                                    dust_registration_events.push(DustRegistrationEvent::Registration {
+                                        cardano_address: reg.cardano_address.0.clone(),
+                                        dust_address: reg.dust_address.clone(),
+                                    });
+                                }
+                                native_token_observation::Event::Deregistration(dereg) => {
+                                    dust_registration_events.push(DustRegistrationEvent::Deregistration {
+                                        cardano_address: dereg.cardano_address.0.clone(),
+                                        dust_address: dereg.dust_address.clone(),
+                                    });
+                                }
+                                native_token_observation::Event::MappingAdded(mapping) => {
+                                    dust_registration_events.push(DustRegistrationEvent::MappingAdded {
+                                        cardano_address: mapping.cardano_address.0.clone(),
+                                        dust_address: mapping.dust_address.clone(),
+                                        utxo_id: mapping.utxo_id.clone(),
+                                    });
+                                }
+                                native_token_observation::Event::MappingRemoved(mapping) => {
+                                    dust_registration_events.push(DustRegistrationEvent::MappingRemoved {
+                                        cardano_address: mapping.cardano_address.0.clone(),
+                                        dust_address: mapping.dust_address.clone(),
+                                        utxo_id: mapping.utxo_id.clone(),
+                                    });
+                                }
+                                _ => {}
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -181,6 +240,7 @@ macro_rules! make_block_details {
                 Ok(BlockDetails {
                     timestamp,
                     transactions,
+                    dust_registration_events,
                 })
             }
         }

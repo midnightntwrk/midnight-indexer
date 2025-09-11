@@ -368,7 +368,7 @@ async fn index_block(
         ..
     } = config;
 
-    let (block, transactions) = block.into();
+    let (block, transactions, dust_registration_events) = block.into();
 
     let transactions = ledger_state
         .apply_node_transactions(transactions, block.parent_hash, block.timestamp)
@@ -403,7 +403,7 @@ async fn index_block(
 
     // First save and update the block.
     let max_transaction_id = storage
-        .save_block(&block, &transactions)
+        .save_block(&block, &transactions, &dust_registration_events)
         .await
         .context("save block")?;
 
