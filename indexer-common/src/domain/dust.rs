@@ -14,7 +14,8 @@
 pub use crate::domain::{DustCommitment, DustNullifier};
 
 use crate::domain::{
-    ByteVec, DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce, ledger::TransactionHash,
+    ByteVec, CardanoStakeKey, DustAddress, DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce,
+    ledger::TransactionHash,
 };
 use serde::{Deserialize, Serialize};
 
@@ -69,23 +70,23 @@ pub enum DustEventDetails {
     /// Registration event - Cardano address registered with DUST address.
     DustRegistration {
         /// Cardano stake key address.
-        cardano_address: crate::domain::CardanoStakeKey,
+        cardano_address: CardanoStakeKey,
         /// DUST address (32 bytes).
-        dust_address: crate::domain::DustAddress,
+        dust_address: DustAddress,
     },
 
     /// Deregistration event - Cardano address deregistered from DUST address.
     DustDeregistration {
         /// Cardano stake key address.
-        cardano_address: crate::domain::CardanoStakeKey,
+        cardano_address: CardanoStakeKey,
         /// DUST address (32 bytes).
-        dust_address: crate::domain::DustAddress,
+        dust_address: DustAddress,
     },
 
     /// Mapping added - UTXO mapping added for registration.
     DustMappingAdded {
         /// Cardano stake key address.
-        cardano_address: crate::domain::CardanoStakeKey,
+        cardano_address: CardanoStakeKey,
         /// DUST address.
         dust_address: ByteVec,
         /// UTXO identifier.
@@ -95,7 +96,7 @@ pub enum DustEventDetails {
     /// Mapping removed - UTXO mapping removed for registration.
     DustMappingRemoved {
         /// Cardano stake key address.
-        cardano_address: crate::domain::CardanoStakeKey,
+        cardano_address: CardanoStakeKey,
         /// DUST address.
         dust_address: ByteVec,
         /// UTXO identifier.

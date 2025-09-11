@@ -12,8 +12,9 @@
 // limitations under the License.
 
 use indexer_common::domain::{
-    ByteVec, CardanoStakeKey, DustAddress, DustMerkleRoot, DustMerkleUpdate, DustNonce,
-    DustNullifier, DustOwner, DustPrefix, NightUtxoHash, ledger::TransactionHash,
+    ByteVec, CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustMerkleUpdate,
+    DustNonce, DustNullifier, DustOwner, DustPrefix, NightUtxoHash,
+    dust::DustMerklePathEntry, ledger::TransactionHash,
 };
 use serde::{Deserialize, Serialize};
 
@@ -105,7 +106,7 @@ pub struct DustGenerationMerkleUpdate {
     pub block_height: u32,
 
     /// Merkle tree path (if available from dtime update).
-    pub merkle_path: Option<Vec<indexer_common::domain::dust::DustMerklePathEntry>>,
+    pub merkle_path: Option<Vec<DustMerklePathEntry>>,
 }
 
 /// DUST generation event union type.
@@ -142,7 +143,7 @@ pub enum DustNullifierTransactionEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DustCommitmentInfo {
     /// DUST commitment.
-    pub commitment: indexer_common::domain::DustCommitment,
+    pub commitment: DustCommitment,
 
     /// DUST nullifier (if spent).
     pub nullifier: Option<DustNullifier>,
@@ -174,6 +175,9 @@ pub struct DustCommitmentMerkleUpdate {
 
     /// Block height of update.
     pub block_height: u32,
+
+    /// Merkle tree path (if available).
+    pub merkle_path: Option<Vec<DustMerklePathEntry>>,
 }
 
 /// DUST commitment event union type.

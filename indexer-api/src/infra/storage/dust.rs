@@ -559,7 +559,7 @@ impl DustStorage for Storage {
 
                 // Query merkle tree updates in the same range.
                 let merkle_query = indoc! {"
-                    SELECT merkle_index, root, block_height
+                    SELECT merkle_index, root, block_height, tree_data
                     FROM dust_commitment_tree
                     WHERE merkle_index >= $1
                     ORDER BY merkle_index
@@ -573,10 +573,17 @@ impl DustStorage for Storage {
                     .await?;
 
                 for row in merkle_rows {
+                    let merkle_path = if row.tree_data.0.is_empty() {
+                        None
+                    } else {
+                        Some(row.tree_data.0)
+                    };
+
                     yield DustCommitmentEvent::MerkleUpdate(DustCommitmentMerkleUpdate {
                         index: row.merkle_index,
                         collapsed_update: row.root,
                         block_height: row.block_height,
+                        merkle_path,
                     });
                 }
             }
@@ -1104,8 +1111,6 @@ struct DustUtxosRow {
 }
 
 /// Row type for dust_commitment_tree table queries.
-/// TODO: This table is not populated yet - waiting for node to expose merkle tree events.
-/// TODO: Add `id` and `tree_data` fields when node provides full merkle tree updates.
 #[derive(Debug, Clone, FromRow)]
 struct DustCommitmentTreeRow {
     #[sqlx(try_from = "i64")]
@@ -1115,11 +1120,11 @@ struct DustCommitmentTreeRow {
     merkle_index: u64,
 
     root: DustMerkleUpdate, // This is actually the collapsed update data, not a root hash
+
+    tree_data: sqlx::types::Json<Vec<DustMerklePathEntry>>, // Merkle path data stored as JSON
 }
 
 /// Row type for dust_generation_tree table queries.
-/// TODO: This table is not populated yet - waiting for node to expose merkle tree events.
-/// TODO: Add `id` and `tree_data` fields when node provides full merkle tree updates.
 #[derive(Debug, Clone, FromRow)]
 struct DustGenerationTreeRow {
     #[sqlx(try_from = "i64")]

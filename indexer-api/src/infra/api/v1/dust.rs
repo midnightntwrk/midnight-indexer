@@ -346,6 +346,9 @@ pub struct DustCommitmentMerkleUpdate {
 
     /// Block height of update.
     pub block_height: u32,
+
+    /// Merkle tree path (if available).
+    pub merkle_path: Option<Vec<DustMerklePathEntry>>,
 }
 
 impl From<domain::dust::DustCommitmentMerkleUpdate> for DustCommitmentMerkleUpdate {
@@ -354,6 +357,7 @@ impl From<domain::dust::DustCommitmentMerkleUpdate> for DustCommitmentMerkleUpda
             index: update.index,
             collapsed_update: update.collapsed_update.hex_encode(),
             block_height: update.block_height,
+            merkle_path: update.merkle_path.map(|path| path.into_iter().map(Into::into).collect()),
         }
     }
 }
