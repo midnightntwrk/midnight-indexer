@@ -21,8 +21,7 @@ use indexer_common::{
     domain::{
         BlockHash, ByteArray, ByteVec,
         dust::{
-            DustCommitment, DustEvent, DustEventDetails, DustEventType, DustGenerationInfo,
-            DustNullifier, QualifiedDustOutput,
+            DustCommitment, DustEvent, DustEventType, QualifiedDustOutput,
         },
         ledger::{
             ContractAttributes, ContractBalance, SystemTransaction as DomainSystemTransaction,
@@ -32,10 +31,7 @@ use indexer_common::{
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
-use midnight_ledger_v6::structure::{
-    CNightGeneratesDustActionType, CNightGeneratesDustEvent,
-    SystemTransaction as LedgerSystemTransaction,
-};
+use midnight_ledger_v6::structure::SystemTransaction as LedgerSystemTransaction;
 use serde::{Deserialize, Serialize};
 use sqlx::{QueryBuilder, Type, types::Json};
 use std::iter;
@@ -410,7 +406,16 @@ async fn save_system_transaction(
     _block_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Deserialize the system transaction to extract additional metadata.
+    // Process and save DUST events from system transactions.
+    // The ledger state already properly extracts DUST events from system transactions,
+    // including CNightGeneratesDustUpdate events which create DustInitialUtxo
+    // and DustGenerationDtimeUpdate events.
+    if !transaction.dust_events.is_empty() {
+        process_dust_events(&transaction.dust_events, transaction_id, tx).await?;
+        save_dust_events(&transaction.dust_events, transaction_id, tx).await?;
+    }
+    
+    // Deserialize the system transaction to extract additional metadata for storage.
     // Note: The transaction has already been successfully applied to the ledger state,
     // so failure here only affects our ability to store additional indexing metadata.
     let system_tx = match DomainSystemTransaction::deserialize(
@@ -431,14 +436,14 @@ async fn save_system_transaction(
         }
     };
 
-    // Handle the V6 variant to access the inner ledger transaction.
+    // Handle the V6 variant to access the inner ledger transaction for metadata storage.
     match system_tx {
         DomainSystemTransaction::V6(ledger_tx) => {
             match ledger_tx {
                 LedgerSystemTransaction::CNightGeneratesDustUpdate { events } => {
-                    // Process and save DUST events.
-                    let dust_events =
-                        convert_cnight_events_to_dust_events(&events, &transaction.hash);
+                    // Convert CNightGeneratesDust events to DUST events and save them.
+                    // These events represent DUST distributions to cNIGHT holders.
+                    let dust_events = convert_cnight_events_to_dust_events(&events, &transaction.hash);
                     if !dust_events.is_empty() {
                         process_dust_events(&dust_events, transaction_id, tx).await?;
                         save_dust_events(&dust_events, transaction_id, tx).await?;
@@ -481,56 +486,6 @@ async fn save_system_transaction(
     }
 
     Ok(())
-}
-
-/// Convert CNightGeneratesDust events to DUST events for storage.
-fn convert_cnight_events_to_dust_events(
-    events: &[CNightGeneratesDustEvent],
-    transaction_hash: &indexer_common::domain::ledger::TransactionHash,
-) -> Vec<DustEvent> {
-    events
-        .iter()
-        .enumerate()
-        .map(|(index, event)| {
-            let event_details = match event.action {
-                CNightGeneratesDustActionType::Create => DustEventDetails::DustInitialUtxo {
-                    output: QualifiedDustOutput {
-                        initial_value: event.value,
-                        owner: event.owner.0.0.to_bytes_le().into(),
-                        nonce: event.nonce.0.0.into(),
-                        seq: 0,
-                        ctime: event.time.to_secs(),
-                        backing_night: event.nonce.0.0.into(),
-                        mt_index: 0,
-                    },
-                    generation_info: DustGenerationInfo {
-                        night_utxo_hash: ByteArray::default(),
-                        value: event.value,
-                        owner: event.owner.0.0.to_bytes_le().into(),
-                        nonce: event.nonce.0.0.into(),
-                        ctime: event.time.to_secs(),
-                        dtime: 0,
-                    },
-                    generation_index: 0,
-                },
-                CNightGeneratesDustActionType::Destroy => DustEventDetails::DustSpendProcessed {
-                    commitment: DustCommitment::default(),
-                    commitment_index: 0,
-                    nullifier: DustNullifier::default(),
-                    v_fee: 0,
-                    time: event.time.to_secs(),
-                    params: indexer_common::domain::dust::DustParameters::default(),
-                },
-            };
-
-            DustEvent {
-                transaction_hash: *transaction_hash,
-                logical_segment: index as u16,
-                physical_segment: index as u16,
-                event_details,
-            }
-        })
-        .collect()
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
@@ -938,10 +893,10 @@ async fn save_night_distribution(
         .sum();
 
     // Store a simplified representation
-    let outputs_json = serde_json::json!({
+    let outputs_json = sqlx::types::Json(serde::json::json!({
         "output_count": outputs.len(),
         "total_amount": total_amount.to_string()
-    });
+    }));
 
     let query = indoc! {"
         INSERT INTO night_distributions (
@@ -956,7 +911,7 @@ async fn save_night_distribution(
     sqlx::query(query)
         .bind(transaction_id)
         .bind("night_distribution")
-        .bind(Json(&outputs_json))
+        .bind(outputs_json)
         .bind(U128BeBytes::from(total_amount))
         .execute(&mut **tx)
         .await?;
@@ -1005,10 +960,10 @@ async fn save_treasury_payment_shielded(
     };
 
     // Store a simplified representation
-    let outputs_json = serde_json::json!({
+    let outputs_json = sqlx::types::Json(serde::json::json!({
         "output_count": outputs.len(),
         "total_amount": total_amount.map(|a| a.to_string())
-    });
+    }));
 
     let query = indoc! {"
         INSERT INTO treasury_payments (
@@ -1025,7 +980,7 @@ async fn save_treasury_payment_shielded(
         .bind(transaction_id)
         .bind("shielded")
         .bind("shielded_token")
-        .bind(Json(&outputs_json))
+        .bind(outputs_json)
         .bind(total_amount.map(U128BeBytes::from))
         .execute(&mut **tx)
         .await?;
@@ -1047,10 +1002,10 @@ async fn save_treasury_payment_unshielded(
         .sum();
 
     // Store a simplified representation
-    let outputs_json = serde_json::json!({
+    let outputs_json = sqlx::types::Json(serde::json::json!({
         "output_count": outputs.len(),
         "total_amount": total_amount.to_string()
-    });
+    }));
 
     let query = indoc! {"
         INSERT INTO treasury_payments (
@@ -1067,7 +1022,7 @@ async fn save_treasury_payment_unshielded(
         .bind(transaction_id)
         .bind("unshielded")
         .bind("unshielded_token")
-        .bind(Json(&outputs_json))
+        .bind(outputs_json)
         .bind(Some(U128BeBytes::from(total_amount)))
         .execute(&mut **tx)
         .await?;
@@ -1094,21 +1049,32 @@ async fn save_dust_utxos(
         VALUES ($1, $2, $3, $4, $5, $6, $7)
     "};
 
-    // TODO: Implement proper cryptographic commitment calculation once the new ledger
-    // and node versions with DUST features are available. The commitment algorithm
-    // must match the node's implementation to ensure consistency across the system.
-    // For now, using a deterministic SHA256 placeholder based on all DUST UTXO fields
-    // to enable tracking functionality for PM-16218.
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(output.owner.as_ref());
-    hasher.update(output.nonce.as_ref());
-    hasher.update(output.initial_value.to_be_bytes());
-    hasher.update(output.seq.to_be_bytes());
-    hasher.update(output.ctime.to_be_bytes());
-    hasher.update(output.backing_night.as_ref());
-    hasher.update(output.mt_index.to_be_bytes());
-    let commitment_bytes: [u8; 32] = hasher.finalize().into();
+    // Calculate DUST commitment using the proper cryptographic commitment algorithm
+    // from the ledger implementation. This uses transient_commit with the domain separator
+    // "mdn:dust:cm" to match the node's implementation.
+    use midnight_transient_crypto::{
+        field::{FieldRepr, Fr as FrV6},
+        hash::transient_commit as transient_commit_v6,
+    };
+    
+    // Create DustPreProjection structure matching the ledger's implementation.
+    // The commitment is calculated from initial_value, owner, nonce, and ctime.
+    let owner_fr = FrV6::from_bytes_le(output.owner.as_ref().try_into().unwrap_or_default());
+    let nonce_fr = FrV6::from_bytes_le(output.nonce.as_ref().try_into().unwrap_or_default());
+    
+    // Create the field vector for commitment calculation.
+    let mut field_vec = Vec::new();
+    field_vec.extend(FieldRepr::field_vec(&output.initial_value));
+    field_vec.push(owner_fr);
+    field_vec.push(nonce_fr);
+    field_vec.extend(FieldRepr::field_vec(&output.ctime));
+    
+    // Use the domain separator from the ledger: "mdn:dust:cm".
+    let domain_separator = FieldRepr::field_vec(b"mdn:dust:cm")[0];
+    let commitment_fr = transient_commit_v6(&field_vec, domain_separator);
+    
+    // Convert Fr to bytes and then to DustCommitment.
+    let commitment_bytes = commitment_fr.0.to_bytes_le();
     let commitment = DustCommitment::from(commitment_bytes);
 
     sqlx::query(query)
@@ -1201,6 +1167,66 @@ async fn save_dust_utxos(
 //     Ok(())
 // }
 
+/// Convert CNightGeneratesDust events to DUST events for storage.
+/// 
+/// This function handles the conversion of CNightGeneratesDust system transaction events
+/// that are emitted by the node when distributing DUST to cNIGHT holders.
+fn convert_cnight_events_to_dust_events(
+    events: &[midnight_ledger_v6::structure::CNightGeneratesDustEvent],
+    tx_hash: &indexer_common::domain::ledger::TransactionHash,
+) -> Vec<indexer_common::domain::dust::DustEvent> {
+    use indexer_common::domain::dust::{
+        DustEvent, DustEventDetails, DustGenerationInfo, QualifiedDustOutput,
+    };
+    
+    events
+        .iter()
+        .enumerate()
+        .map(|(index, event)| {
+            let owner_bytes = event.owner.0.to_le_bytes();
+            let nonce_bytes = event.nonce.0.0;
+            
+            let event_details = match event.action {
+                midnight_ledger_v6::structure::CNightGeneratesDustActionType::Create => {
+                    // Create a new DUST UTXO
+                    DustEventDetails::DustInitialUtxo {
+                        output: QualifiedDustOutput {
+                            initial_value: event.value,
+                            owner: owner_bytes.to_vec().into(),
+                            nonce: nonce_bytes.to_vec().into(),
+                            seq: 0, // Initial sequence number
+                            ctime: event.time.to_secs(),
+                        },
+                        generation_info: DustGenerationInfo {
+                            value: event.value,
+                            owner: owner_bytes.to_vec().into(),
+                            nonce: nonce_bytes.to_vec().into(),
+                            ctime: event.time.to_secs(),
+                            dtime: u64::MAX, // Never destroyed initially
+                        },
+                        generation_index: index as u64,
+                    }
+                }
+                midnight_ledger_v6::structure::CNightGeneratesDustActionType::Destroy => {
+                    // Record DUST spend/destruction
+                    DustEventDetails::DustSpendProcessed {
+                        owner: owner_bytes.to_vec().into(),
+                        time: event.time.to_secs(),
+                        v_fee: 0, // No fee for system-initiated destroys
+                    }
+                }
+            };
+            
+            DustEvent {
+                transaction_hash: *tx_hash,
+                logical_segment: index as u16,
+                physical_segment: index as u16,
+                event_details,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1247,7 +1273,7 @@ mod tests {
         assert_eq!(dust_events[0].physical_segment, 0);
 
         match &dust_events[0].event_details {
-            DustEventDetails::DustInitialUtxo {
+            indexer_common::domain::dust::DustEventDetails::DustInitialUtxo {
                 output,
                 generation_info,
                 ..
@@ -1265,7 +1291,7 @@ mod tests {
         assert_eq!(dust_events[1].physical_segment, 1);
 
         match &dust_events[1].event_details {
-            DustEventDetails::DustSpendProcessed { time, v_fee, .. } => {
+            indexer_common::domain::dust::DustEventDetails::DustSpendProcessed { time, v_fee, .. } => {
                 assert_eq!(*time, 1234567900);
                 assert_eq!(*v_fee, 0); // No fee for system-initiated destroy.
             }

@@ -119,6 +119,8 @@ pub struct SystemTransaction {
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
     pub raw: SerializedTransaction,
+    // DUST events from system transactions (e.g., CNightGeneratesDustUpdate).
+    pub dust_events: Box<Vec<DustEvent>>,
 }
 
 impl From<node::SystemTransaction> for SystemTransaction {
@@ -127,6 +129,7 @@ impl From<node::SystemTransaction> for SystemTransaction {
             hash: transaction.hash,
             protocol_version: transaction.protocol_version,
             raw: transaction.raw,
+            dust_events: Box::default(),
         }
     }
 }

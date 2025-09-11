@@ -166,12 +166,14 @@ impl LedgerState {
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
     ) -> Result<Transaction, Error> {
-        let transaction = SystemTransaction::from(transaction);
+        let mut transaction = SystemTransaction::from(transaction);
 
-        // Apply system transaction. DUST events from system transactions
-        // (e.g., CNightGeneratesDustUpdate) are handled by the storage layer
-        // and don't need to be stored in the transaction object.
-        let _dust_events = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
+        // Apply system transaction and get DUST events.
+        // The ledger state properly extracts DUST events from system transactions,
+        // including CNightGeneratesDustUpdate events which create DustInitialUtxo
+        // and DustGenerationDtimeUpdate events.
+        let dust_events = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
+        transaction.dust_events = Box::new(dust_events);
 
         Ok(Transaction::System(transaction))
     }
