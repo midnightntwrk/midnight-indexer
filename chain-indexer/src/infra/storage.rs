@@ -893,10 +893,10 @@ async fn save_night_distribution(
         .sum();
 
     // Store a simplified representation
-    let outputs_json = sqlx::types::Json(serde::json::json!({
+    let outputs_json = serde_json::json!({
         "output_count": outputs.len(),
         "total_amount": total_amount.to_string()
-    }));
+    });
 
     let query = indoc! {"
         INSERT INTO night_distributions (
@@ -911,7 +911,7 @@ async fn save_night_distribution(
     sqlx::query(query)
         .bind(transaction_id)
         .bind("night_distribution")
-        .bind(outputs_json)
+        .bind(Json(&outputs_json))
         .bind(U128BeBytes::from(total_amount))
         .execute(&mut **tx)
         .await?;
@@ -960,10 +960,10 @@ async fn save_treasury_payment_shielded(
     };
 
     // Store a simplified representation
-    let outputs_json = sqlx::types::Json(serde::json::json!({
+    let outputs_json = serde_json::json!({
         "output_count": outputs.len(),
         "total_amount": total_amount.map(|a| a.to_string())
-    }));
+    });
 
     let query = indoc! {"
         INSERT INTO treasury_payments (
@@ -980,7 +980,7 @@ async fn save_treasury_payment_shielded(
         .bind(transaction_id)
         .bind("shielded")
         .bind("shielded_token")
-        .bind(outputs_json)
+        .bind(Json(&outputs_json))
         .bind(total_amount.map(U128BeBytes::from))
         .execute(&mut **tx)
         .await?;
@@ -1002,10 +1002,10 @@ async fn save_treasury_payment_unshielded(
         .sum();
 
     // Store a simplified representation
-    let outputs_json = sqlx::types::Json(serde::json::json!({
+    let outputs_json = serde_json::json!({
         "output_count": outputs.len(),
         "total_amount": total_amount.to_string()
-    }));
+    });
 
     let query = indoc! {"
         INSERT INTO treasury_payments (
@@ -1022,7 +1022,7 @@ async fn save_treasury_payment_unshielded(
         .bind(transaction_id)
         .bind("unshielded")
         .bind("unshielded_token")
-        .bind(outputs_json)
+        .bind(Json(&outputs_json))
         .bind(Some(U128BeBytes::from(total_amount)))
         .execute(&mut **tx)
         .await?;
