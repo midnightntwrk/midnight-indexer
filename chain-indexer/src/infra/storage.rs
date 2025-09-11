@@ -508,9 +508,15 @@ async fn save_system_transaction(
                     save_treasury_payment_unshielded(transaction_id, &outputs, tx).await?;
                 }
 
-                // Catch-all for any new system transaction types
+                // Required catch-all: LedgerSystemTransaction is marked #[non_exhaustive]
+                // This ensures forward compatibility with new transaction types in future ledger versions
                 _ => {
-                    // Log or ignore unknown system transaction types
+                    log::info!(
+                        "Encountered unhandled system transaction type in transaction {}. \
+                        This may be a new transaction type from a ledger update.",
+                        transaction.hash
+                    );
+                    // Continue processing - new transaction types shouldn't break indexing
                 }
             }
         }
