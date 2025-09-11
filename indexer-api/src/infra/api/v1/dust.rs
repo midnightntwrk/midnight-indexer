@@ -647,7 +647,8 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
                     owner: generation_info.owner.hex_encode(),
                     nonce: generation_info.nonce.hex_encode(),
                     ctime: generation_info.ctime,
-                    dtime: Some(generation_info.dtime),
+                    // u64::MAX represents "never destroyed" - convert to None for GraphQL
+                    dtime: (generation_info.dtime != u64::MAX).then_some(generation_info.dtime),
                     merkle_index: generation_index,
                 },
                 generation_index,
@@ -662,7 +663,8 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
                     owner: generation_info.owner.hex_encode(),
                     nonce: generation_info.nonce.hex_encode(),
                     ctime: generation_info.ctime,
-                    dtime: Some(generation_info.dtime),
+                    // u64::MAX represents "never destroyed" - convert to None for GraphQL
+                    dtime: (generation_info.dtime != u64::MAX).then_some(generation_info.dtime),
                     merkle_index: generation_index,
                 },
                 generation_index,
