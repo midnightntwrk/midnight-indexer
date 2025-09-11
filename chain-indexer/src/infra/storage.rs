@@ -323,7 +323,7 @@ async fn save_transactions(
             }
 
             Transaction::System(transaction) => {
-                save_system_transaction(transaction, transaction_id, block_id, block_height, tx)
+                save_system_transaction(transaction, transaction_id, block_height, tx)
                     .await?
             }
         }
@@ -424,11 +424,10 @@ async fn save_regular_transaction(
     Ok(transaction_id as u64)
 }
 
-#[trace(properties = { "block_id": "{_block_id}" })]
+#[trace]
 async fn save_system_transaction(
     transaction: &SystemTransaction,
     transaction_id: i64,
-    _block_id: i64,
     block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {

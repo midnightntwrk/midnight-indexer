@@ -16,7 +16,7 @@ pub mod storage;
 
 mod block;
 mod contract_action;
-pub mod dust;
+mod dust;
 mod ledger_state;
 mod transaction;
 mod transaction_fees;
