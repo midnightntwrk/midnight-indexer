@@ -298,9 +298,9 @@ impl DustStorage for Storage {
 
                 for row in merkle_rows {
                     last_merkle_index = row.merkle_index + 1;
-                    // Deserialize merkle path from tree_data if available
-                    let merkle_path = if !row.tree_data.is_empty() {
-                        serde_json::from_slice(&row.tree_data).ok()
+                    // Extract merkle path from Json wrapper
+                    let merkle_path = if !row.tree_data.0.is_empty() {
+                        Some(row.tree_data.0)
                     } else {
                         None
                     };
@@ -1129,7 +1129,7 @@ struct DustGenerationTreeRow {
 
     root: DustMerkleUpdate, // This is actually the collapsed update data, not a root hash
 
-    tree_data: DustMerkleTreeData, // Serialized merkle path data
+    tree_data: sqlx::types::Json<Vec<indexer_common::domain::dust::DustMerklePathEntry>>, // Merkle path data stored as JSON
 }
 
 impl From<DustUtxosRow> for DustCommitmentInfo {

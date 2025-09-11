@@ -34,7 +34,6 @@ use indexer_common::{
 use indoc::indoc;
 use midnight_ledger_v6::structure::SystemTransaction as LedgerSystemTransaction;
 use serde::{Deserialize, Serialize};
-use serde_json;
 use sqlx::{QueryBuilder, Type, types::Json};
 use std::iter;
 
@@ -312,12 +311,20 @@ async fn save_transactions(
         match transaction {
             Transaction::Regular(transaction) => {
                 highest_transaction_id = Some(
-                    save_regular_transaction(transaction, transaction_id, block_id, block_height, tx).await?,
+                    save_regular_transaction(
+                        transaction,
+                        transaction_id,
+                        block_id,
+                        block_height,
+                        tx,
+                    )
+                    .await?,
                 );
             }
 
             Transaction::System(transaction) => {
-                save_system_transaction(transaction, transaction_id, block_id, block_height, tx).await?
+                save_system_transaction(transaction, transaction_id, block_id, block_height, tx)
+                    .await?
             }
         }
     }
@@ -841,9 +848,6 @@ async fn save_dust_generation_tree_update(
     block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Serialize the merkle path to store as tree_data
-    let tree_data = serde_json::to_vec(merkle_path).unwrap_or_default();
-
     // Calculate the root hash from the path (placeholder for now)
     // In a real implementation, we'd calculate the actual root from the path
     let root = vec![0u8; 32]; // Placeholder root
@@ -866,7 +870,7 @@ async fn save_dust_generation_tree_update(
         .bind(block_height as i64)
         .bind(merkle_index as i64)
         .bind(&root)
-        .bind(&tree_data)
+        .bind(Json(merkle_path))  // Use Json wrapper for serialization
         .execute(&mut **tx)
         .await?;
 
