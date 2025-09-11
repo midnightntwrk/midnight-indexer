@@ -29,8 +29,8 @@ use fastrace::trace;
 use futures::Stream;
 use indexer_common::{
     domain::{
-        CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustMerkleUpdate, DustNonce,
-        DustNullifier, DustOwner, DustPrefix, NightUtxoHash, ledger::TransactionHash,
+        ByteVec, CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustMerkleUpdate,
+        DustNonce, DustNullifier, DustOwner, DustPrefix, NightUtxoHash, ledger::TransactionHash,
     },
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
@@ -306,7 +306,7 @@ impl DustStorage for Storage {
                     
                     yield DustGenerationEvent::MerkleUpdate(DustGenerationMerkleUpdate {
                         index: row.merkle_index,
-                        collapsed_update: DustMerkleUpdate::from(row.root),
+                        collapsed_update: row.root.clone(),
                         block_height: row.block_height,
                         merkle_path,
                     });
@@ -573,7 +573,7 @@ impl DustStorage for Storage {
                 for row in merkle_rows {
                     yield DustCommitmentEvent::MerkleUpdate(DustCommitmentMerkleUpdate {
                         index: row.merkle_index,
-                        collapsed_update: DustMerkleUpdate::from(row.root),
+                        collapsed_update: row.root,
                         block_height: row.block_height,
                     });
                 }
@@ -1112,7 +1112,7 @@ struct DustCommitmentTreeRow {
     #[sqlx(try_from = "i64")]
     merkle_index: u64,
 
-    root: Vec<u8>,
+    root: ByteVec,
 }
 
 /// Row type for dust_generation_tree table queries.
@@ -1126,9 +1126,9 @@ struct DustGenerationTreeRow {
     #[sqlx(try_from = "i64")]
     merkle_index: u64,
 
-    root: Vec<u8>,
+    root: ByteVec,
     
-    tree_data: Vec<u8>,
+    tree_data: ByteVec,
 }
 
 impl From<DustUtxosRow> for DustCommitmentInfo {
