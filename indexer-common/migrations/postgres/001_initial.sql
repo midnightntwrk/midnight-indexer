@@ -205,7 +205,7 @@ CREATE INDEX ON dust_utxo_mappings(block_id);
 CREATE TABLE dust_commitment_tree(
     id BIGSERIAL PRIMARY KEY,
     block_height BIGINT NOT NULL,
-    merkle_index BIGINT NOT NULL,
+    merkle_index BIGINT NOT NULL UNIQUE,
     root BYTEA NOT NULL,
     tree_data JSONB NOT NULL
 );
@@ -213,7 +213,7 @@ CREATE TABLE dust_commitment_tree(
 CREATE TABLE dust_generation_tree(
     id BIGSERIAL PRIMARY KEY,
     block_height BIGINT NOT NULL,
-    merkle_index BIGINT NOT NULL,
+    merkle_index BIGINT NOT NULL UNIQUE,
     root BYTEA NOT NULL,
     tree_data JSONB NOT NULL
 );

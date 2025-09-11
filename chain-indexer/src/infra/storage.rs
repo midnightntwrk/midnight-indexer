@@ -19,8 +19,7 @@ use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteVec, DustNonce, DustNullifier, DustOwner, NightUtxoHash,
-        NightUtxoNonce,
+        BlockHash, ByteVec, DustNonce, DustNullifier, DustOwner, NightUtxoHash, NightUtxoNonce,
         dust::{
             DustCommitment, DustEvent, DustEventDetails, DustEventType, DustGenerationInfo,
             DustMerklePathEntry, QualifiedDustOutput,

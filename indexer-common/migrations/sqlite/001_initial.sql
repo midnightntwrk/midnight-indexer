@@ -211,7 +211,7 @@ CREATE INDEX dust_utxo_mappings_block_id_idx ON dust_utxo_mappings(block_id);
 CREATE TABLE dust_commitment_tree(
     id INTEGER PRIMARY KEY,
     block_height INTEGER NOT NULL,
-    merkle_index INTEGER NOT NULL,
+    merkle_index INTEGER NOT NULL UNIQUE,
     root BLOB NOT NULL,
     tree_data TEXT NOT NULL -- JSON stored as TEXT in SQLite
 );
@@ -219,7 +219,7 @@ CREATE TABLE dust_commitment_tree(
 CREATE TABLE dust_generation_tree(
     id INTEGER PRIMARY KEY,
     block_height INTEGER NOT NULL,
-    merkle_index INTEGER NOT NULL,
+    merkle_index INTEGER NOT NULL UNIQUE,
     root BLOB NOT NULL,
     tree_data TEXT NOT NULL -- JSON stored as TEXT in SQLite
 );
