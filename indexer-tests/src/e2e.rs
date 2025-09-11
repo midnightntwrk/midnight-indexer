@@ -1250,7 +1250,7 @@ async fn test_dust_events_queries(
     // Note: There may be pre-existing DUST events in the database from genesis or prior runs.
     if dust_generating_tx_count > 0 {
         assert!(!recent_events.is_empty());
-    } else if recent_events.len() > 0 {
+    } else if !recent_events.is_empty() {
         // Pre-existing DUST events found (e.g., from genesis initialization)
         println!(
             "Found {} pre-existing DUST events in database",

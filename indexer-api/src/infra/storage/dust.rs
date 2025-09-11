@@ -983,7 +983,7 @@ impl DustStorage for Storage {
                     }
                     AddressType::Night => {
                         // Night addresses are not used in registration
-                        format!("FALSE")
+                        "FALSE".to_string()
                     }
                 }
             })

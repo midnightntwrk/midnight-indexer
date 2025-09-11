@@ -534,7 +534,7 @@ fn extract_dust_events_v6<D: midnight_storage_v6::db::DB>(
                         nullifier: nullifier.0.0.to_bytes_le().into(),
                         v_fee: *v_fee,
                         time: declared_time.to_secs(),
-                        params: dust_params.clone(),
+                        params: *dust_params,
                     }),
 
                     _ => None,
