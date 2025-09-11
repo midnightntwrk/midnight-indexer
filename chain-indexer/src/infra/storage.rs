@@ -508,15 +508,17 @@ async fn save_system_transaction(
                     save_treasury_payment_unshielded(transaction_id, &outputs, tx).await?;
                 }
 
-                // Required catch-all: LedgerSystemTransaction is marked #[non_exhaustive]
-                // This ensures forward compatibility with new transaction types in future ledger versions
-                _ => {
-                    log::info!(
-                        "Encountered unhandled system transaction type in transaction {}. \
-                        This may be a new transaction type from a ledger update.",
-                        transaction.hash
+                // REQUIRED: SystemTransaction is #[non_exhaustive] - compiler mandates catch-all
+                // We handle all 7 known variants above. This catches future additions.
+                #[allow(unreachable_patterns)]
+                unknown_variant => {
+                    log::warn!(
+                        "Encountered new system transaction variant in tx {}: {:?}. \
+                        Update indexer to handle this variant.",
+                        transaction.hash,
+                        std::any::type_name_of_val(&unknown_variant)
                     );
-                    // Continue processing - new transaction types shouldn't break indexing
+                    // Continue processing - new variants shouldn't break indexing
                 }
             }
         }
