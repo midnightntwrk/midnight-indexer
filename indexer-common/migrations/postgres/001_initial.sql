@@ -109,7 +109,7 @@ CREATE INDEX ON unshielded_utxos(creating_transaction_id);
 
 CREATE INDEX ON unshielded_utxos(spending_transaction_id);
 
-CREATE INDEX ON unshielded_utxos(OWNER);
+CREATE INDEX ON unshielded_utxos(owner);
 
 CREATE INDEX ON unshielded_utxos(token_type);
 
@@ -138,7 +138,7 @@ CREATE TABLE dust_generation_info(
     dtime BIGINT
 );
 
-CREATE INDEX ON dust_generation_info(OWNER);
+CREATE INDEX ON dust_generation_info(owner);
 
 CREATE INDEX ON dust_generation_info(night_utxo_hash);
 
@@ -155,7 +155,7 @@ CREATE TABLE dust_utxos(
     nullifier BYTEA
 );
 
-CREATE INDEX ON dust_utxos(OWNER);
+CREATE INDEX ON dust_utxos(owner);
 
 CREATE INDEX ON dust_utxos(generation_info_id);
 
