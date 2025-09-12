@@ -1,7 +1,6 @@
-import { suite } from '@vitest/runner';
 import path from 'path';
 import { defineConfig } from 'vitest/config';
-import { JUnitReporter } from 'vitest/reporters';
+import XRayJsonReporter from './utils/reporters/custom-xray-json/xray-json-reporter';
 import CustomJUnitReporter from './utils/reporters/custom-junit/custom-junit-reporter';
 
 export default defineConfig({
@@ -18,6 +17,7 @@ export default defineConfig({
     retry: 1, // Retry failed tests one extra time just for random glitches
     reporters: [
       'verbose',
+      new XRayJsonReporter(),
       new CustomJUnitReporter(),
       [
         'junit',
