@@ -21,7 +21,6 @@ class TestDataProvider {
   private viewingKeys: Record<string, string[]>;
   private transactions: Record<string, string>;
   private contracts: Record<string, string>;
-  private heights: Record<string, number>;
 
   constructor() {
     this.unshieldedAddresses = {};
@@ -29,7 +28,6 @@ class TestDataProvider {
     this.viewingKeys = {};
     this.transactions = {};
     this.contracts = {};
-    this.heights = {};
   }
 
   async init(): Promise<this> {
@@ -41,13 +39,11 @@ class TestDataProvider {
     const viewingKeysDataFile = await import(`../data/static/${envName}/viewing-keys.json`);
     const transactionsDataFile = await import(`../data/static/${envName}/transactions.json`);
     const contractsDataFile = await import(`../data/static/${envName}/contracts.json`);
-    const heightsDataFile = await import(`../data/static/${envName}/heights.json`);
     this.unshieldedAddresses = unshieldedAddressDataFile.default;
     this.blocks = blocksDataFile.default;
     this.viewingKeys = viewingKeysDataFile.default;
     this.transactions = transactionsDataFile.default;
     this.contracts = contractsDataFile.default;
-    this.heights = heightsDataFile.default;
     return this;
   }
 
@@ -196,6 +192,7 @@ class TestDataProvider {
 
   getFabricatedMalformedContractAddresses() {
     return [
+      '', // empty string
       ' ', // space
       '0', // too short
       null as any, // null
@@ -211,7 +208,7 @@ class TestDataProvider {
       '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e7@', // special character
       '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e7 ', // trailing space
       ' 000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e78', // leading space
-      ' 000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e78 ', // leading and trailing space
+      ' 000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e78 ' // leading and trailing space
     ];
   }
 

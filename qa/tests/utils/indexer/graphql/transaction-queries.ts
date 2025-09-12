@@ -45,7 +45,7 @@ export const BASE_TRANSACTION_FRAGMENT = `   id
       state
       chainState
     }
-    contractAction {
+    contractActions {
       address
       state
       chainState
