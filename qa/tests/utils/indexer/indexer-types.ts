@@ -24,8 +24,6 @@ export type BlockResponse = GraphQLResponse<{ block: Block }>;
 
 export type TransactionResponse = GraphQLResponse<{ transactions: Transaction[] }>;
 
-// TODO: This is not used anywhere, remove it
-export type UnshieldedUtxoResponse = GraphQLResponse<{ unshieldedUtxos: UnshieldedUtxo[] }>;
 
 export type ContractActionResponse = GraphQLResponse<{ contractAction: ContractAction }>;
 
