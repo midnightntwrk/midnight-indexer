@@ -3647,7 +3647,7 @@ dependencies = [
 [[package]]
 name = "midnight-base-crypto"
 version = "0.5.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
 dependencies = [
  "anyhow",
  "atomic-write-file",
@@ -3675,7 +3675,7 @@ dependencies = [
 [[package]]
 name = "midnight-base-crypto-derive"
 version = "0.4.3-rc"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
 dependencies = [
  "proc-macro2",
  "quote 1.0.40",
@@ -3711,7 +3711,7 @@ dependencies = [
 [[package]]
 name = "midnight-coin-structure"
 version = "0.5.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
 dependencies = [
  "fake",
  "lazy_static",
@@ -3745,7 +3745,7 @@ dependencies = [
 [[package]]
 name = "midnight-ledger"
 version = "6.0.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
 dependencies = [
  "anyhow",
  "derive-where",
@@ -3775,7 +3775,7 @@ dependencies = [
 [[package]]
 name = "midnight-onchain-runtime"
 version = "0.5.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
 dependencies = [
  "derive-where",
  "enum_index",
@@ -3800,7 +3800,7 @@ dependencies = [
 [[package]]
 name = "midnight-onchain-state"
 version = "0.4.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
 dependencies = [
  "derive-where",
  "fake",
@@ -3818,7 +3818,7 @@ dependencies = [
 [[package]]
 name = "midnight-onchain-vm"
 version = "0.4.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
 dependencies = [
  "derive-where",
  "fake",
@@ -3860,7 +3860,7 @@ dependencies = [
 [[package]]
 name = "midnight-serialize"
 version = "0.4.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
 dependencies = [
  "crypto",
  "konst",
@@ -3873,7 +3873,7 @@ dependencies = [
 [[package]]
 name = "midnight-serialize-macros"
 version = "0.1.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
 dependencies = [
  "proc-macro2",
  "quote 1.0.40",
@@ -3883,7 +3883,7 @@ dependencies = [
 [[package]]
 name = "midnight-storage"
 version = "0.5.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
 dependencies = [
  "archery",
  "crypto",
@@ -3905,7 +3905,7 @@ dependencies = [
 [[package]]
 name = "midnight-storage-macros"
 version = "0.1.1"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
 dependencies = [
  "midnight-serialize-macros",
  "proc-macro2",
@@ -3916,7 +3916,7 @@ dependencies = [
 [[package]]
 name = "midnight-transient-crypto"
 version = "0.6.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
 dependencies = [
  "anyhow",
  "blake2b_simd",
@@ -3950,7 +3950,7 @@ dependencies = [
 [[package]]
 name = "midnight-zswap"
 version = "4.1.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger-prototype?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.0.0-alpha.3#a7c7210f434a42f372fdded9194f2531986cff84"
 dependencies = [
  "derive-where",
  "fake",
