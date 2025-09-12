@@ -101,8 +101,8 @@ fn read_node_version() -> String {
             );
             version
         }
-        Err(e) => {
-            panic!("Failed to read {} file: {}", NODE_VERSION_FILE, e);
+        Err(error) => {
+            panic!("Failed to read {} file: {}", NODE_VERSION_FILE, error);
         }
     }
 }

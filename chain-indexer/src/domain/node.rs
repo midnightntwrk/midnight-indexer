@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{self, ContractAction};
+use crate::domain::{self, ContractAction, DustRegistrationEvent};
 use futures::Stream;
 use indexer_common::domain::{
     BlockAuthor, BlockHash, ProtocolVersion,
@@ -53,11 +53,13 @@ pub struct Block {
     pub timestamp: u64,
     pub zswap_state_root: ZswapStateRoot,
     pub transactions: Vec<Transaction>,
+    pub dust_registration_events: Vec<DustRegistrationEvent>,
 }
 
-impl From<Block> for (domain::Block, Vec<Transaction>) {
-    fn from(block: Block) -> (domain::Block, Vec<Transaction>) {
+impl From<Block> for (domain::Block, Vec<Transaction>, Vec<DustRegistrationEvent>) {
+    fn from(block: Block) -> (domain::Block, Vec<Transaction>, Vec<DustRegistrationEvent>) {
         let transactions = block.transactions;
+        let dust_registration_events = block.dust_registration_events;
         let block = domain::Block {
             hash: block.hash,
             height: block.height,
@@ -68,7 +70,7 @@ impl From<Block> for (domain::Block, Vec<Transaction>) {
             zswap_state_root: block.zswap_state_root,
         };
 
-        (block, transactions)
+        (block, transactions, dust_registration_events)
     }
 }
 

@@ -81,6 +81,7 @@ impl Default for Config {
         }
     }
 }
+
 pub async fn run(
     config: Config,
     node: impl Node,
@@ -367,7 +368,7 @@ async fn index_block(
         ..
     } = config;
 
-    let (block, transactions) = block.into();
+    let (block, transactions, dust_registration_events) = block.into();
 
     let transactions = ledger_state
         .apply_node_transactions(transactions, block.parent_hash, block.timestamp)
@@ -402,7 +403,7 @@ async fn index_block(
 
     // First save and update the block.
     let max_transaction_id = storage
-        .save_block(&block, &transactions)
+        .save_block(&block, &transactions, &dust_registration_events)
         .await
         .context("save block")?;
 
@@ -542,6 +543,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Default::default(),
     });
 
     static BLOCK_1: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -553,6 +555,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Default::default(),
     });
 
     static BLOCK_2: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -564,6 +567,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Default::default(),
     });
 
     static BLOCK_3: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -575,6 +579,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Default::default(),
     });
 
     pub const ZERO_HASH: BlockHash = ByteArray([0; 32]);

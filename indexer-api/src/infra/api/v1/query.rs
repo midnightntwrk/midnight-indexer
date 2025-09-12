@@ -14,11 +14,14 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ApiResult, ContextExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v1::{
-            HexEncoded,
+            AsBytesExt, HexEncoded,
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
+            dust::{
+                DustEvent, DustEventType, DustGenerationStatus, DustMerkleTreeType, DustSystemState,
+            },
             transaction::{Transaction, TransactionOffset},
         },
     },
@@ -199,5 +202,106 @@ where
         };
 
         Ok(contract_action.map(Into::into))
+    }
+
+    /// Get current DUST system state.
+    #[trace]
+    async fn current_dust_state(&self, cx: &Context<'_>) -> ApiResult<DustSystemState> {
+        let storage = cx.get_storage::<S>();
+
+        let state = storage
+            .get_current_dust_state()
+            .await
+            .map_err_into_server_error(|| "get current DUST state")?;
+
+        Ok(state.into())
+    }
+
+    /// Get DUST generation status for specific stake keys (DOS protected).
+    async fn dust_generation_status(
+        &self,
+        cx: &Context<'_>,
+        cardano_stake_keys: Vec<HexEncoded>,
+    ) -> ApiResult<Vec<DustGenerationStatus>> {
+        // DOS protection: limit to 10 keys.
+        Some(())
+            .filter(|_| cardano_stake_keys.len() <= 10)
+            .ok_or_client_error(|| "maximum 10 stake keys allowed per request")?;
+
+        let storage = cx.get_storage::<S>();
+
+        // Convert HexEncoded to binary.
+        let binary_keys = cardano_stake_keys
+            .into_iter()
+            .map(|key| key.hex_decode::<indexer_common::domain::CardanoStakeKey>())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err_into_client_error(|| "invalid stake key")?;
+
+        let statuses = storage
+            .get_dust_generation_status(&binary_keys)
+            .await
+            .map_err_into_server_error(|| "get DUST generation status")?;
+
+        Ok(statuses.into_iter().map(Into::into).collect())
+    }
+
+    /// Get historical Merkle tree root for a specific timestamp.
+    #[trace(properties = { "tree_type": "{tree_type:?}", "timestamp": "{timestamp}" })]
+    async fn dust_merkle_root(
+        &self,
+        cx: &Context<'_>,
+        tree_type: DustMerkleTreeType,
+        timestamp: u64,
+    ) -> ApiResult<Option<HexEncoded>> {
+        let storage = cx.get_storage::<S>();
+
+        let root = storage
+            .get_dust_merkle_root(tree_type.into(), timestamp)
+            .await
+            .map_err_into_server_error(|| "get DUST merkle root")?;
+
+        Ok(root.map(|bytes| bytes.hex_encode()))
+    }
+
+    /// Get DUST events by transaction hash.
+    #[trace(properties = { "transaction_hash": "{transaction_hash}" })]
+    async fn dust_events_by_transaction(
+        &self,
+        cx: &Context<'_>,
+        transaction_hash: HexEncoded,
+    ) -> ApiResult<Vec<DustEvent>> {
+        let storage = cx.get_storage::<S>();
+
+        let hash = transaction_hash
+            .hex_decode()
+            .map_err_into_client_error(|| "invalid transaction hash")?;
+
+        let events = storage
+            .get_dust_events_by_transaction(hash)
+            .await
+            .map_err_into_server_error(|| format!("get DUST events for transaction {hash}"))?;
+
+        Ok(events.into_iter().map(Into::into).collect())
+    }
+
+    /// Get recent DUST events with optional filtering.
+    #[trace(properties = { "limit": "{limit:?}", "event_type": "{event_type:?}" })]
+    async fn recent_dust_events(
+        &self,
+        cx: &Context<'_>,
+        limit: Option<u32>,
+        event_type: Option<DustEventType>,
+    ) -> ApiResult<Vec<DustEvent>> {
+        let storage = cx.get_storage::<S>();
+
+        // Limit to 100 events for DOS protection.
+        let limit = limit.unwrap_or(10).min(100);
+
+        let events = storage
+            .get_recent_dust_events(limit, event_type.map(Into::into))
+            .await
+            .map_err_into_server_error(|| "get recent DUST events")?;
+
+        Ok(events.into_iter().map(Into::into).collect())
     }
 }

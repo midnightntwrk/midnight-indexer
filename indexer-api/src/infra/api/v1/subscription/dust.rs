@@ -14,12 +14,15 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, ContextExt, HexEncoded, ResultExt,
-        v1::dust::{
-            DustCommitmentEvent, DustCommitmentProgress, DustGenerationEvent, DustGenerationInfo,
-            DustGenerationProgress, DustNullifierTransactionEvent,
-            DustNullifierTransactionProgress, RegistrationAddress, RegistrationUpdateEvent,
-            RegistrationUpdateProgress,
+        ApiError, ApiResult, ContextExt, InnerApiError, ResultExt,
+        v1::{
+            HexEncoded,
+            dust::{
+                DustCommitmentEvent, DustCommitmentProgress, DustGenerationEvent,
+                DustGenerationInfo, DustGenerationProgress, DustNullifierTransactionEvent,
+                DustNullifierTransactionProgress, RegistrationAddress, RegistrationUpdateEvent,
+                RegistrationUpdateProgress,
+            },
         },
     },
 };
@@ -109,7 +112,10 @@ where
     {
         // Validate minimum prefix length.
         if min_prefix_length < 8 {
-            return Err(ApiError::client("minimum prefix length must be at least 8"));
+            return Err(ApiError::Client(InnerApiError(
+                "minimum prefix length must be at least 8".to_string(),
+                None,
+            )));
         }
 
         // Convert hex prefixes to binary.
@@ -154,7 +160,10 @@ where
     ) -> Result<impl Stream<Item = ApiResult<DustCommitmentEvent>> + use<'a, S>, ApiError> {
         // Validate minimum prefix length.
         if min_prefix_length < 8 {
-            return Err(ApiError::client("minimum prefix length must be at least 8"));
+            return Err(ApiError::Client(InnerApiError(
+                "minimum prefix length must be at least 8".to_string(),
+                None,
+            )));
         }
 
         // Convert hex prefixes to binary.
@@ -183,9 +192,10 @@ where
             }
         });
 
-        let progress_updates = make_commitment_progress_updates::<S>(cx, start_index)
-            .take_until_if(tripwire)
-            .map_ok(DustCommitmentEvent::Progress);
+        let progress_updates =
+            make_commitment_progress_updates::<S>(cx, binary_prefixes.clone(), start_index)
+                .take_until_if(tripwire)
+                .map_ok(DustCommitmentEvent::Progress);
 
         let events = tokio_stream::StreamExt::merge(commitments, progress_updates);
 
@@ -331,21 +341,29 @@ where
 
 fn make_nullifier_progress_updates<'a, S>(
     cx: &'a Context<'a>,
-    _prefixes: Vec<DustPrefix>,
+    prefixes: Vec<DustPrefix>,
     from_block: u32,
 ) -> impl Stream<Item = ApiResult<DustNullifierTransactionProgress>> + use<'a, S>
 where
     S: Storage,
 {
-    let _storage = cx.get_storage::<S>();
+    let storage = cx.get_storage::<S>();
     let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
 
-    // For now, return simple progress updates.
-    intervals.map(move |_| {
-        Ok(DustNullifierTransactionProgress {
-            highest_block: from_block,
-            matched_count: 0,
-        })
+    intervals.then(move |_| {
+        let storage = storage.clone();
+        let prefixes = prefixes.clone();
+        async move {
+            let (highest_block, matched_count) = storage
+                .get_dust_nullifier_progress(&prefixes, 8, from_block)
+                .await
+                .map_err_into_server_error(|| "get nullifier progress")?;
+
+            Ok(DustNullifierTransactionProgress {
+                highest_block,
+                matched_count,
+            })
+        }
     })
 }
 
@@ -379,20 +397,29 @@ where
 
 fn make_commitment_progress_updates<'a, S>(
     cx: &'a Context<'a>,
+    commitment_prefixes: Vec<DustPrefix>,
     start_index: u64,
 ) -> impl Stream<Item = ApiResult<DustCommitmentProgress>> + use<'a, S>
 where
     S: Storage,
 {
-    let _storage = cx.get_storage::<S>();
+    let storage = cx.get_storage::<S>();
     let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
 
-    // For now, return simple progress updates.
-    intervals.map(move |_| {
-        Ok(DustCommitmentProgress {
-            highest_index: start_index,
-            commitment_count: 0,
-        })
+    intervals.then(move |_| {
+        let storage = storage.clone();
+        let prefixes = commitment_prefixes.clone();
+        async move {
+            let (highest_index, commitment_count) = storage
+                .get_dust_commitment_progress(&prefixes, 8, start_index)
+                .await
+                .map_err_into_server_error(|| "get commitment progress")?;
+
+            Ok(DustCommitmentProgress {
+                highest_index,
+                commitment_count,
+            })
+        }
     })
 }
 
@@ -424,19 +451,27 @@ where
 
 fn make_registration_progress_updates<'a, S>(
     cx: &'a Context<'a>,
-    _addresses: Vec<domain::dust::RegistrationAddress>,
+    addresses: Vec<domain::dust::RegistrationAddress>,
 ) -> impl Stream<Item = ApiResult<RegistrationUpdateProgress>> + use<'a, S>
 where
     S: Storage,
 {
-    let _storage = cx.get_storage::<S>();
+    let storage = cx.get_storage::<S>();
     let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
 
-    // For now, return simple progress updates.
-    intervals.map(move |_| {
-        Ok(RegistrationUpdateProgress {
-            latest_timestamp: 0,
-            update_count: 0,
-        })
+    intervals.then(move |_| {
+        let storage = storage.clone();
+        let addresses = addresses.clone();
+        async move {
+            let (latest_timestamp, update_count) = storage
+                .get_registration_progress(&addresses)
+                .await
+                .map_err_into_server_error(|| "get registration progress")?;
+
+            Ok(RegistrationUpdateProgress {
+                latest_timestamp,
+                update_count,
+            })
+        }
     })
 }

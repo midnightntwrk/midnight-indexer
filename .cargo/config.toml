@@ -1,7 +1,2 @@
 [net]
 git-fetch-with-cli = true
-
-[env]
-# Enable experimental ledger features for cNIGHT generation DUST support.
-# Required for PM-16217: cNIGHT generation indexer parsing task.
-MIDNIGHT_LEDGER_EXPERIMENTAL = "1"
