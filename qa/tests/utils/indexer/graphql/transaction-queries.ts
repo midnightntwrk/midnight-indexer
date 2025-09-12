@@ -47,7 +47,7 @@ export const TRANSACTION_BODY_FRAGMENT = `   id
     transactionResult {
       ${TRANSACTION_RESULT_BODY_FRAGMENT}
     }
-    contractAction {
+    contractActions {
       address
       state
       chainState

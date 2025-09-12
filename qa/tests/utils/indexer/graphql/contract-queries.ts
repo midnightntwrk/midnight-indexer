@@ -37,7 +37,7 @@ GetContractAction($ADDRESS: String!) {
 `;
 
 export const GET_CONTRACT_ACTION_BY_OFFSET = `query 
-GetContractActionByOffset($ADDRESS: String!, $OFFSET: Int) {
+GetContractActionByOffset($ADDRESS: String!, $OFFSET: ContractActionOffset) {
     contractAction(address: $ADDRESS, offset: $OFFSET) {
         ${CONTRACT_ACTION_LIGHT_BODY}
     }
