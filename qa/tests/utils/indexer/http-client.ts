@@ -151,7 +151,7 @@ export class IndexerHttpClient {
   ): Promise<ContractActionResponse> {
     log.debug(`Target URL endpoint ${this.getTargetUrl()}`);
 
-    const query = queryOverride || offset ? GET_CONTRACT_ACTION : GET_CONTRACT_ACTION_BY_OFFSET;
+    const query = queryOverride || (offset ? GET_CONTRACT_ACTION_BY_OFFSET : GET_CONTRACT_ACTION);
     const variables = {
       ADDRESS: contractAddress,
       OFFSET: offset,
