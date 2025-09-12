@@ -201,14 +201,6 @@ Create a classic PAT with:
 - `read:packages`
 - `read:org`
 
-#### ~/.netrc Setup
-
-```bash
-machine github.com
-login <YOUR_GITHUB_ID>
-password <YOUR_GITHUB_PAT>
-```
-
 #### Docker Authentication
 
 ```bash
@@ -237,7 +229,7 @@ The Midnight Foundation appreciates contributions, and like many other open sour
 
 ### Dependabot
 
-The Midnight Foundation uses GitHub Dependabot feature to keep our projects dependencies up-to-date and address potential security vulnerabilities. 
+The Midnight Foundation uses GitHub Dependabot feature to keep our projects dependencies up-to-date and address potential security vulnerabilities.
 
 ### Checkmarx
 
@@ -245,4 +237,4 @@ The Midnight Foundation uses Checkmarx for application security (AppSec) to iden
 
 ### Unito
 
-Facilitates two-way data synchronization, automated workflows and streamline processes between: Jira, GitHub issues and Github project Kanban board. 
+Facilitates two-way data synchronization, automated workflows and streamline processes between: Jira, GitHub issues and Github project Kanban board.
