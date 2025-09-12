@@ -26,15 +26,13 @@ RUN mkdir ./indexer-common/src && \
     sed -i "/\"wallet-indexer\"/s/^/# /" Cargo.toml && \
     sed -i "/\"indexer-standalone\"/s/^/# /" Cargo.toml && \
     find . -path '*/src/*' | xargs touch -t 197001010000 -m
-RUN --mount=type=secret,id=netrc,target=/root/.netrc \
-    cargo build -p indexer-tests --profile $PROFILE && \
+RUN cargo build -p indexer-tests --profile $PROFILE && \
     find ./target | xargs touch -t 197001020000 -m
 
 COPY ./indexer-common/ ./indexer-common/
 COPY ./indexer-api/ ./indexer-api/
 COPY ./indexer-tests/ ./indexer-tests/
-RUN --mount=type=secret,id=netrc,target=/root/.netrc \
-    cargo build -p indexer-tests --locked --profile $PROFILE && \
+RUN cargo build -p indexer-tests --locked --profile $PROFILE && \
     mv ./target/$([ "$PROFILE" = "release" ] && echo "release" || echo "debug")/indexer-tests /
 
 # ---------- IMAGE STAGE ---------- #
