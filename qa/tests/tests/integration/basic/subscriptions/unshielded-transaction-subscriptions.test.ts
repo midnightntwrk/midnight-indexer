@@ -31,6 +31,7 @@ import type {
   UnshieldedTransactionsProgress,
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
+import { TestContext } from 'vitest';
 
 let indexerWsClient: IndexerWsClient;
 
@@ -68,7 +69,7 @@ async function subscribeToUnshieldedTransactionEvents(
   const unshieldedTransactionSubscriptionHandler: SubscriptionHandlers<UnshieldedTxSubscriptionResponse> =
     {
       next: (payload) => {
-        log.debug('Received data:\n', JSON.stringify(payload, null, 2));
+        log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
         receivedUnshieldedTransactions.push(payload);
         if (stopCondition(receivedUnshieldedTransactions)) {
           stopListening();
@@ -129,7 +130,7 @@ describe('unshielded utxo subscriptions', async () => {
 
       expect(messages.length).toBeGreaterThanOrEqual(1);
       messages.forEach((transaction) => {
-        log.info('transaction', JSON.stringify(transaction, null, 2));
+        log.info(`transaction ${JSON.stringify(transaction, null, 2)}`);
       });
     });
 
@@ -325,7 +326,13 @@ describe('unshielded utxo subscriptions', async () => {
      * @and we should receive a progress message with the highest transaction ID
      * @and the highest transaction ID in events should match the progress message
      */
-    test('should return a stream of transactions containing that address, starting from transaction id = 0', async () => {
+    test('should return a stream of transactions containing that address, starting from transaction id = 0', async ({
+      task,
+    }: TestContext) => {
+      task.meta.custom = {
+        labels: ['UnshieldedTokens', 'Subscription', 'Transaction'],
+      };
+
       const targetTransactionId = 0;
       const targetAddress = dataProvider.getUnshieldedAddress('existing');
 
