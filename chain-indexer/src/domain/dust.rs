@@ -11,13 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{CardanoStakeKey, DustAddress, DustUtxoId};
-use thiserror::Error;
-
 pub use indexer_common::domain::dust::{
     DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, DustParameters,
     QualifiedDustOutput,
 };
+
+use indexer_common::domain::{CardanoStakeKey, DustAddress, DustUtxoId};
+use thiserror::Error;
 
 /// Domain representation of DUST registration events from the NativeTokenObservation pallet.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,17 +27,20 @@ pub enum DustRegistrationEvent {
         cardano_address: CardanoStakeKey,
         dust_address: DustAddress,
     },
+
     /// Cardano address deregistered from DUST address.
     Deregistration {
         cardano_address: CardanoStakeKey,
         dust_address: DustAddress,
     },
+
     /// UTXO mapping added for registration.
     MappingAdded {
         cardano_address: CardanoStakeKey,
         dust_address: DustAddress,
         utxo_id: DustUtxoId,
     },
+
     /// UTXO mapping removed from registration.
     MappingRemoved {
         cardano_address: CardanoStakeKey,

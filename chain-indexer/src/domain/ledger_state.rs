@@ -48,12 +48,11 @@ impl LedgerState {
         for (variant, transaction) in transactions {
             match variant {
                 TransactionVariant::Regular => {
-                    let (_result, _dust_events, _created_utxos, _spent_utxos) = self
-                        .apply_regular_transaction(
-                            transaction,
-                            block_parent_hash,
-                            block_timestamp,
-                        )?;
+                    self.apply_regular_transaction(
+                        transaction,
+                        block_parent_hash,
+                        block_timestamp,
+                    )?;
                     // DUST events and UTXOs are already stored in the ledger state.
                     // and don't need to be processed here when replaying stored transactions.
                 }
@@ -108,6 +107,7 @@ impl LedgerState {
             node::Transaction::Regular(transaction) => {
                 self.apply_regular_node_transaction(transaction, block_parent_hash, block_timestamp)
             }
+
             node::Transaction::System(transaction) => {
                 self.apply_system_node_transaction(transaction, block_parent_hash, block_timestamp)
             }
@@ -128,16 +128,16 @@ impl LedgerState {
 
         // Apply transaction and set start and end indices; end index is exclusive!
         transaction.start_index = self.zswap_first_free();
-        let (transaction_result, dust_events, created_unshielded_utxos, spent_unshielded_utxos) =
+        let result =
             self.apply_regular_transaction(&transaction.raw, block_parent_hash, block_timestamp)?;
         transaction.end_index = self.zswap_first_free();
 
         // Update transaction.
-        transaction.transaction_result = transaction_result;
-        transaction.dust_events = Box::new(dust_events);
+        transaction.transaction_result = result.transaction_result;
+        transaction.dust_events = result.dust_events;
         transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize()?;
-        transaction.created_unshielded_utxos = created_unshielded_utxos;
-        transaction.spent_unshielded_utxos = spent_unshielded_utxos;
+        transaction.created_unshielded_utxos = result.created_unshielded_utxos;
+        transaction.spent_unshielded_utxos = result.spent_unshielded_utxos;
         if transaction.end_index > transaction.start_index {
             for contract_action in transaction.contract_actions.iter_mut() {
                 let zswap_state = self.extract_contract_zswap_state(&contract_action.address)?;
@@ -173,7 +173,7 @@ impl LedgerState {
         // including CNightGeneratesDustUpdate events which create DustInitialUtxo
         // and DustGenerationDtimeUpdate events.
         let dust_events = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
-        transaction.dust_events = Box::new(dust_events);
+        transaction.dust_events = dust_events;
 
         Ok(Transaction::System(transaction))
     }

@@ -33,7 +33,7 @@ pub use viewing_key::*;
 pub type BlockAuthor = ByteArray<32>;
 pub type BlockHash = ByteArray<32>;
 
-// DUST-specific types
+// DUST-specific types.
 pub type DustCommitment = ByteArray<32>;
 pub type DustNonce = ByteArray<32>;
 pub type DustNullifier = ByteArray<32>;
@@ -43,7 +43,7 @@ pub type CardanoStakeKey = ByteVec;
 pub type DustMerkleRoot = ByteArray<32>;
 pub type DustPrefix = ByteVec;
 pub type DustMerkleUpdate = ByteVec;
-pub type DustMerkleTreeData = ByteVec; // Serialized merkle tree path data
+pub type SerializedDustMerkleTree = ByteVec;
 pub type NightUtxoHash = ByteArray<32>;
 pub type NightUtxoNonce = ByteArray<32>;
 pub type DustUtxoId = ByteVec;

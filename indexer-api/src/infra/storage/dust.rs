@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use sqlx::types::Json;
+
 use crate::{
     domain::{
         dust::{
@@ -171,7 +173,7 @@ impl DustStorage for Storage {
                         .unwrap_or(ctime);
 
                     // Calculate elapsed seconds since creation.
-                    let elapsed_seconds = ((current_timestamp - ctime).max(0) as u128) / 1000; // Convert from ms to seconds
+                    let elapsed_seconds = ((current_timestamp - ctime).max(0) as u128) / 1000; // Convert from ms to seconds.
 
                     // Capacity = NIGHT balance * elapsed_seconds (1 Speck per NIGHT per second).
                     current_capacity = value_u128.saturating_mul(elapsed_seconds);
@@ -230,7 +232,8 @@ impl DustStorage for Storage {
         &self,
         dust_address: &DustAddress,
         from_generation_index: u64,
-        from_merkle_index: u64, // Used to resume from specific merkle tree position when streaming
+        // Used to resume from specific merkle tree position when streaming.
+        from_merkle_index: u64,
         only_active: bool,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send {
@@ -299,12 +302,8 @@ impl DustStorage for Storage {
 
                 for row in merkle_rows {
                     last_merkle_index = row.merkle_index + 1;
-                    // Extract merkle path from Json wrapper
-                    let merkle_path = if !row.tree_data.0.is_empty() {
-                        Some(row.tree_data.0)
-                    } else {
-                        None
-                    };
+                    // Extract merkle path from Json wrapper.
+                    let merkle_path = (!row.tree_data.0.is_empty()).then_some(row.tree_data.0);
 
                     yield DustGenerationEvent::MerkleUpdate(DustGenerationMerkleUpdate {
                         index: row.merkle_index,
@@ -367,7 +366,7 @@ impl DustStorage for Storage {
 
                 let where_clause = conditions.join(" OR ");
 
-                // Use CTE with two-step query:
+                // Use CTE with two-step query:.
                 // 1. First SELECT finds distinct transactions matching our criteria.
                 // 2. Second SELECT fetches all nullifiers for those transactions.
                 let query = format!(
@@ -409,7 +408,7 @@ impl DustStorage for Storage {
                     break;
                 }
 
-                // Group by transaction using itertools' chunk_by (not group_by which is deprecated
+                // Group by transaction using itertools' chunk_by (not group_by which is deprecated).
                 // in 0.14), then collect to avoid Send issues.
                 let grouped = rows
                     .into_iter()
@@ -573,11 +572,7 @@ impl DustStorage for Storage {
                     .await?;
 
                 for row in merkle_rows {
-                    let merkle_path = if row.tree_data.0.is_empty() {
-                        None
-                    } else {
-                        Some(row.tree_data.0)
-                    };
+                    let merkle_path = (!row.tree_data.0.is_empty()).then_some(row.tree_data.0);
 
                     yield DustCommitmentEvent::MerkleUpdate(DustCommitmentMerkleUpdate {
                         index: row.merkle_index,
@@ -611,8 +606,8 @@ impl DustStorage for Storage {
                             AddressType::Dust => ("dust_address", &address.value),
 
                             AddressType::Night => {
-                                // Night addresses might map to DUST addresses through some
-                                // mechanism. For now, treat as DUST
+                                // Night addresses might map to DUST addresses through some.
+                                // mechanism. For now, treat as DUST.
                                 // address.
                                 ("dust_address", &address.value)
                             }
@@ -711,21 +706,20 @@ impl DustStorage for Storage {
         &self,
         transaction_hash: TransactionHash,
     ) -> Result<Vec<DustEvent>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT transaction_hash, logical_segment, physical_segment, event_type, event_data
-            FROM dust_events
-            WHERE transaction_hash = $1
-            ORDER BY logical_segment, physical_segment
-        "};
-
         #[derive(FromRow)]
         struct DustEventRow {
             transaction_hash: TransactionHash,
             logical_segment: i32,
             physical_segment: i32,
-            event_type: DustEventType,
-            event_data: sqlx::types::Json<DustEventDetails>,
+            event_data: Json<DustEventDetails>,
         }
+
+        let query = indoc! {"
+            SELECT transaction_hash, logical_segment, physical_segment, event_data
+            FROM dust_events
+            WHERE transaction_hash = $1
+            ORDER BY logical_segment, physical_segment
+        "};
 
         let rows = sqlx::query_as::<_, DustEventRow>(query)
             .bind(transaction_hash.as_ref())
@@ -734,36 +728,11 @@ impl DustStorage for Storage {
 
         Ok(rows
             .into_iter()
-            .map(|row| {
-                // Validate that event_type matches event_details.
-                let expected_type = match &row.event_data.0 {
-                    DustEventDetails::DustInitialUtxo { .. } => DustEventType::DustInitialUtxo,
-                    DustEventDetails::DustGenerationDtimeUpdate { .. } => {
-                        DustEventType::DustGenerationDtimeUpdate
-                    }
-                    DustEventDetails::DustSpendProcessed { .. } => {
-                        DustEventType::DustSpendProcessed
-                    }
-                    DustEventDetails::DustRegistration { .. } => DustEventType::DustRegistration,
-                    DustEventDetails::DustDeregistration { .. } => {
-                        DustEventType::DustDeregistration
-                    }
-                    DustEventDetails::DustMappingAdded { .. } => DustEventType::DustMappingAdded,
-                    DustEventDetails::DustMappingRemoved { .. } => {
-                        DustEventType::DustMappingRemoved
-                    }
-                };
-                debug_assert_eq!(
-                    row.event_type, expected_type,
-                    "Event type mismatch in database"
-                );
-
-                DustEvent {
-                    transaction_hash: row.transaction_hash,
-                    logical_segment: row.logical_segment as u16,
-                    physical_segment: row.physical_segment as u16,
-                    event_details: row.event_data.0,
-                }
+            .map(|row| DustEvent {
+                transaction_hash: row.transaction_hash,
+                logical_segment: row.logical_segment as u16,
+                physical_segment: row.physical_segment as u16,
+                event_details: row.event_data.0,
             })
             .collect())
     }
@@ -774,11 +743,18 @@ impl DustStorage for Storage {
         limit: u32,
         event_type: Option<DustEventType>,
     ) -> Result<Vec<DustEvent>, sqlx::Error> {
+        #[derive(FromRow)]
+        struct DustEventRow {
+            transaction_hash: TransactionHash,
+            logical_segment: i32,
+            physical_segment: i32,
+            event_data: Json<DustEventDetails>,
+        }
+
         let query = if event_type.is_some() {
             // Filter by event type.
             indoc! {"
-                SELECT de.transaction_hash, de.logical_segment, de.physical_segment, 
-                       de.event_type, de.event_data
+                SELECT de.transaction_hash, de.logical_segment, de.physical_segment, de.event_data
                 FROM dust_events de
                 JOIN transactions t ON t.id = de.transaction_id
                 WHERE de.event_type = $1
@@ -788,23 +764,13 @@ impl DustStorage for Storage {
         } else {
             // Get all event types.
             indoc! {"
-                SELECT de.transaction_hash, de.logical_segment, de.physical_segment,
-                       de.event_type, de.event_data
+                SELECT de.transaction_hash, de.logical_segment, de.physical_segment, de.event_data
                 FROM dust_events de
                 JOIN transactions t ON t.id = de.transaction_id
                 ORDER BY t.id DESC, de.logical_segment, de.physical_segment
                 LIMIT $1
             "}
         };
-
-        #[derive(FromRow)]
-        struct DustEventRow {
-            transaction_hash: TransactionHash,
-            logical_segment: i32,
-            physical_segment: i32,
-            event_type: DustEventType,
-            event_data: sqlx::types::Json<DustEventDetails>,
-        }
 
         let rows = if let Some(event_type) = event_type {
             sqlx::query_as::<_, DustEventRow>(query)
@@ -821,36 +787,11 @@ impl DustStorage for Storage {
 
         Ok(rows
             .into_iter()
-            .map(|row| {
-                // Validate that event_type matches event_details.
-                let expected_type = match &row.event_data.0 {
-                    DustEventDetails::DustInitialUtxo { .. } => DustEventType::DustInitialUtxo,
-                    DustEventDetails::DustGenerationDtimeUpdate { .. } => {
-                        DustEventType::DustGenerationDtimeUpdate
-                    }
-                    DustEventDetails::DustSpendProcessed { .. } => {
-                        DustEventType::DustSpendProcessed
-                    }
-                    DustEventDetails::DustRegistration { .. } => DustEventType::DustRegistration,
-                    DustEventDetails::DustDeregistration { .. } => {
-                        DustEventType::DustDeregistration
-                    }
-                    DustEventDetails::DustMappingAdded { .. } => DustEventType::DustMappingAdded,
-                    DustEventDetails::DustMappingRemoved { .. } => {
-                        DustEventType::DustMappingRemoved
-                    }
-                };
-                debug_assert_eq!(
-                    row.event_type, expected_type,
-                    "Event type mismatch in database"
-                );
-
-                DustEvent {
-                    transaction_hash: row.transaction_hash,
-                    logical_segment: row.logical_segment as u16,
-                    physical_segment: row.physical_segment as u16,
-                    event_details: row.event_data.0,
-                }
+            .map(|row| DustEvent {
+                transaction_hash: row.transaction_hash,
+                logical_segment: row.logical_segment as u16,
+                physical_segment: row.physical_segment as u16,
+                event_details: row.event_data.0,
             })
             .collect())
     }
@@ -862,7 +803,7 @@ impl DustStorage for Storage {
         min_prefix_length: u32,
         from_block: u32,
     ) -> Result<(u32, u32), sqlx::Error> {
-        // Get the highest block that has nullifiers matching the prefixes
+        // Get the highest block that has nullifiers matching the prefixes.
         let min_prefix_length = min_prefix_length as usize;
         let valid_prefixes = prefixes
             .iter()
@@ -873,7 +814,7 @@ impl DustStorage for Storage {
             return Ok((from_block, 0));
         }
 
-        // Build conditions for prefix matching
+        // Build conditions for prefix matching.
         let conditions = valid_prefixes
             .iter()
             .enumerate()
@@ -929,7 +870,7 @@ impl DustStorage for Storage {
             return Ok((start_index, 0));
         }
 
-        // Build conditions for prefix matching
+        // Build conditions for prefix matching.
         let conditions = valid_prefixes
             .iter()
             .enumerate()
@@ -974,7 +915,7 @@ impl DustStorage for Storage {
             return Ok((0, 0));
         }
 
-        // Build conditions for address matching
+        // Build conditions for address matching.
         let conditions = addresses
             .iter()
             .enumerate()
@@ -987,7 +928,7 @@ impl DustStorage for Storage {
                         format!("dust_address = ${}", i + 1)
                     }
                     AddressType::Night => {
-                        // Night addresses are not used in registration
+                        // Night addresses are not used in registration.
                         "FALSE".to_string()
                     }
                 }
@@ -1013,7 +954,7 @@ impl DustStorage for Storage {
                     progress_query = progress_query.bind(address.value.as_ref());
                 }
                 AddressType::Night => {
-                    // Night addresses are not used in registration
+                    // Night addresses are not used in registration.
                 }
             }
         }
@@ -1107,9 +1048,9 @@ struct DustCommitmentTreeRow {
     #[sqlx(try_from = "i64")]
     merkle_index: u64,
 
-    root: DustMerkleUpdate, // This is actually the collapsed update data, not a root hash
+    root: DustMerkleUpdate, // This is actually the collapsed update data, not a root hash.
 
-    tree_data: sqlx::types::Json<Vec<DustMerklePathEntry>>, // Merkle path data stored as JSON
+    tree_data: Json<Vec<DustMerklePathEntry>>, // Merkle path data stored as JSON.
 }
 
 /// Row type for dust_generation_tree table queries.
@@ -1121,9 +1062,9 @@ struct DustGenerationTreeRow {
     #[sqlx(try_from = "i64")]
     merkle_index: u64,
 
-    root: DustMerkleUpdate, // This is actually the collapsed update data, not a root hash
+    root: DustMerkleUpdate, // This is actually the collapsed update data, not a root hash.
 
-    tree_data: sqlx::types::Json<Vec<DustMerklePathEntry>>, // Merkle path data stored as JSON
+    tree_data: Json<Vec<DustMerklePathEntry>>, // Merkle path data stored as JSON.
 }
 
 impl From<DustUtxosRow> for DustCommitmentInfo {
@@ -1145,7 +1086,7 @@ impl From<DustUtxosRow> for DustCommitmentInfo {
             owner,
             nonce,
             created_at: ctime,
-            spent_at: None, // This needs to be handled separately with an additional query
+            spent_at: None, // This needs to be handled separately with an additional query.
         }
     }
 }

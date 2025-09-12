@@ -14,9 +14,9 @@
 // To see how this is generated, look in build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
 
-use crate::infra::subxt_node::SubxtNodeError;
+use crate::{domain, infra::subxt_node::SubxtNodeError};
 use indexer_common::domain::{
-    BlockHash, ByteVec, PROTOCOL_VERSION_000_016_000, ProtocolVersion,
+    BlockHash, ByteArray, ByteVec, PROTOCOL_VERSION_000_016_000, ProtocolVersion,
     ledger::{SerializedContractAddress, SerializedContractState},
 };
 use itertools::Itertools;
@@ -37,15 +37,18 @@ pub(super) enum DustRegistrationEvent {
         cardano_address: Vec<u8>,
         dust_address: Vec<u8>,
     },
+
     Deregistration {
         cardano_address: Vec<u8>,
         dust_address: Vec<u8>,
     },
+
     MappingAdded {
         cardano_address: Vec<u8>,
         dust_address: String,
         utxo_id: String,
     },
+
     MappingRemoved {
         cardano_address: Vec<u8>,
         dust_address: String,
@@ -53,17 +56,15 @@ pub(super) enum DustRegistrationEvent {
     },
 }
 
-impl TryFrom<DustRegistrationEvent> for crate::domain::DustRegistrationEvent {
+impl TryFrom<DustRegistrationEvent> for domain::DustRegistrationEvent {
     type Error = SubxtNodeError;
 
     fn try_from(event: DustRegistrationEvent) -> Result<Self, Self::Error> {
-        use indexer_common::domain::{ByteArray, ByteVec};
-
-        Ok(match event {
+        let event = match event {
             DustRegistrationEvent::Registration {
                 cardano_address,
                 dust_address,
-            } => crate::domain::DustRegistrationEvent::Registration {
+            } => domain::DustRegistrationEvent::Registration {
                 cardano_address: ByteVec::from(cardano_address),
                 dust_address: ByteArray::try_from(dust_address).map_err(|_| {
                     SubxtNodeError::InvalidDustAddress(
@@ -71,10 +72,11 @@ impl TryFrom<DustRegistrationEvent> for crate::domain::DustRegistrationEvent {
                     )
                 })?,
             },
+
             DustRegistrationEvent::Deregistration {
                 cardano_address,
                 dust_address,
-            } => crate::domain::DustRegistrationEvent::Deregistration {
+            } => domain::DustRegistrationEvent::Deregistration {
                 cardano_address: ByteVec::from(cardano_address),
                 dust_address: ByteArray::try_from(dust_address).map_err(|_| {
                     SubxtNodeError::InvalidDustAddress(
@@ -82,69 +84,67 @@ impl TryFrom<DustRegistrationEvent> for crate::domain::DustRegistrationEvent {
                     )
                 })?,
             },
+
             DustRegistrationEvent::MappingAdded {
                 cardano_address,
                 dust_address,
                 utxo_id,
             } => {
-                // dust_address and utxo_id are hex-encoded strings
-                let dust_addr_bytes = const_hex::decode(&dust_address).map_err(|e| {
+                // dust_address and utxo_id are hex-encoded strings.
+                let dust_addr_bytes = const_hex::decode(&dust_address).map_err(|error| {
                     SubxtNodeError::InvalidDustAddress(format!(
-                        "mapping added: invalid hex encoding for DUST address: {}",
-                        e
+                        "mapping added: invalid hex encoding for DUST address: {error}"
                     ))
                 })?;
 
-                let utxo_id_bytes = const_hex::decode(&utxo_id).map_err(|e| {
+                let utxo_id_bytes = const_hex::decode(&utxo_id).map_err(|error| {
                     SubxtNodeError::InvalidDustAddress(format!(
-                        "mapping added: invalid hex encoding for UTXO ID: {}",
-                        e
+                        "mapping added: invalid hex encoding for UTXO ID: {error}"
                     ))
                 })?;
 
-                crate::domain::DustRegistrationEvent::MappingAdded {
+                domain::DustRegistrationEvent::MappingAdded {
                     cardano_address: ByteVec::from(cardano_address),
-                    dust_address: ByteArray::try_from(dust_addr_bytes).map_err(|e| {
+                    dust_address: ByteArray::try_from(dust_addr_bytes).map_err(|error| {
                         SubxtNodeError::InvalidDustAddress(format!(
-                            "mapping added: DUST address must be 32 bytes: {:?}",
-                            e
+                            "mapping added: DUST address must be 32 bytes: {error:?}"
                         ))
                     })?,
                     utxo_id: ByteVec::from(utxo_id_bytes),
                 }
             }
+
             DustRegistrationEvent::MappingRemoved {
                 cardano_address,
                 dust_address,
                 utxo_id,
             } => {
-                // dust_address and utxo_id are hex-encoded strings
-                let dust_addr_bytes = const_hex::decode(&dust_address).map_err(|e| {
+                // dust_address and utxo_id are hex-encoded strings.
+                let dust_addr_bytes = const_hex::decode(&dust_address).map_err(|error| {
                     SubxtNodeError::InvalidDustAddress(format!(
-                        "mapping removed: invalid hex encoding for DUST address: {}",
-                        e
+                        "mapping removed: invalid hex encoding for DUST address: {error}"
                     ))
                 })?;
 
-                let utxo_id_bytes = const_hex::decode(&utxo_id).map_err(|e| {
+                let utxo_id_bytes = const_hex::decode(&utxo_id).map_err(|error| {
                     SubxtNodeError::InvalidDustAddress(format!(
-                        "mapping removed: invalid hex encoding for UTXO ID: {}",
-                        e
+                        "mapping removed: invalid hex encoding for UTXO ID: {error}"
                     ))
                 })?;
 
-                crate::domain::DustRegistrationEvent::MappingRemoved {
+                domain::DustRegistrationEvent::MappingRemoved {
                     cardano_address: ByteVec::from(cardano_address),
-                    dust_address: ByteArray::try_from(dust_addr_bytes).map_err(|e| {
+                    dust_address: ByteArray::try_from(dust_addr_bytes).map_err(|error| {
                         SubxtNodeError::InvalidDustAddress(format!(
-                            "mapping removed: DUST address must be 32 bytes: {:?}",
-                            e
+                            "mapping removed: DUST address must be 32 bytes: {error:?}"
                         ))
                     })?,
                     utxo_id: ByteVec::from(utxo_id_bytes),
                 }
             }
-        })
+        };
+
+        Ok(event)
     }
 }
 
@@ -283,7 +283,7 @@ macro_rules! make_block_details {
                     .collect();
 
                 // Also collect system transactions from events (e.g., CNightGeneratesDust)
-                // and DUST registration events from NativeTokenObservation pallet
+                // and DUST registration events from NativeTokenObservation pallet.
                 let mut dust_registration_events = Vec::new();
 
                 for event in events.iter().flatten() {
@@ -293,11 +293,11 @@ macro_rules! make_block_details {
                             *authorities = None;
                         }
                         Ok(Event::MidnightSystem(midnight_system::Event::SystemTransactionApplied(e))) => {
-                            // System transactions created by the node (not from extrinsics)
-                            transactions.push(Transaction::System(e.serialized_system_transaction.clone().into()));
+                            // System transactions created by the node (not from extrinsics).
+                            transactions.push(Transaction::System(ByteVec::from(e.serialized_system_transaction.clone())));
                         }
                         Ok(Event::NativeTokenObservation(native_event)) => {
-                            // Handle DUST registration events
+                            // Handle DUST registration events.
                             match native_event {
                                 native_token_observation::Event::Registration(reg) => {
                                     dust_registration_events.push(DustRegistrationEvent::Registration {
@@ -459,8 +459,8 @@ macro_rules! get_transaction_cost {
                     .map_err(Box::new)?
                     .map_err(|error| SubxtNodeError::GetTransactionCost(format!("{error:?}")))?;
 
-                // Combine storage cost and gas cost for total fee
-                // StorageCost = u128, GasCost = u64
+                // Combine storage cost and gas cost for total fee.
+                // StorageCost = u128, GasCost = u64.
                 let total_cost = storage_cost.saturating_add(gas_cost as u128);
                 Ok(total_cost)
             }

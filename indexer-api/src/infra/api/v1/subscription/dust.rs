@@ -14,7 +14,7 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
+        ApiError, ApiResult, ContextExt, InnerApiError, ResultExt,
         v1::{
             HexEncoded,
             dust::{
@@ -111,9 +111,12 @@ where
     ) -> Result<impl Stream<Item = ApiResult<DustNullifierTransactionEvent>> + use<'a, S>, ApiError>
     {
         // Validate minimum prefix length.
-        Some(())
-            .filter(|_| min_prefix_length >= 8)
-            .ok_or_client_error(|| "minimum prefix length must be at least 8")?;
+        if min_prefix_length < 8 {
+            return Err(ApiError::Client(InnerApiError(
+                "minimum prefix length must be at least 8".to_string(),
+                None,
+            )));
+        }
 
         // Convert hex prefixes to binary.
         let binary_prefixes = prefixes
@@ -156,9 +159,12 @@ where
         min_prefix_length: u32,
     ) -> Result<impl Stream<Item = ApiResult<DustCommitmentEvent>> + use<'a, S>, ApiError> {
         // Validate minimum prefix length.
-        Some(())
-            .filter(|_| min_prefix_length >= 8)
-            .ok_or_client_error(|| "minimum prefix length must be at least 8")?;
+        if min_prefix_length < 8 {
+            return Err(ApiError::Client(InnerApiError(
+                "minimum prefix length must be at least 8".to_string(),
+                None,
+            )));
+        }
 
         // Convert hex prefixes to binary.
         let binary_prefixes = commitment_prefixes
@@ -344,7 +350,6 @@ where
     let storage = cx.get_storage::<S>();
     let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
 
-    // Get real progress updates from storage.
     intervals.then(move |_| {
         let storage = storage.clone();
         let prefixes = prefixes.clone();
@@ -401,7 +406,6 @@ where
     let storage = cx.get_storage::<S>();
     let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
 
-    // Get real progress updates from storage.
     intervals.then(move |_| {
         let storage = storage.clone();
         let prefixes = commitment_prefixes.clone();
@@ -455,7 +459,6 @@ where
     let storage = cx.get_storage::<S>();
     let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
 
-    // Get real progress updates from storage.
     intervals.then(move |_| {
         let storage = storage.clone();
         let addresses = addresses.clone();

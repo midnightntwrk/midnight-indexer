@@ -90,7 +90,7 @@ pub struct RegularTransaction {
     pub end_index: u64,
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
-    pub dust_events: Box<Vec<DustEvent>>,
+    pub dust_events: Vec<DustEvent>,
 }
 
 impl From<node::RegularTransaction> for RegularTransaction {
@@ -109,7 +109,7 @@ impl From<node::RegularTransaction> for RegularTransaction {
             end_index: Default::default(),
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
-            dust_events: Box::default(),
+            dust_events: Vec::default(),
         }
     }
 }
@@ -120,7 +120,7 @@ pub struct SystemTransaction {
     pub protocol_version: ProtocolVersion,
     pub raw: SerializedTransaction,
     // DUST events from system transactions (e.g., CNightGeneratesDustUpdate).
-    pub dust_events: Box<Vec<DustEvent>>,
+    pub dust_events: Vec<DustEvent>,
 }
 
 impl From<node::SystemTransaction> for SystemTransaction {
@@ -129,7 +129,7 @@ impl From<node::SystemTransaction> for SystemTransaction {
             hash: transaction.hash,
             protocol_version: transaction.protocol_version,
             raw: transaction.raw,
-            dust_events: Box::default(),
+            dust_events: Vec::default(),
         }
     }
 }

@@ -85,8 +85,8 @@ async fn main() -> anyhow::Result<()> {
                             }
                         }
                     }
-                    Err(e) => {
-                        println!("  Failed to deserialize system tx: {}", e);
+                    Err(error) => {
+                        println!("  Failed to deserialize system tx: {}", error);
                     }
                 }
             } else if let node::Transaction::Regular(reg_tx) = transaction {

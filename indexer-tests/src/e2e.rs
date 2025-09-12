@@ -1564,7 +1564,7 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
                         // Expected with dummy address, subscription mechanism works.
                         break;
                     }
-                    Err(e) => return Err(e),
+                    Err(error) => return Err(error),
                 }
             }
             Ok(None) => break, // Stream ended
@@ -1602,7 +1602,7 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
                 Err(e) if e.to_string().contains("minimum prefix length") => {
                     // Expected validation error, subscription mechanism works.
                 }
-                Err(e) => return Err(e),
+                Err(error) => return Err(error),
             }
         }
         Ok(None) => {} // Stream ended
@@ -1693,7 +1693,7 @@ async fn test_dust_subscriptions(ws_api_url: &str) -> anyhow::Result<()> {
                 Err(e) if e.to_string().contains("minimum prefix length") => {
                     // Expected validation error, subscription mechanism works.
                 }
-                Err(e) => return Err(e),
+                Err(error) => return Err(error),
             }
         }
         Ok(None) => {} // Stream ended

@@ -14,29 +14,28 @@
 use crate::domain::{
     self, Block, BlockTransactions, ContractAction, DustRegistrationEvent, RegularTransaction,
     SystemTransaction, Transaction, TransactionVariant, node::BlockInfo,
+    process_dust_events as process_dust_events_domain,
 };
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteVec, DustNonce, DustNullifier, DustOwner, NightUtxoHash, NightUtxoNonce,
+        BlockHash, ByteVec, DustNullifier,
         dust::{
-            DustCommitment, DustEvent, DustEventDetails, DustEventType, DustGenerationInfo,
-            DustMerklePathEntry, QualifiedDustOutput,
+            DustCommitment, DustEvent, DustEventType, DustGenerationInfo, DustMerklePathEntry,
+            QualifiedDustOutput,
         },
         ledger::{
-            ContractAttributes, ContractBalance, SystemTransaction as DomainSystemTransaction,
-            TransactionHash, UnshieldedUtxo,
+            ContractAttributes, ContractBalance, SerializedNightOutputs, SerializedParameterUpdate,
+            SerializedTreasuryOutputs, SystemTransaction as DomainSystemTransaction,
+            UnshieldedUtxo,
         },
     },
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
-use midnight_ledger_v6::structure::{
-    CNightGeneratesDustActionType, CNightGeneratesDustEvent,
-    SystemTransaction as LedgerSystemTransaction,
-};
 use serde::{Deserialize, Serialize};
+use serde_json;
 use sqlx::{QueryBuilder, Type, types::Json};
 use std::iter;
 
@@ -262,16 +261,14 @@ async fn save_block(
         .map_ok(|(id,)| id)
         .await?;
 
-    // Save DUST registration events if any
-    if !dust_registration_events.is_empty() {
-        save_dust_registration_events(
-            dust_registration_events,
-            block_id,
-            block.timestamp as i64,
-            tx,
-        )
-        .await?;
-    }
+    // Save DUST registration events if any.
+    save_dust_registration_events(
+        dust_registration_events,
+        block_id,
+        block.timestamp as i64,
+        tx,
+    )
+    .await?;
 
     save_transactions(transactions, block_id, block.height, tx).await
 }
@@ -419,8 +416,8 @@ async fn save_regular_transaction(
     )
     .await?;
 
-    // Process and save DUST events.
-    process_dust_events(&transaction.dust_events, transaction_id, block_height, tx).await?;
+    // Apply domain processing to determine storage operations.
+    apply_dust_event_operations(&transaction.dust_events, transaction_id, block_height, tx).await?;
     save_dust_events(&transaction.dust_events, transaction_id, tx).await?;
 
     Ok(transaction_id as u64)
@@ -434,28 +431,24 @@ async fn save_system_transaction(
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     // Process and save DUST events from system transactions.
-    // The ledger state already properly extracts DUST events from system transactions,
-    // including CNightGeneratesDustUpdate events which create DustInitialUtxo
+    // The ledger state already properly extracts DUST events from system transactions.
+    // including CNightGeneratesDustUpdate events which create DustInitialUtxo.
     // and DustGenerationDtimeUpdate events.
     if !transaction.dust_events.is_empty() {
-        process_dust_events(&transaction.dust_events, transaction_id, block_height, tx).await?;
+        apply_dust_event_operations(&transaction.dust_events, transaction_id, block_height, tx)
+            .await?;
         save_dust_events(&transaction.dust_events, transaction_id, tx).await?;
     }
 
-    // Deserialize the system transaction to extract additional metadata for storage.
-    // Note: The transaction has already been successfully applied to the ledger state,
-    // so failure here only affects our ability to store additional indexing metadata.
+    // Process the system transaction to extract domain data.
     let system_tx = match DomainSystemTransaction::deserialize(
         &transaction.raw,
         transaction.protocol_version,
     ) {
         Ok(tx) => tx,
         Err(error) => {
-            // Log and continue - we don't want to fail the entire block processing
-            // just because we can't extract metadata from a system transaction.
-            // This could happen with newer protocol versions we don't yet support.
             log::warn!(
-                "cannot extract metadata from system transaction {}: {}",
+                "cannot deserialize system transaction {}: {}",
                 transaction.hash,
                 error
             );
@@ -463,68 +456,42 @@ async fn save_system_transaction(
         }
     };
 
-    // Handle the V6 variant to access the inner ledger transaction for metadata storage.
-    match system_tx {
-        DomainSystemTransaction::V6(ledger_tx) => {
-            match ledger_tx {
-                LedgerSystemTransaction::CNightGeneratesDustUpdate { events } => {
-                    // Convert CNightGeneratesDust events to DUST events and save them.
-                    // These events represent DUST distributions to cNIGHT holders.
-                    let dust_events =
-                        convert_cnight_events_to_dust_events(&events, &transaction.hash);
-                    if !dust_events.is_empty() {
-                        process_dust_events(&dust_events, transaction_id, block_height, tx).await?;
-                        save_dust_events(&dust_events, transaction_id, tx).await?;
-                    }
-                }
+    let processed = system_tx.process(&transaction.hash);
 
-                LedgerSystemTransaction::DistributeReserve(amount) => {
-                    // Store reserve distribution for tracking and auditing.
-                    // Note: The ledger state is already updated, but we track these
-                    // events separately for analytics and historical queries.
-                    save_reserve_distribution(transaction_id, amount, tx).await?;
-                }
+    // Save DUST events if any.
+    if !processed.dust_events.is_empty() {
+        apply_dust_event_operations(&processed.dust_events, transaction_id, block_height, tx)
+            .await?;
+        save_dust_events(&processed.dust_events, transaction_id, tx).await?;
+    }
 
-                LedgerSystemTransaction::OverwriteParameters(params) => {
-                    // Store parameter updates for audit trail and history.
-                    save_parameter_update(transaction_id, &params, tx).await?;
-                }
+    // Save reserve distribution if present.
+    if let Some(amount) = processed.reserve_distribution {
+        save_reserve_distribution(transaction_id, amount, tx).await?;
+    }
 
-                LedgerSystemTransaction::DistributeNight(claim_kind, outputs) => {
-                    // Store NIGHT distribution events for tracking.
-                    save_night_distribution(transaction_id, &claim_kind, &outputs, tx).await?;
-                }
+    // Save parameter update if present.
+    if let Some(params) = processed.parameter_update {
+        save_parameter_update(transaction_id, &params, tx).await?;
+    }
 
-                LedgerSystemTransaction::PayBlockRewardsToTreasury { amount } => {
-                    // Store treasury income from block rewards.
-                    save_treasury_income(transaction_id, amount, "block_rewards", tx).await?;
-                }
+    // Save night distribution if present.
+    if let Some((claim_kind, outputs)) = processed.night_distribution {
+        save_night_distribution(transaction_id, &claim_kind, &outputs, tx).await?;
+    }
 
-                LedgerSystemTransaction::PayFromTreasuryShielded { outputs, .. } => {
-                    // Store shielded treasury payments.
-                    save_treasury_payment_shielded(transaction_id, &outputs, tx).await?;
-                }
+    // Save treasury income if present.
+    if let Some((amount, source)) = processed.treasury_income {
+        save_treasury_income(transaction_id, amount, &source, tx).await?;
+    }
 
-                LedgerSystemTransaction::PayFromTreasuryUnshielded { outputs, .. } => {
-                    // Store unshielded treasury payments.
-                    save_treasury_payment_unshielded(transaction_id, &outputs, tx).await?;
-                }
+    // Save treasury payments if present.
+    if let Some(outputs) = processed.treasury_payment_shielded {
+        save_treasury_payment_shielded(transaction_id, &outputs, tx).await?;
+    }
 
-                // REQUIRED: LedgerSystemTransaction (from midnight-ledger-prototype) is
-                // #[non_exhaustive] Compiler mandates catch-all. We handle all 7
-                // known variants above.
-                #[allow(unreachable_patterns)]
-                unknown_variant => {
-                    log::warn!(
-                        "encountered new system transaction variant in tx {}: {:?}. \
-                        update indexer to handle this variant",
-                        transaction.hash,
-                        std::any::type_name_of_val(&unknown_variant)
-                    );
-                    // Continue processing - new variants shouldn't break indexing
-                }
-            }
-        }
+    if let Some(outputs) = processed.treasury_payment_unshielded {
+        save_treasury_payment_unshielded(transaction_id, &outputs, tx).await?;
     }
 
     Ok(())
@@ -711,59 +678,52 @@ async fn save_identifiers(
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn process_dust_events(
+async fn apply_dust_event_operations(
     dust_events: &[DustEvent],
     transaction_id: i64,
     block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    let mut generation_dtime_and_index = None;
+    // Use domain processing to determine storage operations.
+    let operations = process_dust_events_domain(dust_events, transaction_id, block_height);
 
-    for dust_event in dust_events {
-        match &dust_event.event_details {
-            DustEventDetails::DustInitialUtxo {
-                output,
-                generation_info,
-                generation_index,
-            } => {
-                let generation_info_id =
-                    save_dust_generation_info(generation_info, *generation_index, tx).await?;
-                save_dust_utxos(output, generation_info_id, tx).await?;
-            }
+    // Apply generation saves.
+    for save_op in &operations.generation_saves {
+        let generation_info_id =
+            save_dust_generation_info(&save_op.generation_info, save_op.generation_index, tx)
+                .await?;
 
-            DustEventDetails::DustGenerationDtimeUpdate {
-                generation_info,
-                generation_index,
-                merkle_path,
-            } => {
-                generation_dtime_and_index = Some((generation_info.dtime, *generation_index));
-                // Store merkle path in dust_generation_tree table
-                save_dust_generation_tree_update(*generation_index, merkle_path, block_height, tx)
-                    .await?;
-            }
-
-            DustEventDetails::DustSpendProcessed {
-                commitment,
-                nullifier,
-                ..
-            } => {
-                mark_dust_utxo_spent(*commitment, *nullifier, transaction_id, tx).await?;
-            }
-
-            // Registration events were already processed at block level (line 264)
-            // They come from NODE's NativeTokenObservation pallet and are stored via
-            // save_dust_registration_events(). We skip them here to avoid double-processing.
-            DustEventDetails::DustRegistration { .. }
-            | DustEventDetails::DustDeregistration { .. }
-            | DustEventDetails::DustMappingAdded { .. }
-            | DustEventDetails::DustMappingRemoved { .. } => {
-                // Intentionally empty - already handled at block level
-            }
+        // Find corresponding UTXO save (they're paired in the same order).
+        for utxo_save in &operations.utxo_saves {
+            save_dust_utxos(&utxo_save.output, generation_info_id, tx).await?;
         }
     }
 
-    if let Some((dtime, index)) = generation_dtime_and_index {
-        update_dust_generation_dtime(dtime, index, tx).await?;
+    // Apply tree updates.
+    for tree_update in &operations.tree_updates {
+        save_dust_generation_tree_update(
+            tree_update.generation_index,
+            &tree_update.merkle_path,
+            tree_update.block_height,
+            tx,
+        )
+        .await?;
+    }
+
+    // Apply spent marks.
+    for spent_mark in &operations.spent_marks {
+        mark_dust_utxo_spent(
+            spent_mark.commitment,
+            spent_mark.nullifier,
+            spent_mark.transaction_id,
+            tx,
+        )
+        .await?;
+    }
+
+    // Apply dtime update if present.
+    if let Some(dtime_update) = &operations.dtime_update {
+        update_dust_generation_dtime(dtime_update.dtime, dtime_update.generation_index, tx).await?;
     }
 
     Ok(())
@@ -859,9 +819,9 @@ async fn save_dust_generation_tree_update(
     block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Calculate the root hash from the path (placeholder for now)
-    // In a real implementation, we'd calculate the actual root from the path
-    let root = vec![0u8; 32]; // Placeholder root
+    // Calculate the root hash from the path (placeholder for now).
+    // In a real implementation, we'd calculate the actual root from the path.
+    let root = vec![0u8; 32]; // Placeholder root.
 
     let query = indoc! {"
         INSERT INTO dust_generation_tree (
@@ -881,7 +841,7 @@ async fn save_dust_generation_tree_update(
         .bind(block_height as i64)
         .bind(merkle_index as i64)
         .bind(&root)
-        .bind(Json(merkle_path)) // Use Json wrapper for JSONB column
+        .bind(Json(merkle_path)) // Use Json wrapper for JSONB column.
         .execute(&mut **tx)
         .await?;
 
@@ -947,19 +907,10 @@ async fn save_reserve_distribution(
 #[trace]
 async fn save_parameter_update(
     transaction_id: i64,
-    _params: &midnight_ledger_v6::structure::LedgerParameters,
+    params: &SerializedParameterUpdate,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Store a simplified representation of the parameters
-    // Full parameters are complex and don't serialize directly
-    #[derive(Serialize)]
-    struct ParamsData {
-        note: &'static str,
-    }
-    let params_json = Json(ParamsData {
-        note: "Parameter update applied - details in ledger state",
-    });
-
+    // Store the serialized parameters from the domain.
     let query = indoc! {"
         INSERT INTO parameter_updates (
             transaction_id,
@@ -968,9 +919,13 @@ async fn save_parameter_update(
         VALUES ($1, $2)
     "};
 
+    // Parse the JSON for storage.
+    let json_value: serde_json::Value =
+        serde_json::from_slice(params).unwrap_or_else(|_| serde_json::json!({}));
+
     sqlx::query(query)
         .bind(transaction_id)
-        .bind(Json(&params_json))
+        .bind(Json(json_value))
         .execute(&mut **tx)
         .await?;
 
@@ -980,23 +935,18 @@ async fn save_parameter_update(
 #[trace]
 async fn save_night_distribution(
     transaction_id: i64,
-    _claim_kind: &midnight_ledger_v6::structure::ClaimKind,
-    outputs: &[midnight_ledger_v6::structure::OutputInstructionUnshielded],
+    claim_kind: &str,
+    outputs: &SerializedNightOutputs,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Calculate total amount being distributed
-    let total_amount: u128 = outputs.iter().map(|output| output.amount).sum();
-
-    // Store a simplified representation
-    #[derive(Serialize)]
-    struct OutputsData {
-        output_count: usize,
-        total_amount: String,
+    // Deserialize the outputs to extract total_amount.
+    #[derive(Deserialize)]
+    struct DistributionData {
+        total_amount: u128,
     }
-    let outputs_json = Json(OutputsData {
-        output_count: outputs.len(),
-        total_amount: total_amount.to_string(),
-    });
+
+    let dist_data: DistributionData =
+        serde_json::from_slice(outputs).unwrap_or(DistributionData { total_amount: 0 });
 
     let query = indoc! {"
         INSERT INTO night_distributions (
@@ -1008,11 +958,15 @@ async fn save_night_distribution(
         VALUES ($1, $2, $3, $4)
     "};
 
+    // Parse the JSON for storage.
+    let json_value: serde_json::Value =
+        serde_json::from_slice(outputs).unwrap_or_else(|_| serde_json::json!({}));
+
     sqlx::query(query)
         .bind(transaction_id)
-        .bind("night_distribution")
-        .bind(Json(&outputs_json))
-        .bind(U128BeBytes::from(total_amount))
+        .bind(claim_kind)
+        .bind(Json(json_value))
+        .bind(U128BeBytes::from(dist_data.total_amount))
         .execute(&mut **tx)
         .await?;
 
@@ -1048,24 +1002,11 @@ async fn save_treasury_income(
 #[trace]
 async fn save_treasury_payment_shielded(
     transaction_id: i64,
-    outputs: &[midnight_ledger_v6::structure::OutputInstructionShielded],
+    outputs: &SerializedTreasuryOutputs,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Calculate total amount if possible (depends on output structure)
-    // For shielded outputs, amount may not be visible
-    let total_amount: Option<u128> = None;
-
-    // Store a simplified representation
-    #[derive(Serialize)]
-    struct OutputsData {
-        output_count: usize,
-        total_amount: Option<String>,
-    }
-    let outputs_json = Json(OutputsData {
-        output_count: outputs.len(),
-        total_amount: total_amount.map(|a| a.to_string()),
-    });
-
+    // For shielded outputs, we don't have access to amounts.
+    // Store the serialized data and use 0 for total_amount.
     let query = indoc! {"
         INSERT INTO treasury_payments (
             transaction_id,
@@ -1077,12 +1018,16 @@ async fn save_treasury_payment_shielded(
         VALUES ($1, $2, $3, $4, $5)
     "};
 
+    // Parse the JSON for storage.
+    let json_value: serde_json::Value =
+        serde_json::from_slice(outputs).unwrap_or_else(|_| serde_json::json!({}));
+
     sqlx::query(query)
         .bind(transaction_id)
         .bind("shielded")
         .bind("shielded_token")
-        .bind(Json(&outputs_json))
-        .bind(total_amount.map(U128BeBytes::from))
+        .bind(Json(json_value))
+        .bind(Option::<U128BeBytes>::None)
         .execute(&mut **tx)
         .await?;
 
@@ -1092,22 +1037,21 @@ async fn save_treasury_payment_shielded(
 #[trace]
 async fn save_treasury_payment_unshielded(
     transaction_id: i64,
-    outputs: &[midnight_ledger_v6::structure::OutputInstructionUnshielded],
+    outputs: &SerializedTreasuryOutputs,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Calculate total amount being paid
-    let total_amount: u128 = outputs.iter().map(|output| output.amount).sum();
-
-    // Store a simplified representation
-    #[derive(Serialize)]
-    struct OutputsData {
-        output_count: usize,
-        total_amount: String,
+    // Deserialize to extract total_amount and token_type for unshielded outputs.
+    #[derive(Deserialize)]
+    struct UnshieldedOutputData {
+        total_amount: u128,
+        token_type: String,
     }
-    let outputs_json = Json(OutputsData {
-        output_count: outputs.len(),
-        total_amount: total_amount.to_string(),
-    });
+
+    let output_data: UnshieldedOutputData =
+        serde_json::from_slice(outputs).unwrap_or(UnshieldedOutputData {
+            total_amount: 0,
+            token_type: "unshielded_token".to_string(),
+        });
 
     let query = indoc! {"
         INSERT INTO treasury_payments (
@@ -1120,12 +1064,16 @@ async fn save_treasury_payment_unshielded(
         VALUES ($1, $2, $3, $4, $5)
     "};
 
+    // Parse the JSON for storage.
+    let json_value: serde_json::Value =
+        serde_json::from_slice(outputs).unwrap_or_else(|_| serde_json::json!({}));
+
     sqlx::query(query)
         .bind(transaction_id)
         .bind("unshielded")
-        .bind("unshielded_token")
-        .bind(Json(&outputs_json))
-        .bind(Some(U128BeBytes::from(total_amount)))
+        .bind(output_data.token_type.as_str())
+        .bind(Json(json_value))
+        .bind(U128BeBytes::from(output_data.total_amount))
         .execute(&mut **tx)
         .await?;
 
@@ -1151,9 +1099,9 @@ async fn save_dust_utxos(
         VALUES ($1, $2, $3, $4, $5, $6, $7)
     "};
 
-    // Use the commitment from the output
-    // Generate commitment from the output data - this will be replaced by the actual commitment
-    // from the ledger
+    // Use the commitment from the output.
+    // Generate commitment from the output data - this will be replaced by the actual commitment.
+    // from the ledger.
     let commitment = DustCommitment::default();
 
     sqlx::query(query)
@@ -1171,7 +1119,7 @@ async fn save_dust_utxos(
 }
 
 /// Save cNIGHT registration events from the NativeTokenObservation pallet.
-/// These events are emitted when Cardano stake keys are registered or deregistered
+/// These events are emitted when Cardano stake keys are registered or deregistered.
 /// for DUST distribution. See PM-17951 for details.
 #[trace]
 async fn save_dust_registration_events(
@@ -1180,13 +1128,17 @@ async fn save_dust_registration_events(
     block_timestamp: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
+    if events.is_empty() {
+        return Ok(());
+    }
+
     for event in events {
         match event {
             DustRegistrationEvent::Registration {
                 cardano_address,
                 dust_address,
             } => {
-                // Handle registration: insert new registration or update existing one
+                // Handle registration: insert new registration or update existing one.
                 let query = indoc! {"
                     INSERT INTO cnight_registrations (
                         cardano_address,
@@ -1218,7 +1170,7 @@ async fn save_dust_registration_events(
                 cardano_address,
                 dust_address,
             } => {
-                // Handle deregistration: mark as invalid
+                // Handle deregistration: mark as invalid.
                 let query = indoc! {"
                     UPDATE cnight_registrations
                     SET is_valid = false, removed_at = $1
@@ -1238,7 +1190,7 @@ async fn save_dust_registration_events(
                 dust_address,
                 utxo_id,
             } => {
-                // Store UTXO mapping for tracking
+                // Store UTXO mapping for tracking.
                 let query = indoc! {"
                     INSERT INTO dust_utxo_mappings (
                         cardano_address,
@@ -1266,7 +1218,7 @@ async fn save_dust_registration_events(
                 dust_address: _,
                 utxo_id,
             } => {
-                // Remove UTXO mapping
+                // Remove UTXO mapping.
                 let query = indoc! {"
                     UPDATE dust_utxo_mappings
                     SET removed_at = $1
@@ -1283,146 +1235,4 @@ async fn save_dust_registration_events(
     }
 
     Ok(())
-}
-
-/// Convert CNightGeneratesDust events to DUST events for storage.
-///
-/// This function handles the conversion of CNightGeneratesDust system transaction events
-/// that are emitted by the node when distributing DUST to cNIGHT holders.
-fn convert_cnight_events_to_dust_events(
-    events: &[CNightGeneratesDustEvent],
-    tx_hash: &TransactionHash,
-) -> Vec<DustEvent> {
-    events
-        .iter()
-        .enumerate()
-        .map(|(index, event)| {
-            let owner_bytes = event.owner.0.as_le_bytes();
-            let owner =
-                DustOwner::try_from(owner_bytes).expect("dust public key should be 32 bytes");
-            let nonce = DustNonce::from(event.nonce.0.0);
-
-            let event_details = match event.action {
-                CNightGeneratesDustActionType::Create => {
-                    // Create a new DUST UTXO
-                    DustEventDetails::DustInitialUtxo {
-                        output: QualifiedDustOutput {
-                            initial_value: event.value,
-                            owner,
-                            nonce,
-                            seq: 0, // Initial sequence number
-                            ctime: event.time.to_secs(),
-                            backing_night: NightUtxoNonce::default(), // No backing NIGHT for system-generated DUST
-                            mt_index: 0, // Will be set when added to merkle tree
-                        },
-                        generation_info: DustGenerationInfo {
-                            value: event.value,
-                            owner,
-                            nonce,
-                            ctime: event.time.to_secs(),
-                            dtime: u64::MAX, // Never destroyed initially
-                            night_utxo_hash: NightUtxoHash::default(), // No backing NIGHT UTXO
-                        },
-                        generation_index: index as u64,
-                    }
-                }
-                CNightGeneratesDustActionType::Destroy => {
-                    // System-initiated DUST destruction when cNIGHT holder's tokens are burned.
-                    // Unlike user-initiated spends, system destroys bypass the normal spend flow.
-                    DustEventDetails::DustSpendProcessed {
-                        commitment: DustCommitment::default(), // System destroys don't track original commitment
-                        commitment_index: 0, // Merkle tree position not tracked for system destroys
-                        nullifier: DustNullifier::default(), // No nullifier generated for system destroys
-                        v_fee: 0,                            // System operations don't pay fees
-                        time: event.time.to_secs(),
-                        params: indexer_common::domain::dust::DustParameters::default(), // Use default parameters for system operations
-                    }
-                }
-            };
-
-            DustEvent {
-                transaction_hash: *tx_hash,
-                logical_segment: index as u16,
-                physical_segment: index as u16,
-                event_details,
-            }
-        })
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use indexer_common::domain::ledger::TransactionHash;
-    use midnight_base_crypto_v6::time::Timestamp;
-    use midnight_ledger_v6::{
-        dust::{DustPublicKey, InitialNonce},
-        structure::{CNightGeneratesDustActionType, CNightGeneratesDustEvent},
-    };
-    use midnight_transient_crypto_v6::{curve::Fr, hash::HashOutput};
-
-    #[test]
-    fn test_convert_cnight_events_to_dust_events() {
-        // Create a test transaction hash.
-        let tx_hash = TransactionHash::from([1u8; 32]);
-
-        // Create test CNGD events.
-        let events = vec![
-            CNightGeneratesDustEvent {
-                action: CNightGeneratesDustActionType::Create,
-                value: 1000u128,
-                owner: DustPublicKey(Fr::from_le_bytes(&[2u8; 32]).unwrap()),
-                nonce: InitialNonce(HashOutput([3u8; 32])),
-                time: Timestamp::from_secs(1234567890),
-            },
-            CNightGeneratesDustEvent {
-                action: CNightGeneratesDustActionType::Destroy,
-                value: 500u128,
-                owner: DustPublicKey(Fr::from_le_bytes(&[4u8; 32]).unwrap()),
-                nonce: InitialNonce(HashOutput([5u8; 32])),
-                time: Timestamp::from_secs(1234567900),
-            },
-        ];
-
-        // Convert to DUST events.
-        let dust_events = convert_cnight_events_to_dust_events(&events, &tx_hash);
-
-        // Verify the conversion.
-        assert_eq!(dust_events.len(), 2);
-
-        // Check first event (Create).
-        assert_eq!(dust_events[0].transaction_hash, tx_hash);
-        assert_eq!(dust_events[0].logical_segment, 0);
-        assert_eq!(dust_events[0].physical_segment, 0);
-
-        match &dust_events[0].event_details {
-            indexer_common::domain::dust::DustEventDetails::DustInitialUtxo {
-                output,
-                generation_info,
-                ..
-            } => {
-                assert_eq!(output.initial_value, 1000);
-                assert_eq!(generation_info.value, 1000);
-                assert_eq!(output.ctime, 1234567890);
-            }
-            _ => panic!("expected DustInitialUtxo event"),
-        }
-
-        // Check second event (Destroy).
-        assert_eq!(dust_events[1].transaction_hash, tx_hash);
-        assert_eq!(dust_events[1].logical_segment, 1);
-        assert_eq!(dust_events[1].physical_segment, 1);
-
-        match &dust_events[1].event_details {
-            indexer_common::domain::dust::DustEventDetails::DustSpendProcessed {
-                time,
-                v_fee,
-                ..
-            } => {
-                assert_eq!(*time, 1234567900);
-                assert_eq!(*v_fee, 0); // No fee for system-initiated destroy.
-            }
-            _ => panic!("expected DustSpendProcessed event"),
-        }
-    }
 }

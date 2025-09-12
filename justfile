@@ -128,15 +128,6 @@ get-node-metadata:
 
 update-node: generate-node-data get-node-metadata
 
-check-dust:
-    cargo run --example check_dust
-
-check-node:
-    cargo run --example node
-
-check-genesis:
-    cargo run --example test_genesis
-
 run-node:
     #!/usr/bin/env bash
     node_dir=$(mktemp -d)

@@ -177,10 +177,12 @@ impl Default for DustParameters {
     fn default() -> Self {
         // Initial DUST parameters from the ledger.
         Self {
-            night_dust_ratio: 5_000_000_000, // 5 DUST per NIGHT.
-            generation_decay_rate: 8_267,    /* Works out to a generation time of approximately 1
-                                              * week. */
-            dust_grace_period: 3 * 60 * 60, // 3 hours in seconds.
+            // 5 DUST per NIGHT.
+            night_dust_ratio: 5_000_000_000,
+            // Works out to a generation time of approximately 1 week.
+            generation_decay_rate: 8_267,
+            // 3 hours in seconds.
+            dust_grace_period: 3 * 60 * 60,
         }
     }
 }

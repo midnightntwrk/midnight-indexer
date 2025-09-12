@@ -33,6 +33,7 @@ parity-scale-codec = { workspace = true }
 parking_lot        = { workspace = true }
 paste              = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
+serde_json         = { workspace = true }
 serde_with         = { workspace = true }
 sha2               = { workspace = true }
 sqlx               = { workspace = true, features = [ "runtime-tokio", "time" ] }
