@@ -18,4 +18,8 @@ declare module 'vitest' {
     toBeError(): void;
     toBeSuccess(): void;
   }
+
+  interface TestContext {
+    skip?: (reason?: string) => void;
+  }
 }
