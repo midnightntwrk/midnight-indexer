@@ -422,7 +422,9 @@ export class IndexerWsClient {
       },
     };
 
-    log.debug(`Unshielded transaction subscription full payload:\n${JSON.stringify(payload, null, 2)}`);
+    log.debug(
+      `Unshielded transaction subscription full payload:\n${JSON.stringify(payload, null, 2)}`,
+    );
 
     // Type assertion to satisfy SubscriptionHandlers<unknown> requirement
     this.handlersMap.set(id, handlers as SubscriptionHandlers<unknown>);
@@ -469,7 +471,9 @@ export class IndexerWsClient {
     };
 
     log.debug(`Shielded transaction subscription query:\n${query}`);
-    log.debug(`Shielded transaction subscription variables:\n${JSON.stringify(variables, null, 2)}`);
+    log.debug(
+      `Shielded transaction subscription variables:\n${JSON.stringify(variables, null, 2)}`,
+    );
 
     const payload: GraphQLStartMessage = {
       id,
@@ -480,7 +484,9 @@ export class IndexerWsClient {
       },
     };
 
-    log.debug(`Shielded transaction subscription full payload:\n${JSON.stringify(payload, null, 2)}`);
+    log.debug(
+      `Shielded transaction subscription full payload:\n${JSON.stringify(payload, null, 2)}`,
+    );
 
     // Type assertion to fix type error
     this.handlersMap.set(id, handlers as SubscriptionHandlers<unknown>);

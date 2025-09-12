@@ -122,7 +122,17 @@ describe('block subscriptions', () => {
      * @then we should receive blocks starting from the block with that hash
      */
     test('should stream blocks starting from the block with that hash, given that hash exists', async () => {
-      const knownHash = dataProvider.getKnownBlockHash();
+      // Let's get the hash of the genesis block ...
+      const genesisBlockResponse = await indexerHttpClient.getBlockByOffset({
+        height: 0,
+      });
+      expect(genesisBlockResponse).toBeSuccess();
+      const genesisBlock = genesisBlockResponse.data?.block;
+      expect(genesisBlock).toBeDefined();
+
+      //... and extract its hash
+      const knownHash = genesisBlock?.hash;
+      expect(knownHash).toBeDefined();
       const blockOffset: BlockOffset = {
         hash: knownHash,
       };
