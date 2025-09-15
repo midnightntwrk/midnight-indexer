@@ -68,7 +68,7 @@ async function subscribeToUnshieldedTransactionEvents(
   const unshieldedTransactionSubscriptionHandler: SubscriptionHandlers<UnshieldedTxSubscriptionResponse> =
     {
       next: (payload) => {
-        log.debug('Received data:\n', JSON.stringify(payload, null, 2));
+        log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
         receivedUnshieldedTransactions.push(payload);
         if (stopCondition(receivedUnshieldedTransactions)) {
           stopListening();
@@ -95,9 +95,7 @@ async function subscribeToUnshieldedTransactionEvents(
   return receivedUnshieldedTransactions;
 }
 
-// TODO: rename to unshielded transaction subscriptions for all the occurrences
-// and update the xray tests
-describe('unshielded utxo subscriptions', async () => {
+describe('unshielded transaction subscriptions', async () => {
   beforeAll(async () => {
     indexerWsClient = new IndexerWsClient();
     await indexerWsClient.connectionInit();
@@ -107,19 +105,19 @@ describe('unshielded utxo subscriptions', async () => {
     await indexerWsClient.connectionClose();
   });
 
-  describe('a subscription to unshielded utxo events by address', async () => {
+  describe('a subscription to unshielded transaction events by address', async () => {
     let messages: UnshieldedTxSubscriptionResponse[];
 
     /**
      * Subscribing to unshielded transaction events for an existing address should
      * stream all transactions that involve that address.
      *
-     * @given an existing unshielded address that has transactions
+     * @given an unshielded wallet address that has transactions
      * @when we subscribe to unshielded transaction events by address only for that address
      * @then we should receive at least one transaction event
      * @and each transaction should involve the specified address
      */
-    test('should stream unshielded utxo events related to that address', async () => {
+    test('should stream unshielded transaction events related to that address, given that address has transactions', async () => {
       const unshieldedAddress = dataProvider.getUnshieldedAddress('existing');
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
@@ -127,10 +125,20 @@ describe('unshielded utxo subscriptions', async () => {
         500,
       );
 
+      // we want at least one message ...
       expect(messages.length).toBeGreaterThanOrEqual(1);
+
+      // ... but also at least one message that should be a relevant unshielded transaction
+      // because progress update messages are sent regradless of the presence of transactions
+      let relevantTransactionsFound = 0;
       messages.forEach((transaction) => {
-        log.info('transaction', JSON.stringify(transaction, null, 2));
+        log.info(`transaction ${JSON.stringify(transaction, null, 2)}`);
+        if (transaction.data?.unshieldedTransactions?.__typename === 'UnshieldedTransaction') {
+          relevantTransactionsFound++;
+        }
       });
+
+      expect(relevantTransactionsFound).toBeGreaterThanOrEqual(1);
     });
 
     /**
@@ -188,7 +196,7 @@ describe('unshielded utxo subscriptions', async () => {
       expect(highestFoundTransactionId).toBe(highestTransactionId);
     });
 
-    test.skip('IMPLEMENT ME: should stream unshielded utxo events that adhere to the expected schema', async () => {
+    test.skip('IMPLEMENT ME: should stream unshielded transaction events that adheres to the expected schema', async () => {
       // TODO: implement the following test that checks the schema of the unshielded transaction events
     });
 
@@ -428,7 +436,6 @@ describe('unshielded utxo subscriptions', async () => {
       const transactionEvent: UnshieldedTransactionEvent = messages[0].data
         ?.unshieldedTransactions as UnshieldedTransactionEvent;
       expect(transactionEvent.__typename).toBe('UnshieldedTransactionsProgress');
-      const transactionProgressEvent = transactionEvent as UnshieldedTransactionsProgress;
     });
 
     /**
