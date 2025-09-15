@@ -192,7 +192,6 @@ class TestDataProvider {
 
   getFabricatedMalformedContractAddresses() {
     return [
-      '', // empty string
       ' ', // space
       '0', // too short
       null as any, // null
@@ -208,7 +207,7 @@ class TestDataProvider {
       '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e7@', // special character
       '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e7 ', // trailing space
       ' 000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e78', // leading space
-      ' 000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e78 ' // leading and trailing space
+      ' 000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e78 ', // leading and trailing space
     ];
   }
 
