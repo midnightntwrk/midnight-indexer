@@ -1,37 +1,30 @@
 // Wrapper that runs `midnight-node-toolkit show-address` inside the official image
 // and returns the first "mn..." address printed by the tool.
 
-import { GenericContainer } from "testcontainers";
-import { getNetworkId, type ChainId } from "./env-registry.ts";
+import { GenericContainer } from 'testcontainers';
+import { getNetworkId, type ChainId } from './env-registry.ts';
 
-export type AddressType = "shielded" | "unshielded";
+export type AddressType = 'shielded' | 'unshielded';
 
 export interface ShowAddressParams {
   chain: ChainId;
   addressType: AddressType;
-  seed: string;            // 64-hex seed
-  image?: string;          // override toolkit image if needed
+  seed: string; // 64-hex seed
+  image?: string; // override toolkit image if needed
 }
 
 export async function showAddress({
   chain,
   addressType,
   seed,
-  image = "ghcr.io/midnight-ntwrk/midnight-node-toolkit:latest",
+  image = 'ghcr.io/midnight-ntwrk/midnight-node-toolkit:latest',
 }: ShowAddressParams): Promise<string> {
   const networkId = getNetworkId(chain);
 
   // ENTRYPOINT of the image is the binary, so we pass subcommand + args only
-  const cmd = [
-    "show-address",
-    "--network",
-    networkId,
-    `--${addressType}`,
-    "--seed",
-    seed,
-  ];
+  const cmd = ['show-address', '--network', networkId, `--${addressType}`, '--seed', seed];
 
-  let output = "";
+  let output = '';
 
   // Promise that resolves the first time an address is spotted in the logs
   let resolveFound!: () => void;
@@ -49,10 +42,10 @@ export async function showAddress({
     () =>
       rejectFound(
         new Error(
-          `Timed out waiting for address.\n--- output so far ---\n${output}\n----------------------`
-        )
+          `Timed out waiting for address.\n--- output so far ---\n${output}\n----------------------`,
+        ),
       ),
-    20_000
+    20_000,
   );
 
   const container = await new GenericContainer(image)
@@ -60,15 +53,15 @@ export async function showAddress({
     .withStartupTimeout(60_000)
     .withLogConsumer((stream) => {
       const onChunk = (b: Buffer) => {
-        const s = b.toString("utf8");
+        const s = b.toString('utf8');
         output += s;
         if (addrRegex.test(output)) {
           clearTimeout(timeout);
           resolveFound();
         }
       };
-      stream.on("data", onChunk);
-      stream.on("err", onChunk);
+      stream.on('data', onChunk);
+      stream.on('err', onChunk);
     })
     .start();
 
@@ -85,7 +78,7 @@ export async function showAddress({
     const m = text.match(/mn\S+/);
     if (!m) {
       throw new Error(
-        `Could not parse address from toolkit output.\n--- output ---\n${output}\n--------------`
+        `Could not parse address from toolkit output.\n--- output ---\n${output}\n--------------`,
       );
     }
     return m[0];
