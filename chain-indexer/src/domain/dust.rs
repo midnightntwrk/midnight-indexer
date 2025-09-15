@@ -82,7 +82,7 @@ pub struct DustGeneration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DustUtxo {
     pub output: QualifiedDustOutput,
-    pub generation_info_id: i64,
+    pub generation_index: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,10 +127,9 @@ pub fn extract_dust_operations(dust_events: &[DustEvent]) -> ProcessedDustEvents
                     generation_info: *generation_info,
                     generation_index: *generation_index,
                 });
-                // Note: generation_info_id will be determined during storage.
                 result.utxos.push(DustUtxo {
                     output: *output,
-                    generation_info_id: 0, // Placeholder, will be set during actual save.
+                    generation_index: *generation_index,
                 });
             }
 

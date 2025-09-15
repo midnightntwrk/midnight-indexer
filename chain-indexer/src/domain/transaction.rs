@@ -13,29 +13,21 @@
 
 use crate::domain::{
     ContractAction,
-    dust::{DustEvent, ProcessedDustEvents, extract_dust_operations},
+    dust::{DustEvent, ProcessedDustEvents},
     node,
 };
 use indexer_common::domain::{
-    ByteArray, ByteVec, ProtocolVersion,
+    ByteArray, ProtocolVersion,
     ledger::{
-        SerializedTransaction, SerializedTransactionIdentifier, SerializedZswapStateRoot,
+        NightDistributionData, ParameterUpdateData, SerializedTransaction,
+        SerializedTransactionIdentifier, SerializedZswapStateRoot,
         SystemTransaction as DomainSystemTransaction, TransactionHash, TransactionResult,
-        UnshieldedUtxo,
+        TreasuryPaymentShieldedData, TreasuryPaymentUnshieldedData, UnshieldedUtxo,
     },
 };
 use sqlx::{FromRow, Type};
 use std::fmt::Debug;
 use thiserror::Error;
-
-/// Serialized parameter update data.
-pub type SerializedParameterUpdate = ByteVec;
-
-/// Serialized treasury payment outputs.
-pub type SerializedTreasuryOutputs = ByteVec;
-
-/// Serialized NIGHT distribution outputs.
-pub type SerializedNightOutputs = ByteVec;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Transaction {
@@ -108,7 +100,7 @@ pub struct RegularTransaction {
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub dust_events: Vec<DustEvent>,
-    pub dust_operations: ProcessedDustEvents,
+    pub processed_dust_events: ProcessedDustEvents,
 }
 
 impl From<node::RegularTransaction> for RegularTransaction {
@@ -128,7 +120,7 @@ impl From<node::RegularTransaction> for RegularTransaction {
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
             dust_events: Vec::default(),
-            dust_operations: ProcessedDustEvents {
+            processed_dust_events: ProcessedDustEvents {
                 generations: Vec::new(),
                 utxos: Vec::new(),
                 merkle_tree_updates: Vec::new(),
@@ -146,14 +138,14 @@ pub struct SystemTransaction {
     pub raw: SerializedTransaction,
     // DUST events from system transactions (e.g., CNightGeneratesDustUpdate).
     pub dust_events: Vec<DustEvent>,
-    pub dust_operations: ProcessedDustEvents,
+    pub processed_dust_events: ProcessedDustEvents,
     // Additional processed data from system transactions.
     pub reserve_distribution: Option<u128>,
-    pub parameter_update: Option<SerializedParameterUpdate>,
-    pub night_distribution: Option<(String, SerializedNightOutputs)>,
+    pub parameter_update: Option<ParameterUpdateData>,
+    pub night_distribution: Option<NightDistributionData>,
     pub treasury_income: Option<(u128, String)>,
-    pub treasury_payment_shielded: Option<SerializedTreasuryOutputs>,
-    pub treasury_payment_unshielded: Option<SerializedTreasuryOutputs>,
+    pub treasury_payment_shielded: Option<TreasuryPaymentShieldedData>,
+    pub treasury_payment_unshielded: Option<TreasuryPaymentUnshieldedData>,
 }
 
 /// Error type for system transaction processing.
@@ -175,18 +167,25 @@ impl TryFrom<node::SystemTransaction> for SystemTransaction {
             DomainSystemTransaction::deserialize(&transaction.raw, transaction.protocol_version)
                 .map_err(|error| SystemTransactionError::DeserializationError(error.to_string()))?;
 
-        // Extract metadata using the ledger module method.
+        // Extract metadata from the transaction.
         let metadata = domain_tx.extract_metadata(&transaction.hash);
-
-        // Extract operations from DUST events.
-        let dust_operations = extract_dust_operations(&metadata.dust_events);
 
         Ok(Self {
             hash: transaction.hash,
             protocol_version: transaction.protocol_version,
             raw: transaction.raw,
-            dust_events: metadata.dust_events,
-            dust_operations,
+            // Populated during ledger state application in
+            // ledger_state.rs::apply_system_node_transaction()
+            dust_events: Vec::new(),
+            processed_dust_events: ProcessedDustEvents {
+                // Populated during ledger state application in
+                // ledger_state.rs::apply_system_node_transaction() via extract_dust_operations()
+                generations: Vec::new(),
+                utxos: Vec::new(),
+                merkle_tree_updates: Vec::new(),
+                spends: Vec::new(),
+                dtime_update: None,
+            },
             reserve_distribution: metadata.reserve_distribution,
             parameter_update: metadata.parameter_update,
             night_distribution: metadata.night_distribution,

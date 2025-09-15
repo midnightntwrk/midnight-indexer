@@ -142,8 +142,8 @@ impl LedgerState {
         transaction.created_unshielded_utxos = result.created_unshielded_utxos;
         transaction.spent_unshielded_utxos = result.spent_unshielded_utxos;
 
-        // Extract operations from DUST events (domain logic, not storage).
-        transaction.dust_operations = extract_dust_operations(&transaction.dust_events);
+        // Extract operations from DUST events (dust.rs::extract_dust_operations).
+        transaction.processed_dust_events = extract_dust_operations(&transaction.dust_events);
         if transaction.end_index > transaction.start_index {
             for contract_action in transaction.contract_actions.iter_mut() {
                 let zswap_state = self.extract_contract_zswap_state(&contract_action.address)?;
@@ -175,12 +175,15 @@ impl LedgerState {
         let mut transaction = SystemTransaction::try_from(transaction)
             .map_err(|error| Error::ProcessingError(error.to_string()))?;
 
-        // Apply system transaction and get DUST events.
-        // The ledger state properly extracts DUST events from system transactions,
-        // including CNightGeneratesDustUpdate events which create DustInitialUtxo
-        // and DustGenerationDtimeUpdate events.
+        // Apply system transaction and get DUST events from ledger state.
+        // This is the single source of DUST events (from
+        // indexer_common::domain::ledger::LedgerState::apply_system_transaction),
+        // consistent with regular transactions.
         let dust_events = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
         transaction.dust_events = dust_events;
+
+        // Extract operations from DUST events (dust.rs::extract_dust_operations).
+        transaction.processed_dust_events = extract_dust_operations(&transaction.dust_events);
 
         Ok(Transaction::System(Box::new(transaction)))
     }
