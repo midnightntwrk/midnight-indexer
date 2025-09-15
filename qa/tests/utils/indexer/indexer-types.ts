@@ -24,7 +24,6 @@ export type BlockResponse = GraphQLResponse<{ block: Block }>;
 
 export type TransactionResponse = GraphQLResponse<{ transactions: Transaction[] }>;
 
-
 export type ContractActionResponse = GraphQLResponse<{ contractAction: ContractAction }>;
 
 export type BlockOffset = {

@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import log from '@utils/logging/logger';
+import '@utils/logging/test-logging-hooks';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import dataProvider from '@utils/testdata-provider';
 
@@ -64,7 +66,7 @@ describe('contract queries', () => {
         const response = await indexerHttpClient.getContractAction(malformedAddress);
         expect(response).toBeSuccess();
         expect(response.data?.contractAction).toBeDefined();
-      }
+      },
     );
   });
 
@@ -80,11 +82,13 @@ describe('contract queries', () => {
      * @then Indexer should respond with null contract action
      */
     test('should return null when contract with valid address and valid offset does not exist', async () => {
-      const response = await indexerHttpClient.getContractAction(validAddress, { blockOffset: { hash: knownBlockHash } });
+      const response = await indexerHttpClient.getContractAction(validAddress, {
+        blockOffset: { hash: knownBlockHash },
+      });
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).toBeNull();
     });
-    
+
     /**
      * A contract query by address and non-existing hash returns null when contract does not exist
      *
@@ -94,7 +98,9 @@ describe('contract queries', () => {
      */
     test('should return null when contract with valid address and non-existing hash does not exist', async () => {
       const nonExistingHash = dataProvider.getNonExistingHash();
-      const response = await indexerHttpClient.getContractAction(validAddress, { blockOffset: { hash: nonExistingHash } });
+      const response = await indexerHttpClient.getContractAction(validAddress, {
+        blockOffset: { hash: nonExistingHash },
+      });
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).toBeNull();
     });
@@ -107,8 +113,10 @@ describe('contract queries', () => {
      * @then Indexer should respond with an error
      */
     test('should return error when contract with invalid address and valid hash', async () => {
-      const invalidAddress = dataProvider.getFabricatedMalformedContractAddresses()[10]; 
-      const response = await indexerHttpClient.getContractAction(invalidAddress, { blockOffset: { hash: knownBlockHash } });
+      const invalidAddress = dataProvider.getFabricatedMalformedContractAddresses()[10];
+      const response = await indexerHttpClient.getContractAction(invalidAddress, {
+        blockOffset: { hash: knownBlockHash },
+      });
       expect(response).toBeError();
     });
 
@@ -122,7 +130,9 @@ describe('contract queries', () => {
     test('should return error when contract with invalid address and non-existing hash', async () => {
       const invalidAddress = dataProvider.getFabricatedMalformedContractAddresses()[10];
       const nonExistingHash = dataProvider.getNonExistingHash();
-      const response = await indexerHttpClient.getContractAction(invalidAddress, { blockOffset: { hash: nonExistingHash } });
+      const response = await indexerHttpClient.getContractAction(invalidAddress, {
+        blockOffset: { hash: nonExistingHash },
+      });
       expect(response).toBeError();
     });
 
@@ -135,8 +145,10 @@ describe('contract queries', () => {
      */
     test('should return error when contract with valid address and invalid hash', async () => {
       const malformedHashes = dataProvider.getFabricatedMalformedHashes();
-        const response = await indexerHttpClient.getContractAction(validAddress, { blockOffset: { hash: malformedHashes[0] } });
-        expect(response).toBeError();  
+      const response = await indexerHttpClient.getContractAction(validAddress, {
+        blockOffset: { hash: malformedHashes[0] },
+      });
+      expect(response).toBeError();
     });
 
     /**
@@ -150,8 +162,10 @@ describe('contract queries', () => {
       const invalidAddress = dataProvider.getFabricatedMalformedContractAddresses()[10]; // empty string
       const malformedHashes = dataProvider.getFabricatedMalformedHashes();
       for (const malformedHash of malformedHashes) {
-        const response = await indexerHttpClient.getContractAction(invalidAddress, { blockOffset: { hash: malformedHash } });
-        expect(response).toBeError();  
+        const response = await indexerHttpClient.getContractAction(invalidAddress, {
+          blockOffset: { hash: malformedHash },
+        });
+        expect(response).toBeError();
       }
     });
 
@@ -163,7 +177,9 @@ describe('contract queries', () => {
      * @then Indexer should respond with null contract action
      */
     test('should return null when contract with valid address and valid height does not exist', async () => {
-      const response = await indexerHttpClient.getContractAction(validAddress, { blockOffset: { height: 0 } });
+      const response = await indexerHttpClient.getContractAction(validAddress, {
+        blockOffset: { height: 0 },
+      });
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).toBeNull();
     });
@@ -176,7 +192,9 @@ describe('contract queries', () => {
      * @then Indexer should respond with null contract action
      */
     test('should return null when contract with valid address and non-existing height does not exist', async () => {
-      const response = await indexerHttpClient.getContractAction(validAddress, { blockOffset: { height: 999999 } });
+      const response = await indexerHttpClient.getContractAction(validAddress, {
+        blockOffset: { height: 999999 },
+      });
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).toBeNull();
     });
@@ -190,7 +208,9 @@ describe('contract queries', () => {
      */
     test('should return error when contract with invalid address and valid height', async () => {
       const invalidAddress = dataProvider.getFabricatedMalformedContractAddresses()[10];
-      const response = await indexerHttpClient.getContractAction(invalidAddress, { blockOffset: { height: 0 } });
+      const response = await indexerHttpClient.getContractAction(invalidAddress, {
+        blockOffset: { height: 0 },
+      });
       expect(response).toBeError();
     });
 
@@ -202,11 +222,13 @@ describe('contract queries', () => {
      * @then Indexer should respond with an error
      */
     test('should return error when contract with invalid address and invalid height', async () => {
-      const invalidAddress = dataProvider.getFabricatedMalformedContractAddresses()[10]; 
+      const invalidAddress = dataProvider.getFabricatedMalformedContractAddresses()[10];
       const malformedHeights = dataProvider.getFabricatedMalformedHeights();
       for (const malformedHeight of malformedHeights) {
-        const response = await indexerHttpClient.getContractAction(invalidAddress, { blockOffset: { height: malformedHeight } });
-        expect(response).toBeError();  
+        const response = await indexerHttpClient.getContractAction(invalidAddress, {
+          blockOffset: { height: malformedHeight },
+        });
+        expect(response).toBeError();
       }
     });
 
@@ -218,7 +240,9 @@ describe('contract queries', () => {
      * @then Indexer should respond with an error
      */
     test('should return error for negative height', async () => {
-      const response = await indexerHttpClient.getContractAction(validAddress, { blockOffset: { height: -1 } });
+      const response = await indexerHttpClient.getContractAction(validAddress, {
+        blockOffset: { height: -1 },
+      });
       expect(response).toBeError();
     });
 
@@ -230,7 +254,9 @@ describe('contract queries', () => {
      * @then Indexer should respond with an error
      */
     test('should return error for non-integer height', async () => {
-      const response = await indexerHttpClient.getContractAction(validAddress, { blockOffset: { height: 0.5 } });
+      const response = await indexerHttpClient.getContractAction(validAddress, {
+        blockOffset: { height: 0.5 },
+      });
       expect(response).toBeError();
     });
 
@@ -242,9 +268,10 @@ describe('contract queries', () => {
      * @then Indexer should respond with an error
      */
     test('should return error for extremely large height', async () => {
-      const response = await indexerHttpClient.getContractAction(validAddress, { blockOffset: { height: 2 ** 32 } });
+      const response = await indexerHttpClient.getContractAction(validAddress, {
+        blockOffset: { height: 2 ** 32 },
+      });
       expect(response).toBeError();
     });
   });
 });
-
