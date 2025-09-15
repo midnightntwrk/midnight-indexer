@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::domain::{
-    RegularTransaction, SystemTransaction, Transaction, TransactionVariant, node,
-    process_dust_events,
+    RegularTransaction, SystemTransaction, Transaction, TransactionVariant,
+    dust::extract_dust_operations, node,
 };
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
@@ -142,8 +142,8 @@ impl LedgerState {
         transaction.created_unshielded_utxos = result.created_unshielded_utxos;
         transaction.spent_unshielded_utxos = result.spent_unshielded_utxos;
 
-        // Process DUST events to determine storage operations (domain logic, not storage).
-        transaction.dust_operations = process_dust_events(&transaction.dust_events);
+        // Extract operations from DUST events (domain logic, not storage).
+        transaction.dust_operations = extract_dust_operations(&transaction.dust_events);
         if transaction.end_index > transaction.start_index {
             for contract_action in transaction.contract_actions.iter_mut() {
                 let zswap_state = self.extract_contract_zswap_state(&contract_action.address)?;

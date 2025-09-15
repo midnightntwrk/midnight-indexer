@@ -12,7 +12,9 @@
 // limitations under the License.
 
 use crate::domain::{
-    ByteArray, ByteVec, PROTOCOL_VERSION_000_016_000, ProtocolVersion, ViewingKey,
+    ByteArray, ByteVec, DustCommitment, DustNonce, DustNullifier, DustOwner, NightUtxoNonce,
+    PROTOCOL_VERSION_000_016_000, ProtocolVersion, ViewingKey,
+    dust::{DustEvent, DustEventDetails, DustGenerationInfo, DustParameters, QualifiedDustOutput},
     ledger::{Error, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
 use fastrace::trace;
@@ -257,6 +259,18 @@ pub enum SystemTransaction {
     V6(LedgerSystemTransactionV6),
 }
 
+/// Metadata extracted from a system transaction.
+#[derive(Debug, Clone)]
+pub struct SystemTransactionMetadata {
+    pub dust_events: Vec<DustEvent>,
+    pub reserve_distribution: Option<u128>,
+    pub parameter_update: Option<ByteVec>,
+    pub night_distribution: Option<(String, ByteVec)>,
+    pub treasury_income: Option<(u128, String)>,
+    pub treasury_payment_shielded: Option<ByteVec>,
+    pub treasury_payment_unshielded: Option<ByteVec>,
+}
+
 impl SystemTransaction {
     /// Deserialize the given serialized transaction using the given protocol version.
     #[trace(properties = { "protocol_version": "{protocol_version}" })]
@@ -281,6 +295,13 @@ impl SystemTransaction {
             Self::V6(transaction) => transaction.transaction_hash().0.0.into(),
         }
     }
+
+    /// Extract metadata from the system transaction.
+    pub fn extract_metadata(&self, tx_hash: &TransactionHash) -> SystemTransactionMetadata {
+        match self {
+            Self::V6(ledger_tx) => extract_metadata_v6(ledger_tx, tx_hash),
+        }
+    }
 }
 
 fn serialize_contract_address(
@@ -300,6 +321,208 @@ fn can_decrypt_v6(key: &SecretKeyV6, offer: &OfferV6<ProofV6, DefaultDBV6>) -> b
         key.decrypt::<InfoV6>(&(*ciphertext).to_owned().into())
             .is_some()
     })
+}
+
+/// Extract metadata from a V6 system transaction.
+fn extract_metadata_v6(
+    ledger_tx: &LedgerSystemTransactionV6,
+    tx_hash: &TransactionHash,
+) -> SystemTransactionMetadata {
+    use serde::Serialize;
+
+    let mut dust_events = Vec::new();
+    let mut reserve_distribution = None;
+    let mut parameter_update = None;
+    let mut night_distribution = None;
+    let mut treasury_income = None;
+    let mut treasury_payment_shielded = None;
+    let mut treasury_payment_unshielded = None;
+
+    match ledger_tx {
+        LedgerSystemTransactionV6::CNightGeneratesDustUpdate { events } => {
+            dust_events = convert_cnight_events_to_dust_events_v6(events, tx_hash);
+        }
+
+        LedgerSystemTransactionV6::DistributeReserve(amount) => {
+            reserve_distribution = Some(*amount);
+        }
+
+        LedgerSystemTransactionV6::OverwriteParameters(params) => {
+            // Serialize actual parameters as JSON.
+            #[derive(Serialize)]
+            struct ParameterData {
+                night_dust_ratio: u64,
+                generation_decay_rate: u32,
+                dust_grace_period_seconds: u64,
+            }
+            let param_data = ParameterData {
+                night_dust_ratio: params.dust.night_dust_ratio,
+                generation_decay_rate: params.dust.generation_decay_rate,
+                dust_grace_period_seconds: params.dust.dust_grace_period.as_seconds() as u64,
+            };
+            parameter_update = Some(
+                serde_json::to_vec(&param_data)
+                    .unwrap_or_else(|_| b"parameter_update".to_vec())
+                    .into(),
+            );
+        }
+
+        LedgerSystemTransactionV6::DistributeNight(claim_kind, outputs) => {
+            // Serialize distribution data as JSON.
+            #[derive(Serialize)]
+            struct DistributionData {
+                output_count: usize,
+                claim_type: String,
+                total_amount: u128,
+            }
+            let total: u128 = outputs.iter().map(|o| o.amount).sum();
+            let claim_type = format!("{:?}", claim_kind);
+            let dist_data = DistributionData {
+                output_count: outputs.len(),
+                claim_type: claim_type.clone(),
+                total_amount: total,
+            };
+            night_distribution = Some((
+                claim_type,
+                serde_json::to_vec(&dist_data)
+                    .unwrap_or_else(|_| b"night_distribution".to_vec())
+                    .into(),
+            ));
+        }
+
+        LedgerSystemTransactionV6::PayBlockRewardsToTreasury { amount } => {
+            treasury_income = Some((*amount, "block_rewards".to_string()));
+        }
+
+        LedgerSystemTransactionV6::PayFromTreasuryShielded {
+            outputs,
+            nonce,
+            token_type,
+        } => {
+            // Serialize shielded outputs as JSON.
+            #[derive(Serialize)]
+            struct ShieldedOutputData {
+                output_count: usize,
+                payment_type: String,
+                nonce: Vec<u8>,
+                token_type: String,
+            }
+            let output_data = ShieldedOutputData {
+                output_count: outputs.len(),
+                payment_type: "shielded".to_string(),
+                nonce: nonce.0.to_vec(),
+                token_type: format!("{:?}", token_type),
+            };
+            treasury_payment_shielded = Some(
+                serde_json::to_vec(&output_data)
+                    .unwrap_or_else(|_| b"treasury_shielded".to_vec())
+                    .into(),
+            );
+        }
+
+        LedgerSystemTransactionV6::PayFromTreasuryUnshielded {
+            outputs,
+            token_type,
+        } => {
+            // Serialize unshielded outputs as JSON.
+            #[derive(Serialize)]
+            struct UnshieldedOutputData {
+                output_count: usize,
+                payment_type: String,
+                total_amount: u128,
+                token_type: String,
+            }
+            let total: u128 = outputs.iter().map(|o| o.amount).sum();
+            let output_data = UnshieldedOutputData {
+                output_count: outputs.len(),
+                payment_type: "unshielded".to_string(),
+                total_amount: total,
+                token_type: format!("{:?}", token_type),
+            };
+            treasury_payment_unshielded = Some(
+                serde_json::to_vec(&output_data)
+                    .unwrap_or_else(|_| b"treasury_unshielded".to_vec())
+                    .into(),
+            );
+        }
+
+        // LedgerSystemTransactionV6 is #[non_exhaustive].
+        #[allow(unreachable_patterns)]
+        _ => {
+            log::warn!(
+                "encountered new system transaction variant in tx {}: {:?}",
+                tx_hash,
+                std::any::type_name_of_val(&ledger_tx)
+            );
+        }
+    }
+
+    SystemTransactionMetadata {
+        dust_events,
+        reserve_distribution,
+        parameter_update,
+        night_distribution,
+        treasury_income,
+        treasury_payment_shielded,
+        treasury_payment_unshielded,
+    }
+}
+
+/// Convert CNightGeneratesDust events to domain DUST events.
+fn convert_cnight_events_to_dust_events_v6(
+    events: &[midnight_ledger_v6::structure::CNightGeneratesDustEvent],
+    tx_hash: &TransactionHash,
+) -> Vec<DustEvent> {
+    use midnight_ledger_v6::structure::CNightGeneratesDustActionType;
+
+    events
+        .iter()
+        .enumerate()
+        .map(|(index, event)| {
+            let owner_bytes = event.owner.0.as_le_bytes();
+            let owner =
+                DustOwner::try_from(owner_bytes).expect("dust public key should be 32 bytes");
+            let nonce = DustNonce::from(event.nonce.0.0);
+            let event_details = match event.action {
+                CNightGeneratesDustActionType::Create => DustEventDetails::DustInitialUtxo {
+                    output: QualifiedDustOutput {
+                        initial_value: event.value,
+                        owner,
+                        nonce,
+                        seq: 0,
+                        ctime: event.time.to_secs(),
+                        backing_night: NightUtxoNonce::default(),
+                        mt_index: 0,
+                    },
+                    generation_info: DustGenerationInfo {
+                        value: event.value,
+                        owner,
+                        nonce,
+                        ctime: event.time.to_secs(),
+                        dtime: u64::MAX,
+                        night_utxo_hash: NightUtxoNonce::default(),
+                    },
+                    generation_index: index as u64,
+                },
+
+                CNightGeneratesDustActionType::Destroy => DustEventDetails::DustSpendProcessed {
+                    commitment: DustCommitment::default(),
+                    commitment_index: 0,
+                    nullifier: DustNullifier::default(),
+                    v_fee: 0,
+                    time: event.time.to_secs(),
+                    params: DustParameters::default(),
+                },
+            };
+
+            DustEvent {
+                transaction_hash: *tx_hash,
+                logical_segment: index as u16,
+                physical_segment: index as u16,
+                event_details,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
