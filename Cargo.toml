@@ -51,14 +51,14 @@ log                          = { version = "0.4" }
 logforth                     = { version = "0.27" }
 metrics                      = { version = "0.24" }
 metrics-exporter-prometheus  = { version = "0.17", default-features = false }
-midnight-base-crypto_v6      = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-base-crypto", tag = "ledger-6.0.0-alpha.3" }
-midnight-coin-structure_v6   = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-coin-structure", tag = "ledger-6.0.0-alpha.3" }
-midnight-ledger_v6           = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-ledger", tag = "ledger-6.0.0-alpha.3" }
-midnight-onchain-runtime_v6  = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-onchain-runtime", tag = "ledger-6.0.0-alpha.3" }
-midnight-serialize_v6        = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-serialize", tag = "ledger-6.0.0-alpha.3" }
-midnight-storage_v6          = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-storage", tag = "ledger-6.0.0-alpha.3" }
-midnight-transient-crypto_v6 = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-transient-crypto", tag = "ledger-6.0.0-alpha.3" }
-midnight-zswap_v6            = { git = "https://github.com/midnightntwrk/midnight-ledger-prototype", package = "midnight-zswap", tag = "ledger-6.0.0-alpha.3" }
+midnight-base-crypto_v6      = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-base-crypto", tag = "ledger-6.1.0-alpha.2" }
+midnight-coin-structure_v6   = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-coin-structure", tag = "ledger-6.1.0-alpha.2" }
+midnight-ledger_v6           = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-ledger", tag = "ledger-6.1.0-alpha.2" }
+midnight-onchain-runtime_v6  = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-onchain-runtime", tag = "ledger-6.1.0-alpha.2" }
+midnight-serialize_v6        = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-serialize", tag = "ledger-6.1.0-alpha.2" }
+midnight-storage_v6          = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-storage", tag = "ledger-6.1.0-alpha.2" }
+midnight-transient-crypto_v6 = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-transient-crypto", tag = "ledger-6.1.0-alpha.2" }
+midnight-zswap_v6            = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-zswap", tag = "ledger-6.1.0-alpha.2" }
 nix                          = { version = "0.30" }
 opentelemetry                = { version = "0.30" }
 opentelemetry-otlp           = { version = "0.30" }

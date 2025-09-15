@@ -72,6 +72,12 @@ pub enum Error {
 
     #[error("invalid system transaction")]
     SystemTransaction(#[source] BoxError),
+
+    #[error("block limit exceeded")]
+    BlockLimitExceeded(#[source] BoxError),
+
+    #[error("cannot calculate transaction cost")]
+    TransactionCost(#[source] BoxError),
 }
 
 /// Extension methods for `Serializable` implementations.
