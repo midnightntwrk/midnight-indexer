@@ -1,22 +1,21 @@
 // Minimal manual smoke: prints shielded & unshielded addresses for a known seed.
 
-import { showAddress } from "../show-address.ts";
+import { showAddress } from '../show-address.ts';
 
 (async () => {
-  const seed =
-    "0000000000000000000000000000000000000000000000000000000000000001";
+  const seed = '0000000000000000000000000000000000000000000000000000000000000001';
 
   const shielded = await showAddress({
-    chain: "undeployed",
-    addressType: "shielded",
+    chain: 'undeployed',
+    addressType: 'shielded',
     seed,
   });
-  console.log("Shielded address:", shielded);
+  console.log('Shielded address:', shielded);
 
   const unshielded = await showAddress({
-    chain: "undeployed",
-    addressType: "unshielded",
+    chain: 'undeployed',
+    addressType: 'unshielded',
     seed,
   });
-  console.log("Unshielded address:", unshielded);
+  console.log('Unshielded address:', unshielded);
 })();
