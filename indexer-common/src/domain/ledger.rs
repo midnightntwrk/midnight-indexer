@@ -14,13 +14,11 @@
 mod contract_state;
 mod ledger_state;
 mod secret_key;
-mod system_transaction;
 mod transaction;
 
 pub use contract_state::*;
 pub use ledger_state::*;
 pub use secret_key::*;
-pub use system_transaction::*;
 pub use transaction::*;
 
 use crate::{

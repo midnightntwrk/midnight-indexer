@@ -11,7 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{RegularTransaction, SystemTransaction, Transaction, TransactionVariant, node};
+use crate::domain::{
+    RegularTransaction, SystemTransaction, Transaction, TransactionVariant, node,
+    process_dust_events,
+};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
@@ -138,6 +141,9 @@ impl LedgerState {
         transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize()?;
         transaction.created_unshielded_utxos = result.created_unshielded_utxos;
         transaction.spent_unshielded_utxos = result.spent_unshielded_utxos;
+
+        // Process DUST events to determine storage operations (domain logic, not storage).
+        transaction.dust_operations = process_dust_events(&transaction.dust_events);
         if transaction.end_index > transaction.start_index {
             for contract_action in transaction.contract_actions.iter_mut() {
                 let zswap_state = self.extract_contract_zswap_state(&contract_action.address)?;
@@ -166,7 +172,8 @@ impl LedgerState {
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
     ) -> Result<Transaction, Error> {
-        let mut transaction = SystemTransaction::from(transaction);
+        let mut transaction = SystemTransaction::try_from(transaction)
+            .map_err(|error| Error::ProcessingError(error.to_string()))?;
 
         // Apply system transaction and get DUST events.
         // The ledger state properly extracts DUST events from system transactions,
@@ -175,7 +182,7 @@ impl LedgerState {
         let dust_events = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
         transaction.dust_events = dust_events;
 
-        Ok(Transaction::System(transaction))
+        Ok(Transaction::System(Box::new(transaction)))
     }
 }
 
@@ -183,4 +190,7 @@ impl LedgerState {
 pub enum Error {
     #[error("cannot apply transaction")]
     ApplyTransaction(#[from] indexer_common::domain::ledger::Error),
+
+    #[error("cannot process system transaction: {0}")]
+    ProcessingError(String),
 }

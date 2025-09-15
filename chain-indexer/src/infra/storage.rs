@@ -13,8 +13,8 @@
 
 use crate::domain::{
     self, Block, BlockTransactions, ContractAction, DustRegistrationEvent, RegularTransaction,
+    SerializedNightOutputs, SerializedParameterUpdate, SerializedTreasuryOutputs,
     SystemTransaction, Transaction, TransactionVariant, node::BlockInfo,
-    process_dust_events as process_dust_events_domain,
 };
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
@@ -25,11 +25,7 @@ use indexer_common::{
             DustCommitment, DustEvent, DustEventType, DustGenerationInfo, DustMerklePathEntry,
             QualifiedDustOutput,
         },
-        ledger::{
-            ContractAttributes, ContractBalance, SerializedNightOutputs, SerializedParameterUpdate,
-            SerializedTreasuryOutputs, SystemTransaction as DomainSystemTransaction,
-            UnshieldedUtxo,
-        },
+        ledger::{ContractAttributes, ContractBalance, UnshieldedUtxo},
     },
     infra::sqlx::U128BeBytes,
 };
@@ -416,8 +412,14 @@ async fn save_regular_transaction(
     )
     .await?;
 
-    // Apply domain processing to determine storage operations.
-    apply_dust_event_operations(&transaction.dust_events, transaction_id, block_height, tx).await?;
+    // Apply pre-computed DUST operations from domain layer.
+    apply_dust_operations(
+        &transaction.dust_operations,
+        transaction_id,
+        block_height,
+        tx,
+    )
+    .await?;
     save_dust_events(&transaction.dust_events, transaction_id, tx).await?;
 
     Ok(transaction_id as u64)
@@ -430,68 +432,46 @@ async fn save_system_transaction(
     block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Process and save DUST events from system transactions.
-    // The ledger state already properly extracts DUST events from system transactions.
-    // including CNightGeneratesDustUpdate events which create DustInitialUtxo.
-    // and DustGenerationDtimeUpdate events.
+    // Save DUST events from system transactions.
+    // The domain layer has already processed and computed operations.
     if !transaction.dust_events.is_empty() {
-        apply_dust_event_operations(&transaction.dust_events, transaction_id, block_height, tx)
-            .await?;
+        apply_dust_operations(
+            &transaction.dust_operations,
+            transaction_id,
+            block_height,
+            tx,
+        )
+        .await?;
         save_dust_events(&transaction.dust_events, transaction_id, tx).await?;
     }
 
-    // Process the system transaction to extract domain data.
-    let system_tx = match DomainSystemTransaction::deserialize(
-        &transaction.raw,
-        transaction.protocol_version,
-    ) {
-        Ok(tx) => tx,
-        Err(error) => {
-            log::warn!(
-                "cannot deserialize system transaction {}: {}",
-                transaction.hash,
-                error
-            );
-            return Ok(());
-        }
-    };
-
-    let processed = system_tx.process(&transaction.hash);
-
-    // Save DUST events if any.
-    if !processed.dust_events.is_empty() {
-        apply_dust_event_operations(&processed.dust_events, transaction_id, block_height, tx)
-            .await?;
-        save_dust_events(&processed.dust_events, transaction_id, tx).await?;
-    }
-
     // Save reserve distribution if present.
-    if let Some(amount) = processed.reserve_distribution {
+    if let Some(amount) = transaction.reserve_distribution {
         save_reserve_distribution(transaction_id, amount, tx).await?;
     }
 
     // Save parameter update if present.
-    if let Some(params) = processed.parameter_update {
-        save_parameter_update(transaction_id, &params, tx).await?;
+    if let Some(ref params) = transaction.parameter_update {
+        save_parameter_update(transaction_id, params, tx).await?;
     }
 
     // Save night distribution if present.
-    if let Some((claim_kind, outputs)) = processed.night_distribution {
-        save_night_distribution(transaction_id, &claim_kind, &outputs, tx).await?;
+    if let Some((ref claim_kind, ref outputs)) = transaction.night_distribution {
+        save_night_distribution(transaction_id, claim_kind, outputs, tx).await?;
     }
 
     // Save treasury income if present.
-    if let Some((amount, source)) = processed.treasury_income {
-        save_treasury_income(transaction_id, amount, &source, tx).await?;
+    if let Some((amount, ref source)) = transaction.treasury_income {
+        save_treasury_income(transaction_id, amount, source, tx).await?;
     }
 
     // Save treasury payments if present.
-    if let Some(outputs) = processed.treasury_payment_shielded {
-        save_treasury_payment_shielded(transaction_id, &outputs, tx).await?;
+    if let Some(ref outputs) = transaction.treasury_payment_shielded {
+        save_treasury_payment_shielded(transaction_id, outputs, tx).await?;
     }
 
-    if let Some(outputs) = processed.treasury_payment_unshielded {
-        save_treasury_payment_unshielded(transaction_id, &outputs, tx).await?;
+    if let Some(ref outputs) = transaction.treasury_payment_unshielded {
+        save_treasury_payment_unshielded(transaction_id, outputs, tx).await?;
     }
 
     Ok(())
@@ -678,15 +658,12 @@ async fn save_identifiers(
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn apply_dust_event_operations(
-    dust_events: &[DustEvent],
+async fn apply_dust_operations(
+    operations: &crate::domain::DustEventStorageOperations,
     transaction_id: i64,
     block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Use domain processing to determine storage operations.
-    let operations = process_dust_events_domain(dust_events, transaction_id, block_height);
-
     // Apply generation saves.
     for save_op in &operations.generation_saves {
         let generation_info_id =
@@ -704,7 +681,7 @@ async fn apply_dust_event_operations(
         save_dust_generation_tree_update(
             tree_update.generation_index,
             &tree_update.merkle_path,
-            tree_update.block_height,
+            block_height,
             tx,
         )
         .await?;
@@ -715,7 +692,7 @@ async fn apply_dust_event_operations(
         mark_dust_utxo_spent(
             spent_mark.commitment,
             spent_mark.nullifier,
-            spent_mark.transaction_id,
+            transaction_id,
             tx,
         )
         .await?;

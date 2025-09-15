@@ -17,7 +17,7 @@ use indexer_common::domain::dust::{
 };
 
 /// Storage operations needed for processing DUST events.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DustEventStorageOperations {
     pub generation_saves: Vec<GenerationSave>,
     pub utxo_saves: Vec<UtxoSave>,
@@ -26,44 +26,39 @@ pub struct DustEventStorageOperations {
     pub dtime_update: Option<DtimeUpdate>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GenerationSave {
     pub generation_info: DustGenerationInfo,
     pub generation_index: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UtxoSave {
     pub output: QualifiedDustOutput,
     pub generation_info_id: i64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeUpdate {
     pub generation_index: u64,
     pub merkle_path: Vec<DustMerklePathEntry>,
-    pub block_height: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpentMark {
     pub commitment: DustCommitment,
     pub nullifier: DustNullifier,
-    pub transaction_id: i64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DtimeUpdate {
     pub dtime: u64,
     pub generation_index: u64,
 }
 
 /// Process DUST events and determine what storage operations are needed.
-pub fn process_dust_events(
-    dust_events: &[DustEvent],
-    transaction_id: i64,
-    block_height: u32,
-) -> DustEventStorageOperations {
+/// This processing happens in the domain layer before storage is involved.
+pub fn process_dust_events(dust_events: &[DustEvent]) -> DustEventStorageOperations {
     let mut operations = DustEventStorageOperations {
         generation_saves: Vec::new(),
         utxo_saves: Vec::new(),
@@ -101,7 +96,6 @@ pub fn process_dust_events(
                 operations.tree_updates.push(TreeUpdate {
                     generation_index: *generation_index,
                     merkle_path: merkle_path.clone(),
-                    block_height,
                 });
             }
 
@@ -113,7 +107,6 @@ pub fn process_dust_events(
                 operations.spent_marks.push(SpentMark {
                     commitment: *commitment,
                     nullifier: *nullifier,
-                    transaction_id,
                 });
             }
 
