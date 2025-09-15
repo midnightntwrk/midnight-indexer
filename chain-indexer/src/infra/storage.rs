@@ -659,25 +659,25 @@ async fn save_identifiers(
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn apply_dust_operations(
-    operations: &crate::domain::DustEventStorageOperations,
+    operations: &crate::domain::ProcessedDustEvents,
     transaction_id: i64,
     block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     // Apply generation saves.
-    for save_op in &operations.generation_saves {
+    for save_op in &operations.generations {
         let generation_info_id =
             save_dust_generation_info(&save_op.generation_info, save_op.generation_index, tx)
                 .await?;
 
         // Find corresponding UTXO save (they're paired in the same order).
-        for utxo_save in &operations.utxo_saves {
+        for utxo_save in &operations.utxos {
             save_dust_utxos(&utxo_save.output, generation_info_id, tx).await?;
         }
     }
 
     // Apply tree updates.
-    for tree_update in &operations.tree_updates {
+    for tree_update in &operations.merkle_tree_updates {
         save_dust_generation_tree_update(
             tree_update.generation_index,
             &tree_update.merkle_path,
@@ -688,7 +688,7 @@ async fn apply_dust_operations(
     }
 
     // Apply spent marks.
-    for spent_mark in &operations.spent_marks {
+    for spent_mark in &operations.spends {
         mark_dust_utxo_spent(
             spent_mark.commitment,
             spent_mark.nullifier,

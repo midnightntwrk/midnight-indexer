@@ -16,54 +16,54 @@ use indexer_common::domain::dust::{
     DustNullifier, QualifiedDustOutput,
 };
 
-/// Storage operations needed for processing DUST events.
+/// Processed DUST events ready for persistence.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DustEventStorageOperations {
-    pub generation_saves: Vec<GenerationSave>,
-    pub utxo_saves: Vec<UtxoSave>,
-    pub tree_updates: Vec<TreeUpdate>,
-    pub spent_marks: Vec<SpentMark>,
-    pub dtime_update: Option<DtimeUpdate>,
+pub struct ProcessedDustEvents {
+    pub generations: Vec<DustGeneration>,
+    pub utxos: Vec<DustUtxo>,
+    pub merkle_tree_updates: Vec<DustMerkleTreeUpdate>,
+    pub spends: Vec<DustSpend>,
+    pub dtime_update: Option<DustDtimeUpdate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GenerationSave {
+pub struct DustGeneration {
     pub generation_info: DustGenerationInfo,
     pub generation_index: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UtxoSave {
+pub struct DustUtxo {
     pub output: QualifiedDustOutput,
     pub generation_info_id: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TreeUpdate {
+pub struct DustMerkleTreeUpdate {
     pub generation_index: u64,
     pub merkle_path: Vec<DustMerklePathEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SpentMark {
+pub struct DustSpend {
     pub commitment: DustCommitment,
     pub nullifier: DustNullifier,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DtimeUpdate {
+pub struct DustDtimeUpdate {
     pub dtime: u64,
     pub generation_index: u64,
 }
 
-/// Process DUST events and determine what storage operations are needed.
-/// This processing happens in the domain layer before storage is involved.
-pub fn process_dust_events(dust_events: &[DustEvent]) -> DustEventStorageOperations {
-    let mut operations = DustEventStorageOperations {
-        generation_saves: Vec::new(),
-        utxo_saves: Vec::new(),
-        tree_updates: Vec::new(),
-        spent_marks: Vec::new(),
+/// Process DUST events into domain objects.
+/// This processing happens in the domain layer.
+pub fn process_dust_events(dust_events: &[DustEvent]) -> ProcessedDustEvents {
+    let mut result = ProcessedDustEvents {
+        generations: Vec::new(),
+        utxos: Vec::new(),
+        merkle_tree_updates: Vec::new(),
+        spends: Vec::new(),
         dtime_update: None,
     };
 
@@ -76,12 +76,12 @@ pub fn process_dust_events(dust_events: &[DustEvent]) -> DustEventStorageOperati
                 generation_info,
                 generation_index,
             } => {
-                operations.generation_saves.push(GenerationSave {
+                result.generations.push(DustGeneration {
                     generation_info: *generation_info,
                     generation_index: *generation_index,
                 });
                 // Note: generation_info_id will be determined during storage.
-                operations.utxo_saves.push(UtxoSave {
+                result.utxos.push(DustUtxo {
                     output: *output,
                     generation_info_id: 0, // Placeholder, will be set during actual save.
                 });
@@ -93,7 +93,7 @@ pub fn process_dust_events(dust_events: &[DustEvent]) -> DustEventStorageOperati
                 merkle_path,
             } => {
                 generation_dtime_and_index = Some((generation_info.dtime, *generation_index));
-                operations.tree_updates.push(TreeUpdate {
+                result.merkle_tree_updates.push(DustMerkleTreeUpdate {
                     generation_index: *generation_index,
                     merkle_path: merkle_path.clone(),
                 });
@@ -104,7 +104,7 @@ pub fn process_dust_events(dust_events: &[DustEvent]) -> DustEventStorageOperati
                 nullifier,
                 ..
             } => {
-                operations.spent_marks.push(SpentMark {
+                result.spends.push(DustSpend {
                     commitment: *commitment,
                     nullifier: *nullifier,
                 });
@@ -121,11 +121,11 @@ pub fn process_dust_events(dust_events: &[DustEvent]) -> DustEventStorageOperati
     }
 
     if let Some((dtime, index)) = generation_dtime_and_index {
-        operations.dtime_update = Some(DtimeUpdate {
+        result.dtime_update = Some(DustDtimeUpdate {
             dtime,
             generation_index: index,
         });
     }
 
-    operations
+    result
 }

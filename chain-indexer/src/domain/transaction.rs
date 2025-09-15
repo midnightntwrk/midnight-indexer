@@ -11,9 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{
-    ContractAction, dust::DustEvent, dust_processing::DustEventStorageOperations, node,
-};
+use crate::domain::{ContractAction, dust::DustEvent, dust_processing::ProcessedDustEvents, node};
 use indexer_common::domain::{
     ByteArray, ByteVec, DustCommitment, DustNonce, DustNullifier, DustOwner, NightUtxoNonce,
     ProtocolVersion,
@@ -109,7 +107,7 @@ pub struct RegularTransaction {
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub dust_events: Vec<DustEvent>,
-    pub dust_operations: DustEventStorageOperations,
+    pub dust_operations: ProcessedDustEvents,
 }
 
 impl From<node::RegularTransaction> for RegularTransaction {
@@ -129,11 +127,11 @@ impl From<node::RegularTransaction> for RegularTransaction {
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
             dust_events: Vec::default(),
-            dust_operations: DustEventStorageOperations {
-                generation_saves: Vec::new(),
-                utxo_saves: Vec::new(),
-                tree_updates: Vec::new(),
-                spent_marks: Vec::new(),
+            dust_operations: ProcessedDustEvents {
+                generations: Vec::new(),
+                utxos: Vec::new(),
+                merkle_tree_updates: Vec::new(),
+                spends: Vec::new(),
                 dtime_update: None,
             },
         }
@@ -147,7 +145,7 @@ pub struct SystemTransaction {
     pub raw: SerializedTransaction,
     // DUST events from system transactions (e.g., CNightGeneratesDustUpdate).
     pub dust_events: Vec<DustEvent>,
-    pub dust_operations: DustEventStorageOperations,
+    pub dust_operations: ProcessedDustEvents,
     // Additional processed data from system transactions.
     pub reserve_distribution: Option<u128>,
     pub parameter_update: Option<SerializedParameterUpdate>,
