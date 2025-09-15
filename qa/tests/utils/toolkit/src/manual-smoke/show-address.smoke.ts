@@ -1,5 +1,4 @@
-// Local-only smoke run for the wrapper (not committed).
-// Run from: ~/midnight-indexer/qa/tests
+// Minimal manual smoke: prints shielded & unshielded addresses for a known seed.
 
 import { showAddress } from "../show-address.ts";
 

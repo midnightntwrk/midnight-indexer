@@ -1,47 +1,18 @@
-export type ChainId = "undeployed" | "nodedev01" | "devnet" | "qanet" | "testnet02";
+// Thin shim over the canonical QA environment module.
+// Keep all env names / network IDs in one place (qa/tests/environment/model.ts).
 
-export interface EnvConfig {
-  // default RPCs (this is overridable)
-  srcUrl: string;      // for toolkit -s
-  destUrl: string;     // for toolkit -d
-  networkId: "undeployed" | "devnet" | "testnet";
-  // container we keep alive for this env (from scripts/toolkit-start)
-  containerName: string;   // e.g. "toolkit-devnet"
-  // optional docker network to join when talking to local node
-  dockerNetwork?: string;  // e.g. "midnight-net" for undeployed
+import {
+  networkIdByEnvName,
+  // EnvironmentName, // available if you need the enum elsewhere
+} from "../../../environment/model.ts";
+
+/**
+ * Union of supported chain IDs:
+ * "undeployed" | "qanet" | "nodedev01" | "devnet" | "testnet" | "testnet02"
+ */
+export type ChainId = keyof typeof networkIdByEnvName;
+
+/** Resolve Midnight network label ("Undeployed" | "Devnet" | "Testnet") from a chain id. */
+export function getNetworkId(chain: ChainId): string {
+  return networkIdByEnvName[chain];
 }
-
-export const ENV: Record<ChainId, EnvConfig> = {
-  undeployed: {
-    // use container-to-container hostname, not localhost
-    srcUrl:  "ws://midnight-node:9944",
-    destUrl: "ws://midnight-node:9944",
-    networkId: "undeployed",
-    containerName: "toolkit-undeployed",
-    dockerNetwork: "midnight-net",
-  },
-  nodedev01: {
-    srcUrl:  "wss://rpc.node-dev-01.dev.midnight.network",
-    destUrl: "wss://rpc.node-dev-01.dev.midnight.network",
-    networkId: "devnet",
-    containerName: "toolkit-nodedev01",
-  },
-  devnet: {
-    srcUrl:  "wss://rpc.devnet.midnight.network",
-    destUrl: "wss://rpc.devnet.midnight.network",
-    networkId: "devnet",
-    containerName: "toolkit-devnet",
-  },
-  qanet: {
-    srcUrl:  "wss://rpc.qanet.dev.midnight.network",
-    destUrl: "wss://rpc.qanet.dev.midnight.network",
-    networkId: "devnet",
-    containerName: "toolkit-qanet",
-  },
-  testnet02: {
-    srcUrl:  "wss://rpc.testnet02.midnight.network",
-    destUrl: "wss://rpc.testnet02.midnight.network",
-    networkId: "testnet",
-    containerName: "toolkit-testnet02",
-  },
-};
