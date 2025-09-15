@@ -19,7 +19,7 @@ export async function showAddress({
   seed,
   image = 'ghcr.io/midnight-ntwrk/midnight-node-toolkit:latest',
 }: ShowAddressParams): Promise<string> {
-  const networkId = getNetworkId(chain);
+  const networkId = 'undeployed';
 
   // ENTRYPOINT of the image is the binary, so we pass subcommand + args only
   const cmd = ['show-address', '--network', networkId, `--${addressType}`, '--seed', seed];
