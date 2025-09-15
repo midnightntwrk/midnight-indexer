@@ -20,7 +20,15 @@ import { showAddress } from '@utils/toolkit/src/show-address';
 
 // To run: yarn test e2e
 describe('mn-toolkit', () => {
-  test('mn-toolkit test', () => {
-    const address = showAddress('<your params here>');
+  test('mn-toolkit test', async () => {
+    const seed = '0000000000000000000000000000000000000000000000000000000000000001';
+
+    const shielded = await showAddress({
+      chain: 'undeployed',
+      addressType: 'shielded',
+      seed,
+    });
+
+    console.log('Shielded address:', shielded);
   });
 });
