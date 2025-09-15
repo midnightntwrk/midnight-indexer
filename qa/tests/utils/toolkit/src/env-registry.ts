@@ -4,7 +4,7 @@
 import {
   networkIdByEnvName,
   // EnvironmentName, // available if you need the enum elsewhere
-} from "../../../environment/model.ts";
+} from '../../../environment/model.ts';
 
 /**
  * Union of supported chain IDs:
