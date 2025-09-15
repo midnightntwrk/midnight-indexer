@@ -17,5 +17,9 @@
 - Keep the adapter implementation swappable (initially Testcontainers) behind a stable TS interface.
 - Use correct URLs per env (note: for `undeployed`, prefer container hostname, not localhost).
 
-
+**Show-address**
+- Wraps: `midnight-node-toolkit show-address`
+- Params: chain: `undeployed` | `nodedev01` | `devnet` | `qanet` | `testnet02`, addressType: `shielded` | `unshielded`, seed: 64-hex string
+- Does not require a running node; uses network ID from `env-registry.ts`.
+- Runs via Testcontainers (ephemeral).
 
