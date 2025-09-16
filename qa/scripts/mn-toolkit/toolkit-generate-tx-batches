@@ -1,0 +1,78 @@
+#!/bin/bash
+
+set -e
+
+# Check if the script is executed from the root directory
+if [ ! -f "justfile" ]; then
+    echo "Error: This script must be executed from the root directory of the project"
+    exit 1
+fi
+
+# This is not ideal, NODE_TAG to use depends on the specific chain where node might be running
+# with another version
+NODE_TAG=`cat justfile |grep "node_version :="|awk -F " " '{print $3}'|sed s/\"//g` 
+NODE_TAG="0.13.2-rc.2"
+
+CHAIN=$1
+if [ -z "$CHAIN" ]; then
+    echo "Please provide a chain id"
+    echo "Usage: $0 <chain_id> <seed>"
+    exit 1
+fi
+if [ "$CHAIN" != "undeployed" ] && [ "$CHAIN" != "devnet" ] && [ "$CHAIN" != "testnet02" ] && [ "$CHAIN" != "nodedev01" ]; then
+    echo "Please provide a valid chain id (undeployed, devnet, testnet02, nodedev01)"
+    echo "Usage: $0 <chain_id> <seed>"
+    exit 1
+fi
+
+#Switch case for the chain id
+case $CHAIN in
+    "undeployed")
+        CHAIN_URL="ws://locahost:9935"
+        ;;
+    "devnet")
+        CHAIN_URL="wss://rpc.devnet.midnight.network"
+        ;;
+    "testnet02")
+        CHAIN_URL="wss://rpc.testnet02.midnight.network"
+        ;;
+    "qanet")
+        CHAIN_URL="wss://rpc.qanet.dev.midnight.network"
+        ;;
+    "nodedev01")
+        CHAIN_URL="wss://rpc.node-dev-01.dev.midnight.network"
+        ;;
+esac
+
+SEED=$2
+if [ -z "$SEED" ]; then
+    echo "Please provide a seed"
+    echo "Usage: $0 <chain_id> <seed>"
+    exit 1
+fi
+
+TARGET_DIR=/tmp/toolkit
+
+mkdir -p $TARGET_DIR
+mkdir -p $TARGET_DIR/.sync_cache-$CHAIN
+
+docker run \
+    --rm \
+    --name toolkit-generate-txs-for-$CHAIN \
+    --network host \
+    -v /tmp/toolkit:/out \
+    -v /tmp/toolkit/.sync_cache-$CHAIN:/.sync_cache \
+    ghcr.io/midnight-ntwrk/midnight-node-toolkit:$NODE_TAG \
+    generate-txs \
+    --src-url $CHAIN_URL \
+    --dest-url $CHAIN_URL  \
+    batches -n 2 -b 20 \
+    --funding-seed "$SEED"
+
+
+
+
+
+
+
+
