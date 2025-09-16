@@ -11,7 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, BlockTransactions, Transaction, node::BlockInfo};
+use crate::domain::{
+    Block, BlockTransactions, DustRegistrationEvent, Transaction, node::BlockInfo,
+};
 
 /// Storage abstraction.
 #[trait_variant::make(Send)]
@@ -39,5 +41,6 @@ where
         &self,
         block: &Block,
         transactions: &[Transaction],
+        dust_registration_events: &[DustRegistrationEvent],
     ) -> Result<Option<u64>, sqlx::Error>;
 }

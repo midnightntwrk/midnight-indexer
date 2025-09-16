@@ -15,7 +15,7 @@
 
 use crate::{
     domain,
-    infra::api::{AsBytesExt, HexDecodeError, HexEncoded},
+    infra::api::v1::{AsBytesExt, HexDecodeError, HexEncoded},
 };
 use async_graphql::{Enum, InputObject, SimpleObject, Union};
 use serde::{Deserialize, Serialize};
@@ -113,6 +113,27 @@ impl From<DustMerkleTreeType> for domain::dust::DustMerkleTreeType {
     }
 }
 
+/// Merkle tree path entry for DUST trees.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustMerklePathEntry {
+    /// The hash of the sibling at this level (if available).
+    pub sibling_hash: Option<HexEncoded>,
+
+    /// Whether the path goes left at this level.
+    pub goes_left: bool,
+}
+
+impl From<indexer_common::domain::dust::DustMerklePathEntry> for DustMerklePathEntry {
+    fn from(entry: indexer_common::domain::dust::DustMerklePathEntry) -> Self {
+        Self {
+            sibling_hash: entry
+                .sibling_hash
+                .map(|bytes| HexEncoded(const_hex::encode(bytes))),
+            goes_left: entry.goes_left,
+        }
+    }
+}
+
 /// DUST generation event union type.
 #[derive(Debug, Clone, Union, Serialize, Deserialize)]
 pub enum DustGenerationEvent {
@@ -174,6 +195,9 @@ pub struct DustGenerationMerkleUpdate {
 
     /// Block height of update.
     pub block_height: u32,
+
+    /// Merkle tree path (if available from dtime update).
+    pub merkle_path: Option<Vec<DustMerklePathEntry>>,
 }
 
 impl From<domain::dust::DustGenerationMerkleUpdate> for DustGenerationMerkleUpdate {
@@ -182,12 +206,14 @@ impl From<domain::dust::DustGenerationMerkleUpdate> for DustGenerationMerkleUpda
             index,
             collapsed_update,
             block_height,
+            merkle_path,
         } = update;
 
         Self {
             index,
             collapsed_update: collapsed_update.hex_encode(),
             block_height,
+            merkle_path: merkle_path.map(|path| path.into_iter().map(Into::into).collect()),
         }
     }
 }
@@ -320,6 +346,9 @@ pub struct DustCommitmentMerkleUpdate {
 
     /// Block height of update.
     pub block_height: u32,
+
+    /// Merkle tree path (if available).
+    pub merkle_path: Option<Vec<DustMerklePathEntry>>,
 }
 
 impl From<domain::dust::DustCommitmentMerkleUpdate> for DustCommitmentMerkleUpdate {
@@ -328,6 +357,9 @@ impl From<domain::dust::DustCommitmentMerkleUpdate> for DustCommitmentMerkleUpda
             index: update.index,
             collapsed_update: update.collapsed_update.hex_encode(),
             block_height: update.block_height,
+            merkle_path: update
+                .merkle_path
+                .map(|path| path.into_iter().map(Into::into).collect()),
         }
     }
 }
@@ -483,4 +515,338 @@ pub struct RegistrationUpdateProgress {
 
     /// Number of updates in batch.
     pub update_count: u32,
+}
+
+/// DUST event from chain processing.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustEvent {
+    /// Transaction hash containing this event.
+    pub transaction_hash: HexEncoded,
+
+    /// Logical segment within transaction.
+    pub logical_segment: u16,
+
+    /// Physical segment within transaction.
+    pub physical_segment: u16,
+
+    /// Event type.
+    pub event_type: DustEventType,
+
+    /// Event details.
+    pub event_details: DustEventDetails,
+}
+
+/// Type of DUST event.
+#[derive(Debug, Clone, Copy, Enum, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DustEventType {
+    /// Initial DUST UTXO creation.
+    DustInitialUtxo,
+
+    /// DUST generation time update.
+    DustGenerationDtimeUpdate,
+
+    /// DUST spend processed.
+    DustSpendProcessed,
+
+    /// Registration event.
+    DustRegistration,
+
+    /// Deregistration event.
+    DustDeregistration,
+
+    /// Mapping added event.
+    DustMappingAdded,
+
+    /// Mapping removed event.
+    DustMappingRemoved,
+}
+
+impl From<DustEventType> for indexer_common::domain::dust::DustEventType {
+    fn from(event_type: DustEventType) -> Self {
+        match event_type {
+            DustEventType::DustInitialUtxo => Self::DustInitialUtxo,
+            DustEventType::DustGenerationDtimeUpdate => Self::DustGenerationDtimeUpdate,
+            DustEventType::DustSpendProcessed => Self::DustSpendProcessed,
+            DustEventType::DustRegistration => Self::DustRegistration,
+            DustEventType::DustDeregistration => Self::DustDeregistration,
+            DustEventType::DustMappingAdded => Self::DustMappingAdded,
+            DustEventType::DustMappingRemoved => Self::DustMappingRemoved,
+        }
+    }
+}
+
+/// DUST event details union.
+#[derive(Debug, Clone, Union, Serialize, Deserialize)]
+pub enum DustEventDetails {
+    /// Initial DUST UTXO creation.
+    InitialUtxo(DustInitialUtxoDetails),
+
+    /// DUST generation time update.
+    GenerationDtimeUpdate(DustGenerationDtimeUpdateDetails),
+
+    /// DUST spend processed.
+    SpendProcessed(DustSpendProcessedDetails),
+
+    /// Registration event.
+    Registration(DustRegistrationDetails),
+
+    /// Deregistration event.
+    Deregistration(DustDeregistrationDetails),
+
+    /// Mapping added event.
+    MappingAdded(DustMappingAddedDetails),
+
+    /// Mapping removed event.
+    MappingRemoved(DustMappingRemovedDetails),
+}
+
+/// Details for initial DUST UTXO creation.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustInitialUtxoDetails {
+    /// Initial value.
+    pub initial_value: String,
+
+    /// Owner's DUST public key.
+    pub owner: HexEncoded,
+
+    /// Nonce.
+    pub nonce: HexEncoded,
+
+    /// Sequence number.
+    pub seq: u32,
+
+    /// Creation time.
+    pub ctime: u64,
+
+    /// Backing Night UTXO nonce.
+    pub backing_night: HexEncoded,
+
+    /// Merkle tree index.
+    pub mt_index: u64,
+
+    /// Generation info.
+    pub generation_info: DustGenerationInfo,
+
+    /// Generation index.
+    pub generation_index: u64,
+}
+
+/// Details for DUST generation time update.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustGenerationDtimeUpdateDetails {
+    /// Updated generation info.
+    pub generation_info: DustGenerationInfo,
+
+    /// Generation index.
+    pub generation_index: u64,
+
+    /// Merkle tree path (if available from the ledger).
+    pub merkle_path: Option<Vec<DustMerklePathEntry>>,
+}
+
+/// Details for DUST spend processed.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustSpendProcessedDetails {
+    /// DUST commitment.
+    pub commitment: HexEncoded,
+
+    /// Commitment index.
+    pub commitment_index: u64,
+
+    /// DUST nullifier.
+    pub nullifier: HexEncoded,
+
+    /// Fee amount.
+    pub v_fee: String,
+
+    /// Timestamp.
+    pub time: u64,
+
+    /// DUST parameters.
+    pub params: DustParametersInfo,
+}
+
+/// DUST parameters information.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustParametersInfo {
+    /// Night to DUST ratio.
+    pub night_dust_ratio: u64,
+
+    /// Generation decay rate.
+    pub generation_decay_rate: u32,
+
+    /// DUST grace period in seconds.
+    pub dust_grace_period: u64,
+}
+
+/// Details for DUST registration event.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustRegistrationDetails {
+    /// Cardano stake key address.
+    pub cardano_address: HexEncoded,
+
+    /// DUST address.
+    pub dust_address: HexEncoded,
+}
+
+/// Details for DUST deregistration event.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustDeregistrationDetails {
+    /// Cardano stake key address.
+    pub cardano_address: HexEncoded,
+
+    /// DUST address.
+    pub dust_address: HexEncoded,
+}
+
+/// Details for DUST mapping added event.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustMappingAddedDetails {
+    /// Cardano stake key address.
+    pub cardano_address: HexEncoded,
+
+    /// DUST address.
+    pub dust_address: HexEncoded,
+
+    /// UTXO identifier.
+    pub utxo_id: HexEncoded,
+}
+
+/// Details for DUST mapping removed event.
+#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+pub struct DustMappingRemovedDetails {
+    /// Cardano stake key address.
+    pub cardano_address: HexEncoded,
+
+    /// DUST address.
+    pub dust_address: HexEncoded,
+
+    /// UTXO identifier.
+    pub utxo_id: HexEncoded,
+}
+
+impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
+    fn from(event: indexer_common::domain::dust::DustEvent) -> Self {
+        use indexer_common::domain::dust::DustEventDetails as DomainDetails;
+
+        let event_type = match &event.event_details {
+            DomainDetails::DustInitialUtxo { .. } => DustEventType::DustInitialUtxo,
+            DomainDetails::DustGenerationDtimeUpdate { .. } => {
+                DustEventType::DustGenerationDtimeUpdate
+            }
+            DomainDetails::DustSpendProcessed { .. } => DustEventType::DustSpendProcessed,
+            DomainDetails::DustRegistration { .. } => DustEventType::DustRegistration,
+            DomainDetails::DustDeregistration { .. } => DustEventType::DustDeregistration,
+            DomainDetails::DustMappingAdded { .. } => DustEventType::DustMappingAdded,
+            DomainDetails::DustMappingRemoved { .. } => DustEventType::DustMappingRemoved,
+        };
+
+        let event_details = match event.event_details {
+            DomainDetails::DustInitialUtxo {
+                output,
+                generation_info,
+                generation_index,
+            } => DustEventDetails::InitialUtxo(DustInitialUtxoDetails {
+                initial_value: output.initial_value.to_string(),
+                owner: output.owner.hex_encode(),
+                nonce: output.nonce.hex_encode(),
+                seq: output.seq,
+                ctime: output.ctime,
+                backing_night: output.backing_night.hex_encode(),
+                mt_index: output.mt_index,
+                generation_info: DustGenerationInfo {
+                    night_utxo_hash: generation_info.night_utxo_hash.hex_encode(),
+                    value: generation_info.value.to_string(),
+                    owner: generation_info.owner.hex_encode(),
+                    nonce: generation_info.nonce.hex_encode(),
+                    ctime: generation_info.ctime,
+                    // u64::MAX represents "never destroyed" - convert to None for GraphQL
+                    dtime: (generation_info.dtime != u64::MAX).then_some(generation_info.dtime),
+                    merkle_index: generation_index,
+                },
+                generation_index,
+            }),
+            DomainDetails::DustGenerationDtimeUpdate {
+                generation_info,
+                generation_index,
+                merkle_path,
+            } => DustEventDetails::GenerationDtimeUpdate(DustGenerationDtimeUpdateDetails {
+                generation_info: DustGenerationInfo {
+                    night_utxo_hash: generation_info.night_utxo_hash.hex_encode(),
+                    value: generation_info.value.to_string(),
+                    owner: generation_info.owner.hex_encode(),
+                    nonce: generation_info.nonce.hex_encode(),
+                    ctime: generation_info.ctime,
+                    // u64::MAX represents "never destroyed" - convert to None for GraphQL
+                    dtime: (generation_info.dtime != u64::MAX).then_some(generation_info.dtime),
+                    merkle_index: generation_index,
+                },
+                generation_index,
+                merkle_path: if merkle_path.is_empty() {
+                    None
+                } else {
+                    Some(merkle_path.into_iter().map(Into::into).collect())
+                },
+            }),
+            DomainDetails::DustSpendProcessed {
+                commitment,
+                commitment_index,
+                nullifier,
+                v_fee,
+                time,
+                params,
+            } => DustEventDetails::SpendProcessed(DustSpendProcessedDetails {
+                commitment: commitment.hex_encode(),
+                commitment_index,
+                nullifier: nullifier.hex_encode(),
+                v_fee: v_fee.to_string(),
+                time,
+                params: DustParametersInfo {
+                    night_dust_ratio: params.night_dust_ratio,
+                    generation_decay_rate: params.generation_decay_rate,
+                    dust_grace_period: params.dust_grace_period,
+                },
+            }),
+            DomainDetails::DustRegistration {
+                cardano_address,
+                dust_address,
+            } => DustEventDetails::Registration(DustRegistrationDetails {
+                cardano_address: cardano_address.hex_encode(),
+                dust_address: dust_address.hex_encode(),
+            }),
+            DomainDetails::DustDeregistration {
+                cardano_address,
+                dust_address,
+            } => DustEventDetails::Deregistration(DustDeregistrationDetails {
+                cardano_address: cardano_address.hex_encode(),
+                dust_address: dust_address.hex_encode(),
+            }),
+            DomainDetails::DustMappingAdded {
+                cardano_address,
+                dust_address,
+                utxo_id,
+            } => DustEventDetails::MappingAdded(DustMappingAddedDetails {
+                cardano_address: cardano_address.hex_encode(),
+                dust_address: dust_address.hex_encode(),
+                utxo_id: utxo_id.hex_encode(),
+            }),
+            DomainDetails::DustMappingRemoved {
+                cardano_address,
+                dust_address,
+                utxo_id,
+            } => DustEventDetails::MappingRemoved(DustMappingRemovedDetails {
+                cardano_address: cardano_address.hex_encode(),
+                dust_address: dust_address.hex_encode(),
+                utxo_id: utxo_id.hex_encode(),
+            }),
+        };
+
+        Self {
+            transaction_hash: event.transaction_hash.hex_encode(),
+            logical_segment: event.logical_segment,
+            physical_segment: event.physical_segment,
+            event_type,
+            event_details,
+        }
+    }
 }

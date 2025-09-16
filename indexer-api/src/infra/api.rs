@@ -20,6 +20,7 @@ use axum::{
     body::Body,
     extract::State,
     http::StatusCode,
+    middleware,
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -33,7 +34,6 @@ use log::{error, info, warn};
 use metrics::{Gauge, gauge};
 use serde::Deserialize;
 use std::{
-    convert::Infallible,
     error::Error as StdError,
     fmt::{self, Display},
     io,
@@ -48,7 +48,6 @@ use tokio::{
     net::TcpListener,
     signal::unix::{SignalKind, signal},
 };
-use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
 
 /// Attention: This could change if the used libraries change!
@@ -181,19 +180,20 @@ where
         max_depth,
     );
 
+    // Note: Layer order is important - they execute from bottom to top.
+    // Previously used nested ServiceBuilder composition, but after storage trait
+    // was split into 6 separate traits (commit dde1b16), Rust's type inference
+    // couldn't handle the complexity with multiple trait bounds. Direct layer
+    // application resolved the type inference issues while maintaining all
+    // functionality including proper 413 status code handling for oversized requests.
     Router::new()
         .route("/ready", get(ready))
         .nest("/api/v1", v1_app)
         .with_state(caught_up)
-        .layer(
-            ServiceBuilder::new().layer(
-                ServiceBuilder::new()
-                    .layer(FastraceLayer)
-                    .layer(RequestBodyLimitLayer::new(request_body_limit))
-                    .layer(CorsLayer::permissive())
-                    .and_then(transform_lentgh_limit_exceeded),
-            ),
-        )
+        .layer(middleware::from_fn(transform_lentgh_limit_exceeded))
+        .layer(CorsLayer::permissive())
+        .layer(RequestBodyLimitLayer::new(request_body_limit))
+        .layer(FastraceLayer)
 }
 
 async fn ready(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
@@ -211,26 +211,28 @@ async fn ready(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
 /// This is a workaround for async-graphql swallowing `LengthLimitError`s returned by the
 /// `RequestBodyLimitLayer` for requests that are too large but do not expose that via the
 /// `Content-Length` header which results in responses with status code 400 instead of 413.
-async fn transform_lentgh_limit_exceeded(response: Response<Body>) -> Result<Response, Infallible> {
+async fn transform_lentgh_limit_exceeded(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response<Body> {
+    let response = next.run(request).await;
+
     if response.status() == StatusCode::BAD_REQUEST {
         let (mut head, body) = response.into_parts();
 
         let Ok(bytes) = axum::body::to_bytes(body, LENGTH_LIMIT_EXCEEDED_BODY.len()).await else {
             warn!("cannot consume response body");
-            return Ok(Response::from_parts(head, Body::empty()));
+            return Response::from_parts(head, Body::empty());
         };
 
         if &*bytes == LENGTH_LIMIT_EXCEEDED_BODY {
             head.status = StatusCode::PAYLOAD_TOO_LARGE;
-            Ok(Response::from_parts(
-                head,
-                Body::from("length limit exceeded"),
-            ))
+            Response::from_parts(head, Body::from("length limit exceeded"))
         } else {
-            Ok(Response::from_parts(head, Body::from(bytes)))
+            Response::from_parts(head, Body::from(bytes))
         }
     } else {
-        Ok::<_, Infallible>(response)
+        response
     }
 }
 
@@ -370,16 +372,6 @@ enum ApiError {
 
     /// An internal server error.
     Server(InnerApiError),
-}
-
-impl ApiError {
-    /// Create a client error with the given message.
-    fn client<S>(message: S) -> Self
-    where
-        S: ToString,
-    {
-        ApiError::Client(InnerApiError(message.to_string(), None))
-    }
 }
 
 /// For client errors, write the full error chain and for server errors, log the full error chain

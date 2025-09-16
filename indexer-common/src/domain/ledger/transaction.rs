@@ -17,6 +17,7 @@ use crate::domain::{
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
+use log::warn;
 use midnight_coin_structure_v6::{
     coin::Info as InfoV6, contract::ContractAddress as ContractAddressV6,
 };
@@ -281,6 +282,56 @@ impl SystemTransaction {
             Self::V6(transaction) => transaction.transaction_hash().0.0.into(),
         }
     }
+
+    /// Extract metadata from the system transaction.
+    pub fn extract_metadata(&self, tx_hash: &TransactionHash) -> SystemTransactionMetadata {
+        match self {
+            Self::V6(transaction) => extract_metadata_v6(transaction, tx_hash),
+        }
+    }
+}
+
+/// Metadata extracted from a system transaction.
+#[derive(Debug, Clone)]
+pub struct SystemTransactionMetadata {
+    pub reserve_distribution: Option<u128>,
+    pub parameter_update: Option<ParameterUpdate>,
+    pub night_distribution: Option<NightDistribution>,
+    pub treasury_income: Option<(u128, String)>,
+    pub treasury_payment_shielded: Option<ShieldedTreasuryPayment>,
+    pub treasury_payment_unshielded: Option<UnshieldedTreasuryPayment>,
+}
+
+/// Parameter update data from system transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ParameterUpdate {
+    pub night_dust_ratio: u64,
+    pub generation_decay_rate: u32,
+    pub dust_grace_period_seconds: u64,
+}
+
+/// Night distribution data from system transaction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NightDistribution {
+    pub claim_type: String,
+    pub output_count: usize,
+    pub total_amount: u128,
+}
+
+/// Shielded treasury payment data from system transaction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ShieldedTreasuryPayment {
+    pub output_count: usize,
+    pub nonce: Vec<u8>,
+    pub token_type: String,
+}
+
+/// Treasury payment unshielded data from system transaction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UnshieldedTreasuryPayment {
+    pub output_count: usize,
+    pub total_amount: u128,
+    pub token_type: String,
 }
 
 fn serialize_contract_address(
@@ -300,6 +351,91 @@ fn can_decrypt_v6(key: &SecretKeyV6, offer: &OfferV6<ProofV6, DefaultDBV6>) -> b
         key.decrypt::<InfoV6>(&(*ciphertext).to_owned().into())
             .is_some()
     })
+}
+
+fn extract_metadata_v6(
+    ledger_tx: &LedgerSystemTransactionV6,
+    tx_hash: &TransactionHash,
+) -> SystemTransactionMetadata {
+    let mut reserve_distribution = Default::default();
+    let mut parameter_update = Default::default();
+    let mut night_distribution = Default::default();
+    let mut treasury_income = Default::default();
+    let mut treasury_payment_shielded = Default::default();
+    let mut treasury_payment_unshielded = Default::default();
+
+    match ledger_tx {
+        LedgerSystemTransactionV6::CNightGeneratesDustUpdate { .. } => {
+            // DUST events will be extracted during ledger state application:
+            // 1. indexer-common/ledger_state.rs::apply_system_transaction() extracts events
+            // 2. chain-indexer/ledger_state.rs::apply_system_node_transaction() processes them
+            // This maintains consistency with regular transaction processing where
+            // DUST events only come from ledger state application, not metadata.
+        }
+
+        LedgerSystemTransactionV6::DistributeReserve(amount) => {
+            reserve_distribution = Some(*amount);
+        }
+
+        LedgerSystemTransactionV6::OverwriteParameters(params) => {
+            parameter_update = Some(ParameterUpdate {
+                night_dust_ratio: params.dust.night_dust_ratio,
+                generation_decay_rate: params.dust.generation_decay_rate,
+                dust_grace_period_seconds: params.dust.dust_grace_period.as_seconds() as u64,
+            });
+        }
+
+        LedgerSystemTransactionV6::DistributeNight(claim_kind, outputs) => {
+            let total: u128 = outputs.iter().map(|o| o.amount).sum();
+            night_distribution = Some(NightDistribution {
+                claim_type: format!("{claim_kind:?}"),
+                output_count: outputs.len(),
+                total_amount: total,
+            });
+        }
+
+        LedgerSystemTransactionV6::PayBlockRewardsToTreasury { amount } => {
+            treasury_income = Some((*amount, "block_rewards".to_string()));
+        }
+
+        LedgerSystemTransactionV6::PayFromTreasuryShielded {
+            outputs,
+            nonce,
+            token_type,
+        } => {
+            treasury_payment_shielded = Some(ShieldedTreasuryPayment {
+                output_count: outputs.len(),
+                nonce: nonce.0.to_vec(),
+                token_type: format!("{token_type:?}"),
+            });
+        }
+
+        LedgerSystemTransactionV6::PayFromTreasuryUnshielded {
+            outputs,
+            token_type,
+        } => {
+            let total = outputs.iter().map(|o| o.amount).sum();
+            treasury_payment_unshielded = Some(UnshieldedTreasuryPayment {
+                output_count: outputs.len(),
+                total_amount: total,
+                token_type: format!("{token_type:?}"),
+            });
+        }
+
+        // LedgerSystemTransactionV6 is non-exhaustive]!
+        other => {
+            warn!(tx_hash:%, other:?; "unknown system transaction variant");
+        }
+    }
+
+    SystemTransactionMetadata {
+        reserve_distribution,
+        parameter_update,
+        night_distribution,
+        treasury_income,
+        treasury_payment_shielded,
+        treasury_payment_unshielded,
+    }
 }
 
 #[cfg(test)]

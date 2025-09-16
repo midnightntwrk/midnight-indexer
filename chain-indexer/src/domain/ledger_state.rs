@@ -11,7 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{RegularTransaction, SystemTransaction, Transaction, TransactionVariant, node};
+use crate::domain::{
+    RegularTransaction, SystemTransaction, Transaction, TransactionVariant,
+    dust::extract_dust_operations, node,
+};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
@@ -53,6 +56,8 @@ impl LedgerState {
                         block_parent_hash,
                         block_timestamp,
                     )?;
+                    // DUST events and UTXOs are already stored in the ledger state.
+                    // and don't need to be processed here when replaying stored transactions.
                 }
 
                 TransactionVariant::System => {
@@ -126,15 +131,19 @@ impl LedgerState {
 
         // Apply transaction and set start and end indices; end index is exclusive!
         transaction.start_index = self.zswap_first_free();
-        let (transaction_result, created_unshielded_utxos, spent_unshielded_utxos) =
+        let result =
             self.apply_regular_transaction(&transaction.raw, block_parent_hash, block_timestamp)?;
         transaction.end_index = self.zswap_first_free();
 
         // Update transaction.
-        transaction.transaction_result = transaction_result;
+        transaction.transaction_result = result.transaction_result;
+        transaction.dust_events = result.dust_events;
         transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize()?;
-        transaction.created_unshielded_utxos = created_unshielded_utxos;
-        transaction.spent_unshielded_utxos = spent_unshielded_utxos;
+        transaction.created_unshielded_utxos = result.created_unshielded_utxos;
+        transaction.spent_unshielded_utxos = result.spent_unshielded_utxos;
+
+        // Extract operations from DUST events (dust.rs::extract_dust_operations).
+        transaction.processed_dust_events = extract_dust_operations(&transaction.dust_events);
         if transaction.end_index > transaction.start_index {
             for contract_action in transaction.contract_actions.iter_mut() {
                 let zswap_state = self.extract_contract_zswap_state(&contract_action.address)?;
@@ -150,7 +159,7 @@ impl LedgerState {
             contract_action.extracted_balances = balances;
         }
 
-        Ok(Transaction::Regular(transaction))
+        Ok(Transaction::Regular(Box::new(transaction)))
     }
 
     #[trace(properties = {
@@ -163,11 +172,20 @@ impl LedgerState {
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
     ) -> Result<Transaction, Error> {
-        let transaction = SystemTransaction::from(transaction);
+        let mut transaction = SystemTransaction::try_from(transaction)
+            .map_err(|error| Error::ProcessingError(error.to_string()))?;
 
-        self.apply_system_transaction(&transaction.raw, block_timestamp)?;
+        // Apply system transaction and get DUST events from ledger state.
+        // This is the single source of DUST events (from
+        // indexer_common::domain::ledger::LedgerState::apply_system_transaction),
+        // consistent with regular transactions.
+        let dust_events = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
+        transaction.dust_events = dust_events;
 
-        Ok(Transaction::System(transaction))
+        // Extract operations from DUST events (dust.rs::extract_dust_operations).
+        transaction.processed_dust_events = extract_dust_operations(&transaction.dust_events);
+
+        Ok(Transaction::System(Box::new(transaction)))
     }
 }
 
@@ -175,4 +193,7 @@ impl LedgerState {
 pub enum Error {
     #[error("cannot apply transaction")]
     ApplyTransaction(#[from] indexer_common::domain::ledger::Error),
+
+    #[error("cannot process system transaction: {0}")]
+    ProcessingError(String),
 }

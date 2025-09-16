@@ -11,14 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub use crate::domain::{DustCommitment, DustNullifier};
+
 use crate::domain::{
-    DustCommitment, DustNonce, DustNullifier, DustOwner, NightUtxoHash, NightUtxoNonce,
-    TransactionHash,
+    ByteVec, CardanoStakeKey, DustAddress, DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce,
+    ledger::TransactionHash,
 };
 use serde::{Deserialize, Serialize};
 
 /// DUST event for the indexer domain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustEvent {
     pub transaction_hash: TransactionHash,
     pub logical_segment: u16,
@@ -27,7 +29,7 @@ pub struct DustEvent {
 }
 
 /// DUST event details.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DustEventDetails {
     /// Initial DUST UTXO creation.
     DustInitialUtxo {
@@ -45,6 +47,8 @@ pub enum DustEventDetails {
         generation_info: DustGenerationInfo,
         /// Merkle tree index for generation.
         generation_index: u64,
+        /// Merkle tree path for this update.
+        merkle_path: Vec<DustMerklePathEntry>,
     },
 
     /// DUST spend processed.
@@ -62,9 +66,42 @@ pub enum DustEventDetails {
         /// DUST parameters.
         params: DustParameters,
     },
-    // TODO: Registration events will be provided by the node team, not the ledger.
-    // These events will track mappings between Cardano stake keys and DUST addresses.
-    // See PM-17951 for node team's integration work.
+
+    /// Registration event - Cardano address registered with DUST address.
+    DustRegistration {
+        /// Cardano stake key address.
+        cardano_address: CardanoStakeKey,
+        /// DUST address (32 bytes).
+        dust_address: DustAddress,
+    },
+
+    /// Deregistration event - Cardano address deregistered from DUST address.
+    DustDeregistration {
+        /// Cardano stake key address.
+        cardano_address: CardanoStakeKey,
+        /// DUST address (32 bytes).
+        dust_address: DustAddress,
+    },
+
+    /// Mapping added - UTXO mapping added for registration.
+    DustMappingAdded {
+        /// Cardano stake key address.
+        cardano_address: CardanoStakeKey,
+        /// DUST address.
+        dust_address: ByteVec,
+        /// UTXO identifier.
+        utxo_id: ByteVec,
+    },
+
+    /// Mapping removed - UTXO mapping removed for registration.
+    DustMappingRemoved {
+        /// Cardano stake key address.
+        cardano_address: CardanoStakeKey,
+        /// DUST address.
+        dust_address: ByteVec,
+        /// UTXO identifier.
+        utxo_id: ByteVec,
+    },
 }
 
 /// Qualified DUST output information.
@@ -90,6 +127,15 @@ pub struct QualifiedDustOutput {
 
     /// Merkle tree index.
     pub mt_index: u64,
+}
+
+/// Merkle tree path entry for DUST trees.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DustMerklePathEntry {
+    /// The hash of the sibling at this level (if available).
+    pub sibling_hash: Option<Vec<u8>>,
+    /// Whether the path goes left at this level.
+    pub goes_left: bool,
 }
 
 /// DUST generation information.
@@ -127,6 +173,20 @@ pub struct DustParameters {
     pub dust_grace_period: u64,
 }
 
+impl Default for DustParameters {
+    fn default() -> Self {
+        // Initial DUST parameters from the ledger.
+        Self {
+            // 5 DUST per NIGHT.
+            night_dust_ratio: 5_000_000_000,
+            // Works out to a generation time of approximately 1 week.
+            generation_decay_rate: 8_267,
+            // 3 hours in seconds.
+            dust_grace_period: 3 * 60 * 60,
+        }
+    }
+}
+
 /// DUST event type for database storage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "DUST_EVENT_TYPE", rename_all = "PascalCase")]
@@ -139,7 +199,18 @@ pub enum DustEventType {
 
     /// DUST spend processed.
     DustSpendProcessed,
-    // TODO: Registration event type will be added when node team implements registration events.
+
+    /// Registration event.
+    DustRegistration,
+
+    /// Deregistration event.
+    DustDeregistration,
+
+    /// Mapping added event.
+    DustMappingAdded,
+
+    /// Mapping removed event.
+    DustMappingRemoved,
 }
 
 impl From<&DustEventDetails> for DustEventType {
@@ -148,6 +219,10 @@ impl From<&DustEventDetails> for DustEventType {
             DustEventDetails::DustInitialUtxo { .. } => Self::DustInitialUtxo,
             DustEventDetails::DustGenerationDtimeUpdate { .. } => Self::DustGenerationDtimeUpdate,
             DustEventDetails::DustSpendProcessed { .. } => Self::DustSpendProcessed,
+            DustEventDetails::DustRegistration { .. } => Self::DustRegistration,
+            DustEventDetails::DustDeregistration { .. } => Self::DustDeregistration,
+            DustEventDetails::DustMappingAdded { .. } => Self::DustMappingAdded,
+            DustEventDetails::DustMappingRemoved { .. } => Self::DustMappingRemoved,
         }
     }
 }

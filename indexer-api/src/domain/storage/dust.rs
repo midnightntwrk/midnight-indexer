@@ -87,6 +87,41 @@ pub trait DustStorage: BlockStorage {
         &self,
         dust_address: &DustAddress,
     ) -> Result<u32, sqlx::Error>;
+
+    /// Get DUST events by transaction hash.
+    async fn get_dust_events_by_transaction(
+        &self,
+        transaction_hash: indexer_common::domain::ledger::TransactionHash,
+    ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error>;
+
+    /// Get recent DUST events with optional filtering.
+    async fn get_recent_dust_events(
+        &self,
+        limit: u32,
+        event_type: Option<indexer_common::domain::dust::DustEventType>,
+    ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error>;
+
+    /// Get progress information for DUST nullifier transactions.
+    async fn get_dust_nullifier_progress(
+        &self,
+        prefixes: &[DustPrefix],
+        min_prefix_length: u32,
+        from_block: u32,
+    ) -> Result<(u32, u32), sqlx::Error>;
+
+    /// Get progress information for DUST commitments.
+    async fn get_dust_commitment_progress(
+        &self,
+        commitment_prefixes: &[DustPrefix],
+        min_prefix_length: u32,
+        start_index: u64,
+    ) -> Result<(u64, u32), sqlx::Error>;
+
+    /// Get progress information for registration updates.
+    async fn get_registration_progress(
+        &self,
+        addresses: &[RegistrationAddress],
+    ) -> Result<(u64, u32), sqlx::Error>;
 }
 
 #[allow(unused_variables)]
@@ -160,6 +195,46 @@ impl DustStorage for NoopStorage {
         &self,
         dust_address: &DustAddress,
     ) -> Result<u32, sqlx::Error> {
+        unimplemented!("NoopStorage")
+    }
+
+    async fn get_dust_events_by_transaction(
+        &self,
+        transaction_hash: indexer_common::domain::ledger::TransactionHash,
+    ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error> {
+        unimplemented!("NoopStorage")
+    }
+
+    async fn get_recent_dust_events(
+        &self,
+        limit: u32,
+        event_type: Option<indexer_common::domain::dust::DustEventType>,
+    ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error> {
+        unimplemented!("NoopStorage")
+    }
+
+    async fn get_dust_nullifier_progress(
+        &self,
+        prefixes: &[DustPrefix],
+        min_prefix_length: u32,
+        from_block: u32,
+    ) -> Result<(u32, u32), sqlx::Error> {
+        unimplemented!("NoopStorage")
+    }
+
+    async fn get_dust_commitment_progress(
+        &self,
+        commitment_prefixes: &[DustPrefix],
+        min_prefix_length: u32,
+        start_index: u64,
+    ) -> Result<(u64, u32), sqlx::Error> {
+        unimplemented!("NoopStorage")
+    }
+
+    async fn get_registration_progress(
+        &self,
+        addresses: &[RegistrationAddress],
+    ) -> Result<(u64, u32), sqlx::Error> {
         unimplemented!("NoopStorage")
     }
 }

@@ -464,3 +464,249 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
         }
     }
 }
+
+query DustEventsByTransactionQuery($transactionHash: HexEncoded!) {
+    dustEventsByTransaction(transactionHash: $transactionHash) {
+        transactionHash
+        logicalSegment
+        physicalSegment
+        eventType
+        eventDetails {
+            __typename
+            ... on DustInitialUtxoDetails {
+                initialValue
+                owner
+                nonce
+                seq
+                ctime
+                backingNight
+                mtIndex
+                generationInfo {
+                    nightUtxoHash
+                    value
+                    owner
+                    nonce
+                    ctime
+                    dtime
+                    merkleIndex
+                }
+            }
+            __typename
+            ... on DustGenerationDtimeUpdateDetails {
+                generationInfo {
+                    nightUtxoHash
+                    value
+                    owner
+                    nonce
+                    ctime
+                    dtime
+                    merkleIndex
+                }
+            }
+            __typename
+            ... on DustSpendProcessedDetails {
+                commitment
+                nullifier
+                vFee
+                time
+                params {
+                    nightDustRatio
+                    generationDecayRate
+                    dustGracePeriod
+                }
+            }
+        }
+    }
+}
+
+query RecentDustEventsQuery($limit: Int, $eventType: DustEventType) {
+    recentDustEvents(limit: $limit, eventType: $eventType) {
+        transactionHash
+        logicalSegment
+        physicalSegment
+        eventType
+        eventDetails {
+            __typename
+            ... on DustInitialUtxoDetails {
+                initialValue
+                owner
+                nonce
+                seq
+                ctime
+                backingNight
+                mtIndex
+                generationInfo {
+                    nightUtxoHash
+                    value
+                    owner
+                    nonce
+                    ctime
+                    dtime
+                    merkleIndex
+                }
+            }
+            __typename
+            ... on DustGenerationDtimeUpdateDetails {
+                generationInfo {
+                    nightUtxoHash
+                    value
+                    owner
+                    nonce
+                    ctime
+                    dtime
+                    merkleIndex
+                }
+            }
+            __typename
+            ... on DustSpendProcessedDetails {
+                commitment
+                nullifier
+                vFee
+                time
+                params {
+                    nightDustRatio
+                    generationDecayRate
+                    dustGracePeriod
+                }
+            }
+        }
+    }
+}
+
+
+query CurrentDustStateQuery {
+    currentDustState {
+        commitmentTreeRoot
+        generationTreeRoot
+        blockHeight
+        timestamp
+        totalRegistrations
+    }
+}
+
+query DustMerkleRootQuery($treeType: DustMerkleTreeType!, $timestamp: Int!) {
+    dustMerkleRoot(treeType: $treeType, timestamp: $timestamp)
+}
+
+query DustGenerationStatusQuery($cardanoStakeKeys: [HexEncoded!]!) {
+    dustGenerationStatus(cardanoStakeKeys: $cardanoStakeKeys) {
+        cardanoStakeKey
+        dustAddress
+        isRegistered
+        generationRate
+        currentCapacity
+        nightBalance
+    }
+}
+
+subscription DustGenerationsSubscription(
+    $dustAddress: HexEncoded!,
+    $fromGenerationIndex: Int,
+    $fromMerkleIndex: Int,
+    $onlyActive: Boolean
+) {
+    dustGenerations(
+        dustAddress: $dustAddress,
+        fromGenerationIndex: $fromGenerationIndex,
+        fromMerkleIndex: $fromMerkleIndex,
+        onlyActive: $onlyActive
+    ) {
+        __typename
+        ... on DustGenerationInfo {
+            nightUtxoHash
+            value
+            owner
+            nonce
+            dtime
+            merkleIndex
+        }
+        ... on DustGenerationMerkleUpdate {
+            index
+            collapsedUpdate
+            blockHeight
+            merklePath {
+                siblingHash
+                goesLeft
+            }
+        }
+        ... on DustGenerationProgress {
+            highestIndex
+            activeGenerationCount
+        }
+    }
+}
+
+subscription DustNullifierTransactionsSubscription(
+    $prefixes: [HexEncoded!]!,
+    $minPrefixLength: Int!,
+    $fromBlock: Int
+) {
+    dustNullifierTransactions(
+        prefixes: $prefixes,
+        minPrefixLength: $minPrefixLength,
+        fromBlock: $fromBlock
+    ) {
+        __typename
+        ... on DustNullifierTransaction {
+            transactionHash
+            blockHeight
+            matchingNullifierPrefixes
+        }
+        ... on DustNullifierTransactionProgress {
+            highestBlock
+            matchedCount
+        }
+    }
+}
+
+subscription DustCommitmentsSubscription(
+    $commitmentPrefixes: [HexEncoded!]!,
+    $startIndex: Int!,
+    $minPrefixLength: Int!
+) {
+    dustCommitments(
+        commitmentPrefixes: $commitmentPrefixes,
+        startIndex: $startIndex,
+        minPrefixLength: $minPrefixLength
+    ) {
+        __typename
+        ... on DustCommitment {
+            commitment
+            nullifier
+            value
+            owner
+        }
+        ... on DustCommitmentMerkleUpdate {
+            index
+            collapsedUpdate
+            blockHeight
+            merklePath {
+                siblingHash
+                goesLeft
+            }
+        }
+        ... on DustCommitmentProgress {
+            highestIndex
+            commitmentCount
+        }
+    }
+}
+
+subscription DustRegistrationUpdatesSubscription(
+    $addresses: [RegistrationAddress!]!
+) {
+    dustRegistrationUpdates(addresses: $addresses) {
+        __typename
+        ... on RegistrationUpdate {
+            cardanoStakeKey
+            dustAddress
+            isActive
+            registeredAt
+            removedAt
+        }
+        ... on RegistrationUpdateProgress {
+            latestTimestamp
+            updateCount
+        }
+    }
+}

@@ -240,12 +240,19 @@ impl SubxtNode {
         let BlockDetails {
             timestamp,
             transactions,
+            dust_registration_events,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
 
         let transactions = stream::iter(transactions)
             .then(|t| make_transaction(t, hash, protocol_version, online_client))
             .try_collect::<Vec<_>>()
             .await?;
+
+        // Convert infra DustRegistrationEvent to domain type
+        let dust_registration_events = dust_registration_events
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, _>>()?;
 
         let block = Block {
             hash,
@@ -256,6 +263,7 @@ impl SubxtNode {
             timestamp: timestamp.unwrap_or(0),
             zswap_state_root,
             transactions,
+            dust_registration_events,
         };
 
         debug!(
@@ -456,6 +464,9 @@ pub enum SubxtNodeError {
 
     #[error("cannot hex-decode system transaction")]
     HexDecodeSystemTransaction(#[source] const_hex::FromHexError),
+
+    #[error("invalid dust address: {0}")]
+    InvalidDustAddress(String),
 }
 
 #[trace]
@@ -565,10 +576,6 @@ async fn make_regular_transaction(
         raw: transaction,
         paid_fees: fees.paid_fees,
         estimated_fees: fees.estimated_fees,
-        // DUST events are execution artifacts generated when transactions are applied to the ledger
-        // state. They're populated in ledger_state.rs::apply_transaction_mut() during block
-        // processing.
-        dust_events: Vec::new(),
     };
 
     Ok(Transaction::Regular(transaction))
