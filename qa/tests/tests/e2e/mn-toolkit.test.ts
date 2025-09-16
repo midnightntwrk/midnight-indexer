@@ -14,21 +14,69 @@
 // limitations under the License.
 
 import log from '@utils/logging/logger';
+import { env } from '../../environment/model';
 import '@utils/logging/test-logging-hooks';
 
-import { showAddress } from '@utils/toolkit/src/show-address';
+import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 
 // To run: yarn test e2e
 describe('mn-toolkit', () => {
-  test('mn-toolkit test', async () => {
+  let toolkit: ToolkitWrapper;
+
+  beforeAll(async () => {
+    toolkit = new ToolkitWrapper({
+      containerName: `mn-toolkit-${env.getEnvName()}`,
+      targetDir: '/tmp/toolkit/',
+      chain: `${env.getEnvName()}`,
+      nodeTag: 'latest',
+    });
+    await toolkit.start();
+  });
+
+  afterAll(async () => {
+    await toolkit.stop();
+  });
+
+  test('mn-toolkit show shielded address test', async () => {
     const seed = '0000000000000000000000000000000000000000000000000000000000000001';
 
-    const shielded = await showAddress({
-      chain: 'undeployed',
-      addressType: 'shielded',
-      seed,
-    });
+    const address = await toolkit.showAddress(seed, 'shielded');
 
-    console.log('Shielded address:', shielded);
+    console.log('Shielded address:', address);
+
+    expect(address).toMatch(/^mn_shield-addr_/);
   });
+
+  test('mn-toolkit show unshielded address test', async () => {
+    const seed = '0000000000000000000000000000000000000000000000000000000987654321';
+
+    const address = await toolkit.showAddress(seed, 'unshielded');
+
+    console.log('Unshielded address:', address);
+
+    expect(address).toMatch(/^mn_addr_/);
+  });
+
+  test('mn-toolkit show viewing key test', async () => {
+    const seed = '0000000000000000000000000000000000000000000000000000000987654321';
+
+    const viewingKey = await toolkit.showViewingKey(seed);
+
+    console.log('Viewing key:', viewingKey);
+
+    expect(viewingKey).toMatch(/^mn_shield-esk_/);
+  });
+
+  test('mn-toolkit submit single tx test', async () => {
+    const sourceSeed = '1113354e9a4fb7bff5e049929197acfcf6dcb4fc1ab3205d92ba9c21813c8906';
+    const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
+
+    const unshieldedAddress = await toolkit.showAddress(destinationSeed, 'unshielded');
+
+    console.log('Destination unshielded address:', unshieldedAddress);
+
+    const txLog = await toolkit.generateSingleTx(sourceSeed, 'unshielded', unshieldedAddress, 1);
+
+    console.log('Generated tx:', txLog);
+  }, 30000);
 });
