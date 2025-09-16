@@ -25,6 +25,15 @@ const indexerHostByEnvName: Record<string, string> = {
   testnet02: 'indexer.testnet-02.midnight.network',
 };
 
+const nodeHostByEnvName: Record<string, string> = {
+  undeployed: 'localhost:9944',
+  qanet: 'rpc.qanet.dev.midnight.network',
+  nodedev01: 'rpc.node-dev-01.dev.midnight.network',
+  devnet: 'rpc.devnet.midnight.network',
+  testnet: 'rpc.testnet.midnight.network',
+  testnet02: 'rpc.testnet-02.midnight.network',
+};
+
 export class Environment {
   private readonly envName: string;
   private readonly isUndeployed: boolean;
@@ -32,6 +41,7 @@ export class Environment {
   private readonly httpProtocol: string;
   private readonly indexerHost: string;
   private readonly networkId: string;
+  private readonly nodeHost: string;
 
   constructor() {
     // Setting up environment with error checking
@@ -60,6 +70,7 @@ export class Environment {
     // checked envName
     this.networkId = networkIdByEnvName[this.envName];
     this.indexerHost = indexerHostByEnvName[this.envName];
+    this.nodeHost = nodeHostByEnvName[this.envName];
   }
 
   isUndeployedEnv(): boolean {
@@ -84,6 +95,10 @@ export class Environment {
 
   getIndexerWebsocketBaseURL(): string {
     return `${this.wsProtocol}://${this.indexerHost}`;
+  }
+
+  getNodeWebsocketBaseURL(): string {
+    return `${this.wsProtocol}://${this.nodeHost}`;
   }
 }
 
