@@ -1,0 +1,109 @@
+#!/bin/bash
+
+set -e
+
+# Check if the script is executed from the root directory
+if [ ! -f "justfile" ]; then
+    echo "Error: This script must be executed from the root directory of the project"
+    exit 1
+fi
+
+# This is not ideal, NODE_TAG to use depends on the specific chain where node might be running
+# with another version
+NODE_TAG=`cat justfile |grep "node_version :="|awk -F " " '{print $3}'|sed s/\"//g` 
+NODE_TAG="0.13.2-rc.2"
+
+CHAIN=$1
+if [ -z "$CHAIN" ]; then
+    echo "Please provide a chain id"
+    echo "Usage: $0 <chain_id> <seed>"
+    exit 1
+fi
+if [ "$CHAIN" != "undeployed" ] && [ "$CHAIN" != "devnet" ] && [ "$CHAIN" != "testnet02" ] && [ "$CHAIN" != "nodedev01" ]; then
+    echo "Please provide a valid chain id (undeployed, devnet, testnet02, nodedev01)"
+    echo "Usage: $0 <chain_id> <seed>"
+    exit 1
+fi
+
+NETWORK_ID=""
+
+#Switch case for the chain id
+case $CHAIN in
+    "undeployed")
+        CHAIN_URL="ws://localhost:9944"
+        NETWORK_ID="undeployed"
+        ;;
+    "devnet")
+        CHAIN_URL="wss://rpc.devnet.midnight.network"
+        NETWORK_ID="devnet"
+        ;;
+    "testnet02")
+        CHAIN_URL="wss://rpc.testnet02.midnight.network"
+        NETWORK_ID="testnet"
+        ;;
+    "qanet")
+        CHAIN_URL="wss://rpc.qanet.dev.midnight.network"
+        NETWORK_ID="devnet"
+        ;;
+    "nodedev01")
+        CHAIN_URL="wss://rpc.node-dev-01.dev.midnight.network"
+        NETWORK_ID="devnet"
+        ;;
+esac
+
+SEED=$2
+if [ -z "$SEED" ]; then
+    echo "Please provide a seed"
+    echo "Usage: $0 <chain_id> <seed>"
+    exit 1
+fi
+
+# docker run \
+#     --rm \
+#     --network host \
+#     -v /tmp:/out \
+#     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$NODE_TAG \
+#     generate-txs batches --help
+
+# docker run \
+#     --rm \
+#     --network host \
+#     -v /tmp:/out \
+#     ghcr.io/midnight-ntwrk/midnight-node-toolkit:$NODE_TAG \
+#     generate-txs batches -n 3 -b 2
+TARGET_DIR=/tmp/toolkit
+
+mkdir -p $TARGET_DIR
+mkdir -p $TARGET_DIR/.sync_cache-$CHAIN
+
+echo "Generating Destination Addresses off the wallet seed"
+DEST_WALLET_SEED="0000000000000000000000000000000000000000000000000000000987654321"
+DEST_SHIELDED_ADDR=$(bash scripts/toolkit-show-address $NETWORK_ID shielded $DEST_WALLET_SEED)
+echo "DEST_SHIELDED_ADDR: $DEST_SHIELDED_ADDR"
+DEST_UNSHIELDED_ADDR=$(bash scripts/toolkit-show-address $NETWORK_ID unshielded $DEST_WALLET_SEED)
+echo "DEST_UNSHIELDED_ADDR: $DEST_UNSHIELDED_ADDR"
+
+docker run \
+    --rm \
+    --name toolkit-generate-txs-for-$CHAIN \
+    --network host \
+    -v /tmp/toolkit:/out \
+    -v /tmp/toolkit/.sync_cache-$CHAIN:/.sync_cache \
+    ghcr.io/midnight-ntwrk/midnight-node-toolkit:$NODE_TAG \
+    generate-txs \
+    --src-url $CHAIN_URL \
+    --dest-url $CHAIN_URL  \
+    single-tx \
+    --source-seed "$SEED" \
+    --shielded-amount 1 \
+    --unshielded-amount 2 \
+    --destination-address "$DEST_UNSHIELDED_ADDR" \
+    --destination-address "$DEST_SHIELDED_ADDR"
+
+
+
+
+
+
+
+

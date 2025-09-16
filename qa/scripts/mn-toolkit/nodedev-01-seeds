@@ -1,0 +1,17 @@
+{
+"wallet-seed-0":"4ff85bf61a8a5cf481ae2d8f75873e6898585081c1df5988dc005fa64acba43b",
+"wallet-seed-1":"c0395928a75280722c8185ee4006e05306b69c6e440fb44e293847df31266bd3",
+"wallet-seed-2":"ca593d2a819b400866522bd063b277455f7bbd20d7caa2d82e59eedefc28bc0c",
+"wallet-seed-3":"3151fd35399b826b0dbea4120f5faffb080832b863da9a21d868ccc429d01f75"
+}
+{
+    "wallet-seed-0":"1113354e9a4fb7bff5e049929197acfcf6dcb4fc1ab3205d92ba9c21813c8906",
+    "wallet-seed-1":"ec4fef233c410c3ad2fc283ec38a101e082b756fe438d7d3d2294740f5cf2e15",
+    "wallet-seed-2":"8863286d3be8ceb0cf0a4335f6860553d50336609d58d1b02a26b23d010a3f39",
+    "wallet-seed-3":"1b1fdb7b795593c1dac0342c7c5d14859f9fd57cdd0665471ad6518780d009ca"
+}
+
+sudo rm -rf /tmp/toolkit/.sync_cache-nodedev01/ && bash scripts/toolkit-generate-single-tx nodedev01 4ff85bf61a8a5cf481ae2d8f75873e6898585081c1df5988dc005fa64acba43b > 4ff85bf61a8a5cf481ae2d8f75873e6898585081c1df5988dc005fa64acba43b.log
+sudo rm -rf /tmp/toolkit/.sync_cache-nodedev01/ && bash scripts/toolkit-generate-single-tx nodedev01 c0395928a75280722c8185ee4006e05306b69c6e440fb44e293847df31266bd3 > c0395928a75280722c8185ee4006e05306b69c6e440fb44e293847df31266bd3.log
+sudo rm -rf /tmp/toolkit/.sync_cache-nodedev01/ && bash scripts/toolkit-generate-single-tx nodedev01 ca593d2a819b400866522bd063b277455f7bbd20d7caa2d82e59eedefc28bc0c > ca593d2a819b400866522bd063b277455f7bbd20d7caa2d82e59eedefc28bc0c.log
+sudo rm -rf /tmp/toolkit/.sync_cache-nodedev01/ && bash scripts/toolkit-generate-single-tx nodedev01 3151fd35399b826b0dbea4120f5faffb080832b863da9a21d868ccc429d01f75 > 3151fd35399b826b0dbea4120f5faffb080832b863da9a21d868ccc429d01f75.log
