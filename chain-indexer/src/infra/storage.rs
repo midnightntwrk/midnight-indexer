@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::domain::{
-    self, Block, BlockTransactions, ContractAction, DustRegistrationEvent, RegularTransaction,
-    SystemTransaction, Transaction, TransactionVariant, node::BlockInfo,
+    self, Block, BlockTransactions, ContractAction, DustRegistrationEvent, ProcessedDustEvents,
+    RegularTransaction, SystemTransaction, Transaction, TransactionVariant, node::BlockInfo,
 };
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
@@ -25,8 +25,8 @@ use indexer_common::{
             QualifiedDustOutput,
         },
         ledger::{
-            ContractAttributes, ContractBalance, NightDistributionData, ParameterUpdateData,
-            TreasuryPaymentShieldedData, TreasuryPaymentUnshieldedData, UnshieldedUtxo,
+            ContractAttributes, ContractBalance, NightDistribution, ParameterUpdate,
+            ShieldedTreasuryPayment, UnshieldedTreasuryPayment, UnshieldedUtxo,
         },
     },
     infra::sqlx::U128BeBytes,
@@ -96,7 +96,7 @@ impl domain::storage::Storage for Storage {
     #[trace]
     async fn get_transaction_count(&self) -> Result<u64, sqlx::Error> {
         let query = indoc! {"
-            SELECT count(*) 
+            SELECT count(*)
             FROM transactions
         "};
 
@@ -110,7 +110,7 @@ impl domain::storage::Storage for Storage {
     #[trace]
     async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error> {
         let query = indoc! {"
-            SELECT count(*) 
+            SELECT count(*)
             FROM contract_actions
             WHERE variant = $1
         "};
@@ -414,14 +414,14 @@ async fn save_regular_transaction(
     )
     .await?;
 
-    // Apply pre-computed DUST operations from domain layer.
-    apply_processed_dust_events(
+    save_processed_dust_events(
         &transaction.processed_dust_events,
         transaction_id,
         block_height,
         tx,
     )
     .await?;
+
     save_dust_events(&transaction.dust_events, transaction_id, tx).await?;
 
     Ok(transaction_id as u64)
@@ -434,47 +434,28 @@ async fn save_system_transaction(
     block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Save DUST events from system transactions.
-    // The domain layer has already processed and computed operations.
-    if !transaction.dust_events.is_empty() {
-        apply_processed_dust_events(
-            &transaction.processed_dust_events,
-            transaction_id,
-            block_height,
-            tx,
-        )
+    let SystemTransaction {
+        reserve_distribution,
+        parameter_update,
+        night_distribution,
+        treasury_income,
+        treasury_payment_shielded,
+        treasury_payment_unshielded,
+        dust_events,
+        processed_dust_events,
+        ..
+    } = transaction;
+
+    save_processed_dust_events(processed_dust_events, transaction_id, block_height, tx).await?;
+
+    save_dust_events(dust_events, transaction_id, tx).await?;
+    save_reserve_distribution(transaction_id, *reserve_distribution, tx).await?;
+    save_parameter_update(transaction_id, *parameter_update, tx).await?;
+    save_night_distribution(transaction_id, night_distribution.as_ref(), tx).await?;
+    save_treasury_income(transaction_id, treasury_income.as_ref(), tx).await?;
+    save_shielded_treasury_payment(transaction_id, treasury_payment_shielded.as_ref(), tx).await?;
+    save_unshielded_treasury_payment(transaction_id, treasury_payment_unshielded.as_ref(), tx)
         .await?;
-        save_dust_events(&transaction.dust_events, transaction_id, tx).await?;
-    }
-
-    // Save reserve distribution if present.
-    if let Some(amount) = transaction.reserve_distribution {
-        save_reserve_distribution(transaction_id, amount, tx).await?;
-    }
-
-    // Save parameter update if present.
-    if let Some(ref params) = transaction.parameter_update {
-        save_parameter_update(transaction_id, params, tx).await?;
-    }
-
-    // Save night distribution if present.
-    if let Some(ref distribution) = transaction.night_distribution {
-        save_night_distribution(transaction_id, distribution, tx).await?;
-    }
-
-    // Save treasury income if present.
-    if let Some((amount, ref source)) = transaction.treasury_income {
-        save_treasury_income(transaction_id, amount, source, tx).await?;
-    }
-
-    // Save treasury payments if present.
-    if let Some(ref payment) = transaction.treasury_payment_shielded {
-        save_treasury_payment_shielded(transaction_id, payment, tx).await?;
-    }
-
-    if let Some(ref payment) = transaction.treasury_payment_unshielded {
-        save_treasury_payment_unshielded(transaction_id, payment, tx).await?;
-    }
 
     Ok(())
 }
@@ -660,26 +641,24 @@ async fn save_identifiers(
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn apply_processed_dust_events(
-    operations: &crate::domain::ProcessedDustEvents,
+async fn save_processed_dust_events(
+    processed_dust_events: &ProcessedDustEvents,
     transaction_id: i64,
     block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Apply generation saves.
-    for save_op in &operations.generations {
+    for generation in &processed_dust_events.generations {
         let generation_info_id =
-            save_dust_generation_info(&save_op.generation_info, save_op.generation_index, tx)
+            save_dust_generation_info(&generation.generation_info, generation.generation_index, tx)
                 .await?;
 
         // Find corresponding UTXO save (they're paired in the same order).
-        for utxo_save in &operations.utxos {
-            save_dust_utxos(&utxo_save.output, generation_info_id, tx).await?;
+        for utxo in &processed_dust_events.utxos {
+            save_dust_utxos(&utxo.output, generation_info_id, tx).await?;
         }
     }
 
-    // Apply tree updates.
-    for tree_update in &operations.merkle_tree_updates {
+    for tree_update in &processed_dust_events.merkle_tree_updates {
         save_dust_generation_tree_update(
             tree_update.generation_index,
             &tree_update.merkle_path,
@@ -689,19 +668,11 @@ async fn apply_processed_dust_events(
         .await?;
     }
 
-    // Apply spent marks.
-    for spent_mark in &operations.spends {
-        mark_dust_utxo_spent(
-            spent_mark.commitment,
-            spent_mark.nullifier,
-            transaction_id,
-            tx,
-        )
-        .await?;
+    for spend in &processed_dust_events.spends {
+        mark_dust_utxo_spent(spend.commitment, spend.nullifier, transaction_id, tx).await?;
     }
 
-    // Apply dtime update if present.
-    if let Some(dtime_update) = &operations.dtime_update {
+    if let Some(dtime_update) = &processed_dust_events.dtime_update {
         update_dust_generation_dtime(dtime_update.dtime, dtime_update.generation_index, tx).await?;
     }
 
@@ -798,8 +769,6 @@ async fn save_dust_generation_tree_update(
     block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Calculate the root hash from the path (placeholder for now).
-    // In a real implementation, we'd calculate the actual root from the path.
     let root = vec![0u8; 32]; // Placeholder root.
 
     let query = indoc! {"
@@ -820,7 +789,7 @@ async fn save_dust_generation_tree_update(
         .bind(block_height as i64)
         .bind(merkle_index as i64)
         .bind(&root)
-        .bind(Json(merkle_path)) // Use Json wrapper for JSONB column.
+        .bind(Json(merkle_path))
         .execute(&mut **tx)
         .await?;
 
@@ -863,22 +832,24 @@ async fn save_dust_generation_info(
 #[trace]
 async fn save_reserve_distribution(
     transaction_id: i64,
-    amount: u128,
+    reserve_distribution: Option<u128>,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    let query = indoc! {"
-        INSERT INTO reserve_distributions (
-            transaction_id,
-            amount
-        )
-        VALUES ($1, $2)
-    "};
+    if let Some(reserve_distribution) = reserve_distribution {
+        let query = indoc! {"
+            INSERT INTO reserve_distributions (
+                transaction_id,
+                amount
+            )
+            VALUES ($1, $2)
+        "};
 
-    sqlx::query(query)
-        .bind(transaction_id)
-        .bind(U128BeBytes::from(amount))
-        .execute(&mut **tx)
-        .await?;
+        sqlx::query(query)
+            .bind(transaction_id)
+            .bind(U128BeBytes::from(reserve_distribution))
+            .execute(&mut **tx)
+            .await?;
+    }
 
     Ok(())
 }
@@ -886,39 +857,27 @@ async fn save_reserve_distribution(
 #[trace]
 async fn save_parameter_update(
     transaction_id: i64,
-    params: &ParameterUpdateData,
+    parameter_update: Option<ParameterUpdate>,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Serialize the typed parameter data for storage.
-    let query = indoc! {"
-        INSERT INTO parameter_updates (
-            transaction_id,
-            parameters
-        )
-        VALUES ($1, $2)
-    "};
+    if let Some(parameter_update) = parameter_update {
+        let query = indoc! {"
+            INSERT INTO parameter_updates (
+                transaction_id,
+                parameters
+            )
+            VALUES ($1, $2)
+        "};
 
-    // Convert domain object to JSON for storage.
-    #[derive(Serialize)]
-    struct ParameterData {
-        night_dust_ratio: u64,
-        generation_decay_rate: u32,
-        dust_grace_period_seconds: u64,
+        let parameter_update =
+            to_value(&parameter_update).map_err(|error| sqlx::Error::Encode(error.into()))?;
+
+        sqlx::query(query)
+            .bind(transaction_id)
+            .bind(Json(parameter_update))
+            .execute(&mut **tx)
+            .await?;
     }
-
-    let param_data = ParameterData {
-        night_dust_ratio: params.night_dust_ratio,
-        generation_decay_rate: params.generation_decay_rate,
-        dust_grace_period_seconds: params.dust_grace_period_seconds,
-    };
-
-    let json_value = to_value(&param_data).map_err(|error| sqlx::Error::Encode(Box::new(error)))?;
-
-    sqlx::query(query)
-        .bind(transaction_id)
-        .bind(Json(json_value))
-        .execute(&mut **tx)
-        .await?;
 
     Ok(())
 }
@@ -926,44 +885,31 @@ async fn save_parameter_update(
 #[trace]
 async fn save_night_distribution(
     transaction_id: i64,
-    distribution: &NightDistributionData,
+    night_distribution: Option<&NightDistribution>,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Serialize the typed distribution data for storage.
-    let query = indoc! {"
-        INSERT INTO night_distributions (
-            transaction_id,
-            claim_kind,
-            outputs,
-            total_amount
-        )
-        VALUES ($1, $2, $3, $4)
-    "};
+    if let Some(night_distribution) = night_distribution {
+        let query = indoc! {"
+            INSERT INTO night_distributions (
+                transaction_id,
+                claim_kind,
+                outputs,
+                total_amount
+            )
+            VALUES ($1, $2, $3, $4)
+        "};
 
-    // Convert domain object to JSON for storage.
-    #[derive(Serialize)]
-    struct DistributionOutputData {
-        output_count: usize,
-        claim_type: String,
-        total_amount: u128,
+        let json_value =
+            to_value(&night_distribution).map_err(|error| sqlx::Error::Encode(error.into()))?;
+
+        sqlx::query(query)
+            .bind(transaction_id)
+            .bind(&night_distribution.claim_type)
+            .bind(Json(json_value))
+            .bind(U128BeBytes::from(night_distribution.total_amount))
+            .execute(&mut **tx)
+            .await?;
     }
-
-    let output_data = DistributionOutputData {
-        output_count: distribution.output_count,
-        claim_type: distribution.claim_type.clone(),
-        total_amount: distribution.total_amount,
-    };
-
-    let json_value =
-        to_value(&output_data).map_err(|error| sqlx::Error::Encode(Box::new(error)))?;
-
-    sqlx::query(query)
-        .bind(transaction_id)
-        .bind(&distribution.claim_type)
-        .bind(Json(json_value))
-        .bind(U128BeBytes::from(distribution.total_amount))
-        .execute(&mut **tx)
-        .await?;
 
     Ok(())
 }
@@ -971,120 +917,94 @@ async fn save_night_distribution(
 #[trace]
 async fn save_treasury_income(
     transaction_id: i64,
-    amount: u128,
-    source: &str,
+    treasury_income: Option<&(u128, String)>,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    let query = indoc! {"
-        INSERT INTO treasury_income (
-            transaction_id,
-            amount,
-            source
-        )
-        VALUES ($1, $2, $3)
-    "};
+    if let Some((amount, source)) = treasury_income {
+        let query = indoc! {"
+            INSERT INTO treasury_income (
+                transaction_id,
+                amount,
+                source
+            )
+            VALUES ($1, $2, $3)
+        "};
 
-    sqlx::query(query)
-        .bind(transaction_id)
-        .bind(U128BeBytes::from(amount))
-        .bind(source)
-        .execute(&mut **tx)
-        .await?;
+        sqlx::query(query)
+            .bind(transaction_id)
+            .bind(U128BeBytes::from(*amount))
+            .bind(source)
+            .execute(&mut **tx)
+            .await?;
+    }
 
     Ok(())
 }
 
 #[trace]
-async fn save_treasury_payment_shielded(
+async fn save_shielded_treasury_payment(
     transaction_id: i64,
-    payment: &TreasuryPaymentShieldedData,
+    treasury_payment: Option<&ShieldedTreasuryPayment>,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // For shielded outputs, we don't have access to amounts.
-    // Store the serialized data and use None for total_amount.
-    let query = indoc! {"
-        INSERT INTO treasury_payments (
-            transaction_id,
-            payment_type,
-            token_type,
-            outputs,
-            total_amount
-        )
-        VALUES ($1, $2, $3, $4, $5)
-    "};
+    if let Some(treasury_payment) = treasury_payment {
+        let query = indoc! {"
+            INSERT INTO treasury_payments (
+                transaction_id,
+                payment_type,
+                token_type,
+                outputs,
+                total_amount
+            )
+            VALUES ($1, $2, $3, $4, $5)
+        "};
 
-    // Convert domain object to JSON for storage.
-    #[derive(Serialize)]
-    struct ShieldedOutputData {
-        output_count: usize,
-        nonce: Vec<u8>,
-        token_type: String,
+        let treasury_payment_json =
+            to_value(&treasury_payment).map_err(|error| sqlx::Error::Encode(error.into()))?;
+
+        sqlx::query(query)
+            .bind(transaction_id)
+            .bind("shielded")
+            .bind(&treasury_payment.token_type)
+            .bind(Json(treasury_payment_json))
+            .bind(Option::<U128BeBytes>::None)
+            .execute(&mut **tx)
+            .await?;
     }
-
-    let output_data = ShieldedOutputData {
-        output_count: payment.output_count,
-        nonce: payment.nonce.clone(),
-        token_type: payment.token_type.clone(),
-    };
-
-    let json_value =
-        to_value(&output_data).map_err(|error| sqlx::Error::Encode(Box::new(error)))?;
-
-    sqlx::query(query)
-        .bind(transaction_id)
-        .bind("shielded")
-        .bind(&payment.token_type)
-        .bind(Json(json_value))
-        .bind(Option::<U128BeBytes>::None)
-        .execute(&mut **tx)
-        .await?;
 
     Ok(())
 }
 
 #[trace]
-async fn save_treasury_payment_unshielded(
+async fn save_unshielded_treasury_payment(
     transaction_id: i64,
-    payment: &TreasuryPaymentUnshieldedData,
+    treasury_payment: Option<&UnshieldedTreasuryPayment>,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Serialize the typed payment data for storage.
-    let query = indoc! {"
-        INSERT INTO treasury_payments (
-            transaction_id,
-            payment_type,
-            token_type,
-            outputs,
-            total_amount
-        )
-        VALUES ($1, $2, $3, $4, $5)
-    "};
+    if let Some(treasury_payment) = treasury_payment {
+        let query = indoc! {"
+            INSERT INTO treasury_payments (
+                transaction_id,
+                payment_type,
+                token_type,
+                outputs,
+                total_amount
+            )
+            VALUES ($1, $2, $3, $4, $5)
+        "};
 
-    // Convert domain object to JSON for storage.
-    #[derive(Serialize)]
-    struct UnshieldedOutputData {
-        output_count: usize,
-        total_amount: u128,
-        token_type: String,
+        let treasury_payment_json =
+            to_value(&treasury_payment).map_err(|error| sqlx::Error::Encode(error.into()))?;
+
+        sqlx::query(query)
+            .bind(transaction_id)
+            .bind("unshielded")
+            .bind(&treasury_payment.token_type)
+            .bind(Json(treasury_payment_json))
+            .bind(U128BeBytes::from(treasury_payment.total_amount))
+            .execute(&mut **tx)
+            .await?;
     }
-
-    let output_data = UnshieldedOutputData {
-        output_count: payment.output_count,
-        total_amount: payment.total_amount,
-        token_type: payment.token_type.clone(),
-    };
-
-    let json_value =
-        to_value(&output_data).map_err(|error| sqlx::Error::Encode(Box::new(error)))?;
-
-    sqlx::query(query)
-        .bind(transaction_id)
-        .bind("unshielded")
-        .bind(&payment.token_type)
-        .bind(Json(json_value))
-        .bind(U128BeBytes::from(payment.total_amount))
-        .execute(&mut **tx)
-        .await?;
 
     Ok(())
 }

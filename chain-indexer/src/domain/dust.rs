@@ -64,7 +64,7 @@ pub enum DustProcessingError {
 }
 
 /// Processed DUST events ready for persistence.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProcessedDustEvents {
     pub generations: Vec<DustGeneration>,
     pub utxos: Vec<DustUtxo>,

@@ -19,10 +19,9 @@ use crate::domain::{
 use indexer_common::domain::{
     ByteArray, ProtocolVersion,
     ledger::{
-        NightDistributionData, ParameterUpdateData, SerializedTransaction,
-        SerializedTransactionIdentifier, SerializedZswapStateRoot,
-        SystemTransaction as DomainSystemTransaction, TransactionHash, TransactionResult,
-        TreasuryPaymentShieldedData, TreasuryPaymentUnshieldedData, UnshieldedUtxo,
+        self, NightDistribution, ParameterUpdate, SerializedTransaction,
+        SerializedTransactionIdentifier, SerializedZswapStateRoot, ShieldedTreasuryPayment,
+        TransactionHash, TransactionResult, UnshieldedTreasuryPayment, UnshieldedUtxo,
     },
 };
 use sqlx::{FromRow, Type};
@@ -66,7 +65,7 @@ impl Transaction {
 }
 
 impl TryFrom<node::Transaction> for Transaction {
-    type Error = SystemTransactionError;
+    type Error = DeserializeSystemTransactionError;
 
     fn try_from(transaction: node::Transaction) -> Result<Self, Self::Error> {
         match transaction {
@@ -119,82 +118,62 @@ impl From<node::RegularTransaction> for RegularTransaction {
             end_index: Default::default(),
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
-            dust_events: Vec::default(),
-            processed_dust_events: ProcessedDustEvents {
-                generations: Vec::new(),
-                utxos: Vec::new(),
-                merkle_tree_updates: Vec::new(),
-                spends: Vec::new(),
-                dtime_update: None,
-            },
+            dust_events: Default::default(),
+            processed_dust_events: Default::default(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemTransaction {
+    // These fields come from node::SystemTransaction.
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
     pub raw: SerializedTransaction,
-    // DUST events from system transactions (e.g., CNightGeneratesDustUpdate).
+
+    // Additional data extracted from from domain::ledger::SystemTransaction.
+    pub reserve_distribution: Option<u128>,
+    pub parameter_update: Option<ParameterUpdate>,
+    pub night_distribution: Option<NightDistribution>,
+    pub treasury_income: Option<(u128, String)>,
+    pub treasury_payment_shielded: Option<ShieldedTreasuryPayment>,
+    pub treasury_payment_unshielded: Option<UnshieldedTreasuryPayment>,
+
+    // These fields come from applying the node transactions to the ledger state.
     pub dust_events: Vec<DustEvent>,
     pub processed_dust_events: ProcessedDustEvents,
-    // Additional processed data from system transactions.
-    pub reserve_distribution: Option<u128>,
-    pub parameter_update: Option<ParameterUpdateData>,
-    pub night_distribution: Option<NightDistributionData>,
-    pub treasury_income: Option<(u128, String)>,
-    pub treasury_payment_shielded: Option<TreasuryPaymentShieldedData>,
-    pub treasury_payment_unshielded: Option<TreasuryPaymentUnshieldedData>,
-}
-
-/// Error type for system transaction processing.
-#[derive(Debug, Error)]
-pub enum SystemTransactionError {
-    #[error("cannot deserialize system transaction: {0}")]
-    DeserializationError(String),
-
-    #[error("cannot process system transaction: {0}")]
-    ProcessingError(String),
 }
 
 impl TryFrom<node::SystemTransaction> for SystemTransaction {
-    type Error = SystemTransactionError;
+    type Error = DeserializeSystemTransactionError;
 
     fn try_from(transaction: node::SystemTransaction) -> Result<Self, Self::Error> {
-        // Deserialize the raw transaction to process it.
-        let domain_tx =
-            DomainSystemTransaction::deserialize(&transaction.raw, transaction.protocol_version)
-                .map_err(|error| SystemTransactionError::DeserializationError(error.to_string()))?;
+        let ledger_transaction =
+            ledger::SystemTransaction::deserialize(&transaction.raw, transaction.protocol_version)?;
 
         // Extract metadata from the transaction.
-        let metadata = domain_tx.extract_metadata(&transaction.hash);
+        let metadata = ledger_transaction.extract_metadata(&transaction.hash);
 
         Ok(Self {
             hash: transaction.hash,
             protocol_version: transaction.protocol_version,
             raw: transaction.raw,
-            // Populated during ledger state application in
-            // ledger_state.rs::apply_system_node_transaction()
-            dust_events: Vec::new(),
-            processed_dust_events: ProcessedDustEvents {
-                // Populated during ledger state application in
-                // ledger_state.rs::apply_system_node_transaction() via extract_dust_operations()
-                generations: Vec::new(),
-                utxos: Vec::new(),
-                merkle_tree_updates: Vec::new(),
-                spends: Vec::new(),
-                dtime_update: None,
-            },
             reserve_distribution: metadata.reserve_distribution,
             parameter_update: metadata.parameter_update,
             night_distribution: metadata.night_distribution,
             treasury_income: metadata.treasury_income,
             treasury_payment_shielded: metadata.treasury_payment_shielded,
             treasury_payment_unshielded: metadata.treasury_payment_unshielded,
+            dust_events: Default::default(),
+            processed_dust_events: Default::default(),
         })
     }
 }
+
+/// Error type for system transaction processing.
+#[derive(Debug, Error)]
+#[error("cannot deserialize system transaction")]
+pub struct DeserializeSystemTransactionError(#[from] ledger::Error);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Type)]
 #[cfg_attr(feature = "cloud", sqlx(type_name = "TRANSACTION_VARIANT"))]
