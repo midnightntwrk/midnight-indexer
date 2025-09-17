@@ -224,6 +224,7 @@ impl LedgerState {
                 let root = ledger_state
                     .zswap
                     .coin_coms
+                    .rehash()
                     .root()
                     .expect("zswap merkle tree root should exist");
                 ZswapStateRoot::V6(root)

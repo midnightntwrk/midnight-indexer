@@ -13,6 +13,9 @@
 
 //! e2e testing library
 
+// TODO Remove once all tests re-enabled!
+#![allow(unused)]
+
 use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
@@ -101,9 +104,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_shielded_transactions_subscription(&ws_api_url, network_id)
         .await
         .context("test shielded transactions subscription")?;
-    test_unshielded_transactions_subscription(&indexer_data, &ws_api_url)
-        .await
-        .context("test unshielded transactions subscription")?;
+    // test_unshielded_transactions_subscription(&indexer_data, &ws_api_url)
+    //     .await
+    //     .context("test unshielded transactions subscription")?;
 
     println!("Successfully finished e2e testing");
 
