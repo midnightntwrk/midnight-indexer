@@ -24,7 +24,8 @@ use midnight_base_crypto_v6::{
     time::Timestamp as TimestampV6,
 };
 use midnight_coin_structure_v6::{
-    coin::UserAddress as UserAddressV6, contract::ContractAddress as ContractAddressV6,
+    coin::{Nonce as NonceV6, UserAddress as UserAddressV6},
+    contract::ContractAddress as ContractAddressV6,
 };
 use midnight_ledger_v6::{
     semantics::{
@@ -42,6 +43,7 @@ use midnight_transient_crypto_v6::merkle_tree::{
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{collections::HashSet, sync::LazyLock};
 
 pub type IntentHash = ByteArray<32>;
@@ -368,6 +370,22 @@ fn timestamp_v6(block_timestamp: u64) -> TimestampV6 {
     TimestampV6::from_secs(block_timestamp / 1000)
 }
 
+/// Compute a pseudo-intent-hash for ClaimRewards transactions.
+/// ClaimRewards don't have intents, but we need a unique hash for database constraints.
+/// We use a hash of (owner || value || nonce) to ensure uniqueness.
+fn compute_claim_rewards_intent_hash(
+    owner: &UserAddressV6,
+    value: u128,
+    nonce: &NonceV6,
+) -> IntentHash {
+    let mut hasher = Sha256::new();
+    hasher.update(owner.0.0);
+    hasher.update(value.to_le_bytes());
+    hasher.update(nonce.0.0);
+    let hash_bytes: [u8; 32] = hasher.finalize().into();
+    hash_bytes.into()
+}
+
 fn extract_unshielded_utxos_v6(
     ledger_transaction: TransactionV6,
     transaction_result: &TransactionResult,
@@ -407,7 +425,20 @@ fn extract_unshielded_utxos_v6(
             (outputs, inputs)
         }
 
-        TransactionV6::ClaimRewards(_) => (vec![], vec![]),
+        TransactionV6::ClaimRewards(claim) => {
+            // ClaimRewards creates a single unshielded UTXO for the claimed amount.
+            let owner = UserAddressV6::from(claim.owner.clone());
+            let intent_hash = compute_claim_rewards_intent_hash(&owner, claim.value, &claim.nonce);
+
+            let utxo = UnshieldedUtxo {
+                owner: owner.0.0.into(),
+                token_type: RawTokenType::default(), // Native token (all zeros).
+                value: claim.value,
+                intent_hash,
+                output_index: 0,
+            };
+            (vec![utxo], vec![]) // Creates one UTXO, spends none.
+        }
     }
 }
 
