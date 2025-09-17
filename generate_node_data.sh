@@ -2,12 +2,12 @@
 
 set -euxo pipefail
 
-# Cleanup function to ensure node container is removed
+# Cleanup function to ensure node container is removed.
 cleanup() {
     docker rm -f node >/dev/null 2>&1 || true
 }
 
-# Set up trap to cleanup on exit
+# Set up trap to cleanup on exit.
 trap cleanup EXIT
 
 if [ -z "$1" ]; then
@@ -17,9 +17,9 @@ if [ -z "$1" ]; then
 fi
 node_version="$1"
 
-# Function to run all toolkit commands
+# Function to run all toolkit commands.
 run_toolkit_commands() {
-    # Generate batches
+    # Generate batches.
     # Note: Reduced from -n 3 -b 2 to -n 1 -b 1 to minimize DUST requirements
     # after fees were enabled in node 0.16.0-da0b6c69. Larger batch sizes fail with:
     # "Balancing TX failed: Insufficient DUST (trying to spend X, need Y more)"
@@ -83,17 +83,14 @@ run_toolkit_commands() {
         --contract-address /out/contract_address.mn
 }
 
-# Clean up any existing data
+# Clean up any existing data.
 if [ -d ./.node/$node_version ]; then
     rm -r ./.node/$node_version;
 fi
 
 mkdir -p ./.node/$node_version
 
-# Start the node container
-# SIDECHAIN_BLOCK_BENEFICIARY specifies the wallet that receives block rewards and transaction fees (DUST).
-# Required after fees were enabled in 0.16.0-da0b6c69.
-# This hex value is a public key that matches the one used in toolkit-e2e.sh.
+# Start the node container.
 docker run \
     -d \
     --name node \
@@ -104,7 +101,7 @@ docker run \
     -v ./.node/$node_version:/node \
     ghcr.io/midnight-ntwrk/midnight-node:$node_version
 
-# Wait for node to be ready (max 30 seconds)
+# Wait for node to be ready (max 30 seconds).
 echo "Waiting for node to be ready..."
 for i in {1..30}; do
     if curl -f http://localhost:9944/health/readiness 2>/dev/null; then
@@ -120,14 +117,14 @@ for i in {1..30}; do
     sleep 1
 done
 
-# Retry the entire toolkit command sequence up to 3 times
+# Retry the entire toolkit command sequence up to 3 times.
 max_attempts=3
 attempt=1
 
 while [ $attempt -le $max_attempts ]; do
     echo "Running toolkit commands (attempt $attempt of $max_attempts)..."
 
-    # Try to run all toolkit commands
+    # Try to run all toolkit commands.
     if run_toolkit_commands; then
         echo "Successfully generated node data"
         exit 0
@@ -135,7 +132,7 @@ while [ $attempt -le $max_attempts ]; do
 
     echo "Toolkit commands failed on attempt $attempt" >&2
 
-    # If this wasn't the last attempt, clean up and retry
+    # If this wasn't the last attempt, clean up and retry.
     if [ $attempt -lt $max_attempts ]; then
         echo "Cleaning up node data folder for retry..." >&2
         rm -rf ./.node/$node_version/*
@@ -147,6 +144,6 @@ while [ $attempt -le $max_attempts ]; do
 done
 
 echo "Failed to generate node data after $max_attempts attempts" >&2
-# Clean up the folder on final failure
+# Clean up the folder on final failure.
 rm -rf ./.node/$node_version
 exit 1

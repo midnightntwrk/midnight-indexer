@@ -311,7 +311,6 @@ mod tests {
 
     /// Notice: The raw test data is created with `generate_txs.sh`.
     #[test]
-    #[ignore = "temporarily disabled until we can create shielded transactions on the node again"]
     fn test_deserialize_relevant() {
         let transaction = fs::read(format!("{}/tests/tx_1_2_2.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
