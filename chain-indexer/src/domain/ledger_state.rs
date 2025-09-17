@@ -86,30 +86,37 @@ impl LedgerState {
         // across multiple transactions. but the test/API expects them on the first
         // transaction.
         if block_parent_hash == BlockHash::default() && !transactions.is_empty() {
-            let mut all_created_utxos = Vec::new();
-
             // Collect all created UTXOs from all transactions.
-            for transaction in &transactions {
-                if let Transaction::Regular(reg_tx) = transaction {
-                    all_created_utxos.extend(reg_tx.created_unshielded_utxos.clone());
-                }
-            }
+            let created_utxos = transactions
+                .iter()
+                .filter_map(|transaction| {
+                    if let Transaction::Regular(transaction) = transaction {
+                        Some(transaction.created_unshielded_utxos.clone())
+                    } else {
+                        None
+                    }
+                })
+                .flatten()
+                .collect::<Vec<_>>();
 
-            // If we found UTXOs, assign them all to the first regular transaction.
-            if !all_created_utxos.is_empty() {
+            // If we found UTXOs, clear all regular transactions and assign to the first one.
+            if !created_utxos.is_empty() {
+                // Clear all regular transactions.
                 for transaction in &mut transactions {
-                    if let Transaction::Regular(reg_tx) = transaction {
-                        // Clear UTXOs from all regular transactions.
-                        reg_tx.created_unshielded_utxos.clear();
+                    if let Transaction::Regular(transaction) = transaction {
+                        transaction.created_unshielded_utxos.clear();
                     }
                 }
 
-                // Find first regular transaction and assign all UTXOs to it.
-                for transaction in &mut transactions {
-                    if let Transaction::Regular(reg_tx) = transaction {
-                        reg_tx.created_unshielded_utxos = all_created_utxos;
-                        break;
+                // Find and assign to first regular transaction.
+                if let Some(transaction) = transactions.iter_mut().find_map(|t| {
+                    if let Transaction::Regular(transaction) = t {
+                        Some(transaction)
+                    } else {
+                        None
                     }
+                }) {
+                    transaction.created_unshielded_utxos = created_utxos;
                 }
             }
         }

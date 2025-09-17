@@ -370,22 +370,6 @@ fn timestamp_v6(block_timestamp: u64) -> TimestampV6 {
     TimestampV6::from_secs(block_timestamp / 1000)
 }
 
-/// Compute a pseudo-intent-hash for ClaimRewards transactions.
-/// ClaimRewards don't have intents, but we need a unique hash for database constraints.
-/// We use a hash of (owner || value || nonce) to ensure uniqueness.
-fn compute_claim_rewards_intent_hash(
-    owner: &UserAddressV6,
-    value: u128,
-    nonce: &NonceV6,
-) -> IntentHash {
-    let mut hasher = Sha256::new();
-    hasher.update(owner.0.0);
-    hasher.update(value.to_le_bytes());
-    hasher.update(nonce.0.0);
-    let hash_bytes: [u8; 32] = hasher.finalize().into();
-    hash_bytes.into()
-}
-
 fn extract_unshielded_utxos_v6(
     ledger_transaction: TransactionV6,
     transaction_result: &TransactionResult,
@@ -485,4 +469,19 @@ fn extend_v6(
         output_index: spend.output_no,
     });
     inputs.extend(intent_inputs);
+}
+
+/// Compute a pseudo-intent-hash for ClaimRewards transactions.
+/// ClaimRewards don't have intents, but we need a unique hash for database constraints.
+/// We use a hash of (owner || value || nonce) to ensure uniqueness.
+fn compute_claim_rewards_intent_hash(
+    owner: &UserAddressV6,
+    value: u128,
+    nonce: &NonceV6,
+) -> IntentHash {
+    let mut hasher = Sha256::new();
+    hasher.update(owner.0.0);
+    hasher.update(value.to_le_bytes());
+    hasher.update(nonce.0.0);
+    ByteArray(hasher.finalize().into())
 }
