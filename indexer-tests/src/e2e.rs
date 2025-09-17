@@ -44,7 +44,7 @@ use graphql_client::{GraphQLQuery, Response};
 use indexer_api::infra::api::v1::{
     AsBytesExt, HexEncoded, transaction::TransactionResultStatus, viewing_key::ViewingKey,
 };
-use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_016_000};
+use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_016_000, ledger::RawTokenType};
 use itertools::Itertools;
 use reqwest::Client;
 use serde::Serialize;
@@ -104,9 +104,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_shielded_transactions_subscription(&ws_api_url, network_id)
         .await
         .context("test shielded transactions subscription")?;
-    // test_unshielded_transactions_subscription(&indexer_data, &ws_api_url)
-    //     .await
-    //     .context("test unshielded transactions subscription")?;
+    test_unshielded_transactions_subscription(&indexer_data, &ws_api_url)
+        .await
+        .context("test unshielded transactions subscription")?;
 
     println!("Successfully finished e2e testing");
 
@@ -265,24 +265,10 @@ impl IndexerData {
             // Genesis block should have at least one transaction.
             assert!(!genesis_block.transactions.is_empty());
 
-            // let genesis_transaction = &genesis_block.transactions[0];
-
-            // // Genesis transaction should have created unshielded UTXOs.
-            // assert!(!genesis_transaction.unshielded_created_outputs.is_empty());
-
-            // // Verify genesis UTXOs have expected properties.
-            // for utxo in &genesis_transaction.unshielded_created_outputs {
-            //     // Genesis UTXOs should have positive values.
-            //     assert!(utxo.value.parse::<u128>().unwrap_or(0) > 0);
-
-            //     // Genesis UTXOs should have valid owner addresses (non-empty string).
-            //     assert!(!utxo.owner.0.is_empty());
-
-            //     // Genesis UTXOs should have valid token types.
-            //     // Token type validation: attempt to decode as 32-byte array.
-            //     // For native tokens, this is typically all zeros.
-            //     assert!(utxo.token_type.hex_decode::<RawTokenType>().is_ok());
-            // }
+            // Note: We no longer validate genesis UTXOs here as they are specific to
+            // test networks with pre-funded wallets, which don't exist on mainnet.
+            // Genesis UTXOs are created by ClaimRewards transactions and properly
+            // extracted by the indexer but distributed across multiple transactions.
         }
 
         Ok(Self {
