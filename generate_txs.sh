@@ -94,3 +94,5 @@ docker run \
     --network undeployed \
     --dest-file /out/tx_1_2_3.raw \
     --from-bytes
+
+mv target/*.raw indexer-common/tests
