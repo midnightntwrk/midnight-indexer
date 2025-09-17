@@ -1,17 +1,16 @@
 name: Checkmarx One Scan
 
-# ↓ lock down top‐level permissions to only what we use
-permissions:
-  contents: read # we only need to checkout code
-  actions: read # to query workflows/runs
-  pull-requests: write # to comment on or label PRs
-  security-events: write # to upload scan results to github
+# use only job-level permissions
+permissions: {}
 
 on:
   pull_request:
-    branches: ["**"]
+    branches: [ '**' ]
   push:
-    branches: ["main"]
+    branches: [ 'main' ]
+  workflow_dispatch: {}   # so you can still run it manually
+  schedule:
+    - cron: "0 0 * * *"   # run daily at midnight UTC
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref }}
   cancel-in-progress: true
@@ -20,8 +19,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      statuses: write
       security-events: write
+      actions: read              # to query workflows/runs
 
     runs-on: ubuntu-latest
 
@@ -35,11 +34,11 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           repository: midnightntwrk/upload-sarif-github-action
-          ref: 20eb09abe9113be23e3791b5298c120ce15a95a5
+          ref: 8202d2182e4c0ebec293f9d9140c3378a2afe16e
           path: upload-sarif-github-action
           token: ${{ secrets.MIDNIGHTCI_REPO }}
 
-      # Once public, can simplify to: uses: midnightntwrk/upload-sarif-github-action/checkmarx-scan@main
+      # Once public, can simplify to: uses: midnightntwrk/upload-sarif-github-action/checkmarx-scan@8202d2182e4c0ebec293f9d9140c3378a2afe16e
       - name: Checkmarx Full Scan
         uses: ./upload-sarif-github-action/checkmarx-scan
         with:
