@@ -2,12 +2,12 @@
 
 set -euo pipefail
 
-# Cleanup function to ensure node container is removed
+# Cleanup function to ensure node container is removed.
 cleanup() {
     docker rm -f node >/dev/null 2>&1 || true
 }
 
-# Set up trap to cleanup on exit
+# Set up trap to cleanup on exit.
 trap cleanup EXIT
 
 if [ -z "$1" ]; then
@@ -38,9 +38,7 @@ fi
 
 mkdir -p ./.node/$node_version
 
-# SIDECHAIN_BLOCK_BENEFICIARY specifies the wallet that receives block rewards and transaction fees (DUST).
-# Required after fees were enabled in 0.16.0-da0b6c69.
-# This hex value is a public key that matches the one used in toolkit-e2e.sh.
+# Start the node container.
 docker run \
     -d \
     --name node \
