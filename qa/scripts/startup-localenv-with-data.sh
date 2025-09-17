@@ -1,5 +1,13 @@
-docker-pialla-tutto
+#!/bin/bash
 
+if [ -n "$(docker ps -a|grep -e ghcr.io -e nats -e postgres|awk -F " " '{print $1}'
+)" ]; then
+    docker rm -f $(docker ps -a|grep -e ghcr.io -e nats -e postgres|awk -F " " '{print $1}')
+    echo "All Midnight containers removed."
+else
+    echo "No Midnight containers to remove."
+    echo "Everything is clear!"
+fi
 
 sudo rm -rf target/data/postgres
 sudo rm -rf target/data/nats
@@ -24,7 +32,6 @@ copy-node-data-to-target() {
     tree $SRC_DIR
 
     tree $DEST_DIR
-
 }
 
 export NODE_TAG=${NODE_TAG:-`cat NODE_VERSION`} 
