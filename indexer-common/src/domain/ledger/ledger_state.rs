@@ -42,7 +42,7 @@ use midnight_transient_crypto_v6::merkle_tree::{
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::LazyLock};
 
 pub type IntentHash = ByteArray<32>;
 pub type RawTokenType = ByteArray<32>;
@@ -51,6 +51,12 @@ pub type SerializedLedgerState = ByteVec;
 pub type SerializedTransaction = ByteVec;
 pub type SerializedZswapState = ByteVec;
 pub type SerializedZswapStateRoot = ByteVec;
+
+static STRICTNESS_V6: LazyLock<WellFormedStrictnessV6> = LazyLock::new(|| {
+    let mut strictness = WellFormedStrictnessV6::default();
+    strictness.enforce_balancing = false;
+    strictness
+});
 
 /// Facade for `LedgerState` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
@@ -128,21 +134,14 @@ impl LedgerState {
                 };
 
                 // Assume midnight-node has already validated included transactions.
-                let mut strictness = WellFormedStrictnessV6::default();
-                strictness.enforce_balancing = false;
-                strictness.enforce_limits = false;
-                strictness.verify_contract_proofs = false;
-                strictness.verify_native_proofs = false;
-                strictness.verify_signatures = false;
-                let verified_transaction = ledger_transaction
-                    .well_formed(&cx.ref_state, strictness, cx.block_context.tblock)
-                    .map_err(|error| Error::MalformedTransaction(error.into()))?;
-
-                let cost = verified_transaction
+                let cost = ledger_transaction
                     .cost(&ledger_state.parameters)
                     .map_err(|error| Error::TransactionCost(error.into()))?;
+                let verified_ledger_transaction = ledger_transaction
+                    .well_formed(&cx.ref_state, *STRICTNESS_V6, cx.block_context.tblock)
+                    .map_err(|error| Error::MalformedTransaction(error.into()))?;
                 let (ledger_state, transaction_result) =
-                    ledger_state.apply(&verified_transaction, &cx);
+                    ledger_state.apply(&verified_ledger_transaction, &cx);
                 let block_fullness = *block_fullness + cost;
 
                 *self = Self::V6 {
@@ -225,6 +224,7 @@ impl LedgerState {
                 let root = ledger_state
                     .zswap
                     .coin_coms
+                    .rehash()
                     .root()
                     .expect("zswap merkle tree root should exist");
                 ZswapStateRoot::V6(root)
