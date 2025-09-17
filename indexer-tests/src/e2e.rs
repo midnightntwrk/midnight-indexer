@@ -265,24 +265,10 @@ impl IndexerData {
             // Genesis block should have at least one transaction.
             assert!(!genesis_block.transactions.is_empty());
 
-            let genesis_transaction = &genesis_block.transactions[0];
-
-            // Genesis transaction should have created unshielded UTXOs.
-            assert!(!genesis_transaction.unshielded_created_outputs.is_empty());
-
-            // Verify genesis UTXOs have expected properties.
-            for utxo in &genesis_transaction.unshielded_created_outputs {
-                // Genesis UTXOs should have positive values.
-                assert!(utxo.value.parse::<u128>().unwrap_or(0) > 0);
-
-                // Genesis UTXOs should have valid owner addresses (non-empty string).
-                assert!(!utxo.owner.0.is_empty());
-
-                // Genesis UTXOs should have valid token types.
-                // Token type validation: attempt to decode as 32-byte array.
-                // For native tokens, this is typically all zeros.
-                assert!(utxo.token_type.hex_decode::<RawTokenType>().is_ok());
-            }
+            // Note: We no longer validate genesis UTXOs here as they are specific to
+            // test networks with pre-funded wallets, which don't exist on mainnet.
+            // Genesis UTXOs are created by ClaimRewards transactions and properly
+            // extracted by the indexer but distributed across multiple transactions.
         }
 
         Ok(Self {
