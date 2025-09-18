@@ -23,9 +23,13 @@ use crate::domain::{
     },
 };
 use fastrace::trace;
-use midnight_base_crypto_v6::{hash::HashOutput as HashOutputV6, time::Timestamp as TimestampV6};
+use midnight_base_crypto_v6::{
+    cost_model::SyntheticCost as SyntheticCostV6, hash::HashOutput as HashOutputV6,
+    time::Timestamp as TimestampV6,
+};
 use midnight_coin_structure_v6::{
-    coin::UserAddress as UserAddressV6, contract::ContractAddress as ContractAddressV6,
+    coin::{Nonce as NonceV6, UserAddress as UserAddressV6},
+    contract::ContractAddress as ContractAddressV6,
 };
 use midnight_ledger_v6::{
     semantics::{
@@ -43,7 +47,8 @@ use midnight_transient_crypto_v6::merkle_tree::{
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use sha2::{Digest, Sha256};
+use std::{collections::HashSet, sync::LazyLock};
 
 pub type IntentHash = ByteArray<32>;
 pub type RawTokenType = ByteArray<32>;
@@ -53,16 +58,28 @@ pub type SerializedTransaction = ByteVec;
 pub type SerializedZswapState = ByteVec;
 pub type SerializedZswapStateRoot = ByteVec;
 
+static STRICTNESS_V6: LazyLock<WellFormedStrictnessV6> = LazyLock::new(|| {
+    let mut strictness = WellFormedStrictnessV6::default();
+    strictness.enforce_balancing = false;
+    strictness
+});
+
 /// Facade for `LedgerState` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum LedgerState {
-    V6(LedgerStateV6<DefaultDBV6>),
+    V6 {
+        ledger_state: LedgerStateV6<DefaultDBV6>,
+        block_fullness: SyntheticCostV6,
+    },
 }
 
 impl LedgerState {
     #[allow(missing_docs)]
     pub fn new(network_id: NetworkId) -> Self {
-        Self::V6(LedgerStateV6::new(network_id))
+        Self::V6 {
+            ledger_state: LedgerStateV6::new(network_id),
+            block_fullness: Default::default(),
+        }
     }
 
     /// Deserialize the given serialized ledger state using the given protocol version.
@@ -74,7 +91,10 @@ impl LedgerState {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
             let ledger_state = tagged_deserialize_v6(&mut ledger_state.as_ref())
                 .map_err(|error| Error::Io("cannot deserialize LedgerStateV6", error))?;
-            Ok(Self::V6(ledger_state))
+            Ok(Self::V6 {
+                ledger_state,
+                block_fullness: Default::default(),
+            })
         } else {
             Err(Error::InvalidProtocolVersion(protocol_version))
         }
@@ -84,7 +104,7 @@ impl LedgerState {
     #[trace]
     pub fn serialize(&self) -> Result<SerializedLedgerState, Error> {
         match self {
-            Self::V6(ledger_state) => ledger_state
+            Self::V6 { ledger_state, .. } => ledger_state
                 .tagged_serialize_v6()
                 .map_err(|error| Error::Io("cannot serialize LedgerStateV6", error)),
         }
@@ -100,7 +120,10 @@ impl LedgerState {
         block_timestamp: u64,
     ) -> Result<ApplyRegularTransactionResult, Error> {
         match self {
-            Self::V6(ledger_state) => {
+            Self::V6 {
+                ledger_state,
+                block_fullness,
+            } => {
                 let ledger_transaction = tagged_deserialize_v6::<TransactionV6>(
                     &mut transaction.as_ref(),
                 )
@@ -117,18 +140,14 @@ impl LedgerState {
                 };
 
                 // Assume midnight-node has already validated included transactions.
-                let mut strictness = WellFormedStrictnessV6::default();
-                strictness.enforce_balancing = false;
-                strictness.enforce_limits = false;
-                strictness.verify_contract_proofs = false;
-                strictness.verify_native_proofs = false;
-                strictness.verify_signatures = false;
-                let verified_transaction = ledger_transaction
-                    .well_formed(&cx.ref_state, strictness, cx.block_context.tblock)
+                let cost = ledger_transaction
+                    .cost(&ledger_state.parameters)
+                    .map_err(|error| Error::TransactionCost(error.into()))?;
+                let verified_ledger_transaction = ledger_transaction
+                    .well_formed(&cx.ref_state, *STRICTNESS_V6, cx.block_context.tblock)
                     .map_err(|error| Error::MalformedTransaction(error.into()))?;
-
                 let (ledger_state, transaction_result) =
-                    ledger_state.apply(&verified_transaction, &cx);
+                    ledger_state.apply(&verified_ledger_transaction, &cx);
 
                 // Get DUST parameters before updating self.
                 let dust_params = DustParameters {
@@ -138,7 +157,12 @@ impl LedgerState {
                         as u64,
                 };
 
-                *self = Self::V6(ledger_state);
+                let block_fullness = *block_fullness + cost;
+
+                *self = Self::V6 {
+                    ledger_state,
+                    block_fullness,
+                };
 
                 let (transaction_result, dust_events) = match transaction_result {
                     TransactionResultV6::Success(events) => {
@@ -180,13 +204,17 @@ impl LedgerState {
         block_timestamp: u64,
     ) -> Result<Vec<DustEvent>, Error> {
         match self {
-            Self::V6(ledger_state) => {
+            Self::V6 {
+                ledger_state,
+                block_fullness,
+            } => {
                 let ledger_transaction =
                     tagged_deserialize_v6::<LedgerSystemTransactionV6>(&mut transaction.as_ref())
                         .map_err(|error| {
                         Error::Io("cannot deserialize LedgerSystemTransactionV6", error)
                     })?;
 
+                let cost = ledger_transaction.cost(&ledger_state.parameters);
                 let (ledger_state, events) = ledger_state
                     .apply_system_tx(&ledger_transaction, timestamp_v6(block_timestamp))
                     .map_err(|error| Error::SystemTransaction(error.into()))?;
@@ -199,7 +227,12 @@ impl LedgerState {
                         as u64,
                 };
 
-                *self = Self::V6(ledger_state);
+                let block_fullness = *block_fullness + cost;
+
+                *self = Self::V6 {
+                    ledger_state,
+                    block_fullness,
+                };
 
                 // Extract DUST events from system transaction events.
                 let dust_events = extract_dust_events_v6(&events, &dust_params);
@@ -211,17 +244,18 @@ impl LedgerState {
     /// Get the first free index of the zswap state.
     pub fn zswap_first_free(&self) -> u64 {
         match self {
-            Self::V6(ledger_state) => ledger_state.zswap.first_free,
+            Self::V6 { ledger_state, .. } => ledger_state.zswap.first_free,
         }
     }
 
     /// Get the merkle tree root of the zswap state.
     pub fn zswap_merkle_tree_root(&self) -> ZswapStateRoot {
         match self {
-            Self::V6(ledger_state) => {
+            Self::V6 { ledger_state, .. } => {
                 let root = ledger_state
                     .zswap
                     .coin_coms
+                    .rehash()
                     .root()
                     .expect("zswap merkle tree root should exist");
                 ZswapStateRoot::V6(root)
@@ -235,7 +269,7 @@ impl LedgerState {
         address: &SerializedContractAddress,
     ) -> Result<SerializedZswapState, Error> {
         match self {
-            Self::V6(ledger_state) => {
+            Self::V6 { ledger_state, .. } => {
                 let address = tagged_deserialize_v6::<ContractAddressV6>(&mut address.as_ref())
                     .map_err(|error| Error::Io("cannot deserialize ContractAddressV6", error))?;
 
@@ -252,7 +286,7 @@ impl LedgerState {
     /// Extract the UTXOs.
     pub fn extract_utxos(&self) -> Vec<UnshieldedUtxo> {
         match self {
-            Self::V6(ledger_state) => ledger_state
+            Self::V6 { ledger_state, .. } => ledger_state
                 .utxo
                 .utxos
                 .keys()
@@ -270,7 +304,7 @@ impl LedgerState {
     /// Extract the serialized merkle-tree collapsed update for the given indices.
     pub fn collapsed_update(&self, start_index: u64, end_index: u64) -> Result<ByteVec, Error> {
         match self {
-            Self::V6(ledger_state) => MerkleTreeCollapsedUpdateV6::new(
+            Self::V6 { ledger_state, .. } => MerkleTreeCollapsedUpdateV6::new(
                 &ledger_state.zswap.coin_coms,
                 start_index,
                 end_index,
@@ -282,12 +316,23 @@ impl LedgerState {
     }
 
     /// To be called after applying transactions.
-    pub fn post_apply_transactions(&mut self, block_timestamp: u64) {
+    pub fn post_apply_transactions(&mut self, block_timestamp: u64) -> Result<(), Error> {
         match self {
-            Self::V6(ledger_state) => {
+            Self::V6 {
+                ledger_state,
+                block_fullness,
+            } => {
                 let timestamp = timestamp_v6(block_timestamp);
-                let ledger_state = ledger_state.post_block_update(timestamp);
-                *self = Self::V6(ledger_state);
+                let ledger_state = ledger_state
+                    .post_block_update(timestamp, *block_fullness)
+                    .map_err(|error| Error::BlockLimitExceeded(error.into()))?;
+
+                *self = Self::V6 {
+                    ledger_state,
+                    block_fullness: Default::default(),
+                };
+
+                Ok(())
             }
         }
     }
@@ -402,7 +447,20 @@ fn extract_unshielded_utxos_v6(
             (outputs, inputs)
         }
 
-        TransactionV6::ClaimRewards(_) => (vec![], vec![]),
+        TransactionV6::ClaimRewards(claim) => {
+            // ClaimRewards creates a single unshielded UTXO for the claimed amount.
+            let owner = UserAddressV6::from(claim.owner.clone());
+            let intent_hash = compute_claim_rewards_intent_hash(&owner, claim.value, &claim.nonce);
+
+            let utxo = UnshieldedUtxo {
+                owner: owner.0.0.into(),
+                token_type: RawTokenType::default(), // Native token (all zeros).
+                value: claim.value,
+                intent_hash,
+                output_index: 0,
+            };
+            (vec![utxo], vec![]) // Creates one UTXO, spends none.
+        }
     }
 }
 
@@ -559,4 +617,19 @@ where
             })
         })
         .collect()
+}
+
+/// Compute a pseudo-intent-hash for ClaimRewards transactions.
+/// ClaimRewards don't have intents, but we need a unique hash for database constraints.
+/// We use a hash of (owner || value || nonce) to ensure uniqueness.
+fn compute_claim_rewards_intent_hash(
+    owner: &UserAddressV6,
+    value: u128,
+    nonce: &NonceV6,
+) -> IntentHash {
+    let mut hasher = Sha256::new();
+    hasher.update(owner.0.0);
+    hasher.update(value.to_le_bytes());
+    hasher.update(nonce.0.0);
+    ByteArray(hasher.finalize().into())
 }

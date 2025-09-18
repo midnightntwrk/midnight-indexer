@@ -585,9 +585,6 @@ async fn make_system_transaction(
     transaction: ByteVec,
     protocol_version: ProtocolVersion,
 ) -> Result<Transaction, SubxtNodeError> {
-    let transaction = const_hex::decode(&transaction)
-        .map_err(SubxtNodeError::HexDecodeSystemTransaction)?
-        .into();
     let ledger_transaction =
         ledger::SystemTransaction::deserialize(&transaction, protocol_version)?;
 

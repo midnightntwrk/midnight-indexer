@@ -23,6 +23,7 @@ reqwest           = { workspace = true, features = [ "json", "rustls-tls" ] }
 serde             = { workspace = true, features = [ "derive" ] }
 serde_json        = { workspace = true }
 tokio             = { workspace = true, features = [ "macros", "process", "rt-multi-thread" ] }
+tokio-stream      = { workspace = true }
 tokio-tungstenite = { workspace = true, features = [ "rustls-tls-webpki-roots" ] }
 
 [dev-dependencies]

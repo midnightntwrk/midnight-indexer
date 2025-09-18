@@ -13,119 +13,98 @@
 
 use std::{env, fs, path::Path};
 
-// Configure the path to the node version file
 const NODE_VERSION_FILE: &str = "../NODE_VERSION";
 
 fn main() {
     let node_version = read_node_version();
-    let metadata_path = format!("../.node/{}/metadata.scale", node_version);
 
-    if !Path::new(&metadata_path).exists() {
-        panic!(
-            "Metadata file not found at: {}\nMake sure the node version '{}' exists in ../.node/",
-            metadata_path, node_version
-        );
+    let metadata_path = Path::new("..")
+        .join(".node")
+        .join(&node_version)
+        .join("metadata.scale");
+    if !metadata_path.exists() {
+        panic!("metadata file not found at {}", metadata_path.display());
     }
 
-    // Extract version for module name (replace dots and hyphens with underscores)
-    // e.g. "0.16.0-da0b6c69" becomes "0_16"
+    // Extract version for module name (replace dots and hyphens with underscores).
+    // E.g. "0.16.0-da0b6c69" becomes "0_16".
     let module_suffix = node_version
         .split('.')
         .take(2)
-        .collect::<Vec<&str>>()
+        .collect::<Vec<_>>()
         .join("_");
 
-    // Generate the subxt macro call
+    // Generate the code with the subxt macro call.
     let generated_code = format!(
         r#"
-#[subxt::subxt(
-    runtime_metadata_path = "{}",
-    derive_for_type(
-        path = "sp_consensus_slots::Slot",
-        derive = "parity_scale_codec::Encode, parity_scale_codec::Decode",
-        recursive
-    )
-)]
-pub mod runtime_{} {{}}
-"#,
-        metadata_path, module_suffix
+            #[subxt::subxt(
+                runtime_metadata_path = "{}",
+                derive_for_type(
+                    path = "sp_consensus_slots::Slot",
+                    derive = "parity_scale_codec::Encode, parity_scale_codec::Decode",
+                    recursive
+                )
+            )]
+            pub mod runtime_{module_suffix} {{}}
+        "#,
+        metadata_path.display()
     );
 
-    // Write to output file in the OUT_DIR
-    let out_dir = env::var("OUT_DIR").unwrap();
-    let dest_path = Path::new(&out_dir).join("generated_runtime.rs");
-
-    fs::write(&dest_path, generated_code).expect("Failed to write generated runtime file");
+    // Write generated code to file in OUT_DIR.
+    let out_dir = env::var("OUT_DIR").expect("env var OUT_DIR is set");
+    let runtime_file = Path::new(&out_dir).join("generated_runtime.rs");
+    fs::write(&runtime_file, generated_code).expect("generated runtime file can be written");
 
     // Tell cargo to rerun build script if:
-    // 1. The NODE_VERSION file changes
+    // 1. The NODE_VERSION file changes.
     println!("cargo:rerun-if-changed={}", NODE_VERSION_FILE);
-
-    // 2. The metadata file itself changes
-    println!("cargo:rerun-if-changed={}", metadata_path);
-
-    // 3. The .node directory structure changes
+    // 2. The metadata file itself changes.
+    println!("cargo:rerun-if-changed={}", metadata_path.display());
+    // 3. The .node directory structure changes.
     println!("cargo:rerun-if-changed=../.node");
 
-    // Output information for debugging
+    // Output information for debugging.
     println!("cargo:rustc-env=USED_NODE_VERSION={}", node_version);
-    println!("cargo:warning=Using node version: {}", node_version);
 }
 
 fn read_node_version() -> String {
-    // Check if NODE_VERSION file exists
     if !Path::new(NODE_VERSION_FILE).exists() {
-        panic!(
-            "{} file not found. Please create a {} file containing the node version (e.g., '0.16.0-da0b6c69')",
-            NODE_VERSION_FILE, NODE_VERSION_FILE
-        );
+        panic!("{NODE_VERSION_FILE} file not found");
     }
 
-    // Read and clean the version string
+    // Read and validate/sanitize the version string.
     match fs::read_to_string(NODE_VERSION_FILE) {
-        Ok(content) => {
-            let version = content.trim().to_string();
+        Ok(version) => {
+            let version = version.trim().to_string();
 
             if version.is_empty() {
-                panic!(
-                    "{} file is empty. Please specify a node version (e.g., '0.16.0-da0b6c69')",
-                    NODE_VERSION_FILE
-                );
+                panic!("{NODE_VERSION_FILE} file is empty");
             }
 
-            let version = validate_and_sanitize_version(&version);
-
-            println!(
-                "cargo:warning=Read node version from {}: {}",
-                NODE_VERSION_FILE, version
-            );
-            version
+            validate_and_sanitize_version(&version)
         }
+
         Err(error) => {
-            panic!("Failed to read {} file: {}", NODE_VERSION_FILE, error);
+            panic!("cannot read {NODE_VERSION_FILE} file: {error}");
         }
     }
 }
 
 fn validate_and_sanitize_version(version: &str) -> String {
-    const PERMITTED_SPECIAL_CHARS: [char; 3] = ['.', '-', '_'];
     const MAX_VERSION_LENGTH: usize = 64;
     if version.len() > MAX_VERSION_LENGTH {
         panic!(
-            "Node version too long (max {} characters): length is {}",
-            MAX_VERSION_LENGTH,
+            "node version must have less than {MAX_VERSION_LENGTH} characters, but had {}",
             version.len()
         );
     }
 
-    // Validate that the version contains only allowed characters
-    // Node versions typically follow patterns like: "0.16.0-da0b6c69", "1.2.3-abc123def456"
+    const PERMITTED_SPECIAL_CHARS: [char; 3] = ['.', '-', '_'];
     let allowed_chars =
         |c: char| -> bool { c.is_ascii_alphanumeric() || PERMITTED_SPECIAL_CHARS.contains(&c) };
-
     if !version.chars().all(allowed_chars) {
         panic!(
-            "Invalid characters in node version. Only {PERMITTED_SPECIAL_CHARS:?} are allowed. Got: '{}'",
+            "invalid characters in node version {}",
             version
                 .chars()
                 .filter(|c| !allowed_chars(*c))
@@ -133,10 +112,9 @@ fn validate_and_sanitize_version(version: &str) -> String {
         );
     }
 
-    // Additional validation: ensure it's not empty and doesn't start/end with special chars
     if version.starts_with(PERMITTED_SPECIAL_CHARS) || version.ends_with(PERMITTED_SPECIAL_CHARS) {
         panic!(
-            "Node version cannot start or end with {PERMITTED_SPECIAL_CHARS:?}. Got: '{}'",
+            "node version must not start or end with {PERMITTED_SPECIAL_CHARS:?}, but got: '{}'",
             version
         );
     }

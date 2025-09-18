@@ -64,6 +64,25 @@ input BlockOffset @oneOf {
 	height: Int
 }
 
+type CollapsedMerkleTree {
+	"""
+	The zswap state start index.
+	"""
+	startIndex: Int!
+	"""
+	The zswap state end index.
+	"""
+	endIndex: Int!
+	"""
+	The hex-encoded value.
+	"""
+	update: HexEncoded!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+}
+
 """
 A contract action.
 """
@@ -689,25 +708,6 @@ type DustSystemState {
 
 scalar HexEncoded
 
-type MerkleTreeCollapsedUpdate {
-	"""
-	The start index into the zswap state.
-	"""
-	start: Int!
-	"""
-	The end index into the zswap state.
-	"""
-	end: Int!
-	"""
-	The hex-encoded merkle-tree collapsed update.
-	"""
-	update: HexEncoded!
-	"""
-	The protocol version.
-	"""
-	protocolVersion: Int!
-}
-
 type Mutation {
 	"""
 	Connect the wallet with the given viewing key and return a session ID.
@@ -813,19 +813,18 @@ type RegistrationUpdateProgress {
 	updateCount: Int!
 }
 
+"""
+A transaction relevant for the subscribing wallet and an optional collapsed merkle tree.
+"""
 type RelevantTransaction {
 	"""
-	Relevant transaction for the wallet.
+	A transaction relevant for the subscribing wallet.
 	"""
 	transaction: Transaction!
 	"""
-	The start index.
+	An optional collapsed merkle tree.
 	"""
-	start: Int!
-	"""
-	The end index.
-	"""
-	end: Int!
+	collapsedMerkleTree: CollapsedMerkleTree
 }
 
 """
@@ -846,26 +845,32 @@ type Segment {
 """
 An event of the shielded transactions subscription.
 """
-union ShieldedTransactionsEvent = ViewingUpdate | ShieldedTransactionsProgress
+union ShieldedTransactionsEvent = RelevantTransaction | ShieldedTransactionsProgress
 
 """
-Aggregates information about the shielded transactions indexing progress.
+Information about the shielded transactions indexing progress.
 """
 type ShieldedTransactionsProgress {
 	"""
-	The highest end index into the zswap state of all currently known transactions.
+	The highest zswap state end index (see `endIndex` of `Transaction`) of all transactions. It
+	represents the known state of the blockchain. A value of zero (completely unlikely) means
+	that no shielded transactions have been indexed yet.
 	"""
-	highestIndex: Int!
+	highestEndIndex: Int!
 	"""
-	The highest end index into the zswap state of all currently known relevant transactions,
-	i.e. those that belong to any known wallet. Less or equal `highest_index`.
+	The highest zswap state end index (see `endIndex` of `Transaction`) of all transactions
+	checked for relevance. Initially less than and eventually (when some wallet has been fully
+	indexed) equal to `highest_end_index`. A value of zero (very unlikely) means that no wallet
+	has subscribed before and indexing for the subscribing wallet has not yet started.
 	"""
-	highestRelevantIndex: Int!
+	highestCheckedEndIndex: Int!
 	"""
-	The highest end index into the zswap state of all currently known relevant transactions for
-	a particular wallet. Less or equal `highest_relevant_index`.
+	The highest zswap state end index (see `endIndex` of `Transaction`) of all relevant
+	transactions for the subscribing wallet. Usually less than `highest_checked_end_index`
+	unless the latest checked transaction is relevant for the subscribing wallet. A value of
+	zero means that no relevant transactions have been indexed for the subscribing wallet.
 	"""
-	highestRelevantWalletIndex: Int!
+	highestRelevantEndIndex: Int!
 }
 
 type Subscription {
@@ -883,7 +888,7 @@ type Subscription {
 	Subscribe shielded transaction events for the given session ID starting at the given index
 	or at zero if omitted.
 	"""
-	shieldedTransactions(sessionId: HexEncoded!, index: Int, sendProgressUpdates: Boolean): ShieldedTransactionsEvent!
+	shieldedTransactions(sessionId: HexEncoded!, index: Int): ShieldedTransactionsEvent!
 	"""
 	Subscribe unshielded transaction events for the given address and the given transaction ID
 	or zero if omitted.
@@ -908,7 +913,7 @@ type Subscription {
 }
 
 """
-A transaction with its relevant data.
+A Midnight transaction.
 """
 type Transaction {
 	"""
@@ -943,6 +948,14 @@ type Transaction {
 	The hex-encoded serialized merkle-tree root.
 	"""
 	merkleTreeRoot: HexEncoded!
+	"""
+	The zswap state start index.
+	"""
+	startIndex: Int!
+	"""
+	The zswap state end index.
+	"""
+	endIndex: Int!
 	"""
 	The block for this transaction.
 	"""
@@ -1079,25 +1092,6 @@ type UnshieldedUtxo {
 }
 
 scalar ViewingKey
-
-"""
-Aggregates a relevant transaction with the next start index and an optional collapsed
-Merkle-Tree update.
-"""
-type ViewingUpdate {
-	"""
-	Next start index into the zswap state to be queried. Usually the end index of the included
-	relevant transaction plus one unless that is a failure in which case just its end
-	index.
-	"""
-	index: Int!
-	"""
-	Relevant transaction for the wallet and maybe a collapsed Merkle-Tree update.
-	"""
-	update: [ZswapChainStateUpdate!]!
-}
-
-union ZswapChainStateUpdate = MerkleTreeCollapsedUpdate | RelevantTransaction
 
 """
 Directs the executor to include this field or fragment only when the `if` argument is true.

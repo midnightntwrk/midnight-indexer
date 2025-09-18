@@ -181,7 +181,10 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
     }
 }
 
-query ContractActionQuery($address: HexEncoded!, $contract_action_offset: ContractActionOffset) {
+query ContractActionQuery(
+    $address: HexEncoded!
+    $contract_action_offset: ContractActionOffset
+) {
     contractAction(address: $address, offset: $contract_action_offset) {
         __typename
         ... on ContractDeploy {
@@ -340,10 +343,13 @@ subscription BlockSubscription($block_offset: BlockOffset) {
 }
 
 subscription ContractActionSubscription(
-    $address: HexEncoded!, 
+    $address: HexEncoded!
     $contract_action_subscription_offset: BlockOffset
 ) {
-    contractActions(address: $address, offset: $contract_action_subscription_offset) {
+    contractActions(
+        address: $address
+        offset: $contract_action_subscription_offset
+    ) {
         __typename
         ... on ContractDeploy {
             address
@@ -395,31 +401,24 @@ subscription ContractActionSubscription(
     }
 }
 
-subscription ShieldedTransactionsSubscription(
-    $sessionId: HexEncoded!
-) {
+subscription ShieldedTransactionsSubscription($sessionId: HexEncoded!) {
     shieldedTransactions(sessionId: $sessionId) {
         __typename
-        ... on ViewingUpdate {
-            index
-            update {
-                __typename
-                ... on MerkleTreeCollapsedUpdate {
-                    start
-                    end
-                }
-                __typename
-                ... on RelevantTransaction {
-                    start
-                    end
-                }
+        ... on RelevantTransaction {
+            transaction {
+                startIndex
+                endIndex
+            }
+            collapsedMerkleTree {
+                startIndex
+                endIndex
             }
         }
         __typename
         ... on ShieldedTransactionsProgress {
-            highestIndex
-            highestRelevantIndex
-            highestRelevantWalletIndex
+            highestEndIndex
+            highestCheckedEndIndex
+            highestRelevantEndIndex
         }
     }
 }
