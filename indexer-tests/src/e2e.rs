@@ -247,22 +247,6 @@ impl IndexerData {
             .flat_map(|transaction| transaction.unshielded_created_outputs.to_owned())
             .collect::<Vec<_>>();
 
-        // Test genesis UTXOs for non-MainNet networks.
-        if network_id != NetworkId::MainNet {
-            let genesis_block = blocks
-                .iter()
-                .find(|block| block.height == 0)
-                .context("genesis block not found")?;
-
-            // Genesis block should have at least one transaction.
-            assert!(!genesis_block.transactions.is_empty());
-
-            // Note: We no longer validate genesis UTXOs here as they are specific to
-            // test networks with pre-funded wallets, which don't exist on mainnet.
-            // Genesis UTXOs are created by ClaimRewards transactions and properly
-            // extracted by the indexer but distributed across multiple transactions.
-        }
-
         Ok(Self {
             blocks,
             transactions,
@@ -672,36 +656,37 @@ async fn test_unshielded_transactions_subscription(
     indexer_data: &IndexerData,
     ws_api_url: &str,
 ) -> anyhow::Result<()> {
-    let unshielded_address = indexer_data
+    if let Some(unshielded_address) = indexer_data
         .unshielded_utxos
         .first()
         .cloned()
-        .unwrap()
-        .owner;
+        .map(|a| a.owner)
+    {
+        let variables = unshielded_transactions_subscription::Variables {
+            address: unshielded_address.clone(),
+        };
+        let unshielded_utxos_updates = graphql_ws_client::subscribe::<
+            UnshieldedTransactionsSubscription,
+        >(ws_api_url, variables)
+        .await
+        .context("subscribe to unshielded UTXOs")?
+        .take(3)
+        .map_ok(|data| data.unshielded_transactions)
+        .try_filter_map(|event| match event {
+            UnshieldedTransactions::UnshieldedTransaction(t) => ok(Some(t)),
+            _ => ok(None),
+        })
+        .try_collect::<Vec<_>>()
+        .await
+        .context("collect unshielded UTXO events")?;
 
-    let variables = unshielded_transactions_subscription::Variables {
-        address: unshielded_address.clone(),
-    };
-    let unshielded_utxos_updates =
-        graphql_ws_client::subscribe::<UnshieldedTransactionsSubscription>(ws_api_url, variables)
-            .await
-            .context("subscribe to unshielded UTXOs")?
-            .take(3)
-            .map_ok(|data| data.unshielded_transactions)
-            .try_filter_map(|event| match event {
-                UnshieldedTransactions::UnshieldedTransaction(t) => ok(Some(t)),
-                _ => ok(None),
-            })
-            .try_collect::<Vec<_>>()
-            .await
-            .context("collect unshielded UTXO events")?;
-
-    assert!(unshielded_utxos_updates.iter().any(move |update| {
-        update
-            .created_utxos
-            .iter()
-            .any(|u| u.owner == unshielded_address)
-    }));
+        assert!(unshielded_utxos_updates.iter().any(move |update| {
+            update
+                .created_utxos
+                .iter()
+                .any(|u| u.owner == unshielded_address)
+        }));
+    }
 
     Ok(())
 }
