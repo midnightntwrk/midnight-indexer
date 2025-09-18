@@ -3037,6 +3037,7 @@ dependencies = [
  "testcontainers",
  "testcontainers-modules",
  "tokio",
+ "tokio-stream",
  "tokio-tungstenite 0.27.0",
 ]
 
