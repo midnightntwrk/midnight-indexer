@@ -20,7 +20,8 @@ use crate::{
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
             dust::{
-                DustEvent, DustEventType, DustGenerationStatus, DustMerkleTreeType, DustSystemState,
+                DustEvent, DustEventVariant, DustGenerationStatus, DustMerkleTreeType,
+                DustSystemState,
             },
             transaction::{Transaction, TransactionOffset},
         },
@@ -290,7 +291,7 @@ where
         &self,
         cx: &Context<'_>,
         limit: Option<u32>,
-        event_type: Option<DustEventType>,
+        event_type: Option<DustEventVariant>,
     ) -> ApiResult<Vec<DustEvent>> {
         let storage = cx.get_storage::<S>();
 

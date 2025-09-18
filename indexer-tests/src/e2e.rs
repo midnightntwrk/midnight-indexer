@@ -1163,13 +1163,13 @@ async fn test_dust_events_queries(
 
                 // Validate and count event types.
                 match event.event_type {
-                    dust_events_by_transaction_query::DustEventType::DUST_INITIAL_UTXO => {
+                    dust_events_by_transaction_query::DustEventVariant::DUST_INITIAL_UTXO => {
                         dust_initial_utxo_count += 1;
                     }
-                    dust_events_by_transaction_query::DustEventType::DUST_GENERATION_DTIME_UPDATE => {
+                    dust_events_by_transaction_query::DustEventVariant::DUST_GENERATION_DTIME_UPDATE => {
                         dust_generation_update_count += 1;
                     }
-                    dust_events_by_transaction_query::DustEventType::DUST_SPEND_PROCESSED => {
+                    dust_events_by_transaction_query::DustEventVariant::DUST_SPEND_PROCESSED => {
                         dust_spend_processed_count += 1;
                     }
                     _ => {
@@ -1300,9 +1300,9 @@ async fn test_dust_comprehensive_coverage(
     // Even with no events, the queries should execute without errors.
     println!("Testing DUST event type filters...");
     let event_types = [
-        recent_dust_events_query::DustEventType::DUST_INITIAL_UTXO,
-        recent_dust_events_query::DustEventType::DUST_GENERATION_DTIME_UPDATE,
-        recent_dust_events_query::DustEventType::DUST_SPEND_PROCESSED,
+        recent_dust_events_query::DustEventVariant::DUST_INITIAL_UTXO,
+        recent_dust_events_query::DustEventVariant::DUST_GENERATION_DTIME_UPDATE,
+        recent_dust_events_query::DustEventVariant::DUST_SPEND_PROCESSED,
     ];
 
     for (i, event_type) in event_types.iter().enumerate() {
@@ -1329,7 +1329,7 @@ async fn test_dust_comprehensive_coverage(
         // Note: block_height is not available in DustEvent type
 
         // Type-specific validation through event_details field
-        if let recent_dust_events_query::DustEventType::DUST_INITIAL_UTXO = event.event_type {
+        if let recent_dust_events_query::DustEventVariant::DUST_INITIAL_UTXO = event.event_type {
             // Event details validation would go here if needed
         }
     }
@@ -1375,10 +1375,10 @@ async fn test_dust_comprehensive_coverage(
         let has_reward_events = recent_events.iter().any(|e| {
             matches!(
                 e.event_type,
-                recent_dust_events_query::DustEventType::DUST_INITIAL_UTXO
+                recent_dust_events_query::DustEventVariant::DUST_INITIAL_UTXO
             ) || matches!(
                 e.event_type,
-                recent_dust_events_query::DustEventType::DUST_SPEND_PROCESSED
+                recent_dust_events_query::DustEventVariant::DUST_SPEND_PROCESSED
             )
         });
         assert!(

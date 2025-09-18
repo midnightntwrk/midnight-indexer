@@ -13,7 +13,7 @@
 
 use crate::domain::{
     ContractAction,
-    dust::{DustEvent, ProcessedDustEvents},
+    dust::{DustEvent, DustEventProjections},
     node,
 };
 use indexer_common::domain::{
@@ -99,7 +99,7 @@ pub struct RegularTransaction {
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub dust_events: Vec<DustEvent>,
-    pub processed_dust_events: ProcessedDustEvents,
+    pub processed_dust_events: DustEventProjections,
 }
 
 impl From<node::RegularTransaction> for RegularTransaction {
@@ -141,7 +141,7 @@ pub struct SystemTransaction {
 
     // These fields come from applying the node transactions to the ledger state.
     pub dust_events: Vec<DustEvent>,
-    pub processed_dust_events: ProcessedDustEvents,
+    pub processed_dust_events: DustEventProjections,
 }
 
 impl TryFrom<node::SystemTransaction> for SystemTransaction {

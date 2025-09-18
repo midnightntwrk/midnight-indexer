@@ -33,7 +33,7 @@ use indexer_common::{
     domain::{
         CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustMerkleUpdate, DustNonce,
         DustNullifier, DustOwner, DustPrefix, NightUtxoHash,
-        dust::{DustEvent, DustEventDetails, DustEventType, DustMerklePathEntry},
+        dust::{DustEvent, DustEventAttributes, DustEventVariant, DustMerklePathEntry},
         ledger::TransactionHash,
     },
     infra::sqlx::{SqlxOption, U128BeBytes},
@@ -711,7 +711,7 @@ impl DustStorage for Storage {
             transaction_hash: TransactionHash,
             logical_segment: i32,
             physical_segment: i32,
-            event_data: Json<DustEventDetails>,
+            event_data: Json<DustEventAttributes>,
         }
 
         let query = indoc! {"
@@ -741,14 +741,14 @@ impl DustStorage for Storage {
     async fn get_recent_dust_events(
         &self,
         limit: u32,
-        event_type: Option<DustEventType>,
+        event_type: Option<DustEventVariant>,
     ) -> Result<Vec<DustEvent>, sqlx::Error> {
         #[derive(FromRow)]
         struct DustEventRow {
             transaction_hash: TransactionHash,
             logical_segment: i32,
             physical_segment: i32,
-            event_data: Json<DustEventDetails>,
+            event_data: Json<DustEventAttributes>,
         }
 
         let query = if event_type.is_some() {

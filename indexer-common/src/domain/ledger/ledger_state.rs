@@ -14,7 +14,7 @@
 use crate::domain::{
     ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_016_000, ProtocolVersion,
     dust::{
-        DustEvent, DustEventDetails, DustGenerationInfo, DustMerklePathEntry, DustParameters,
+        DustEvent, DustEventAttributes, DustGenerationInfo, DustMerklePathEntry, DustParameters,
         QualifiedDustOutput,
     },
     ledger::{
@@ -470,7 +470,7 @@ where
                     generation,
                     generation_index,
                     ..
-                } => Some(DustEventDetails::DustInitialUtxo {
+                } => Some(DustEventAttributes::DustInitialUtxo {
                     output: QualifiedDustOutput {
                         initial_value: output.initial_value,
                         owner: output.owner.0.0.to_bytes_le().into(),
@@ -518,7 +518,7 @@ where
                         })
                         .collect();
 
-                    Some(DustEventDetails::DustGenerationDtimeUpdate {
+                    Some(DustEventAttributes::DustGenerationDtimeUpdate {
                         generation_info: DustGenerationInfo {
                             night_utxo_hash: generation.nonce.0.0.into(),
                             value: generation.value,
@@ -539,7 +539,7 @@ where
                     v_fee,
                     declared_time,
                     ..
-                } => Some(DustEventDetails::DustSpendProcessed {
+                } => Some(DustEventAttributes::DustSpendProcessed {
                     commitment: commitment.0.0.to_bytes_le().into(),
                     commitment_index: *commitment_index,
                     nullifier: nullifier.0.0.to_bytes_le().into(),

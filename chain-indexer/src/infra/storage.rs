@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{
-    self, Block, BlockTransactions, ContractAction, DustRegistrationEvent, ProcessedDustEvents,
+    self, Block, BlockTransactions, ContractAction, DustEventProjections, DustRegistrationEvent,
     RegularTransaction, SystemTransaction, Transaction, TransactionVariant, node::BlockInfo,
 };
 use fastrace::trace;
@@ -21,7 +21,7 @@ use indexer_common::{
     domain::{
         BlockHash, ByteVec, DustNullifier,
         dust::{
-            DustCommitment, DustEvent, DustEventType, DustGenerationInfo, DustMerklePathEntry,
+            DustCommitment, DustEvent, DustEventVariant, DustGenerationInfo, DustMerklePathEntry,
             QualifiedDustOutput,
         },
         ledger::{
@@ -642,7 +642,7 @@ async fn save_identifiers(
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_processed_dust_events(
-    processed_dust_events: &ProcessedDustEvents,
+    processed_dust_events: &DustEventProjections,
     transaction_id: i64,
     block_height: u32,
     tx: &mut SqlxTransaction,
@@ -702,7 +702,7 @@ async fn save_dust_events(
 
     QueryBuilder::new(query)
         .push_values(dust_events.iter(), |mut q, event| {
-            let event_type = DustEventType::from(&event.event_details);
+            let event_type = DustEventVariant::from(&event.event_details);
             q.push_bind(transaction_id)
                 .push_bind(event.transaction_hash.as_ref())
                 .push_bind(event.logical_segment as i32)
@@ -870,7 +870,7 @@ async fn save_parameter_update(
         "};
 
         let parameter_update =
-            to_value(&parameter_update).map_err(|error| sqlx::Error::Encode(error.into()))?;
+            to_value(parameter_update).map_err(|error| sqlx::Error::Encode(error.into()))?;
 
         sqlx::query(query)
             .bind(transaction_id)
@@ -900,7 +900,7 @@ async fn save_night_distribution(
         "};
 
         let json_value =
-            to_value(&night_distribution).map_err(|error| sqlx::Error::Encode(error.into()))?;
+            to_value(night_distribution).map_err(|error| sqlx::Error::Encode(error.into()))?;
 
         sqlx::query(query)
             .bind(transaction_id)
@@ -960,7 +960,7 @@ async fn save_shielded_treasury_payment(
         "};
 
         let treasury_payment_json =
-            to_value(&treasury_payment).map_err(|error| sqlx::Error::Encode(error.into()))?;
+            to_value(treasury_payment).map_err(|error| sqlx::Error::Encode(error.into()))?;
 
         sqlx::query(query)
             .bind(transaction_id)
@@ -994,7 +994,7 @@ async fn save_unshielded_treasury_payment(
         "};
 
         let treasury_payment_json =
-            to_value(&treasury_payment).map_err(|error| sqlx::Error::Encode(error.into()))?;
+            to_value(treasury_payment).map_err(|error| sqlx::Error::Encode(error.into()))?;
 
         sqlx::query(query)
             .bind(transaction_id)

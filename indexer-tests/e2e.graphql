@@ -519,7 +519,7 @@ query DustEventsByTransactionQuery($transactionHash: HexEncoded!) {
     }
 }
 
-query RecentDustEventsQuery($limit: Int, $eventType: DustEventType) {
+query RecentDustEventsQuery($limit: Int, $eventType: DustEventVariant) {
     recentDustEvents(limit: $limit, eventType: $eventType) {
         transactionHash
         logicalSegment

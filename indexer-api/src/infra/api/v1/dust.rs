@@ -530,15 +530,15 @@ pub struct DustEvent {
     pub physical_segment: u16,
 
     /// Event type.
-    pub event_type: DustEventType,
+    pub event_type: DustEventVariant,
 
     /// Event details.
-    pub event_details: DustEventDetails,
+    pub event_details: DustEventAttributes,
 }
 
 /// Type of DUST event.
 #[derive(Debug, Clone, Copy, Enum, Serialize, Deserialize, PartialEq, Eq)]
-pub enum DustEventType {
+pub enum DustEventVariant {
     /// Initial DUST UTXO creation.
     DustInitialUtxo,
 
@@ -547,37 +547,21 @@ pub enum DustEventType {
 
     /// DUST spend processed.
     DustSpendProcessed,
-
-    /// Registration event.
-    DustRegistration,
-
-    /// Deregistration event.
-    DustDeregistration,
-
-    /// Mapping added event.
-    DustMappingAdded,
-
-    /// Mapping removed event.
-    DustMappingRemoved,
 }
 
-impl From<DustEventType> for indexer_common::domain::dust::DustEventType {
-    fn from(event_type: DustEventType) -> Self {
+impl From<DustEventVariant> for indexer_common::domain::dust::DustEventVariant {
+    fn from(event_type: DustEventVariant) -> Self {
         match event_type {
-            DustEventType::DustInitialUtxo => Self::DustInitialUtxo,
-            DustEventType::DustGenerationDtimeUpdate => Self::DustGenerationDtimeUpdate,
-            DustEventType::DustSpendProcessed => Self::DustSpendProcessed,
-            DustEventType::DustRegistration => Self::DustRegistration,
-            DustEventType::DustDeregistration => Self::DustDeregistration,
-            DustEventType::DustMappingAdded => Self::DustMappingAdded,
-            DustEventType::DustMappingRemoved => Self::DustMappingRemoved,
+            DustEventVariant::DustInitialUtxo => Self::DustInitialUtxo,
+            DustEventVariant::DustGenerationDtimeUpdate => Self::DustGenerationDtimeUpdate,
+            DustEventVariant::DustSpendProcessed => Self::DustSpendProcessed,
         }
     }
 }
 
 /// DUST event details union.
 #[derive(Debug, Clone, Union, Serialize, Deserialize)]
-pub enum DustEventDetails {
+pub enum DustEventAttributes {
     /// Initial DUST UTXO creation.
     InitialUtxo(DustInitialUtxoDetails),
 
@@ -586,18 +570,6 @@ pub enum DustEventDetails {
 
     /// DUST spend processed.
     SpendProcessed(DustSpendProcessedDetails),
-
-    /// Registration event.
-    Registration(DustRegistrationDetails),
-
-    /// Deregistration event.
-    Deregistration(DustDeregistrationDetails),
-
-    /// Mapping added event.
-    MappingAdded(DustMappingAddedDetails),
-
-    /// Mapping removed event.
-    MappingRemoved(DustMappingRemovedDetails),
 }
 
 /// Details for initial DUST UTXO creation.
@@ -727,18 +699,14 @@ pub struct DustMappingRemovedDetails {
 
 impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
     fn from(event: indexer_common::domain::dust::DustEvent) -> Self {
-        use indexer_common::domain::dust::DustEventDetails as DomainDetails;
+        use indexer_common::domain::dust::DustEventAttributes as DomainDetails;
 
         let event_type = match &event.event_details {
-            DomainDetails::DustInitialUtxo { .. } => DustEventType::DustInitialUtxo,
+            DomainDetails::DustInitialUtxo { .. } => DustEventVariant::DustInitialUtxo,
             DomainDetails::DustGenerationDtimeUpdate { .. } => {
-                DustEventType::DustGenerationDtimeUpdate
+                DustEventVariant::DustGenerationDtimeUpdate
             }
-            DomainDetails::DustSpendProcessed { .. } => DustEventType::DustSpendProcessed,
-            DomainDetails::DustRegistration { .. } => DustEventType::DustRegistration,
-            DomainDetails::DustDeregistration { .. } => DustEventType::DustDeregistration,
-            DomainDetails::DustMappingAdded { .. } => DustEventType::DustMappingAdded,
-            DomainDetails::DustMappingRemoved { .. } => DustEventType::DustMappingRemoved,
+            DomainDetails::DustSpendProcessed { .. } => DustEventVariant::DustSpendProcessed,
         };
 
         let event_details = match event.event_details {
@@ -746,7 +714,7 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
                 output,
                 generation_info,
                 generation_index,
-            } => DustEventDetails::InitialUtxo(DustInitialUtxoDetails {
+            } => DustEventAttributes::InitialUtxo(DustInitialUtxoDetails {
                 initial_value: output.initial_value.to_string(),
                 owner: output.owner.hex_encode(),
                 nonce: output.nonce.hex_encode(),
@@ -770,7 +738,7 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
                 generation_info,
                 generation_index,
                 merkle_path,
-            } => DustEventDetails::GenerationDtimeUpdate(DustGenerationDtimeUpdateDetails {
+            } => DustEventAttributes::GenerationDtimeUpdate(DustGenerationDtimeUpdateDetails {
                 generation_info: DustGenerationInfo {
                     night_utxo_hash: generation_info.night_utxo_hash.hex_encode(),
                     value: generation_info.value.to_string(),
@@ -795,7 +763,7 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
                 v_fee,
                 time,
                 params,
-            } => DustEventDetails::SpendProcessed(DustSpendProcessedDetails {
+            } => DustEventAttributes::SpendProcessed(DustSpendProcessedDetails {
                 commitment: commitment.hex_encode(),
                 commitment_index,
                 nullifier: nullifier.hex_encode(),
@@ -806,38 +774,6 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
                     generation_decay_rate: params.generation_decay_rate,
                     dust_grace_period: params.dust_grace_period,
                 },
-            }),
-            DomainDetails::DustRegistration {
-                cardano_address,
-                dust_address,
-            } => DustEventDetails::Registration(DustRegistrationDetails {
-                cardano_address: cardano_address.hex_encode(),
-                dust_address: dust_address.hex_encode(),
-            }),
-            DomainDetails::DustDeregistration {
-                cardano_address,
-                dust_address,
-            } => DustEventDetails::Deregistration(DustDeregistrationDetails {
-                cardano_address: cardano_address.hex_encode(),
-                dust_address: dust_address.hex_encode(),
-            }),
-            DomainDetails::DustMappingAdded {
-                cardano_address,
-                dust_address,
-                utxo_id,
-            } => DustEventDetails::MappingAdded(DustMappingAddedDetails {
-                cardano_address: cardano_address.hex_encode(),
-                dust_address: dust_address.hex_encode(),
-                utxo_id: utxo_id.hex_encode(),
-            }),
-            DomainDetails::DustMappingRemoved {
-                cardano_address,
-                dust_address,
-                utxo_id,
-            } => DustEventDetails::MappingRemoved(DustMappingRemovedDetails {
-                cardano_address: cardano_address.hex_encode(),
-                dust_address: dust_address.hex_encode(),
-                utxo_id: utxo_id.hex_encode(),
             }),
         };
 

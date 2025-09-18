@@ -13,10 +13,7 @@
 
 pub use crate::domain::{DustCommitment, DustNullifier};
 
-use crate::domain::{
-    ByteVec, CardanoStakeKey, DustAddress, DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce,
-    ledger::TransactionHash,
-};
+use crate::domain::{DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce, ledger::TransactionHash};
 use serde::{Deserialize, Serialize};
 
 /// DUST event for the indexer domain.
@@ -25,12 +22,12 @@ pub struct DustEvent {
     pub transaction_hash: TransactionHash,
     pub logical_segment: u16,
     pub physical_segment: u16,
-    pub event_details: DustEventDetails,
+    pub event_details: DustEventAttributes,
 }
 
 /// DUST event details.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DustEventDetails {
+pub enum DustEventAttributes {
     /// Initial DUST UTXO creation.
     DustInitialUtxo {
         /// Qualified DUST output.
@@ -65,42 +62,6 @@ pub enum DustEventDetails {
         time: u64,
         /// DUST parameters.
         params: DustParameters,
-    },
-
-    /// Registration event - Cardano address registered with DUST address.
-    DustRegistration {
-        /// Cardano stake key address.
-        cardano_address: CardanoStakeKey,
-        /// DUST address (32 bytes).
-        dust_address: DustAddress,
-    },
-
-    /// Deregistration event - Cardano address deregistered from DUST address.
-    DustDeregistration {
-        /// Cardano stake key address.
-        cardano_address: CardanoStakeKey,
-        /// DUST address (32 bytes).
-        dust_address: DustAddress,
-    },
-
-    /// Mapping added - UTXO mapping added for registration.
-    DustMappingAdded {
-        /// Cardano stake key address.
-        cardano_address: CardanoStakeKey,
-        /// DUST address.
-        dust_address: ByteVec,
-        /// UTXO identifier.
-        utxo_id: ByteVec,
-    },
-
-    /// Mapping removed - UTXO mapping removed for registration.
-    DustMappingRemoved {
-        /// Cardano stake key address.
-        cardano_address: CardanoStakeKey,
-        /// DUST address.
-        dust_address: ByteVec,
-        /// UTXO identifier.
-        utxo_id: ByteVec,
     },
 }
 
@@ -190,7 +151,7 @@ impl Default for DustParameters {
 /// DUST event type for database storage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "DUST_EVENT_TYPE", rename_all = "PascalCase")]
-pub enum DustEventType {
+pub enum DustEventVariant {
     /// Initial DUST UTXO creation.
     DustInitialUtxo,
 
@@ -199,30 +160,16 @@ pub enum DustEventType {
 
     /// DUST spend processed.
     DustSpendProcessed,
-
-    /// Registration event.
-    DustRegistration,
-
-    /// Deregistration event.
-    DustDeregistration,
-
-    /// Mapping added event.
-    DustMappingAdded,
-
-    /// Mapping removed event.
-    DustMappingRemoved,
 }
 
-impl From<&DustEventDetails> for DustEventType {
-    fn from(details: &DustEventDetails) -> Self {
+impl From<&DustEventAttributes> for DustEventVariant {
+    fn from(details: &DustEventAttributes) -> Self {
         match details {
-            DustEventDetails::DustInitialUtxo { .. } => Self::DustInitialUtxo,
-            DustEventDetails::DustGenerationDtimeUpdate { .. } => Self::DustGenerationDtimeUpdate,
-            DustEventDetails::DustSpendProcessed { .. } => Self::DustSpendProcessed,
-            DustEventDetails::DustRegistration { .. } => Self::DustRegistration,
-            DustEventDetails::DustDeregistration { .. } => Self::DustDeregistration,
-            DustEventDetails::DustMappingAdded { .. } => Self::DustMappingAdded,
-            DustEventDetails::DustMappingRemoved { .. } => Self::DustMappingRemoved,
+            DustEventAttributes::DustInitialUtxo { .. } => Self::DustInitialUtxo,
+            DustEventAttributes::DustGenerationDtimeUpdate { .. } => {
+                Self::DustGenerationDtimeUpdate
+            }
+            DustEventAttributes::DustSpendProcessed { .. } => Self::DustSpendProcessed,
         }
     }
 }
