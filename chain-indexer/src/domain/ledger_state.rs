@@ -15,7 +15,7 @@ use crate::domain::{RegularTransaction, SystemTransaction, Transaction, Transact
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
-    BlockHash, NetworkId,
+    ApplyRegularTransactionResult, BlockHash, NetworkId,
     ledger::{ContractState, SerializedTransaction},
 };
 use std::ops::DerefMut;
@@ -124,17 +124,25 @@ impl LedgerState {
     ) -> Result<Transaction, Error> {
         let mut transaction = RegularTransaction::from(transaction);
 
-        // Apply transaction and set start and end indices; end index is exclusive!
-        transaction.start_index = self.zswap_first_free();
-        let (transaction_result, created_unshielded_utxos, spent_unshielded_utxos) =
-            self.apply_regular_transaction(&transaction.raw, block_parent_hash, block_timestamp)?;
-        transaction.end_index = self.zswap_first_free();
+        // Apply transaction.
+        let start_index = self.zswap_first_free();
+        let ApplyRegularTransactionResult {
+            transaction_result,
+            created_unshielded_utxos,
+            spent_unshielded_utxos,
+            ledger_events,
+        } = self.apply_regular_transaction(&transaction.raw, block_parent_hash, block_timestamp)?;
 
         // Update transaction.
         transaction.transaction_result = transaction_result;
         transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize()?;
+        transaction.start_index = start_index;
+        transaction.end_index = self.zswap_first_free();
         transaction.created_unshielded_utxos = created_unshielded_utxos;
         transaction.spent_unshielded_utxos = spent_unshielded_utxos;
+        transaction.ledger_events = ledger_events;
+
+        // Update contract actions.
         if transaction.end_index > transaction.start_index {
             for contract_action in transaction.contract_actions.iter_mut() {
                 let zswap_state = self.extract_contract_zswap_state(&contract_action.address)?;
@@ -150,7 +158,7 @@ impl LedgerState {
             contract_action.extracted_balances = balances;
         }
 
-        Ok(Transaction::Regular(transaction))
+        Ok(Transaction::Regular(transaction.into()))
     }
 
     #[trace(properties = {

@@ -14,8 +14,8 @@
 use crate::domain::{Transaction, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{
-    SessionId,
-    ledger::{RawUnshieldedAddress, SerializedTransactionIdentifier, TransactionHash},
+    RawUnshieldedAddress, SessionId,
+    ledger::{SerializedTransactionIdentifier, TransactionHash},
 };
 use std::{fmt::Debug, num::NonZeroU32};
 

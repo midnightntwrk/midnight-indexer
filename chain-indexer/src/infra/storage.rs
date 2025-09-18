@@ -19,8 +19,8 @@ use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteVec,
-        ledger::{ContractAttributes, ContractBalance, UnshieldedUtxo},
+        BlockHash, ByteVec, LedgerEvent, UnshieldedUtxo,
+        ledger::{ContractAttributes, ContractBalance},
     },
     infra::sqlx::U128BeBytes,
 };
@@ -88,7 +88,7 @@ impl domain::storage::Storage for Storage {
     #[trace]
     async fn get_transaction_count(&self) -> Result<u64, sqlx::Error> {
         let query = indoc! {"
-            SELECT count(*) 
+            SELECT count(*)
             FROM transactions
         "};
 
@@ -102,7 +102,7 @@ impl domain::storage::Storage for Storage {
     #[trace]
     async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error> {
         let query = indoc! {"
-            SELECT count(*) 
+            SELECT count(*)
             FROM contract_actions
             WHERE variant = $1
         "};
@@ -355,20 +355,7 @@ async fn save_regular_transaction(
     #[cfg(feature = "standalone")]
     save_identifiers(&transaction.identifiers, transaction_id, tx).await?;
 
-    let contract_action_ids =
-        save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
-    let contract_balances = transaction
-        .contract_actions
-        .iter()
-        .zip(contract_action_ids.iter())
-        .flat_map(|(action, &action_id)| {
-            action
-                .extracted_balances
-                .iter()
-                .map(move |&balance| (action_id, balance))
-        })
-        .collect::<Vec<_>>();
-    save_contract_balances(contract_balances, tx).await?;
+    save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
 
     save_unshielded_utxos(
         &transaction.created_unshielded_utxos,
@@ -385,6 +372,8 @@ async fn save_regular_transaction(
     )
     .await?;
 
+    save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
+
     Ok(transaction_id as u64)
 }
 
@@ -396,6 +385,58 @@ async fn save_system_transaction(
     _tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     // TODO: Store DistributeReserve and other (DUST-related) system transactions.
+    Ok(())
+}
+
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn save_contract_actions(
+    contract_actions: &[ContractAction],
+    transaction_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    if contract_actions.is_empty() {
+        return Ok(());
+    }
+
+    let query = indoc! {"
+        INSERT INTO contract_actions (
+            transaction_id,
+            variant,
+            address,
+            state,
+            chain_state,
+            attributes
+        )
+    "};
+
+    let contract_action_ids = QueryBuilder::new(query)
+        .push_values(contract_actions.iter(), |mut q, action| {
+            q.push_bind(transaction_id)
+                .push_bind(ContractActionVariant::from(&action.attributes))
+                .push_bind(&action.address)
+                .push_bind(&action.state)
+                .push_bind(&action.chain_state)
+                .push_bind(Json(&action.attributes));
+        })
+        .push(" RETURNING id")
+        .build_query_as::<(i64,)>()
+        .fetch_all(&mut **tx)
+        .await?
+        .into_iter()
+        .map(|(id,)| id);
+
+    let contract_balances = contract_actions
+        .iter()
+        .zip(contract_action_ids)
+        .flat_map(|(action, action_id)| {
+            action
+                .extracted_balances
+                .iter()
+                .map(move |&balance| (action_id, balance))
+        })
+        .collect::<Vec<_>>();
+    save_contract_balances(&contract_balances, tx).await?;
+
     Ok(())
 }
 
@@ -485,70 +526,64 @@ async fn save_unshielded_utxos(
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn save_contract_actions(
-    contract_actions: &[ContractAction],
+async fn save_ledger_events(
+    ledger_events: &[LedgerEvent],
     transaction_id: i64,
     tx: &mut SqlxTransaction,
-) -> Result<Vec<i64>, sqlx::Error> {
-    if contract_actions.is_empty() {
-        return Ok(Vec::new());
+) -> Result<(), sqlx::Error> {
+    if ledger_events.is_empty() {
+        return Ok(());
     }
 
     let query = indoc! {"
-        INSERT INTO contract_actions (
+        INSERT INTO ledger_events (
             transaction_id,
             variant,
-            address,
-            state,
-            chain_state,
-            attributes
+            grouping,
+            raw
         )
     "};
 
-    let contract_action_ids = QueryBuilder::new(query)
-        .push_values(contract_actions.iter(), |mut q, action| {
+    QueryBuilder::new(query)
+        .push_values(ledger_events.iter(), |mut q, ledger_event| {
             q.push_bind(transaction_id)
-                .push_bind(ContractActionVariant::from(&action.attributes))
-                .push_bind(&action.address)
-                .push_bind(&action.state)
-                .push_bind(&action.chain_state)
-                .push_bind(Json(&action.attributes));
+                .push_bind(ledger_event.variant)
+                .push_bind(ledger_event.grouping)
+                .push_bind(ledger_event.raw.as_ref());
         })
-        .push(" RETURNING id")
-        .build_query_as::<(i64,)>()
-        .fetch_all(&mut **tx)
-        .await?
-        .into_iter()
-        .map(|(id,)| id)
-        .collect();
+        .build()
+        .execute(&mut **tx)
+        .await?;
 
-    Ok(contract_action_ids)
+    Ok(())
 }
 
 #[trace]
 async fn save_contract_balances(
-    balances: Vec<(i64, ContractBalance)>,
+    balances: &[(i64, ContractBalance)],
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    if !balances.is_empty() {
-        let query = indoc! {"
-            INSERT INTO contract_balances (
-                contract_action_id,
-                token_type,
-                amount
-            )
-        "};
-
-        QueryBuilder::new(query)
-            .push_values(balances.iter(), |mut q, (action_id, balance)| {
-                q.push_bind(*action_id)
-                    .push_bind(balance.token_type.as_ref())
-                    .push_bind(U128BeBytes::from(balance.amount));
-            })
-            .build()
-            .execute(&mut **tx)
-            .await?;
+    if balances.is_empty() {
+        return Ok(());
     }
+
+    let query = indoc! {"
+        INSERT INTO contract_balances (
+            contract_action_id,
+            token_type,
+            amount
+        )
+    "};
+
+    QueryBuilder::new(query)
+        .push_values(balances.iter(), |mut q, (action_id, balance)| {
+            q.push_bind(*action_id)
+                .push_bind(balance.token_type.as_ref())
+                .push_bind(U128BeBytes::from(balance.amount));
+        })
+        .build()
+        .execute(&mut **tx)
+        .await?;
 
     Ok(())
 }
@@ -559,22 +594,24 @@ async fn save_identifiers(
     transaction_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    if !identifiers.is_empty() {
-        let query = indoc! {"
-            INSERT INTO transaction_identifiers (
-                transaction_id,
-                identifier
-            )
-        "};
-
-        QueryBuilder::new(query)
-            .push_values(identifiers.iter(), |mut q, identifier| {
-                q.push_bind(transaction_id).push_bind(identifier);
-            })
-            .build()
-            .execute(&mut **tx)
-            .await?;
+    if identifiers.is_empty() {
+        return Ok(());
     }
+
+    let query = indoc! {"
+        INSERT INTO transaction_identifiers (
+            transaction_id,
+            identifier
+        )
+    "};
+
+    QueryBuilder::new(query)
+        .push_values(identifiers.iter(), |mut q, identifier| {
+            q.push_bind(transaction_id).push_bind(identifier);
+        })
+        .build()
+        .execute(&mut **tx)
+        .await?;
 
     Ok(())
 }

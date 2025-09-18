@@ -284,15 +284,15 @@ pub struct SegmentResult {
     success: bool,
 }
 
-impl From<indexer_common::domain::ledger::TransactionResult> for TransactionResult {
-    fn from(transaction_result: indexer_common::domain::ledger::TransactionResult) -> Self {
+impl From<indexer_common::domain::TransactionResult> for TransactionResult {
+    fn from(transaction_result: indexer_common::domain::TransactionResult) -> Self {
         match transaction_result {
-            indexer_common::domain::ledger::TransactionResult::Success => Self {
+            indexer_common::domain::TransactionResult::Success => Self {
                 status: TransactionResultStatus::Success,
                 segments: None,
             },
 
-            indexer_common::domain::ledger::TransactionResult::PartialSuccess(segments) => {
+            indexer_common::domain::TransactionResult::PartialSuccess(segments) => {
                 let segments = segments
                     .into_iter()
                     .map(|(id, success)| Segment { id, success })
@@ -304,7 +304,7 @@ impl From<indexer_common::domain::ledger::TransactionResult> for TransactionResu
                 }
             }
 
-            indexer_common::domain::ledger::TransactionResult::Failure => Self {
+            indexer_common::domain::TransactionResult::Failure => Self {
                 status: TransactionResultStatus::Failure,
                 segments: None,
             },

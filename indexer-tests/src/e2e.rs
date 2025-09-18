@@ -45,8 +45,7 @@ use indexer_api::infra::api::v1::{
     AsBytesExt, HexEncoded, transaction::TransactionResultStatus, viewing_key::ViewingKey,
 };
 use indexer_common::domain::{
-    ByteVec, NetworkId, PROTOCOL_VERSION_000_016_000,
-    ledger::{self, RawTokenType},
+    ByteVec, NetworkId, PROTOCOL_VERSION_000_016_000, RawTokenType, ledger,
 };
 use itertools::Itertools;
 use reqwest::Client;
