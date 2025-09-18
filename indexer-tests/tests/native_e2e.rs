@@ -266,7 +266,7 @@ fn start_chain_indexer(
     Command::new(format!("{}/debug/chain-indexer", &*TARGET_DIR))
         .env(
             "RUST_LOG",
-            "chain_indexer=warn,fastrace_opentelemetry=off,error",
+            "chain_indexer=error,fastrace_opentelemetry=off,error",
         )
         .env(
             "CONFIG_FILE",
@@ -286,7 +286,7 @@ async fn start_wallet_indexer(postgres_port: u16, nats_url: &str) -> anyhow::Res
     Command::new(format!("{}/debug/wallet-indexer", &*TARGET_DIR))
         .env(
             "RUST_LOG",
-            "wallet_indexer=warn,fastrace_opentelemetry=off,error",
+            "wallet_indexer=error,fastrace_opentelemetry=off,error",
         )
         .env(
             "CONFIG_FILE",
@@ -306,7 +306,7 @@ async fn start_indexer_api(postgres_port: u16, nats_url: &str) -> anyhow::Result
     Command::new(format!("{}/debug/indexer-api", &*TARGET_DIR))
         .env(
             "RUST_LOG",
-            "indexer_api::infra::api::v1::subscription::shielded=DEBUG,indexer_api=warn,fastrace_opentelemetry=off,error",
+            "indexer_api=error,fastrace_opentelemetry=off,error",
         )
         .env(
             "CONFIG_FILE",

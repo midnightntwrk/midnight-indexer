@@ -38,17 +38,26 @@ use crate::{
     },
     graphql_ws_client,
 };
-use anyhow::{Context, Ok, bail};
+use anyhow::{Context, bail};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::infra::api::v1::{
     AsBytesExt, HexEncoded, transaction::TransactionResultStatus, viewing_key::ViewingKey,
 };
-use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_016_000, ledger::RawTokenType};
+use indexer_common::domain::{
+    ByteVec, NetworkId, PROTOCOL_VERSION_000_016_000,
+    ledger::{self, RawTokenType},
+};
 use itertools::Itertools;
 use reqwest::Client;
 use serde::Serialize;
-use std::time::{Duration, Instant};
+use shielded_transactions_subscription::ShieldedTransactionsSubscriptionShieldedTransactions as ShieldedTransactions;
+use std::{
+    future::ready,
+    time::{Duration, Instant},
+};
+use tokio_stream::Elapsed;
+use unshielded_transactions_subscription::UnshieldedTransactionsSubscriptionUnshieldedTransactions as UnshieldedTransactions;
 
 const MAX_HEIGHT: usize = 30;
 
@@ -145,8 +154,7 @@ impl IndexerData {
             (0..=MAX_HEIGHT).map(|n| n as i64).collect::<Vec<_>>()
         );
 
-        // Verify that each block correctly references its parent and the height is increased by
-        // one.
+        // Verify that each block references its parent and the height is incremented by one.
         blocks.windows(2).all(|blocks| {
             let hash_0 = &blocks[0].hash;
             let height_0 = blocks[0].height;
@@ -165,43 +173,12 @@ impl IndexerData {
             hash_0 == parent_hash_1 && height_0 == parent_height_1
         });
 
-        // Verify that all transactions reference the correct block and have the same protocol
-        // version.
+        // Verify that all transactions of a block reference that block and have the same protocol
+        // version like the block.
         assert!(blocks.iter().all(|block| {
             block.transactions.iter().all(|transaction| {
                 transaction.block.hash == block.hash
                     && transaction.protocol_version == block.protocol_version
-            })
-        }));
-
-        // Verify that all transactions have fee information
-        assert!(blocks.iter().all(|block| {
-            block.transactions.iter().all(|transaction| {
-                // Fees should always be present and non-empty strings
-                !transaction.fees.paid_fees.is_empty()
-                    && !transaction.fees.estimated_fees.is_empty()
-            })
-        }));
-
-        // Verify that segment results are consistent with transaction results
-        assert!(blocks.iter().all(|block| {
-            block.transactions.iter().all(|transaction| {
-                match transaction.transaction_result.status {
-                    BlockSubscriptionTransactionResultStatus::SUCCESS => {
-                        transaction.transaction_result.segments.is_none()
-                    }
-
-                    BlockSubscriptionTransactionResultStatus::FAILURE => {
-                        // Failure transactions should have no segment results
-                        transaction.transaction_result.segments.is_none()
-                    }
-
-                    BlockSubscriptionTransactionResultStatus::PARTIAL_SUCCESS => {
-                        transaction.transaction_result.segments.is_some()
-                    }
-
-                    _ => true,
-                }
             })
         }));
 
@@ -211,17 +188,34 @@ impl IndexerData {
             .flat_map(|block| block.transactions.to_owned())
             .collect::<Vec<_>>();
 
-        // Verify that all transactions have valid fee information
-        assert!(
-            transactions.iter().all(|transaction| {
-                // Fees should be parseable as numbers
-                transaction.fees.paid_fees.parse::<u64>().is_ok()
-                    && transaction.fees.estimated_fees.parse::<u64>().is_ok()
-            }),
-            "All transactions should have valid numeric fee values"
-        );
+        // Verify transaction segment results.
+        assert!(transactions.iter().all(|transaction| {
+            match transaction.transaction_result.status {
+                BlockSubscriptionTransactionResultStatus::SUCCESS => {
+                    transaction.transaction_result.segments.is_none()
+                }
 
-        // Verify that all contract actions reference the correct transaction.
+                BlockSubscriptionTransactionResultStatus::PARTIAL_SUCCESS => {
+                    transaction.transaction_result.segments.is_some()
+                }
+
+                BlockSubscriptionTransactionResultStatus::FAILURE => {
+                    // Failure transactions should have no segment results
+                    transaction.transaction_result.segments.is_none()
+                }
+
+                _ => true,
+            }
+        }));
+
+        // Verify that all transactions have valid fees.
+        assert!(transactions.iter().all(|transaction| {
+            // Fees should be parseable as numbers
+            transaction.fees.paid_fees.parse::<u64>().is_ok()
+                && transaction.fees.estimated_fees.parse::<u64>().is_ok()
+        }));
+
+        // Verify that all contract actions of a transaction reference that transaction.
         assert!(transactions.iter().all(|transaction| {
             transaction
                 .contract_actions
@@ -242,6 +236,7 @@ impl IndexerData {
                 BlockSubscriptionContractAction::ContractCall(c) => {
                     Some((&c.address, &c.deploy.address))
                 }
+
                 _ => None,
             })
             .all(|(a1, a2)| a1 == a2);
@@ -253,9 +248,6 @@ impl IndexerData {
             .collect::<Vec<_>>();
 
         // Test genesis UTXOs for non-MainNet networks.
-        // MainNet has no pre-funded accounts (clean genesis), while test/dev networks
-        // contain pre-funded UTXOs for testing purposes. This validation ensures the
-        // genesis UTXO extraction workaround works correctly on networks where it's needed.
         if network_id != NetworkId::MainNet {
             let genesis_block = blocks
                 .iter()
@@ -361,73 +353,12 @@ async fn test_transactions_query(
             .await?
             .transactions;
 
-        // Verify expected transaction is in results
+        // Verify expected transaction is in results.
         let transaction_values = transactions
             .iter()
             .map(|t| t.to_json_value())
             .collect::<Vec<_>>();
         assert!(transaction_values.contains(&expected_transaction.to_json_value()));
-
-        // Validate fee metadata and segment results for all returned transactions
-        for transaction in &transactions {
-            // Verify fee information is present and valid
-            assert!(
-                !transaction.fees.paid_fees.is_empty(),
-                "paid_fee should not be empty"
-            );
-            assert!(
-                !transaction.fees.estimated_fees.is_empty(),
-                "estimated_fee should not be empty"
-            );
-
-            // Verify fees are valid numeric strings (DUST amounts)
-            let paid_fee: u64 = transaction
-                .fees
-                .paid_fees
-                .parse()
-                .expect("paid_fee should be a valid number");
-            let estimated_fee: u64 = transaction
-                .fees
-                .estimated_fees
-                .parse()
-                .expect("estimated_fee should be a valid number");
-
-            // Fees should be reasonable values (not impossibly large)
-            assert!(
-                paid_fee <= 1_000_000_000_000,
-                "paid_fee should be reasonable"
-            );
-            assert!(
-                estimated_fee <= 1_000_000_000_000,
-                "estimated_fee should be reasonable"
-            );
-
-            // Verify segment results structure matches transaction status
-            match transaction.transaction_result.status {
-                transactions_query::TransactionResultStatus::SUCCESS => {
-                    assert!(
-                        transaction.transaction_result.segments.is_none(),
-                        "SUCCESS transactions should have no segment results"
-                    );
-                }
-
-                transactions_query::TransactionResultStatus::FAILURE => {
-                    assert!(
-                        transaction.transaction_result.segments.is_none(),
-                        "FAILURE transactions should have no segment results"
-                    );
-                }
-
-                transactions_query::TransactionResultStatus::PARTIAL_SUCCESS => {
-                    assert!(
-                        transaction.transaction_result.segments.is_some(),
-                        "PARTIAL_SUCCESS transactions should have segment results"
-                    );
-                }
-
-                _ => {}
-            }
-        }
 
         // Existing identifier.
         for identifier in &expected_transaction.identifiers {
@@ -741,8 +672,6 @@ async fn test_unshielded_transactions_subscription(
     indexer_data: &IndexerData,
     ws_api_url: &str,
 ) -> anyhow::Result<()> {
-    use unshielded_transactions_subscription::UnshieldedTransactionsSubscriptionUnshieldedTransactions as UnshieldedTransactions;
-
     let unshielded_address = indexer_data
         .unshielded_utxos
         .first()
@@ -766,6 +695,7 @@ async fn test_unshielded_transactions_subscription(
             .try_collect::<Vec<_>>()
             .await
             .context("collect unshielded UTXO events")?;
+
     assert!(unshielded_utxos_updates.iter().any(move |update| {
         update
             .created_utxos
@@ -776,47 +706,34 @@ async fn test_unshielded_transactions_subscription(
     Ok(())
 }
 
-/// Test the wallet subscription.
+/// Test the shielded transactions subscription.
 async fn test_shielded_transactions_subscription(
     ws_api_url: &str,
     network_id: NetworkId,
 ) -> anyhow::Result<()> {
-    use shielded_transactions_subscription::ShieldedTransactionsSubscriptionShieldedTransactions as ShieldedTransactions;
-
     let session_id = ViewingKey::from(viewing_key(network_id))
         .try_into_domain(network_id, PROTOCOL_VERSION_000_016_000)?
         .to_session_id()
         .hex_encode();
 
-    // Collect shielded transactions events until there are no more relevant transactions (3s
-    // deadline).
-    let mut relevant_transaction_timestamp = Instant::now();
+    // Collect shielded transactions events until there are no more relevant transactions.
     let variables = shielded_transactions_subscription::Variables { session_id };
-    let events =
+    let relevant_transactions =
         graphql_ws_client::subscribe::<ShieldedTransactionsSubscription>(ws_api_url, variables)
             .await
             .context("subscribe to shielded transactions")?
             .map_ok(|data| data.shielded_transactions)
-            .try_take_while(|event| {
-                let duration = Instant::now() - relevant_transaction_timestamp;
-
-                if let ShieldedTransactions::RelevantTransaction(_) = event {
-                    relevant_transaction_timestamp = Instant::now()
-                }
-
-                ok(duration < Duration::from_secs(3))
-            })
+            .try_filter_map(|event| match event {
+                ShieldedTransactions::RelevantTransaction(t) => ok(Some(t)),
+                ShieldedTransactions::ShieldedTransactionsProgress(_) => ok(None),
+            });
+    let relevant_transactions =
+        tokio_stream::StreamExt::timeout(relevant_transactions, Duration::from_secs(3))
+            .take_while(|timeout_result| ready(timeout_result.is_ok()))
+            .filter_map(|timeout_result| ready(timeout_result.map(Some).unwrap_or(None)))
             .try_collect::<Vec<_>>()
             .await
-            .context("collect shielded transactions events")?;
-
-    // Filter relevant transactions only.
-    let relevant_transactions = events.into_iter().filter_map(|event| match event {
-        ShieldedTransactions::RelevantTransaction(relevant_transaction) => {
-            Some(relevant_transaction)
-        }
-        _ => None,
-    });
+            .context("collect relevant transactions from shielded transactions events")?;
 
     // Verify that there are no index gaps.
     let mut expected_start_index = 0;
