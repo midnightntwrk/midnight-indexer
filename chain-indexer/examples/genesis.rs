@@ -120,9 +120,9 @@ impl Cli {
         };
 
         match ledger_state.apply_regular_transaction(&tx.raw, block.parent_hash, block.timestamp) {
-            Ok((_result, created_utxos, spent_utxos)) => {
+            Ok(result) => {
                 let should_print = self.verbose
-                    || !created_utxos.is_empty()
+                    || !result.created_unshielded_utxos.is_empty()
                     || index < 5
                     || index == block.transactions.len() - 1;
 
@@ -131,17 +131,19 @@ impl Cli {
                         "    ## [{}] REGULAR TRANSACTION ({}): hash={}",
                         index, tx_type, tx.hash
                     );
-                    if !created_utxos.is_empty() || !spent_utxos.is_empty() {
+                    if !result.created_unshielded_utxos.is_empty()
+                        || !result.spent_unshielded_utxos.is_empty()
+                    {
                         println!(
                             "        Created UTXOs: {}, Spent UTXOs: {}",
-                            created_utxos.len(),
-                            spent_utxos.len()
+                            result.created_unshielded_utxos.len(),
+                            result.spent_unshielded_utxos.len()
                         );
                     }
 
-                    if !created_utxos.is_empty() {
-                        *total_utxos += created_utxos.len();
-                        for utxo in &created_utxos {
+                    if !result.created_unshielded_utxos.is_empty() {
+                        *total_utxos += result.created_unshielded_utxos.len();
+                        for utxo in &result.created_unshielded_utxos {
                             utxo_details.push((
                                 index,
                                 utxo.value,
