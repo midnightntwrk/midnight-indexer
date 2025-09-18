@@ -14,10 +14,10 @@
 use derive_more::Debug;
 use indexer_common::{
     domain::{
-        BlockHash, ProtocolVersion,
+        BlockHash, ProtocolVersion, TransactionResult,
         ledger::{
             SerializedTransaction, SerializedTransactionIdentifier, SerializedZswapStateRoot,
-            TransactionHash, TransactionResult,
+            TransactionHash,
         },
     },
     infra::sqlx::{SqlxOption, U128BeBytes},

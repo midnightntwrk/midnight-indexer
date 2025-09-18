@@ -18,7 +18,7 @@ use crate::domain::{
         transaction::TransactionStorage, wallet::WalletStorage,
     },
 };
-use indexer_common::domain::ledger::RawUnshieldedAddress;
+use indexer_common::domain::RawUnshieldedAddress;
 use sqlx::Error;
 use std::fmt::Debug;
 

@@ -292,7 +292,7 @@ allow = [
     "ZPL-2.1",
 
     # Additional:
-    "CDLA-Permissive-2.0",  # Open data
+    "CDLA-Permissive-2.0", # Open data
 ]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
@@ -423,14 +423,14 @@ unknown-registry = "warn"
 unknown-git = "warn"
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
-allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-registry = [ "https://github.com/rust-lang/crates.io-index" ]
 # List of URLs for allowed Git repositories
-allow-git = []
+allow-git = [  ]
 
 [sources.allow-org]
 # github.com organizations to allow git sources for
-github = [ ]
+github = [  ]
 # gitlab.com organizations to allow git sources for
-gitlab = []
+gitlab = [  ]
 # bitbucket.org organizations to allow git sources for
-bitbucket = []
+bitbucket = [  ]

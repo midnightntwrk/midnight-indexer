@@ -26,9 +26,7 @@ use async_graphql::{Context, SimpleObject, Subscription, Union, async_stream::tr
 use derive_more::Debug;
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
-use indexer_common::domain::{
-    NetworkId, Subscriber, UnshieldedUtxoIndexed, ledger::RawUnshieldedAddress,
-};
+use indexer_common::domain::{NetworkId, RawUnshieldedAddress, Subscriber, UnshieldedUtxoIndexed};
 use log::{debug, warn};
 use std::{future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};

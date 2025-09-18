@@ -16,7 +16,7 @@ use crate::{
     infra::storage::Storage,
 };
 use fastrace::trace;
-use indexer_common::domain::ledger::RawUnshieldedAddress;
+use indexer_common::domain::RawUnshieldedAddress;
 use indoc::indoc;
 
 impl UnshieldedUtxoStorage for Storage {

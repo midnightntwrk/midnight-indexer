@@ -20,8 +20,8 @@ use fastrace::trace;
 use futures::Stream;
 use indexer_common::{
     domain::{
-        SessionId,
-        ledger::{RawUnshieldedAddress, SerializedTransactionIdentifier, TransactionHash},
+        RawUnshieldedAddress, SessionId,
+        ledger::{SerializedTransactionIdentifier, TransactionHash},
     },
     stream::flatten_chunks,
 };

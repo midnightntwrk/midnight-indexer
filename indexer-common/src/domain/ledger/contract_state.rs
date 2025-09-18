@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::domain::{
-    PROTOCOL_VERSION_000_016_000, ProtocolVersion,
-    ledger::{Error, RawTokenType, TaggedSerializableV6Ext},
+    PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType,
+    ledger::{Error, TaggedSerializableV6Ext},
 };
 use fastrace::trace;
 use midnight_coin_structure_v6::coin::TokenType as TokenTypeV6;
