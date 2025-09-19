@@ -470,8 +470,8 @@ query DustEventsByTransactionQuery($transactionHash: HexEncoded!) {
         transactionHash
         logicalSegment
         physicalSegment
-        eventType
-        eventDetails {
+        eventVariant
+        eventAttributes {
             __typename
             ... on DustInitialUtxoDetails {
                 initialValue
@@ -519,13 +519,13 @@ query DustEventsByTransactionQuery($transactionHash: HexEncoded!) {
     }
 }
 
-query RecentDustEventsQuery($limit: Int, $eventType: DustEventVariant) {
-    recentDustEvents(limit: $limit, eventType: $eventType) {
+query RecentDustEventsQuery($limit: Int, $eventVariant: DustEventVariant) {
+    recentDustEvents(limit: $limit, eventVariant: $eventVariant) {
         transactionHash
         logicalSegment
         physicalSegment
-        eventType
-        eventDetails {
+        eventVariant
+        eventAttributes {
             __typename
             ... on DustInitialUtxoDetails {
                 initialValue

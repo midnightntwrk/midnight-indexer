@@ -271,13 +271,13 @@ type DustEvent {
 	"""
 	physicalSegment: Int!
 	"""
-	Event type.
+	Event variant.
 	"""
-	eventType: DustEventVariant!
+	eventVariant: DustEventVariant!
 	"""
-	Event details.
+	Event attributes.
 	"""
-	eventDetails: DustEventAttributes!
+	eventAttributes: DustEventAttributes!
 }
 
 """
@@ -286,7 +286,7 @@ DUST event details union.
 union DustEventAttributes = DustInitialUtxoDetails | DustGenerationDtimeUpdateDetails | DustSpendProcessedDetails
 
 """
-Type of DUST event.
+Variant of DUST event.
 """
 enum DustEventVariant {
 	"""
@@ -671,7 +671,7 @@ type Query {
 	"""
 	Get recent DUST events with optional filtering.
 	"""
-	recentDustEvents(limit: Int, eventType: DustEventVariant): [DustEvent!]!
+	recentDustEvents(limit: Int, eventVariant: DustEventVariant): [DustEvent!]!
 }
 
 """

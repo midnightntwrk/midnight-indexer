@@ -286,12 +286,12 @@ where
     }
 
     /// Get recent DUST events with optional filtering.
-    #[trace(properties = { "limit": "{limit:?}", "event_type": "{event_type:?}" })]
+    #[trace(properties = { "limit": "{limit:?}", "event_variant": "{event_variant:?}" })]
     async fn recent_dust_events(
         &self,
         cx: &Context<'_>,
         limit: Option<u32>,
-        event_type: Option<DustEventVariant>,
+        event_variant: Option<DustEventVariant>,
     ) -> ApiResult<Vec<DustEvent>> {
         let storage = cx.get_storage::<S>();
 
@@ -299,7 +299,7 @@ where
         let limit = limit.unwrap_or(10).min(100);
 
         let events = storage
-            .get_recent_dust_events(limit, event_type.map(Into::into))
+            .get_recent_dust_events(limit, event_variant.map(Into::into))
             .await
             .map_err_into_server_error(|| "get recent DUST events")?;
 

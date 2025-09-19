@@ -143,7 +143,7 @@ impl LedgerState {
         transaction.spent_unshielded_utxos = result.spent_unshielded_utxos;
 
         // Extract operations from DUST events (dust.rs::extract_dust_operations).
-        transaction.processed_dust_events = extract_dust_operations(&transaction.dust_events);
+        transaction.dust_event_projections = extract_dust_operations(&transaction.dust_events);
         if transaction.end_index > transaction.start_index {
             for contract_action in transaction.contract_actions.iter_mut() {
                 let zswap_state = self.extract_contract_zswap_state(&contract_action.address)?;
@@ -183,7 +183,7 @@ impl LedgerState {
         transaction.dust_events = dust_events;
 
         // Extract operations from DUST events (dust.rs::extract_dust_operations).
-        transaction.processed_dust_events = extract_dust_operations(&transaction.dust_events);
+        transaction.dust_event_projections = extract_dust_operations(&transaction.dust_events);
 
         Ok(Transaction::System(Box::new(transaction)))
     }

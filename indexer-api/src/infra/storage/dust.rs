@@ -741,7 +741,7 @@ impl DustStorage for Storage {
     async fn get_recent_dust_events(
         &self,
         limit: u32,
-        event_type: Option<DustEventVariant>,
+        event_variant: Option<DustEventVariant>,
     ) -> Result<Vec<DustEvent>, sqlx::Error> {
         #[derive(FromRow)]
         struct DustEventRow {
@@ -751,7 +751,7 @@ impl DustStorage for Storage {
             event_data: Json<DustEventAttributes>,
         }
 
-        let query = if event_type.is_some() {
+        let query = if event_variant.is_some() {
             // Filter by event type.
             indoc! {"
                 SELECT de.transaction_hash, de.logical_segment, de.physical_segment, de.event_data
@@ -772,9 +772,9 @@ impl DustStorage for Storage {
             "}
         };
 
-        let rows = if let Some(event_type) = event_type {
+        let rows = if let Some(event_variant) = event_variant {
             sqlx::query_as::<_, DustEventRow>(query)
-                .bind(event_type)
+                .bind(event_variant)
                 .bind(limit as i64)
                 .fetch_all(&*self.pool)
                 .await?

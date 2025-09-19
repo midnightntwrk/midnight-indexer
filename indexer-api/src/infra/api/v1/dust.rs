@@ -529,14 +529,14 @@ pub struct DustEvent {
     /// Physical segment within transaction.
     pub physical_segment: u16,
 
-    /// Event type.
-    pub event_type: DustEventVariant,
+    /// Event variant.
+    pub event_variant: DustEventVariant,
 
-    /// Event details.
-    pub event_details: DustEventAttributes,
+    /// Event attributes.
+    pub event_attributes: DustEventAttributes,
 }
 
-/// Type of DUST event.
+/// Variant of DUST event.
 #[derive(Debug, Clone, Copy, Enum, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DustEventVariant {
     /// Initial DUST UTXO creation.
@@ -550,8 +550,8 @@ pub enum DustEventVariant {
 }
 
 impl From<DustEventVariant> for indexer_common::domain::dust::DustEventVariant {
-    fn from(event_type: DustEventVariant) -> Self {
-        match event_type {
+    fn from(event_variant: DustEventVariant) -> Self {
+        match event_variant {
             DustEventVariant::DustInitialUtxo => Self::DustInitialUtxo,
             DustEventVariant::DustGenerationDtimeUpdate => Self::DustGenerationDtimeUpdate,
             DustEventVariant::DustSpendProcessed => Self::DustSpendProcessed,
@@ -701,7 +701,7 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
     fn from(event: indexer_common::domain::dust::DustEvent) -> Self {
         use indexer_common::domain::dust::DustEventAttributes as DomainDetails;
 
-        let event_type = match &event.event_details {
+        let event_variant = match &event.event_details {
             DomainDetails::DustInitialUtxo { .. } => DustEventVariant::DustInitialUtxo,
             DomainDetails::DustGenerationDtimeUpdate { .. } => {
                 DustEventVariant::DustGenerationDtimeUpdate
@@ -709,7 +709,7 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
             DomainDetails::DustSpendProcessed { .. } => DustEventVariant::DustSpendProcessed,
         };
 
-        let event_details = match event.event_details {
+        let event_attributes = match event.event_details {
             DomainDetails::DustInitialUtxo {
                 output,
                 generation_info,
@@ -781,8 +781,8 @@ impl From<indexer_common::domain::dust::DustEvent> for DustEvent {
             transaction_hash: event.transaction_hash.hex_encode(),
             logical_segment: event.logical_segment,
             physical_segment: event.physical_segment,
-            event_type,
-            event_details,
+            event_variant,
+            event_attributes,
         }
     }
 }

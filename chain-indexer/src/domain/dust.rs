@@ -50,7 +50,7 @@ pub enum DustRegistrationEvent {
     },
 }
 
-/// Processed DUST events ready for persistence.
+/// DUST event projections ready for persistence.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DustEventProjections {
     pub generations: Vec<DustGeneration>,
