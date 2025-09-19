@@ -117,16 +117,16 @@ run-indexer-standalone node="ws://localhost:9944" network_id="Undeployed":
         APP__INFRA__STORAGE__CNN_URL=target/data/indexer.sqlite \
         cargo run -p indexer-standalone --features standalone
 
+update-node: generate-node-data get-node-metadata
+
 generate-node-data:
     ./generate_node_data.sh {{node_version}}
-
-generate-txs:
-    ./generate_txs.sh {{node_version}}
 
 get-node-metadata:
     ./get_node_metadata.sh {{node_version}}
 
-update-node: generate-node-data get-node-metadata
+generate-txs:
+    ./generate_txs.sh {{node_version}}
 
 run-node:
     #!/usr/bin/env bash

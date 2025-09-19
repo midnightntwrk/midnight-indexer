@@ -147,7 +147,6 @@ describe('graphql health checks', () => {
       ).client.rawRequest(query);
 
       expect(response).toBeError();
-      expect(response.errors).toBeDefined();
     });
   });
 });

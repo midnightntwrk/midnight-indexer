@@ -45,6 +45,7 @@ const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(30);
 #[derive(Debug, Union)]
 pub enum UnshieldedTransactionsEvent<S: Storage> {
     /// A transaction that created and/or spent UTXOs alongside these and other information.
+    // Boxing UnshieldedTransaction to reduce variant size (clippy warning).
     UnshieldedTransaction(Box<UnshieldedTransaction<S>>),
 
     /// Information about the unshielded indexing progress.

@@ -870,7 +870,7 @@ async fn save_parameter_update(
         "};
 
         let parameter_update =
-            to_value(&parameter_update).map_err(|error| sqlx::Error::Encode(error.into()))?;
+            to_value(parameter_update).map_err(|error| sqlx::Error::Encode(error.into()))?;
 
         sqlx::query(query)
             .bind(transaction_id)
@@ -900,7 +900,7 @@ async fn save_night_distribution(
         "};
 
         let json_value =
-            to_value(&night_distribution).map_err(|error| sqlx::Error::Encode(error.into()))?;
+            to_value(night_distribution).map_err(|error| sqlx::Error::Encode(error.into()))?;
 
         sqlx::query(query)
             .bind(transaction_id)
@@ -960,7 +960,7 @@ async fn save_shielded_treasury_payment(
         "};
 
         let treasury_payment_json =
-            to_value(&treasury_payment).map_err(|error| sqlx::Error::Encode(error.into()))?;
+            to_value(treasury_payment).map_err(|error| sqlx::Error::Encode(error.into()))?;
 
         sqlx::query(query)
             .bind(transaction_id)
@@ -994,7 +994,7 @@ async fn save_unshielded_treasury_payment(
         "};
 
         let treasury_payment_json =
-            to_value(&treasury_payment).map_err(|error| sqlx::Error::Encode(error.into()))?;
+            to_value(treasury_payment).map_err(|error| sqlx::Error::Encode(error.into()))?;
 
         sqlx::query(query)
             .bind(transaction_id)

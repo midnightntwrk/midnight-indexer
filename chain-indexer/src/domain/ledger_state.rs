@@ -18,7 +18,7 @@ use crate::domain::{
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
-    ByteArray, NetworkId,
+    BlockHash, NetworkId,
     ledger::{ContractState, SerializedTransaction},
 };
 use std::ops::DerefMut;
@@ -45,7 +45,7 @@ impl LedgerState {
     pub fn apply_stored_transactions<'a>(
         &mut self,
         transactions: impl Iterator<Item = &'a (TransactionVariant, SerializedTransaction)>,
-        block_parent_hash: ByteArray<32>,
+        block_parent_hash: BlockHash,
         block_timestamp: u64,
     ) -> Result<(), Error> {
         for (variant, transaction) in transactions {
@@ -66,7 +66,7 @@ impl LedgerState {
             }
         }
 
-        self.post_apply_transactions(block_timestamp);
+        self.post_apply_transactions(block_timestamp)?;
 
         Ok(())
     }
@@ -76,7 +76,7 @@ impl LedgerState {
     pub fn apply_node_transactions(
         &mut self,
         transactions: impl IntoIterator<Item = node::Transaction>,
-        block_parent_hash: ByteArray<32>,
+        block_parent_hash: BlockHash,
         block_timestamp: u64,
     ) -> Result<Vec<Transaction>, Error> {
         let transactions = transactions
@@ -86,7 +86,7 @@ impl LedgerState {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        self.post_apply_transactions(block_timestamp);
+        self.post_apply_transactions(block_timestamp)?;
 
         Ok(transactions)
     }
@@ -103,7 +103,7 @@ impl LedgerState {
     fn apply_node_transaction(
         &mut self,
         transaction: node::Transaction,
-        block_parent_hash: ByteArray<32>,
+        block_parent_hash: BlockHash,
         block_timestamp: u64,
     ) -> Result<Transaction, Error> {
         match transaction {
@@ -124,7 +124,7 @@ impl LedgerState {
     fn apply_regular_node_transaction(
         &mut self,
         transaction: node::RegularTransaction,
-        block_parent_hash: ByteArray<32>,
+        block_parent_hash: BlockHash,
         block_timestamp: u64,
     ) -> Result<Transaction, Error> {
         let mut transaction = RegularTransaction::from(transaction);
@@ -169,7 +169,7 @@ impl LedgerState {
     fn apply_system_node_transaction(
         &mut self,
         transaction: node::SystemTransaction,
-        block_parent_hash: ByteArray<32>,
+        block_parent_hash: BlockHash,
         block_timestamp: u64,
     ) -> Result<Transaction, Error> {
         let mut transaction = SystemTransaction::try_from(transaction)

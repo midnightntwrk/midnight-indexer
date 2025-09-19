@@ -32,20 +32,20 @@ use midnight_serialize_v6::{
     Serializable as SerializableV6, Tagged as TaggedV6, tagged_serialize as tagged_serialize_v6,
 };
 use midnight_storage_v6::DefaultDB as DefaultDBV6;
-use midnight_transient_crypto_v6::commitment::PedersenRandomness as PedersenRandomnessV6;
+use midnight_transient_crypto_v6::commitment::PureGeneratorPedersen as PureGeneratorPedersenV6;
 use std::io;
 use thiserror::Error;
 
 type TransactionV6 = midnight_ledger_v6::structure::Transaction<
     SignatureV6,
     ProofMarkerV6,
-    PedersenRandomnessV6,
+    PureGeneratorPedersenV6,
     DefaultDBV6,
 >;
 type IntentV6 = midnight_ledger_v6::structure::Intent<
     SignatureV6,
     ProofMarkerV6,
-    PedersenRandomnessV6,
+    PureGeneratorPedersenV6,
     DefaultDBV6,
 >;
 
@@ -72,6 +72,12 @@ pub enum Error {
 
     #[error("invalid system transaction")]
     SystemTransaction(#[source] BoxError),
+
+    #[error("block limit exceeded")]
+    BlockLimitExceeded(#[source] BoxError),
+
+    #[error("cannot calculate transaction cost")]
+    TransactionCost(#[source] BoxError),
 }
 
 /// Extension methods for `Serializable` implementations.
