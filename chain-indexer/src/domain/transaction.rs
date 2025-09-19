@@ -13,7 +13,7 @@
 
 use crate::domain::{
     ContractAction,
-    dust::{DustEvent, ProcessedDustEvents},
+    dust::{DustEvent, DustEventProjections},
     node,
 };
 use indexer_common::domain::{
@@ -99,7 +99,7 @@ pub struct RegularTransaction {
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub dust_events: Vec<DustEvent>,
-    pub processed_dust_events: ProcessedDustEvents,
+    pub dust_event_projections: DustEventProjections,
 }
 
 impl From<node::RegularTransaction> for RegularTransaction {
@@ -119,7 +119,7 @@ impl From<node::RegularTransaction> for RegularTransaction {
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
             dust_events: Default::default(),
-            processed_dust_events: Default::default(),
+            dust_event_projections: Default::default(),
         }
     }
 }
@@ -141,7 +141,7 @@ pub struct SystemTransaction {
 
     // These fields come from applying the node transactions to the ledger state.
     pub dust_events: Vec<DustEvent>,
-    pub processed_dust_events: ProcessedDustEvents,
+    pub dust_event_projections: DustEventProjections,
 }
 
 impl TryFrom<node::SystemTransaction> for SystemTransaction {
@@ -165,7 +165,7 @@ impl TryFrom<node::SystemTransaction> for SystemTransaction {
             treasury_payment_shielded: metadata.treasury_payment_shielded,
             treasury_payment_unshielded: metadata.treasury_payment_unshielded,
             dust_events: Default::default(),
-            processed_dust_events: Default::default(),
+            dust_event_projections: Default::default(),
         })
     }
 }

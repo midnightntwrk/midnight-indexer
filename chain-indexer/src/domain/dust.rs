@@ -12,14 +12,13 @@
 // limitations under the License.
 
 pub use indexer_common::domain::dust::{
-    DustEvent, DustEventDetails, DustEventType, DustGenerationInfo, DustMerklePathEntry,
+    DustEvent, DustEventAttributes, DustEventVariant, DustGenerationInfo, DustMerklePathEntry,
     DustParameters, QualifiedDustOutput,
 };
 
 use indexer_common::domain::{
     CardanoStakeKey, DustAddress, DustCommitment, DustNullifier, DustUtxoId,
 };
-use thiserror::Error;
 
 /// Domain representation of DUST registration events from the NativeTokenObservation pallet.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,21 +50,9 @@ pub enum DustRegistrationEvent {
     },
 }
 
-#[derive(Error, Debug)]
-pub enum DustProcessingError {
-    #[error("Database error during DUST processing")]
-    Database(#[from] sqlx::Error),
-
-    #[error("Invalid DUST event data: {0}")]
-    InvalidEventData(String),
-
-    #[error("DUST generation info not found for index {0}")]
-    GenerationInfoNotFound(u64),
-}
-
-/// Processed DUST events ready for persistence.
+/// DUST event projections ready for persistence.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ProcessedDustEvents {
+pub struct DustEventProjections {
     pub generations: Vec<DustGeneration>,
     pub utxos: Vec<DustUtxo>,
     pub merkle_tree_updates: Vec<DustMerkleTreeUpdate>,
@@ -105,8 +92,8 @@ pub struct DustDtimeUpdate {
 
 /// Extract operations from DUST events.
 /// This processing happens in the domain layer.
-pub fn extract_dust_operations(dust_events: &[DustEvent]) -> ProcessedDustEvents {
-    let mut result = ProcessedDustEvents {
+pub fn extract_dust_operations(dust_events: &[DustEvent]) -> DustEventProjections {
+    let mut result = DustEventProjections {
         generations: Vec::new(),
         utxos: Vec::new(),
         merkle_tree_updates: Vec::new(),
@@ -118,7 +105,7 @@ pub fn extract_dust_operations(dust_events: &[DustEvent]) -> ProcessedDustEvents
 
     for dust_event in dust_events {
         match &dust_event.event_details {
-            DustEventDetails::DustInitialUtxo {
+            DustEventAttributes::DustInitialUtxo {
                 output,
                 generation_info,
                 generation_index,
@@ -133,7 +120,7 @@ pub fn extract_dust_operations(dust_events: &[DustEvent]) -> ProcessedDustEvents
                 });
             }
 
-            DustEventDetails::DustGenerationDtimeUpdate {
+            DustEventAttributes::DustGenerationDtimeUpdate {
                 generation_info,
                 generation_index,
                 merkle_path,
@@ -145,7 +132,7 @@ pub fn extract_dust_operations(dust_events: &[DustEvent]) -> ProcessedDustEvents
                 });
             }
 
-            DustEventDetails::DustSpendProcessed {
+            DustEventAttributes::DustSpendProcessed {
                 commitment,
                 nullifier,
                 ..
@@ -154,14 +141,6 @@ pub fn extract_dust_operations(dust_events: &[DustEvent]) -> ProcessedDustEvents
                     commitment: *commitment,
                     nullifier: *nullifier,
                 });
-            }
-
-            // Registration events are handled at block level.
-            DustEventDetails::DustRegistration { .. }
-            | DustEventDetails::DustDeregistration { .. }
-            | DustEventDetails::DustMappingAdded { .. }
-            | DustEventDetails::DustMappingRemoved { .. } => {
-                // Intentionally empty - already handled at block level.
             }
         }
     }

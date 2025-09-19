@@ -98,7 +98,7 @@ pub trait DustStorage: BlockStorage {
     async fn get_recent_dust_events(
         &self,
         limit: u32,
-        event_type: Option<indexer_common::domain::dust::DustEventType>,
+        event_variant: Option<indexer_common::domain::dust::DustEventVariant>,
     ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error>;
 
     /// Get progress information for DUST nullifier transactions.
@@ -208,7 +208,7 @@ impl DustStorage for NoopStorage {
     async fn get_recent_dust_events(
         &self,
         limit: u32,
-        event_type: Option<indexer_common::domain::dust::DustEventType>,
+        event_variant: Option<indexer_common::domain::dust::DustEventVariant>,
     ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error> {
         unimplemented!("NoopStorage")
     }

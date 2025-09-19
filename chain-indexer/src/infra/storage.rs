@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{
-    self, Block, BlockTransactions, ContractAction, DustRegistrationEvent, ProcessedDustEvents,
+    self, Block, BlockTransactions, ContractAction, DustEventProjections, DustRegistrationEvent,
     RegularTransaction, SystemTransaction, Transaction, TransactionVariant, node::BlockInfo,
 };
 use fastrace::trace;
@@ -21,7 +21,7 @@ use indexer_common::{
     domain::{
         BlockHash, ByteVec, DustNullifier,
         dust::{
-            DustCommitment, DustEvent, DustEventType, DustGenerationInfo, DustMerklePathEntry,
+            DustCommitment, DustEvent, DustEventVariant, DustGenerationInfo, DustMerklePathEntry,
             QualifiedDustOutput,
         },
         ledger::{
@@ -414,8 +414,8 @@ async fn save_regular_transaction(
     )
     .await?;
 
-    save_processed_dust_events(
-        &transaction.processed_dust_events,
+    save_dust_event_projections(
+        &transaction.dust_event_projections,
         transaction_id,
         block_height,
         tx,
@@ -442,12 +442,11 @@ async fn save_system_transaction(
         treasury_payment_shielded,
         treasury_payment_unshielded,
         dust_events,
-        processed_dust_events,
+        dust_event_projections,
         ..
     } = transaction;
 
-    save_processed_dust_events(processed_dust_events, transaction_id, block_height, tx).await?;
-
+    save_dust_event_projections(dust_event_projections, transaction_id, block_height, tx).await?;
     save_dust_events(dust_events, transaction_id, tx).await?;
     save_reserve_distribution(transaction_id, *reserve_distribution, tx).await?;
     save_parameter_update(transaction_id, *parameter_update, tx).await?;
@@ -641,24 +640,24 @@ async fn save_identifiers(
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn save_processed_dust_events(
-    processed_dust_events: &ProcessedDustEvents,
+async fn save_dust_event_projections(
+    dust_event_projections: &DustEventProjections,
     transaction_id: i64,
     block_height: u32,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    for generation in &processed_dust_events.generations {
+    for generation in &dust_event_projections.generations {
         let generation_info_id =
             save_dust_generation_info(&generation.generation_info, generation.generation_index, tx)
                 .await?;
 
         // Find corresponding UTXO save (they're paired in the same order).
-        for utxo in &processed_dust_events.utxos {
+        for utxo in &dust_event_projections.utxos {
             save_dust_utxos(&utxo.output, generation_info_id, tx).await?;
         }
     }
 
-    for tree_update in &processed_dust_events.merkle_tree_updates {
+    for tree_update in &dust_event_projections.merkle_tree_updates {
         save_dust_generation_tree_update(
             tree_update.generation_index,
             &tree_update.merkle_path,
@@ -668,11 +667,11 @@ async fn save_processed_dust_events(
         .await?;
     }
 
-    for spend in &processed_dust_events.spends {
+    for spend in &dust_event_projections.spends {
         mark_dust_utxo_spent(spend.commitment, spend.nullifier, transaction_id, tx).await?;
     }
 
-    if let Some(dtime_update) = &processed_dust_events.dtime_update {
+    if let Some(dtime_update) = &dust_event_projections.dtime_update {
         update_dust_generation_dtime(dtime_update.dtime, dtime_update.generation_index, tx).await?;
     }
 
@@ -702,7 +701,7 @@ async fn save_dust_events(
 
     QueryBuilder::new(query)
         .push_values(dust_events.iter(), |mut q, event| {
-            let event_type = DustEventType::from(&event.event_details);
+            let event_type = DustEventVariant::from(&event.event_details);
             q.push_bind(transaction_id)
                 .push_bind(event.transaction_hash.as_ref())
                 .push_bind(event.logical_segment as i32)
