@@ -26,8 +26,8 @@ use crate::{
 use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject, scalar};
 use derive_more::{Debug, From};
 use indexer_common::domain::{
-    AddressType, ByteArrayLenError, DecodeAddressError, NetworkId, decode_address, encode_address,
-    ledger::RawUnshieldedAddress,
+    AddressType, ByteArrayLenError, DecodeAddressError, NetworkId, RawUnshieldedAddress,
+    decode_address, encode_address,
 };
 use log::error;
 use serde::{Deserialize, Serialize};

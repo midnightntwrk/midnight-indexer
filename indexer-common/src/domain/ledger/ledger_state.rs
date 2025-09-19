@@ -12,13 +12,15 @@
 // limitations under the License.
 
 use crate::domain::{
-    ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_016_000, ProtocolVersion,
+    ApplyRegularTransactionResult, ByteArray, ByteVec, IntentHash, LedgerEvent, NetworkId,
+    PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType, TransactionResult, UnshieldedUtxo,
     ledger::{
         Error, IntentV6, SerializableV6Ext, SerializedContractAddress, TaggedSerializableV6Ext,
         TransactionV6,
     },
 };
 use fastrace::trace;
+use itertools::Itertools;
 use midnight_base_crypto_v6::{
     cost_model::SyntheticCost as SyntheticCostV6, hash::HashOutput as HashOutputV6,
     time::Timestamp as TimestampV6,
@@ -28,6 +30,7 @@ use midnight_coin_structure_v6::{
     contract::ContractAddress as ContractAddressV6,
 };
 use midnight_ledger_v6::{
+    events::EventDetails as EventDetailsV6,
     semantics::{
         TransactionContext as TransactionContextV6, TransactionResult as TransactionResultV6,
     },
@@ -42,13 +45,8 @@ use midnight_transient_crypto_v6::merkle_tree::{
     MerkleTreeDigest as MerkleTreeDigestV6,
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::HashSet, sync::LazyLock};
-
-pub type IntentHash = ByteArray<32>;
-pub type RawTokenType = ByteArray<32>;
-pub type RawUnshieldedAddress = ByteArray<32>;
 pub type SerializedLedgerState = ByteVec;
 pub type SerializedTransaction = ByteVec;
 pub type SerializedZswapState = ByteVec;
@@ -114,7 +112,7 @@ impl LedgerState {
         transaction: &SerializedTransaction,
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
-    ) -> Result<(TransactionResult, Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>), Error> {
+    ) -> Result<ApplyRegularTransactionResult, Error> {
         match self {
             Self::V6 {
                 ledger_state,
@@ -151,28 +149,50 @@ impl LedgerState {
                     block_fullness,
                 };
 
-                let transaction_result = match transaction_result {
-                    TransactionResultV6::Success(_) => TransactionResult::Success,
+                let (transaction_result, events) = match transaction_result {
+                    TransactionResultV6::Success(events) => (TransactionResult::Success, events),
 
-                    TransactionResultV6::PartialSuccess(segments, _) => {
+                    TransactionResultV6::PartialSuccess(segments, events) => {
                         let segments = segments
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
                             .collect::<Vec<_>>();
-                        TransactionResult::PartialSuccess(segments)
+                        (TransactionResult::PartialSuccess(segments), events)
                     }
 
-                    TransactionResultV6::Failure(_) => TransactionResult::Failure,
+                    TransactionResultV6::Failure(_) => (TransactionResult::Failure, vec![]),
                 };
+
+                let ledger_events = events
+                    .into_iter()
+                    .map(|event| {
+                        let raw = event
+                            .tagged_serialize_v6()
+                            .map_err(|error| Error::Io("cannot serialize EventV6", error))?;
+                        Ok((event, raw))
+                    })
+                    .filter_map_ok(|(event, raw)| match event.content {
+                        EventDetailsV6::ZswapInput { .. } => Some(LedgerEvent::zswap_input(raw)),
+                        EventDetailsV6::ZswapOutput { .. } => Some(LedgerEvent::zswap_output(raw)),
+                        EventDetailsV6::ContractDeploy { .. } => None,
+                        EventDetailsV6::ContractLog { .. } => None,
+                        EventDetailsV6::ParamChange(..) => None,
+                        EventDetailsV6::DustInitialUtxo { .. } => None,
+                        EventDetailsV6::DustGenerationDtimeUpdate { .. } => None,
+                        EventDetailsV6::DustSpendProcessed { .. } => None,
+                        other => panic!("unexpected EventDetailsV6 variant {other:?}"),
+                    })
+                    .collect::<Result<_, _>>()?;
 
                 let (created_unshielded_utxos, spent_unshielded_utxos) =
                     extract_unshielded_utxos_v6(ledger_transaction, &transaction_result);
 
-                Ok((
+                Ok(ApplyRegularTransactionResult {
                     transaction_result,
                     created_unshielded_utxos,
                     spent_unshielded_utxos,
-                ))
+                    ledger_events,
+                })
             }
         }
     }
@@ -254,25 +274,7 @@ impl LedgerState {
         }
     }
 
-    /// Extract the UTXOs.
-    pub fn extract_utxos(&self) -> Vec<UnshieldedUtxo> {
-        match self {
-            Self::V6 { ledger_state, .. } => ledger_state
-                .utxo
-                .utxos
-                .keys()
-                .map(|utxo| UnshieldedUtxo {
-                    value: utxo.value,
-                    owner: utxo.owner.0.0.into(),
-                    token_type: utxo.type_.0.0.into(),
-                    intent_hash: utxo.intent_hash.0.0.into(),
-                    output_index: utxo.output_no,
-                })
-                .collect(),
-        }
-    }
-
-    /// Extract the serialized merkle-tree collapsed update for the given indices.
+    /// Get the serialized merkle-tree collapsed update for the given indices.
     pub fn collapsed_update(&self, start_index: u64, end_index: u64) -> Result<ByteVec, Error> {
         match self {
             Self::V6 { ledger_state, .. } => MerkleTreeCollapsedUpdateV6::new(
@@ -307,30 +309,6 @@ impl LedgerState {
             }
         }
     }
-}
-
-/// The result of applying a transaction to the ledger state.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TransactionResult {
-    /// All guaranteed and fallible coins succeeded.
-    Success,
-
-    /// Not all fallible coins succeeded; the value maps segemt ID to success.
-    PartialSuccess(Vec<(u16, bool)>),
-
-    /// Guaranteed coins failed.
-    #[default]
-    Failure,
-}
-
-/// An unshielded UTXO.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UnshieldedUtxo {
-    pub owner: RawUnshieldedAddress,
-    pub token_type: RawTokenType,
-    pub value: u128,
-    pub intent_hash: IntentHash,
-    pub output_index: u32,
 }
 
 /// Facade for zswap state root across supported (protocol) versions.
@@ -391,18 +369,18 @@ fn extract_unshielded_utxos_v6(
             let mut outputs = vec![];
             let mut inputs = vec![];
 
-            for segment_id in transaction.segments() {
+            for segment in transaction.segments() {
                 // Guaranteed phase.
-                if segment_id == 0 {
+                if segment == 0 {
                     for intent in transaction.intents.values() {
-                        extend_v6(&mut outputs, &mut inputs, segment_id, &intent, true);
+                        extend_v6(&mut outputs, &mut inputs, segment, &intent, true);
                     }
 
                 // Fallible phase.
-                } else if let Some(intent) = transaction.intents.get(&segment_id)
-                    && successful_segments.contains(&segment_id)
+                } else if let Some(intent) = transaction.intents.get(&segment)
+                    && successful_segments.contains(&segment)
                 {
-                    extend_v6(&mut outputs, &mut inputs, segment_id, &intent, false);
+                    extend_v6(&mut outputs, &mut inputs, segment, &intent, false);
                 }
             }
 

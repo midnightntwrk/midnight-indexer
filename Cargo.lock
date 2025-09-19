@@ -2967,6 +2967,7 @@ dependencies = [
  "figment",
  "futures",
  "humantime-serde",
+ "itertools 0.14.0",
  "log",
  "logforth",
  "metrics-exporter-prometheus",
