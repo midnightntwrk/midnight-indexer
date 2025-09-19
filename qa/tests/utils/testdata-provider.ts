@@ -68,15 +68,6 @@ class TestDataProvider {
     return this.blocks[property];
   }
 
-  private getHeightData(property: string) {
-    if (!this.heights.hasOwnProperty(property) || this.heights[property] === undefined) {
-      throw new Error(
-        `Test data provider is missing the ${property} data for ${env.getEnvName()} environment`,
-      );
-    }
-    return this.heights[property];
-  }
-
   getKnownBlockHash() {
     return this.getBlockData('known-hash');
   }
@@ -93,16 +84,8 @@ class TestDataProvider {
     return this.getBlockData('contract-call-block-hash');
   }
 
-  getContractDeployHeight() {
-    return this.getHeightData('contract-deploy-height');
-  }
-
-  getContractCallHeight() {
-    return this.getHeightData('contract-call-height');
-  }
-
-  getContractUpdateHeight() {
-    return this.getHeightData('contract-update-height');
+  getKnownContractBlockHash() {
+    return this.getBlockData('known-block-hash');
   }
 
   // TODO: this is a temporary and random viewing key, it should be removed once we can derive them
