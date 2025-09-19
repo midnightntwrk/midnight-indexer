@@ -47,6 +47,11 @@ export const TRANSACTION_BODY_FRAGMENT = `   id
     transactionResult {
       ${TRANSACTION_RESULT_BODY_FRAGMENT}
     }
+    contractActions {
+      address
+      state
+      chainState
+    }
     unshieldedCreatedOutputs {
       ${UNSHIELDED_UTXO_BODY_FRAGMENT}
     }
