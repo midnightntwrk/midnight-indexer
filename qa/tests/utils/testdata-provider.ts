@@ -21,6 +21,7 @@ class TestDataProvider {
   private viewingKeys: Record<string, string[]>;
   private transactions: Record<string, string>;
   private contracts: Record<string, string>;
+  private heights: Record<string, number>;
 
   constructor() {
     this.unshieldedAddresses = {};
@@ -28,6 +29,7 @@ class TestDataProvider {
     this.viewingKeys = {};
     this.transactions = {};
     this.contracts = {};
+    this.heights = {};
   }
 
   async init(): Promise<this> {
@@ -39,11 +41,13 @@ class TestDataProvider {
     const viewingKeysDataFile = await import(`../data/static/${envName}/viewing-keys.json`);
     const transactionsDataFile = await import(`../data/static/${envName}/transactions.json`);
     const contractsDataFile = await import(`../data/static/${envName}/contracts.json`);
+    const heightsDataFile = await import(`../data/static/${envName}/heights.json`);
     this.unshieldedAddresses = unshieldedAddressDataFile.default;
     this.blocks = blocksDataFile.default;
     this.viewingKeys = viewingKeysDataFile.default;
     this.transactions = transactionsDataFile.default;
     this.contracts = contractsDataFile.default;
+    this.heights = heightsDataFile.default;
     return this;
   }
 
@@ -68,12 +72,37 @@ class TestDataProvider {
     return this.blocks[property];
   }
 
+  private getHeightData(property: string) {
+    if (!this.heights.hasOwnProperty(property) || this.heights[property] === undefined) {
+      throw new Error(
+        `Test data provider is missing the ${property} data for ${env.getEnvName()} environment`,
+      );
+    }
+    return this.heights[property];
+  }
+
   getKnownBlockHash() {
     return this.getBlockData('known-hash');
   }
 
   getKnownContractBlockHash() {
     return this.getBlockData('known-block-hash');
+  }
+
+  getFutureBlockHash() {
+    return this.getBlockData('future-block-hash');
+  }
+
+  getPastBlockHash() {
+    return this.getBlockData('past-block-hash');
+  }
+
+  getKnownContractHeight() {
+    return this.getHeightData('known-contract-height');
+  }
+
+  getFutureHeight() {
+    return this.getHeightData('future-height');
   }
 
   getFaucetsViewingKeys() {
