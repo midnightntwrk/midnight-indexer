@@ -68,11 +68,29 @@ describe('contract queries', () => {
         expect(response.data?.contractAction).toBeDefined();
       },
     );
+
+    /**
+     * A contract query by address returns the correct action for a valid, existing contract address
+     *
+     * @given we have an existing contract address with a known action
+     * @when we send a contract query using that address
+     * @then Indexer should respond with successful response, non-null contractAction, and matching address
+     */
+    test('should return the correct action for a valid, existing contract address', async () => {
+      const existingContractAddress = dataProvider.getKnownContractAddress();
+      const response = await indexerHttpClient.getContractAction(existingContractAddress);
+      
+      expect(response).toBeSuccess();
+      expect(response.data?.contractAction).not.toBeNull();
+      expect(response.data?.contractAction?.address).toBe(existingContractAddress);
+    });
   });
 
   describe('a contract query by address and offset', () => {
     const validAddress = dataProvider.getNonExistingContractAddress();
     const knownBlockHash = dataProvider.getKnownBlockHash();
+    const existingContractAddress = dataProvider.getKnownContractAddress();
+    const existingContractBlockHash = dataProvider.getKnownContractBlockHash();
 
     /**
      * A contract query by address and offset returns null when contract does not exist
@@ -272,6 +290,23 @@ describe('contract queries', () => {
         blockOffset: { height: 2 ** 32 },
       });
       expect(response).toBeError();
+    });
+
+    /**
+     * A contract query by address and offset returns the correct action using exact block hash
+     *
+     * @given we have an existing contract address and the exact block hash where it was included
+     * @when we send a contract query using that address and block hash
+     * @then Indexer should respond with successful response and non-null contractAction with correct data
+     */
+    test('should return the correct action using exact block hash where it was included', async () => {
+      const response = await indexerHttpClient.getContractAction(existingContractAddress, {
+        blockOffset: { hash: existingContractBlockHash },
+      });
+      
+      expect(response).toBeSuccess();
+      expect(response.data?.contractAction).not.toBeNull();
+      expect(response.data?.contractAction?.address).toBe(existingContractAddress);
     });
   });
 });

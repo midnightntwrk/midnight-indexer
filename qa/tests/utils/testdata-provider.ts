@@ -59,13 +59,21 @@ class TestDataProvider {
     return this.unshieldedAddresses[property];
   }
 
-  getKnownBlockHash() {
-    if (!this.blocks.hasOwnProperty('known-hash') || this.blocks['known-hash'] === undefined) {
+  private getBlockData(property: string) {
+    if (!this.blocks.hasOwnProperty(property) || this.blocks[property] === undefined) {
       throw new Error(
-        `Test data provider is missing the known block hash data for ${env.getEnvName()} environment`,
+        `Test data provider is missing the ${property} data for ${env.getEnvName()} environment`,
       );
     }
-    return this.blocks['known-hash'];
+    return this.blocks[property];
+  }
+
+  getKnownBlockHash() {
+    return this.getBlockData('known-hash');
+  }
+
+  getKnownContractBlockHash() {
+    return this.getBlockData('known-block-hash');
   }
 
   getFaucetsViewingKeys() {
