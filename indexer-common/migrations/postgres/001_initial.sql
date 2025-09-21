@@ -88,10 +88,10 @@ CREATE TABLE ledger_events (
   transaction_id BIGINT NOT NULL REFERENCES transactions (id),
   variant LEDGER_EVENT_VARIANT NOT NULL,
   grouping LEDGER_EVENT_GROUPING NOT NULL,
-  raw BYTEA NOT NULL
+  raw BYTEA NOT NULL,
+  attributes JSONB NOT NULL
 );
 CREATE INDEX ON ledger_events (transaction_id);
-CREATE INDEX ON ledger_events (variant);
 CREATE INDEX ON ledger_events (grouping);
 --------------------------------------------------------------------------------
 -- contract_balances

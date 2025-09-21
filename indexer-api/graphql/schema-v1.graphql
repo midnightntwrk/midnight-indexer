@@ -280,8 +280,8 @@ type Subscription {
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
 	"""
-	Subscribe shielded transaction events for the given session ID starting at the given index
-	or at zero if omitted.
+	Subscribe to shielded transaction events for the given session ID starting at the given
+	index or at zero if omitted.
 	"""
 	shieldedTransactions(sessionId: HexEncoded!, index: Int): ShieldedTransactionsEvent!
 	"""
@@ -289,6 +289,10 @@ type Subscription {
 	or zero if omitted.
 	"""
 	unshieldedTransactions(address: UnshieldedAddress!, transactionId: Int): UnshieldedTransactionsEvent!
+	"""
+	Subscribe to zswap ledger events starting at the given ID or at the very start if omitted.
+	"""
+	zswapLedgerEvents(id: Int): ZswapLedgerEvent!
 }
 
 """
@@ -471,6 +475,24 @@ type UnshieldedUtxo {
 }
 
 scalar ViewingKey
+
+"""
+An event of the zswap ledger events subscription.
+"""
+type ZswapLedgerEvent {
+	"""
+	The ID of this zswap ledger event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all zswap ledger events.
+	"""
+	maxId: Int!
+}
 
 """
 Directs the executor to include this field or fragment only when the `if` argument is true.

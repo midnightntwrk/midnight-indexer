@@ -15,8 +15,16 @@ mod block;
 mod contract_action;
 mod shielded;
 mod unshielded;
+mod zswap_ledger_events;
 
-use crate::domain::{self, storage::Storage};
+use crate::{
+    domain::{self, storage::Storage},
+    infra::api::v1::subscription::{
+        block::BlockSubscription, contract_action::ContractActionSubscription,
+        shielded::ShieldedTransactionsSubscription, unshielded::UnshieldedTransactionsSubscription,
+        zswap_ledger_events::ZswapLedgerEventsSubscription,
+    },
+};
 use async_graphql::MergedSubscription;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext};
 use futures::{Stream, stream::TryStreamExt};
@@ -24,10 +32,11 @@ use indexer_common::domain::{LedgerStateStorage, Subscriber};
 
 #[derive(MergedSubscription)]
 pub struct Subscription<S, B, Z>(
-    block::BlockSubscription<S, B>,
-    contract_action::ContractActionSubscription<S, B>,
-    shielded::ShieldedTransactionsSubscription<S, B, Z>,
-    unshielded::UnshieldedTransactionsSubscription<S, B>,
+    BlockSubscription<S, B>,
+    ContractActionSubscription<S, B>,
+    ShieldedTransactionsSubscription<S, B, Z>,
+    UnshieldedTransactionsSubscription<S, B>,
+    ZswapLedgerEventsSubscription<S, B>,
 )
 where
     S: Storage,
@@ -42,10 +51,11 @@ where
 {
     fn default() -> Self {
         Subscription(
-            block::BlockSubscription::default(),
-            contract_action::ContractActionSubscription::default(),
-            shielded::ShieldedTransactionsSubscription::default(),
-            unshielded::UnshieldedTransactionsSubscription::default(),
+            BlockSubscription::default(),
+            ContractActionSubscription::default(),
+            ShieldedTransactionsSubscription::default(),
+            UnshieldedTransactionsSubscription::default(),
+            ZswapLedgerEventsSubscription::default(),
         )
     }
 }

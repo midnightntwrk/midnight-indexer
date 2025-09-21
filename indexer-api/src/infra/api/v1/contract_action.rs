@@ -25,7 +25,7 @@ use crate::{
 };
 use async_graphql::{ComplexObject, Context, Interface, OneofObject, SimpleObject};
 use derive_more::Debug;
-use indexer_common::domain::ledger::SerializedContractAddress;
+use indexer_common::domain::{ContractAttributes, SerializedContractAddress};
 use std::marker::PhantomData;
 
 /// A contract action.
@@ -64,7 +64,7 @@ where
         } = action;
 
         match attributes {
-            domain::ContractAttributes::Deploy => ContractAction::Deploy(ContractDeploy {
+            ContractAttributes::Deploy => ContractAction::Deploy(ContractDeploy {
                 address: address.hex_encode(),
                 state: state.hex_encode(),
                 chain_state: chain_state.hex_encode(),
@@ -73,20 +73,18 @@ where
                 _s: PhantomData,
             }),
 
-            domain::ContractAttributes::Call { entry_point } => {
-                ContractAction::Call(ContractCall {
-                    address: address.hex_encode(),
-                    state: state.hex_encode(),
-                    entry_point: entry_point.hex_encode(),
-                    chain_state: chain_state.hex_encode(),
-                    transaction_id,
-                    contract_action_id: id,
-                    raw_address: address,
-                    _s: PhantomData,
-                })
-            }
+            ContractAttributes::Call { entry_point } => ContractAction::Call(ContractCall {
+                address: address.hex_encode(),
+                state: state.hex_encode(),
+                entry_point: entry_point.hex_encode(),
+                chain_state: chain_state.hex_encode(),
+                transaction_id,
+                contract_action_id: id,
+                raw_address: address,
+                _s: PhantomData,
+            }),
 
-            domain::ContractAttributes::Update => ContractAction::Update(ContractUpdate {
+            ContractAttributes::Update => ContractAction::Update(ContractUpdate {
                 address: address.hex_encode(),
                 state: state.hex_encode(),
                 chain_state: chain_state.hex_encode(),

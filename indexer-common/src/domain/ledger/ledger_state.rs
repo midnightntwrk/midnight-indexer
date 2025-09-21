@@ -13,11 +13,10 @@
 
 use crate::domain::{
     ApplyRegularTransactionResult, ByteArray, ByteVec, IntentHash, LedgerEvent, NetworkId,
-    PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType, TransactionResult, UnshieldedUtxo,
-    ledger::{
-        Error, IntentV6, SerializableV6Ext, SerializedContractAddress, TaggedSerializableV6Ext,
-        TransactionV6,
-    },
+    PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType, SerializedContractAddress,
+    SerializedLedgerState, SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot,
+    TransactionResult, UnshieldedUtxo,
+    ledger::{Error, IntentV6, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
 use fastrace::trace;
 use itertools::Itertools;
@@ -47,10 +46,6 @@ use midnight_transient_crypto_v6::merkle_tree::{
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
 use sha2::{Digest, Sha256};
 use std::{collections::HashSet, sync::LazyLock};
-pub type SerializedLedgerState = ByteVec;
-pub type SerializedTransaction = ByteVec;
-pub type SerializedZswapState = ByteVec;
-pub type SerializedZswapStateRoot = ByteVec;
 
 static STRICTNESS_V6: LazyLock<WellFormedStrictnessV6> = LazyLock::new(|| {
     let mut strictness = WellFormedStrictnessV6::default();

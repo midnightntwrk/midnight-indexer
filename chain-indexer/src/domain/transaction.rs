@@ -13,11 +13,9 @@
 
 use crate::domain::{ContractAction, node};
 use indexer_common::domain::{
-    ByteArray, LedgerEvent, ProtocolVersion, TransactionResult, UnshieldedUtxo,
-    ledger::{
-        SerializedTransaction, SerializedTransactionIdentifier, SerializedZswapStateRoot,
-        TransactionHash,
-    },
+    ByteArray, LedgerEvent, ProtocolVersion, SerializedTransaction,
+    SerializedTransactionIdentifier, SerializedZswapStateRoot, TransactionHash, TransactionResult,
+    UnshieldedUtxo,
 };
 use sqlx::{FromRow, Type};
 use std::fmt::Debug;

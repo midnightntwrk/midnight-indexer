@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::ledger::{
+use indexer_common::domain::{
     ContractAttributes, ContractBalance, SerializedContractAddress, SerializedContractState,
     SerializedZswapState,
 };
@@ -26,8 +26,8 @@ pub struct ContractAction {
     pub attributes: ContractAttributes,
 }
 
-impl From<indexer_common::domain::ledger::ContractAction> for ContractAction {
-    fn from(contract_action: indexer_common::domain::ledger::ContractAction) -> Self {
+impl From<indexer_common::domain::ContractAction> for ContractAction {
+    fn from(contract_action: indexer_common::domain::ContractAction) -> Self {
         Self {
             address: contract_action.address,
             state: contract_action.state,

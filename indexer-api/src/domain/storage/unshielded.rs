@@ -22,7 +22,6 @@ use indexer_common::domain::RawUnshieldedAddress;
 use sqlx::Error;
 use std::fmt::Debug;
 
-/// Storage abstraction for unshielded UTXO operations.
 #[trait_variant::make(Send)]
 pub trait UnshieldedUtxoStorage
 where

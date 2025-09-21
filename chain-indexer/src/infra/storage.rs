@@ -19,8 +19,8 @@ use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteVec, LedgerEvent, UnshieldedUtxo,
-        ledger::{ContractAttributes, ContractBalance},
+        BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
+        LedgerEventAttributes, UnshieldedUtxo,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -182,17 +182,11 @@ impl domain::storage::Storage for Storage {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[cfg_attr(feature = "cloud", sqlx(type_name = "CONTRACT_ACTION_VARIANT"))]
 enum ContractActionVariant {
-    /// A contract deployment.
-    #[default]
     Deploy,
-
-    /// A contract call.
     Call,
-
-    /// A contract update.
     Update,
 }
 
@@ -202,6 +196,22 @@ impl From<&ContractAttributes> for ContractActionVariant {
             ContractAttributes::Deploy => Self::Deploy,
             ContractAttributes::Call { .. } => Self::Call,
             ContractAttributes::Update => Self::Update,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[cfg_attr(feature = "cloud", sqlx(type_name = "LEDGER_EVENT_VARIANT"))]
+pub enum LedgerEventVariant {
+    ZswapInput,
+    ZswapOutput,
+}
+
+impl From<&LedgerEventAttributes> for LedgerEventVariant {
+    fn from(attributes: &LedgerEventAttributes) -> Self {
+        match attributes {
+            LedgerEventAttributes::ZswapInput => Self::ZswapInput,
+            LedgerEventAttributes::ZswapOutput => Self::ZswapOutput,
         }
     }
 }
@@ -540,16 +550,18 @@ async fn save_ledger_events(
             transaction_id,
             variant,
             grouping,
-            raw
+            raw,
+            attributes
         )
     "};
 
     QueryBuilder::new(query)
         .push_values(ledger_events.iter(), |mut q, ledger_event| {
             q.push_bind(transaction_id)
-                .push_bind(ledger_event.variant)
+                .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
                 .push_bind(ledger_event.grouping)
-                .push_bind(ledger_event.raw.as_ref());
+                .push_bind(ledger_event.raw.as_ref())
+                .push_bind(Json(ledger_event.attributes));
         })
         .build()
         .execute(&mut **tx)

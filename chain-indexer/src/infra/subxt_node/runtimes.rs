@@ -16,8 +16,8 @@ include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
 
 use crate::infra::subxt_node::SubxtNodeError;
 use indexer_common::domain::{
-    BlockHash, ByteVec, PROTOCOL_VERSION_000_016_000, ProtocolVersion,
-    ledger::{SerializedContractAddress, SerializedContractState},
+    BlockHash, ByteVec, PROTOCOL_VERSION_000_016_000, ProtocolVersion, SerializedContractAddress,
+    SerializedContractState,
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;

@@ -41,7 +41,7 @@ const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(30);
 
 /// An event of the unshielded transactions subscription.
 #[derive(Debug, Union)]
-pub enum UnshieldedTransactionsEvent<S: Storage> {
+enum UnshieldedTransactionsEvent<S: Storage> {
     /// A transaction that created and/or spent UTXOs alongside these and other information.
     // Boxing UnshieldedTransaction to reduce variant size (clippy warning).
     UnshieldedTransaction(Box<UnshieldedTransaction<S>>),
@@ -52,25 +52,25 @@ pub enum UnshieldedTransactionsEvent<S: Storage> {
 
 /// A transaction that created and/or spent UTXOs alongside these and other information.
 #[derive(Debug, SimpleObject)]
-pub struct UnshieldedTransaction<S>
+struct UnshieldedTransaction<S>
 where
     S: Storage,
 {
     /// The transaction that created and/or spent UTXOs.
-    pub transaction: Transaction<S>,
+    transaction: Transaction<S>,
 
     /// UTXOs created in the above transaction, possibly empty.
-    pub created_utxos: Vec<UnshieldedUtxo<S>>,
+    created_utxos: Vec<UnshieldedUtxo<S>>,
 
     /// UTXOs spent in the above transaction, possibly empty.
-    pub spent_utxos: Vec<UnshieldedUtxo<S>>,
+    spent_utxos: Vec<UnshieldedUtxo<S>>,
 }
 
 /// Information about the unshielded indexing progress.
 #[derive(Debug, SimpleObject)]
-pub struct UnshieldedTransactionsProgress {
+struct UnshieldedTransactionsProgress {
     /// The highest transaction ID of all currently known transactions for a subscribed address.
-    pub highest_transaction_id: u64,
+    highest_transaction_id: u64,
 }
 
 pub struct UnshieldedTransactionsSubscription<S, B> {

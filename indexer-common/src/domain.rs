@@ -27,16 +27,26 @@ pub use ledger_state_storage::*;
 pub use network_id::*;
 pub use protocol_version::*;
 pub use pub_sub::*;
+pub use viewing_key::*;
+
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
-pub use viewing_key::*;
 
 pub type BlockAuthor = ByteArray<32>;
 pub type BlockHash = ByteArray<32>;
 pub type IntentHash = ByteArray<32>;
 pub type RawTokenType = ByteArray<32>;
 pub type RawUnshieldedAddress = ByteArray<32>;
+pub type SerializedContractAddress = ByteVec;
+pub type SerializedContractEntryPoint = ByteVec;
+pub type SerializedContractState = ByteVec;
 pub type SerializedLedgerEvent = ByteVec;
+pub type SerializedLedgerState = ByteVec;
+pub type SerializedTransaction = ByteVec;
+pub type SerializedTransactionIdentifier = ByteVec;
+pub type SerializedZswapState = ByteVec;
+pub type SerializedZswapStateRoot = ByteVec;
+pub type TransactionHash = ByteArray<32>;
 
 /// The result of applying a regular transaction to the ledger state along with extracted data.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -61,6 +71,44 @@ pub enum TransactionResult {
     Failure,
 }
 
+/// A contract action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractAction {
+    pub address: SerializedContractAddress,
+    pub state: SerializedContractState,
+    pub attributes: ContractAttributes,
+}
+
+/// Attributes for a specific contract action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContractAttributes {
+    Deploy,
+    Call {
+        entry_point: SerializedContractEntryPoint,
+    },
+    Update,
+}
+
+/// Token balance of a contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContractBalance {
+    /// Token type identifier.
+    pub token_type: RawTokenType,
+
+    /// Balance amount as u128.
+    pub amount: u128,
+}
+
+/// Transaction structure for fees calculation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransactionStructure {
+    pub segment_count: usize,
+    pub estimated_input_count: usize,
+    pub estimated_output_count: usize,
+    pub has_contract_operations: bool,
+    pub size: usize,
+}
+
 /// An unshielded UTXO.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnshieldedUtxo {
@@ -73,32 +121,31 @@ pub struct UnshieldedUtxo {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LedgerEvent {
-    pub variant: LedgerEventVariant,
     pub grouping: LedgerEventGrouping,
     pub raw: SerializedLedgerEvent,
+    pub attributes: LedgerEventAttributes,
 }
 
 impl LedgerEvent {
     fn zswap_input(raw: SerializedLedgerEvent) -> Self {
         Self {
-            variant: LedgerEventVariant::ZswapInput,
             grouping: LedgerEventGrouping::Zswap,
             raw,
+            attributes: LedgerEventAttributes::ZswapInput,
         }
     }
 
     fn zswap_output(raw: SerializedLedgerEvent) -> Self {
         Self {
-            variant: LedgerEventVariant::ZswapOutput,
             grouping: LedgerEventGrouping::Zswap,
             raw,
+            attributes: LedgerEventAttributes::ZswapOutput,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[cfg_attr(feature = "cloud", sqlx(type_name = "LEDGER_EVENT_VARIANT"))]
-pub enum LedgerEventVariant {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LedgerEventAttributes {
     ZswapInput,
     ZswapOutput,
 }

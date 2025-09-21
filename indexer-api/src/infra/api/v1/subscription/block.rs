@@ -64,7 +64,7 @@ where
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
         let mut height = resolve_height(offset, storage).await?;
 
-        let blocks_stream = try_stream! {
+        let blocks = try_stream! {
             // Stream existing blocks.
             debug!(height; "streaming existing blocks");
 
@@ -93,7 +93,6 @@ where
 
                 let blocks = storage.get_blocks(height, BATCH_SIZE);
                 let mut blocks = pin!(blocks);
-
                 while let Some(block) = get_next_block(&mut blocks)
                     .await
                     .map_err_into_server_error(|| format!("get next block at height {height}"))?
@@ -108,7 +107,7 @@ where
             warn!("stream of BlockIndexed events completed unexpectedly");
         };
 
-        Ok(blocks_stream)
+        Ok(blocks)
     }
 }
 

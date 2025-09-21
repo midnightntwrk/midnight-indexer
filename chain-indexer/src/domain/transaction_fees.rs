@@ -19,12 +19,12 @@
 //! 3. Basic size-based calculation (tertiary) - Fallback using transaction size
 //! 4. Minimum fees (final) - Ensures non-zero fees for all transactions
 
-use indexer_common::domain::ledger::{self, TransactionStructure};
+use indexer_common::domain::{TransactionStructure, ledger};
 
 // Fee calculation constants
 const BASE_OVERHEAD: u128 = 1000; // Base transaction overhead in smallest DUST unit
 const INPUT_FEE_OVERHEAD: u128 = 100; // Cost per UTXO input
-const OUTPUT_FEE_OVERHEAD: u128 = 150; // Cost per UTXO output  
+const OUTPUT_FEE_OVERHEAD: u128 = 150; // Cost per UTXO output
 const CONTRACT_OPERATION_COST: u128 = 5000; // Additional cost for contract calls/deploys
 const SEGMENT_OVERHEAD_COST: u128 = 500; // Cost per additional segment
 

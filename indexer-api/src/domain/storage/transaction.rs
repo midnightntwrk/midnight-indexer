@@ -14,12 +14,10 @@
 use crate::domain::{Transaction, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{
-    RawUnshieldedAddress, SessionId,
-    ledger::{SerializedTransactionIdentifier, TransactionHash},
+    RawUnshieldedAddress, SerializedTransactionIdentifier, SessionId, TransactionHash,
 };
 use std::{fmt::Debug, num::NonZeroU32};
 
-/// Storage abstraction.
 #[trait_variant::make(Send)]
 pub trait TransactionStorage
 where

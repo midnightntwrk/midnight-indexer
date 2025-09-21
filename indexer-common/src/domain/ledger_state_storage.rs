@@ -13,7 +13,7 @@
 
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-use crate::domain::{ProtocolVersion, ledger::SerializedLedgerState};
+use crate::domain::{ProtocolVersion, SerializedLedgerState};
 use std::{convert::Infallible, error::Error as StdError};
 
 /// Abstraction for ledger state storage.

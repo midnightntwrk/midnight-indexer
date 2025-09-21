@@ -15,8 +15,7 @@ use crate::domain::{RegularTransaction, SystemTransaction, Transaction, Transact
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
-    ApplyRegularTransactionResult, BlockHash, NetworkId,
-    ledger::{ContractState, SerializedTransaction},
+    ApplyRegularTransactionResult, BlockHash, NetworkId, SerializedTransaction, ledger,
 };
 use std::ops::DerefMut;
 use thiserror::Error;
@@ -152,8 +151,10 @@ impl LedgerState {
 
         // Update extracted balances of contract actions.
         for contract_action in &mut transaction.contract_actions {
-            let contract_state =
-                ContractState::deserialize(&contract_action.state, transaction.protocol_version)?;
+            let contract_state = ledger::ContractState::deserialize(
+                &contract_action.state,
+                transaction.protocol_version,
+            )?;
             let balances = contract_state.balances()?;
             contract_action.extracted_balances = balances;
         }
