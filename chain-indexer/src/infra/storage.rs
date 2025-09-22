@@ -600,7 +600,7 @@ async fn save_contract_balances(
 
 #[cfg(feature = "standalone")]
 async fn save_identifiers(
-    identifiers: &[indexer_common::domain::ledger::SerializedTransactionIdentifier],
+    identifiers: &[indexer_common::domain::SerializedTransactionIdentifier],
     transaction_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
