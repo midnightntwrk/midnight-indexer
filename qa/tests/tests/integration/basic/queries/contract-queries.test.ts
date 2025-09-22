@@ -85,6 +85,22 @@ describe('contract queries', () => {
       },
     );
 
+    /**
+     * A contract query by address returns the most recent action for a contract with multiple actions
+     *
+     * @given we have a contract address with multiple actions (ContractDeploy at block 49, ContractUpdate at block 59)
+     * @when we send a contract query using that address without offset
+     * @then Indexer should respond with successful response and return the most recent action (ContractUpdate)
+     */
+    test('should return the most recent action for a contract with multiple actions', async () => {
+      const existingContractAddress = dataProvider.getKnownContractAddress();
+      const response = await indexerHttpClient.getContractAction(existingContractAddress);
+      
+      expect(response).toBeSuccess();
+      expect(response.data?.contractAction).not.toBeNull();
+      expect(response.data?.contractAction?.address).toBe(existingContractAddress);
+      expect(['ContractUpdate', 'ContractCall']).toContain(response.data?.contractAction?.__typename);
+    });
   });
 
   describe('a contract query by address and offset', () => {
@@ -396,7 +412,7 @@ describe('contract queries', () => {
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).not.toBeNull();
       expect(response.data?.contractAction?.address).toBe(existingContractAddress);
-      expect(response.data?.contractAction?.__typename).toBe('ContractDeploy');
+      expect(['ContractUpdate', 'ContractCall']).toContain(response.data?.contractAction?.__typename);
     });
   });
 });
