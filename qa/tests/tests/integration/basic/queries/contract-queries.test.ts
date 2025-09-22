@@ -13,8 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import log from '@utils/logging/logger';
-import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
@@ -30,23 +28,14 @@ describe('contract queries', () => {
      * @when we send a contract query using that address without offset
      * @then Indexer should respond with successful response and return the most recent action (ContractUpdate)
      */
-    test('should return the most recent action for a contract with multiple actions', async (context: TestContext) => {
-      let existingContractAddress: string;
-      try {
-        existingContractAddress = dataProvider.getKnownContractAddress();
-      } catch (error) {
-        log.warn(error);
-        context.skip?.(true, (error as Error).message);
-      }
-
-      const response = await indexerHttpClient.getContractAction(existingContractAddress!);
+    test('should return the most recent action for a contract with multiple actions', async () => {
+      const existingContractAddress = dataProvider.getKnownContractAddress();
+      const response = await indexerHttpClient.getContractAction(existingContractAddress);
 
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).not.toBeNull();
-      expect(response.data?.contractAction?.address).toBe(existingContractAddress!);
-      expect(['ContractUpdate', 'ContractCall']).toContain(
-        response.data?.contractAction?.__typename,
-      );
+      expect(response.data?.contractAction?.address).toBe(existingContractAddress);
+      expect(response.data?.contractAction?.__typename).toBe('ContractUpdate');
     });
 
     /**
@@ -96,32 +85,17 @@ describe('contract queries', () => {
       },
     );
 
-    /**
-     * A contract query by address returns the correct action for a valid, existing contract address
-     *
-     * @given we have an existing contract address with a known action
-     * @when we send a contract query using that address
-     * @then Indexer should respond with successful response, non-null contractAction, and matching address
-     */
-    test('should return the correct action for a valid, existing contract address', async () => {
-      const existingContractAddress = dataProvider.getKnownContractAddress();
-      const response = await indexerHttpClient.getContractAction(existingContractAddress);
-      
-      expect(response).toBeSuccess();
-      expect(response.data?.contractAction).not.toBeNull();
-      expect(response.data?.contractAction?.address).toBe(existingContractAddress);
-    });
   });
 
   describe('a contract query by address and offset', () => {
     const validAddress = dataProvider.getNonExistingContractAddress();
     const knownBlockHash = dataProvider.getKnownBlockHash();
     const existingContractAddress = dataProvider.getKnownContractAddress();
-    const existingContractBlockHash = dataProvider.getKnownContractBlockHash();
-    const futureBlockHash = dataProvider.getFutureBlockHash();
-    const pastBlockHash = dataProvider.getPastBlockHash();
-    const existingContractHeight = dataProvider.getKnownContractHeight();
-    const futureHeight = dataProvider.getFutureHeight();
+    const contractDeployBlockHash = dataProvider.getContractDeployBlockHash();
+    const contractUpdateBlockHash = dataProvider.getContractUpdateBlockHash();
+    const preContractBlockHash = dataProvider.getPreContractBlockHash();
+    const contractDeployHeight = dataProvider.getContractDeployHeight();
+    const contractUpdateHeight = dataProvider.getContractUpdateHeight();
 
     /**
      * A contract query by address and offset returns null when contract does not exist
@@ -332,7 +306,7 @@ describe('contract queries', () => {
      */
     test('should return the correct action using exact block hash where it was included', async () => {
       const response = await indexerHttpClient.getContractAction(existingContractAddress, {
-        blockOffset: { hash: existingContractBlockHash },
+        blockOffset: { hash: contractDeployBlockHash },
       });
       
       expect(response).toBeSuccess();
@@ -349,7 +323,7 @@ describe('contract queries', () => {
      */
     test('should return the latest state using a future block hash', async () => {
       const response = await indexerHttpClient.getContractAction(existingContractAddress, {
-        blockOffset: { hash: futureBlockHash },
+        blockOffset: { hash: contractUpdateBlockHash },
       });
       
       expect(response).toBeSuccess();
@@ -366,7 +340,7 @@ describe('contract queries', () => {
      */
     test('should return null when using a block hash from before the action existed', async () => {
       const response = await indexerHttpClient.getContractAction(existingContractAddress, {
-        blockOffset: { hash: pastBlockHash },
+        blockOffset: { hash: preContractBlockHash },
       });
       
       expect(response).toBeSuccess();
@@ -382,7 +356,7 @@ describe('contract queries', () => {
      */
     test('should return the correct action using exact block height where it was included', async () => {
       const response = await indexerHttpClient.getContractAction(existingContractAddress, {
-        blockOffset: { height: existingContractHeight },
+        blockOffset: { height: contractDeployHeight },
       });
       
       expect(response).toBeSuccess();
@@ -399,12 +373,30 @@ describe('contract queries', () => {
      */
     test('should return the latest state using a future block height', async () => {
       const response = await indexerHttpClient.getContractAction(existingContractAddress, {
-        blockOffset: { height: futureHeight },
+        blockOffset: { height: contractUpdateHeight },
       });
       
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).not.toBeNull();
       expect(response.data?.contractAction?.address).toBe(existingContractAddress);
+    });
+
+    /**
+     * A contract query by address and offset returns the older action using "time-travel" to past height
+     *
+     * @given we have a contract with multiple actions (ContractDeploy at block 49, ContractUpdate at block 59)
+     * @when we send a contract query using that address and past block height (49)
+     * @then Indexer should respond with successful response and return the older action (ContractDeploy)
+     */
+    test('should return the older action using time-travel to past block height', async () => {
+      const response = await indexerHttpClient.getContractAction(existingContractAddress, {
+        blockOffset: { height: contractDeployHeight },
+      });
+      
+      expect(response).toBeSuccess();
+      expect(response.data?.contractAction).not.toBeNull();
+      expect(response.data?.contractAction?.address).toBe(existingContractAddress);
+      expect(response.data?.contractAction?.__typename).toBe('ContractDeploy');
     });
   });
 });

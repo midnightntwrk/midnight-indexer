@@ -1,9 +1,6 @@
 {
   "known-hash": "fe98007b9e3bd24ffa78defa4af75085bb40e5438dc79ddb135c7fb02fd1eebc",
-  "contract-deploy-block-hash": "683ba5e9ed3248ac2cc439ca1572b916cff9f2106eaef144e4e6722873c01676",
-  "contract-call-block-hash": "d7eef3df5563760b313c63f891e310f44f51c5a00723d00af89d6d5914d34a6e",
-  "contract-update-block-hash": "f81ef550f017a18453b5b4be58aebf88a9ab47a15ce93d333dddcbf62088a1ad",
-  "known-block-hash": "99e45e3ca4143e454760c6d2a54d388f455a26ce148f43a78a832ac0db13ed79",
-  "future-block-hash": "a6730a3152af447040b967784b84eea90b530addb15934d05c75c793ccdf55d8",
-  "past-block-hash": "01c2e99c306e9d36a1695f8d58eea46053d6f05b20140b1e08ec6c52c56c4da3"
+  "contract-deploy-block-hash": "99e45e3ca4143e454760c6d2a54d388f455a26ce148f43a78a832ac0db13ed79",
+  "contract-update-block-hash": "a6730a3152af447040b967784b84eea90b530addb15934d05c75c793ccdf55d8",
+  "pre-contract-block-hash": "01c2e99c306e9d36a1695f8d58eea46053d6f05b20140b1e08ec6c52c56c4da3"
 }

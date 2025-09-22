@@ -93,35 +93,18 @@ class TestDataProvider {
     return this.getBlockData('contract-update-block-hash');
   }
 
-  getContractCallBlockHash() {
-    return this.getBlockData('contract-call-block-hash');
+  getPreContractBlockHash() {
+    return this.getBlockData('pre-contract-block-hash');
   }
 
-  getKnownContractBlockHash() {
-    return this.getBlockData('known-block-hash');
+  getContractDeployHeight() {
+    return this.getHeightData('contract-deploy-height');
   }
 
-  // TODO: this is a temporary and random viewing key, it should be removed once we can derive them
-  // from the wallet
-  getViewingKey() {
-    return 'mn_shield-esk_undeployed1d45kgmnfva58gwn9de3hy7tsw35k7m3dwdjkxun9wskkketetdmrzhf6wdwg0q0t85zu4sgm8ldgf66hkxmupkjn3spfncne2gtykttjjhjq2mjpxh8';
+  getContractUpdateHeight() {
+    return this.getHeightData('contract-update-height');
   }
 
-  getFutureBlockHash() {
-    return this.getBlockData('future-block-hash');
-  }
-
-  getPastBlockHash() {
-    return this.getBlockData('past-block-hash');
-  }
-
-  getKnownContractHeight() {
-    return this.getHeightData('known-contract-height');
-  }
-
-  getFutureHeight() {
-    return this.getHeightData('future-height');
-  }
 
   getFaucetsViewingKeys() {
     if (
