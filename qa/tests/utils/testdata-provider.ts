@@ -85,25 +85,26 @@ class TestDataProvider {
     return this.getBlockData('known-hash');
   }
 
-  getKnownContractBlockHash() {
-    return this.getBlockData('known-block-hash');
+  getContractDeployBlockHash() {
+    return this.getBlockData('contract-deploy-block-hash');
   }
 
-  getFutureBlockHash() {
-    return this.getBlockData('future-block-hash');
+  getContractUpdateBlockHash() {
+    return this.getBlockData('contract-update-block-hash');
   }
 
-  getPastBlockHash() {
-    return this.getBlockData('past-block-hash');
+  getPreContractBlockHash() {
+    return this.getBlockData('pre-contract-block-hash');
   }
 
-  getKnownContractHeight() {
-    return this.getHeightData('known-contract-height');
+  getContractDeployHeight() {
+    return this.getHeightData('contract-deploy-height');
   }
 
-  getFutureHeight() {
-    return this.getHeightData('future-height');
+  getContractUpdateHeight() {
+    return this.getHeightData('contract-update-height');
   }
+
 
   getFaucetsViewingKeys() {
     if (
