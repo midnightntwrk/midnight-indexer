@@ -72,7 +72,7 @@ impl From<node::Transaction> for Transaction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegularTransaction {
-    // These fields come from node::Transaction.
+    // These fields come from the node.
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
     pub raw: SerializedTransaction,
@@ -81,7 +81,7 @@ pub struct RegularTransaction {
     pub paid_fees: u128,
     pub estimated_fees: u128,
 
-    // These fields are set after applying a regular node transaction to the ledger state.
+    // These fields are set after applying the transaction to the ledger state.
     pub transaction_result: TransactionResult,
     pub merkle_tree_root: SerializedZswapStateRoot,
     pub start_index: u64,
@@ -114,9 +114,13 @@ impl From<node::RegularTransaction> for RegularTransaction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemTransaction {
+    // These fields come from the node.
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
     pub raw: SerializedTransaction,
+
+    // These fields are set after applying the transaction to the ledger state.
+    pub ledger_events: Vec<LedgerEvent>,
 }
 
 impl From<node::SystemTransaction> for SystemTransaction {
@@ -125,6 +129,7 @@ impl From<node::SystemTransaction> for SystemTransaction {
             hash: transaction.hash,
             protocol_version: transaction.protocol_version,
             raw: transaction.raw,
+            ledger_events: Default::default(),
         }
     }
 }

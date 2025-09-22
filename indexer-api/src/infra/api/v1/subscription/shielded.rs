@@ -237,17 +237,15 @@ where
             .await
             .map_err_into_server_error(|| "get next transaction")?
         {
-            let relevant_transaction = make_relevant_transaction(
+            // The end index is "exclusive", i.e. the next free index; hence no +1 here!
+            index = transaction.end_index;
+            yield make_relevant_transaction(
                 index,
                 transaction,
                 ledger_state_storage,
                 zswap_state_cache,
             )
             .await?;
-
-            index = relevant_transaction.transaction.end_index;
-
-            yield relevant_transaction;
         }
 
         // Stream live transactions.
@@ -268,17 +266,15 @@ where
                 .await
                 .map_err_into_server_error(|| "get next transaction")?
             {
-                let relevant_transaction = make_relevant_transaction(
+                // The end index is "exclusive", i.e. the next free index; hence no +1 here!
+                index = transaction.end_index;
+                yield make_relevant_transaction(
                     index,
                     transaction,
                     ledger_state_storage,
                     zswap_state_cache,
                 )
                 .await?;
-
-                index = relevant_transaction.transaction.end_index;
-
-                yield relevant_transaction;
             }
         }
 

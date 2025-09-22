@@ -29,7 +29,7 @@ use midnight_coin_structure_v6::{
     contract::ContractAddress as ContractAddressV6,
 };
 use midnight_ledger_v6::{
-    events::EventDetails as EventDetailsV6,
+    events::{Event as EventV6, EventDetails as EventDetailsV6},
     semantics::{
         TransactionContext as TransactionContextV6, TransactionResult as TransactionResultV6,
     },
@@ -158,29 +158,10 @@ impl LedgerState {
                     TransactionResultV6::Failure(_) => (TransactionResult::Failure, vec![]),
                 };
 
-                let ledger_events = events
-                    .into_iter()
-                    .map(|event| {
-                        let raw = event
-                            .tagged_serialize_v6()
-                            .map_err(|error| Error::Io("cannot serialize EventV6", error))?;
-                        Ok((event, raw))
-                    })
-                    .filter_map_ok(|(event, raw)| match event.content {
-                        EventDetailsV6::ZswapInput { .. } => Some(LedgerEvent::zswap_input(raw)),
-                        EventDetailsV6::ZswapOutput { .. } => Some(LedgerEvent::zswap_output(raw)),
-                        EventDetailsV6::ContractDeploy { .. } => None,
-                        EventDetailsV6::ContractLog { .. } => None,
-                        EventDetailsV6::ParamChange(..) => None,
-                        EventDetailsV6::DustInitialUtxo { .. } => None,
-                        EventDetailsV6::DustGenerationDtimeUpdate { .. } => None,
-                        EventDetailsV6::DustSpendProcessed { .. } => None,
-                        other => panic!("unexpected EventDetailsV6 variant {other:?}"),
-                    })
-                    .collect::<Result<_, _>>()?;
-
                 let (created_unshielded_utxos, spent_unshielded_utxos) =
-                    extract_unshielded_utxos_v6(ledger_transaction, &transaction_result);
+                    make_unshielded_utxos_v6(ledger_transaction, &transaction_result);
+
+                let ledger_events = make_ledger_events_v6(events)?;
 
                 Ok(ApplyRegularTransactionResult {
                     transaction_result,
@@ -198,7 +179,7 @@ impl LedgerState {
         &mut self,
         transaction: &SerializedTransaction,
         block_timestamp: u64,
-    ) -> Result<(), Error> {
+    ) -> Result<Vec<LedgerEvent>, Error> {
         match self {
             Self::V6 {
                 ledger_state,
@@ -210,9 +191,8 @@ impl LedgerState {
                         Error::Io("cannot deserialize LedgerSystemTransactionV6", error)
                     })?;
 
-                // TODO Handle events!
                 let cost = ledger_transaction.cost(&ledger_state.parameters);
-                let (ledger_state, _events) = ledger_state
+                let (ledger_state, events) = ledger_state
                     .apply_system_tx(&ledger_transaction, timestamp_v6(block_timestamp))
                     .map_err(|error| Error::SystemTransaction(error.into()))?;
                 let block_fullness = *block_fullness + cost;
@@ -222,7 +202,9 @@ impl LedgerState {
                     block_fullness,
                 };
 
-                Ok(())
+                let ledger_events = make_ledger_events_v6(events)?;
+
+                Ok(ledger_events)
             }
         }
     }
@@ -343,7 +325,7 @@ fn timestamp_v6(block_timestamp: u64) -> TimestampV6 {
     TimestampV6::from_secs(block_timestamp / 1000)
 }
 
-fn extract_unshielded_utxos_v6(
+fn make_unshielded_utxos_v6(
     ledger_transaction: TransactionV6,
     transaction_result: &TransactionResult,
 ) -> (Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>) {
@@ -397,6 +379,29 @@ fn extract_unshielded_utxos_v6(
             (vec![utxo], vec![]) // Creates one UTXO, spends none.
         }
     }
+}
+
+fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<LedgerEvent>, Error> {
+    events
+        .into_iter()
+        .map(|event| {
+            let raw = event
+                .tagged_serialize_v6()
+                .map_err(|error| Error::Io("cannot serialize EventV6", error))?;
+            Ok((event, raw))
+        })
+        .filter_map_ok(|(event, raw)| match event.content {
+            EventDetailsV6::ZswapInput { .. } => Some(LedgerEvent::zswap_input(raw)),
+            EventDetailsV6::ZswapOutput { .. } => Some(LedgerEvent::zswap_output(raw)),
+            EventDetailsV6::ContractDeploy { .. } => None,
+            EventDetailsV6::ContractLog { .. } => None,
+            EventDetailsV6::ParamChange(..) => None,
+            EventDetailsV6::DustInitialUtxo { .. } => None,
+            EventDetailsV6::DustGenerationDtimeUpdate { .. } => None,
+            EventDetailsV6::DustSpendProcessed { .. } => None,
+            other => panic!("unexpected EventDetailsV6 variant {other:?}"),
+        })
+        .collect::<Result<_, _>>()
 }
 
 fn extend_v6(

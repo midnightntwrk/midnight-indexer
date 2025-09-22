@@ -172,9 +172,9 @@ impl LedgerState {
         block_parent_hash: BlockHash,
         block_timestamp: u64,
     ) -> Result<Transaction, Error> {
-        let transaction = SystemTransaction::from(transaction);
-
-        self.apply_system_transaction(&transaction.raw, block_timestamp)?;
+        let mut transaction = SystemTransaction::from(transaction);
+        let ledger_events = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
+        transaction.ledger_events = ledger_events;
 
         Ok(Transaction::System(transaction))
     }

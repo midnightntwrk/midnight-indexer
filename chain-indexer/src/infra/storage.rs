@@ -303,7 +303,7 @@ async fn save_transactions(
             }
 
             Transaction::System(transaction) => {
-                save_system_transaction(transaction, transaction_id, block_id, tx).await?
+                save_system_transaction(transaction, transaction_id, tx).await?
             }
         }
     }
@@ -387,15 +387,13 @@ async fn save_regular_transaction(
     Ok(transaction_id as u64)
 }
 
-#[trace(properties = { "block_id": "{block_id}" })]
+#[trace]
 async fn save_system_transaction(
-    _transaction: &SystemTransaction,
-    _transaction_id: i64,
-    block_id: i64,
-    _tx: &mut SqlxTransaction,
+    transaction: &SystemTransaction,
+    transaction_id: i64,
+    tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // TODO: Store DistributeReserve and other (DUST-related) system transactions.
-    Ok(())
+    save_ledger_events(&transaction.ledger_events, transaction_id, tx).await
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]

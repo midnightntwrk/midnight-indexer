@@ -13,12 +13,9 @@
 
 use crate::{
     domain::{LedgerEvent, storage::Storage},
-    infra::api::{
-        ApiResult, ContextExt, ResultExt,
-        v1::{AsBytesExt, HexEncoded},
-    },
+    infra::api::{ApiResult, ContextExt, ResultExt, v1::ledger_events::ZswapLedgerEvent},
 };
-use async_graphql::{Context, SimpleObject, Subscription};
+use async_graphql::{Context, Subscription};
 use async_stream::try_stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext};
 use futures::{Stream, TryStreamExt};
@@ -28,29 +25,6 @@ use std::{marker::PhantomData, num::NonZeroU32, pin::pin};
 
 // TODO: Make configurable!
 const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
-
-/// An event of the zswap ledger events subscription.
-#[derive(Debug, SimpleObject)]
-struct ZswapLedgerEvent {
-    /// The ID of this zswap ledger event.
-    id: u64,
-
-    /// The hex-encoded serialized event.
-    raw: HexEncoded,
-
-    /// The maximum ID of all zswap ledger events.
-    max_id: u64,
-}
-
-impl From<LedgerEvent> for ZswapLedgerEvent {
-    fn from(ledger_event: LedgerEvent) -> Self {
-        Self {
-            id: ledger_event.id,
-            raw: ledger_event.raw.hex_encode(),
-            max_id: ledger_event.max_id,
-        }
-    }
-}
 
 pub struct ZswapLedgerEventsSubscription<S, B> {
     _s: PhantomData<S>,
@@ -78,7 +52,7 @@ where
         cx: &'a Context<'a>,
         id: Option<u64>,
     ) -> impl Stream<Item = ApiResult<ZswapLedgerEvent>> {
-        let mut id = id.unwrap_or_default();
+        let mut id = id.unwrap_or(1);
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
 
@@ -93,9 +67,7 @@ where
                 .await
                 .map_err_into_server_error(|| format!("get next ledger event at id {id}"))?
             {
-                assert_eq!(ledger_event.id, id);
-                id += 1;
-
+                id = ledger_event.id + 1;
                 yield ledger_event.into();
             }
 
@@ -115,9 +87,7 @@ where
                     .await
                     .map_err_into_server_error(|| format!("get next ledger event at id {id}"))?
                 {
-                    assert_eq!(ledger_event.id, id);
-                    id += 1;
-
+                    id = ledger_event.id + 1;
                     yield ledger_event.into();
                 }
             }

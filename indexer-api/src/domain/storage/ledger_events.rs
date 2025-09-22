@@ -29,6 +29,13 @@ where
         id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<LedgerEvent, sqlx::Error>> + Send;
+
+    /// Get the ledger events for the given grouping and transaction ID.
+    async fn get_ledger_events_by_transaction_id(
+        &self,
+        grouping: LedgerEventGrouping,
+        transaction_id: u64,
+    ) -> Result<Vec<LedgerEvent>, sqlx::Error>;
 }
 
 #[allow(unused_variables)]
@@ -40,5 +47,13 @@ impl LedgerEventStorage for NoopStorage {
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<LedgerEvent, sqlx::Error>> + Send {
         stream::empty()
+    }
+
+    async fn get_ledger_events_by_transaction_id(
+        &self,
+        grouping: LedgerEventGrouping,
+        transaction_id: u64,
+    ) -> Result<Vec<LedgerEvent>, sqlx::Error> {
+        unimplemented!()
     }
 }

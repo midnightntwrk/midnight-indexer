@@ -91,6 +91,10 @@ query BlockQuery($block_offset: BlockOffset) {
                 intentHash
                 outputIndex
             }
+            zswapLedgerEvents {
+                id
+                maxId
+            }
         }
     }
 }
@@ -177,6 +181,10 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
             tokenType
             intentHash
             outputIndex
+        }
+        zswapLedgerEvents {
+            id
+            maxId
         }
     }
 }
@@ -338,6 +346,10 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                 intentHash
                 outputIndex
             }
+            zswapLedgerEvents {
+                id
+                maxId
+            }
         }
     }
 }
@@ -461,5 +473,12 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
         ... on UnshieldedTransactionsProgress {
             highestTransactionId
         }
+    }
+}
+
+subscription ZswapLedgerEventsSubscription($id: Int) {
+    zswapLedgerEvents(id: $id) {
+        id
+        maxId
     }
 }

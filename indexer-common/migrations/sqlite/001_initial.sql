@@ -89,7 +89,8 @@ CREATE TABLE ledger_events (
   transaction_id INTEGER NOT NULL REFERENCES regular_transactions (id),
   variant TEXT CHECK (variant IN ('ZswapInput', 'ZswapOutput')) NOT NULL,
   grouping TEXT CHECK (grouping IN ('Zswap')) NOT NULL,
-  raw BYTEA NOT NULL
+  raw BYTEA NOT NULL,
+  attributes TEXT NOT NULL
 );
 CREATE INDEX ledger_events_transaction_id_idx ON ledger_events (transaction_id);
 CREATE INDEX ledger_events_variant_idx ON ledger_events (variant);

@@ -44,6 +44,30 @@ impl LedgerEventStorage for Storage {
 
         flatten_chunks(chunks)
     }
+
+    async fn get_ledger_events_by_transaction_id(
+        &self,
+        grouping: LedgerEventGrouping,
+        transaction_id: u64,
+    ) -> Result<Vec<LedgerEvent>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT
+                id,
+                raw,
+                attributes,
+                MAX(id) OVER (PARTITION BY grouping) AS max_id
+            FROM ledger_events
+            WHERE grouping = $1
+            AND transaction_id = $2
+            ORDER BY id
+        "};
+
+        sqlx::query_as(query)
+            .bind(grouping)
+            .bind(transaction_id as i64)
+            .fetch_all(&*self.pool)
+            .await
+    }
 }
 
 impl Storage {

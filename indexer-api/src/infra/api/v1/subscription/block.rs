@@ -74,9 +74,7 @@ where
                 .await
                 .map_err_into_server_error(|| format!("get next block at height {height}"))?
             {
-                assert_eq!(block.height, height);
-                height += 1;
-
+                height = block.height + 1;
                 yield block.into();
             }
 
@@ -97,9 +95,7 @@ where
                     .await
                     .map_err_into_server_error(|| format!("get next block at height {height}"))?
                 {
-                    assert_eq!(block.height, height);
-                    height += 1;
-
+                    height = block.height + 1;
                     yield block.into();
                 }
             }

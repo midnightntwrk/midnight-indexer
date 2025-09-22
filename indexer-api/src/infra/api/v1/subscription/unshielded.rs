@@ -190,7 +190,7 @@ where
                         format!("get next transaction for address {address}")
                     })?
             {
-                if let Some(utxo_update) = make_unshielded_transaction(
+                if let Some(unshielded_transaction) = make_unshielded_transaction(
                     &mut transaction_id,
                     storage,
                     address,
@@ -199,7 +199,7 @@ where
                 )
                 .await?
                 {
-                    yield utxo_update;
+                    yield unshielded_transaction;
                 }
             }
         }

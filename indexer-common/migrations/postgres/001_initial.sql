@@ -92,6 +92,7 @@ CREATE TABLE ledger_events (
   attributes JSONB NOT NULL
 );
 CREATE INDEX ON ledger_events (transaction_id);
+CREATE INDEX ON ledger_events (variant);
 CREATE INDEX ON ledger_events (grouping);
 --------------------------------------------------------------------------------
 -- contract_balances

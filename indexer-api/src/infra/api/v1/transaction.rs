@@ -17,13 +17,13 @@ use crate::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         v1::{
             AsBytesExt, HexEncoded, block::Block, contract_action::ContractAction,
-            unshielded::UnshieldedUtxo,
+            ledger_events::ZswapLedgerEvent, unshielded::UnshieldedUtxo,
         },
     },
 };
 use async_graphql::{ComplexObject, Context, Enum, OneofObject, SimpleObject};
 use derive_more::Debug;
-use indexer_common::domain::{BlockHash, ProtocolVersion};
+use indexer_common::domain::{BlockHash, LedgerEventGrouping, ProtocolVersion};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
@@ -166,6 +166,24 @@ where
             .collect();
 
         Ok(utxos)
+    }
+
+    /// Zswap ledger events of this transaction.
+    async fn zswap_ledger_events(&self, cx: &Context<'_>) -> ApiResult<Vec<ZswapLedgerEvent>> {
+        let id = self.id;
+
+        let zswap_ledger_events = cx
+            .get_storage::<S>()
+            .get_ledger_events_by_transaction_id(LedgerEventGrouping::Zswap, id)
+            .await
+            .map_err_into_server_error(|| {
+                format!("cannot get zswap ledger events for transaction with ID {id}")
+            })?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+
+        Ok(zswap_ledger_events)
     }
 }
 

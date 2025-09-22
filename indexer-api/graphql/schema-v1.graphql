@@ -355,6 +355,10 @@ type Transaction {
 	Unshielded UTXOs spent (consumed) by this transaction.
 	"""
 	unshieldedSpentOutputs: [UnshieldedUtxo!]!
+	"""
+	Zswap ledger events of this transaction.
+	"""
+	zswapLedgerEvents: [ZswapLedgerEvent!]!
 }
 
 """
@@ -477,7 +481,7 @@ type UnshieldedUtxo {
 scalar ViewingKey
 
 """
-An event of the zswap ledger events subscription.
+A zswap related ledger event.
 """
 type ZswapLedgerEvent {
 	"""
