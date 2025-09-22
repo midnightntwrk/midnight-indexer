@@ -17,11 +17,20 @@ import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
 import '@utils/logging/test-logging-hooks';
 import { TestContext } from 'vitest';
-import { hash, randomBytes } from 'crypto';
 
 import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import { BlockResponse } from '@utils/indexer/indexer-types';
+import {
+  BlockResponse,
+  Transaction,
+  UnshieldedTransaction,
+  UnshieldedUtxo,
+} from '@utils/indexer/indexer-types';
+import {
+  IndexerWsClient,
+  UnshieldedTransactionSubscriptionParams,
+  UnshieldedTxSubscriptionResponse,
+} from '@utils/indexer/websocket-client';
 
 function retry<T>(
   fn: () => Promise<T>,
@@ -72,12 +81,38 @@ function getBlockByHashWithRetry(hash: string): Promise<BlockResponse> {
 
 // To run: yarn test e2e
 describe('unshielded transactions', () => {
+  let indexerWsClient: IndexerWsClient;
+  let indexerHttpClient: IndexerHttpClient;
+
+  // Toolkit instance for generating and submitting transactions
   let toolkit: ToolkitWrapper;
-  let sourceAddress: string;
-  let destinationAddress: string;
+
+  // Result of the unshielded transaction submitted to node
   let transactionResult: ToolkitTransactionResult;
 
+  // Addresses for the source and destination wallets, derived from their seeds
+  let sourceAddress: string;
+  let destinationAddress: string;
+
+  // Events from the indexer websocket for both the source and destination addresses
+  let sourceAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
+  let destinationAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
+
+  // Historical events from the indexer websocket for both the source and destination addresses
+  let historicalSourceAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
+  let historicalDestinationAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
+
+  // Functions to unsubscribe from the indexer websocket for both the source and destination addresses
+  let sourceAddrUnscribeFromEvents: () => void;
+  let destAddrUnscribeFromEvents: () => void;
+
   beforeAll(async () => {
+    indexerHttpClient = new IndexerHttpClient();
+    indexerWsClient = new IndexerWsClient();
+
+    // Connecting to the indexer websocket
+    await indexerWsClient.connectionInit();
+
     const randomId = Math.random().toString(36).substring(2, 12);
     toolkit = new ToolkitWrapper({
       containerName: `mn-toolkit-${env.getEnvName()}-${randomId}`,
@@ -86,10 +121,89 @@ describe('unshielded transactions', () => {
       nodeTag: '0.16.2-71d3d861',
     });
     await toolkit.start();
+
     const sourceSeed = '0000000000000000000000000000000000000000000000000000000000000001';
     const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
+
+    // Getting the addresses from their seeds
     sourceAddress = await toolkit.showAddress(sourceSeed, 'unshielded');
     destinationAddress = await toolkit.showAddress(destinationSeed, 'unshielded');
+
+    // Creating the unshielded transaction subscription parameter for the source address (just the address)
+    let unshieldedTransactionParam: UnshieldedTransactionSubscriptionParams = {
+      address: sourceAddress,
+    };
+
+    // Creating the unshielded transaction subscription handler, we will record all relevant events for the source address
+    let sourceAddrUnshieldedTxSubscriptionHandler = {
+      next: (event: UnshieldedTxSubscriptionResponse) => {
+        sourceAddressEvents.push(event);
+      },
+    };
+
+    // Subscribe to unshielded transaction events for the source address
+    sourceAddrUnscribeFromEvents = indexerWsClient.subscribeToUnshieldedTransactionEvents(
+      sourceAddrUnshieldedTxSubscriptionHandler,
+      unshieldedTransactionParam,
+    );
+
+    // Creating the unshielded transaction subscription parameter for the destination address (just the address)
+    unshieldedTransactionParam = {
+      address: destinationAddress,
+    };
+
+    // Creating the unshielded transaction subscription handler, we will record all relevant events for the source address
+    let destAddrUnshieldedTxSubscriptionHandler = {
+      next: (event: UnshieldedTxSubscriptionResponse) => {
+        destinationAddressEvents.push(event);
+      },
+    };
+
+    // Subscribe to unshielded transaction events for the destination address
+    destAddrUnscribeFromEvents = indexerWsClient.subscribeToUnshieldedTransactionEvents(
+      destAddrUnshieldedTxSubscriptionHandler,
+      unshieldedTransactionParam,
+    );
+
+    // Wait until source events count stabilizes, then snapshot to historical array
+    {
+      let previousCount = -1;
+      // Poll every 500ms until the count does not change between checks
+      // This indicates we have consumed the initial backlog of historical events
+      // and are ready to proceed
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const currentCount = sourceAddressEvents.length;
+        if (currentCount === previousCount) {
+          console.log('Source events count stabilized', currentCount);
+          break;
+        }
+        previousCount = currentCount;
+      }
+      historicalSourceAddressEvents = sourceAddressEvents.splice(0, sourceAddressEvents.length);
+    }
+
+    // Wait until destination events count stabilizes, then snapshot to historical array
+    {
+      let previousCount = -1;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const currentCount = destinationAddressEvents.length;
+        if (currentCount === previousCount) {
+          console.log('Destination events count stabilized', currentCount);
+          break;
+        }
+        previousCount = currentCount;
+      }
+      historicalDestinationAddressEvents = destinationAddressEvents.splice(
+        0,
+        destinationAddressEvents.length,
+      );
+    }
+
+    // Generating and submitting the transaction to node
     transactionResult = await toolkit.generateSingleTx(
       sourceSeed,
       'unshielded',
@@ -99,12 +213,23 @@ describe('unshielded transactions', () => {
   }, 60000);
 
   afterAll(async () => {
-    await toolkit.stop();
+    // Unsubscribe from the unshielded transaction events for the source and destination addresses
+    sourceAddrUnscribeFromEvents();
+    destAddrUnscribeFromEvents();
+
+    // Let's trigger these operations in parallel
+    await Promise.all([toolkit.stop(), indexerWsClient.connectionClose()]);
   });
 
   describe('a successful unshielded transaction transferring 1 NIGHT between two wallets', async () => {
-    const indexerHttpClient = new IndexerHttpClient();
-
+    /**
+     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction in the block through a block query by hash, using the block hash reported by the toolkit.
+     *
+     * @given a confirmed unshielded transaction between two wallets
+     * @when we query the indexer with a block query by hash, using the block hash reported by the toolkit
+     * @then the block should contain the transaction with outputs for both addresses
+     */
     test('should be reported by the indexer through a block query by hash', async (context: TestContext) => {
       context.skip?.(
         transactionResult.status !== 'confirmed',
@@ -119,19 +244,128 @@ describe('unshielded transactions', () => {
       expect(blockResponse?.data?.block?.transactions?.length).toBeGreaterThan(0);
 
       // Find our specific transaction by hash
-      const sourceAddresInTx = blockResponse.data?.block?.transactions?.find((tx: any) =>
-        tx.unshieldedCreatedOutputs.find((output: any) => output.owner === sourceAddress),
+      const sourceAddresInTx = blockResponse.data?.block?.transactions?.find((tx: Transaction) =>
+        tx.unshieldedCreatedOutputs?.find((output: any) => output.owner === sourceAddress),
       );
 
-      const destAddresInTx = blockResponse.data?.block?.transactions?.find((tx: any) =>
-        tx.unshieldedCreatedOutputs.find((output: any) => output.owner === destinationAddress),
+      const destAddresInTx = blockResponse.data?.block?.transactions?.find((tx: Transaction) =>
+        tx.unshieldedCreatedOutputs?.find((output: any) => output.owner === destinationAddress),
       );
 
       expect(sourceAddresInTx).toBeDefined();
       expect(destAddresInTx).toBeDefined();
     });
 
-    test('should transfer 1 NIGHT from the source wallet to the destination wallet', async (context: TestContext) => {
+    /**
+     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction through a query by transaction hash, using the transaction hash reported by the toolkit.
+     *
+     * @given a confirmed unshielded transaction between two wallets
+     * @when we query transactions by the transaction hash
+     * @then the returned transactions should include outputs for both addresses involved
+     */
+    test('should be reported by the indexer through a transaction query by hash', async (context: TestContext) => {
+      context.skip?.(
+        transactionResult.status !== 'confirmed',
+        "Toolkit transaction hasn't been confirmed",
+      );
+
+      // The expected transaction might take a bit more to show up by indexer, so we retry a few times
+      const transactionResponse = await indexerHttpClient.getShieldedTransaction({
+        hash: transactionResult.txHash,
+      });
+
+      // Find our specific transaction by hash
+      const sourceAddresInTx = transactionResponse.data?.transactions?.find((tx: Transaction) =>
+        tx.unshieldedCreatedOutputs?.find((output: any) => output.owner === sourceAddress),
+      );
+
+      const destAddresInTx = transactionResponse.data?.transactions?.find((tx: Transaction) =>
+        tx.unshieldedCreatedOutputs?.find((output: any) => output.owner === destinationAddress),
+      );
+
+      expect(sourceAddresInTx).toBeDefined();
+      expect(destAddresInTx).toBeDefined();
+    });
+
+    /**
+     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction through an unshielded transaction event for the source address.
+     *
+     * @given we subscribe to unshielded transaction events for the source address
+     * @when we submit an unshielded transaction to node
+     * @then we should receive a transaction event that includes created and spent UTXOs for the source address
+     */
+    test('should be reported by the indexer through an unshielded transaction event for the source address', async (context: TestContext) => {
+      context.skip?.(
+        transactionResult.status !== 'confirmed',
+        "Toolkit transaction hasn't been confirmed",
+      );
+
+      // Wait for the unshielded transaction event for the source address to be reported by the indexer
+      // through the unshielded transaction subscription. Note this is an async operation, so we need
+      // to try a few times and wait for the event to be reported.
+      let sourceAddressEvent: UnshieldedTxSubscriptionResponse | undefined;
+      for (let attempt = 0; attempt < 3 && sourceAddressEvent == null; attempt++) {
+        sourceAddressEvent = sourceAddressEvents.find((event) => {
+          const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
+          console.log('txEvent', txEvent);
+          return (
+            txEvent.__typename === 'UnshieldedTransaction' &&
+            txEvent.createdUtxos?.some((utxo: UnshieldedUtxo) => utxo.owner === sourceAddress) &&
+            txEvent.spentUtxos?.some((utxo: UnshieldedUtxo) => utxo.owner === sourceAddress)
+          );
+        });
+        if (sourceAddressEvent == null && attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+      expect(sourceAddressEvent).toBeDefined();
+    });
+
+    /**
+     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction through an unshielded transaction event for the destination address.
+     *
+     * @given we subscribe to unshielded transaction events for the destination address
+     * @when we submit an unshielded transaction to node
+     * @then we should receive a transaction event that includes a created UTXO for the destination
+     */
+    test('should be reported by the indexer through an unshielded transaction event for the destination address', async (context: TestContext) => {
+      context.skip?.(
+        transactionResult.status !== 'confirmed',
+        "Toolkit transaction hasn't been confirmed",
+      );
+
+      // Wait for the unshielded transaction event for the destination address to be reported by the indexer
+      // through the unshielded transaction subscription. Note this is an async operation, so we need
+      // to try a few times and wait for the event to be reported.
+      let destinationAddressEvent: UnshieldedTxSubscriptionResponse | undefined;
+      for (let attempt = 0; attempt < 3 && destinationAddressEvent == null; attempt++) {
+        destinationAddressEvent = destinationAddressEvents.find((event) => {
+          const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
+          console.log('txEvent', txEvent);
+          return (
+            txEvent.__typename === 'UnshieldedTransaction' &&
+            txEvent.createdUtxos?.some((utxo: UnshieldedUtxo) => utxo.owner === destinationAddress)
+          );
+        });
+        if (destinationAddressEvent == null && attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+      expect(destinationAddressEvent).toBeDefined();
+    });
+
+    /**
+     * Once a shielded transaction has been submitted to node and confirmed, we should see the transaction
+     * giving 1 NIGHT to the destination address.
+     *
+     * @given a confirmed unshielded transaction between two wallets
+     * @when we inspect the containing block for unshielded outputs
+     * @then there should be two created outputs and one spent output reflecting the transfer of 1 NIGHT
+     */
+    test('should have transferred 1 NIGHT from the source to the destination address', async (context: TestContext) => {
       context.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",
@@ -167,20 +401,5 @@ describe('unshielded transactions', () => {
       const spentOutput = unshieldedTx?.unshieldedSpentOutputs?.[0];
       expect(spentOutput?.owner).toBe(sourceAddress);
     });
-
-    // test('mn-toolkit submit single shielded tx test', async () => {
-    //     // const sourceSeed = '1113354e9a4fb7bff5e049929197acfcf6dcb4fc1ab3205d92ba9c21813c8906';
-    //     const sourceSeed = '0000000000000000000000000000000000000000000000000000000000000001';
-    //     const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
-
-    //     const shieldedAddress = await toolkit.showAddress(destinationSeed, 'shielded');
-
-    //     console.log('Destination shielded address:', shieldedAddress);
-
-    //     const transactionResult: ToolkitTransactionResult = await toolkit.generateSingleTx(sourceSeed, 'shielded', shieldedAddress, 1);
-
-    //     console.log('Block hash      :', transactionResult.blockHash);
-    //     console.log('Transaction hash:', transactionResult.txHash);
-    // }, 60000);
   });
 });
