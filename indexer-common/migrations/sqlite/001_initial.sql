@@ -95,6 +95,8 @@ CREATE TABLE ledger_events (
 CREATE INDEX ledger_events_transaction_id_idx ON ledger_events (transaction_id);
 CREATE INDEX ledger_events_variant_idx ON ledger_events (variant);
 CREATE INDEX ledger_events_grouping_idx ON ledger_events (grouping);
+CREATE INDEX ledger_events_id_grouping_idx ON ledger_events (id, grouping);
+CREATE INDEX ledger_events_transaction_id_grouping_idx ON ledger_events (transaction_id, grouping);
 --------------------------------------------------------------------------------
 -- contract_balances
 --------------------------------------------------------------------------------
