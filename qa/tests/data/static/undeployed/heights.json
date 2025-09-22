@@ -1,13 +1,5 @@
 {
-<<<<<<< HEAD
   "contract-deploy-height": 8,
   "contract-call-height": 12,
   "contract-update-height": 18
-=======
-  "contract-deploy-height": 9,
-  "contract-call-height": 13,
-  "contract-update-height": 19,
-  "known-contract-height": 49,
-  "future-height": 59
->>>>>>> 5a7df1c (More Positive scenarios for contractAction)
 }
