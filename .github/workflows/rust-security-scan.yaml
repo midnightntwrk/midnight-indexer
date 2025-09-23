@@ -40,7 +40,7 @@ jobs:
           password: ${{ secrets.MIDNIGHTCI_REPO }}
 
       - name: Run deny
-        run: cargo deny check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed
+        run: cargo deny -f sarif check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed > cargo-deny.sarif || true
         # TODO: once everything's open sourced remove -Aunlicensed
 
       # TODO: Remove this checkout step once upload-sarif-github-action repo is made public
@@ -52,7 +52,7 @@ jobs:
           path: upload-sarif-github-action
           token: ${{ secrets.MIDNIGHTCI_REPO }}
 
-      - name: Upload SARIF to Checkmarx
+      - name: Upload cargo-audit SARIF to Checkmarx
         uses: ./upload-sarif-github-action
         with:
           sarif-file: scan.sarif
@@ -60,3 +60,14 @@ jobs:
           cx-client-id: ${{ secrets.CX_CLIENT_ID }}
           cx-client-secret: ${{ secrets.CX_CLIENT_SECRET_EU }}
           cx-tenant: ${{ secrets.CX_TENANT }}
+
+      - name: Upload cargo-deny SARIF to Checkmarx
+        if: hashFiles('cargo-deny.sarif') != ''
+        uses: ./upload-sarif-github-action
+        with:
+          sarif-file: cargo-deny.sarif
+          project-name: midnightntwrk/midnight-indexer
+          cx-client-id: ${{ secrets.CX_CLIENT_ID }}
+          cx-client-secret: ${{ secrets.CX_CLIENT_SECRET_EU }}
+          cx-tenant: ${{ secrets.CX_TENANT }}
+        continue-on-error: true
