@@ -20,12 +20,14 @@ use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
         ContractActionSubscription, DisconnectMutation, ShieldedTransactionsSubscription,
-        TransactionsQuery, UnshieldedTransactionsSubscription, block_query,
+        TransactionsQuery, UnshieldedTransactionsSubscription, ZswapLedgerEventsSubscription,
+        block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks as BlockSubscriptionBlock,
             BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
             BlockSubscriptionBlocksTransactionsContractActions as BlockSubscriptionContractAction,
             BlockSubscriptionBlocksTransactionsUnshieldedCreatedOutputs as BlockSubscriptionUnshieldedUtxo,
+            BlockSubscriptionBlocksTransactionsZswapLedgerEvents as BlockSubscriptionZswapLedgerEvent,
             TransactionResultStatus as BlockSubscriptionTransactionResultStatus,
         },
         connect_mutation,
@@ -34,7 +36,7 @@ use crate::{
             TransactionResultStatus as ContractActionQueryTransactionResultStatus,
         },
         contract_action_subscription, disconnect_mutation, shielded_transactions_subscription,
-        transactions_query, unshielded_transactions_subscription,
+        transactions_query, unshielded_transactions_subscription, zswap_ledger_events_subscription,
     },
     graphql_ws_client,
 };
@@ -45,8 +47,7 @@ use indexer_api::infra::api::v1::{
     AsBytesExt, HexEncoded, transaction::TransactionResultStatus, viewing_key::ViewingKey,
 };
 use indexer_common::domain::{
-    ByteVec, NetworkId, PROTOCOL_VERSION_000_016_000,
-    ledger::{self, RawTokenType},
+    ByteVec, NetworkId, PROTOCOL_VERSION_000_016_000, RawTokenType, ledger,
 };
 use itertools::Itertools;
 use reqwest::Client;
@@ -116,6 +117,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_unshielded_transactions_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test unshielded transactions subscription")?;
+    test_zswap_ledger_events_subscription(&indexer_data, &ws_api_url)
+        .await
+        .context("test zswap ledger events subscription")?;
 
     println!("Successfully finished e2e testing");
 
@@ -129,6 +133,7 @@ struct IndexerData {
     transactions: Vec<BlockSubscriptionTransaction>,
     contract_actions: Vec<BlockSubscriptionContractAction>,
     unshielded_utxos: Vec<BlockSubscriptionUnshieldedUtxo>,
+    zswap_ledger_events: Vec<BlockSubscriptionZswapLedgerEvent>,
 }
 
 impl IndexerData {
@@ -247,11 +252,18 @@ impl IndexerData {
             .flat_map(|transaction| transaction.unshielded_created_outputs.to_owned())
             .collect::<Vec<_>>();
 
+        // Collect ledger events.
+        let zswap_ledger_events = transactions
+            .iter()
+            .flat_map(|transaction| transaction.zswap_ledger_events.to_owned())
+            .collect::<Vec<_>>();
+
         Ok(Self {
             blocks,
             transactions,
             contract_actions,
             unshielded_utxos,
+            zswap_ledger_events,
         })
     }
 }
@@ -652,45 +664,6 @@ async fn test_contract_actions_subscription(
     Ok(())
 }
 
-async fn test_unshielded_transactions_subscription(
-    indexer_data: &IndexerData,
-    ws_api_url: &str,
-) -> anyhow::Result<()> {
-    if let Some(unshielded_address) = indexer_data
-        .unshielded_utxos
-        .first()
-        .cloned()
-        .map(|a| a.owner)
-    {
-        let variables = unshielded_transactions_subscription::Variables {
-            address: unshielded_address.clone(),
-        };
-        let unshielded_utxos_updates = graphql_ws_client::subscribe::<
-            UnshieldedTransactionsSubscription,
-        >(ws_api_url, variables)
-        .await
-        .context("subscribe to unshielded UTXOs")?
-        .take(3)
-        .map_ok(|data| data.unshielded_transactions)
-        .try_filter_map(|event| match event {
-            UnshieldedTransactions::UnshieldedTransaction(t) => ok(Some(t)),
-            _ => ok(None),
-        })
-        .try_collect::<Vec<_>>()
-        .await
-        .context("collect unshielded UTXO events")?;
-
-        assert!(unshielded_utxos_updates.iter().any(move |update| {
-            update
-                .created_utxos
-                .iter()
-                .any(|u| u.owner == unshielded_address)
-        }));
-    }
-
-    Ok(())
-}
-
 /// Test the shielded transactions subscription.
 async fn test_shielded_transactions_subscription(
     ws_api_url: &str,
@@ -742,6 +715,70 @@ async fn test_shielded_transactions_subscription(
     Ok(())
 }
 
+async fn test_unshielded_transactions_subscription(
+    indexer_data: &IndexerData,
+    ws_api_url: &str,
+) -> anyhow::Result<()> {
+    if let Some(unshielded_address) = indexer_data
+        .unshielded_utxos
+        .first()
+        .cloned()
+        .map(|a| a.owner)
+    {
+        let variables = unshielded_transactions_subscription::Variables {
+            address: unshielded_address.clone(),
+        };
+        let unshielded_utxos_updates = graphql_ws_client::subscribe::<
+            UnshieldedTransactionsSubscription,
+        >(ws_api_url, variables)
+        .await
+        .context("subscribe to unshielded UTXOs")?
+        .take(3)
+        .map_ok(|data| data.unshielded_transactions)
+        .try_filter_map(|event| match event {
+            UnshieldedTransactions::UnshieldedTransaction(t) => ok(Some(t)),
+            _ => ok(None),
+        })
+        .try_collect::<Vec<_>>()
+        .await
+        .context("collect unshielded UTXO events")?;
+
+        assert!(unshielded_utxos_updates.iter().any(move |update| {
+            update
+                .created_utxos
+                .iter()
+                .any(|u| u.owner == unshielded_address)
+        }));
+    }
+
+    Ok(())
+}
+
+async fn test_zswap_ledger_events_subscription(
+    indexer_data: &IndexerData,
+    ws_api_url: &str,
+) -> anyhow::Result<()> {
+    let expected_zswap_ledger_events = indexer_data
+        .zswap_ledger_events
+        .iter()
+        .map(|event| event.to_json_value())
+        .collect::<Vec<_>>();
+
+    let variables = zswap_ledger_events_subscription::Variables { id: None };
+    let zswap_ledger_events =
+        graphql_ws_client::subscribe::<ZswapLedgerEventsSubscription>(ws_api_url, variables)
+            .await
+            .context("subscribe to zswap ledger events")?
+            .take(expected_zswap_ledger_events.len())
+            .map_ok(|data| data.zswap_ledger_events.to_json_value())
+            .try_collect::<Vec<_>>()
+            .await
+            .context("collect zswap ledger events from subscription")?;
+
+    assert_eq!(zswap_ledger_events, expected_zswap_ledger_events);
+
+    Ok(())
+}
 trait SerializeExt
 where
     Self: Serialize,
@@ -1036,4 +1073,12 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct ShieldedTransactionsSubscription;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct ZswapLedgerEventsSubscription;
 }

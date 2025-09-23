@@ -14,10 +14,8 @@
 use crate::domain::{self, ContractAction};
 use futures::Stream;
 use indexer_common::domain::{
-    BlockAuthor, BlockHash, ProtocolVersion,
-    ledger::{
-        SerializedTransaction, SerializedTransactionIdentifier, TransactionHash, ZswapStateRoot,
-    },
+    BlockAuthor, BlockHash, ProtocolVersion, SerializedTransaction,
+    SerializedTransactionIdentifier, TransactionHash, ledger::ZswapStateRoot,
 };
 use std::{error::Error as StdError, fmt::Debug};
 

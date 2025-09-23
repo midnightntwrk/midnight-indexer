@@ -12,31 +12,26 @@
 // limitations under the License.
 
 use crate::{
-    domain::{self, storage::Storage},
-    infra::api::{
-        ApiError, ApiResult, ContextExt, ResultExt,
-        v1::{
-            block::{Block, BlockOffset},
-            resolve_height,
-        },
-    },
+    domain::{LedgerEvent, storage::Storage},
+    infra::api::{ApiResult, ContextExt, ResultExt, v1::ledger_events::ZswapLedgerEvent},
 };
-use async_graphql::{Context, Subscription, async_stream::try_stream};
+use async_graphql::{Context, Subscription};
+use async_stream::try_stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext};
 use futures::{Stream, TryStreamExt};
-use indexer_common::domain::{BlockIndexed, Subscriber};
+use indexer_common::domain::{BlockIndexed, LedgerEventGrouping, Subscriber};
 use log::{debug, warn};
 use std::{marker::PhantomData, num::NonZeroU32, pin::pin};
 
 // TODO: Make configurable!
 const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
 
-pub struct BlockSubscription<S, B> {
+pub struct ZswapLedgerEventsSubscription<S, B> {
     _s: PhantomData<S>,
     _b: PhantomData<B>,
 }
 
-impl<S, B> Default for BlockSubscription<S, B> {
+impl<S, B> Default for ZswapLedgerEventsSubscription<S, B> {
     fn default() -> Self {
         Self {
             _s: PhantomData,
@@ -46,40 +41,37 @@ impl<S, B> Default for BlockSubscription<S, B> {
 }
 
 #[Subscription]
-impl<S, B> BlockSubscription<S, B>
+impl<S, B> ZswapLedgerEventsSubscription<S, B>
 where
     S: Storage,
     B: Subscriber,
 {
-    /// Subscribe to blocks starting at the given offset or at the latest block if the offset is
-    /// omitted.
-    async fn blocks<'a>(
+    /// Subscribe to zswap ledger events starting at the given ID or at the very start if omitted.
+    async fn zswap_ledger_events<'a>(
         &self,
         cx: &'a Context<'a>,
-        offset: Option<BlockOffset>,
-    ) -> Result<impl Stream<Item = ApiResult<Block<S>>> + use<'a, S, B>, ApiError> {
+        id: Option<u64>,
+    ) -> impl Stream<Item = ApiResult<ZswapLedgerEvent>> {
+        let mut id = id.unwrap_or(1);
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
-        let mut height = resolve_height(offset, storage).await?;
 
-        let blocks = try_stream! {
-            // Stream existing blocks.
-            debug!(height; "streaming existing blocks");
+        try_stream! {
+            debug!(id; "streaming existing events");
 
-            let blocks = storage.get_blocks(height, BATCH_SIZE);
-            let mut blocks = pin!(blocks);
-            while let Some(block) = get_next_block(&mut blocks)
+            let ledger_events = storage.get_ledger_events(LedgerEventGrouping::Zswap, id, BATCH_SIZE).await;
+            let mut ledger_events = pin!(ledger_events);
+            while let Some(ledger_event) = get_next_ledger_event(&mut ledger_events)
                 .await
-                .map_err_into_server_error(|| format!("get next block at height {height}"))?
+                .map_err_into_server_error(|| format!("get next ledger event at id {id}"))?
             {
-                height = block.height + 1;
-                yield block.into();
+                id = ledger_event.id + 1;
+                yield ledger_event.into();
             }
 
-            // Stream live blocks.
-            debug!(height; "streaming live blocks");
+            debug!(id; "streaming live events");
             let mut block_indexed_stream = pin!(block_indexed_stream);
             while block_indexed_stream
                 .try_next()
@@ -87,33 +79,31 @@ where
                 .map_err_into_server_error(|| "get next BlockIndexed event")?
                 .is_some()
             {
-                debug!(height; "streaming next blocks");
+                debug!(id; "streaming next events");
 
-                let blocks = storage.get_blocks(height, BATCH_SIZE);
-                let mut blocks = pin!(blocks);
-                while let Some(block) = get_next_block(&mut blocks)
+                let ledger_events = storage.get_ledger_events(LedgerEventGrouping::Zswap, id, BATCH_SIZE).await;
+                let mut ledger_events = pin!(ledger_events);
+                while let Some(ledger_event) = get_next_ledger_event(&mut ledger_events)
                     .await
-                    .map_err_into_server_error(|| format!("get next block at height {height}"))?
+                    .map_err_into_server_error(|| format!("get next ledger event at id {id}"))?
                 {
-                    height = block.height + 1;
-                    yield block.into();
+                    id = ledger_event.id + 1;
+                    yield ledger_event.into();
                 }
             }
 
             warn!("stream of BlockIndexed events completed unexpectedly");
-        };
-
-        Ok(blocks)
+        }
     }
 }
 
-async fn get_next_block<E>(
-    blocks: &mut (impl Stream<Item = Result<domain::Block, E>> + Unpin),
-) -> Result<Option<domain::Block>, E> {
-    blocks
+async fn get_next_ledger_event<E>(
+    ledger_events: &mut (impl Stream<Item = Result<LedgerEvent, E>> + Unpin),
+) -> Result<Option<LedgerEvent>, E> {
+    ledger_events
         .try_next()
         .in_span(Span::root(
-            "subscription.blocks.get-next-block",
+            "subscription.zswap-ledger-events.get-next-ledger-event",
             SpanContext::random(),
         ))
         .await

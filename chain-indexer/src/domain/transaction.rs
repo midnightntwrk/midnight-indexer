@@ -13,18 +13,16 @@
 
 use crate::domain::{ContractAction, node};
 use indexer_common::domain::{
-    ByteArray, ProtocolVersion,
-    ledger::{
-        SerializedTransaction, SerializedTransactionIdentifier, SerializedZswapStateRoot,
-        TransactionHash, TransactionResult, UnshieldedUtxo,
-    },
+    ByteArray, LedgerEvent, ProtocolVersion, SerializedTransaction,
+    SerializedTransactionIdentifier, SerializedZswapStateRoot, TransactionHash, TransactionResult,
+    UnshieldedUtxo,
 };
 use sqlx::{FromRow, Type};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Transaction {
-    Regular(RegularTransaction),
+    Regular(Box<RegularTransaction>),
     System(SystemTransaction),
 }
 
@@ -62,7 +60,7 @@ impl From<node::Transaction> for Transaction {
     fn from(transaction: node::Transaction) -> Self {
         match transaction {
             node::Transaction::Regular(regular_transaction) => {
-                Transaction::Regular(regular_transaction.into())
+                Transaction::Regular(Box::new(regular_transaction.into()))
             }
 
             node::Transaction::System(system_transaction) => {
@@ -74,7 +72,7 @@ impl From<node::Transaction> for Transaction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegularTransaction {
-    // These fields come from node::Transaction.
+    // These fields come from the node.
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
     pub raw: SerializedTransaction,
@@ -83,13 +81,14 @@ pub struct RegularTransaction {
     pub paid_fees: u128,
     pub estimated_fees: u128,
 
-    // These fields come from applying the node transactions to the ledger state.
+    // These fields are set after applying the transaction to the ledger state.
     pub transaction_result: TransactionResult,
     pub merkle_tree_root: SerializedZswapStateRoot,
     pub start_index: u64,
     pub end_index: u64,
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
+    pub ledger_events: Vec<LedgerEvent>,
 }
 
 impl From<node::RegularTransaction> for RegularTransaction {
@@ -108,15 +107,20 @@ impl From<node::RegularTransaction> for RegularTransaction {
             end_index: Default::default(),
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
+            ledger_events: Default::default(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemTransaction {
+    // These fields come from the node.
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
     pub raw: SerializedTransaction,
+
+    // These fields are set after applying the transaction to the ledger state.
+    pub ledger_events: Vec<LedgerEvent>,
 }
 
 impl From<node::SystemTransaction> for SystemTransaction {
@@ -125,6 +129,7 @@ impl From<node::SystemTransaction> for SystemTransaction {
             hash: transaction.hash,
             protocol_version: transaction.protocol_version,
             raw: transaction.raw,
+            ledger_events: Default::default(),
         }
     }
 }

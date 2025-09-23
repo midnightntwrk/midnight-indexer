@@ -13,6 +13,7 @@
 
 mod block;
 mod contract_action;
+mod ledger_events;
 mod transaction;
 mod unshielded;
 mod wallet;

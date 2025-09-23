@@ -50,7 +50,7 @@ const ACTIVATE_WALLET_INTERVAL: Duration = Duration::from_secs(60);
 
 /// An event of the shielded transactions subscription.
 #[derive(Debug, Union)]
-pub enum ShieldedTransactionsEvent<S: Storage> {
+enum ShieldedTransactionsEvent<S: Storage> {
     // Boxing RelevantTransaction to reduce variant size (clippy warning).
     RelevantTransaction(Box<RelevantTransaction<S>>),
     ShieldedTransactionsProgress(ShieldedTransactionsProgress),
@@ -58,40 +58,40 @@ pub enum ShieldedTransactionsEvent<S: Storage> {
 
 /// A transaction relevant for the subscribing wallet and an optional collapsed merkle tree.
 #[derive(Debug, SimpleObject)]
-pub struct RelevantTransaction<S>
+struct RelevantTransaction<S>
 where
     S: Storage,
 {
     /// A transaction relevant for the subscribing wallet.
-    pub transaction: Transaction<S>,
+    transaction: Transaction<S>,
 
     /// An optional collapsed merkle tree.
-    pub collapsed_merkle_tree: Option<CollapsedMerkleTree>,
+    collapsed_merkle_tree: Option<CollapsedMerkleTree>,
 }
 
 /// Information about the shielded transactions indexing progress.
 #[derive(Debug, SimpleObject)]
-pub struct ShieldedTransactionsProgress {
+struct ShieldedTransactionsProgress {
     /// The highest zswap state end index (see `endIndex` of `Transaction`) of all transactions. It
     /// represents the known state of the blockchain. A value of zero (completely unlikely) means
     /// that no shielded transactions have been indexed yet.
-    pub highest_end_index: u64,
+    highest_end_index: u64,
 
     /// The highest zswap state end index (see `endIndex` of `Transaction`) of all transactions
     /// checked for relevance. Initially less than and eventually (when some wallet has been fully
     /// indexed) equal to `highest_end_index`. A value of zero (very unlikely) means that no wallet
     /// has subscribed before and indexing for the subscribing wallet has not yet started.
-    pub highest_checked_end_index: u64,
+    highest_checked_end_index: u64,
 
     /// The highest zswap state end index (see `endIndex` of `Transaction`) of all relevant
     /// transactions for the subscribing wallet. Usually less than `highest_checked_end_index`
     /// unless the latest checked transaction is relevant for the subscribing wallet. A value of
     /// zero means that no relevant transactions have been indexed for the subscribing wallet.
-    pub highest_relevant_end_index: u64,
+    highest_relevant_end_index: u64,
 }
 
 #[derive(Debug, SimpleObject)]
-pub struct CollapsedMerkleTree {
+struct CollapsedMerkleTree {
     /// The zswap state start index.
     start_index: u64,
 
@@ -147,9 +147,9 @@ where
     B: Subscriber,
     Z: LedgerStateStorage,
 {
-    /// Subscribe shielded transaction events for the given session ID starting at the given index
-    /// or at zero if omitted.
-    pub async fn shielded_transactions<'a>(
+    /// Subscribe to shielded transaction events for the given session ID starting at the given
+    /// index or at zero if omitted.
+    async fn shielded_transactions<'a>(
         &self,
         cx: &'a Context<'a>,
         session_id: HexEncoded,
@@ -237,17 +237,15 @@ where
             .await
             .map_err_into_server_error(|| "get next transaction")?
         {
-            let relevant_transaction = make_relevant_transaction(
+            // The end index is "exclusive", i.e. the next free index; hence no +1 here!
+            index = transaction.end_index;
+            yield make_relevant_transaction(
                 index,
                 transaction,
                 ledger_state_storage,
                 zswap_state_cache,
             )
             .await?;
-
-            index = relevant_transaction.transaction.end_index;
-
-            yield relevant_transaction;
         }
 
         // Stream live transactions.
@@ -268,17 +266,15 @@ where
                 .await
                 .map_err_into_server_error(|| "get next transaction")?
             {
-                let relevant_transaction = make_relevant_transaction(
+                // The end index is "exclusive", i.e. the next free index; hence no +1 here!
+                index = transaction.end_index;
+                yield make_relevant_transaction(
                     index,
                     transaction,
                     ledger_state_storage,
                     zswap_state_cache,
                 )
                 .await?;
-
-                index = relevant_transaction.transaction.end_index;
-
-                yield relevant_transaction;
             }
         }
 

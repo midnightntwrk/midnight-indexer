@@ -17,13 +17,13 @@ use crate::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         v1::{
             AsBytesExt, HexEncoded, block::Block, contract_action::ContractAction,
-            unshielded::UnshieldedUtxo,
+            ledger_events::ZswapLedgerEvent, unshielded::UnshieldedUtxo,
         },
     },
 };
 use async_graphql::{ComplexObject, Context, Enum, OneofObject, SimpleObject};
 use derive_more::Debug;
-use indexer_common::domain::{BlockHash, ProtocolVersion};
+use indexer_common::domain::{BlockHash, LedgerEventGrouping, ProtocolVersion};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
@@ -167,6 +167,24 @@ where
 
         Ok(utxos)
     }
+
+    /// Zswap ledger events of this transaction.
+    async fn zswap_ledger_events(&self, cx: &Context<'_>) -> ApiResult<Vec<ZswapLedgerEvent>> {
+        let id = self.id;
+
+        let zswap_ledger_events = cx
+            .get_storage::<S>()
+            .get_ledger_events_by_transaction_id(LedgerEventGrouping::Zswap, id)
+            .await
+            .map_err_into_server_error(|| {
+                format!("cannot get zswap ledger events for transaction with ID {id}")
+            })?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+
+        Ok(zswap_ledger_events)
+    }
 }
 
 impl<S> From<domain::Transaction> for Transaction<S>
@@ -284,15 +302,15 @@ pub struct SegmentResult {
     success: bool,
 }
 
-impl From<indexer_common::domain::ledger::TransactionResult> for TransactionResult {
-    fn from(transaction_result: indexer_common::domain::ledger::TransactionResult) -> Self {
+impl From<indexer_common::domain::TransactionResult> for TransactionResult {
+    fn from(transaction_result: indexer_common::domain::TransactionResult) -> Self {
         match transaction_result {
-            indexer_common::domain::ledger::TransactionResult::Success => Self {
+            indexer_common::domain::TransactionResult::Success => Self {
                 status: TransactionResultStatus::Success,
                 segments: None,
             },
 
-            indexer_common::domain::ledger::TransactionResult::PartialSuccess(segments) => {
+            indexer_common::domain::TransactionResult::PartialSuccess(segments) => {
                 let segments = segments
                     .into_iter()
                     .map(|(id, success)| Segment { id, success })
@@ -304,7 +322,7 @@ impl From<indexer_common::domain::ledger::TransactionResult> for TransactionResu
                 }
             }
 
-            indexer_common::domain::ledger::TransactionResult::Failure => Self {
+            indexer_common::domain::TransactionResult::Failure => Self {
                 status: TransactionResultStatus::Failure,
                 segments: None,
             },

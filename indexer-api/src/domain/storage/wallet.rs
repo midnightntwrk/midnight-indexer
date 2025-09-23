@@ -15,7 +15,6 @@ use crate::domain::storage::NoopStorage;
 use indexer_common::domain::{SessionId, ViewingKey};
 use std::fmt::Debug;
 
-/// Storage abstraction.
 #[trait_variant::make(Send)]
 pub trait WalletStorage
 where

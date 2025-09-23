@@ -19,10 +19,7 @@ use async_stream::try_stream;
 use fastrace::trace;
 use futures::Stream;
 use indexer_common::{
-    domain::{
-        SessionId,
-        ledger::{RawUnshieldedAddress, SerializedTransactionIdentifier, TransactionHash},
-    },
+    domain::{RawUnshieldedAddress, SerializedTransactionIdentifier, SessionId, TransactionHash},
     stream::flatten_chunks,
 };
 use indoc::indoc;

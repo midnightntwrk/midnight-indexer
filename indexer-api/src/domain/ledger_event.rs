@@ -11,26 +11,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{
-    ContractAttributes, SerializedContractAddress, SerializedContractState, SerializedZswapState,
-};
-use sqlx::FromRow;
+use indexer_common::domain::{LedgerEventAttributes, SerializedLedgerEvent};
+use sqlx::prelude::FromRow;
 
-/// A contract action.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
-pub struct ContractAction {
+pub struct LedgerEvent {
     #[sqlx(try_from = "i64")]
     pub id: u64,
 
-    pub address: SerializedContractAddress,
-
-    pub state: SerializedContractState,
+    pub raw: SerializedLedgerEvent,
 
     #[sqlx(json)]
-    pub attributes: ContractAttributes,
-
-    pub chain_state: SerializedZswapState,
+    pub attributes: LedgerEventAttributes,
 
     #[sqlx(try_from = "i64")]
-    pub transaction_id: u64,
+    pub max_id: u64,
 }

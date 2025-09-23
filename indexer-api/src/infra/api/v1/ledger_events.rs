@@ -11,26 +11,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{
-    ContractAttributes, SerializedContractAddress, SerializedContractState, SerializedZswapState,
+use async_graphql::SimpleObject;
+
+use crate::{
+    domain::LedgerEvent,
+    infra::api::v1::{AsBytesExt, HexEncoded},
 };
-use sqlx::FromRow;
 
-/// A contract action.
-#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
-pub struct ContractAction {
-    #[sqlx(try_from = "i64")]
-    pub id: u64,
+/// A zswap related ledger event.
+#[derive(Debug, SimpleObject)]
+pub struct ZswapLedgerEvent {
+    /// The ID of this zswap ledger event.
+    id: u64,
 
-    pub address: SerializedContractAddress,
+    /// The hex-encoded serialized event.
+    raw: HexEncoded,
 
-    pub state: SerializedContractState,
+    /// The maximum ID of all zswap ledger events.
+    max_id: u64,
+}
 
-    #[sqlx(json)]
-    pub attributes: ContractAttributes,
-
-    pub chain_state: SerializedZswapState,
-
-    #[sqlx(try_from = "i64")]
-    pub transaction_id: u64,
+impl From<LedgerEvent> for ZswapLedgerEvent {
+    fn from(ledger_event: LedgerEvent) -> Self {
+        Self {
+            id: ledger_event.id,
+            raw: ledger_event.raw.hex_encode(),
+            max_id: ledger_event.max_id,
+        }
+    }
 }

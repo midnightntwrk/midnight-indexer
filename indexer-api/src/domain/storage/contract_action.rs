@@ -14,8 +14,7 @@
 use crate::domain::{ContractAction, ContractBalance, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{
-    BlockHash,
-    ledger::{SerializedContractAddress, SerializedTransactionIdentifier, TransactionHash},
+    BlockHash, SerializedContractAddress, SerializedTransactionIdentifier, TransactionHash,
 };
 use std::{fmt::Debug, num::NonZeroU32};
 
