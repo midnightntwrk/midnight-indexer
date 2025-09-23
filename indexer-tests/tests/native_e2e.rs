@@ -329,26 +329,25 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
     let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
     let sqlite_file = temp_dir.path().join("indexer.sqlite").display().to_string();
 
-    let mut cmd = Command::new(format!("{}/debug/indexer-standalone", &*TARGET_DIR));
-    cmd.env(
-        "RUST_LOG",
-        "indexer_standalone=warn,fastrace_opentelemetry=off,error",
-    )
-    .env(
-        "CONFIG_FILE",
-        format!("{}/indexer-standalone/config.yaml", &*WS_DIR),
-    )
-    .env("APP__INFRA__API__PORT", api_port.to_string())
-    .env("APP__INFRA__API__MAX_COMPLEXITY", "500")
-    .env("APP__INFRA__NODE__URL", node_url)
-    .env("APP__INFRA__STORAGE__CNN_URL", sqlite_file)
-    .env("APP__TELEMETRY__TRACING__ENABLED", "true");
-
-    if let Ok(secret) = std::env::var("APP__INFRA__SECRET") {
-        cmd.env("APP__INFRA__SECRET", secret);
-    }
-
-    cmd.spawn()
+    Command::new(format!("{}/debug/indexer-standalone", &*TARGET_DIR))
+        .env(
+            "RUST_LOG",
+            "indexer_standalone=warn,fastrace_opentelemetry=off,error",
+        )
+        .env(
+            "CONFIG_FILE",
+            format!("{}/indexer-standalone/config.yaml", &*WS_DIR),
+        )
+        .env("APP__INFRA__API__PORT", api_port.to_string())
+        .env("APP__INFRA__API__MAX_COMPLEXITY", "500")
+        .env("APP__INFRA__NODE__URL", node_url)
+        .env("APP__INFRA__STORAGE__CNN_URL", sqlite_file)
+        .env("APP__TELEMETRY__TRACING__ENABLED", "true")
+        .env(
+            "APP__INFRA__SECRET",
+            std::env::var("APP__INFRA__SECRET").expect("APP__INFRA__SECRET env var should be set"),
+        )
+        .spawn()
         .context("spawn indexer-standalone process")
         .map(|child| (child, api_port, temp_dir))
 }
