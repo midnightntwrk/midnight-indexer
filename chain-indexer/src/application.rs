@@ -271,6 +271,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+#[trace]
 async fn get_and_index_block<E>(
     config: Config,
     blocks: &mut (impl Stream<Item = Result<node::Block, E>> + Unpin),
