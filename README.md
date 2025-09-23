@@ -168,13 +168,14 @@ just run-chain-indexer
 
 ### Requirements
 
-- **Rust**: The latest stable version (see `rust-toolchain.toml`).
+- **Rust**: The latest stable version, see `rust-toolchain.toml`.
 - **Cargo**: Comes with Rust.
-- **Just**: A command-runner used for tasks. Install from [GitHub](https://github.com/casey/just).
+- **cargo-nextest**: For running tests, see [nextest](https://github.com/nextest-rs/nextest/).
+- **Just**: A command-runner used for tasks. Install from [just](https://github.com/casey/just).
 - **direnv**: For a reproducible development environment.
 - **Docker**: For integration tests and running services locally.
-- **subxt-cli**: For fetching new metadata from the node ([GitHub](https://github.com/paritytech/subxt?tab=readme-ov-file#downloading-metadata-from-a-substrate-node)). **Note:** Version used must match version in Cargo.toml
-- **cargo-nextest**: For running tests ([GitHub](https://github.com/nextest-rs/nextest/))
+- **subxt-cli**: For fetching metadata from the node, see [subxt](https://github.com/paritytech/subxt?tab=readme-ov-file#downloading-metadata-from-a-substrate-node). Note: Version used must match version in Cargo.toml.
+- **sql-formatter**: For formatting SQL files. Install from [sql-formatter](https://sql-formatter-org.github.io/sql-formatter/) and either integrate into your editor or run `find . -type f -name "*.sql" -exec sh -c 'sql-formatter -o "$1" "$1"' _ {} \;`.
 
 ### Environment Variables
 
@@ -237,7 +238,7 @@ The Midnight Foundation appreciates contributions, and like many other open sour
 
 ### Dependabot
 
-The Midnight Foundation uses GitHub Dependabot feature to keep our projects dependencies up-to-date and address potential security vulnerabilities. 
+The Midnight Foundation uses GitHub Dependabot feature to keep our projects dependencies up-to-date and address potential security vulnerabilities.
 
 ### Checkmarx
 
@@ -245,4 +246,4 @@ The Midnight Foundation uses Checkmarx for application security (AppSec) to iden
 
 ### Unito
 
-Facilitates two-way data synchronization, automated workflows and streamline processes between: Jira, GitHub issues and Github project Kanban board. 
+Facilitates two-way data synchronization, automated workflows and streamline processes between: Jira, GitHub issues and Github project Kanban board.
