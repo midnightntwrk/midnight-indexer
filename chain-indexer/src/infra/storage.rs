@@ -205,6 +205,10 @@ impl From<&ContractAttributes> for ContractActionVariant {
 pub enum LedgerEventVariant {
     ZswapInput,
     ZswapOutput,
+    ParamChange,
+    DustInitialUtxo,
+    DustGenerationDtimeUpdate,
+    DustSpendProcessed,
 }
 
 impl From<&LedgerEventAttributes> for LedgerEventVariant {
@@ -212,6 +216,10 @@ impl From<&LedgerEventAttributes> for LedgerEventVariant {
         match attributes {
             LedgerEventAttributes::ZswapInput => Self::ZswapInput,
             LedgerEventAttributes::ZswapOutput => Self::ZswapOutput,
+            LedgerEventAttributes::ParamChange => Self::ParamChange,
+            LedgerEventAttributes::DustInitialUtxo { .. } => Self::DustInitialUtxo,
+            LedgerEventAttributes::DustGenerationDtimeUpdate => Self::DustGenerationDtimeUpdate,
+            LedgerEventAttributes::DustSpendProcessed => Self::DustSpendProcessed,
         }
     }
 }

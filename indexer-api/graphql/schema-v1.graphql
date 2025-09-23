@@ -180,6 +180,74 @@ type ContractUpdate implements ContractAction {
 	unshieldedBalances: [ContractBalance!]!
 }
 
+type DustGenerationDtimeUpdate implements DustLedgerEvent {
+	"""
+	The ID of this dust ledger event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all dust ledger events.
+	"""
+	maxId: Int!
+}
+
+type DustInitialUtxo implements DustLedgerEvent {
+	"""
+	The ID of this dust ledger event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all dust ledger events.
+	"""
+	maxId: Int!
+	"""
+	The dust output.
+	"""
+	output: DustOutput!
+}
+
+"""
+A dust related ledger event.
+"""
+interface DustLedgerEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+}
+
+"""
+A dust output.
+"""
+type DustOutput {
+	"""
+	The hex-encoded 32-byte nonce.
+	"""
+	nonce: HexEncoded!
+}
+
+type DustSpendProcessed implements DustLedgerEvent {
+	"""
+	The ID of this dust ledger event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all dust ledger events.
+	"""
+	maxId: Int!
+}
+
 scalar HexEncoded
 
 type Mutation {
@@ -191,6 +259,21 @@ type Mutation {
 	Disconnect the wallet with the given session ID.
 	"""
 	disconnect(sessionId: HexEncoded!): Unit!
+}
+
+type ParamChange implements DustLedgerEvent {
+	"""
+	The ID of this dust ledger event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all dust ledger events.
+	"""
+	maxId: Int!
 }
 
 type Query {
@@ -280,6 +363,10 @@ type Subscription {
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
 	"""
+	Subscribe to dust ledger events starting at the given ID or at the very start if omitted.
+	"""
+	dustLedgerEvents(id: Int): DustLedgerEvent!
+	"""
 	Subscribe to shielded transaction events for the given session ID starting at the given
 	index or at zero if omitted.
 	"""
@@ -359,6 +446,10 @@ type Transaction {
 	Zswap ledger events of this transaction.
 	"""
 	zswapLedgerEvents: [ZswapLedgerEvent!]!
+	"""
+	Dust ledger events of this transaction.
+	"""
+	dustLedgerEvents: [DustLedgerEvent!]!
 }
 
 """

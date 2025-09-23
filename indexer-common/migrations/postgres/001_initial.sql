@@ -2,8 +2,15 @@
 -- types
 --------------------------------------------------------------------------------
 CREATE TYPE CONTRACT_ACTION_VARIANT AS ENUM('Deploy', 'Call', 'Update');
-CREATE TYPE LEDGER_EVENT_GROUPING AS ENUM('Zswap');
-CREATE TYPE LEDGER_EVENT_VARIANT AS ENUM('ZswapInput', 'ZswapOutput');
+CREATE TYPE LEDGER_EVENT_GROUPING AS ENUM('Zswap', 'Dust');
+CREATE TYPE LEDGER_EVENT_VARIANT AS ENUM(
+  'ZswapInput',
+  'ZswapOutput',
+  'ParamChange',
+  'DustInitialUtxo',
+  'DustGenerationDtimeUpdate',
+  'DustSpendProcessed'
+);
 CREATE TYPE TRANSACTION_VARIANT AS ENUM('Regular', 'System');
 --------------------------------------------------------------------------------
 -- blocks

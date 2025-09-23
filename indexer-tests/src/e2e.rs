@@ -13,19 +13,17 @@
 
 //! e2e testing library
 
-// TODO Remove once all tests re-enabled!
-#![allow(unused)]
-
 use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
-        ContractActionSubscription, DisconnectMutation, ShieldedTransactionsSubscription,
-        TransactionsQuery, UnshieldedTransactionsSubscription, ZswapLedgerEventsSubscription,
-        block_query,
+        ContractActionSubscription, DisconnectMutation, DustLedgerEventsSubscription,
+        ShieldedTransactionsSubscription, TransactionsQuery, UnshieldedTransactionsSubscription,
+        ZswapLedgerEventsSubscription, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks as BlockSubscriptionBlock,
             BlockSubscriptionBlocksTransactions as BlockSubscriptionTransaction,
             BlockSubscriptionBlocksTransactionsContractActions as BlockSubscriptionContractAction,
+            BlockSubscriptionBlocksTransactionsDustLedgerEvents as BlockSubscriptionDustLedgerEvent,
             BlockSubscriptionBlocksTransactionsUnshieldedCreatedOutputs as BlockSubscriptionUnshieldedUtxo,
             BlockSubscriptionBlocksTransactionsZswapLedgerEvents as BlockSubscriptionZswapLedgerEvent,
             TransactionResultStatus as BlockSubscriptionTransactionResultStatus,
@@ -35,8 +33,9 @@ use crate::{
             self, ContractActionQueryContractAction,
             TransactionResultStatus as ContractActionQueryTransactionResultStatus,
         },
-        contract_action_subscription, disconnect_mutation, shielded_transactions_subscription,
-        transactions_query, unshielded_transactions_subscription, zswap_ledger_events_subscription,
+        contract_action_subscription, disconnect_mutation, dust_ledger_events_subscription,
+        shielded_transactions_subscription, transactions_query,
+        unshielded_transactions_subscription, zswap_ledger_events_subscription,
     },
     graphql_ws_client,
 };
@@ -46,18 +45,12 @@ use graphql_client::{GraphQLQuery, Response};
 use indexer_api::infra::api::v1::{
     AsBytesExt, HexEncoded, transaction::TransactionResultStatus, viewing_key::ViewingKey,
 };
-use indexer_common::domain::{
-    ByteVec, NetworkId, PROTOCOL_VERSION_000_016_000, RawTokenType, ledger,
-};
+use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_016_000};
 use itertools::Itertools;
 use reqwest::Client;
 use serde::Serialize;
 use shielded_transactions_subscription::ShieldedTransactionsSubscriptionShieldedTransactions as ShieldedTransactions;
-use std::{
-    future::ready,
-    time::{Duration, Instant},
-};
-use tokio_stream::Elapsed;
+use std::{future::ready, time::Duration};
 use unshielded_transactions_subscription::UnshieldedTransactionsSubscriptionUnshieldedTransactions as UnshieldedTransactions;
 
 const MAX_HEIGHT: usize = 30;
@@ -84,7 +77,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     let api_client = Client::new();
 
     // Collect Indexer data using the block subscription.
-    let indexer_data = IndexerData::collect(&ws_api_url, network_id)
+    let indexer_data = IndexerData::collect(&ws_api_url)
         .await
         .context("collect Indexer data")?;
 
@@ -120,6 +113,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_zswap_ledger_events_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test zswap ledger events subscription")?;
+    test_dust_ledger_events_subscription(&indexer_data, &ws_api_url)
+        .await
+        .context("test dust ledger events subscription")?;
 
     println!("Successfully finished e2e testing");
 
@@ -134,12 +130,13 @@ struct IndexerData {
     contract_actions: Vec<BlockSubscriptionContractAction>,
     unshielded_utxos: Vec<BlockSubscriptionUnshieldedUtxo>,
     zswap_ledger_events: Vec<BlockSubscriptionZswapLedgerEvent>,
+    dust_ledger_events: Vec<BlockSubscriptionDustLedgerEvent>,
 }
 
 impl IndexerData {
     /// Not only collects the Indexer data needed for testing, but also validates it, e.g. that
     /// block heights start at zero and increment by one.
-    async fn collect(ws_api_url: &str, network_id: NetworkId) -> anyhow::Result<Self> {
+    async fn collect(ws_api_url: &str) -> anyhow::Result<Self> {
         // Subscribe to blocks and collect up to MAX_HEIGHT.
         let variables = block_subscription::Variables {
             block_offset: Some(block_subscription::BlockOffset::Height(0)),
@@ -257,6 +254,10 @@ impl IndexerData {
             .iter()
             .flat_map(|transaction| transaction.zswap_ledger_events.to_owned())
             .collect::<Vec<_>>();
+        let dust_ledger_events = transactions
+            .iter()
+            .flat_map(|transaction| transaction.dust_ledger_events.to_owned())
+            .collect::<Vec<_>>();
 
         Ok(Self {
             blocks,
@@ -264,6 +265,7 @@ impl IndexerData {
             contract_actions,
             unshielded_utxos,
             zswap_ledger_events,
+            dust_ledger_events,
         })
     }
 }
@@ -779,6 +781,42 @@ async fn test_zswap_ledger_events_subscription(
 
     Ok(())
 }
+
+async fn test_dust_ledger_events_subscription(
+    indexer_data: &IndexerData,
+    ws_api_url: &str,
+) -> anyhow::Result<()> {
+    let expected_dust_ledger_events = indexer_data
+        .dust_ledger_events
+        .iter()
+        .map(|event| event.to_json_value())
+        .collect::<Vec<_>>();
+
+    let variables = dust_ledger_events_subscription::Variables { id: None };
+    let dust_ledger_events =
+        graphql_ws_client::subscribe::<DustLedgerEventsSubscription>(ws_api_url, variables)
+            .await
+            .context("subscribe to dust ledger events")?
+            .map_ok(|data| data.dust_ledger_events.to_json_value());
+    let dust_ledger_events =
+        tokio_stream::StreamExt::timeout(dust_ledger_events, Duration::from_secs(3))
+            .take_while(|timeout_result| ready(timeout_result.is_ok()))
+            .filter_map(|timeout_result| ready(timeout_result.map(Some).unwrap_or(None)))
+            .try_collect::<Vec<_>>()
+            .await
+            .context("collect dust ledger events from subscription")?;
+
+    // This is because expected_dust_ledger_events currently does not contain events from system
+    // transactions!
+    assert!(
+        expected_dust_ledger_events
+            .iter()
+            .all(|event| dust_ledger_events.contains(event))
+    );
+
+    Ok(())
+}
+
 trait SerializeExt
 where
     Self: Serialize,
@@ -1081,4 +1119,12 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct ZswapLedgerEventsSubscription;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustLedgerEventsSubscription;
 }

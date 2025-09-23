@@ -32,9 +32,9 @@ use std::marker::PhantomData;
 #[derive(Debug, Clone, Interface)]
 #[allow(clippy::duplicated_attributes)]
 #[graphql(
-    field(name = "address", ty = "HexEncoded"),
-    field(name = "state", ty = "HexEncoded"),
-    field(name = "chain_state", ty = "HexEncoded"),
+    field(name = "address", ty = "&HexEncoded"),
+    field(name = "state", ty = "&HexEncoded"),
+    field(name = "chain_state", ty = "&HexEncoded"),
     field(name = "transaction", ty = "Transaction<S>")
 )]
 pub enum ContractAction<S: Storage> {
