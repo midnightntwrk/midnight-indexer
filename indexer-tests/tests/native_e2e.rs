@@ -328,6 +328,8 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
     let api_port = find_free_port()?;
     let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
     let sqlite_file = temp_dir.path().join("indexer.sqlite").display().to_string();
+    let secret = std::env::var("APP__INFRA__SECRET")
+        .unwrap_or_else(|_| "303132333435363738393031323334353637383930313233343536373839303132".to_string());
 
     Command::new(format!("{}/debug/indexer-standalone", &*TARGET_DIR))
         .env(
@@ -342,6 +344,7 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
         .env("APP__INFRA__API__MAX_COMPLEXITY", "500")
         .env("APP__INFRA__NODE__URL", node_url)
         .env("APP__INFRA__STORAGE__CNN_URL", sqlite_file)
+        .env("APP__INFRA__SECRET", secret)
         .env("APP__TELEMETRY__TRACING__ENABLED", "true")
         .spawn()
         .context("spawn indexer-standalone process")
