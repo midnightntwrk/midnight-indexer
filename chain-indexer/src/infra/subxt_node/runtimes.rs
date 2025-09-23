@@ -128,7 +128,9 @@ macro_rules! make_block_details {
                 let calls = extrinsics
                     .iter()
                     .map(|extrinsic| {
-                        let call = extrinsic.as_root_extrinsic::<Call>().map_err(Box::new)?;
+                        let call = extrinsic
+                            .as_root_extrinsic::<Call>()
+                            .map_err(SubxtNodeError::AsRootExtrinsic)?;
                         Ok(call)
                     })
                     .filter_ok(|call|
@@ -193,7 +195,7 @@ macro_rules! fetch_authorities {
                     .at(H256(block_hash.0))
                     .fetch(&$module::storage().aura().authorities())
                     .await
-                    .map_err(Box::new)?
+                    .map_err(SubxtNodeError::FetchAuthorities)?
                     .map(|authorities| authorities.0.into_iter().map(|public| public.0).collect());
 
                 Ok(authorities)
@@ -236,8 +238,8 @@ macro_rules! get_contract_state {
                     .at(H256(block_hash.0))
                     .call(get_state)
                     .await
-                    .map_err(Box::new)?
-                    .map_err(|error| SubxtNodeError::GetContractState(format!("{error:?}")))?
+                    .map_err(|error| SubxtNodeError::GetContractState(error.into()))?
+                    .map_err(|error| SubxtNodeError::GetContractState(format!("{error:?}").into()))?
                     .into();
 
                 Ok(state)
@@ -264,8 +266,8 @@ macro_rules! get_zswap_state_root {
                     .at(H256(block_hash.0))
                     .call(get_zswap_state_root)
                     .await
-                    .map_err(Box::new)?
-                    .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}")))?;
+                    .map_err(|error| SubxtNodeError::GetZswapStateRoot(error.into()))?
+                    .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}").into()))?;
 
                 Ok(root)
 
@@ -293,8 +295,8 @@ macro_rules! get_transaction_cost {
                     .at(H256(block_hash.0))
                     .call(get_transaction_cost)
                     .await
-                    .map_err(Box::new)?
-                    .map_err(|error| SubxtNodeError::GetTransactionCost(format!("{error:?}")))?;
+                    .map_err(|error| SubxtNodeError::GetTransactionCost(error.into()))?
+                    .map_err(|error| SubxtNodeError::GetTransactionCost(format!("{error:?}").into()))?;
 
                 // Combine storage cost and gas cost for total fee
                 // StorageCost = u128, GasCost = u64
