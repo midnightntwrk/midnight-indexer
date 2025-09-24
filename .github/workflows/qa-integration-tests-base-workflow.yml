@@ -97,4 +97,3 @@ jobs:
           name: qa-integration-tests-${{ inputs.target_env }}-logs
           path: |
             ./qa/tests/logs
-
