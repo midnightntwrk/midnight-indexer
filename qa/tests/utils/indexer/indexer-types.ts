@@ -24,7 +24,7 @@ export type BlockResponse = GraphQLResponse<{ block: Block }>;
 
 export type TransactionResponse = GraphQLResponse<{ transactions: Transaction[] }>;
 
-export type UnshieldedUtxoResponse = GraphQLResponse<{ unshieldedUtxos: UnshieldedUtxo[] }>;
+export type ContractActionResponse = GraphQLResponse<{ contractAction: ContractAction }>;
 
 export type BlockOffset = {
   hash?: string;
@@ -34,6 +34,11 @@ export type BlockOffset = {
 export type TransactionOffset = {
   hash?: string;
   identifier?: string;
+};
+
+export type ContractActionOffset = {
+  blockOffset?: BlockOffset;
+  transactionOffset?: TransactionOffset;
 };
 
 export type UnshieldedAddress = string;
@@ -88,6 +93,7 @@ export interface Transaction {
   transactionResult?: TransactionResult;
   fees?: TransactionFees;
   merkleTreeRoot?: string;
+  contractActions?: ContractAction[];
   unshieldedCreatedOutputs?: UnshieldedUtxo[];
   unshieldedSpentOutputs?: UnshieldedUtxo[];
 }
@@ -136,6 +142,42 @@ export interface UnshieldedTransaction {
   transaction: Transaction;
   createdUtxos: UnshieldedUtxo[];
   spentUtxos: UnshieldedUtxo[];
+}
+
+export type ContractAction = ContractDeploy | ContractCall | ContractUpdate;
+
+export interface ContractDeploy {
+  __typename: 'ContractDeploy';
+  address: string;
+  state: string;
+  chainState: string;
+  transaction: Transaction;
+  unshieldedBalances: ContractBalance[];
+}
+
+export interface ContractCall {
+  __typename: 'ContractCall';
+  address: string;
+  state: string;
+  chainState: string;
+  transaction: Transaction;
+  entryPoint: string;
+  deploy: ContractDeploy;
+  unshieldedBalances: ContractBalance[];
+}
+
+export interface ContractUpdate {
+  __typename: 'ContractUpdate';
+  address: string;
+  state: string;
+  chainState: string;
+  transaction: Transaction;
+  unshieldedBalances: ContractBalance[];
+}
+
+export interface ContractBalance {
+  tokenType: string;
+  amount: string;
 }
 
 export type ViewingKey = string & { __brand: 'ViewingKey' };

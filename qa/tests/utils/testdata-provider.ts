@@ -20,12 +20,16 @@ class TestDataProvider {
   private blocks: Record<string, string>;
   private viewingKeys: Record<string, string[]>;
   private transactions: Record<string, string>;
+  private contracts: Record<string, string>;
+  private heights: Record<string, number>;
 
   constructor() {
     this.unshieldedAddresses = {};
     this.blocks = {};
     this.viewingKeys = {};
     this.transactions = {};
+    this.contracts = {};
+    this.heights = {};
   }
 
   async init(): Promise<this> {
@@ -36,10 +40,14 @@ class TestDataProvider {
     );
     const viewingKeysDataFile = await import(`../data/static/${envName}/viewing-keys.json`);
     const transactionsDataFile = await import(`../data/static/${envName}/transactions.json`);
+    const contractsDataFile = await import(`../data/static/${envName}/contracts.json`);
+    const heightsDataFile = await import(`../data/static/${envName}/heights.json`);
     this.unshieldedAddresses = unshieldedAddressDataFile.default;
     this.blocks = blocksDataFile.default;
     this.viewingKeys = viewingKeysDataFile.default;
     this.transactions = transactionsDataFile.default;
+    this.contracts = contractsDataFile.default;
+    this.heights = heightsDataFile.default;
     return this;
   }
 
@@ -55,13 +63,46 @@ class TestDataProvider {
     return this.unshieldedAddresses[property];
   }
 
-  getKnownBlockHash() {
-    if (!this.blocks.hasOwnProperty('known-hash') || this.blocks['known-hash'] === undefined) {
+  private getBlockData(property: string) {
+    if (!this.blocks.hasOwnProperty(property) || this.blocks[property] === undefined) {
       throw new Error(
-        `Test data provider is missing the known block hash data for ${env.getEnvName()} environment`,
+        `Test data provider is missing the ${property} data for ${env.getEnvName()} environment`,
       );
     }
-    return this.blocks['known-hash'];
+    return this.blocks[property];
+  }
+
+  private getHeightData(property: string) {
+    if (!this.heights.hasOwnProperty(property) || this.heights[property] === undefined) {
+      throw new Error(
+        `Test data provider is missing the ${property} data for ${env.getEnvName()} environment`,
+      );
+    }
+    return this.heights[property];
+  }
+
+  getKnownBlockHash() {
+    return this.getBlockData('known-hash');
+  }
+
+  getContractDeployBlockHash() {
+    return this.getBlockData('contract-deploy-block-hash');
+  }
+
+  getContractUpdateBlockHash() {
+    return this.getBlockData('contract-update-block-hash');
+  }
+
+  getPreContractBlockHash() {
+    return this.getBlockData('pre-contract-block-hash');
+  }
+
+  getContractDeployHeight() {
+    return this.getHeightData('contract-deploy-height');
+  }
+
+  getContractUpdateHeight() {
+    return this.getHeightData('contract-update-height');
   }
 
   getFaucetsViewingKeys() {
@@ -124,6 +165,58 @@ class TestDataProvider {
       0.5, // not an integer
       2 ** 32, // 32-bit overflow
     ];
+  }
+
+  getKnownContractAddress() {
+    if (
+      !this.contracts.hasOwnProperty('known-address') ||
+      this.contracts['known-address'] === undefined
+    ) {
+      throw new Error(
+        `Test data provider is missing the known contract address data for ${env.getEnvName()} environment`,
+      );
+    }
+    return this.contracts['known-address'];
+  }
+
+  getNonExistingContractAddress() {
+    // Return a valid format address that doesn't exist
+    return '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e79';
+  }
+
+  getFabricatedMalformedContractAddresses() {
+    return [
+      ' ', // space
+      '0', // too short
+      null as any, // null
+      undefined as any, // undefined
+      NaN as any, // NaN
+      Infinity as any, // Infinity
+      -Infinity as any, // -Infinity
+      false as any, // false
+      true as any, // true
+      '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e7', // too short (63 chars)
+      '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e78a', // too long (65 chars)
+      '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e7g', // invalid hex character
+      '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e7@', // special character
+      '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e7 ', // trailing space
+      ' 000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e78', // leading space
+      ' 000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e78 ', // leading and trailing space
+    ];
+  }
+
+  getBoundaryContractAddresses() {
+    return [
+      '0000000000000000000000000000000000000000000000000000000000000000000000000000', // all zeros
+      '0000000000000000000000000000000000000000000000000000000000000000000000000001', // all zeros except first byte
+      '1111111111111111111111111111111111111111111111111111111111111111111111111111', // all ones
+      'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', // highest hex value
+    ];
+  }
+
+  getNonExistingHash() {
+    // Return a valid format hash that doesn't exist (all zeros)
+    return '0000000000000000000000000000000000000000000000000000000000000000';
   }
 }
 
