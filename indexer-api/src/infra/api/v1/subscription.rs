@@ -13,6 +13,7 @@
 
 mod block;
 mod contract_action;
+mod dust_ledger_events;
 mod shielded;
 mod unshielded;
 mod zswap_ledger_events;
@@ -21,6 +22,7 @@ use crate::{
     domain::{self, storage::Storage},
     infra::api::v1::subscription::{
         block::BlockSubscription, contract_action::ContractActionSubscription,
+        dust_ledger_events::DustLedgerEventsSubscription,
         shielded::ShieldedTransactionsSubscription, unshielded::UnshieldedTransactionsSubscription,
         zswap_ledger_events::ZswapLedgerEventsSubscription,
     },
@@ -34,6 +36,7 @@ use indexer_common::domain::{LedgerStateStorage, Subscriber};
 pub struct Subscription<S, B, Z>(
     BlockSubscription<S, B>,
     ContractActionSubscription<S, B>,
+    DustLedgerEventsSubscription<S, B>,
     ShieldedTransactionsSubscription<S, B, Z>,
     UnshieldedTransactionsSubscription<S, B>,
     ZswapLedgerEventsSubscription<S, B>,
@@ -53,6 +56,7 @@ where
         Subscription(
             BlockSubscription::default(),
             ContractActionSubscription::default(),
+            DustLedgerEventsSubscription::default(),
             ShieldedTransactionsSubscription::default(),
             UnshieldedTransactionsSubscription::default(),
             ZswapLedgerEventsSubscription::default(),

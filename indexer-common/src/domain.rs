@@ -34,6 +34,7 @@ use sqlx::Type;
 
 pub type BlockAuthor = ByteArray<32>;
 pub type BlockHash = ByteArray<32>;
+pub type DustNonce = ByteArray<32>;
 pub type IntentHash = ByteArray<32>;
 pub type RawTokenType = ByteArray<32>;
 pub type RawUnshieldedAddress = ByteArray<32>;
@@ -142,16 +143,63 @@ impl LedgerEvent {
             attributes: LedgerEventAttributes::ZswapOutput,
         }
     }
+
+    fn param_change(raw: SerializedLedgerEvent) -> Self {
+        Self {
+            grouping: LedgerEventGrouping::Dust,
+            raw,
+            attributes: LedgerEventAttributes::ParamChange,
+        }
+    }
+
+    fn dust_initial_utxo(raw: SerializedLedgerEvent, output: DustOutput) -> Self {
+        Self {
+            grouping: LedgerEventGrouping::Dust,
+            raw,
+            attributes: LedgerEventAttributes::DustInitialUtxo { output },
+        }
+    }
+
+    fn dust_generation_dtime_update(raw: SerializedLedgerEvent) -> Self {
+        Self {
+            grouping: LedgerEventGrouping::Dust,
+            raw,
+            attributes: LedgerEventAttributes::DustGenerationDtimeUpdate,
+        }
+    }
+
+    fn dust_spend_processed(raw: SerializedLedgerEvent) -> Self {
+        Self {
+            grouping: LedgerEventGrouping::Dust,
+            raw,
+            attributes: LedgerEventAttributes::DustSpendProcessed,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LedgerEventAttributes {
     ZswapInput,
+
     ZswapOutput,
+
+    ParamChange,
+
+    DustInitialUtxo { output: DustOutput },
+
+    DustGenerationDtimeUpdate,
+
+    DustSpendProcessed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DustOutput {
+    pub nonce: DustNonce,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[cfg_attr(feature = "cloud", sqlx(type_name = "LEDGER_EVENT_GROUPING"))]
 pub enum LedgerEventGrouping {
     Zswap,
+    Dust,
 }

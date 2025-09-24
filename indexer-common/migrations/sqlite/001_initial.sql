@@ -43,7 +43,7 @@ CREATE INDEX regular_transactions_end_idx ON regular_transactions (end_index);
 --------------------------------------------------------------------------------
 CREATE TABLE transaction_identifiers (
   id INTEGER PRIMARY KEY,
-  transaction_id INTEGER NOT NULL REFERENCES regular_transactions (id),
+  transaction_id INTEGER NOT NULL REFERENCES transactions (id),
   identifier BLOB NOT NULL
 );
 CREATE INDEX transaction_identifiers_transaction_id_idx ON transaction_identifiers (transaction_id);
@@ -86,9 +86,18 @@ CREATE INDEX unshielded_token_type_idx ON unshielded_utxos (token_type);
 --------------------------------------------------------------------------------
 CREATE TABLE ledger_events (
   id INTEGER PRIMARY KEY,
-  transaction_id INTEGER NOT NULL REFERENCES regular_transactions (id),
-  variant TEXT CHECK (variant IN ('ZswapInput', 'ZswapOutput')) NOT NULL,
-  grouping TEXT CHECK (grouping IN ('Zswap')) NOT NULL,
+  transaction_id INTEGER NOT NULL REFERENCES transactions (id),
+  variant TEXT CHECK (
+    variant IN (
+      'ZswapInput',
+      'ZswapOutput',
+      'ParamChange',
+      'DustInitialUtxo',
+      'DustGenerationDtimeUpdate',
+      'DustSpendProcessed'
+    )
+  ) NOT NULL,
+  grouping TEXT CHECK (grouping IN ('Zswap', 'Dust')) NOT NULL,
   raw BYTEA NOT NULL,
   attributes TEXT NOT NULL
 );

@@ -93,7 +93,24 @@ query BlockQuery($block_offset: BlockOffset) {
             }
             zswapLedgerEvents {
                 id
-                maxId
+            }
+            dustLedgerEvents {
+                __typename
+                ... on ParamChange {
+                    id
+                }
+                __typename
+                ... on DustInitialUtxo {
+                    id
+                }
+                __typename
+                ... on DustGenerationDtimeUpdate {
+                    id
+                }
+                __typename
+                ... on DustSpendProcessed {
+                    id
+                }
             }
         }
     }
@@ -184,7 +201,24 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
         }
         zswapLedgerEvents {
             id
-            maxId
+        }
+        dustLedgerEvents {
+            __typename
+            ... on ParamChange {
+                id
+            }
+            __typename
+            ... on DustInitialUtxo {
+                id
+            }
+            __typename
+            ... on DustGenerationDtimeUpdate {
+                id
+            }
+            __typename
+            ... on DustSpendProcessed {
+                id
+            }
         }
     }
 }
@@ -348,7 +382,24 @@ subscription BlockSubscription($block_offset: BlockOffset) {
             }
             zswapLedgerEvents {
                 id
-                maxId
+            }
+            dustLedgerEvents {
+                __typename
+                ... on ParamChange {
+                    id
+                }
+                __typename
+                ... on DustInitialUtxo {
+                    id
+                }
+                __typename
+                ... on DustGenerationDtimeUpdate {
+                    id
+                }
+                __typename
+                ... on DustSpendProcessed {
+                    id
+                }
             }
         }
     }
@@ -479,6 +530,26 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
 subscription ZswapLedgerEventsSubscription($id: Int) {
     zswapLedgerEvents(id: $id) {
         id
-        maxId
+    }
+}
+
+subscription DustLedgerEventsSubscription($id: Int) {
+    dustLedgerEvents(id: $id) {
+        __typename
+        ... on ParamChange {
+            id
+        }
+        __typename
+        ... on DustInitialUtxo {
+            id
+        }
+        __typename
+        ... on DustGenerationDtimeUpdate {
+            id
+        }
+        __typename
+        ... on DustSpendProcessed {
+            id
+        }
     }
 }

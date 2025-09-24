@@ -130,7 +130,7 @@ macro_rules! make_block_details {
                     .map(|extrinsic| {
                         let call = extrinsic
                             .as_root_extrinsic::<Call>()
-                            .map_err(SubxtNodeError::AsRootExtrinsic)?;
+                            .map_err(|error| SubxtNodeError::AsRootExtrinsic(error.into()))?;
                         Ok(call)
                     })
                     .filter_ok(|call|
@@ -195,7 +195,7 @@ macro_rules! fetch_authorities {
                     .at(H256(block_hash.0))
                     .fetch(&$module::storage().aura().authorities())
                     .await
-                    .map_err(SubxtNodeError::FetchAuthorities)?
+                    .map_err(|error| SubxtNodeError::FetchAuthorities(error.into()))?
                     .map(|authorities| authorities.0.into_iter().map(|public| public.0).collect());
 
                 Ok(authorities)

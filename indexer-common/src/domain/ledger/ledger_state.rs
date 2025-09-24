@@ -12,10 +12,10 @@
 // limitations under the License.
 
 use crate::domain::{
-    ApplyRegularTransactionResult, ByteArray, ByteVec, IntentHash, LedgerEvent, NetworkId,
-    PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType, SerializedContractAddress,
-    SerializedLedgerState, SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot,
-    TransactionResult, UnshieldedUtxo,
+    ApplyRegularTransactionResult, ByteArray, ByteVec, DustOutput, IntentHash, LedgerEvent,
+    NetworkId, PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType,
+    SerializedContractAddress, SerializedLedgerState, SerializedTransaction, SerializedZswapState,
+    SerializedZswapStateRoot, TransactionResult, UnshieldedUtxo,
     ledger::{Error, IntentV6, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
 use fastrace::trace;
@@ -392,13 +392,30 @@ fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<Ledger
         })
         .filter_map_ok(|(event, raw)| match event.content {
             EventDetailsV6::ZswapInput { .. } => Some(LedgerEvent::zswap_input(raw)),
+
             EventDetailsV6::ZswapOutput { .. } => Some(LedgerEvent::zswap_output(raw)),
+
             EventDetailsV6::ContractDeploy { .. } => None,
+
             EventDetailsV6::ContractLog { .. } => None,
-            EventDetailsV6::ParamChange(..) => None,
-            EventDetailsV6::DustInitialUtxo { .. } => None,
-            EventDetailsV6::DustGenerationDtimeUpdate { .. } => None,
-            EventDetailsV6::DustSpendProcessed { .. } => None,
+
+            EventDetailsV6::ParamChange(..) => Some(LedgerEvent::param_change(raw)),
+
+            EventDetailsV6::DustInitialUtxo { output, .. } => {
+                let output = DustOutput {
+                    nonce: output.nonce.0.to_bytes_le().into(),
+                };
+                Some(LedgerEvent::dust_initial_utxo(raw, output))
+            }
+
+            EventDetailsV6::DustGenerationDtimeUpdate { .. } => {
+                Some(LedgerEvent::dust_generation_dtime_update(raw))
+            }
+
+            EventDetailsV6::DustSpendProcessed { .. } => {
+                Some(LedgerEvent::dust_spend_processed(raw))
+            }
+
             other => panic!("unexpected EventDetailsV6 variant {other:?}"),
         })
         .collect::<Result<_, _>>()

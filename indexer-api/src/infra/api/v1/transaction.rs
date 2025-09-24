@@ -16,8 +16,11 @@ use crate::{
     infra::api::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         v1::{
-            AsBytesExt, HexEncoded, block::Block, contract_action::ContractAction,
-            ledger_events::ZswapLedgerEvent, unshielded::UnshieldedUtxo,
+            AsBytesExt, HexEncoded,
+            block::Block,
+            contract_action::ContractAction,
+            ledger_events::{DustLedgerEvent, ZswapLedgerEvent},
+            unshielded::UnshieldedUtxo,
         },
     },
 };
@@ -184,6 +187,24 @@ where
             .collect();
 
         Ok(zswap_ledger_events)
+    }
+
+    /// Dust ledger events of this transaction.
+    async fn dust_ledger_events(&self, cx: &Context<'_>) -> ApiResult<Vec<DustLedgerEvent>> {
+        let id = self.id;
+
+        let dust_ledger_events = cx
+            .get_storage::<S>()
+            .get_ledger_events_by_transaction_id(LedgerEventGrouping::Dust, id)
+            .await
+            .map_err_into_server_error(|| {
+                format!("cannot get dust ledger events for transaction with ID {id}")
+            })?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+
+        Ok(dust_ledger_events)
     }
 }
 
