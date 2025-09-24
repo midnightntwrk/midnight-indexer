@@ -360,8 +360,9 @@ async fn index_block(
 
     // Use saturating subtraction to handle the case where streams are temporarily out of order.
     // The two subscriptions (highest_blocks and finalized_blocks) are independent with no
-    // ordering guarantee, so node_block_height < block.height may happen under certain rare conditions.
-    // This will produce 0 when node_block_height < block.height, treating it as caught up.
+    // ordering guarantee, so node_block_height < block.height may happen under certain rare
+    // conditions. This will produce 0 when node_block_height < block.height, treating it as
+    // caught up.
     let distance = node_block_height.saturating_sub(block.height);
     let max_distance = if *caught_up {
         caught_up_max_distance + caught_up_leeway
