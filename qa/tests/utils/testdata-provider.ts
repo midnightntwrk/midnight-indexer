@@ -105,7 +105,6 @@ class TestDataProvider {
     return this.getHeightData('contract-update-height');
   }
 
-
   getFaucetsViewingKeys() {
     if (
       !this.viewingKeys.hasOwnProperty('pre-fund-faucet') ||
