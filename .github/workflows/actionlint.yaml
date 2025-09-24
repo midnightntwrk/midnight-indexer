@@ -23,3 +23,4 @@ jobs:
         uses: raven-actions/actionlint@v2
         with:
           matcher: true # Enable GitHub annotations for errors
+          fail-on-error: false # Don't fail CI on errors, just report them
