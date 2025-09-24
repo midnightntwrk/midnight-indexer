@@ -18,18 +18,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
-      - name: Install cargo-audit
-        run: cargo install --git https://github.com/rustsec/rustsec cargo-audit
-
-      - name: Run cargo-audit
-        run: cargo audit --format sarif | tee scan.sarif || true
-
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@7273f08caa1dcf2c2837f362f1982de0ab4dc344
-        with:
-          sarif_file: scan.sarif
-
-      - name: Install Deny
+      - name: Install cargo-deny
         run: cargo install cargo-deny
 
       - name: Add github.com credentials to netrc
@@ -39,9 +28,14 @@ jobs:
           username: MidnightCI
           password: ${{ secrets.MIDNIGHTCI_REPO }}
 
-      - name: Run deny
-        run: cargo deny -f sarif check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed > cargo-deny.sarif || true
+      - name: Run cargo-deny
+        run: cargo deny -f sarif check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed | tee scan.sarif || true
         # TODO: once everything's open sourced remove -Aunlicensed
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@7273f08caa1dcf2c2837f362f1982de0ab4dc344
+        with:
+          sarif_file: scan.sarif
 
       # TODO: Remove this checkout step once upload-sarif-github-action repo is made public
       - name: Checkout Upload action repository
@@ -52,7 +46,7 @@ jobs:
           path: upload-sarif-github-action
           token: ${{ secrets.MIDNIGHTCI_REPO }}
 
-      - name: Upload cargo-audit SARIF to Checkmarx
+      - name: Upload SARIF to Checkmarx
         uses: ./upload-sarif-github-action
         with:
           sarif-file: scan.sarif
@@ -60,14 +54,3 @@ jobs:
           cx-client-id: ${{ secrets.CX_CLIENT_ID }}
           cx-client-secret: ${{ secrets.CX_CLIENT_SECRET_EU }}
           cx-tenant: ${{ secrets.CX_TENANT }}
-
-      - name: Upload cargo-deny SARIF to Checkmarx
-        if: hashFiles('cargo-deny.sarif') != ''
-        uses: ./upload-sarif-github-action
-        with:
-          sarif-file: cargo-deny.sarif
-          project-name: midnightntwrk/midnight-indexer
-          cx-client-id: ${{ secrets.CX_CLIENT_ID }}
-          cx-client-secret: ${{ secrets.CX_CLIENT_SECRET_EU }}
-          cx-tenant: ${{ secrets.CX_TENANT }}
-        continue-on-error: true
