@@ -50,7 +50,8 @@ impl From<LedgerEvent> for ZswapLedgerEvent {
     field(name = "max_id", ty = "&u64")
 )]
 pub enum DustLedgerEvent {
-    // A parameter change.
+    // A general parameter change; possibly conveys modified dust related parameters like
+    // generation rate or decay.
     ParamChange(ParamChange),
 
     // An initial dust UTXO.
@@ -103,6 +104,8 @@ impl From<LedgerEvent> for DustLedgerEvent {
 }
 
 #[derive(Debug, SimpleObject)]
+// A general parameter change; possibly conveys modified dust related parameters like
+// generation rate or decay.
 pub struct ParamChange {
     /// The ID of this dust ledger event.
     id: u64,
@@ -114,6 +117,7 @@ pub struct ParamChange {
     max_id: u64,
 }
 
+// An initial dust UTXO.
 #[derive(Debug, SimpleObject)]
 pub struct DustInitialUtxo {
     /// The ID of this dust ledger event.
@@ -129,6 +133,7 @@ pub struct DustInitialUtxo {
     output: DustOutput,
 }
 
+// A dtime update for a dust generation.
 #[derive(Debug, SimpleObject)]
 pub struct DustGenerationDtimeUpdate {
     /// The ID of this dust ledger event.
@@ -141,6 +146,7 @@ pub struct DustGenerationDtimeUpdate {
     max_id: u64,
 }
 
+// A processed dust spend.
 #[derive(Debug, SimpleObject)]
 pub struct DustSpendProcessed {
     /// The ID of this dust ledger event.
