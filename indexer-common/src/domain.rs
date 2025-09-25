@@ -72,6 +72,14 @@ pub enum TransactionResult {
     Failure,
 }
 
+/// The variant of a transaction: regular or system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[cfg_attr(feature = "cloud", sqlx(type_name = "TRANSACTION_VARIANT"))]
+pub enum TransactionVariant {
+    Regular,
+    System,
+}
+
 /// A contract action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {

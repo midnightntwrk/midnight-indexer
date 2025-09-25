@@ -16,7 +16,6 @@ use crate::{
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
         v1::{
-            subscription::get_next_transaction,
             transaction::Transaction,
             unshielded::{UnshieldedAddress, UnshieldedUtxo},
         },
@@ -24,7 +23,7 @@ use crate::{
 };
 use async_graphql::{Context, SimpleObject, Subscription, Union, async_stream::try_stream};
 use derive_more::Debug;
-use fastrace::trace;
+use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::domain::{NetworkId, RawUnshieldedAddress, Subscriber, UnshieldedUtxoIndexed};
 use log::{debug, warn};
@@ -220,7 +219,7 @@ async fn make_unshielded_transaction<S>(
 where
     S: Storage,
 {
-    *transaction_id = transaction.id;
+    *transaction_id = transaction.id();
     let transaction_id = *transaction_id;
 
     let created = storage
@@ -288,4 +287,16 @@ where
     Ok(UnshieldedTransactionsProgress {
         highest_transaction_id,
     })
+}
+
+async fn get_next_transaction<E>(
+    transactions: &mut (impl Stream<Item = Result<domain::Transaction, E>> + Unpin),
+) -> Result<Option<domain::Transaction>, E> {
+    transactions
+        .try_next()
+        .in_span(Span::root(
+            "subscription.unshielded-transactions.get-next-transaction",
+            SpanContext::random(),
+        ))
+        .await
 }

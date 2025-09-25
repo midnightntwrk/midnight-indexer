@@ -14,7 +14,7 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v1::{
             AsBytesExt, HexEncoded,
             block::Block,
@@ -24,16 +24,56 @@ use crate::{
         },
     },
 };
-use async_graphql::{ComplexObject, Context, Enum, OneofObject, SimpleObject};
+use async_graphql::{ComplexObject, Context, Enum, Interface, OneofObject, SimpleObject};
 use derive_more::Debug;
-use indexer_common::domain::{BlockHash, LedgerEventGrouping, ProtocolVersion};
-use serde::{Deserialize, Serialize};
+use indexer_common::domain::{BlockHash, LedgerEventGrouping};
 use std::marker::PhantomData;
 
 /// A Midnight transaction.
+#[derive(Debug, Clone, Interface)]
+#[allow(clippy::duplicated_attributes)]
+#[graphql(
+    field(name = "id", ty = "&u64"),
+    field(name = "hash", ty = "&HexEncoded"),
+    field(name = "protocol_version", ty = "&u32"),
+    field(name = "raw", ty = "&HexEncoded"),
+    field(name = "block", ty = "ApiResult<Block<S>>"),
+    field(name = "contract_actions", ty = "ApiResult<Vec<ContractAction<S>>>"),
+    field(
+        name = "unshielded_created_outputs",
+        ty = "ApiResult<Vec<UnshieldedUtxo<S>>>"
+    ),
+    field(
+        name = "unshielded_spent_outputs",
+        ty = "ApiResult<Vec<UnshieldedUtxo<S>>>"
+    ),
+    field(name = "zswap_ledger_events", ty = "ApiResult<Vec<ZswapLedgerEvent>>"),
+    field(name = "dust_ledger_events", ty = "ApiResult<Vec<DustLedgerEvent>>")
+)]
+pub enum Transaction<S: Storage> {
+    /// A regular Midnight transaction.
+    Regular(RegularTransaction<S>),
+
+    /// A system Midnight transaction.
+    System(SystemTransaction<S>),
+}
+
+impl<S> From<domain::Transaction> for Transaction<S>
+where
+    S: Storage,
+{
+    fn from(transaction: domain::Transaction) -> Self {
+        match transaction {
+            domain::Transaction::Regular(t) => Transaction::Regular(t.into()),
+            domain::Transaction::System(t) => Transaction::System(t.into()),
+        }
+    }
+}
+
+/// A regular Midnight transaction.
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(complex)]
-pub struct Transaction<S>
+pub struct RegularTransaction<S>
 where
     S: Storage,
 {
@@ -53,11 +93,8 @@ where
     #[graphql(skip)]
     block_hash: BlockHash,
 
-    /// The result of applying a transaction to the ledger state.
+    /// The result of applying this transaction to the ledger state.
     transaction_result: TransactionResult,
-
-    /// Fee information for this transaction.
-    fees: TransactionFees,
 
     /// The hex-encoded serialized transaction identifiers.
     #[debug(skip)]
@@ -71,62 +108,29 @@ where
     start_index: u64,
 
     /// The zswap state end index.
-    pub end_index: u64,
+    end_index: u64,
+
+    /// Fee information for this transaction.
+    fees: TransactionFees,
 
     #[graphql(skip)]
     #[debug(skip)]
     _s: PhantomData<S>,
 }
 
-// Required by async-graphql's Interface derive macro for `ContractAction`.
-impl<S> From<Result<Transaction<S>, ApiError>> for Transaction<S>
-where
-    S: Storage,
-{
-    fn from(value: Result<Transaction<S>, ApiError>) -> Self {
-        match value {
-            Ok(transaction) => transaction,
-            Err(error) => {
-                // This panic indicates a bug in async-graphql's interface resolution
-                // or a missing implementation in one of the concrete types.
-                panic!(
-                    "Unexpected error resolving transaction for ContractAction interface: {error}"
-                )
-            }
-        }
-    }
-}
-
 #[ComplexObject]
-impl<S> Transaction<S>
+impl<S> RegularTransaction<S>
 where
     S: Storage,
 {
     /// The block for this transaction.
     async fn block(&self, cx: &Context<'_>) -> ApiResult<Block<S>> {
-        let block = cx
-            .get_storage::<S>()
-            .get_block_by_hash(self.block_hash)
-            .await
-            .map_err_into_server_error(|| format!("get block by hash {}", self.block_hash))?
-            .ok_or_server_error(|| format!("block with hash {} not found", self.block_hash))?;
-
-        Ok(block.into())
+        block(self.block_hash, cx).await
     }
 
-    /// The contract actions.
+    /// The contract actions for this transaction.
     async fn contract_actions(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractAction<S>>> {
-        let id = self.id;
-
-        let contract_actions = cx
-            .get_storage::<S>()
-            .get_contract_actions_by_transaction_id(id)
-            .await
-            .map_err_into_server_error(|| {
-                format!("cannot get contract actions by transaction ID {id}")
-            })?;
-
-        Ok(contract_actions.into_iter().map(Into::into).collect())
+        contract_actions(self.id, cx).await
     }
 
     /// Unshielded UTXOs created by this transaction.
@@ -134,20 +138,7 @@ where
         &self,
         cx: &Context<'_>,
     ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
-        let id = self.id;
-
-        let utxos = cx
-            .get_storage::<S>()
-            .get_unshielded_utxos_created_by_transaction(id)
-            .await
-            .map_err_into_server_error(|| {
-                format!("cannot get unshielded UTXOs created by transaction with ID {id}")
-            })?
-            .into_iter()
-            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, cx.get_network_id())))
-            .collect();
-
-        Ok(utxos)
+        unshielded_created_outputs(self.id, cx).await
     }
 
     /// Unshielded UTXOs spent (consumed) by this transaction.
@@ -155,68 +146,29 @@ where
         &self,
         cx: &Context<'_>,
     ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
-        let id = self.id;
-
-        let utxos = cx
-            .get_storage::<S>()
-            .get_unshielded_utxos_spent_by_transaction(id)
-            .await
-            .map_err_into_server_error(|| {
-                format!("cannot get unshielded UTXOs spent by transaction with ID {id}")
-            })?
-            .into_iter()
-            .map(|utxo| UnshieldedUtxo::<S>::from((utxo, cx.get_network_id())))
-            .collect();
-
-        Ok(utxos)
+        unshielded_spent_outputs(self.id, cx).await
     }
 
     /// Zswap ledger events of this transaction.
     async fn zswap_ledger_events(&self, cx: &Context<'_>) -> ApiResult<Vec<ZswapLedgerEvent>> {
-        let id = self.id;
-
-        let zswap_ledger_events = cx
-            .get_storage::<S>()
-            .get_ledger_events_by_transaction_id(LedgerEventGrouping::Zswap, id)
-            .await
-            .map_err_into_server_error(|| {
-                format!("cannot get zswap ledger events for transaction with ID {id}")
-            })?
-            .into_iter()
-            .map(Into::into)
-            .collect();
-
-        Ok(zswap_ledger_events)
+        zswap_ledger_events::<S>(self.id, cx).await
     }
 
     /// Dust ledger events of this transaction.
     async fn dust_ledger_events(&self, cx: &Context<'_>) -> ApiResult<Vec<DustLedgerEvent>> {
-        let id = self.id;
-
-        let dust_ledger_events = cx
-            .get_storage::<S>()
-            .get_ledger_events_by_transaction_id(LedgerEventGrouping::Dust, id)
-            .await
-            .map_err_into_server_error(|| {
-                format!("cannot get dust ledger events for transaction with ID {id}")
-            })?
-            .into_iter()
-            .map(Into::into)
-            .collect();
-
-        Ok(dust_ledger_events)
+        dust_ledger_events::<S>(self.id, cx).await
     }
 }
 
-impl<S> From<domain::Transaction> for Transaction<S>
+impl<S> From<domain::RegularTransaction> for RegularTransaction<S>
 where
     S: Storage,
 {
-    fn from(value: domain::Transaction) -> Self {
-        let domain::Transaction {
+    fn from(transaction: domain::RegularTransaction) -> Self {
+        let domain::RegularTransaction {
             id,
             hash,
-            protocol_version: ProtocolVersion(protocol_version),
+            protocol_version,
             raw,
             block_hash,
             transaction_result,
@@ -225,15 +177,15 @@ where
             start_index,
             end_index,
             ..
-        } = value;
+        } = transaction;
 
         // Use fees information from database (calculated by chain-indexer)
         let fees = TransactionFees {
-            paid_fees: value
+            paid_fees: transaction
                 .paid_fees
                 .map(|f| f.to_string())
                 .unwrap_or_else(|| "0".to_owned()),
-            estimated_fees: value
+            estimated_fees: transaction
                 .estimated_fees
                 .map(|f| f.to_string())
                 .unwrap_or_else(|| "0".to_owned()),
@@ -242,7 +194,7 @@ where
         Self {
             id,
             hash: hash.hex_encode(),
-            protocol_version,
+            protocol_version: protocol_version.0,
             raw: raw.hex_encode(),
             block_hash,
             transaction_result: transaction_result.into(),
@@ -259,17 +211,102 @@ where
     }
 }
 
-impl<S> From<&Transaction<S>> for Transaction<S>
+/// A system Midnight transaction.
+#[derive(Debug, Clone, SimpleObject)]
+#[graphql(complex)]
+pub struct SystemTransaction<S>
 where
     S: Storage,
 {
-    fn from(value: &Transaction<S>) -> Self {
-        value.to_owned()
+    /// The transaction ID.
+    id: u64,
+
+    /// The hex-encoded transaction hash.
+    hash: HexEncoded,
+
+    /// The protocol version.
+    protocol_version: u32,
+
+    /// The hex-encoded serialized transaction content.
+    #[debug(skip)]
+    raw: HexEncoded,
+
+    #[graphql(skip)]
+    block_hash: BlockHash,
+
+    #[graphql(skip)]
+    #[debug(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S> SystemTransaction<S>
+where
+    S: Storage,
+{
+    /// The block for this transaction.
+    async fn block(&self, cx: &Context<'_>) -> ApiResult<Block<S>> {
+        block(self.block_hash, cx).await
+    }
+
+    /// The contract actions for this transaction.
+    async fn contract_actions(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractAction<S>>> {
+        contract_actions(self.id, cx).await
+    }
+
+    /// Unshielded UTXOs created by this transaction.
+    async fn unshielded_created_outputs(
+        &self,
+        cx: &Context<'_>,
+    ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
+        unshielded_created_outputs(self.id, cx).await
+    }
+
+    /// Unshielded UTXOs spent (consumed) by this transaction.
+    async fn unshielded_spent_outputs(
+        &self,
+        cx: &Context<'_>,
+    ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
+        unshielded_spent_outputs(self.id, cx).await
+    }
+
+    /// Zswap ledger events of this transaction.
+    async fn zswap_ledger_events(&self, cx: &Context<'_>) -> ApiResult<Vec<ZswapLedgerEvent>> {
+        zswap_ledger_events::<S>(self.id, cx).await
+    }
+
+    /// Dust ledger events of this transaction.
+    async fn dust_ledger_events(&self, cx: &Context<'_>) -> ApiResult<Vec<DustLedgerEvent>> {
+        dust_ledger_events::<S>(self.id, cx).await
+    }
+}
+
+impl<S> From<domain::SystemTransaction> for SystemTransaction<S>
+where
+    S: Storage,
+{
+    fn from(transaction: domain::SystemTransaction) -> Self {
+        let domain::SystemTransaction {
+            id,
+            hash,
+            protocol_version,
+            raw,
+            block_hash,
+        } = transaction;
+
+        Self {
+            id,
+            hash: hash.hex_encode(),
+            protocol_version: protocol_version.0,
+            raw: raw.hex_encode(),
+            block_hash,
+            _s: PhantomData,
+        }
     }
 }
 
 /// Either a transaction hash or a transaction identifier.
-#[derive(Debug, OneofObject)]
+#[derive(Debug, Clone, OneofObject)]
 pub enum TransactionOffset {
     /// A hex-encoded transaction hash.
     Hash(HexEncoded),
@@ -280,14 +317,14 @@ pub enum TransactionOffset {
 
 /// The result of applying a transaction to the ledger state. In case of a partial success (status),
 /// there will be segments.
-#[derive(Debug, Clone, Serialize, Deserialize, SimpleObject)]
+#[derive(Debug, Clone, SimpleObject)]
 pub struct TransactionResult {
     pub status: TransactionResultStatus,
     pub segments: Option<Vec<Segment>>,
 }
 
 /// The status of the transaction result: success, partial success or failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
 pub enum TransactionResultStatus {
     Success,
     PartialSuccess,
@@ -296,7 +333,7 @@ pub enum TransactionResultStatus {
 
 /// One of many segments for a partially successful transaction result showing success for some
 /// segment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, SimpleObject)]
 pub struct Segment {
     /// Segment ID.
     id: u16,
@@ -306,7 +343,7 @@ pub struct Segment {
 }
 
 /// Fees information for a transaction, including both paid and estimated fees.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
+#[derive(Debug, Clone, PartialEq, Eq, SimpleObject)]
 pub struct TransactionFees {
     /// The actual fees paid for this transaction in DUST.
     paid_fees: String,
@@ -315,7 +352,7 @@ pub struct TransactionFees {
 }
 
 /// Result for a specific segment within a transaction.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
+#[derive(Debug, Clone, PartialEq, Eq, SimpleObject)]
 pub struct SegmentResult {
     /// The segment identifier.
     segment_id: u16,
@@ -349,4 +386,108 @@ impl From<indexer_common::domain::TransactionResult> for TransactionResult {
             },
         }
     }
+}
+
+async fn block<S>(block_hash: BlockHash, cx: &Context<'_>) -> ApiResult<Block<S>>
+where
+    S: Storage,
+{
+    let block = cx
+        .get_storage::<S>()
+        .get_block_by_hash(block_hash)
+        .await
+        .map_err_into_server_error(|| format!("get block by hash {}", block_hash))?
+        .ok_or_server_error(|| format!("block with hash {} not found", block_hash))?;
+
+    Ok(block.into())
+}
+
+async fn contract_actions<S>(id: u64, cx: &Context<'_>) -> ApiResult<Vec<ContractAction<S>>>
+where
+    S: Storage,
+{
+    let contract_actions = cx
+        .get_storage::<S>()
+        .get_contract_actions_by_transaction_id(id)
+        .await
+        .map_err_into_server_error(|| {
+            format!("cannot get contract actions by transaction ID {id}")
+        })?;
+
+    Ok(contract_actions.into_iter().map(Into::into).collect())
+}
+
+async fn unshielded_created_outputs<S>(
+    id: u64,
+    cx: &Context<'_>,
+) -> ApiResult<Vec<UnshieldedUtxo<S>>>
+where
+    S: Storage,
+{
+    let utxos = cx
+        .get_storage::<S>()
+        .get_unshielded_utxos_created_by_transaction(id)
+        .await
+        .map_err_into_server_error(|| {
+            format!("cannot get unshielded UTXOs created by transaction with ID {id}")
+        })?
+        .into_iter()
+        .map(|utxo| UnshieldedUtxo::<S>::from((utxo, cx.get_network_id())))
+        .collect();
+
+    Ok(utxos)
+}
+
+async fn unshielded_spent_outputs<S>(id: u64, cx: &Context<'_>) -> ApiResult<Vec<UnshieldedUtxo<S>>>
+where
+    S: Storage,
+{
+    let utxos = cx
+        .get_storage::<S>()
+        .get_unshielded_utxos_spent_by_transaction(id)
+        .await
+        .map_err_into_server_error(|| {
+            format!("cannot get unshielded UTXOs spent by transaction with ID {id}")
+        })?
+        .into_iter()
+        .map(|utxo| UnshieldedUtxo::<S>::from((utxo, cx.get_network_id())))
+        .collect();
+
+    Ok(utxos)
+}
+
+async fn zswap_ledger_events<S>(id: u64, cx: &Context<'_>) -> ApiResult<Vec<ZswapLedgerEvent>>
+where
+    S: Storage,
+{
+    let zswap_ledger_events = cx
+        .get_storage::<S>()
+        .get_ledger_events_by_transaction_id(LedgerEventGrouping::Zswap, id)
+        .await
+        .map_err_into_server_error(|| {
+            format!("cannot get zswap ledger events for transaction with ID {id}")
+        })?
+        .into_iter()
+        .map(Into::into)
+        .collect();
+
+    Ok(zswap_ledger_events)
+}
+
+async fn dust_ledger_events<S>(id: u64, cx: &Context<'_>) -> ApiResult<Vec<DustLedgerEvent>>
+where
+    S: Storage,
+{
+    let dust_ledger_events = cx
+        .get_storage::<S>()
+        .get_ledger_events_by_transaction_id(LedgerEventGrouping::Dust, id)
+        .await
+        .map_err_into_server_error(|| {
+            format!("cannot get dust ledger events for transaction with ID {id}")
+        })?
+        .into_iter()
+        .map(Into::into)
+        .collect();
+
+    Ok(dust_ledger_events)
 }
