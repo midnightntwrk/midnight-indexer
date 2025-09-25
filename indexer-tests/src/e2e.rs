@@ -23,6 +23,7 @@ use crate::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
             BlockSubscriptionBlocksTransactionsDustLedgerEvents,
+            BlockSubscriptionBlocksTransactionsOnRegularTransaction,
             BlockSubscriptionBlocksTransactionsUnshieldedCreatedOutputs,
             BlockSubscriptionBlocksTransactionsZswapLedgerEvents,
         },
@@ -362,29 +363,31 @@ async fn test_transactions_query(
             .collect::<Vec<_>>();
         assert!(transaction_values.contains(&expected_transaction.to_json_value()));
 
-        // // Existing identifier for regular transactions.
-        // if let block_subscription::BlockSubscriptionBlocksTransactionsOn::RegularTransaction(
-        //     expected_transaction,
-        // ) = &expected_transaction.on
-        // {
-        //     for identifier in &expected_transaction.identifiers {
-        //         let variables = transactions_query::Variables {
-        //             transaction_offset: transactions_query::TransactionOffset::Identifier(
-        //                 identifier.to_owned(),
-        //             ),
-        //         };
-        //         let transactions = send_query::<TransactionsQuery>(api_client, api_url, variables)
-        //             .await?
-        //             .transactions;
+        // Existing identifier for regular transactions.
+        if let block_subscription::BlockSubscriptionBlocksTransactionsOn::RegularTransaction(
+            BlockSubscriptionBlocksTransactionsOnRegularTransaction { identifiers, .. },
+        ) = &expected_transaction.on
+        {
+            for identifier in identifiers {
+                let variables = transactions_query::Variables {
+                    transaction_offset: transactions_query::TransactionOffset::Identifier(
+                        identifier.to_owned(),
+                    ),
+                };
+                let transactions = send_query::<TransactionsQuery>(api_client, api_url, variables)
+                    .await?
+                    .transactions;
 
-        //         // Verify expected transaction is in results.
-        //         let transaction_values = transactions
-        //             .iter()
-        //             .map(|t| t.to_json_value())
-        //             .collect::<Vec<_>>();
-        //         assert!(transaction_values.contains(&expected_transaction.to_json_value()));
-        //     }
-        // }
+                // Verify expected transaction is in results.
+                let transaction_values = transactions
+                    .iter()
+                    .map(|t| t.to_json_value())
+                    .collect::<Vec<_>>();
+                println!("expected: {}", expected_transaction.to_json_value());
+                println!("values: {transaction_values:?}");
+                assert!(transaction_values.contains(&expected_transaction.to_json_value()));
+            }
+        }
     }
 
     // Unknown hash.

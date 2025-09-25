@@ -27,8 +27,18 @@ query BlockQuery($block_offset: BlockOffset) {
                     ... on RegularTransaction {
                         transactionResult {
                             status
+                            segments {
+                                id
+                                success
+                            }
                         }
                         identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
                     }
                 }
                 unshieldedBalances {
@@ -109,8 +119,18 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                 ... on RegularTransaction {
                     transactionResult {
                         status
+                        segments {
+                            id
+                            success
+                        }
                     }
                     identifiers
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
+                    }
                 }
             }
             unshieldedBalances {
@@ -187,8 +207,18 @@ query ContractActionQuery(
             ... on RegularTransaction {
                 transactionResult {
                     status
+                    segments {
+                        id
+                        success
+                    }
                 }
                 identifiers
+                startIndex
+                endIndex
+                fees {
+                    paidFees
+                    estimatedFees
+                }
             }
         }
         unshieldedBalances {
@@ -242,8 +272,18 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                     ... on RegularTransaction {
                         transactionResult {
                             status
+                            segments {
+                                id
+                                success
+                            }
                         }
                         identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
                     }
                 }
                 unshieldedBalances {
@@ -324,8 +364,18 @@ subscription ContractActionSubscription(
             ... on RegularTransaction {
                 transactionResult {
                     status
+                    segments {
+                        id
+                        success
+                    }
                 }
                 identifiers
+                startIndex
+                endIndex
+                fees {
+                    paidFees
+                    estimatedFees
+                }
             }
         }
         unshieldedBalances {
@@ -374,6 +424,17 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                 ... on RegularTransaction {
                     transactionResult {
                         status
+                        segments {
+                            id
+                            success
+                        }
+                    }
+                    identifiers
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
                     }
                 }
             }
@@ -389,6 +450,17 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                     ... on RegularTransaction {
                         transactionResult {
                             status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
                         }
                     }
                 }
@@ -405,6 +477,17 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                     ... on RegularTransaction {
                         transactionResult {
                             status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
                         }
                     }
                 }
@@ -414,6 +497,17 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                     ... on RegularTransaction {
                         transactionResult {
                             status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
                         }
                     }
                 }

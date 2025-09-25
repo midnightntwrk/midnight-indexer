@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{RegularTransaction, Transaction, storage::NoopStorage};
+use crate::domain::{Transaction, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{
     RawUnshieldedAddress, SerializedTransactionIdentifier, SessionId, TransactionHash,
@@ -50,7 +50,7 @@ where
         session_id: SessionId,
         index: u64,
         batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<RegularTransaction, sqlx::Error>> + Send;
+    ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send;
 
     /// Get all transactions that create or spend unshielded UTXOs for the given address, ordered by
     /// transaction ID.
@@ -107,7 +107,7 @@ impl TransactionStorage for NoopStorage {
         session_id: SessionId,
         index: u64,
         batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<RegularTransaction, sqlx::Error>> + Send {
+    ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send {
         stream::empty()
     }
 

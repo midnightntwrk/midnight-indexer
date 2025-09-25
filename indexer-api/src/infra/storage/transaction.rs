@@ -365,7 +365,7 @@ impl TransactionStorage for Storage {
         session_id: SessionId,
         mut index: u64,
         batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<RegularTransaction, sqlx::Error>> + Send {
+    ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send {
         let chunks = try_stream! {
             loop {
                 let transactions = self
@@ -373,8 +373,10 @@ impl TransactionStorage for Storage {
                     .await?;
 
                 match transactions.last() {
-                    Some(transaction) => index = transaction.end_index + 1,
+                    Some(Transaction::Regular(t)) => index = t.end_index + 1,
+                    Some(Transaction::System(_)) => panic!("unexpected system transaction"),
                     None => break,
+
                 }
 
                 yield transactions;
@@ -484,7 +486,7 @@ impl Storage {
         session_id: SessionId,
         index: u64,
         batch_size: NonZeroU32,
-    ) -> Result<Vec<RegularTransaction>, sqlx::Error> {
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
         #[cfg(feature = "cloud")]
         let query = indoc! {"
             SELECT
@@ -541,8 +543,7 @@ impl Storage {
             .bind(session_id.as_ref())
             .bind(index as i64)
             .bind(batch_size.get() as i64)
-            .fetch_all(&*self.pool)
-            .await?;
+            .fetch(&*self.pool);
 
         #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
@@ -550,7 +551,10 @@ impl Storage {
                 get_identifiers_for_transaction(transaction.id, &self.pool).await?;
         }
 
-        Ok(transactions)
+        transactions
+            .map_ok(Transaction::Regular)
+            .try_collect::<Vec<_>>()
+            .await
     }
 
     #[trace(properties = {
