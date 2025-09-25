@@ -1,0 +1,72 @@
+#!/bin/bash
+
+set -e
+
+# Check if the script is executed from the root directory
+if [ ! -f "justfile" ]; then
+    echo "Error: This script must be executed from the root directory of the project"
+    exit 1
+fi
+
+CHAIN=$1
+if [ -z "$CHAIN" ]; then
+    echo "Please provide a chain id"
+    echo "Usage: $0 <chain_id> [node_tag]"
+    exit 1
+fi
+
+# NODE_TAG is optional - if not provided, use default
+NODE_TAG=$2
+if [ -z "$NODE_TAG" ]; then
+    # This is not ideal, NODE_TAG to use depends on the specific chain where node might be running
+    # with another version
+    echo "NODE_TAG not specified, deriving it from justfile"
+    NODE_TAG=`cat justfile |grep "node_version :="|awk -F " " '{print $3}'|sed s/\"//g` 
+    
+    # Validate NODE_TAG format: <number>.<number>.<number><optional -alpha, -beta, -rc and number>
+    if [[ ! "$NODE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]*)?$ ]]; then
+        echo "Warning: NODE_TAG from justfile ($NODE_TAG) doesn't match expected format"
+        echo "Expected format: <number>.<number>.<number> or <number>.<number>.<number>-<alpha|beta|rc>[<number>]"
+        echo "Using fallback NODE_TAG"
+        NODE_TAG="0.13.2-rc.2"
+    fi
+    
+    echo "NODE_TAG derived from justfile: $NODE_TAG"
+fi
+if [ "$CHAIN" != "undeployed" ] && [ "$CHAIN" != "devnet" ] && [ "$CHAIN" != "testnet02" ] && [ "$CHAIN" != "nodedev01" ]; then
+    echo "Please provide a valid chain id (undeployed, devnet, testnet02, nodedev01)"
+    echo "Usage: $0 <chain_id>"
+    exit 1
+fi
+
+TARGET_DIR=./.tmp/toolkit
+
+mkdir -p $TARGET_DIR
+mkdir -p $TARGET_DIR/.sync_cache-$CHAIN
+
+CONTAINER_NAME="toolkit-${CHAIN}"
+
+# Check if container is already running
+if docker ps --format "table {{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+    echo "Container ${CONTAINER_NAME} is already running"
+    exit 0
+fi
+
+# Check if container exists but is stopped
+if docker ps -a --format "table {{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+    echo "Container ${CONTAINER_NAME} exists but is stopped. Starting it..."
+    docker start "$CONTAINER_NAME"
+    exit 0
+fi
+
+echo "Starting new container ${CONTAINER_NAME} with NODE_TAG: $NODE_TAG"
+
+docker run \
+    -d \
+    --name "$CONTAINER_NAME" \
+    --entrypoint "" \
+    --network host \
+    -v $TARGET_DIR:/out \
+    -v $TARGET_DIR/.sync_cache-$CHAIN:/.sync_cache \
+    ghcr.io/midnight-ntwrk/midnight-node-toolkit:$NODE_TAG \
+    sleep infinity
