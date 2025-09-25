@@ -24,6 +24,7 @@ import type {
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
 import dataProvider from '@utils/testdata-provider';
+import { TestContext } from 'vitest';
 
 const indexerHttpClient = new IndexerHttpClient();
 
@@ -81,7 +82,12 @@ describe('block queries', () => {
      * @when we send a block query without parameters
      * @then Indexer should return the latest known block
      */
-    test('should return the latest known block', async () => {
+    test('should return the latest known block', async ({ task }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'Latest'],
+        testKey: 'PM-17677',
+      };
+
       log.debug('Requesting latest block from indexer');
       const response: BlockResponse = await indexerHttpClient.getLatestBlock();
 
@@ -99,7 +105,14 @@ describe('block queries', () => {
      * @when we send a block query without parameters
      * @then Indexer should respond with a block according to the requested schema
      */
-    test('should respond with a block according to the requested schema', async () => {
+    test('should respond with a block according to the requested schema', async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'Latest', 'SchemaValidation'],
+        testKey: 'PM-17678',
+      };
+
       log.debug('Requesting latest block from indexer');
       const response: BlockResponse = await indexerHttpClient.getLatestBlock();
 
@@ -124,7 +137,14 @@ describe('block queries', () => {
      * @when we send a block query by hash using that hash
      * @then Indexer should respond with the block with that hash
      */
-    test('should return the block with that hash, given that block exists', async () => {
+    test('should return the block with that hash, given that block exists', async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHash'],
+        testKey: 'PM-17679',
+      };
+
       // Everything is already checked in getLatestBlockByHash function
       // If the promise resolves, we know that the block exists and the test passes
       const blockByHash = await getLatestBlockByHash();
@@ -136,7 +156,14 @@ describe('block queries', () => {
      * @when we send a block query by hash
      * @then Indexer should respond with a block according to the requested schema
      */
-    test('should return blocks according to the requested schema', async () => {
+    test('should return blocks according to the requested schema', async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHash', 'SchemaValidation'],
+        testKey: 'PM-17680',
+      };
+
       const blockByHash = await getLatestBlockByHash();
 
       log.debug('Validating block schema');
@@ -154,7 +181,14 @@ describe('block queries', () => {
      * @when we send a block query by hash using that hash
      * @then Indexer should respond with a null block section
      */
-    test("should return a null block, given a block with that hash doesn't exist", async () => {
+    test("should return a null block, given a block with that hash doesn't exist", async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHash', 'Negative'],
+        testKey: 'PM-17681',
+      };
+
       const allZeroHash = '0000000000000000000000000000000000000000000000000000000000000000';
       log.debug(`Requesting a block with hash ${allZeroHash}`);
 
@@ -172,7 +206,14 @@ describe('block queries', () => {
      * @when we send a block query by hash using them
      * @then Indexer should respond with an error
      */
-    test('should return an error, when the hash is invalid (malformed)', async () => {
+    test('should return an error, when the hash is invalid (malformed)', async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHash', 'Negative'],
+        testKey: 'PM-17683',
+      };
+
       const fabricatedMalformedHashes = dataProvider.getFabricatedMalformedHashes();
 
       for (const targetHash of fabricatedMalformedHashes) {
@@ -193,7 +234,14 @@ describe('block queries', () => {
      * @when we send a block query by height using that height
      * @then Indexer should respond with the block with that height
      */
-    test('should return the block with that height, given a valid height', async () => {
+    test('should return the block with that height, given a valid height', async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight'],
+        testKey: 'PM-17339',
+      };
+
       // Everything is already checked in getLatestBlockByHeight function
       // If the promise resolves, we know that the block exists and the test passes
       const blockByHeight = await getLatestBlockByHeight();
@@ -205,7 +253,14 @@ describe('block queries', () => {
      * @when we send a block query by height
      * @then Indexer should respond with a block according to the requested schema
      */
-    test('should return a blocks according to the requested schema', async () => {
+    test('should return a blocks according to the requested schema', async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'SchemaValidation'],
+        testKey: 'PM-17684',
+      };
+
       // Everything is already checked in getLatestBlockByHeight function
       // If the promise resolves, we know that the block exists and the test passes
       const blockByHeight = await getLatestBlockByHeight();
@@ -225,7 +280,14 @@ describe('block queries', () => {
      * @when we send a block query by height using that height
      * @then Indexer should respond with the genesis block
      */
-    test('should return the genesis block, given height=0 is requested', async () => {
+    test('should return the genesis block, given height=0 is requested', async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis'],
+        testKey: 'PM-17685',
+      };
+
       log.debug(`Requesting genesis block (height = 0)`);
 
       const queryResponse = await indexerHttpClient.getBlockByOffset({ height: 0 });
@@ -247,7 +309,14 @@ describe('block queries', () => {
      * @when we send a block query by height using that height
      * @then Indexer should respond with an empty block
      */
-    test('should return an empty body answer, given that block height request is the maximum available height', async () => {
+    test('should return an empty body answer, given that block height request is the maximum available height', async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Negative'],
+        testKey: 'PM-17686',
+      };
+
       const maxAllowedBlockHeight = 2 ** 32 - 1; // Note this is the maximum allowed height and will take 800+ years to reach
       log.debug(`Requesting block with max height = ${maxAllowedBlockHeight}`);
 
@@ -267,7 +336,12 @@ describe('block queries', () => {
      * @when we send a block query by height using them
      * @then Indexer should respond with an error
      */
-    test('should return an error, given an invalid height', async () => {
+    test('should return an error, given an invalid height', async ({ task }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Negative'],
+        testKey: 'PM-17687',
+      };
+
       const invalidHeights = dataProvider.getFabricatedMalformedHeights();
 
       for (const targetHeight of invalidHeights) {
@@ -291,7 +365,14 @@ describe('block queries', () => {
      * @when we send a block query with both parameters
      * @then Indexer should respond with an error
      */
-    test('should return an error, as only one parameter at a time can be used', async () => {
+    test('should return an error, as only one parameter at a time can be used', async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeightAndHash', 'Negative'],
+        testKey: 'PM-17688',
+      };
+
       // Here we cover the 4 combinations of valid and invalid parameters (hash and height)
       const hashes = [dataProvider.getKnownBlockHash(), 'invalid-hash'];
       const heights = [1, 2 ** 32];
@@ -342,7 +423,14 @@ describe(`genesis block`, () => {
      * @when we inspect its transactions
      * @then it should contain one transaction with pre-fund wallet utxos
      */
-    test('should contain one transaction with pre-fund wallet utxos', async () => {
+    test('should contain one transaction with pre-fund wallet utxos', async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets'],
+        testKey: 'PM-17689',
+      };
+
       const genesisTransaction = await extractGenesisTransaction(genesisBlock);
       expect(genesisTransaction.unshieldedCreatedOutputs).toBeDefined();
       expect(genesisTransaction.unshieldedCreatedOutputs?.length).toBeGreaterThanOrEqual(1);
@@ -355,7 +443,14 @@ describe(`genesis block`, () => {
      * @when we inspect the utxos in its transaction
      * @then there should be utxos related to exactly 4 pre-fund wallets
      */
-    test('should contain utxos related to exactly 4 pre-fund wallets', async () => {
+    test('should contain utxos related to exactly 4 pre-fund wallets', async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets'],
+        testKey: 'PM-17690',
+      };
+
       const expectedPreFundWallets = 4;
       const genesisTransaction = await extractGenesisTransaction(genesisBlock);
 
@@ -377,7 +472,12 @@ describe(`genesis block`, () => {
      * @when we inspect the utxos in its transaction
      * @then there should be utxos with exactly 3 different tokens
      */
-    test('should contain utxos with exactly 3 different tokens', async () => {
+    test('should contain utxos with exactly 3 different tokens', async ({ task }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets'],
+        testKey: 'PM-17691',
+      };
+
       const expectedTokenTypes = 3;
       const genesisTransaction = await extractGenesisTransaction(genesisBlock);
       expect(genesisTransaction.unshieldedCreatedOutputs).toBeDefined();
@@ -402,7 +502,14 @@ describe(`genesis block`, () => {
      * @then the utxos should be sorted by outputIndex in ascending order
      */
     // https://shielded.atlassian.net/browse/PM-17665
-    test('should contain utxos sorted by outputIndex in ascending order', async () => {
+    test('should contain utxos sorted by outputIndex in ascending order', async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets'],
+        testKey: 'PM-17692',
+      };
+
       const genesisTransaction = await extractGenesisTransaction(genesisBlock);
 
       const createdOutputs = genesisTransaction.unshieldedCreatedOutputs;
