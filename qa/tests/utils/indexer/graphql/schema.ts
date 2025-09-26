@@ -39,17 +39,61 @@ export const BlockSchema = z.lazy(() =>
   }),
 );
 
-export const FullTransactionSchema = z.lazy(() =>
+// Base transaction schema (common to both RegularTransaction and SystemTransaction)
+const BaseTransactionFields = {
+  id: z.number(),
+  hash: Hash64,
+  protocolVersion: z.number(),
+  raw: VarLenghtHex,
+  block: PartialBlockSchema,
+  contractActions: z.array(z.any()), // Will be validated separately
+  unshieldedCreatedOutputs: z.array(z.any()), // Will be validated separately
+  unshieldedSpentOutputs: z.array(z.any()), // Will be validated separately
+  zswapLedgerEvents: z.array(
+    z.object({
+      id: z.number(),
+      raw: z.string(),
+      maxId: z.number(),
+    }),
+  ),
+  dustLedgerEvents: z.array(
+    z.object({
+      id: z.number(),
+      raw: z.string(),
+      maxId: z.number(),
+    }),
+  ),
+};
+
+// RegularTransaction schema (includes additional fields)
+export const RegularTransactionSchema = z.lazy(() =>
   z.object({
-    hash: Hash64,
-    protocolVersion: z.number(),
-    applyStage: z.string(),
-    identifiers: z.array(z.string()),
-    raw: VarLenghtHex,
+    ...BaseTransactionFields,
     merkleTreeRoot: z.string().regex(/^[a-f0-9]+$/),
-    block: PartialBlockSchema,
+    identifiers: z.array(z.string()),
+    startIndex: z.number(),
+    endIndex: z.number(),
+    fees: z.object({
+      paidFees: z.string(),
+      estimatedFees: z.string(),
+    }),
+    transactionResult: z.object({
+      status: z.enum(['SUCCESS', 'PARTIAL_SUCCESS', 'FAILURE']),
+      segments: z.array(
+        z.object({
+          id: z.number(),
+          success: z.boolean(),
+        }),
+      ),
+    }),
   }),
 );
+
+// SystemTransaction schema (only base fields)
+export const SystemTransactionSchema = z.lazy(() => z.object(BaseTransactionFields));
+
+// Union schema for both transaction types
+export const FullTransactionSchema = z.union([RegularTransactionSchema, SystemTransactionSchema]);
 
 // Contract related schema validation
 const BaseActionSchema = z.object({
@@ -78,4 +122,59 @@ export const ContractActionSchema = z.discriminatedUnion('type', [
   ContractCallSchema,
   ContractDeploySchema,
   ContractUpdateSchema,
+]);
+
+// Ledger event schemas
+export const ZswapLedgerEventSchema = z.object({
+  id: z.number(),
+  raw: z.string(),
+  maxId: z.number(),
+});
+
+export const DustLedgerEventSchema = z.object({
+  id: z.number(),
+  raw: z.string(),
+  maxId: z.number(),
+});
+
+// Contract balance schema
+export const ContractBalanceSchema = z.object({
+  tokenType: z.string(),
+  amount: z.string(),
+});
+
+// Updated contract action schemas to match current API
+export const ContractDeployActionSchema = z.object({
+  __typename: z.literal('ContractDeploy'),
+  address: z.string(),
+  state: z.string(),
+  chainState: z.string(),
+  transaction: z.any(), // Reference to transaction
+  unshieldedBalances: z.array(ContractBalanceSchema),
+});
+
+export const ContractCallActionSchema = z.object({
+  __typename: z.literal('ContractCall'),
+  address: z.string(),
+  state: z.string(),
+  chainState: z.string(),
+  entryPoint: z.string(),
+  transaction: z.any(), // Reference to transaction
+  deploy: z.any(), // Reference to deploy
+  unshieldedBalances: z.array(ContractBalanceSchema),
+});
+
+export const ContractUpdateActionSchema = z.object({
+  __typename: z.literal('ContractUpdate'),
+  address: z.string(),
+  state: z.string(),
+  chainState: z.string(),
+  transaction: z.any(), // Reference to transaction
+  unshieldedBalances: z.array(ContractBalanceSchema),
+});
+
+export const ContractActionUnionSchema = z.discriminatedUnion('__typename', [
+  ContractDeployActionSchema,
+  ContractCallActionSchema,
+  ContractUpdateActionSchema,
 ]);

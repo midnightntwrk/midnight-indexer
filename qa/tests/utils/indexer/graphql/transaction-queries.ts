@@ -31,21 +31,14 @@ export const UNSHIELDED_UTXO_BODY_FRAGMENT = `     owner
         hash
       }`;
 
-export const TRANSACTION_BODY_FRAGMENT = `   id
+export const BASE_TRANSACTION_FRAGMENT = `   id
+    __typename
     hash
     protocolVersion
-    merkleTreeRoot
-        identifiers
-    fees {
-      paidFees
-      estimatedFees
-    }
+    raw
     block {
       hash
       height
-    }
-    transactionResult {
-      ${TRANSACTION_RESULT_BODY_FRAGMENT}
     }
     contractActions {
       address
@@ -57,7 +50,39 @@ export const TRANSACTION_BODY_FRAGMENT = `   id
     }
     unshieldedSpentOutputs {
       ${UNSHIELDED_UTXO_BODY_FRAGMENT}
+    }
+    zswapLedgerEvents {
+      id
+      raw
+      maxId
+    }
+    dustLedgerEvents {
+      id
+      raw
+      maxId
     }`;
+
+export const REGULAR_TRANSACTION_FRAGMENT = `   ... on RegularTransaction {
+      ${BASE_TRANSACTION_FRAGMENT}
+      merkleTreeRoot
+      identifiers
+      startIndex
+      endIndex
+      fees {
+        paidFees
+        estimatedFees
+      }
+      transactionResult {
+        ${TRANSACTION_RESULT_BODY_FRAGMENT}
+      }
+    }`;
+
+export const SYSTEM_TRANSACTION_FRAGMENT = `   ... on SystemTransaction {
+      ${BASE_TRANSACTION_FRAGMENT}
+    }`;
+
+export const TRANSACTION_BODY_FRAGMENT = `   ${REGULAR_TRANSACTION_FRAGMENT}
+    ${SYSTEM_TRANSACTION_FRAGMENT}`;
 
 export const GET_TRANSACTION_BY_OFFSET = `query GetTransactionByOffset($OFFSET: TransactionOffset!){
   transactions(offset: $OFFSET){
