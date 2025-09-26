@@ -21,6 +21,7 @@ import type {
   BlockOffset,
   ShieldedTransactionsEvent,
   UnshieldedTransactionEvent,
+  ContractAction,
   GraphQLResponse,
 } from './indexer-types';
 import {
@@ -29,6 +30,8 @@ import {
   SHIELDED_TRANSACTION_SUBSCRIPTION_BY_SESSION_ID,
   UNSHIELDED_TX_SUBSCRIPTION_BY_ADDRESS,
   UNSHIELDED_TX_SUBSCRIPTION_BY_ADDRESS_AND_TRANSACTION_ID,
+  CONTRACT_ACTIONS_SUBSCRIPTION_FROM_LATEST_BLOCK,
+  CONTRACT_ACTIONS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET,
 } from './graphql/subscriptions';
 
 export type BlockSubscriptionResponse = GraphQLResponse<{ blocks: Block }>;
@@ -39,6 +42,10 @@ export type UnshieldedTxSubscriptionResponse = GraphQLResponse<{
 
 export type ShieldedTxSubscriptionResponse = GraphQLResponse<{
   shieldedTransactions: ShieldedTransactionsEvent;
+}>;
+
+export type ContractActionSubscriptionResponse = GraphQLResponse<{
+  contractActions: ContractAction;
 }>;
 
 /**
@@ -653,5 +660,70 @@ export class IndexerWsClient {
 
       this.ws.addEventListener('message', handleMessage);
     });
+  }
+
+  /**
+   * Subscribes to contract action events.
+   *
+   * This method subscribes to contract action events for a specific address.
+   * This can be done providing a blockOffset parameter or without parameters
+   * to start from the latest block.
+   *
+   * - No blockOffset: start streaming from the latest block
+   * - With blockOffset: start streaming from the specified block
+   *
+   * **Query Override Behavior:**
+   * - If `queryOverride` is NOT provided: The function automatically selects the appropriate
+   *   default query based on whether blockOffset is provided and handles all variable mapping
+   * - If `queryOverride` IS provided: The function uses the provided query as-is, but still
+   *   passes the address and blockOffset as variables (caller's responsibility to ensure
+   *   the query matches the params provided)
+   *
+   * @param handlers - The handlers to receive the contract action events.
+   * @param address - The contract address to subscribe to.
+   * @param blockOffset - The block offset to subscribe to.
+   * @param queryOverride - The query override to use.
+   * @returns A function to unsubscribe from the contract action events.
+   */
+  subscribeToContractActionEvents(
+    handlers: SubscriptionHandlers<ContractActionSubscriptionResponse>,
+    address: string,
+    blockOffset?: BlockOffset,
+    queryOverride?: string,
+  ): () => void {
+    const id = this.getNextId();
+
+    const query =
+      queryOverride ??
+      (blockOffset
+        ? CONTRACT_ACTIONS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET
+        : CONTRACT_ACTIONS_SUBSCRIPTION_FROM_LATEST_BLOCK);
+    const variables = {
+      ADDRESS: address,
+      ...(blockOffset && { OFFSET: blockOffset }),
+    };
+
+    log.debug(`Contract action subscription query:\n${query}`);
+    log.debug(`Contract action subscription variables:\n${JSON.stringify(variables, null, 2)}`);
+
+    const payload: GraphQLStartMessage = {
+      id,
+      type: 'start',
+      payload: {
+        query,
+        variables,
+      },
+    };
+
+    log.debug(`Contract action subscription full payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(id, handlers as SubscriptionHandlers<unknown>);
+    this.ws.send(JSON.stringify(payload));
+
+    return () => {
+      const stopMessage: GraphQLStopMessage = { id, type: 'stop' };
+      this.ws.send(JSON.stringify(stopMessage));
+      this.handlersMap.delete(id);
+    };
   }
 }

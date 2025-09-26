@@ -113,3 +113,61 @@ export const BLOCKS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription BlocksSubs
         timestamp
     }
 }`;
+
+const CONTRACT_ACTION_SUBSCRIPTION_FRAGMENT = `
+    __typename
+    address
+    ... on ContractDeploy {
+        state
+        chainState
+        transaction {
+            hash
+        }
+        unshieldedBalances {
+            tokenType
+            amount
+        }
+    }
+    ... on ContractCall {
+        state
+        chainState
+        transaction {
+            hash
+        }
+        entryPoint
+        deploy {
+            address
+            unshieldedBalances {
+                tokenType
+                amount
+            }
+        }
+        unshieldedBalances {
+            tokenType
+            amount
+        }
+    }
+    ... on ContractUpdate {
+        state
+        chainState
+        transaction {
+            hash
+        }
+        unshieldedBalances {
+            tokenType
+            amount
+        }
+    }
+`;
+
+export const CONTRACT_ACTIONS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription ContractActionsSubscriptionFromLatestBlock($ADDRESS: HexEncoded!) {
+    contractActions(address: $ADDRESS) {
+        ${CONTRACT_ACTION_SUBSCRIPTION_FRAGMENT}
+    }
+}`;
+
+export const CONTRACT_ACTIONS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription ContractActionsSubscriptionFromBlockByOffset($ADDRESS: HexEncoded!, $OFFSET: BlockOffset) {
+    contractActions(address: $ADDRESS, offset: $OFFSET) {
+        ${CONTRACT_ACTION_SUBSCRIPTION_FRAGMENT}
+    }
+}`;
