@@ -239,6 +239,9 @@ where
     _s: PhantomData<S>,
 }
 
+// TODO: This duplicates the ComplexObject implementation for RegularTransaction which is necessary
+// for async-graphql's #[ComplexObject] macro to work with GraphQL interfaces. Revisit when
+// async-graphql provides better support for shared implementations across interface types.
 #[ComplexObject]
 impl<S> SystemTransaction<S>
 where
