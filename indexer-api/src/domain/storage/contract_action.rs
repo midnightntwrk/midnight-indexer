@@ -79,7 +79,7 @@ where
     ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send;
 
     /// Get unshielded token balances for a contract action.
-    async fn get_unshielded_balances_by_action_id(
+    async fn get_unshielded_balances_by_contract_action_id(
         &self,
         contract_action_id: u64,
     ) -> Result<Vec<ContractBalance>, sqlx::Error>;
@@ -156,7 +156,7 @@ impl ContractActionStorage for NoopStorage {
         stream::empty()
     }
 
-    async fn get_unshielded_balances_by_action_id(
+    async fn get_unshielded_balances_by_contract_action_id(
         &self,
         contract_action_id: u64,
     ) -> Result<Vec<ContractBalance>, sqlx::Error> {

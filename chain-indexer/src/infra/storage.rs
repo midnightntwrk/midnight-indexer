@@ -13,14 +13,14 @@
 
 use crate::domain::{
     self, Block, BlockTransactions, ContractAction, RegularTransaction, SystemTransaction,
-    Transaction, TransactionVariant, node::BlockInfo,
+    Transaction, node::BlockInfo,
 };
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
         BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
-        LedgerEventAttributes, UnshieldedUtxo,
+        LedgerEventAttributes, TransactionVariant, UnshieldedUtxo,
     },
     infra::sqlx::U128BeBytes,
 };

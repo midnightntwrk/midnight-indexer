@@ -73,6 +73,7 @@ interface ContractAction {
 	state: HexEncoded!
 	chainState: HexEncoded!
 	transaction: Transaction!
+	unshieldedBalances: [ContractBalance!]!
 }
 
 """
@@ -125,7 +126,13 @@ type ContractCall implements ContractAction {
 	The hex-encoded serialized entry point.
 	"""
 	entryPoint: HexEncoded!
+	"""
+	Transaction for this contract call.
+	"""
 	transaction: Transaction!
+	"""
+	Contract deploy for this contract call.
+	"""
 	deploy: ContractDeploy!
 	"""
 	Unshielded token balances held by this contract.
@@ -149,10 +156,12 @@ type ContractDeploy implements ContractAction {
 	The hex-encoded serialized contract-specific zswap state.
 	"""
 	chainState: HexEncoded!
+	"""
+	Transaction for this contract deploy.
+	"""
 	transaction: Transaction!
 	"""
 	Unshielded token balances held by this contract.
-	According to the architecture, deployed contracts must have zero balance.
 	"""
 	unshieldedBalances: [ContractBalance!]!
 }
@@ -173,6 +182,9 @@ type ContractUpdate implements ContractAction {
 	The hex-encoded serialized contract-specific zswap state.
 	"""
 	chainState: HexEncoded!
+	"""
+	Transaction for this contract update.
+	"""
 	transaction: Transaction!
 	"""
 	Unshielded token balances held by this contract after the update.
@@ -292,13 +304,83 @@ type Query {
 }
 
 """
+A regular Midnight transaction.
+"""
+type RegularTransaction implements Transaction {
+	"""
+	The transaction ID.
+	"""
+	id: Int!
+	"""
+	The hex-encoded transaction hash.
+	"""
+	hash: HexEncoded!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The hex-encoded serialized transaction content.
+	"""
+	raw: HexEncoded!
+	"""
+	The result of applying this transaction to the ledger state.
+	"""
+	transactionResult: TransactionResult!
+	"""
+	The hex-encoded serialized transaction identifiers.
+	"""
+	identifiers: [HexEncoded!]!
+	"""
+	The hex-encoded serialized merkle-tree root.
+	"""
+	merkleTreeRoot: HexEncoded!
+	"""
+	The zswap state start index.
+	"""
+	startIndex: Int!
+	"""
+	The zswap state end index.
+	"""
+	endIndex: Int!
+	"""
+	Fee information for this transaction.
+	"""
+	fees: TransactionFees!
+	"""
+	The block for this transaction.
+	"""
+	block: Block!
+	"""
+	The contract actions for this transaction.
+	"""
+	contractActions: [ContractAction!]!
+	"""
+	Unshielded UTXOs created by this transaction.
+	"""
+	unshieldedCreatedOutputs: [UnshieldedUtxo!]!
+	"""
+	Unshielded UTXOs spent (consumed) by this transaction.
+	"""
+	unshieldedSpentOutputs: [UnshieldedUtxo!]!
+	"""
+	Zswap ledger events of this transaction.
+	"""
+	zswapLedgerEvents: [ZswapLedgerEvent!]!
+	"""
+	Dust ledger events of this transaction.
+	"""
+	dustLedgerEvents: [DustLedgerEvent!]!
+}
+
+"""
 A transaction relevant for the subscribing wallet and an optional collapsed merkle tree.
 """
 type RelevantTransaction {
 	"""
 	A transaction relevant for the subscribing wallet.
 	"""
-	transaction: Transaction!
+	transaction: RegularTransaction!
 	"""
 	An optional collapsed merkle tree.
 	"""
@@ -383,9 +465,9 @@ type Subscription {
 }
 
 """
-A Midnight transaction.
+A system Midnight transaction.
 """
-type Transaction {
+type SystemTransaction implements Transaction {
 	"""
 	The transaction ID.
 	"""
@@ -403,35 +485,11 @@ type Transaction {
 	"""
 	raw: HexEncoded!
 	"""
-	The result of applying a transaction to the ledger state.
-	"""
-	transactionResult: TransactionResult!
-	"""
-	Fee information for this transaction.
-	"""
-	fees: TransactionFees!
-	"""
-	The hex-encoded serialized transaction identifiers.
-	"""
-	identifiers: [HexEncoded!]!
-	"""
-	The hex-encoded serialized merkle-tree root.
-	"""
-	merkleTreeRoot: HexEncoded!
-	"""
-	The zswap state start index.
-	"""
-	startIndex: Int!
-	"""
-	The zswap state end index.
-	"""
-	endIndex: Int!
-	"""
 	The block for this transaction.
 	"""
 	block: Block!
 	"""
-	The contract actions.
+	The contract actions for this transaction.
 	"""
 	contractActions: [ContractAction!]!
 	"""
@@ -449,6 +507,22 @@ type Transaction {
 	"""
 	Dust ledger events of this transaction.
 	"""
+	dustLedgerEvents: [DustLedgerEvent!]!
+}
+
+"""
+A Midnight transaction.
+"""
+interface Transaction {
+	id: Int!
+	hash: HexEncoded!
+	protocolVersion: Int!
+	raw: HexEncoded!
+	block: Block!
+	contractActions: [ContractAction!]!
+	unshieldedCreatedOutputs: [UnshieldedUtxo!]!
+	unshieldedSpentOutputs: [UnshieldedUtxo!]!
+	zswapLedgerEvents: [ZswapLedgerEvent!]!
 	dustLedgerEvents: [DustLedgerEvent!]!
 }
 

@@ -12,68 +12,44 @@ query BlockQuery($block_offset: BlockOffset) {
         transactions {
             hash
             protocolVersion
-            transactionResult {
-                status
-                segments {
-                    id
-                    success
-                }
-            }
-            fees {
-                paidFees
-                estimatedFees
-            }
-            identifiers
             block {
                 hash
             }
             contractActions {
-                __typename
-                ... on ContractDeploy {
-                    address
-                    transaction {
+                address
+                transaction {
+                    hash
+                    block {
                         hash
+                        height
+                    }
+                    __typename
+                    ... on RegularTransaction {
                         transactionResult {
                             status
+                            segments {
+                                id
+                                success
+                            }
                         }
                         identifiers
-                        block {
-                            hash
-                            height
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
                         }
                     }
+                }
+                unshieldedBalances {
+                    tokenType
+                    amount
                 }
                 __typename
                 ... on ContractCall {
-                    address
-                    transaction {
-                        hash
-                        transactionResult {
-                            status
-                        }
-                        identifiers
-                        block {
-                            hash
-                            height
-                        }
-                    }
+                    entryPoint
                     deploy {
                         address
-                    }
-                }
-                __typename
-                ... on ContractUpdate {
-                    address
-                    transaction {
-                        transactionResult {
-                            status
-                        }
-                        hash
-                        identifiers
-                        block {
-                            hash
-                            height
-                        }
                     }
                 }
             }
@@ -95,21 +71,29 @@ query BlockQuery($block_offset: BlockOffset) {
                 id
             }
             dustLedgerEvents {
-                __typename
-                ... on ParamChange {
-                    id
-                }
+                id
                 __typename
                 ... on DustInitialUtxo {
-                    id
+                    output {
+                        nonce
+                    }
                 }
-                __typename
-                ... on DustGenerationDtimeUpdate {
-                    id
+            }
+            __typename
+            ... on RegularTransaction {
+                transactionResult {
+                    status
+                    segments {
+                        id
+                        success
+                    }
                 }
-                __typename
-                ... on DustSpendProcessed {
-                    id
+                identifiers
+                startIndex
+                endIndex
+                fees {
+                    paidFees
+                    estimatedFees
                 }
             }
         }
@@ -120,68 +104,44 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
     transactions(offset: $transaction_offset) {
         hash
         protocolVersion
-        transactionResult {
-            status
-            segments {
-                id
-                success
-            }
-        }
-        fees {
-            paidFees
-            estimatedFees
-        }
-        identifiers
         block {
             hash
         }
         contractActions {
-            __typename
-            ... on ContractDeploy {
-                address
-                transaction {
+            address
+            transaction {
+                hash
+                block {
                     hash
+                    height
+                }
+                __typename
+                ... on RegularTransaction {
                     transactionResult {
                         status
+                        segments {
+                            id
+                            success
+                        }
                     }
                     identifiers
-                    block {
-                        hash
-                        height
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
                     }
                 }
+            }
+            unshieldedBalances {
+                tokenType
+                amount
             }
             __typename
             ... on ContractCall {
-                address
-                transaction {
-                    hash
-                    transactionResult {
-                        status
-                    }
-                    identifiers
-                    block {
-                        hash
-                        height
-                    }
-                }
+                entryPoint
                 deploy {
                     address
-                }
-            }
-            __typename
-            ... on ContractUpdate {
-                address
-                transaction {
-                    hash
-                    transactionResult {
-                        status
-                    }
-                    identifiers
-                    block {
-                        hash
-                        height
-                    }
                 }
             }
         }
@@ -203,21 +163,29 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
             id
         }
         dustLedgerEvents {
-            __typename
-            ... on ParamChange {
-                id
-            }
+            id
             __typename
             ... on DustInitialUtxo {
-                id
+                output {
+                    nonce
+                }
             }
-            __typename
-            ... on DustGenerationDtimeUpdate {
-                id
+        }
+        __typename
+        ... on RegularTransaction {
+            transactionResult {
+                status
+                segments {
+                    id
+                    success
+                }
             }
-            __typename
-            ... on DustSpendProcessed {
-                id
+            identifiers
+            startIndex
+            endIndex
+            fees {
+                paidFees
+                estimatedFees
             }
         }
     }
@@ -228,52 +196,40 @@ query ContractActionQuery(
     $contract_action_offset: ContractActionOffset
 ) {
     contractAction(address: $address, offset: $contract_action_offset) {
-        __typename
-        ... on ContractDeploy {
-            address
-            transaction {
+        address
+        transaction {
+            hash
+            block {
                 hash
+                height
+            }
+            __typename
+            ... on RegularTransaction {
                 transactionResult {
                     status
+                    segments {
+                        id
+                        success
+                    }
                 }
                 identifiers
-                block {
-                    hash
-                    height
+                startIndex
+                endIndex
+                fees {
+                    paidFees
+                    estimatedFees
                 }
             }
+        }
+        unshieldedBalances {
+            tokenType
+            amount
         }
         __typename
         ... on ContractCall {
-            address
-            transaction {
-                hash
-                transactionResult {
-                    status
-                }
-                identifiers
-                block {
-                    hash
-                    height
-                }
-            }
+            entryPoint
             deploy {
                 address
-            }
-        }
-        __typename
-        ... on ContractUpdate {
-            address
-            transaction {
-                hash
-                transactionResult {
-                    status
-                }
-                identifiers
-                block {
-                    hash
-                    height
-                }
             }
         }
     }
@@ -301,68 +257,44 @@ subscription BlockSubscription($block_offset: BlockOffset) {
         transactions {
             hash
             protocolVersion
-            transactionResult {
-                status
-                segments {
-                    id
-                    success
-                }
-            }
-            fees {
-                paidFees
-                estimatedFees
-            }
-            identifiers
             block {
                 hash
             }
             contractActions {
-                __typename
-                ... on ContractDeploy {
-                    address
-                    transaction {
+                address
+                transaction {
+                    hash
+                    block {
                         hash
+                        height
+                    }
+                    __typename
+                    ... on RegularTransaction {
                         transactionResult {
                             status
+                            segments {
+                                id
+                                success
+                            }
                         }
                         identifiers
-                        block {
-                            hash
-                            height
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
                         }
                     }
+                }
+                unshieldedBalances {
+                    tokenType
+                    amount
                 }
                 __typename
                 ... on ContractCall {
-                    address
-                    transaction {
-                        hash
-                        transactionResult {
-                            status
-                        }
-                        identifiers
-                        block {
-                            hash
-                            height
-                        }
-                    }
+                    entryPoint
                     deploy {
                         address
-                    }
-                }
-                __typename
-                ... on ContractUpdate {
-                    address
-                    transaction {
-                        hash
-                        transactionResult {
-                            status
-                        }
-                        identifiers
-                        block {
-                            hash
-                            height
-                        }
                     }
                 }
             }
@@ -384,21 +316,29 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                 id
             }
             dustLedgerEvents {
-                __typename
-                ... on ParamChange {
-                    id
-                }
+                id
                 __typename
                 ... on DustInitialUtxo {
-                    id
+                    output {
+                        nonce
+                    }
                 }
-                __typename
-                ... on DustGenerationDtimeUpdate {
-                    id
+            }
+            __typename
+            ... on RegularTransaction {
+                transactionResult {
+                    status
+                    segments {
+                        id
+                        success
+                    }
                 }
-                __typename
-                ... on DustSpendProcessed {
-                    id
+                identifiers
+                startIndex
+                endIndex
+                fees {
+                    paidFees
+                    estimatedFees
                 }
             }
         }
@@ -413,52 +353,40 @@ subscription ContractActionSubscription(
         address: $address
         offset: $contract_action_subscription_offset
     ) {
-        __typename
-        ... on ContractDeploy {
-            address
-            transaction {
+        address
+        transaction {
+            hash
+            block {
                 hash
+                height
+            }
+            __typename
+            ... on RegularTransaction {
                 transactionResult {
                     status
+                    segments {
+                        id
+                        success
+                    }
                 }
                 identifiers
-                block {
-                    hash
-                    height
+                startIndex
+                endIndex
+                fees {
+                    paidFees
+                    estimatedFees
                 }
             }
+        }
+        unshieldedBalances {
+            tokenType
+            amount
         }
         __typename
         ... on ContractCall {
-            address
-            transaction {
-                hash
-                transactionResult {
-                    status
-                }
-                identifiers
-                block {
-                    hash
-                    height
-                }
-            }
+            entryPoint
             deploy {
                 address
-            }
-        }
-        __typename
-        ... on ContractUpdate {
-            address
-            transaction {
-                hash
-                transactionResult {
-                    status
-                }
-                identifiers
-                block {
-                    hash
-                    height
-                }
             }
         }
     }
@@ -492,8 +420,22 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
         ... on UnshieldedTransaction {
             transaction {
                 hash
-                block {
-                    height
+                __typename
+                ... on RegularTransaction {
+                    transactionResult {
+                        status
+                        segments {
+                            id
+                            success
+                        }
+                    }
+                    identifiers
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
+                    }
                 }
             }
             createdUtxos {
@@ -504,6 +446,23 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                 intentHash
                 createdAtTransaction {
                     hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
                 }
             }
             spentUtxos {
@@ -514,9 +473,43 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                 intentHash
                 createdAtTransaction {
                     hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
                 }
                 spentAtTransaction {
                     hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
                 }
             }
         }
@@ -535,21 +528,12 @@ subscription ZswapLedgerEventsSubscription($id: Int) {
 
 subscription DustLedgerEventsSubscription($id: Int) {
     dustLedgerEvents(id: $id) {
-        __typename
-        ... on ParamChange {
-            id
-        }
+        id
         __typename
         ... on DustInitialUtxo {
-            id
-        }
-        __typename
-        ... on DustGenerationDtimeUpdate {
-            id
-        }
-        __typename
-        ... on DustSpendProcessed {
-            id
+            output {
+                nonce
+            }
         }
     }
 }
