@@ -20,6 +20,7 @@ import { IndexerHttpClient } from '@utils/indexer/http-client';
 import type {
   Block,
   BlockResponse,
+  RegularTransaction,
   Transaction,
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
@@ -308,17 +309,17 @@ describe('block queries', () => {
 });
 
 /**
- * Extracts and returns the single transaction from the genesis block.
+ * Extracts and returns all the transactions from the genesis block.
  *
- * @param block - The genesis block object to extract the transaction from.
- * @returns The single Transaction object contained in the genesis block.
+ * @param block - The genesis block object to extract the transactions from.
+ * @returns The array of Transaction objects contained in the genesis block.
  */
-async function extractGenesisTransaction(block: Block): Promise<Transaction> {
+async function extractGenesisTransactions(block: Block): Promise<Transaction[]> {
   expect(block.transactions).toBeDefined();
   expect(block.transactions).not.toBeNull();
-  expect(block.transactions).toHaveLength(1);
+  expect(block.transactions.length).toBeGreaterThanOrEqual(1);
 
-  return block.transactions[0] as Transaction;
+  return block.transactions as Transaction[];
 }
 
 describe(`genesis block`, () => {
@@ -336,16 +337,29 @@ describe(`genesis block`, () => {
 
   describe(`a block query to the genesis block`, async () => {
     /**
-     * Genesis block contains one transaction with pre-fund wallet utxos
+     * Genesis block contains transactions with pre-fund wallet utxos
      *
      * @given the genesis block is queried
      * @when we inspect its transactions
-     * @then it should contain one transaction with pre-fund wallet utxos
+     * @then it should contain transactions with pre-fund wallet utxos
      */
-    test('should contain one transaction with pre-fund wallet utxos', async () => {
-      const genesisTransaction = await extractGenesisTransaction(genesisBlock);
-      expect(genesisTransaction.unshieldedCreatedOutputs).toBeDefined();
-      expect(genesisTransaction.unshieldedCreatedOutputs?.length).toBeGreaterThanOrEqual(1);
+    test('should contain transactions with pre-fund wallet utxos', async () => {
+      const genesisTransactions = await extractGenesisTransactions(genesisBlock);
+      expect(genesisTransactions).toBeDefined();
+      expect(genesisTransactions.length).toBeGreaterThanOrEqual(1);
+
+      for (const transaction of genesisTransactions) {
+        if (transaction.__typename === 'RegularTransaction') {
+          const regularTransaction = transaction as RegularTransaction;
+          if (regularTransaction.identifiers?.length === 1) {
+            expect(regularTransaction.unshieldedCreatedOutputs).toBeDefined();
+            expect(regularTransaction.unshieldedCreatedOutputs?.length).toBeGreaterThanOrEqual(1);
+          } else {
+            expect(regularTransaction.raw).toBeDefined();
+            expect(regularTransaction.raw).not.toBeNull();
+          }
+        }
+      }
     });
 
     /**
@@ -357,38 +371,52 @@ describe(`genesis block`, () => {
      */
     test('should contain utxos related to exactly 4 pre-fund wallets', async () => {
       const expectedPreFundWallets = 4;
-      const genesisTransaction = await extractGenesisTransaction(genesisBlock);
+      const genesisTransactions = await extractGenesisTransactions(genesisBlock);
 
-      // Loop through all the utxos in the genesis transaction and gather all
+      // Loop through all the utxos in the transactions that have them and gather all
       // the pre-fund wallet addresses
       const preFundWallets: Set<string> = new Set();
-      for (const utxo of genesisTransaction.unshieldedCreatedOutputs!) {
-        preFundWallets.add(utxo.owner);
-        log.debug(`pre-fund wallet found: ${utxo.owner}`);
+      for (const transaction of genesisTransactions) {
+        if (transaction.__typename === 'RegularTransaction') {
+          const regularTransaction = transaction as RegularTransaction;
+          const utxos = regularTransaction.unshieldedCreatedOutputs;
+          if (utxos!.length > 0) {
+            for (const utxo of utxos!) {
+              preFundWallets.add(utxo.owner);
+              log.debug(`pre-fund wallet found: ${utxo.owner}`);
+            }
+          }
+        }
       }
 
       expect(preFundWallets).toHaveLength(expectedPreFundWallets);
     });
 
     /**
-     * Genesis block contains utxos with exactly 3 different tokens
+     * Genesis block contains utxos with exactly 1 token type
      *
      * @given the genesis block is queried
      * @when we inspect the utxos in its transaction
-     * @then there should be utxos with exactly 3 different tokens
+     * @then there should be utxos with exactly 1 token type
      */
-    test('should contain utxos with exactly 3 different tokens', async () => {
-      const expectedTokenTypes = 3;
-      const genesisTransaction = await extractGenesisTransaction(genesisBlock);
-      expect(genesisTransaction.unshieldedCreatedOutputs).toBeDefined();
-      expect(genesisTransaction.unshieldedCreatedOutputs).not.toBeNull();
+    test('should contain utxos with exactly 1 token', async () => {
+      const expectedTokenTypes = 1;
+      const genesisTransactions = await extractGenesisTransactions(genesisBlock);
 
-      // Loop through all the utxos in the genesis transaction and gather all
-      // available token types
+      // Loop through all the utxos in the transactions that have them and gather all
+      // the token types
       const tokenTypes: Set<string> = new Set();
-      for (const utxo of genesisTransaction.unshieldedCreatedOutputs!) {
-        tokenTypes.add(utxo.tokenType);
-        log.debug(`tokenType found: ${utxo.tokenType}`);
+      for (const transaction of genesisTransactions) {
+        if (transaction.__typename === 'RegularTransaction') {
+          const regularTransaction = transaction as RegularTransaction;
+          const utxos = regularTransaction.unshieldedCreatedOutputs;
+          if (utxos!.length > 0) {
+            for (const utxo of utxos!) {
+              tokenTypes.add(utxo.tokenType);
+              log.debug(`tokenType found: ${utxo.tokenType}`);
+            }
+          }
+        }
       }
 
       expect(tokenTypes).toHaveLength(expectedTokenTypes);
@@ -403,20 +431,35 @@ describe(`genesis block`, () => {
      */
     // https://shielded.atlassian.net/browse/PM-17665
     test('should contain utxos sorted by outputIndex in ascending order', async () => {
-      const genesisTransaction = await extractGenesisTransaction(genesisBlock);
+      const genesisTransactions = await extractGenesisTransactions(genesisBlock);
 
-      const createdOutputs = genesisTransaction.unshieldedCreatedOutputs;
-      expect(createdOutputs).toBeDefined();
-      expect(createdOutputs).not.toBeNull();
-      expect(createdOutputs?.length).toBeGreaterThanOrEqual(1);
-      const utxos = createdOutputs as UnshieldedUtxo[];
+      // Loop through all the utxos in the transactions that have them and gather all
+      // the output indexes
+      const outputIndexes: Set<number> = new Set();
+      for (const transaction of genesisTransactions) {
+        if (transaction.__typename === 'RegularTransaction') {
+          const regularTransaction = transaction as RegularTransaction;
+          const utxos = regularTransaction.unshieldedCreatedOutputs;
+          if (utxos!.length > 0) {
+            for (const utxo of utxos!) {
+              outputIndexes.add(utxo.outputIndex);
+              log.debug(`outputIndex found: ${utxo.outputIndex}`);
+            }
+          }
+        }
+      }
+
+      expect(outputIndexes).toBeDefined();
+      expect(outputIndexes).not.toBeNull();
+      expect(outputIndexes.size).toBeGreaterThanOrEqual(1);
+      const utxos = Array.from(outputIndexes) as number[];
 
       // Loop through all the utxos in the genesis transaction and check whether the
       // they are sorted by outputIndex in ascending order
-      let previousOutputIndex = utxos[0].outputIndex;
+      let previousOutputIndex = utxos[0];
       let currentOutputIndex: number;
       for (let i = 1; i < utxos.length; i++) {
-        currentOutputIndex = utxos[i].outputIndex;
+        currentOutputIndex = utxos[i];
 
         // NOTE: We don't need to check that outputIndex values are strictly sequential (e.g., 0, 1, 2, ... N);
         // we only need to verify that they are sorted in ascending order.

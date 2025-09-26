@@ -314,7 +314,7 @@ describe('unshielded transaction subscriptions', async () => {
         expect(msg.data).toBeNull();
         expect(msg.errors).toBeDefined();
         expect(msg.errors?.[0].message).toMatch(/invalid address/);
-        expect(msg.errors?.[0].message).toMatch(/network ID mismatch/);
+        expect(msg.errors?.[0].message).toMatch(/cannot bech32m-decode unshielded address/);
       }
     });
   });

@@ -18,7 +18,6 @@ import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import { skip } from 'node:test';
 
 const indexerHttpClient = new IndexerHttpClient();
 
@@ -150,7 +149,6 @@ describe('contract queries', () => {
         contractUpdateBlockHash = dataProvider.getContractUpdateBlockHash();
       } catch (error) {
         log.warn(error);
-        console.log(error);
         context.skip?.(true, (error as Error).message);
       }
 
@@ -216,32 +214,42 @@ describe('contract queries', () => {
     });
 
     /**
-     * A contract query by address and block offset returns the most recent contract action for that address before the specified block
+     * A contract query by address and block offset by height returns the most recent contract action for that address before the specified block
      *
-     * @given we have a contract with multiple actions (ContractDeploy at block 49, ContractUpdate at block 59)
-     * @when we send a contract query using that address and past block height (49)
-     * @then Indexer should respond with successful response and return the older action (ContractDeploy)
+     * @given we have multiple contract actions in different blocks (example: ContractDeploy block 49, ContractUpdate block 59)
+     * @when we send a contract query using that address and a past block height (example: block 49)
+     * @then Indexer should return the most recent action for the address before the specified block height (so ContractDeploy block 49)
      */
     test('should return the most recent contract action for that address before the specified block', async (context: TestContext) => {
       let existingContractAddress: string;
       let contractDeployHeight: number;
+      let contractCallHeight: number;
+
       try {
         existingContractAddress = dataProvider.getKnownContractAddress();
         contractDeployHeight = dataProvider.getContractDeployHeight();
+        contractCallHeight = dataProvider.getContractCallHeight();
       } catch (error) {
         log.warn(error);
         context.skip?.(true, (error as Error).message);
       }
-      const response = await indexerHttpClient.getContractAction(existingContractAddress!, {
+      let response = await indexerHttpClient.getContractAction(existingContractAddress!, {
         blockOffset: { height: contractDeployHeight! },
       });
 
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).not.toBeNull();
       expect(response.data?.contractAction?.address).toBe(existingContractAddress!);
-      expect(['ContractUpdate', 'ContractCall']).toContain(
-        response.data?.contractAction?.__typename,
-      );
+      expect(response.data?.contractAction?.__typename).toBe('ContractDeploy');
+
+      response = await indexerHttpClient.getContractAction(existingContractAddress!, {
+        blockOffset: { height: contractCallHeight! },
+      });
+
+      expect(response).toBeSuccess();
+      expect(response.data?.contractAction).not.toBeNull();
+      expect(response.data?.contractAction?.address).toBe(existingContractAddress!);
+      expect(response.data?.contractAction?.__typename).toBe('ContractCall');
     });
 
     /**
@@ -474,16 +482,16 @@ describe('contract queries', () => {
      */
     test('should return null when using a block hash from before the action existed', async (context: TestContext) => {
       let existingContractAddress: string;
-      let preContractBlockHash: string;
+      const genesisBlockHash = (await indexerHttpClient.getBlockByOffset({ height: 0 })).data?.block
+        .hash;
       try {
         existingContractAddress = dataProvider.getKnownContractAddress();
-        preContractBlockHash = dataProvider.getPreContractBlockHash();
       } catch (error) {
         log.warn(error);
         context.skip?.(true, (error as Error).message);
       }
       const response = await indexerHttpClient.getContractAction(existingContractAddress!, {
-        blockOffset: { hash: preContractBlockHash! },
+        blockOffset: { hash: genesisBlockHash! },
       });
 
       expect(response).toBeSuccess();

@@ -1,4 +1,5 @@
 {
-  "contract-deploy-height": 49,
-  "contract-update-height": 59
+  "contract-deploy-height": 3,
+  "contract-call-height": 7,
+  "contract-update-height": 13
 }
