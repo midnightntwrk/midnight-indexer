@@ -37,9 +37,9 @@ export const SHIELDED_TRANSACTION_SUBSCRIPTION_BY_SESSION_ID = `subscription Wal
         }
         ... on ShieldedTransactionsProgress {
             __typename
-            highestIndex
-            highestRelevantIndex
-            highestRelevantWalletIndex
+            highestEndIndex
+            highestCheckedEndIndex
+            highestRelevantEndIndex
         }
     }
 }`;
@@ -49,6 +49,9 @@ const UNSHIELDED_TX_SUBSCRIPTION_FRAGMENT = `    ... on UnshieldedTransaction {
         transaction{
           id
           hash
+          ... on RegularTransaction {
+            identifiers
+          }
         }
         createdUtxos{
           owner
@@ -58,11 +61,15 @@ const UNSHIELDED_TX_SUBSCRIPTION_FRAGMENT = `    ... on UnshieldedTransaction {
           outputIndex
           createdAtTransaction{
               hash
-              identifiers
+              ... on RegularTransaction {
+                identifiers
+              }
           }
           spentAtTransaction{
               hash
-              identifiers
+              ... on RegularTransaction {
+                identifiers
+              }
           }
         }
         spentUtxos{
@@ -73,11 +80,15 @@ const UNSHIELDED_TX_SUBSCRIPTION_FRAGMENT = `    ... on UnshieldedTransaction {
           outputIndex
           createdAtTransaction{
               hash
-              identifiers
+              ... on RegularTransaction {
+                identifiers
+              }
           }
           spentAtTransaction{
               hash
-              identifiers
+              ... on RegularTransaction {
+                identifiers
+              }
           }
         }
       }
