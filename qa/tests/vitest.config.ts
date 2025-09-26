@@ -8,7 +8,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    globalSetup: path.resolve(__dirname, './utils/logging/setup.ts'),
+    globalSetup: [path.resolve(__dirname, './utils/logging/setup.ts')],
     setupFiles: [path.resolve(__dirname, './utils/custom-matchers.ts')],
     coverage: {
       reporter: ['text', 'json', 'html'],
