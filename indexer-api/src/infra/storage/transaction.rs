@@ -29,7 +29,7 @@ use indexer_common::{
     stream::flatten_chunks,
 };
 use indoc::indoc;
-use sqlx::{FromRow, Row, postgres::PgRow};
+use sqlx::{FromRow, Row};
 use std::num::NonZeroU32;
 
 impl TransactionStorage for Storage {
@@ -83,6 +83,7 @@ impl TransactionStorage for Storage {
         let query = indoc! {"
             SELECT
                 transactions.id,
+                transactions.variant,
                 transactions.hash,
                 transactions.protocol_version,
                 transactions.raw,
@@ -97,6 +98,27 @@ impl TransactionStorage for Storage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.id = $1
+            AND transactions.variant = 'Regular'
+
+            UNION ALL
+
+            SELECT
+                transactions.id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                NULL AS transaction_result,
+                NULL AS merkle_tree_root,
+                NULL AS start_index,
+                NULL AS end_index,
+                NULL AS paid_fees,
+                NULL AS estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE transactions.id = $1
+            AND transactions.variant = 'System'
         "};
 
         #[cfg_attr(feature = "cloud", allow(unused_mut))]
@@ -108,7 +130,7 @@ impl TransactionStorage for Storage {
             .transpose()?;
 
         #[cfg(feature = "standalone")]
-        if let Some(transaction) = &mut transaction {
+        if let Some(Transaction::Regular(transaction)) = &mut transaction {
             transaction.identifiers =
                 get_identifiers_for_transaction(transaction.id, &self.pool).await?;
         }
@@ -143,7 +165,7 @@ impl TransactionStorage for Storage {
             UNION ALL
 
             SELECT
-                transactions.id,
+                transactions.id as id,
                 transactions.variant,
                 transactions.hash,
                 transactions.protocol_version,
@@ -167,7 +189,8 @@ impl TransactionStorage for Storage {
         #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
-                transactions.id,
+                transactions.id as id,
+                transactions.variant,
                 transactions.hash,
                 transactions.protocol_version,
                 transactions.raw,
@@ -182,7 +205,29 @@ impl TransactionStorage for Storage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.block_id = $1
-            ORDER BY transactions.id
+            AND transactions.variant = 'Regular'
+
+            UNION ALL
+
+            SELECT
+                transactions.id as id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                NULL AS transaction_result,
+                NULL AS merkle_tree_root,
+                NULL AS start_index,
+                NULL AS end_index,
+                NULL AS paid_fees,
+                NULL AS estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE transactions.block_id = $1
+            AND transactions.variant = 'System'
+
+            ORDER BY id
         "};
 
         #[cfg_attr(feature = "cloud", allow(unused_mut))]
@@ -196,8 +241,10 @@ impl TransactionStorage for Storage {
 
         #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
-            transaction.identifiers =
-                get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+            if let Transaction::Regular(transaction) = transaction {
+                transaction.identifiers =
+                    get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+            }
         }
 
         Ok(transactions)
@@ -257,7 +304,8 @@ impl TransactionStorage for Storage {
         #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
-                transactions.id,
+                transactions.id as id,
+                transactions.variant,
                 transactions.hash,
                 transactions.protocol_version,
                 transactions.raw,
@@ -272,7 +320,29 @@ impl TransactionStorage for Storage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.hash = $1
-            ORDER BY transactions.id DESC
+            AND transactions.variant = 'Regular'
+
+            UNION ALL
+
+            SELECT
+                transactions.id as id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                NULL AS transaction_result,
+                NULL AS merkle_tree_root,
+                NULL AS start_index,
+                NULL AS end_index,
+                NULL AS paid_fees,
+                NULL AS estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE transactions.hash = $1
+            AND transactions.variant = 'System'
+
+            ORDER BY id
         "};
 
         #[cfg_attr(feature = "cloud", allow(unused_mut))]
@@ -286,8 +356,10 @@ impl TransactionStorage for Storage {
 
         #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
-            transaction.identifiers =
-                get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+            if let Transaction::Regular(transaction) = transaction {
+                transaction.identifiers =
+                    get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+            }
         }
 
         Ok(transactions)
@@ -346,18 +418,20 @@ impl TransactionStorage for Storage {
         #[cfg_attr(feature = "cloud", allow(unused_mut))]
         let mut transactions = sqlx::query_as::<_, RegularTransaction>(query)
             .bind(identifier)
-            .fetch(&*self.pool);
+            .fetch(&*self.pool)
+            .map_ok(Transaction::Regular)
+            .try_collect::<Vec<_>>()
+            .await?;
 
         #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
-            transaction.identifiers =
-                get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+            if let Transaction::Regular(transaction) = transaction {
+                transaction.identifiers =
+                    get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+            }
         }
 
-        transactions
-            .map_ok(Transaction::Regular)
-            .try_collect::<Vec<_>>()
-            .await
+        Ok(transactions)
     }
 
     fn get_relevant_transactions(
@@ -543,18 +617,20 @@ impl Storage {
             .bind(session_id.as_ref())
             .bind(index as i64)
             .bind(batch_size.get() as i64)
-            .fetch(&*self.pool);
+            .fetch(&*self.pool)
+            .map_ok(Transaction::Regular)
+            .try_collect::<Vec<_>>()
+            .await?;
 
         #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
-            transaction.identifiers =
-                get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+            if let Transaction::Regular(transaction) = transaction {
+                transaction.identifiers =
+                    get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+            }
         }
 
-        transactions
-            .map_ok(Transaction::Regular)
-            .try_collect::<Vec<_>>()
-            .await
+        Ok(transactions)
     }
 
     #[trace(properties = {
@@ -627,27 +703,56 @@ impl Storage {
 
         #[cfg(feature = "standalone")]
         let query = indoc! {"
-            SELECT
-                transactions.id,
-                transactions.hash,
-                transactions.protocol_version,
-                transactions.raw,
-                blocks.hash AS block_hash,
-                regular_transactions.transaction_result,
-                regular_transactions.merkle_tree_root,
-                regular_transactions.start_index,
-                regular_transactions.end_index,
-                regular_transactions.paid_fees,
-                regular_transactions.estimated_fees
-            FROM transactions
-            INNER JOIN blocks ON blocks.id = transactions.block_id
-            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
-            INNER JOIN unshielded_utxos ON
-                unshielded_utxos.creating_transaction_id = transactions.id OR
-                unshielded_utxos.spending_transaction_id = transactions.id
-            WHERE unshielded_utxos.owner = $1
-            AND transactions.id >= $2
-            ORDER BY transactions.id
+            SELECT DISTINCT *
+            FROM (
+                SELECT
+                    transactions.id,
+                    transactions.variant,
+                    transactions.hash,
+                    transactions.protocol_version,
+                    transactions.raw,
+                    blocks.hash AS block_hash,
+                    regular_transactions.transaction_result,
+                    regular_transactions.merkle_tree_root,
+                    regular_transactions.start_index,
+                    regular_transactions.end_index,
+                    regular_transactions.paid_fees,
+                    regular_transactions.estimated_fees
+                FROM transactions
+                INNER JOIN blocks ON blocks.id = transactions.block_id
+                INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
+                INNER JOIN unshielded_utxos ON
+                    unshielded_utxos.creating_transaction_id = transactions.id OR
+                    unshielded_utxos.spending_transaction_id = transactions.id
+                WHERE unshielded_utxos.owner = $1
+                AND transactions.id >= $2
+                AND transactions.variant = 'Regular'
+
+                UNION ALL
+
+                SELECT
+                    transactions.id,
+                    transactions.variant,
+                    transactions.hash,
+                    transactions.protocol_version,
+                    transactions.raw,
+                    blocks.hash AS block_hash,
+                    NULL AS transaction_result,
+                    NULL AS merkle_tree_root,
+                    NULL AS start_index,
+                    NULL AS end_index,
+                    NULL AS paid_fees,
+                    NULL AS estimated_fees
+                FROM transactions
+                INNER JOIN blocks ON blocks.id = transactions.block_id
+                INNER JOIN unshielded_utxos ON
+                    unshielded_utxos.creating_transaction_id = transactions.id OR
+                    unshielded_utxos.spending_transaction_id = transactions.id
+                WHERE unshielded_utxos.owner = $1
+                AND transactions.id >= $2
+                AND transactions.variant = 'System'
+            )
+            ORDER BY id
             LIMIT $3
         "};
 
@@ -664,15 +769,28 @@ impl Storage {
 
         #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
-            transaction.identifiers =
-                get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+            if let Transaction::Regular(transaction) = transaction {
+                transaction.identifiers =
+                    get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+            }
         }
 
         Ok(transactions)
     }
 }
 
-fn make_transaction(row: PgRow) -> Result<Transaction, sqlx::Error> {
+#[cfg(feature = "cloud")]
+fn make_transaction(row: sqlx::postgres::PgRow) -> Result<Transaction, sqlx::Error> {
+    let variant = row.try_get::<TransactionVariant, _>("variant")?;
+    let transaction = match variant {
+        TransactionVariant::Regular => Transaction::Regular(RegularTransaction::from_row(&row)?),
+        TransactionVariant::System => Transaction::System(SystemTransaction::from_row(&row)?),
+    };
+    Ok(transaction)
+}
+
+#[cfg(feature = "standalone")]
+fn make_transaction(row: sqlx::sqlite::SqliteRow) -> Result<Transaction, sqlx::Error> {
     let variant = row.try_get::<TransactionVariant, _>("variant")?;
     let transaction = match variant {
         TransactionVariant::Regular => Transaction::Regular(RegularTransaction::from_row(&row)?),

@@ -383,8 +383,6 @@ async fn test_transactions_query(
                     .iter()
                     .map(|t| t.to_json_value())
                     .collect::<Vec<_>>();
-                println!("expected: {}", expected_transaction.to_json_value());
-                println!("values: {transaction_values:?}");
                 assert!(transaction_values.contains(&expected_transaction.to_json_value()));
             }
         }
