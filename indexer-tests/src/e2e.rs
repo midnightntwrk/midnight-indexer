@@ -860,16 +860,16 @@ where
 fn viewing_key(network_id: NetworkId) -> &'static str {
     match network_id {
         NetworkId::Undeployed => {
-            "mn_shield-esk_undeployed1d45kgmnfva58gwn9de3hy7tsw35k7m3dwdjkxun9wskkketetdmrzhf6dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsmxqc0u"
+            "mn_shield-esk_undeployed1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs9ete5h"
         }
-        NetworkId::DevNet => {
-            "mn_shield-esk_dev1d45kgmnfva58gwn9de3hy7tsw35k7m3dwdjkxun9wskkketetdmrzhf6dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs6vq5mk"
+        NetworkId::Devnet => {
+            "mn_shield-esk_dev1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsp7rsx2"
         }
-        NetworkId::TestNet => {
-            "mn_shield-esk_test1d45kgmnfva58gwn9de3hy7tsw35k7m3dwdjkxun9wskkketetdmrzhf6dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsqwtxq9"
+        NetworkId::Testnet => {
+            "mn_shield-esk_test1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsuv0u5j"
         }
-        NetworkId::MainNet => {
-            "mn_shield-esk1d45kgmnfva58gwn9de3hy7tsw35k7m3dwdjkxun9wskkketetdmrzhf6dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsn6y6ls"
+        NetworkId::Mainnet => {
+            "mn_shield-esk1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsucf6ww"
         }
     }
 }
