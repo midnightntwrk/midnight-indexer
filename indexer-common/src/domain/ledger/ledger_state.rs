@@ -14,8 +14,9 @@
 use crate::domain::{
     ApplyRegularTransactionResult, ByteArray, ByteVec, DustOutput, IntentHash, LedgerEvent,
     NetworkId, PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType,
-    SerializedContractAddress, SerializedLedgerState, SerializedTransaction, SerializedZswapState,
-    SerializedZswapStateRoot, TransactionResult, UnshieldedUtxo,
+    SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerState,
+    SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot, TransactionResult,
+    UnshieldedUtxo,
     ledger::{Error, IntentV6, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
 use fastrace::trace;
@@ -33,7 +34,10 @@ use midnight_ledger_v6::{
     semantics::{
         TransactionContext as TransactionContextV6, TransactionResult as TransactionResultV6,
     },
-    structure::{LedgerState as LedgerStateV6, SystemTransaction as LedgerSystemTransactionV6},
+    structure::{
+        LedgerParameters as LedgerParametersV6, LedgerState as LedgerStateV6,
+        SystemTransaction as LedgerSystemTransactionV6,
+    },
     verify::WellFormedStrictness as WellFormedStrictnessV6,
 };
 use midnight_onchain_runtime_v6::context::BlockContext as BlockContextV6;
@@ -45,7 +49,7 @@ use midnight_transient_crypto_v6::merkle_tree::{
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
 use sha2::{Digest, Sha256};
-use std::{collections::HashSet, sync::LazyLock};
+use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 static STRICTNESS_V6: LazyLock<WellFormedStrictnessV6> = LazyLock::new(|| {
     let mut strictness = WellFormedStrictnessV6::default();
@@ -266,7 +270,10 @@ impl LedgerState {
     }
 
     /// To be called after applying transactions.
-    pub fn post_apply_transactions(&mut self, block_timestamp: u64) -> Result<(), Error> {
+    pub fn post_apply_transactions(
+        &mut self,
+        block_timestamp: u64,
+    ) -> Result<LedgerParameters, Error> {
         match self {
             Self::V6 {
                 ledger_state,
@@ -277,13 +284,33 @@ impl LedgerState {
                     .post_block_update(timestamp, *block_fullness)
                     .map_err(|error| Error::BlockLimitExceeded(error.into()))?;
 
+                let ledger_parameters = ledger_state.parameters.deref().to_owned();
+
                 *self = Self::V6 {
                     ledger_state,
                     block_fullness: Default::default(),
                 };
 
-                Ok(())
+                Ok(LedgerParameters::V6(ledger_parameters))
             }
+        }
+    }
+}
+
+/// Facade for ledger parameters across supported (protocol) versions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LedgerParameters {
+    V6(LedgerParametersV6),
+}
+
+impl LedgerParameters {
+    /// Serialize these ledger parameters.
+    #[trace]
+    pub fn serialize(&self) -> Result<SerializedLedgerParameters, Error> {
+        match self {
+            Self::V6(parameters) => parameters
+                .serialize_v6()
+                .map_err(|error| Error::Io("cannot serialize SerializedLedgerParametersV6", error)),
         }
     }
 }

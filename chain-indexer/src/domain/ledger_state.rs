@@ -16,7 +16,7 @@ use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionResult, BlockHash, NetworkId, SerializedTransaction, TransactionVariant,
-    ledger,
+    ledger::{self, LedgerParameters},
 };
 use std::ops::DerefMut;
 use thiserror::Error;
@@ -44,7 +44,7 @@ impl LedgerState {
         transactions: impl Iterator<Item = &'a (TransactionVariant, SerializedTransaction)>,
         block_parent_hash: BlockHash,
         block_timestamp: u64,
-    ) -> Result<(), Error> {
+    ) -> Result<LedgerParameters, Error> {
         for (variant, transaction) in transactions {
             match variant {
                 TransactionVariant::Regular => {
@@ -61,9 +61,9 @@ impl LedgerState {
             }
         }
 
-        self.post_apply_transactions(block_timestamp)?;
+        let ledger_parameters = self.post_apply_transactions(block_timestamp)?;
 
-        Ok(())
+        Ok(ledger_parameters)
     }
 
     /// Apply the given node transactions to this ledger state and return domain transactions.
@@ -73,7 +73,7 @@ impl LedgerState {
         transactions: impl IntoIterator<Item = node::Transaction>,
         block_parent_hash: BlockHash,
         block_timestamp: u64,
-    ) -> Result<Vec<Transaction>, Error> {
+    ) -> Result<(Vec<Transaction>, LedgerParameters), Error> {
         let transactions = transactions
             .into_iter()
             .map(|transaction| {
@@ -81,9 +81,9 @@ impl LedgerState {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        self.post_apply_transactions(block_timestamp)?;
+        let ledger_parameters = self.post_apply_transactions(block_timestamp)?;
 
-        Ok(transactions)
+        Ok((transactions, ledger_parameters))
     }
 
     /// The highest used zswap state index or none.

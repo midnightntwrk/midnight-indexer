@@ -18,7 +18,10 @@ use crate::{
 use async_stream::try_stream;
 use fastrace::trace;
 use futures::Stream;
-use indexer_common::{domain::BlockHash, stream::flatten_chunks};
+use indexer_common::{
+    domain::{BlockHash, ByteVec, SerializedLedgerParameters},
+    stream::flatten_chunks,
+};
 use indoc::indoc;
 use std::num::NonZeroU32;
 
@@ -84,6 +87,25 @@ impl BlockStorage for Storage {
         };
 
         flatten_chunks(chunks)
+    }
+
+    #[trace(properties = { "block_id": "{block_id}" })]
+    async fn get_block_parameters(
+        &self,
+        block_id: u64,
+    ) -> Result<Option<SerializedLedgerParameters>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT raw
+            FROM block_parameters
+            WHERE block_id = $1
+        "};
+
+        let result: Option<(ByteVec,)> = sqlx::query_as(query)
+            .bind(block_id as i64)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        Ok(result.map(|(raw,)| raw))
     }
 }
 

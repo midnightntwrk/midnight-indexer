@@ -341,7 +341,7 @@ async fn index_block(
 
     let (block, transactions) = block.into();
 
-    let transactions = ledger_state
+    let (transactions, ledger_parameters) = ledger_state
         .apply_node_transactions(transactions, block.parent_hash, block.timestamp)
         .context("apply node transactions to ledger state")?;
     if ledger_state.zswap_merkle_tree_root() != block.zswap_state_root {
@@ -376,9 +376,9 @@ async fn index_block(
         info!(caught_up:%; "caught-up status changed")
     }
 
-    // First save and update the block.
+    // First save and update the block with its transactions and parameters.
     let max_transaction_id = storage
-        .save_block(&block, &transactions)
+        .save_block(&block, &transactions, &ledger_parameters.serialize()?)
         .await
         .context("save block")?;
 

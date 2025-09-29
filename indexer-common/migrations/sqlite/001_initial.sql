@@ -11,6 +11,13 @@ CREATE TABLE blocks (
   timestamp INTEGER NOT NULL
 );
 --------------------------------------------------------------------------------
+-- block_parameters
+--------------------------------------------------------------------------------
+CREATE TABLE block_parameters (
+  block_id INTEGER PRIMARY KEY REFERENCES blocks (id),
+  raw BLOB NOT NULL
+);
+--------------------------------------------------------------------------------
 -- transactions
 --------------------------------------------------------------------------------
 CREATE TABLE transactions (

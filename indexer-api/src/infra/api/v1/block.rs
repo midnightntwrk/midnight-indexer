@@ -81,6 +81,19 @@ where
 
         Ok(transactions.into_iter().map(Into::into).collect())
     }
+
+    /// The hex-encoded ledger parameters after this block.
+    async fn parameters(&self, cx: &Context<'_>) -> ApiResult<Option<HexEncoded>> {
+        let parameters = cx
+            .get_storage::<S>()
+            .get_block_parameters(self.id)
+            .await
+            .map_err_into_server_error(|| {
+                format!("get block parameters for block id {}", self.id)
+            })?;
+
+        Ok(parameters.map(|p| p.hex_encode()))
+    }
 }
 
 impl<S> From<domain::Block> for Block<S>

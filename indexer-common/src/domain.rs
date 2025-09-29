@@ -42,6 +42,7 @@ pub type SerializedContractAddress = ByteVec;
 pub type SerializedContractEntryPoint = ByteVec;
 pub type SerializedContractState = ByteVec;
 pub type SerializedLedgerEvent = ByteVec;
+pub type SerializedLedgerParameters = ByteVec;
 pub type SerializedLedgerState = ByteVec;
 pub type SerializedTransaction = ByteVec;
 pub type SerializedTransactionIdentifier = ByteVec;
