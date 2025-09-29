@@ -173,9 +173,15 @@ impl domain::storage::Storage for Storage {
         &self,
         block: &Block,
         transactions: &[Transaction],
+        parameters: Option<&indexer_common::domain::SerializedLedgerParameters>,
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let max_transaction_id = save_block(block, transactions, &mut tx).await?;
+        let (block_id, max_transaction_id) = save_block(block, transactions, &mut tx).await?;
+
+        if let Some(params) = parameters {
+            save_block_parameters(block_id, params, &mut tx).await?;
+        }
+
         tx.commit().await?;
 
         Ok(max_transaction_id)
@@ -225,11 +231,34 @@ impl From<&LedgerEventAttributes> for LedgerEventVariant {
 }
 
 #[trace]
+async fn save_block_parameters(
+    block_id: i64,
+    parameters: &indexer_common::domain::SerializedLedgerParameters,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO block_parameters (
+            block_id,
+            raw
+        )
+        VALUES ($1, $2)
+    "};
+
+    sqlx::query(query)
+        .bind(block_id)
+        .bind(parameters.as_ref())
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace]
 async fn save_block(
     block: &Block,
     transactions: &[Transaction],
     tx: &mut SqlxTransaction,
-) -> Result<Option<u64>, sqlx::Error> {
+) -> Result<(i64, Option<u64>), sqlx::Error> {
     let query = indoc! {"
         INSERT INTO blocks (
             hash,
@@ -266,7 +295,8 @@ async fn save_block(
         .map_ok(|(id,)| id)
         .await?;
 
-    save_transactions(transactions, block_id, tx).await
+    let max_transaction_id = save_transactions(transactions, block_id, tx).await?;
+    Ok((block_id, max_transaction_id))
 }
 
 #[trace(properties = { "block_id": "{block_id}" })]

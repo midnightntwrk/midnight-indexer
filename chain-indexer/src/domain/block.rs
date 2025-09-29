@@ -11,7 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{BlockAuthor, BlockHash, ProtocolVersion, ledger::ZswapStateRoot};
+use indexer_common::domain::{
+    BlockAuthor, BlockHash, ProtocolVersion, SerializedLedgerParameters, ledger::ZswapStateRoot,
+};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone)]
@@ -24,4 +26,5 @@ pub struct Block {
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
     pub zswap_state_root: ZswapStateRoot,
+    pub parameters: Option<SerializedLedgerParameters>,
 }

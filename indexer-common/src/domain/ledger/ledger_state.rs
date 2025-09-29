@@ -14,8 +14,9 @@
 use crate::domain::{
     ApplyRegularTransactionResult, ByteArray, ByteVec, DustOutput, IntentHash, LedgerEvent,
     NetworkId, PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType,
-    SerializedContractAddress, SerializedLedgerState, SerializedTransaction, SerializedZswapState,
-    SerializedZswapStateRoot, TransactionResult, UnshieldedUtxo,
+    SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerState,
+    SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot, TransactionResult,
+    UnshieldedUtxo,
     ledger::{Error, IntentV6, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
 use fastrace::trace;
@@ -96,6 +97,17 @@ impl LedgerState {
             Self::V6 { ledger_state, .. } => ledger_state
                 .tagged_serialize_v6()
                 .map_err(|error| Error::Io("cannot serialize LedgerStateV6", error)),
+        }
+    }
+
+    /// Serialize the ledger parameters.
+    #[trace]
+    pub fn serialize_parameters(&self) -> Result<SerializedLedgerParameters, Error> {
+        match self {
+            Self::V6 { ledger_state, .. } => ledger_state
+                .parameters
+                .tagged_serialize_v6()
+                .map_err(|error| Error::Io("cannot serialize LedgerParametersV6", error)),
         }
     }
 

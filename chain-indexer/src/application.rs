@@ -376,9 +376,14 @@ async fn index_block(
         info!(caught_up:%; "caught-up status changed")
     }
 
-    // First save and update the block.
+    // Extract ledger parameters after applying transactions.
+    let serialized_parameters = ledger_state
+        .serialize_parameters()
+        .context("serialize ledger parameters")?;
+
+    // First save and update the block with parameters.
     let max_transaction_id = storage
-        .save_block(&block, &transactions)
+        .save_block(&block, &transactions, Some(&serialized_parameters))
         .await
         .context("save block")?;
 

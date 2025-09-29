@@ -25,6 +25,13 @@ CREATE TABLE blocks (
   timestamp BIGINT NOT NULL
 );
 --------------------------------------------------------------------------------
+-- block_parameters
+--------------------------------------------------------------------------------
+CREATE TABLE block_parameters (
+  block_id BIGINT PRIMARY KEY REFERENCES blocks (id),
+  raw BYTEA NOT NULL
+);
+--------------------------------------------------------------------------------
 -- transactions
 --------------------------------------------------------------------------------
 CREATE TABLE transactions (
