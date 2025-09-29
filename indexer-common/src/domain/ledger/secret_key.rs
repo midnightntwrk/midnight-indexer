@@ -15,7 +15,7 @@ use crate::domain::{
     ByteArray, PROTOCOL_VERSION_000_016_000, ProtocolVersion, VIEWING_KEY_LEN, ledger::Error,
 };
 use fastrace::trace;
-use midnight_serialize_v6::tagged_deserialize as tagged_deserialize_v6;
+use midnight_serialize_v6::Deserializable as DeserializableV6;
 use midnight_transient_crypto_v6::encryption::SecretKey as SecretKeyV6;
 
 /// Facade for `SecretKey` from `midnight_ledger` across supported (protocol) versions.
@@ -32,7 +32,7 @@ impl SecretKey {
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
-            let secret_key = tagged_deserialize_v6(&mut secret_key.as_ref())
+            let secret_key = SecretKeyV6::deserialize(&mut secret_key.as_ref(), 0)
                 .map_err(|error| Error::Io("cannot deserialize SecretKeyV6", error))?;
             Ok(Self::V6(secret_key))
         } else {
