@@ -40,6 +40,6 @@ where
         &self,
         block: &Block,
         transactions: &[Transaction],
-        parameters: Option<&SerializedLedgerParameters>,
+        ledger_parameters: &SerializedLedgerParameters,
     ) -> Result<Option<u64>, sqlx::Error>;
 }

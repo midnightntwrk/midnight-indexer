@@ -26,5 +26,7 @@ pub struct Block {
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
     pub zswap_state_root: ZswapStateRoot,
+
+    // These fields are set after applying transactions to the ledger state.
     pub parameters: Option<SerializedLedgerParameters>,
 }

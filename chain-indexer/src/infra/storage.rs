@@ -20,7 +20,7 @@ use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
         BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
-        LedgerEventAttributes, TransactionVariant, UnshieldedUtxo,
+        LedgerEventAttributes, SerializedLedgerParameters, TransactionVariant, UnshieldedUtxo,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -173,14 +173,12 @@ impl domain::storage::Storage for Storage {
         &self,
         block: &Block,
         transactions: &[Transaction],
-        parameters: Option<&indexer_common::domain::SerializedLedgerParameters>,
+        ledger_parameters: &SerializedLedgerParameters,
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         let (block_id, max_transaction_id) = save_block(block, transactions, &mut tx).await?;
 
-        if let Some(params) = parameters {
-            save_block_parameters(block_id, params, &mut tx).await?;
-        }
+        save_block_parameters(block_id, ledger_parameters, &mut tx).await?;
 
         tx.commit().await?;
 
