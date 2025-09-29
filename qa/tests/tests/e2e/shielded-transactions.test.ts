@@ -16,142 +16,104 @@
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
-
-import {
-  ToolkitWrapper,
-  type ToolkitTransactionResult,
-} from '@utils/toolkit/toolkit-wrapper';
-
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import type { BlockResponse, Transaction } from '@utils/indexer/indexer-types';
+import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 
-/* -------------------- helpers -------------------- */
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Poll the indexer for a block by hash until it appears, or timeout.
- * Returns the raw BlockResponse (or null if not found within the timeout).
- */
-async function waitForBlockByHash(
-  blockHash: string,
-  timeoutMs = 60_000,
-  intervalMs = 1_000,
-): Promise<BlockResponse | null> {
-  const http = new IndexerHttpClient();
-  const start = Date.now();
-
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const resp = await http.getBlockByOffset({ hash: blockHash });
-      if (resp?.data?.block) return resp;
-    } catch (err) {
-      // indexer might not be ready yet; ignore and retry
-    }
-    await sleep(intervalMs);
-  }
-  return null;
-}
-
+import type { Transaction } from '@utils/indexer/indexer-types';
+import { getBlockByHashWithRetry } from './test-utils';
+import { TestContext } from 'vitest';
 
 describe('shielded transactions', () => {
   let toolkit: ToolkitWrapper;
-  let tx: ToolkitTransactionResult;
+  let transactionResult: ToolkitTransactionResult;
 
   // Deterministic seeds (hex) that work with the toolkit
-  const SOURCE_SEED =
-    '0000000000000000000000000000000000000000000000000000000000000001';
-  const DEST_SEED =
-    '0000000000000000000000000000000000000000000000000000000987654321';
+  const sourceSeed = '0000000000000000000000000000000000000000000000000000000000000001';
+  const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
 
-  let sourceShieldedAddr = '';
-  let destShieldedAddr = '';
+  let sourceAddress: string;
+  let destinationAddress: string;
 
   beforeAll(async () => {
     // Start a one-off toolkit container
-    const randomId = Math.random().toString(36).slice(2, 12);
-    toolkit = new ToolkitWrapper({
-      containerName: `mn-toolkit-${env.getEnvName()}-${randomId}`,
-      targetDir: '/tmp/toolkit/',
-      chain: env.getEnvName(),
-      nodeTag: '0.16.2-4079e511',
-    });
+    toolkit = new ToolkitWrapper({});
 
     await toolkit.start();
 
     // Derive shielded addresses from seeds
-    sourceShieldedAddr = await toolkit.showAddress(SOURCE_SEED, 'shielded');
-    destShieldedAddr = await toolkit.showAddress(DEST_SEED, 'shielded');
+    sourceAddress = await toolkit.showAddress(sourceSeed, 'shielded');
+    destinationAddress = await toolkit.showAddress(destinationSeed, 'shielded');
 
     // Submit one shielded->shielded transfer (1 NIGHT)
-    tx = await toolkit.generateSingleTx(SOURCE_SEED, 'shielded', destShieldedAddr, 1);
+    transactionResult = await toolkit.generateSingleTx(
+      sourceSeed,
+      'shielded',
+      destinationAddress,
+      1,
+    );
 
     // Print the TX hashes from toolkit
     const summary = {
-      txHash: tx.txHash,
-      blockHash: tx.blockHash,
-      status: tx.status,
+      txHash: transactionResult.txHash,
+      blockHash: transactionResult.blockHash,
+      status: transactionResult.status,
     };
-    console.log('\nTX hashes from toolkit:', JSON.stringify(summary, null, 2), '\n');
-    log.info(summary, 'TX hashes from toolkit');
+    log.info(`\nTX hashes from toolkit: ${JSON.stringify(summary, null, 2)} \n`);
   }, 120_000);
 
   afterAll(async () => {
-    try {
-      await toolkit.stop();
-    } catch {
-      /* noop */
-    }
+    await Promise.all([toolkit.stop()]);
   });
 
-  test(
-    'block contains the shielded transaction by hash',
-    async () => {
-      // Keep the minimal guarantees so the test stays robust
-      expect(tx).toBeDefined();
-      expect(typeof tx.txHash).toBe('string');
-      expect(tx.txHash.length).toBeGreaterThan(0);
-      expect(typeof tx.blockHash).toBe('string');
-      expect((tx.blockHash ?? '').length).toBeGreaterThan(0);
-      expect(['confirmed']).toContain(tx.status);
-
-      // try to fetch the block from the indexer (best-effort) ---
-      const blockResp = await waitForBlockByHash(tx.blockHash!, 60_000, 1_000);
-
-      if (!blockResp?.data?.block) {
-        console.warn(
-          `Indexer has not surfaced block ${tx.blockHash} within the wait window.`,
-        );
-        // Only fail if explicit: ASSERT_INDEXER=1
-        if (process.env.ASSERT_INDEXER === '1') {
-          expect(blockResp?.data?.block).toBeDefined();
-        }
-        return;
-      }
-
-      const block = blockResp.data.block;
-      const txs = (block.transactions ?? []) as Transaction[];
-      const hashes = txs
-        .map((t: any) => (typeof t?.hash === 'string' ? t.hash : '<no-hash-field>'));
-
-      // Show a concise summary in the terminal
-      console.log(
-        `Indexer block found ${block.hash} @ height ${block.height} with ${txs.length} tx(s).`,
+  describe('a successful shielded transaction transferring 1 Token between two wallets', async () => {
+    /**
+     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction in the block through a block query by hash, using the block hash reported by the toolkit.
+     *
+     * @given a confirmed shielded transaction between two wallets
+     * @when we query the indexer with a block query by hash, using the block hash reported by the toolkit
+     * @then the block should contain the expected transaction
+     */
+    test('should be reported by the indexer through a block query by hash', async (context: TestContext) => {
+      context.skip?.(
+        transactionResult.status !== 'confirmed',
+        "Toolkit transaction hasn't been confirmed",
       );
-      console.log('Block transactions (hash preview):', hashes.slice(0, 20));
 
-      // Only enforce strict checks if requested (avoid flakiness by default)
-      if (process.env.ASSERT_INDEXER === '1') {
-        expect(block.transactions).toBeDefined();
-        expect(txs.length).toBeGreaterThan(0);
+      // The expected block might take a bit more to show up by indexer, so we retry a few times
+      const blockResponse = await getBlockByHashWithRetry(transactionResult.blockHash!);
 
-        // If indexer exposes tx.hash, verify presence of our tx
-        if (hashes[0] !== '<no-hash-field>') {
-          const present = hashes.includes(tx.txHash);
-          expect(present).toBe(true);
-        }
-      }
-    },
-    120_000,
-  );
+      // Verify the transaction appears in the block but as it's shielded, we can't see the details
+      expect(blockResponse).toBeSuccess();
+      expect(blockResponse?.data?.block?.transactions).toBeDefined();
+      expect(blockResponse?.data?.block?.transactions?.length).toBeGreaterThan(0);
+    });
+
+    /**
+     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction through a query by transaction hash, using the transaction hash reported by the toolkit.
+     *
+     * @given a confirmed shielded transaction between two wallets
+     * @when we query transactions by the transaction hash
+     * @then the indexer should return the expected transaction
+     */
+    test('should be reported by the indexer through a transaction query by hash', async (context: TestContext) => {
+      context.skip?.(
+        transactionResult.status !== 'confirmed',
+        "Toolkit transaction hasn't been confirmed",
+      );
+
+      // The expected transaction might take a bit more to show up by indexer, so we retry a few times
+      const transactionResponse = await new IndexerHttpClient().getShieldedTransaction({
+        hash: transactionResult.txHash,
+      });
+
+      expect(transactionResponse).toBeSuccess();
+      expect(transactionResponse?.data?.transactions).toBeDefined();
+      expect(transactionResponse?.data?.transactions?.length).toBeGreaterThan(0);
+      expect(transactionResponse?.data?.transactions?.map((tx: Transaction) => tx.hash)).toContain(
+        transactionResult.txHash,
+      );
+    });
+  });
 });

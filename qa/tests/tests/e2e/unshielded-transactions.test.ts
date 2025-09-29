@@ -20,64 +20,14 @@ import { TestContext } from 'vitest';
 
 import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import {
-  BlockResponse,
-  Transaction,
-  UnshieldedTransaction,
-  UnshieldedUtxo,
-} from '@utils/indexer/indexer-types';
+import { Transaction, UnshieldedTransaction, UnshieldedUtxo } from '@utils/indexer/indexer-types';
 import {
   IndexerWsClient,
   UnshieldedTransactionSubscriptionParams,
   UnshieldedTxSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
-
-function retry<T>(
-  fn: () => Promise<T>,
-  condition: (result: T) => boolean,
-  maxAttempts: number,
-  delay: number,
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    let attempts = 0;
-    const execute = () => {
-      attempts++;
-      fn()
-        .then((result) => {
-          if (condition(result)) {
-            resolve(result);
-          } else if (attempts < maxAttempts) {
-            setTimeout(execute, delay);
-          } else {
-            reject(new Error(`Condition not met after ${maxAttempts} attempts`));
-          }
-        })
-        .catch((error) => {
-          if (attempts < maxAttempts) {
-            setTimeout(execute, delay);
-          } else {
-            reject(error);
-          }
-        });
-    };
-    execute();
-  });
-}
-
-/**
- * Simple retry mechanism: try every 500ms for up to 6 seconds
- * Retry getting a block by hash until the block is found or the maximum number of attempts is reached.
- * @param hash - The hash of the block to get.
- * @returns The block response.
- */
-function getBlockByHashWithRetry(hash: string): Promise<BlockResponse> {
-  return retry(
-    () => new IndexerHttpClient().getBlockByOffset({ hash }),
-    (response) => response.data?.block != null,
-    12,
-    500,
-  );
-}
+import { getBlockByHashWithRetry } from './test-utils';
+import { waitForEventsStabilization } from './test-utils';
 
 // To run: yarn test e2e
 describe('unshielded transactions', () => {
@@ -114,12 +64,7 @@ describe('unshielded transactions', () => {
     await indexerWsClient.connectionInit();
 
     const randomId = Math.random().toString(36).substring(2, 12);
-    toolkit = new ToolkitWrapper({
-      containerName: `mn-toolkit-${env.getEnvName()}-${randomId}`,
-      targetDir: '/tmp/toolkit/',
-      chain: `${env.getEnvName()}`,
-      nodeTag: '0.16.2-71d3d861',
-    });
+    toolkit = new ToolkitWrapper({});
     await toolkit.start();
 
     const sourceSeed = '0000000000000000000000000000000000000000000000000000000000000001';
@@ -166,42 +111,14 @@ describe('unshielded transactions', () => {
     );
 
     // Wait until source events count stabilizes, then snapshot to historical array
-    {
-      let previousCount = -1;
-      // Poll every 500ms until the count does not change between checks
-      // This indicates we have consumed the initial backlog of historical events
-      // and are ready to proceed
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        const currentCount = sourceAddressEvents.length;
-        if (currentCount === previousCount) {
-          console.log('Source events count stabilized', currentCount);
-          break;
-        }
-        previousCount = currentCount;
-      }
-      historicalSourceAddressEvents = sourceAddressEvents.splice(0, sourceAddressEvents.length);
-    }
+    let drained = await waitForEventsStabilization(sourceAddressEvents, 500);
+    log.info(`Source events count stabilized: ${drained.length}`);
+    historicalSourceAddressEvents = drained;
 
     // Wait until destination events count stabilizes, then snapshot to historical array
-    {
-      let previousCount = -1;
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        const currentCount = destinationAddressEvents.length;
-        if (currentCount === previousCount) {
-          console.log('Destination events count stabilized', currentCount);
-          break;
-        }
-        previousCount = currentCount;
-      }
-      historicalDestinationAddressEvents = destinationAddressEvents.splice(
-        0,
-        destinationAddressEvents.length,
-      );
-    }
+    drained = await waitForEventsStabilization(destinationAddressEvents, 1000);
+    log.info(`Destination events count stabilized: ${drained.length}`);
+    historicalDestinationAddressEvents = drained;
 
     // Generating and submitting the transaction to node
     transactionResult = await toolkit.generateSingleTx(
@@ -223,7 +140,7 @@ describe('unshielded transactions', () => {
 
   describe('a successful unshielded transaction transferring 1 NIGHT between two wallets', async () => {
     /**
-     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * Once an unshielded transaction has been submitted to node and confirmed, the indexer should report
      * that transaction in the block through a block query by hash, using the block hash reported by the toolkit.
      *
      * @given a confirmed unshielded transaction between two wallets
@@ -257,7 +174,7 @@ describe('unshielded transactions', () => {
     });
 
     /**
-     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * Once an unshielded transaction has been submitted to node and confirmed, the indexer should report
      * that transaction through a query by transaction hash, using the transaction hash reported by the toolkit.
      *
      * @given a confirmed unshielded transaction between two wallets
@@ -275,6 +192,13 @@ describe('unshielded transactions', () => {
         hash: transactionResult.txHash,
       });
 
+      // Verify the transaction appears in the block
+      expect(transactionResponse?.data?.transactions).toBeDefined();
+      expect(
+        transactionResponse?.data?.transactions?.length,
+        'No transactions found',
+      ).toBeGreaterThan(0);
+
       // Find our specific transaction by hash
       const sourceAddresInTx = transactionResponse.data?.transactions?.find((tx: Transaction) =>
         tx.unshieldedCreatedOutputs?.find((output: any) => output.owner === sourceAddress),
@@ -289,7 +213,7 @@ describe('unshielded transactions', () => {
     });
 
     /**
-     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * Once an unshielded transaction has been submitted to node and confirmed, the indexer should report
      * that transaction through an unshielded transaction event for the source address.
      *
      * @given we subscribe to unshielded transaction events for the source address
@@ -309,7 +233,6 @@ describe('unshielded transactions', () => {
       for (let attempt = 0; attempt < 3 && sourceAddressEvent == null; attempt++) {
         sourceAddressEvent = sourceAddressEvents.find((event) => {
           const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
-          console.log('txEvent', txEvent);
           return (
             txEvent.__typename === 'UnshieldedTransaction' &&
             txEvent.createdUtxos?.some((utxo: UnshieldedUtxo) => utxo.owner === sourceAddress) &&
@@ -324,7 +247,7 @@ describe('unshielded transactions', () => {
     });
 
     /**
-     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * Once an unshielded transaction has been submitted to node and confirmed, the indexer should report
      * that transaction through an unshielded transaction event for the destination address.
      *
      * @given we subscribe to unshielded transaction events for the destination address
@@ -344,7 +267,6 @@ describe('unshielded transactions', () => {
       for (let attempt = 0; attempt < 3 && destinationAddressEvent == null; attempt++) {
         destinationAddressEvent = destinationAddressEvents.find((event) => {
           const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
-          console.log('txEvent', txEvent);
           return (
             txEvent.__typename === 'UnshieldedTransaction' &&
             txEvent.createdUtxos?.some((utxo: UnshieldedUtxo) => utxo.owner === destinationAddress)
@@ -358,7 +280,7 @@ describe('unshielded transactions', () => {
     });
 
     /**
-     * Once a shielded transaction has been submitted to node and confirmed, we should see the transaction
+     * Once an unshielded transaction has been submitted to node and confirmed, we should see the transaction
      * giving 1 NIGHT to the destination address.
      *
      * @given a confirmed unshielded transaction between two wallets
@@ -378,7 +300,7 @@ describe('unshielded transactions', () => {
       const unshieldedTx = blockResponse.data?.block?.transactions?.find((tx: any) => {
         const hasCreated = tx.unshieldedCreatedOutputs && tx.unshieldedCreatedOutputs.length > 0;
         const hasSpent = tx.unshieldedSpentOutputs && tx.unshieldedSpentOutputs.length > 0;
-        console.log(`Transaction ${tx.hash}: hasCreated=${hasCreated}, hasSpent=${hasSpent}`);
+        log.info(`Transaction ${tx.hash}: hasCreated=${hasCreated}, hasSpent=${hasSpent}`);
         return hasCreated || hasSpent;
       });
 

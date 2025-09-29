@@ -19,10 +19,10 @@ import { GenericContainer, StartedTestContainer } from 'testcontainers';
 export type AddressType = 'shielded' | 'unshielded';
 
 interface ToolkitConfig {
-  containerName: string;
-  targetDir: string;
-  chain: string;
-  nodeTag: string;
+  containerName?: string;
+  targetDir?: string;
+  chain?: string;
+  nodeTag?: string;
 }
 
 interface ToolkitTransactionResult {
@@ -87,19 +87,27 @@ class ToolkitWrapper {
 
   constructor(config: ToolkitConfig) {
     this.config = config;
+
+    const randomId = Math.random().toString(36).slice(2, 12);
+
+    this.config.containerName =
+      config.containerName || `mn-toolkit-${env.getEnvName()}-${randomId}-${Date.now()}`;
+    this.config.targetDir = config.targetDir || '/tmp/toolkit/';
+    this.config.nodeTag = config.nodeTag || env.getNodeVersion();
+
     this.container = new GenericContainer(
-      `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${config.nodeTag}`,
+      `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeTag}`,
     )
-      .withName(config.containerName)
+      .withName(this.config.containerName)
       .withNetworkMode('host') // equivalent to --network host
       .withEntrypoint([]) // equivalent to --entrypoint ""
       .withBindMounts([
         {
-          source: config.targetDir,
+          source: this.config.targetDir,
           target: '/out',
         },
         {
-          source: `${config.targetDir}/.sync_cache-${config.chain}`,
+          source: `${this.config.targetDir}/.sync_cache-${this.config.chain}-${randomId}`,
           target: `/.sync_cache`,
         },
       ])
@@ -126,7 +134,6 @@ class ToolkitWrapper {
       'show-address',
       '--network',
       env.getEnvName().toLowerCase(),
-      `--${addressType}`,
       '--seed',
       seed,
     ]);
@@ -136,8 +143,8 @@ class ToolkitWrapper {
       throw new Error(`Toolkit command failed with exit code ${result.exitCode}: ${errorMessage}`);
     }
 
-    // Extract just the address from the output, trimming whitespace
-    return result.output.trim();
+    // Extract the json object and return it as is
+    return JSON.parse(result.output.trim())[addressType];
   }
 
   async showViewingKey(seed: string): Promise<string> {

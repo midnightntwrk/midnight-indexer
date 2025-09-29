@@ -2,14 +2,12 @@
 
 set -e
 
-
 CHAIN=$1
 if [ "$CHAIN" != "undeployed" ] && [ "$CHAIN" != "devnet" ] && [ "$CHAIN" != "testnet02" ] && [ "$CHAIN" != "nodedev01" ]; then
     echo "Please provide a valid chain id (undeployed, devnet, testnet02, nodedev01)"
     echo "Usage: $0 <chain_id>"
     exit 1
 fi
-
 
 # Switch case for the chain id
 NETWORK_ID=""
@@ -36,18 +34,7 @@ case $CHAIN in
         ;;
 esac
 
-ADDRESS_TYPE=$2
-if [ -z "$ADDRESS_TYPE" ]; then
-    echo "Please provide an address type"
-    echo "Usage: $0 <chain_id> <address_type> <seed>"
-    exit 1
-fi
-if [ "$ADDRESS_TYPE" != "shielded" ] && [ "$ADDRESS_TYPE" != "unshielded" ]; then
-    echo "Usage: $0 <chain_id> <address_type> <seed>"
-    exit 1
-fi
-
-SEED=$3
+SEED=$2
 if [ -z "$SEED" ]; then
     echo "Please provide a seed"
     echo "Usage: $0 <network_id> <address_type> <seed>"
@@ -58,5 +45,4 @@ fi
 docker exec -it toolkit-${CHAIN} \
     /midnight-node-toolkit show-address \
     --network $NETWORK_ID \
-    --$ADDRESS_TYPE \
     --seed $SEED
