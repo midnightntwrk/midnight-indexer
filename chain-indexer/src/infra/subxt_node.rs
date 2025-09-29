@@ -447,6 +447,12 @@ pub enum SubxtNodeError {
     #[error("cannot get events")]
     GetEvents(#[source] Box<subxt::Error>),
 
+    #[error("cannot next event")]
+    GetNextEvent(#[source] Box<subxt::Error>),
+
+    #[error("cannot decode event as root event")]
+    AsRootEvent(#[source] Box<subxt::Error>),
+
     #[error("cannot get node metadata")]
     GetMetadata(#[source] Box<subxt::Error>),
 
