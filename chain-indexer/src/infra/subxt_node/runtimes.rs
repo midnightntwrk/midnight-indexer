@@ -146,7 +146,7 @@ macro_rules! make_block_details {
                     _ => None,
                 });
 
-                let transactions = calls
+                let mut transactions: Vec<Transaction> = calls
                     .into_iter()
                     .filter_map(|call| match call {
                         Call::Midnight(
@@ -167,8 +167,15 @@ macro_rules! make_block_details {
 
                 for event in events.iter().flatten() {
                     let event = event.as_root_event::<Event>();
-                    if let Ok(Event::Session(NewSession { .. })) = event {
-                        *authorities = None;
+                    match event {
+                        Ok(Event::Session(NewSession { .. })) => {
+                            *authorities = None;
+                        }
+                        Ok(Event::MidnightSystem(midnight_system::Event::SystemTransactionApplied(e))) => {
+                            // System transactions created by the node (not from extrinsics).
+                            transactions.push(Transaction::System(ByteVec::from(e.serialized_system_transaction.clone())));
+                        }
+                        _ => {}
                     }
                 }
 
