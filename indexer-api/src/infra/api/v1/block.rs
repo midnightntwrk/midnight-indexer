@@ -83,7 +83,7 @@ where
     }
 
     /// The hex-encoded ledger parameters after this block.
-    async fn parameters(&self, cx: &Context<'_>) -> ApiResult<Option<HexEncoded>> {
+    async fn ledger_parameters(&self, cx: &Context<'_>) -> ApiResult<Option<HexEncoded>> {
         let parameters = cx
             .get_storage::<S>()
             .get_block_parameters(self.id)

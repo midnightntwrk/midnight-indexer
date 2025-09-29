@@ -33,7 +33,7 @@ type Block {
 	"""
 	The hex-encoded ledger parameters after this block.
 	"""
-	parameters: HexEncoded
+	ledgerParameters: HexEncoded
 }
 
 """
