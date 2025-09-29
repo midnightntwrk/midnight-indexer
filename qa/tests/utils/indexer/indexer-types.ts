@@ -83,19 +83,34 @@ export interface TransactionFees {
   estimatedFees: string;
 }
 
+// Base Transaction interface (common to both RegularTransaction and SystemTransaction)
 export interface Transaction {
-  hash: string;
-  id: number;
-  identifiers?: string[];
-  block?: Block;
-  raw?: string;
+  __typename: 'RegularTransaction' | 'SystemTransaction';
+  id?: number;
+  hash?: string;
   protocolVersion?: number;
-  transactionResult?: TransactionResult;
-  fees?: TransactionFees;
-  merkleTreeRoot?: string;
+  raw?: string;
+  block?: Block;
   contractActions?: ContractAction[];
   unshieldedCreatedOutputs?: UnshieldedUtxo[];
   unshieldedSpentOutputs?: UnshieldedUtxo[];
+  zswapLedgerEvents?: ZswapLedgerEvent[];
+  dustLedgerEvents?: DustLedgerEvent[];
+}
+
+// RegularTransaction interface (includes additional fields)
+export interface RegularTransaction extends Transaction {
+  merkleTreeRoot?: string;
+  identifiers?: string[];
+  startIndex?: number;
+  endIndex?: number;
+  fees?: TransactionFees;
+  transactionResult?: TransactionResult;
+}
+
+// SystemTransaction interface (only base fields)
+export interface SystemTransaction extends Transaction {
+  // No additional fields beyond the base Transaction interface
 }
 
 export type ShieldedTransactionsEvent = ViewingUpdate | ShieldedTransactionsProgress;
@@ -118,16 +133,16 @@ export interface MerkleTreeCollapsedUpdate {
 
 export interface RelevantTransaction {
   __typename: 'RelevantTransaction';
-  transaction: Transaction;
+  transaction: RegularTransaction;
   start: number;
   end: number;
 }
 
 export interface ShieldedTransactionsProgress {
   __typename: 'ShieldedTransactionsProgress';
-  highestIndex: number;
-  highestRelevantIndex: number;
-  highestRelevantWalletIndex: number;
+  highestEndIndex: number;
+  highestCheckedEndIndex: number;
+  highestRelevantEndIndex: number;
 }
 
 export type UnshieldedTransactionEvent = UnshieldedTransaction | UnshieldedTransactionsProgress;
@@ -178,6 +193,18 @@ export interface ContractUpdate {
 export interface ContractBalance {
   tokenType: string;
   amount: string;
+}
+
+export interface ZswapLedgerEvent {
+  id: number;
+  raw: string;
+  maxId: number;
+}
+
+export interface DustLedgerEvent {
+  id: number;
+  raw: string;
+  maxId: number;
 }
 
 export type ViewingKey = string & { __brand: 'ViewingKey' };
