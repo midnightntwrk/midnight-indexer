@@ -29,7 +29,14 @@ impl BlockStorage for Storage {
     #[trace]
     async fn get_latest_block(&self) -> Result<Option<Block>, sqlx::Error> {
         let query = indoc! {"
-            SELECT *
+            SELECT
+                id,
+                hash,
+                height,
+                protocol_version,
+                parent_hash,
+                author,
+                timestamp
             FROM blocks
             ORDER BY height DESC
             LIMIT 1
@@ -41,7 +48,14 @@ impl BlockStorage for Storage {
     #[trace(properties = { "hash": "{hash}" })]
     async fn get_block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>, sqlx::Error> {
         let query = indoc! {"
-            SELECT *
+            SELECT
+                id,
+                hash,
+                height,
+                protocol_version,
+                parent_hash,
+                author,
+                timestamp
             FROM blocks
             WHERE hash = $1
             LIMIT 1
@@ -56,7 +70,14 @@ impl BlockStorage for Storage {
     #[trace(properties = { "height": "{height}" })]
     async fn get_block_by_height(&self, height: u32) -> Result<Option<Block>, sqlx::Error> {
         let query = indoc! {"
-            SELECT *
+            SELECT
+                id,
+                hash,
+                height,
+                protocol_version,
+                parent_hash,
+                author,
+                timestamp
             FROM blocks
             WHERE height = $1
             LIMIT 1
@@ -90,22 +111,22 @@ impl BlockStorage for Storage {
     }
 
     #[trace(properties = { "block_id": "{block_id}" })]
-    async fn get_block_parameters(
+    async fn get_ledger_parameters(
         &self,
         block_id: u64,
     ) -> Result<Option<SerializedLedgerParameters>, sqlx::Error> {
         let query = indoc! {"
-            SELECT raw
-            FROM block_parameters
-            WHERE block_id = $1
+            SELECT ledger_parameters
+            FROM blocks
+            WHERE id = $1
         "};
 
-        let result: Option<(ByteVec,)> = sqlx::query_as(query)
+        let parameters = sqlx::query_as::<_, (ByteVec,)>(query)
             .bind(block_id as i64)
             .fetch_optional(&*self.pool)
             .await?;
 
-        Ok(result.map(|(raw,)| raw))
+        Ok(parameters.map(|(p,)| p))
     }
 }
 
@@ -117,7 +138,14 @@ impl Storage {
         batch_size: NonZeroU32,
     ) -> Result<Vec<Block>, sqlx::Error> {
         let query = indoc! {"
-            SELECT *
+            SELECT
+                id,
+                hash,
+                height,
+                protocol_version,
+                parent_hash,
+                author,
+                timestamp
             FROM blocks
             WHERE height >= $1
             ORDER BY height
