@@ -101,18 +101,13 @@ describe('contract action subscriptions', () => {
 
       // Maximum wait time for contract action (similar to block timeout)
       const maxTimeForContractAction = 8_000;
-      await Promise.race([
-        eventCoordinator.waitFor('contractActionReceived'),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Timeout waiting for contract action event')), maxTimeForContractAction),
-        ),
-      ]);
+      await eventCoordinator.waitForAll(['contractActionReceived'], maxTimeForContractAction);
 
       unsubscribe();
 
       // We should receive at least one contract action message
       expect(receivedContractActions.length).toBeGreaterThanOrEqual(1);
-      expect(receivedContractActions[0]).toBeDefined();
+      expect(receivedContractActions[0]).toBeSuccess();
       
       // Validate the received contract action
       for (const action of receivedContractActions) {
