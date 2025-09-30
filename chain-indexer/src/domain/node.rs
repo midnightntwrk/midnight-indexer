@@ -64,7 +64,7 @@ impl From<Block> for (domain::Block, Vec<Transaction>) {
             author: block.author,
             timestamp: block.timestamp,
             zswap_state_root: block.zswap_state_root,
-            parameters: None,
+            ledger_parameters: Default::default(),
         };
 
         (block, transactions)

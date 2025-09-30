@@ -28,5 +28,5 @@ pub struct Block {
     pub zswap_state_root: ZswapStateRoot,
 
     // These fields are set after applying transactions to the ledger state.
-    pub parameters: Option<SerializedLedgerParameters>,
+    pub ledger_parameters: SerializedLedgerParameters,
 }

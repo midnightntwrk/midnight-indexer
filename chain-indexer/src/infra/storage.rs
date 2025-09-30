@@ -20,7 +20,7 @@ use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
         BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
-        LedgerEventAttributes, SerializedLedgerParameters, TransactionVariant, UnshieldedUtxo,
+        LedgerEventAttributes, TransactionVariant, UnshieldedUtxo,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -173,13 +173,9 @@ impl domain::storage::Storage for Storage {
         &self,
         block: &Block,
         transactions: &[Transaction],
-        ledger_parameters: &SerializedLedgerParameters,
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let (block_id, max_transaction_id) = save_block(block, transactions, &mut tx).await?;
-
-        save_block_parameters(block_id, ledger_parameters, &mut tx).await?;
-
+        let max_transaction_id = save_block(block, transactions, &mut tx).await?;
         tx.commit().await?;
 
         Ok(max_transaction_id)
@@ -229,34 +225,11 @@ impl From<&LedgerEventAttributes> for LedgerEventVariant {
 }
 
 #[trace]
-async fn save_block_parameters(
-    block_id: i64,
-    parameters: &indexer_common::domain::SerializedLedgerParameters,
-    tx: &mut SqlxTransaction,
-) -> Result<(), sqlx::Error> {
-    let query = indoc! {"
-        INSERT INTO block_parameters (
-            block_id,
-            raw
-        )
-        VALUES ($1, $2)
-    "};
-
-    sqlx::query(query)
-        .bind(block_id)
-        .bind(parameters.as_ref())
-        .execute(&mut **tx)
-        .await?;
-
-    Ok(())
-}
-
-#[trace]
 async fn save_block(
     block: &Block,
     transactions: &[Transaction],
     tx: &mut SqlxTransaction,
-) -> Result<(i64, Option<u64>), sqlx::Error> {
+) -> Result<Option<u64>, sqlx::Error> {
     let query = indoc! {"
         INSERT INTO blocks (
             hash,
@@ -264,7 +237,8 @@ async fn save_block(
             protocol_version,
             parent_hash,
             author,
-            timestamp
+            timestamp,
+            ledger_parameters
         )
     "};
 
@@ -277,6 +251,7 @@ async fn save_block(
                 parent_hash,
                 author,
                 timestamp,
+                ledger_parameters,
                 ..
             } = block;
 
@@ -285,7 +260,8 @@ async fn save_block(
                 .push_bind(protocol_version.0 as i64)
                 .push_bind(parent_hash.as_ref())
                 .push_bind(author.as_ref().map(|a| a.as_ref()))
-                .push_bind(*timestamp as i64);
+                .push_bind(*timestamp as i64)
+                .push_bind(ledger_parameters.as_ref());
         })
         .push(" RETURNING id")
         .build_query_as::<(i64,)>()
@@ -294,7 +270,7 @@ async fn save_block(
         .await?;
 
     let max_transaction_id = save_transactions(transactions, block_id, tx).await?;
-    Ok((block_id, max_transaction_id))
+    Ok(max_transaction_id)
 }
 
 #[trace(properties = { "block_id": "{block_id}" })]

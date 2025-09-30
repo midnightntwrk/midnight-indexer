@@ -12,7 +12,6 @@
 // limitations under the License.
 
 use crate::domain::{Block, BlockTransactions, Transaction, node::BlockInfo};
-use indexer_common::domain::SerializedLedgerParameters;
 
 /// Storage abstraction.
 #[trait_variant::make(Send)]
@@ -40,6 +39,5 @@ where
         &self,
         block: &Block,
         transactions: &[Transaction],
-        ledger_parameters: &SerializedLedgerParameters,
     ) -> Result<Option<u64>, sqlx::Error>;
 }

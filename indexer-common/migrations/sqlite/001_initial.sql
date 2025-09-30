@@ -8,14 +8,8 @@ CREATE TABLE blocks (
   protocol_version INTEGER NOT NULL,
   parent_hash BLOB NOT NULL,
   author BLOB,
-  timestamp INTEGER NOT NULL
-);
---------------------------------------------------------------------------------
--- block_parameters
---------------------------------------------------------------------------------
-CREATE TABLE block_parameters (
-  block_id INTEGER PRIMARY KEY REFERENCES blocks (id),
-  raw BLOB NOT NULL
+  timestamp INTEGER NOT NULL,
+  ledger_parameters BLOB NOT NULL
 );
 --------------------------------------------------------------------------------
 -- transactions
