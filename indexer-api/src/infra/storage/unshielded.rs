@@ -34,7 +34,9 @@ impl UnshieldedUtxoStorage for Storage {
                 token_type,
                 value,
                 output_index,
-                intent_hash
+                intent_hash,
+                initial_nonce,
+                is_registered_for_dust_generation
             FROM unshielded_utxos
             WHERE owner = $1
             ORDER BY id
@@ -62,7 +64,9 @@ impl UnshieldedUtxoStorage for Storage {
                 token_type,
                 value,
                 output_index,
-                intent_hash
+                intent_hash,
+                initial_nonce,
+                is_registered_for_dust_generation
             FROM unshielded_utxos
             WHERE creating_transaction_id = $1
             ORDER BY output_index
@@ -90,7 +94,9 @@ impl UnshieldedUtxoStorage for Storage {
                 token_type,
                 value,
                 output_index,
-                intent_hash
+                intent_hash,
+                initial_nonce,
+                is_registered_for_dust_generation
             FROM unshielded_utxos
             WHERE spending_transaction_id = $1
             ORDER BY output_index
@@ -119,7 +125,9 @@ impl UnshieldedUtxoStorage for Storage {
                 token_type,
                 value,
                 output_index,
-                intent_hash
+                intent_hash,
+                initial_nonce,
+                is_registered_for_dust_generation
             FROM unshielded_utxos
             WHERE creating_transaction_id = $1
             AND owner = $2
@@ -150,7 +158,9 @@ impl UnshieldedUtxoStorage for Storage {
                 token_type,
                 value,
                 output_index,
-                intent_hash
+                intent_hash,
+                initial_nonce,
+                is_registered_for_dust_generation
             FROM unshielded_utxos
             WHERE spending_transaction_id = $1
             AND owner = $2

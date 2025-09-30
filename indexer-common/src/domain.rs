@@ -35,6 +35,7 @@ use sqlx::Type;
 pub type BlockAuthor = ByteArray<32>;
 pub type BlockHash = ByteArray<32>;
 pub type DustNonce = ByteArray<32>;
+pub type InitialNonce = ByteArray<32>;
 pub type IntentHash = ByteArray<32>;
 pub type RawTokenType = ByteArray<32>;
 pub type RawUnshieldedAddress = ByteArray<32>;
@@ -120,13 +121,15 @@ pub struct TransactionStructure {
 }
 
 /// An unshielded UTXO.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnshieldedUtxo {
     pub owner: RawUnshieldedAddress,
     pub token_type: RawTokenType,
     pub value: u128,
     pub intent_hash: IntentHash,
     pub output_index: u32,
+    pub initial_nonce: InitialNonce,
+    pub is_registered_for_dust_generation: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

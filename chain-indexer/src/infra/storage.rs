@@ -472,7 +472,7 @@ async fn save_unshielded_utxos(
     }
 
     if spent {
-        for &utxo in utxos {
+        for utxo in utxos {
             let query = indoc! {"
                 INSERT INTO unshielded_utxos (
                     creating_transaction_id,
@@ -481,9 +481,11 @@ async fn save_unshielded_utxos(
                     token_type,
                     value,
                     output_index,
-                    intent_hash
+                    intent_hash,
+                    initial_nonce,
+                    is_registered_for_dust_generation
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 ON CONFLICT (intent_hash, output_index)
                 DO UPDATE SET spending_transaction_id = $2
                 WHERE unshielded_utxos.spending_transaction_id IS NULL
@@ -495,16 +497,20 @@ async fn save_unshielded_utxos(
                 value,
                 intent_hash,
                 output_index,
-            } = utxo;
+                initial_nonce,
+                is_registered_for_dust_generation,
+            } = &utxo;
 
             sqlx::query(query)
                 .bind(transaction_id)
                 .bind(transaction_id)
                 .bind(owner.as_ref())
                 .bind(token_type.as_ref())
-                .bind(U128BeBytes::from(value))
-                .bind(output_index as i32)
+                .bind(U128BeBytes::from(*value))
+                .bind(*output_index as i32)
                 .bind(intent_hash.as_ref())
+                .bind(initial_nonce.as_ref())
+                .bind(*is_registered_for_dust_generation)
                 .execute(&mut **tx)
                 .await?;
         }
@@ -516,7 +522,9 @@ async fn save_unshielded_utxos(
                 token_type,
                 value,
                 output_index,
-                intent_hash
+                intent_hash,
+                initial_nonce,
+                is_registered_for_dust_generation
             )
         "};
 
@@ -528,6 +536,8 @@ async fn save_unshielded_utxos(
                     value,
                     intent_hash,
                     output_index,
+                    initial_nonce,
+                    is_registered_for_dust_generation,
                 } = utxo;
 
                 q.push_bind(transaction_id)
@@ -535,7 +545,9 @@ async fn save_unshielded_utxos(
                     .push_bind(token_type.as_ref())
                     .push_bind(U128BeBytes::from(*value))
                     .push_bind(*output_index as i32)
-                    .push_bind(intent_hash.as_ref());
+                    .push_bind(intent_hash.as_ref())
+                    .push_bind(initial_nonce.as_ref())
+                    .push_bind(*is_registered_for_dust_generation);
             })
             .build()
             .execute(&mut **tx)

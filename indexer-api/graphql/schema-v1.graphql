@@ -638,6 +638,14 @@ type UnshieldedUtxo {
 	"""
 	intentHash: HexEncoded!
 	"""
+	The hex-encoded initial nonce for DUST generation tracking.
+	"""
+	initialNonce: HexEncoded!
+	"""
+	Whether this UTXO is registered for DUST generation.
+	"""
+	isRegisteredForDustGeneration: Boolean!
+	"""
 	Transaction that created this UTXO.
 	"""
 	createdAtTransaction: Transaction!
