@@ -132,9 +132,8 @@ impl LedgerState {
                     whitelist: None,
                 };
 
-                // Assume midnight-node has already validated included transactions.
                 let cost = ledger_transaction
-                    .cost(&ledger_state.parameters)
+                    .cost(&ledger_state.parameters, true)
                     .map_err(|error| Error::TransactionCost(error.into()))?;
                 let verified_ledger_transaction = ledger_transaction
                     .well_formed(&cx.ref_state, *STRICTNESS_V6, cx.block_context.tblock)
