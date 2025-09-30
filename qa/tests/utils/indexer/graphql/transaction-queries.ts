@@ -45,11 +45,6 @@ export const BASE_TRANSACTION_FRAGMENT = `   id
       state
       chainState
     }
-    contractActions {
-      address
-      state
-      chainState
-    }
     unshieldedCreatedOutputs {
       ${UNSHIELDED_UTXO_BODY_FRAGMENT}
     }
