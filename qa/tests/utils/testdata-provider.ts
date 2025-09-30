@@ -93,16 +93,26 @@ class TestDataProvider {
     return this.getBlockData('contract-update-block-hash');
   }
 
-  getPreContractBlockHash() {
-    return this.getBlockData('pre-contract-block-hash');
+  getContractCallBlockHash() {
+    return this.getBlockData('contract-call-block-hash');
   }
 
   getContractDeployHeight() {
     return this.getHeightData('contract-deploy-height');
   }
 
+  getContractCallHeight() {
+    return this.getHeightData('contract-call-height');
+  }
+
   getContractUpdateHeight() {
     return this.getHeightData('contract-update-height');
+  }
+
+  // TODO: this is a temporary and random viewing key, it should be removed once we can derive them
+  // from the wallet
+  getViewingKey() {
+    return 'mn_shield-esk_undeployed1d45kgmnfva58gwn9de3hy7tsw35k7m3dwdjkxun9wskkketetdmrzhf6wdwg0q0t85zu4sgm8ldgf66hkxmupkjn3spfncne2gtykttjjhjq2mjpxh8';
   }
 
   getFaucetsViewingKeys() {

@@ -66,7 +66,7 @@ describe('contract action subscriptions', () => {
   describe('a subscription to contract action updates without parameters', () => {
     /**
      * Subscribing to contract action updates without any offset parameters should stream
-     * contract actions starting from the latest available block and continue streaming 
+     * contract actions starting from the latest available block and continue streaming
      * new contract actions as they are produced.
      *
      * @given no block offset parameters are provided
@@ -80,23 +80,24 @@ describe('contract action subscriptions', () => {
 
       // We wait for at least one contract action to be received
       const receivedContractActions: ContractActionSubscriptionResponse[] = [];
-      const contractActionSubscriptionHandler: SubscriptionHandlers<ContractActionSubscriptionResponse> = {
-        next: (payload: ContractActionSubscriptionResponse) => {
-          log.debug(`Received contract action:\n${JSON.stringify(payload)}`);
-          receivedContractActions.push(payload);
-          
-          if (receivedContractActions.length === 1) {
-            eventCoordinator.notify('contractActionReceived');
-            log.debug('Contract action received');
-          }
-        },
-      };
+      const contractActionSubscriptionHandler: SubscriptionHandlers<ContractActionSubscriptionResponse> =
+        {
+          next: (payload: ContractActionSubscriptionResponse) => {
+            log.debug(`Received contract action:\n${JSON.stringify(payload)}`);
+            receivedContractActions.push(payload);
+
+            if (receivedContractActions.length === 1) {
+              eventCoordinator.notify('contractActionReceived');
+              log.debug('Contract action received');
+            }
+          },
+        };
 
       // We subscribe to contract actions for a specific address without block offset
       // This will start streaming contract actions from the latest block
       const unsubscribe = indexerWsClient.subscribeToContractActionEvents(
         contractActionSubscriptionHandler,
-        contractAddress
+        contractAddress,
       );
 
       // Maximum wait time for contract action (similar to block timeout)
@@ -108,14 +109,16 @@ describe('contract action subscriptions', () => {
       // We should receive at least one contract action message
       expect(receivedContractActions.length).toBeGreaterThanOrEqual(1);
       expect(receivedContractActions[0]).toBeSuccess();
-      
+
       // Validate the received contract action
       for (const action of receivedContractActions) {
         if (action.data?.contractActions) {
           const contractAction = action.data.contractActions;
           expect(contractAction).toBeDefined();
           expect(contractAction.__typename).toBeDefined();
-          expect(['ContractDeploy', 'ContractCall', 'ContractUpdate']).toContain(contractAction.__typename);
+          expect(['ContractDeploy', 'ContractCall', 'ContractUpdate']).toContain(
+            contractAction.__typename,
+          );
           expect(contractAction.address).toBe(contractAddress);
         }
       }
