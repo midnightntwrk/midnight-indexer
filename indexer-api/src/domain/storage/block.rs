@@ -37,8 +37,8 @@ where
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<Block, sqlx::Error>> + Send;
 
-    /// Get block parameters for the given block ID.
-    async fn get_block_parameters(
+    /// Get ledger parameters for the given block ID.
+    async fn get_ledger_parameters(
         &self,
         block_id: u64,
     ) -> Result<Option<SerializedLedgerParameters>, sqlx::Error>;
@@ -66,7 +66,7 @@ impl BlockStorage for NoopStorage {
         stream::empty()
     }
 
-    async fn get_block_parameters(
+    async fn get_ledger_parameters(
         &self,
         block_id: u64,
     ) -> Result<Option<SerializedLedgerParameters>, sqlx::Error> {

@@ -14,7 +14,7 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiResult, ContextExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v1::{AsBytesExt, HexEncoded, transaction::Transaction},
     },
 };
@@ -82,17 +82,18 @@ where
         Ok(transactions.into_iter().map(Into::into).collect())
     }
 
-    /// The hex-encoded ledger parameters after this block.
-    async fn ledger_parameters(&self, cx: &Context<'_>) -> ApiResult<Option<HexEncoded>> {
+    /// The hex-encoded ledger parameters for this block.
+    async fn ledger_parameters(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
         let parameters = cx
             .get_storage::<S>()
-            .get_block_parameters(self.id)
+            .get_ledger_parameters(self.id)
             .await
             .map_err_into_server_error(|| {
-                format!("get block parameters for block id {}", self.id)
-            })?;
+                format!("get ledger parameters for block id {}", self.id)
+            })?
+            .ok_or_server_error(|| format!("block with id {} not found", self.id))?;
 
-        Ok(parameters.map(|p| p.hex_encode()))
+        Ok(parameters.hex_encode())
     }
 }
 

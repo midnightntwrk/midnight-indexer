@@ -339,7 +339,7 @@ async fn index_block(
         ..
     } = config;
 
-    let (block, transactions) = block.into();
+    let (mut block, transactions) = block.into();
 
     let (transactions, ledger_parameters) = ledger_state
         .apply_node_transactions(transactions, block.parent_hash, block.timestamp)
@@ -351,6 +351,7 @@ async fn index_block(
             block.height
         );
     }
+    block.ledger_parameters = ledger_parameters.serialize()?;
 
     // Determine whether caught up, also allowing to fall back a little in that state.
     let node_block_height = highest_block_on_node
@@ -376,9 +377,9 @@ async fn index_block(
         info!(caught_up:%; "caught-up status changed")
     }
 
-    // First save and update the block with its transactions and parameters.
+    // First save and update the block with its transactions.
     let max_transaction_id = storage
-        .save_block(&block, &transactions, &ledger_parameters.serialize()?)
+        .save_block(&block, &transactions)
         .await
         .context("save block")?;
 

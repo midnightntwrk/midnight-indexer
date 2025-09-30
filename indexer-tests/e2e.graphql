@@ -5,6 +5,7 @@ query BlockQuery($block_offset: BlockOffset) {
         protocolVersion
         timestamp
         author
+        ledgerParameters
         parent {
             hash
             height
@@ -250,6 +251,7 @@ subscription BlockSubscription($block_offset: BlockOffset) {
         protocolVersion
         timestamp
         author
+        ledgerParameters
         parent {
             hash
             height

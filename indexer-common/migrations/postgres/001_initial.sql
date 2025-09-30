@@ -22,14 +22,8 @@ CREATE TABLE blocks (
   protocol_version BIGINT NOT NULL,
   parent_hash BYTEA NOT NULL,
   author BYTEA,
-  timestamp BIGINT NOT NULL
-);
---------------------------------------------------------------------------------
--- block_parameters
---------------------------------------------------------------------------------
-CREATE TABLE block_parameters (
-  block_id BIGINT PRIMARY KEY REFERENCES blocks (id),
-  raw BYTEA NOT NULL
+  timestamp BIGINT NOT NULL,
+  ledger_parameters BYTEA NOT NULL
 );
 --------------------------------------------------------------------------------
 -- transactions

@@ -31,9 +31,9 @@ type Block {
 	"""
 	transactions: [Transaction!]!
 	"""
-	The hex-encoded ledger parameters after this block.
+	The hex-encoded ledger parameters for this block.
 	"""
-	ledgerParameters: HexEncoded
+	ledgerParameters: HexEncoded!
 }
 
 """
