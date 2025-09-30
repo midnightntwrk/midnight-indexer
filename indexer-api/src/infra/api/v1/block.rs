@@ -88,7 +88,9 @@ where
             .get_storage::<S>()
             .get_ledger_parameters(self.id)
             .await
-            .map_err_into_server_error(|| format!("get block parameters for block id {}", self.id))?
+            .map_err_into_server_error(|| {
+                format!("get ledger parameters for block id {}", self.id)
+            })?
             .ok_or_server_error(|| format!("block with id {} not found", self.id))?;
 
         Ok(parameters.hex_encode())
