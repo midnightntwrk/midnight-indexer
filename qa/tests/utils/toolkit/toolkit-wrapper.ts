@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import log from '@utils/logging/logger';
 import { env, networkIdByEnvName } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
 
@@ -23,6 +24,7 @@ interface ToolkitConfig {
   targetDir?: string;
   chain?: string;
   nodeTag?: string;
+  syncCacheDir?: string;
 }
 
 interface ToolkitTransactionResult {
@@ -91,9 +93,15 @@ class ToolkitWrapper {
     const randomId = Math.random().toString(36).slice(2, 12);
 
     this.config.containerName =
-      config.containerName || `mn-toolkit-${env.getEnvName()}-${randomId}-${Date.now()}`;
+      config.containerName || `mn-toolkit-${env.getEnvName()}-${randomId}`;
     this.config.targetDir = config.targetDir || '/tmp/toolkit/';
     this.config.nodeTag = config.nodeTag || env.getNodeVersion();
+    this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${env.getEnvName()}-${randomId}`;
+
+    log.debug(`Toolkit container name: ${this.config.containerName}`);
+    log.debug(`Toolkit target dir: ${this.config.targetDir}`);
+    log.debug(`Toolkit node tag: ${this.config.nodeTag}`);
+    log.debug(`Toolkit sync cache dir: ${this.config.syncCacheDir}`);
 
     this.container = new GenericContainer(
       `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeTag}`,
@@ -107,7 +115,7 @@ class ToolkitWrapper {
           target: '/out',
         },
         {
-          source: `${this.config.targetDir}/.sync_cache-${this.config.chain}-${randomId}`,
+          source: this.config.syncCacheDir,
           target: `/.sync_cache`,
         },
       ])
