@@ -644,7 +644,7 @@ type UnshieldedUtxo {
 	"""
 	Whether this UTXO is registered for DUST generation.
 	"""
-	isRegisteredForDustGeneration: Boolean!
+	registeredForDustGeneration: Boolean!
 	"""
 	Transaction that created this UTXO.
 	"""

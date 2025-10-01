@@ -40,6 +40,12 @@ impl From<u128> for U128BeBytes {
     }
 }
 
+impl From<&u128> for U128BeBytes {
+    fn from(value: &u128) -> Self {
+        Self(value.to_be_bytes())
+    }
+}
+
 impl From<U128BeBytes> for u128 {
     fn from(value: U128BeBytes) -> Self {
         u128::from_be_bytes(value.0)

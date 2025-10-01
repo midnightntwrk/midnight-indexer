@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use indexer_common::{
-    domain::{InitialNonce, IntentHash, RawTokenType, RawUnshieldedAddress},
+    domain::{IntentHash, Nonce, RawTokenType, RawUnshieldedAddress},
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
 use sqlx::FromRow;
@@ -46,10 +46,10 @@ pub struct UnshieldedUtxo {
     pub intent_hash: IntentHash,
 
     /// Initial nonce for DUST generation tracking.
-    pub initial_nonce: InitialNonce,
+    pub initial_nonce: Nonce,
 
     /// Whether this UTXO is registered for DUST generation.
-    pub is_registered_for_dust_generation: bool,
+    pub registered_for_dust_generation: bool,
 }
 
 /// Token balance held by a contract.

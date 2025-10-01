@@ -83,7 +83,7 @@ CREATE TABLE unshielded_utxos (
   output_index BIGINT NOT NULL,
   intent_hash BYTEA NOT NULL,
   initial_nonce BYTEA NOT NULL,
-  is_registered_for_dust_generation BOOLEAN NOT NULL,
+  registered_for_dust_generation BOOLEAN NOT NULL,
   UNIQUE (intent_hash, output_index)
 );
 CREATE INDEX ON unshielded_utxos (creating_transaction_id);
