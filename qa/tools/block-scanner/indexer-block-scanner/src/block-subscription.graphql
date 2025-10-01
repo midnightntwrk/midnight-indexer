@@ -1,0 +1,77 @@
+subscription BlocksSubscription($OFFSET: BlockOffset) {
+  blocks(offset: $OFFSET) {
+    hash
+    height
+    timestamp
+    transactions {
+      __typename
+      hash
+      protocolVersion
+      block {
+        hash
+        height
+      }
+      ... on RegularTransaction {
+        merkleTreeRoot
+        identifiers
+        startIndex
+        endIndex
+        fees {
+          paidFees
+          estimatedFees
+        }
+        transactionResult {
+          status
+          segments {
+            id
+            success
+          }
+        }
+        contractActions {
+          __typename
+          address
+          state
+          chainState
+        }
+        unshieldedCreatedOutputs {
+          owner
+          intentHash
+          value
+          tokenType
+          outputIndex
+          createdAtTransaction {
+            hash
+          }
+          spentAtTransaction {
+            hash
+          }
+        }
+        unshieldedSpentOutputs {
+          owner
+          intentHash
+          value
+          tokenType
+          outputIndex
+          createdAtTransaction {
+            hash
+          }
+          spentAtTransaction {
+            hash
+          }
+        }
+      }
+      ... on SystemTransaction {
+        zswapLedgerEvents {
+          id
+          raw
+          maxId
+        }
+        dustLedgerEvents {
+          id
+          raw
+          maxId
+        }
+      }
+    }
+  }
+}
