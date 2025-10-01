@@ -1,22 +1,4 @@
 """
-Address type for registration queries.
-"""
-enum AddressType {
-	"""
-	Night address.
-	"""
-	NIGHT
-	"""
-	DUST address.
-	"""
-	DUST
-	"""
-	Cardano stake key.
-	"""
-	CARDANO_STAKE
-}
-
-"""
 A block with its relevant data.
 """
 type Block {
@@ -215,81 +197,6 @@ type ContractUpdate implements ContractAction {
 }
 
 """
-DUST commitment information.
-"""
-type DustCommitment {
-	"""
-	DUST commitment.
-	"""
-	commitment: HexEncoded!
-	"""
-	DUST nullifier (if spent).
-	"""
-	nullifier: HexEncoded
-	"""
-	Initial value.
-	"""
-	value: String!
-	"""
-	DUST address of owner.
-	"""
-	owner: HexEncoded!
-	"""
-	Nonce.
-	"""
-	nonce: HexEncoded!
-	"""
-	Creation timestamp.
-	"""
-	createdAt: Int!
-	"""
-	Spend timestamp (if spent).
-	"""
-	spentAt: Int
-}
-
-"""
-DUST commitment event union type.
-"""
-union DustCommitmentEvent = DustCommitment | DustCommitmentMerkleUpdate | DustCommitmentProgress
-
-"""
-DUST commitment Merkle tree update.
-"""
-type DustCommitmentMerkleUpdate {
-	"""
-	Tree index.
-	"""
-	index: Int!
-	"""
-	Collapsed update data.
-	"""
-	collapsedUpdate: HexEncoded!
-	"""
-	Block height of update.
-	"""
-	blockHeight: Int!
-	"""
-	Merkle tree path (if available).
-	"""
-	merklePath: [DustMerklePathEntry!]
-}
-
-"""
-DUST commitment progress information.
-"""
-type DustCommitmentProgress {
-	"""
-	Highest processed index.
-	"""
-	highestIndex: Int!
-	"""
-	Number of commitments in batch.
-	"""
-	commitmentCount: Int!
-}
-
-"""
 DUST event from chain processing.
 """
 type DustEvent {
@@ -372,11 +279,6 @@ type DustGenerationDtimeUpdateDetails {
 }
 
 """
-DUST generation event union type.
-"""
-union DustGenerationEvent = DustGenerationInfo | DustGenerationMerkleUpdate | DustGenerationProgress
-
-"""
 DUST generation information.
 """
 type DustGenerationInfo {
@@ -408,42 +310,6 @@ type DustGenerationInfo {
 	Index in generation Merkle tree.
 	"""
 	merkleIndex: Int!
-}
-
-"""
-DUST generation Merkle tree update.
-"""
-type DustGenerationMerkleUpdate {
-	"""
-	Tree index.
-	"""
-	index: Int!
-	"""
-	Collapsed update data.
-	"""
-	collapsedUpdate: HexEncoded!
-	"""
-	Block height of update.
-	"""
-	blockHeight: Int!
-	"""
-	Merkle tree path (if available from dtime update).
-	"""
-	merklePath: [DustMerklePathEntry!]
-}
-
-"""
-DUST generation progress information.
-"""
-type DustGenerationProgress {
-	"""
-	Highest processed index.
-	"""
-	highestIndex: Int!
-	"""
-	Number of active generations.
-	"""
-	activeGenerationCount: Int!
 }
 
 """
@@ -572,43 +438,6 @@ enum DustMerkleTreeType {
 	Generation Merkle tree.
 	"""
 	GENERATION
-}
-
-"""
-Transaction containing DUST nullifiers.
-"""
-type DustNullifierTransaction {
-	"""
-	Transaction hash.
-	"""
-	transactionHash: HexEncoded!
-	"""
-	Block height.
-	"""
-	blockHeight: Int!
-	"""
-	Matching nullifier prefixes.
-	"""
-	matchingNullifierPrefixes: [HexEncoded!]!
-}
-
-"""
-DUST nullifier transaction event union type.
-"""
-union DustNullifierTransactionEvent = DustNullifierTransaction | DustNullifierTransactionProgress
-
-"""
-DUST nullifier transaction progress.
-"""
-type DustNullifierTransactionProgress {
-	"""
-	Highest processed block.
-	"""
-	highestBlock: Int!
-	"""
-	Number of matched transactions.
-	"""
-	matchedCount: Int!
 }
 
 """
@@ -774,65 +603,6 @@ type Query {
 }
 
 """
-Registration address input.
-"""
-input RegistrationAddress {
-	"""
-	Type of address.
-	"""
-	addressType: AddressType!
-	"""
-	Address value.
-	"""
-	value: HexEncoded!
-}
-
-"""
-Registration update information.
-"""
-type RegistrationUpdate {
-	"""
-	Cardano stake key.
-	"""
-	cardanoStakeKey: HexEncoded!
-	"""
-	DUST address.
-	"""
-	dustAddress: HexEncoded!
-	"""
-	Whether this registration is active.
-	"""
-	isActive: Boolean!
-	"""
-	Registration timestamp.
-	"""
-	registeredAt: Int!
-	"""
-	Removal timestamp (if removed).
-	"""
-	removedAt: Int
-}
-
-"""
-Registration update event union type.
-"""
-union RegistrationUpdateEvent = RegistrationUpdate | RegistrationUpdateProgress
-
-"""
-Registration update progress.
-"""
-type RegistrationUpdateProgress {
-	"""
-	Latest processed timestamp.
-	"""
-	latestTimestamp: Int!
-	"""
-	Number of updates in batch.
-	"""
-	updateCount: Int!
-}
-
-"""
 A regular Midnight transaction.
 """
 type RegularTransaction implements Transaction {
@@ -991,22 +761,6 @@ type Subscription {
 	Subscribe to zswap ledger events starting at the given ID or at the very start if omitted.
 	"""
 	zswapLedgerEvents(id: Int): ZswapLedgerEvent!
-	"""
-	Stream generation info with merkle updates for wallet reconstruction.
-	"""
-	dustGenerations(dustAddress: HexEncoded!, fromGenerationIndex: Int, fromMerkleIndex: Int, onlyActive: Boolean): DustGenerationEvent!
-	"""
-	Stream regular transactions containing DUST nullifiers.
-	"""
-	dustNullifierTransactions(prefixes: [HexEncoded!]!, minPrefixLength: Int!, fromBlock: Int): DustNullifierTransactionEvent!
-	"""
-	Stream DUST commitments with merkle tree updates, filtered by prefix.
-	"""
-	dustCommitments(commitmentPrefixes: [HexEncoded!]!, startIndex: Int!, minPrefixLength: Int!): DustCommitmentEvent!
-	"""
-	Stream registration changes for multiple address types.
-	"""
-	dustRegistrationUpdates(addresses: [RegistrationAddress!]!): RegistrationUpdateEvent!
 }
 
 """

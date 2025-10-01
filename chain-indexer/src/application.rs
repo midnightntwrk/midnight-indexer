@@ -50,6 +50,36 @@ pub struct Config {
     pub save_ledger_state_after: u32,
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
+    pub dust: DustConfig,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct DustConfig {
+    /// Merkle tree batch update size.
+    pub merkle_tree_batch_size: usize,
+
+    /// Privacy prefix length for nullifier queries.
+    pub privacy_prefix_length: usize,
+
+    /// Maximum registrations per DUST address.
+    pub max_registrations_per_address: usize,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            network_id: NetworkId::Undeployed,
+            blocks_buffer: 10,
+            save_ledger_state_after: 1000,
+            caught_up_max_distance: 10,
+            caught_up_leeway: 5,
+            dust: DustConfig {
+                merkle_tree_batch_size: 1000,
+                privacy_prefix_length: 8,
+                max_registrations_per_address: 10,
+            },
+        }
+    }
 }
 
 pub async fn run(
@@ -519,7 +549,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
-        dust_registration_events: Vec::new(),
+        dust_registration_events: Default::default(),
     });
 
     static BLOCK_1: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -531,7 +561,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
-        dust_registration_events: Vec::new(),
+        dust_registration_events: Default::default(),
     });
 
     static BLOCK_2: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -543,7 +573,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
-        dust_registration_events: Vec::new(),
+        dust_registration_events: Default::default(),
     });
 
     static BLOCK_3: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -555,7 +585,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
-        dust_registration_events: Vec::new(),
+        dust_registration_events: Default::default(),
     });
 
     pub const ZERO_HASH: BlockHash = ByteArray([0; 32]);

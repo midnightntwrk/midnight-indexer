@@ -570,10 +570,8 @@ fn compute_claim_rewards_intent_hash_v6(
     nonce: &NonceV6,
 ) -> IntentHash {
     let mut hasher = Sha256::new();
-
     hasher.update(owner.0.0);
     hasher.update(value.to_le_bytes());
     hasher.update(nonce.0.0);
-
     ByteArray(hasher.finalize().into())
 }

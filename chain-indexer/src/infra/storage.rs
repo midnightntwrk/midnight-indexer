@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::domain::{
-    self, Block, BlockTransactions, ContractAction, RegularTransaction, SystemTransaction,
-    Transaction, node::BlockInfo,
+    self, Block, BlockTransactions, ContractAction, DustRegistrationEvent, RegularTransaction,
+    SystemTransaction, Transaction, node::BlockInfo,
 };
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
@@ -173,9 +173,11 @@ impl domain::storage::Storage for Storage {
         &self,
         block: &Block,
         transactions: &[Transaction],
+        dust_registration_events: &[DustRegistrationEvent],
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let max_transaction_id = save_block(block, transactions, &mut tx).await?;
+        let max_transaction_id =
+            save_block(block, transactions, dust_registration_events, &mut tx).await?;
         tx.commit().await?;
 
         Ok(max_transaction_id)
@@ -228,6 +230,7 @@ impl From<&LedgerEventAttributes> for LedgerEventVariant {
 async fn save_block(
     block: &Block,
     transactions: &[Transaction],
+    dust_registration_events: &[DustRegistrationEvent],
     tx: &mut SqlxTransaction,
 ) -> Result<Option<u64>, sqlx::Error> {
     let query = indoc! {"
@@ -270,6 +273,7 @@ async fn save_block(
         .await?;
 
     let max_transaction_id = save_transactions(transactions, block_id, tx).await?;
+    save_dust_registration_events(dust_registration_events, block_id, block.timestamp, tx).await?;
     Ok(max_transaction_id)
 }
 
@@ -646,6 +650,129 @@ async fn save_identifiers(
         .build()
         .execute(&mut **tx)
         .await?;
+
+    Ok(())
+}
+
+#[trace(properties = { "block_id": "{block_id}" })]
+async fn save_dust_registration_events(
+    events: &[DustRegistrationEvent],
+    block_id: i64,
+    block_timestamp: u64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    use crate::domain::DustRegistrationEvent;
+
+    for event in events {
+        match event {
+            DustRegistrationEvent::Registration {
+                cardano_address,
+                dust_address,
+            } => {
+                let query = indoc! {"
+                    INSERT INTO cnight_registrations (
+                        cardano_address,
+                        dust_address,
+                        is_valid,
+                        registered_at,
+                        block_id
+                    ) VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (cardano_address, dust_address)
+                    DO UPDATE SET
+                        is_valid = EXCLUDED.is_valid,
+                        registered_at = EXCLUDED.registered_at,
+                        removed_at = NULL,
+                        block_id = EXCLUDED.block_id
+                "};
+
+                sqlx::query(query)
+                    .bind(cardano_address.as_ref())
+                    .bind(dust_address.as_ref())
+                    .bind(true)
+                    .bind(block_timestamp as i64)
+                    .bind(block_id)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+
+            DustRegistrationEvent::Deregistration {
+                cardano_address,
+                dust_address,
+            } => {
+                let query = indoc! {"
+                    UPDATE cnight_registrations
+                    SET is_valid = $1,
+                        removed_at = $2,
+                        block_id = $3
+                    WHERE cardano_address = $4
+                      AND dust_address = $5
+                "};
+
+                sqlx::query(query)
+                    .bind(false)
+                    .bind(block_timestamp as i64)
+                    .bind(block_id)
+                    .bind(cardano_address.as_ref())
+                    .bind(dust_address.as_ref())
+                    .execute(&mut **tx)
+                    .await?;
+            }
+
+            DustRegistrationEvent::MappingAdded {
+                cardano_address,
+                dust_address,
+                utxo_id,
+            } => {
+                let query = indoc! {"
+                    INSERT INTO dust_utxo_mappings (
+                        cardano_address,
+                        dust_address,
+                        utxo_id,
+                        added_at,
+                        block_id
+                    ) VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (utxo_id)
+                    DO UPDATE SET
+                        added_at = EXCLUDED.added_at,
+                        removed_at = NULL,
+                        block_id = EXCLUDED.block_id
+                "};
+
+                sqlx::query(query)
+                    .bind(cardano_address.as_ref())
+                    .bind(dust_address.as_ref())
+                    .bind(utxo_id.as_ref())
+                    .bind(block_timestamp as i64)
+                    .bind(block_id)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+
+            DustRegistrationEvent::MappingRemoved {
+                cardano_address,
+                dust_address,
+                utxo_id,
+            } => {
+                let query = indoc! {"
+                    UPDATE dust_utxo_mappings
+                    SET removed_at = $1,
+                        block_id = $2
+                    WHERE utxo_id = $3
+                      AND cardano_address = $4
+                      AND dust_address = $5
+                "};
+
+                sqlx::query(query)
+                    .bind(block_timestamp as i64)
+                    .bind(block_id)
+                    .bind(utxo_id.as_ref())
+                    .bind(cardano_address.as_ref())
+                    .bind(dust_address.as_ref())
+                    .execute(&mut **tx)
+                    .await?;
+            }
+        }
+    }
 
     Ok(())
 }
