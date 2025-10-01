@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import fs from 'fs';
 import log from '@utils/logging/logger';
 import { env, networkIdByEnvName } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
@@ -94,14 +95,20 @@ class ToolkitWrapper {
 
     this.config.containerName =
       config.containerName || `mn-toolkit-${env.getEnvName()}-${randomId}`;
-    this.config.targetDir = config.targetDir || '/tmp/toolkit/';
+    this.config.targetDir = config.targetDir || '.tmp/toolkitto/';
     this.config.nodeTag = config.nodeTag || env.getNodeVersion();
     this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${env.getEnvName()}-${randomId}`;
+
+    // Get the current working directory
+    const cwd = process.cwd();
 
     log.debug(`Toolkit container name: ${this.config.containerName}`);
     log.debug(`Toolkit target dir: ${this.config.targetDir}`);
     log.debug(`Toolkit node tag: ${this.config.nodeTag}`);
     log.debug(`Toolkit sync cache dir: ${this.config.syncCacheDir}`);
+
+    // Create the sync cache dir
+    fs.mkdirSync(this.config.syncCacheDir, { recursive: true });
 
     this.container = new GenericContainer(
       `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeTag}`,
@@ -111,11 +118,11 @@ class ToolkitWrapper {
       .withEntrypoint([]) // equivalent to --entrypoint ""
       .withBindMounts([
         {
-          source: this.config.targetDir,
+          source: `${cwd}/${this.config.targetDir}`,
           target: '/out',
         },
         {
-          source: this.config.syncCacheDir,
+          source: `${cwd}/${this.config.syncCacheDir}`,
           target: `/.sync_cache`,
         },
       ])
@@ -130,16 +137,16 @@ class ToolkitWrapper {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
-    const result = await this.startedContainer.exec(['rm', '-rf', `/.sync_cache`]);
-    if (result.exitCode !== 0) {
-      throw new Error(
-        `Toolkit command failed with exit code ${result.exitCode}: ${result.stderr || result.output || 'Unknown error occurred'}`,
-      );
-    }
+
+    // Remove the sync cache dir from the container
+    await this.startedContainer.exec(['rm', '-rf', `/.sync_cache/*`]);
 
     if (this.startedContainer) {
       await this.startedContainer.stop();
     }
+
+    // Remove the sync cache dir
+    fs.rmSync(this.config.syncCacheDir!, { recursive: true });
   }
 
   async showAddress(seed: string, addressType: AddressType): Promise<string> {
