@@ -1,0 +1,12 @@
+# Initialise the project with yarn
+# set it to use 3.6.0
+# and use node_modules instead of pnp
+yarn init -y
+yarn set version 3.6.0
+yarn config set nodeLinker node-modules
+
+yarn add ws
+yarn add -D typescript @types/ws
+
+# Bundler instead of tsc
+yarn add --dev esbuild

@@ -1,0 +1,24 @@
+{
+  "name": "ts-indexer-based-block-scanner",
+  "packageManager": "yarn@3.6.0",
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf indexer-block-scanner/logs/ indexer-block-scanner/dist tmp_scan",
+    "format": "prettier --write '**/*.{js,jsx,json,ts,tsx,graphql,gql}'",
+    "audit": "yarn npm audit && echo 'No known vulnerabilities found.'",
+    "build:scanner": "tsc -p indexer-block-scanner/tsconfig.json && cp indexer-block-scanner/src/*.graphql indexer-block-scanner/dist/",
+    "build:scanner:module": "esbuild indexer-block-scanner/src/scanner.ts --platform=node --outdir=indexer-block-scanner/dist --format=esm && cp indexer-block-scanner/src/*.graphql indexer-block-scanner/dist/",
+    "run:scanner": "node indexer-block-scanner/dist/scanner.js",
+    "postfilter": "TARGET_ENV=${TARGET_ENV:-undeployed} && FILE=$(ls ${TARGET_ENV}-block-scan-*.jsonl | sort | tail -n1) && grep '\"MidnightTransaction\"' \"$FILE\" | jq -c 'del(.transactions_index)' > \"transactions-of-$FILE\""
+  },
+  "dependencies": {
+    "graphql-ws": "^6.0.5",
+    "ws": "^8.18.2"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.25.5",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.3"
+  }
+}
