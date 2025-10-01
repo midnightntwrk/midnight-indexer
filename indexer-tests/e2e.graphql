@@ -56,17 +56,101 @@ query BlockQuery($block_offset: BlockOffset) {
             }
             unshieldedCreatedOutputs {
                 owner
-                value
                 tokenType
-                intentHash
+                value
                 outputIndex
+                intentHash
+                initialNonce
+                registeredForDustGeneration
+                createdAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
+                spentAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
             }
             unshieldedSpentOutputs {
                 owner
-                value
                 tokenType
-                intentHash
+                value
                 outputIndex
+                intentHash
+                initialNonce
+                registeredForDustGeneration
+                createdAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
+                spentAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
             }
             zswapLedgerEvents {
                 id
@@ -148,17 +232,101 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
         }
         unshieldedCreatedOutputs {
             owner
-            value
             tokenType
-            intentHash
+            value
             outputIndex
+            intentHash
+            initialNonce
+            registeredForDustGeneration
+            createdAtTransaction {
+                hash
+                __typename
+                ... on RegularTransaction {
+                    transactionResult {
+                        status
+                        segments {
+                            id
+                            success
+                        }
+                    }
+                    identifiers
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
+                    }
+                }
+            }
+            spentAtTransaction {
+                hash
+                __typename
+                ... on RegularTransaction {
+                    transactionResult {
+                        status
+                        segments {
+                            id
+                            success
+                        }
+                    }
+                    identifiers
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
+                    }
+                }
+            }
         }
         unshieldedSpentOutputs {
             owner
-            value
             tokenType
-            intentHash
+            value
             outputIndex
+            intentHash
+            initialNonce
+            registeredForDustGeneration
+            createdAtTransaction {
+                hash
+                __typename
+                ... on RegularTransaction {
+                    transactionResult {
+                        status
+                        segments {
+                            id
+                            success
+                        }
+                    }
+                    identifiers
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
+                    }
+                }
+            }
+            spentAtTransaction {
+                hash
+                __typename
+                ... on RegularTransaction {
+                    transactionResult {
+                        status
+                        segments {
+                            id
+                            success
+                        }
+                    }
+                    identifiers
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
+                    }
+                }
+            }
         }
         zswapLedgerEvents {
             id
@@ -302,17 +470,101 @@ subscription BlockSubscription($block_offset: BlockOffset) {
             }
             unshieldedCreatedOutputs {
                 owner
-                value
                 tokenType
-                intentHash
+                value
                 outputIndex
+                intentHash
+                initialNonce
+                registeredForDustGeneration
+                createdAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
+                spentAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
             }
             unshieldedSpentOutputs {
                 owner
-                value
                 tokenType
-                intentHash
+                value
                 outputIndex
+                intentHash
+                initialNonce
+                registeredForDustGeneration
+                createdAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
+                spentAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
             }
             zswapLedgerEvents {
                 id
@@ -446,6 +698,8 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                 value
                 outputIndex
                 intentHash
+                initialNonce
+                registeredForDustGeneration
                 createdAtTransaction {
                     hash
                     __typename
@@ -473,6 +727,8 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                 value
                 outputIndex
                 intentHash
+                initialNonce
+                registeredForDustGeneration
                 createdAtTransaction {
                     hash
                     __typename
