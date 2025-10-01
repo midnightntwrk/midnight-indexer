@@ -127,6 +127,16 @@ class ToolkitWrapper {
   }
 
   async stop() {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+    const result = await this.startedContainer.exec(['rm', '-rf', `/.sync_cache`]);
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Toolkit command failed with exit code ${result.exitCode}: ${result.stderr || result.output || 'Unknown error occurred'}`,
+      );
+    }
+
     if (this.startedContainer) {
       await this.startedContainer.stop();
     }
@@ -142,6 +152,7 @@ class ToolkitWrapper {
       'show-address',
       '--network',
       env.getEnvName().toLowerCase(),
+      `--${addressType}`,
       '--seed',
       seed,
     ]);
@@ -151,8 +162,10 @@ class ToolkitWrapper {
       throw new Error(`Toolkit command failed with exit code ${result.exitCode}: ${errorMessage}`);
     }
 
+    log.info(`Show address (${addressType}): ${result.output.trim()}`);
+
     // Extract the json object and return it as is
-    return JSON.parse(result.output.trim())[addressType];
+    return result.output.trim();
   }
 
   async showViewingKey(seed: string): Promise<string> {
