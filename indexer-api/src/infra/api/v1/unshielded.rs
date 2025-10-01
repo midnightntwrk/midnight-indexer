@@ -56,6 +56,12 @@ where
     /// The hex-encoded serialized intent hash.
     intent_hash: HexEncoded,
 
+    /// The hex-encoded initial nonce for DUST generation tracking.
+    initial_nonce: HexEncoded,
+
+    /// Whether this UTXO is registered for DUST generation.
+    registered_for_dust_generation: bool,
+
     #[graphql(skip)]
     creating_transaction_id: u64,
 
@@ -115,6 +121,8 @@ where
             value: utxo.value.to_string(),
             output_index: utxo.output_index,
             intent_hash: utxo.intent_hash.hex_encode(),
+            initial_nonce: utxo.initial_nonce.hex_encode(),
+            registered_for_dust_generation: utxo.registered_for_dust_generation,
             creating_transaction_id: utxo.creating_transaction_id,
             spending_transaction_id: utxo.spending_transaction_id,
             _s: PhantomData,

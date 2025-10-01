@@ -76,6 +76,8 @@ CREATE TABLE unshielded_utxos (
   value BLOB NOT NULL,
   output_index INTEGER NOT NULL,
   intent_hash BLOB NOT NULL,
+  initial_nonce BLOB NOT NULL,
+  registered_for_dust_generation INTEGER NOT NULL,
   UNIQUE (intent_hash, output_index)
 );
 CREATE INDEX unshielded_creating_idx ON unshielded_utxos (creating_transaction_id);

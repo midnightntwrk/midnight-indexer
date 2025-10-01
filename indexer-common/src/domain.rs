@@ -34,7 +34,7 @@ use sqlx::Type;
 
 pub type BlockAuthor = ByteArray<32>;
 pub type BlockHash = ByteArray<32>;
-pub type DustNonce = ByteArray<32>;
+pub type Nonce = ByteArray<32>;
 pub type IntentHash = ByteArray<32>;
 pub type RawTokenType = ByteArray<32>;
 pub type RawUnshieldedAddress = ByteArray<32>;
@@ -127,6 +127,8 @@ pub struct UnshieldedUtxo {
     pub value: u128,
     pub intent_hash: IntentHash,
     pub output_index: u32,
+    pub initial_nonce: Nonce,
+    pub registered_for_dust_generation: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,7 +205,7 @@ pub enum LedgerEventAttributes {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustOutput {
-    pub nonce: DustNonce,
+    pub nonce: Nonce,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
