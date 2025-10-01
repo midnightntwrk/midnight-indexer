@@ -48,6 +48,10 @@ type Block {
 	The transactions within this block.
 	"""
 	transactions: [Transaction!]!
+	"""
+	The hex-encoded ledger parameters for this block.
+	"""
+	ledgerParameters: HexEncoded!
 }
 
 """
@@ -91,6 +95,7 @@ interface ContractAction {
 	state: HexEncoded!
 	chainState: HexEncoded!
 	transaction: Transaction!
+	unshieldedBalances: [ContractBalance!]!
 }
 
 """
@@ -143,7 +148,13 @@ type ContractCall implements ContractAction {
 	The hex-encoded serialized entry point.
 	"""
 	entryPoint: HexEncoded!
+	"""
+	Transaction for this contract call.
+	"""
 	transaction: Transaction!
+	"""
+	Contract deploy for this contract call.
+	"""
 	deploy: ContractDeploy!
 	"""
 	Unshielded token balances held by this contract.
@@ -167,10 +178,12 @@ type ContractDeploy implements ContractAction {
 	The hex-encoded serialized contract-specific zswap state.
 	"""
 	chainState: HexEncoded!
+	"""
+	Transaction for this contract deploy.
+	"""
 	transaction: Transaction!
 	"""
 	Unshielded token balances held by this contract.
-	According to the architecture, deployed contracts must have zero balance.
 	"""
 	unshieldedBalances: [ContractBalance!]!
 }
@@ -191,6 +204,9 @@ type ContractUpdate implements ContractAction {
 	The hex-encoded serialized contract-specific zswap state.
 	"""
 	chainState: HexEncoded!
+	"""
+	Transaction for this contract update.
+	"""
 	transaction: Transaction!
 	"""
 	Unshielded token balances held by this contract after the update.
@@ -322,6 +338,21 @@ enum DustEventVariant {
 	DUST_SPEND_PROCESSED
 }
 
+type DustGenerationDtimeUpdate implements DustLedgerEvent {
+	"""
+	The ID of this dust ledger event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all dust ledger events.
+	"""
+	maxId: Int!
+}
+
 """
 Details for DUST generation time update.
 """
@@ -445,6 +476,25 @@ type DustGenerationStatus {
 	nightBalance: String!
 }
 
+type DustInitialUtxo implements DustLedgerEvent {
+	"""
+	The ID of this dust ledger event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all dust ledger events.
+	"""
+	maxId: Int!
+	"""
+	The dust output.
+	"""
+	output: DustOutput!
+}
+
 """
 Details for initial DUST UTXO creation.
 """
@@ -485,6 +535,15 @@ type DustInitialUtxoDetails {
 	Generation index.
 	"""
 	generationIndex: Int!
+}
+
+"""
+A dust related ledger event.
+"""
+interface DustLedgerEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
 }
 
 """
@@ -553,6 +612,16 @@ type DustNullifierTransactionProgress {
 }
 
 """
+A dust output.
+"""
+type DustOutput {
+	"""
+	The hex-encoded 32-byte nonce.
+	"""
+	nonce: HexEncoded!
+}
+
+"""
 DUST parameters information.
 """
 type DustParametersInfo {
@@ -568,6 +637,21 @@ type DustParametersInfo {
 	DUST grace period in seconds.
 	"""
 	dustGracePeriod: Int!
+}
+
+type DustSpendProcessed implements DustLedgerEvent {
+	"""
+	The ID of this dust ledger event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all dust ledger events.
+	"""
+	maxId: Int!
 }
 
 """
@@ -637,6 +721,21 @@ type Mutation {
 	Disconnect the wallet with the given session ID.
 	"""
 	disconnect(sessionId: HexEncoded!): Unit!
+}
+
+type ParamChange implements DustLedgerEvent {
+	"""
+	The ID of this dust ledger event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all dust ledger events.
+	"""
+	maxId: Int!
 }
 
 type Query {
@@ -734,13 +833,83 @@ type RegistrationUpdateProgress {
 }
 
 """
+A regular Midnight transaction.
+"""
+type RegularTransaction implements Transaction {
+	"""
+	The transaction ID.
+	"""
+	id: Int!
+	"""
+	The hex-encoded transaction hash.
+	"""
+	hash: HexEncoded!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The hex-encoded serialized transaction content.
+	"""
+	raw: HexEncoded!
+	"""
+	The result of applying this transaction to the ledger state.
+	"""
+	transactionResult: TransactionResult!
+	"""
+	The hex-encoded serialized transaction identifiers.
+	"""
+	identifiers: [HexEncoded!]!
+	"""
+	The hex-encoded serialized merkle-tree root.
+	"""
+	merkleTreeRoot: HexEncoded!
+	"""
+	The zswap state start index.
+	"""
+	startIndex: Int!
+	"""
+	The zswap state end index.
+	"""
+	endIndex: Int!
+	"""
+	Fee information for this transaction.
+	"""
+	fees: TransactionFees!
+	"""
+	The block for this transaction.
+	"""
+	block: Block!
+	"""
+	The contract actions for this transaction.
+	"""
+	contractActions: [ContractAction!]!
+	"""
+	Unshielded UTXOs created by this transaction.
+	"""
+	unshieldedCreatedOutputs: [UnshieldedUtxo!]!
+	"""
+	Unshielded UTXOs spent (consumed) by this transaction.
+	"""
+	unshieldedSpentOutputs: [UnshieldedUtxo!]!
+	"""
+	Zswap ledger events of this transaction.
+	"""
+	zswapLedgerEvents: [ZswapLedgerEvent!]!
+	"""
+	Dust ledger events of this transaction.
+	"""
+	dustLedgerEvents: [DustLedgerEvent!]!
+}
+
+"""
 A transaction relevant for the subscribing wallet and an optional collapsed merkle tree.
 """
 type RelevantTransaction {
 	"""
 	A transaction relevant for the subscribing wallet.
 	"""
-	transaction: Transaction!
+	transaction: RegularTransaction!
 	"""
 	An optional collapsed merkle tree.
 	"""
@@ -805,8 +974,12 @@ type Subscription {
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
 	"""
-	Subscribe shielded transaction events for the given session ID starting at the given index
-	or at zero if omitted.
+	Subscribe to dust ledger events starting at the given ID or at the very start if omitted.
+	"""
+	dustLedgerEvents(id: Int): DustLedgerEvent!
+	"""
+	Subscribe to shielded transaction events for the given session ID starting at the given
+	index or at zero if omitted.
 	"""
 	shieldedTransactions(sessionId: HexEncoded!, index: Int): ShieldedTransactionsEvent!
 	"""
@@ -814,6 +987,10 @@ type Subscription {
 	or zero if omitted.
 	"""
 	unshieldedTransactions(address: UnshieldedAddress!, transactionId: Int): UnshieldedTransactionsEvent!
+	"""
+	Subscribe to zswap ledger events starting at the given ID or at the very start if omitted.
+	"""
+	zswapLedgerEvents(id: Int): ZswapLedgerEvent!
 	"""
 	Stream generation info with merkle updates for wallet reconstruction.
 	"""
@@ -833,9 +1010,9 @@ type Subscription {
 }
 
 """
-A Midnight transaction.
+A system Midnight transaction.
 """
-type Transaction {
+type SystemTransaction implements Transaction {
 	"""
 	The transaction ID.
 	"""
@@ -853,35 +1030,11 @@ type Transaction {
 	"""
 	raw: HexEncoded!
 	"""
-	The result of applying a transaction to the ledger state.
-	"""
-	transactionResult: TransactionResult!
-	"""
-	Fee information for this transaction.
-	"""
-	fees: TransactionFees!
-	"""
-	The hex-encoded serialized transaction identifiers.
-	"""
-	identifiers: [HexEncoded!]!
-	"""
-	The hex-encoded serialized merkle-tree root.
-	"""
-	merkleTreeRoot: HexEncoded!
-	"""
-	The zswap state start index.
-	"""
-	startIndex: Int!
-	"""
-	The zswap state end index.
-	"""
-	endIndex: Int!
-	"""
 	The block for this transaction.
 	"""
 	block: Block!
 	"""
-	The contract actions.
+	The contract actions for this transaction.
 	"""
 	contractActions: [ContractAction!]!
 	"""
@@ -892,6 +1045,30 @@ type Transaction {
 	Unshielded UTXOs spent (consumed) by this transaction.
 	"""
 	unshieldedSpentOutputs: [UnshieldedUtxo!]!
+	"""
+	Zswap ledger events of this transaction.
+	"""
+	zswapLedgerEvents: [ZswapLedgerEvent!]!
+	"""
+	Dust ledger events of this transaction.
+	"""
+	dustLedgerEvents: [DustLedgerEvent!]!
+}
+
+"""
+A Midnight transaction.
+"""
+interface Transaction {
+	id: Int!
+	hash: HexEncoded!
+	protocolVersion: Int!
+	raw: HexEncoded!
+	block: Block!
+	contractActions: [ContractAction!]!
+	unshieldedCreatedOutputs: [UnshieldedUtxo!]!
+	unshieldedSpentOutputs: [UnshieldedUtxo!]!
+	zswapLedgerEvents: [ZswapLedgerEvent!]!
+	dustLedgerEvents: [DustLedgerEvent!]!
 }
 
 """
@@ -1002,6 +1179,14 @@ type UnshieldedUtxo {
 	"""
 	intentHash: HexEncoded!
 	"""
+	The hex-encoded initial nonce for DUST generation tracking.
+	"""
+	initialNonce: HexEncoded!
+	"""
+	Whether this UTXO is registered for DUST generation.
+	"""
+	registeredForDustGeneration: Boolean!
+	"""
 	Transaction that created this UTXO.
 	"""
 	createdAtTransaction: Transaction!
@@ -1012,6 +1197,24 @@ type UnshieldedUtxo {
 }
 
 scalar ViewingKey
+
+"""
+A zswap related ledger event.
+"""
+type ZswapLedgerEvent {
+	"""
+	The ID of this zswap ledger event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all zswap ledger events.
+	"""
+	maxId: Int!
+}
 
 """
 Directs the executor to include this field or fragment only when the `if` argument is true.

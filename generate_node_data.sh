@@ -17,11 +17,7 @@ if [ -z "$1" ]; then
 fi
 node_version="$1"
 
-# Clean up any existing node container FIRST to avoid conflicts
-echo "Cleaning up any existing node container..."
-docker rm -f node >/dev/null 2>&1 || true
-
-# Function to run all toolkit commands
+# Function to run all toolkit commands.
 run_toolkit_commands() {
     # Generate batches.
     # Note: Reduced from -n 3 -b 2 to -n 1 -b 1 to minimize DUST requirements
@@ -94,15 +90,7 @@ fi
 
 mkdir -p ./.node/$node_version
 
-# Start the node container
-# SIDECHAIN_BLOCK_BENEFICIARY specifies the wallet that receives block rewards and transaction fees (DUST).
-# Required after fees were enabled in 0.16.0-da0b6c69.
-# This hex value is a public key that matches the one used in toolkit-e2e.sh.
-#
-# Note: DUST distribution (CNightGeneratesDust) requires:
-# 1. cNIGHT token holders (from Cardano integration)
-# 2. Fee-paying transactions (wallets need DUST balance)
-# Without these, only basic system transactions (DistributeReserve, etc.) will occur.
+# Start the node container.
 docker run \
     -d \
     --name node \
@@ -139,11 +127,6 @@ while [ $attempt -le $max_attempts ]; do
     # Try to run all toolkit commands.
     if run_toolkit_commands; then
         echo "Successfully generated node data"
-        echo ""
-        echo "Note: To check for DUST/system transactions:"
-        echo "  - Run 'just check-dust' to see system transactions (DistributeReserve, etc.)"
-        echo "  - CNightGeneratesDust won't appear without cNIGHT holders (requires Cardano)"
-        echo "  - Transactions may pay 0 fees if wallets lack DUST balance"
         exit 0
     fi
 

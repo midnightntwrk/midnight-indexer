@@ -37,9 +37,9 @@ export const SHIELDED_TRANSACTION_SUBSCRIPTION_BY_SESSION_ID = `subscription Wal
         }
         ... on ShieldedTransactionsProgress {
             __typename
-            highestIndex
-            highestRelevantIndex
-            highestRelevantWalletIndex
+            highestEndIndex
+            highestCheckedEndIndex
+            highestRelevantEndIndex
         }
     }
 }`;
@@ -49,6 +49,9 @@ const UNSHIELDED_TX_SUBSCRIPTION_FRAGMENT = `    ... on UnshieldedTransaction {
         transaction{
           id
           hash
+          ... on RegularTransaction {
+            identifiers
+          }
         }
         createdUtxos{
           owner
@@ -58,11 +61,15 @@ const UNSHIELDED_TX_SUBSCRIPTION_FRAGMENT = `    ... on UnshieldedTransaction {
           outputIndex
           createdAtTransaction{
               hash
-              identifiers
+              ... on RegularTransaction {
+                identifiers
+              }
           }
           spentAtTransaction{
               hash
-              identifiers
+              ... on RegularTransaction {
+                identifiers
+              }
           }
         }
         spentUtxos{
@@ -73,11 +80,15 @@ const UNSHIELDED_TX_SUBSCRIPTION_FRAGMENT = `    ... on UnshieldedTransaction {
           outputIndex
           createdAtTransaction{
               hash
-              identifiers
+              ... on RegularTransaction {
+                identifiers
+              }
           }
           spentAtTransaction{
               hash
-              identifiers
+              ... on RegularTransaction {
+                identifiers
+              }
           }
         }
       }
@@ -111,5 +122,63 @@ export const BLOCKS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription BlocksSubs
         hash
         height
         timestamp
+    }
+}`;
+
+const CONTRACT_ACTION_SUBSCRIPTION_FRAGMENT = `
+    __typename
+    address
+    ... on ContractDeploy {
+        state
+        chainState
+        transaction {
+            hash
+        }
+        unshieldedBalances {
+            tokenType
+            amount
+        }
+    }
+    ... on ContractCall {
+        state
+        chainState
+        transaction {
+            hash
+        }
+        entryPoint
+        deploy {
+            address
+            unshieldedBalances {
+                tokenType
+                amount
+            }
+        }
+        unshieldedBalances {
+            tokenType
+            amount
+        }
+    }
+    ... on ContractUpdate {
+        state
+        chainState
+        transaction {
+            hash
+        }
+        unshieldedBalances {
+            tokenType
+            amount
+        }
+    }
+`;
+
+export const CONTRACT_ACTIONS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription ContractActionsSubscriptionFromLatestBlock($ADDRESS: HexEncoded!) {
+    contractActions(address: $ADDRESS) {
+        ${CONTRACT_ACTION_SUBSCRIPTION_FRAGMENT}
+    }
+}`;
+
+export const CONTRACT_ACTIONS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription ContractActionsSubscriptionFromBlockByOffset($ADDRESS: HexEncoded!, $OFFSET: BlockOffset) {
+    contractActions(address: $ADDRESS, offset: $OFFSET) {
+        ${CONTRACT_ACTION_SUBSCRIPTION_FRAGMENT}
     }
 }`;

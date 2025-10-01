@@ -90,7 +90,6 @@ where
                 })?
             {
                 contract_action_id = contract_action.id + 1;
-
                 yield contract_action.into();
             }
 
@@ -118,7 +117,6 @@ where
                     })?
                 {
                     contract_action_id = contract_action.id + 1;
-
                     yield contract_action.into();
                 }
             }

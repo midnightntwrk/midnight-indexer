@@ -50,36 +50,6 @@ pub struct Config {
     pub save_ledger_state_after: u32,
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
-    pub dust: DustConfig,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-pub struct DustConfig {
-    /// Merkle tree batch update size.
-    pub merkle_tree_batch_size: usize,
-
-    /// Privacy prefix length for nullifier queries.
-    pub privacy_prefix_length: usize,
-
-    /// Maximum registrations per DUST address.
-    pub max_registrations_per_address: usize,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            network_id: NetworkId::Undeployed,
-            blocks_buffer: 10,
-            save_ledger_state_after: 1000,
-            caught_up_max_distance: 10,
-            caught_up_leeway: 5,
-            dust: DustConfig {
-                merkle_tree_batch_size: 1000,
-                privacy_prefix_length: 8,
-                max_registrations_per_address: 10,
-            },
-        }
-    }
 }
 
 pub async fn run(
@@ -301,6 +271,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+#[trace]
 async fn get_and_index_block<E>(
     config: Config,
     blocks: &mut (impl Stream<Item = Result<node::Block, E>> + Unpin),
@@ -368,9 +339,9 @@ async fn index_block(
         ..
     } = config;
 
-    let (block, transactions, dust_registration_events) = block.into();
+    let (mut block, transactions, dust_registration_events) = block.into();
 
-    let transactions = ledger_state
+    let (transactions, ledger_parameters) = ledger_state
         .apply_node_transactions(transactions, block.parent_hash, block.timestamp)
         .context("apply node transactions to ledger state")?;
     if ledger_state.zswap_merkle_tree_root() != block.zswap_state_root {
@@ -380,15 +351,20 @@ async fn index_block(
             block.height
         );
     }
+    block.ledger_parameters = ledger_parameters.serialize()?;
 
     // Determine whether caught up, also allowing to fall back a little in that state.
     let node_block_height = highest_block_on_node
         .read()
         .map(|BlockInfo { height, .. }| height)
         .unwrap_or_default();
-    assert!(node_block_height >= block.height);
 
-    let distance = node_block_height - block.height;
+    // Use saturating subtraction to handle the case where streams are temporarily out of order.
+    // The two subscriptions (highest_blocks and finalized_blocks) are independent with no
+    // ordering guarantee, so node_block_height < block.height may happen under certain rare
+    // conditions. This will produce 0 when node_block_height < block.height, treating it as
+    // caught up.
+    let distance = node_block_height.saturating_sub(block.height);
     let max_distance = if *caught_up {
         caught_up_max_distance + caught_up_leeway
     } else {
@@ -401,7 +377,7 @@ async fn index_block(
         info!(caught_up:%; "caught-up status changed")
     }
 
-    // First save and update the block.
+    // First save and update the block with its transactions.
     let max_transaction_id = storage
         .save_block(&block, &transactions, &dust_registration_events)
         .await
@@ -543,7 +519,6 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
-        dust_registration_events: Default::default(),
     });
 
     static BLOCK_1: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -555,7 +530,6 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
-        dust_registration_events: Default::default(),
     });
 
     static BLOCK_2: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -567,7 +541,6 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
-        dust_registration_events: Default::default(),
     });
 
     static BLOCK_3: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -579,7 +552,6 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
-        dust_registration_events: Default::default(),
     });
 
     pub const ZERO_HASH: BlockHash = ByteArray([0; 32]);

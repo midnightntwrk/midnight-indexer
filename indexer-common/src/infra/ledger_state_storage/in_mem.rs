@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{LedgerStateStorage, ProtocolVersion, ledger::SerializedLedgerState};
+use crate::domain::{LedgerStateStorage, ProtocolVersion, SerializedLedgerState};
 use parking_lot::RwLock;
 use std::{convert::Infallible, sync::Arc};
 

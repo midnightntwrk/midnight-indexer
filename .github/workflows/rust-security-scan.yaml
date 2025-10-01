@@ -18,18 +18,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
-      - name: Install cargo-audit
-        run: cargo install --git https://github.com/rustsec/rustsec cargo-audit
-
-      - name: Run cargo-audit
-        run: cargo audit --format sarif | tee scan.sarif || true
-
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@7273f08caa1dcf2c2837f362f1982de0ab4dc344
-        with:
-          sarif_file: scan.sarif
-
-      - name: Install Deny
+      - name: Install cargo-deny
         run: cargo install cargo-deny
 
       - name: Add github.com credentials to netrc
@@ -39,16 +28,43 @@ jobs:
           username: MidnightCI
           password: ${{ secrets.MIDNIGHTCI_REPO }}
 
-      - name: Run deny
-        run: cargo deny check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed
+      - name: Run cargo-deny
+        run: cargo deny -f sarif check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed | tee scan.sarif || true
         # TODO: once everything's open sourced remove -Aunlicensed
+
+      - name: Fix SARIF for GitHub upload
+        run: |
+          # GitHub requires at least one location per result, but cargo-deny may generate
+          # results with empty locations (e.g., for git dependencies). Add Cargo.lock as
+          # the location for any results missing locations.
+          if [ -f scan.sarif ]; then
+            jq '.runs[].results |= map(
+              if .locations == [] or .locations == null then
+                .locations = [{
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "Cargo.lock"
+                    },
+                    "region": {
+                      "startLine": 1
+                    }
+                  }
+                }]
+              else . end
+            )' scan.sarif > scan-fixed.sarif && mv scan-fixed.sarif scan.sarif
+          fi
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@7273f08caa1dcf2c2837f362f1982de0ab4dc344
+        with:
+          sarif_file: scan.sarif
 
       # TODO: Remove this checkout step once upload-sarif-github-action repo is made public
       - name: Checkout Upload action repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: midnightntwrk/upload-sarif-github-action
-          ref: main
+          ref: a0cd00c4e936a5c2fc10d73ef5f3371992350c05
           path: upload-sarif-github-action
           token: ${{ secrets.MIDNIGHTCI_REPO }}
 

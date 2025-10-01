@@ -14,10 +14,8 @@
 use crate::domain::{self, ContractAction, DustRegistrationEvent};
 use futures::Stream;
 use indexer_common::domain::{
-    BlockAuthor, BlockHash, ProtocolVersion,
-    ledger::{
-        SerializedTransaction, SerializedTransactionIdentifier, TransactionHash, ZswapStateRoot,
-    },
+    BlockAuthor, BlockHash, ProtocolVersion, SerializedTransaction,
+    SerializedTransactionIdentifier, TransactionHash, ledger::ZswapStateRoot,
 };
 use std::{error::Error as StdError, fmt::Debug};
 
@@ -68,6 +66,7 @@ impl From<Block> for (domain::Block, Vec<Transaction>, Vec<DustRegistrationEvent
             author: block.author,
             timestamp: block.timestamp,
             zswap_state_root: block.zswap_state_root,
+            ledger_parameters: Default::default(),
         };
 
         (block, transactions, dust_registration_events)

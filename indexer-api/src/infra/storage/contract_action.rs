@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{ContractAction, ContractAttributes, storage::contract_action::ContractActionStorage},
+    domain::{ContractAction, storage::contract_action::ContractActionStorage},
     infra::storage::Storage,
 };
 use async_stream::try_stream;
@@ -20,8 +20,8 @@ use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash,
-        ledger::{SerializedContractAddress, SerializedTransactionIdentifier, TransactionHash},
+        BlockHash, ContractAttributes, SerializedContractAddress, SerializedTransactionIdentifier,
+        TransactionHash,
     },
     stream::flatten_chunks,
 };
@@ -200,6 +200,7 @@ impl ContractActionStorage for Storage {
             ORDER BY contract_actions.id DESC
             LIMIT 1
         "};
+
         #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
@@ -274,13 +275,13 @@ impl ContractActionStorage for Storage {
     }
 
     #[trace(properties = { "contract_action_id": "{contract_action_id}" })]
-    async fn get_unshielded_balances_by_action_id(
+    async fn get_unshielded_balances_by_contract_action_id(
         &self,
         contract_action_id: u64,
     ) -> Result<Vec<crate::domain::ContractBalance>, sqlx::Error> {
         let query = indoc! {"
-            SELECT token_type, amount 
-            FROM contract_balances 
+            SELECT token_type, amount
+            FROM contract_balances
             WHERE contract_action_id = $1
         "};
 

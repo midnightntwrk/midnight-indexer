@@ -69,7 +69,7 @@ mod tests {
     #[test]
     fn test_try_into_domain() {
         let viewing_key = ViewingKey::from(
-            "mn_shield-esk_undeployed1d45kgmnfva58gwn9de3hy7tsw35k7m3dwdjkxun9wskkketetdmrzhf6dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsmxqc0u", /* "mn_shield-esk_undeployed1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs9ete5h", */
+            "mn_shield-esk_undeployed1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs9ete5h",
         );
         let domain_viewing_key =
             viewing_key.try_into_domain(NetworkId::Undeployed, PROTOCOL_VERSION_000_016_000);

@@ -14,19 +14,30 @@
 use derive_more::Debug;
 use indexer_common::{
     domain::{
-        BlockHash, ProtocolVersion,
-        ledger::{
-            SerializedTransaction, SerializedTransactionIdentifier, SerializedZswapStateRoot,
-            TransactionHash, TransactionResult,
-        },
+        BlockHash, ProtocolVersion, SerializedTransaction, SerializedTransactionIdentifier,
+        SerializedZswapStateRoot, TransactionHash, TransactionResult,
     },
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
 use sqlx::FromRow;
 
-/// Relevant transaction data from the perspective of the Indexer API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Transaction {
+    Regular(RegularTransaction),
+    System(SystemTransaction),
+}
+
+impl Transaction {
+    pub fn id(&self) -> u64 {
+        match self {
+            Transaction::Regular(t) => t.id,
+            Transaction::System(t) => t.id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
-pub struct Transaction {
+pub struct RegularTransaction {
     #[sqlx(try_from = "i64")]
     pub id: u64,
 
@@ -61,4 +72,20 @@ pub struct Transaction {
 
     #[sqlx(try_from = "SqlxOption<U128BeBytes>")]
     pub estimated_fees: Option<u128>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+pub struct SystemTransaction {
+    #[sqlx(try_from = "i64")]
+    pub id: u64,
+
+    pub hash: TransactionHash,
+
+    #[sqlx(try_from = "i64")]
+    pub protocol_version: ProtocolVersion,
+
+    #[debug(skip)]
+    pub raw: SerializedTransaction,
+
+    pub block_hash: BlockHash,
 }

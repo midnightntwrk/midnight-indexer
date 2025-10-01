@@ -14,8 +14,7 @@
 use crate::domain::{ContractAction, ContractBalance, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{
-    BlockHash,
-    ledger::{SerializedContractAddress, SerializedTransactionIdentifier, TransactionHash},
+    BlockHash, SerializedContractAddress, SerializedTransactionIdentifier, TransactionHash,
 };
 use std::{fmt::Debug, num::NonZeroU32};
 
@@ -80,7 +79,7 @@ where
     ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send;
 
     /// Get unshielded token balances for a contract action.
-    async fn get_unshielded_balances_by_action_id(
+    async fn get_unshielded_balances_by_contract_action_id(
         &self,
         contract_action_id: u64,
     ) -> Result<Vec<ContractBalance>, sqlx::Error>;
@@ -157,7 +156,7 @@ impl ContractActionStorage for NoopStorage {
         stream::empty()
     }
 
-    async fn get_unshielded_balances_by_action_id(
+    async fn get_unshielded_balances_by_contract_action_id(
         &self,
         contract_action_id: u64,
     ) -> Result<Vec<ContractBalance>, sqlx::Error> {

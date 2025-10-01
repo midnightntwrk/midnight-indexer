@@ -16,7 +16,6 @@ use crate::{
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
         v1::{
-            subscription::get_next_transaction,
             transaction::Transaction,
             unshielded::{UnshieldedAddress, UnshieldedUtxo},
         },
@@ -24,11 +23,9 @@ use crate::{
 };
 use async_graphql::{Context, SimpleObject, Subscription, Union, async_stream::try_stream};
 use derive_more::Debug;
-use fastrace::trace;
+use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt};
-use indexer_common::domain::{
-    NetworkId, Subscriber, UnshieldedUtxoIndexed, ledger::RawUnshieldedAddress,
-};
+use indexer_common::domain::{NetworkId, RawUnshieldedAddress, Subscriber, UnshieldedUtxoIndexed};
 use log::{debug, warn};
 use std::{future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
@@ -43,7 +40,7 @@ const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(30);
 
 /// An event of the unshielded transactions subscription.
 #[derive(Debug, Union)]
-pub enum UnshieldedTransactionsEvent<S: Storage> {
+enum UnshieldedTransactionsEvent<S: Storage> {
     /// A transaction that created and/or spent UTXOs alongside these and other information.
     // Boxing UnshieldedTransaction to reduce variant size (clippy warning).
     UnshieldedTransaction(Box<UnshieldedTransaction<S>>),
@@ -54,25 +51,25 @@ pub enum UnshieldedTransactionsEvent<S: Storage> {
 
 /// A transaction that created and/or spent UTXOs alongside these and other information.
 #[derive(Debug, SimpleObject)]
-pub struct UnshieldedTransaction<S>
+struct UnshieldedTransaction<S>
 where
     S: Storage,
 {
     /// The transaction that created and/or spent UTXOs.
-    pub transaction: Transaction<S>,
+    transaction: Transaction<S>,
 
     /// UTXOs created in the above transaction, possibly empty.
-    pub created_utxos: Vec<UnshieldedUtxo<S>>,
+    created_utxos: Vec<UnshieldedUtxo<S>>,
 
     /// UTXOs spent in the above transaction, possibly empty.
-    pub spent_utxos: Vec<UnshieldedUtxo<S>>,
+    spent_utxos: Vec<UnshieldedUtxo<S>>,
 }
 
 /// Information about the unshielded indexing progress.
 #[derive(Debug, SimpleObject)]
-pub struct UnshieldedTransactionsProgress {
+struct UnshieldedTransactionsProgress {
     /// The highest transaction ID of all currently known transactions for a subscribed address.
-    pub highest_transaction_id: u64,
+    highest_transaction_id: u64,
 }
 
 pub struct UnshieldedTransactionsSubscription<S, B> {
@@ -192,7 +189,7 @@ where
                         format!("get next transaction for address {address}")
                     })?
             {
-                if let Some(utxo_update) = make_unshielded_transaction(
+                if let Some(unshielded_transaction) = make_unshielded_transaction(
                     &mut transaction_id,
                     storage,
                     address,
@@ -201,7 +198,7 @@ where
                 )
                 .await?
                 {
-                    yield utxo_update;
+                    yield unshielded_transaction;
                 }
             }
         }
@@ -222,7 +219,7 @@ async fn make_unshielded_transaction<S>(
 where
     S: Storage,
 {
-    *transaction_id = transaction.id;
+    *transaction_id = transaction.id();
     let transaction_id = *transaction_id;
 
     let created = storage
@@ -290,4 +287,16 @@ where
     Ok(UnshieldedTransactionsProgress {
         highest_transaction_id,
     })
+}
+
+async fn get_next_transaction<E>(
+    transactions: &mut (impl Stream<Item = Result<domain::Transaction, E>> + Unpin),
+) -> Result<Option<domain::Transaction>, E> {
+    transactions
+        .try_next()
+        .in_span(Span::root(
+            "subscription.unshielded-transactions.get-next-transaction",
+            SpanContext::random(),
+        ))
+        .await
 }

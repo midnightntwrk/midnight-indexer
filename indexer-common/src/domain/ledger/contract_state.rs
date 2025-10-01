@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::domain::{
-    PROTOCOL_VERSION_000_016_000, ProtocolVersion,
-    ledger::{Error, RawTokenType, TaggedSerializableV6Ext},
+    ContractBalance, PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType,
+    ledger::{Error, TaggedSerializableV6Ext},
 };
 use fastrace::trace;
 use midnight_coin_structure_v6::coin::TokenType as TokenTypeV6;
@@ -84,14 +84,4 @@ impl ContractState {
             }
         }
     }
-}
-
-/// Token balance of a contract.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ContractBalance {
-    /// Token type identifier.
-    pub token_type: RawTokenType,
-
-    /// Balance amount as u128.
-    pub amount: u128,
 }

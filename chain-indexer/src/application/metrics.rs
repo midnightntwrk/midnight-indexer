@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{Block, ContractAction, Transaction};
-use indexer_common::domain::ledger::{ContractAttributes, SerializedLedgerState};
+use indexer_common::domain::{ContractAttributes, SerializedLedgerState};
 use metrics::{Counter, Gauge, counter, gauge};
 
 pub struct Metrics {

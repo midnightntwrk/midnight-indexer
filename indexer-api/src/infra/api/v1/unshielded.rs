@@ -26,8 +26,8 @@ use crate::{
 use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject, scalar};
 use derive_more::{Debug, From};
 use indexer_common::domain::{
-    AddressType, ByteArrayLenError, DecodeAddressError, NetworkId, decode_address, encode_address,
-    ledger::RawUnshieldedAddress,
+    AddressType, ByteArrayLenError, DecodeAddressError, NetworkId, RawUnshieldedAddress,
+    decode_address, encode_address,
 };
 use log::error;
 use serde::{Deserialize, Serialize};
@@ -56,6 +56,12 @@ where
     /// The hex-encoded serialized intent hash.
     intent_hash: HexEncoded,
 
+    /// The hex-encoded initial nonce for DUST generation tracking.
+    initial_nonce: HexEncoded,
+
+    /// Whether this UTXO is registered for DUST generation.
+    registered_for_dust_generation: bool,
+
     #[graphql(skip)]
     creating_transaction_id: u64,
 
@@ -79,8 +85,8 @@ where
             .get_storage::<S>()
             .get_transaction_by_id(id)
             .await
-            .map_err_into_server_error(|| format!("get transaction by ID {id})"))?
-            .ok_or_server_error(|| format!("transaction with ID {id} not found"))?;
+            .map_err_into_server_error(|| format!("get transaction by id {id})"))?
+            .ok_or_server_error(|| format!("transaction with id {id} not found"))?;
 
         Ok(transaction.into())
     }
@@ -95,8 +101,8 @@ where
             .get_storage::<S>()
             .get_transaction_by_id(id)
             .await
-            .map_err_into_server_error(|| format!("get transaction by ID {id}"))?
-            .ok_or_server_error(|| format!("transaction with ID {id} not found"))?;
+            .map_err_into_server_error(|| format!("get transaction by id {id}"))?
+            .ok_or_server_error(|| format!("transaction with id {id} not found"))?;
 
         Ok(Some(transaction.into()))
     }
@@ -115,6 +121,8 @@ where
             value: utxo.value.to_string(),
             output_index: utxo.output_index,
             intent_hash: utxo.intent_hash.hex_encode(),
+            initial_nonce: utxo.initial_nonce.hex_encode(),
+            registered_for_dust_generation: utxo.registered_for_dust_generation,
             creating_transaction_id: utxo.creating_transaction_id,
             spending_transaction_id: utxo.spending_transaction_id,
             _s: PhantomData,

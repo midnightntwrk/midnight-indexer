@@ -113,13 +113,14 @@ impl SubxtNode {
                 .backend()
                 .metadata_at_version(15, H256(hash.0))
                 .await
-                .map_err(Box::new)?;
+                .map_err(|error| SubxtNodeError::GetMetadata(error.into()))?;
 
             let legacy_rpc_methods =
                 LegacyRpcMethods::<SubstrateConfig>::new(self.rpc_client.to_owned().into());
             let runtime_version = legacy_rpc_methods
                 .state_get_runtime_version(Some(H256(hash.0)))
-                .await?;
+                .await
+                .map_err(SubxtNodeError::GetRuntimeVersion)?;
             let runtime_version = subxt::client::RuntimeVersion {
                 spec_version: runtime_version.spec_version,
                 transaction_version: runtime_version.transaction_version,
@@ -131,7 +132,7 @@ impl SubxtNode {
                 metadata,
                 self.rpc_client.to_owned(),
             )
-            .map_err(Box::new)?;
+            .map_err(|error| SubxtNodeError::MakeOnlineClient(error.into()))?;
 
             self.compatible_online_client = Some((protocol_version, online_client));
         }
@@ -148,14 +149,16 @@ impl SubxtNode {
     /// Subscribe to finalizded blocks, filtering duplicates and disconnection errors.
     async fn subscribe_finalized_blocks(
         &self,
-    ) -> Result<impl Stream<Item = Result<SubxtBlock, subxt::Error>> + use<>, subxt::Error> {
+    ) -> Result<impl Stream<Item = Result<SubxtBlock, SubxtNodeError>> + use<>, SubxtNodeError>
+    {
         let mut last_block_height = None;
 
         let subscribe_finalized_blocks = self
             .default_online_client
             .blocks()
             .subscribe_finalized()
-            .await?
+            .await
+            .map_err(|error| SubxtNodeError::SubscribeFinalizedBlocks(error.into()))?
             .filter(move |block| {
                 let pass = match block {
                     Ok(block) => {
@@ -185,14 +188,10 @@ impl SubxtNode {
                 };
 
                 ready(pass)
-            });
+            })
+            .map_err(|error| SubxtNodeError::ReceiveBlock(error.into()));
 
         Ok(subscribe_finalized_blocks)
-    }
-
-    #[trace]
-    async fn fetch_block(&self, hash: H256) -> Result<SubxtBlock, subxt::Error> {
-        self.default_online_client.blocks().at(hash).await
     }
 
     async fn make_block(
@@ -235,24 +234,23 @@ impl SubxtNode {
             runtimes::get_zswap_state_root(hash, protocol_version, online_client).await?;
         let zswap_state_root = ZswapStateRoot::deserialize(zswap_state_root, protocol_version)?;
 
-        let extrinsics = block.extrinsics().await.map_err(Box::new)?;
-        let events = block.events().await.map_err(Box::new)?;
+        let extrinsics = block
+            .extrinsics()
+            .await
+            .map_err(|error| SubxtNodeError::GetExtrinsics(error.into()))?;
+        let events = block
+            .events()
+            .await
+            .map_err(|error| SubxtNodeError::GetEvents(error.into()))?;
         let BlockDetails {
             timestamp,
             transactions,
-            dust_registration_events,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
 
         let transactions = stream::iter(transactions)
             .then(|t| make_transaction(t, hash, protocol_version, online_client))
             .try_collect::<Vec<_>>()
             .await?;
-
-        // Convert infra DustRegistrationEvent to domain type
-        let dust_registration_events = dust_registration_events
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, _>>()?;
 
         let block = Block {
             hash,
@@ -263,7 +261,8 @@ impl SubxtNode {
             timestamp: timestamp.unwrap_or(0),
             zswap_state_root,
             transactions,
-            dust_registration_events,
+            // TODO: Extract DUST registration events from node block events
+            dust_registration_events: Vec::new(),
         };
 
         debug!(
@@ -276,6 +275,15 @@ impl SubxtNode {
 
         Ok(block)
     }
+
+    #[trace]
+    async fn fetch_block(&self, hash: H256) -> Result<SubxtBlock, SubxtNodeError> {
+        self.default_online_client
+            .blocks()
+            .at(hash)
+            .await
+            .map_err(|error| SubxtNodeError::FetchBlock(error.into()))
+    }
 }
 
 impl Node for SubxtNode {
@@ -286,13 +294,11 @@ impl Node for SubxtNode {
     ) -> Result<impl Stream<Item = Result<BlockInfo, Self::Error>> + Send, Self::Error> {
         let highest_blocks = self
             .subscribe_finalized_blocks()
-            .await
-            .map_err(Box::new)?
+            .await?
             .map_ok(|block| BlockInfo {
                 hash: block.hash().0.into(),
                 height: block.number(),
-            })
-            .map_err(|error| Box::new(error).into());
+            });
 
         Ok(highest_blocks)
     }
@@ -314,12 +320,10 @@ impl Node for SubxtNode {
         let mut authorities = None;
 
         try_stream! {
-            let mut finalized_blocks = self.subscribe_finalized_blocks().await.map_err(Box::new)?;
+            let mut finalized_blocks = self.subscribe_finalized_blocks().await?;
 
             // First we receive the first finalized block.
-            let Some(first_block) = receive_block(&mut finalized_blocks)
-                .await
-                .map_err(Box::new)?
+            let Some(first_block) = receive_block(&mut finalized_blocks).await?
             else {
                 return;
             };
@@ -340,7 +344,7 @@ impl Node for SubxtNode {
                 let genesis_parent_hash = self
                     .fetch_block(self.default_online_client.genesis_hash())
                     .await
-                    .map_err(Box::new)?
+                    ?
                     .header()
                     .parent_hash;
 
@@ -359,7 +363,7 @@ impl Node for SubxtNode {
                 let mut hashes = Vec::with_capacity(capacity);
                 let mut parent_hash = first_block.header().parent_hash;
                 while parent_hash.0 != after_hash.0 && parent_hash != genesis_parent_hash {
-                    let block = self.fetch_block(parent_hash).await.map_err(Box::new)?;
+                    let block = self.fetch_block(parent_hash).await?;
                     if block.number() % TRAVERSE_BACK_LOG_AFTER == 0 {
                         info!(
                             highest_stored_height:? = after_height,
@@ -374,7 +378,7 @@ impl Node for SubxtNode {
 
                 // We fetch and yield the blocks for the stored block hashes.
                 for hash in hashes.into_iter().rev() {
-                    let block = self.fetch_block(hash).await.map_err(Box::new)?;
+                    let block = self.fetch_block(hash).await?;
                     debug!(
                         hash:% = block.hash(),
                         height = block.number(),
@@ -389,9 +393,7 @@ impl Node for SubxtNode {
             }
 
             // Finally we emit all other finalized ones.
-            while let Some(block) = receive_block(&mut finalized_blocks)
-                .await
-                .map_err(Box::new)?
+            while let Some(block) = receive_block(&mut finalized_blocks).await?
             {
                 debug!(
                     hash:% = block.hash(),
@@ -432,11 +434,41 @@ pub enum Error {
 /// Error possibly returned by each item of the [Block]s stream.
 #[derive(Debug, Error)]
 pub enum SubxtNodeError {
-    #[error(transparent)]
-    Subxt(#[from] Box<subxt::Error>),
+    #[error("cannot subscribe to finalized blocks")]
+    SubscribeFinalizedBlocks(#[source] Box<subxt::Error>),
 
-    #[error(transparent)]
-    SubxtRcps(#[from] subxt::ext::subxt_rpcs::Error),
+    #[error("cannot receive finalized block")]
+    ReceiveBlock(#[source] Box<subxt::Error>),
+
+    #[error("cannot fetch block")]
+    FetchBlock(#[source] Box<subxt::Error>),
+
+    #[error("cannot get extrinsics")]
+    GetExtrinsics(#[source] Box<subxt::Error>),
+
+    #[error("cannot get events")]
+    GetEvents(#[source] Box<subxt::Error>),
+
+    #[error("cannot next event")]
+    GetNextEvent(#[source] Box<subxt::Error>),
+
+    #[error("cannot decode event as root event")]
+    AsRootEvent(#[source] Box<subxt::Error>),
+
+    #[error("cannot get node metadata")]
+    GetMetadata(#[source] Box<subxt::Error>),
+
+    #[error("cannot make compatible subxt online client")]
+    MakeOnlineClient(#[source] Box<subxt::Error>),
+
+    #[error("cannot fetch authorities")]
+    FetchAuthorities(#[source] Box<subxt::Error>),
+
+    #[error("cannot use extrinsic as root extrinsic")]
+    AsRootExtrinsic(#[source] Box<subxt::Error>),
+
+    #[error("cannot get runtime version")]
+    GetRuntimeVersion(#[source] subxt::ext::subxt_rpcs::Error),
 
     #[error("cannot scale decode")]
     ScaleDecode(#[from] parity_scale_codec::Error),
@@ -447,32 +479,26 @@ pub enum SubxtNodeError {
     #[error(transparent)]
     Ledger(#[from] ledger::Error),
 
-    #[error("cannot get contract state: {0}")]
-    GetContractState(String),
+    #[error("cannot get contract state")]
+    GetContractState(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
 
-    #[error("cannot get zswap state root: {0}")]
-    GetZswapStateRoot(String),
+    #[error("cannot get zswap state root")]
+    GetZswapStateRoot(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
 
-    #[error("cannot get transaction cost: {0}")]
-    GetTransactionCost(String),
+    #[error("cannot get transaction cost")]
+    GetTransactionCost(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
 
     #[error("block with hash {0} not found")]
     BlockNotFound(BlockHash),
 
     #[error("invalid protocol version {0}")]
     InvalidProtocolVersion(ProtocolVersion),
-
-    #[error("cannot hex-decode system transaction")]
-    HexDecodeSystemTransaction(#[source] const_hex::FromHexError),
-
-    #[error("invalid dust address: {0}")]
-    InvalidDustAddress(String),
 }
 
 #[trace]
 async fn receive_block(
-    finalized_blocks: &mut (impl Stream<Item = Result<SubxtBlock, subxt::Error>> + Unpin),
-) -> Result<Option<SubxtBlock>, subxt::Error> {
+    finalized_blocks: &mut (impl Stream<Item = Result<SubxtBlock, SubxtNodeError>> + Unpin),
+) -> Result<Option<SubxtBlock>, SubxtNodeError> {
     finalized_blocks.try_next().await
 }
 
