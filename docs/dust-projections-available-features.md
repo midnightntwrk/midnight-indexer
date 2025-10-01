@@ -1,11 +1,134 @@
 # DUST Projections: Available Features in feat/cnight-generates-dust
-**Date**: September 29, 2025
+**Date**: October 1, 2025
 **Branch**: `feat/cnight-generates-dust`
 **Purpose**: Technical inventory of implemented DUST features available for adaptation
 
 ## Overview
 
 This document catalogs the DUST projection features implemented in the `feat/cnight-generates-dust` branch. These features were developed based on wallet requirements from July-August 2025 and represent a complete projection layer built on top of the ledger events framework.
+
+## Recent Updates (October 1, 2025)
+
+### Merge from Main (ecccd9a)
+Merged 49 commits from main branch, bringing fundamental architectural changes:
+
+#### What Main Branch Replaced in CNGD
+
+**Before Merge - CNGD's Approach:**
+- Custom DUST event extraction from system transactions
+- Custom `DustEventType` enum with DUST-specific variants
+- Direct processing of ledger events into projection tables
+- Registration events treated as ledger events (later discovered to be incorrect)
+
+**Main Branch Contributions (What Replaced CNGD's Approach):**
+
+1. **Generic Ledger Events Framework** (commit 113f440)
+   - **Replaced**: CNGD's custom DUST event extraction logic
+   - **With**: Generic `LedgerEvent` enum supporting all event types (DUST, Zswap, etc.)
+   - **Why**: Wallet team (Jegor) requested raw events for WASM compatibility
+   - **Impact**: CNGD's custom extraction became redundant; adapted to use generic framework
+
+2. **dustLedgerEvents Subscription** (commit 4cd1ec3)
+   - **Replaced**: CNGD would have needed to implement this separately
+   - **With**: Ready-to-use GraphQL subscription for DUST ledger events
+   - **Why**: WASM wallet needs raw event stream without projection overhead
+   - **Result**: Both raw events (main) and projections (CNGD) now coexist
+
+3. **System Transaction Architecture** (commits bf86d1e, 5be4f84, f4ad8bd)
+   - **Replaced**: CNGD's system transaction handling with metadata fields
+   - **With**: Simplified domain model + separate DB storage for metadata
+   - **Why**: Cleaner separation of concerns, better storage efficiency
+   - **Impact**: CNGD adapted to store system transaction metadata separately
+
+4. **Updated Dependencies**:
+   - Ledger v6.1.0-alpha.3 (commit cd5a2aa)
+   - Node v0.16.3 (commit 872c93a)
+   - Transaction fee calculation in chain-indexer (merged from main)
+
+#### What CNGD Kept
+
+- **Projection layer**: All queries and subscriptions (`dustGenerations`, `dustCommitments`, etc.)
+- **Merkle tree maintenance**: Generation/commitment tree tracking
+- **Registration tracking**: Moved from ledger events to runtime pallet events (see below)
+- **Database tables**: Projection tables coexist with main's ledger_events table
+
+#### Architecture After Merge
+
+```
+                    ┌─────────────────────────────────┐
+                    │   Midnight Node (Substrate)    │
+                    └────────────┬────────────────────┘
+                                 │
+                    ┌────────────┴────────────────────┐
+                    │                                 │
+         ┌──────────▼──────────┐        ┌────────────▼───────────┐
+         │ Ledger Events       │        │ Runtime Pallet Events  │
+         │ (System Txs)        │        │ (NativeTokenObservation)│
+         └──────────┬──────────┘        └────────────┬───────────┘
+                    │                                 │
+         ┌──────────▼──────────┐        ┌────────────▼───────────┐
+         │ Main's Generic      │        │ CNGD's Runtime         │
+         │ Ledger Event Layer  │        │ Event Extraction       │
+         │ (113f440, 4cd1ec3)  │        │ (8eece6b - new)        │
+         └──────────┬──────────┘        └────────────┬───────────┘
+                    │                                 │
+         ┌──────────▼──────────┐                     │
+         │ ledger_events       │                     │
+         │ table (PostgreSQL)  │                     │
+         └──────────┬──────────┘                     │
+                    │                                 │
+         ┌──────────▼──────────────────────────┐     │
+         │ Main: dustLedgerEvents subscription │     │
+         │ (Raw events for WASM wallet)        │     │
+         └─────────────────────────────────────┘     │
+                    │                                 │
+         ┌──────────▼─────────────────────────────────▼──────────┐
+         │ CNGD: Projection Layer                               │
+         │ - Process events into projections                    │
+         │ - Maintain merkle trees                              │
+         │ - Track generations, commitments, registrations      │
+         └──────────┬───────────────────────────────────────────┘
+                    │
+         ┌──────────▼──────────────────────────────────────────┐
+         │ CNGD Projection Tables                              │
+         │ - dust_generation_info, dust_utxos                  │
+         │ - dust_commitment_tree, dust_generation_tree        │
+         │ - cnight_registrations (from runtime events)        │
+         └──────────┬──────────────────────────────────────────┘
+                    │
+         ┌──────────▼──────────────────────────────────────────┐
+         │ CNGD: Projection Queries & Subscriptions            │
+         │ - dustGenerations, dustCommitments                  │
+         │ - cNightRegistrations, dustSystemState              │
+         └─────────────────────────────────────────────────────┘
+```
+
+**Result**: Two complementary layers serving different needs:
+- **Main's layer**: Raw events for maximum flexibility (WASM wallets)
+- **CNGD's layer**: Processed projections for convenience (web wallets, explorers)
+
+### DUST Registration Event Extraction (8eece6b)
+Added extraction of DUST registration events directly from the Substrate runtime's NativeTokenObservation pallet:
+- **Registration**: Captures Cardano stake key → DUST address registration
+- **Deregistration**: Captures registration removal
+- **MappingAdded**: Captures UTXO mapping additions with transaction IDs
+- **MappingRemoved**: Captures UTXO mapping removals
+
+**Why Separate from Ledger Events?**
+
+Registration events come from the `NativeTokenObservation` pallet at the Substrate runtime level, NOT from system transactions/ledger events. Key differences:
+
+| Aspect | Ledger Events (Main's Layer) | Registration Events (CNGD's Addition) |
+|--------|------------------------------|--------------------------------------|
+| **Source** | System transactions (ledger state changes) | NativeTokenObservation pallet (runtime) |
+| **Examples** | DustInitialUtxo, DustGenerationDtimeUpdate, DustSpendProcessed | Registration, Deregistration, MappingAdded, MappingRemoved |
+| **When emitted** | During transaction execution affecting ledger state | During off-chain Cardano observation updates |
+| **Storage** | `ledger_events` table (main's design) | `dust_registration_events` field in blocks (CNGD's addition) |
+| **Purpose** | Track DUST coin lifecycle (creation, spending, generation) | Track Night→DUST address associations for Cardano integration |
+
+**Historical Context**: CNGD originally included registration events in the DUST ledger event enum (commit df50427). This was corrected in commit 1128b7b when we realized they weren't ledger events. After the main merge, commit 8eece6b properly implemented them as runtime pallet event extraction.
+
+These events are stored in the `dust_registration_events` field of each indexed block, providing the infrastructure layer needed for tracking Night→DUST address associations for Cardano cNIGHT support.
 
 ## Requirements Sources
 
@@ -29,7 +152,29 @@ This document catalogs the DUST projection features implemented in the `feat/cni
 
 ## Available Components
 
-### 1. GraphQL API Extensions
+### 1. Runtime Event Extraction (Infrastructure Layer)
+
+#### NativeTokenObservation Pallet Event Extraction
+Added in commit 8eece6b - extracts DUST registration events at the Substrate runtime level:
+
+- **Event Types Captured**:
+  - `Registration` - New Cardano stake key → DUST address registration
+  - `Deregistration` - Registration removal
+  - `MappingAdded` - UTXO mapping addition (includes transaction ID)
+  - `MappingRemoved` - UTXO mapping removal (includes transaction ID)
+
+- **Implementation Details**:
+  - Location: `chain-indexer/src/infra/subxt_node/runtimes.rs`
+  - Extracts events from `pallet_native_token_observation::pallet::Event`
+  - Type conversions: BoundedVec → CardanoStakeKey, Vec<u8> → DustAddress
+  - Hex decoding: String → DustUtxoId for mapping events
+  - Error handling: Silent failures for malformed events (filters invalid data)
+
+- **Storage**: Events stored in `Block.dust_registration_events` field
+- **Purpose**: Infrastructure for tracking Night→DUST address associations at the node level
+- **Note**: Distinct from ledger-level DUST events (which track generation/spending)
+
+### 2. GraphQL API Extensions
 
 #### Subscriptions (Why These Exist)
 
@@ -56,6 +201,7 @@ This document catalogs the DUST projection features implemented in the `feat/cni
   - **Source**: dust.md - "table tracks which Dust public key to associate with which Night public key"
   - Parameters: addresses, addressTypes
   - Tracks Cardano-DUST address mappings
+  - **Note**: This subscription uses data populated by the NativeTokenObservation event extraction
 
 #### Queries (Why These Exist)
 - **`dustSystemState`** - Current DUST system state including merkle roots
@@ -68,7 +214,7 @@ This document catalogs the DUST projection features implemented in the `feat/cni
   - **Why**: Grace period requires accepting proofs against recent roots
   - **Source**: dust.md - "3-hour grace period" for transaction acceptance
 
-### 2. Domain Models (Requirements-Driven Design)
+### 3. Domain Models (Requirements-Driven Design)
 
 #### Core Types (Why Each Exists)
 - `DustGenerationInfo` - Parsed generation data with Night UTXO tracking
@@ -103,7 +249,7 @@ This document catalogs the DUST projection features implemented in the `feat/cni
   - **Why**: Reduce bandwidth for wallet sync
   - **Source**: Performance requirement from wallet team
 
-### 3. Storage Layer (Ledger State Persistence)
+### 4. Storage Layer (Ledger State Persistence)
 
 #### Database Schema Extensions (Why Each Table)
 ```sql
@@ -141,7 +287,7 @@ dust_initial_utxos (night_utxo_hash, dust_owner, nonce, value)
 - Transaction-safe updates
   - **Why**: Maintain consistency during chain reorganizations
 
-### 4. Processing Logic (Ledger Specification Implementation)
+### 5. Processing Logic (Ledger Specification Implementation)
 
 #### Event Processors (Direct from Ledger Events)
 - `process_dust_initial_utxo()` - Handles new DUST creation
@@ -177,7 +323,7 @@ dust_initial_utxos (night_utxo_hash, dust_owner, nonce, value)
   - **Why**: Prevent multiple registrations per Night address
   - **Source**: dust.md - "table entry for a given Night public key"
 
-### 5. Testing Infrastructure
+### 6. Testing Infrastructure
 
 - Integration tests for all DUST operations
 - End-to-end tests with simulated blockchain
@@ -195,13 +341,16 @@ dust_initial_utxos (night_utxo_hash, dust_owner, nonce, value)
 ## Integration Points
 
 ### With Existing Systems
-- Built on ledger events framework (PR #359)
-- Compatible with system transactions (PR #371)
+- Built on ledger events framework (merged from main)
+- Compatible with system transactions (merged from main)
+- Extracts NativeTokenObservation pallet events at runtime level
 - Follows established indexer patterns
 - Uses existing storage abstractions
+- Coexists with raw ledger event subscriptions
 
 ### External Dependencies
-- Requires ledger v6 events
+- Requires ledger v6.1.0-alpha.3 events
+- Requires node v0.16.3 with NativeTokenObservation pallet
 - Works with Night transaction processing
 - Integrates with Cardano stake key system
 
@@ -308,6 +457,14 @@ Every feature in this implementation traces back to specific requirements:
 ## Conclusion
 
 The `feat/cnight-generates-dust` branch contains a complete, requirements-driven implementation of DUST projections. Every feature exists for a specific reason traced to ledger specifications, wallet requirements, or architectural needs. These features are available for adaptation to main as needed, following the gradual rollout approach.
+
+### Recent Enhancements (October 2025)
+
+The branch has been updated with main branch integration (49 commits merged) and now includes:
+1. **Dual Event Layer**: Both raw ledger events (from main) and projection layer (from this branch) coexist
+2. **Runtime Event Extraction**: Direct extraction of NativeTokenObservation pallet events for registration tracking
+3. **Updated Dependencies**: Ledger v6.1.0-alpha.3 and Node v0.16.3 with latest protocol features
+4. **Enhanced Architecture**: Maintains backward compatibility while adding new capabilities
 
 The implementation is not speculative - it directly implements the DUST mechanics as specified in the ledger documentation and addresses the concrete needs identified by the wallet team. All code is production-ready and follows established patterns. The modular design allows for selective integration of specific features based on requirements.
 
