@@ -519,6 +519,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Vec::new(),
     });
 
     static BLOCK_1: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -530,6 +531,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Vec::new(),
     });
 
     static BLOCK_2: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -541,6 +543,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Vec::new(),
     });
 
     static BLOCK_3: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -552,6 +555,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Vec::new(),
     });
 
     pub const ZERO_HASH: BlockHash = ByteArray([0; 32]);

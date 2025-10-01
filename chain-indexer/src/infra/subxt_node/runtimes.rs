@@ -14,10 +14,10 @@
 // To see how this is generated, look in build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
 
-use crate::infra::subxt_node::SubxtNodeError;
+use crate::{domain::DustRegistrationEvent, infra::subxt_node::SubxtNodeError};
 use indexer_common::domain::{
-    BlockHash, ByteVec, PROTOCOL_VERSION_000_016_000, ProtocolVersion, SerializedContractAddress,
-    SerializedContractState,
+    BlockHash, ByteVec, CardanoStakeKey, DustAddress, DustUtxoId, PROTOCOL_VERSION_000_016_000,
+    ProtocolVersion, SerializedContractAddress, SerializedContractState,
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
@@ -27,6 +27,7 @@ use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, u
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
     pub transactions: Vec<Transaction>,
+    pub dust_registration_events: Vec<DustRegistrationEvent>,
 }
 
 /// Runtime specific (serialized) transaction.
@@ -124,6 +125,7 @@ async fn make_block_details_runtime_0_16(
             pallet_midnight_system::pallet::{
                 Call::send_mn_system_transaction, Event::SystemTransactionApplied,
             },
+            pallet_native_token_observation::pallet::Event as NativeTokenObservationEvent,
             pallet_partner_chains_session::pallet::Event::NewSession,
         },
         timestamp,
@@ -165,6 +167,8 @@ async fn make_block_details_runtime_0_16(
         })
         .collect::<Vec<_>>();
 
+    let mut dust_registration_events = Vec::new();
+
     for event_details in events.iter() {
         let event_details =
             event_details.map_err(|error| SubxtNodeError::GetNextEvent(error.into()))?;
@@ -185,6 +189,67 @@ async fn make_block_details_runtime_0_16(
                 )));
             }
 
+            // DUST registration events from NativeTokenObservation pallet.
+            Event::NativeTokenObservation(native_token_event) => match native_token_event {
+                NativeTokenObservationEvent::Registration(event) => {
+                    let cardano_address = CardanoStakeKey::from(event.cardano_address.0);
+                    if let Ok(dust_address_array) =
+                        TryInto::<[u8; 32]>::try_into(event.dust_address)
+                    {
+                        dust_registration_events.push(DustRegistrationEvent::Registration {
+                            cardano_address,
+                            dust_address: DustAddress::from(dust_address_array),
+                        });
+                    }
+                }
+
+                NativeTokenObservationEvent::Deregistration(event) => {
+                    let cardano_address = CardanoStakeKey::from(event.cardano_address.0);
+                    if let Ok(dust_address_array) =
+                        TryInto::<[u8; 32]>::try_into(event.dust_address)
+                    {
+                        dust_registration_events.push(DustRegistrationEvent::Deregistration {
+                            cardano_address,
+                            dust_address: DustAddress::from(dust_address_array),
+                        });
+                    }
+                }
+
+                NativeTokenObservationEvent::MappingAdded(event) => {
+                    let cardano_address = CardanoStakeKey::from(event.cardano_address.0);
+                    if let (Ok(dust_address_bytes), Ok(utxo_id_bytes)) = (
+                        const_hex::decode(&event.dust_address),
+                        const_hex::decode(&event.utxo_id),
+                    ) && let Ok(dust_address_array) =
+                        TryInto::<[u8; 32]>::try_into(dust_address_bytes)
+                    {
+                        dust_registration_events.push(DustRegistrationEvent::MappingAdded {
+                            cardano_address,
+                            dust_address: DustAddress::from(dust_address_array),
+                            utxo_id: DustUtxoId::from(utxo_id_bytes),
+                        });
+                    }
+                }
+
+                NativeTokenObservationEvent::MappingRemoved(event) => {
+                    let cardano_address = CardanoStakeKey::from(event.cardano_address.0);
+                    if let (Ok(dust_address_bytes), Ok(utxo_id_bytes)) = (
+                        const_hex::decode(&event.dust_address),
+                        const_hex::decode(&event.utxo_id),
+                    ) && let Ok(dust_address_array) =
+                        TryInto::<[u8; 32]>::try_into(dust_address_bytes)
+                    {
+                        dust_registration_events.push(DustRegistrationEvent::MappingRemoved {
+                            cardano_address,
+                            dust_address: DustAddress::from(dust_address_array),
+                            utxo_id: DustUtxoId::from(utxo_id_bytes),
+                        });
+                    }
+                }
+
+                _ => {}
+            },
+
             _ => {}
         }
     }
@@ -192,6 +257,7 @@ async fn make_block_details_runtime_0_16(
     Ok(BlockDetails {
         timestamp,
         transactions,
+        dust_registration_events,
     })
 }
 

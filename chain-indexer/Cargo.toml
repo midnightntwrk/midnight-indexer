@@ -18,6 +18,7 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 anyhow             = { workspace = true }
 async-stream       = { workspace = true }
 byte-unit          = { workspace = true }
+const-hex          = { workspace = true }
 derive_more        = { workspace = true, features = [ "from" ] }
 fastrace           = { workspace = true, features = [ "enable" ] }
 futures            = { workspace = true }
@@ -39,8 +40,9 @@ tokio              = { workspace = true, features = [ "macros", "rt-multi-thread
 trait-variant      = { workspace = true }
 
 [dev-dependencies]
-clap = { workspace = true, features = [ "derive" ] }
-fake = { workspace = true }
+clap               = { workspace = true, features = [ "derive" ] }
+fake               = { workspace = true }
+midnight-ledger_v6 = { workspace = true }
 
 [features]
 cloud      = [ "indexer-common/cloud" ]

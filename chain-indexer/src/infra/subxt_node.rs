@@ -245,6 +245,7 @@ impl SubxtNode {
         let BlockDetails {
             timestamp,
             transactions,
+            dust_registration_events,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
 
         let transactions = stream::iter(transactions)
@@ -261,8 +262,7 @@ impl SubxtNode {
             timestamp: timestamp.unwrap_or(0),
             zswap_state_root,
             transactions,
-            // TODO: Extract DUST registration events from node block events
-            dust_registration_events: Vec::new(),
+            dust_registration_events,
         };
 
         debug!(
