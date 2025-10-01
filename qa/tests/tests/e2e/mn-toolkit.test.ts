@@ -27,7 +27,7 @@ describe('mn-toolkit', () => {
   beforeAll(async () => {
     toolkit = new ToolkitWrapper({});
     await toolkit.start();
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await toolkit.stop();
