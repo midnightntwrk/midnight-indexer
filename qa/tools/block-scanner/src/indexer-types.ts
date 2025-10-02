@@ -1,3 +1,18 @@
+// This file is part of midnightntwrk/midnight-indexer
+// Copyright (C) 2025 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 export interface Block {
   hash: string;
   height: number;
@@ -22,9 +37,9 @@ export type TransactionResult = {
 };
 
 export enum TransactionResultStatus {
-  SUCCESS = 'SUCCESS',
-  PARTIAL_SUCCESS = 'PARTIAL_SUCCESS',
-  FAILURE = 'FAILURE',
+  SUCCESS = "SUCCESS",
+  PARTIAL_SUCCESS = "PARTIAL_SUCCESS",
+  FAILURE = "FAILURE",
 }
 
 export interface Segment {
@@ -39,7 +54,7 @@ export interface TransactionFees {
 
 // Base Transaction interface (common to both RegularTransaction and SystemTransaction)
 export interface Transaction {
-  __typename: 'RegularTransaction' | 'SystemTransaction';
+  __typename: "RegularTransaction" | "SystemTransaction";
   id?: number;
   hash?: string;
   protocolVersion?: number;
@@ -73,7 +88,7 @@ export interface SystemTransaction extends Transaction {
 export type ContractAction = ContractDeploy | ContractCall | ContractUpdate;
 
 export interface ContractDeploy {
-  __typename: 'ContractDeploy';
+  __typename: "ContractDeploy";
   address: string;
   state: string;
   chainState: string;
@@ -82,7 +97,7 @@ export interface ContractDeploy {
 }
 
 export interface ContractCall {
-  __typename: 'ContractCall';
+  __typename: "ContractCall";
   address: string;
   state: string;
   chainState: string;
@@ -93,7 +108,7 @@ export interface ContractCall {
 }
 
 export interface ContractUpdate {
-  __typename: 'ContractUpdate';
+  __typename: "ContractUpdate";
   address: string;
   state: string;
   chainState: string;

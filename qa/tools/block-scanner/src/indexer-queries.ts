@@ -79,7 +79,10 @@ export const TRANSACTION_BODY_FRAGMENT = `                   __typename
                     ${REGULAR_TRANSACTION_FRAGMENT}
                     ${SYSTEM_TRANSACTION_FRAGMENT}`;
 
-export function getBlockSubscriptionQuery(blockTypeParam: string, blockValueParam: string) {
+export function getBlockSubscriptionQuery(
+  blockTypeParam: string,
+  blockValueParam: string,
+) {
   return `subscription BlocksSubscription${blockTypeParam} { 
             blocks${blockValueParam} { 
                 hash
