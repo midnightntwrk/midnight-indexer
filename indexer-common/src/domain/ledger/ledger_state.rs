@@ -27,7 +27,7 @@ use midnight_base_crypto_v6::{
     time::Timestamp as TimestampV6,
 };
 use midnight_coin_structure_v6::{
-    coin::{Nonce as NonceV6, UserAddress as UserAddressV6},
+    coin::{NIGHT as NIGHTV6, Nonce as NonceV6, UserAddress as UserAddressV6},
     contract::ContractAddress as ContractAddressV6,
 };
 use midnight_ledger_v6::{
@@ -38,6 +38,7 @@ use midnight_ledger_v6::{
     },
     structure::{
         LedgerParameters as LedgerParametersV6, LedgerState as LedgerStateV6,
+        OutputInstructionUnshielded as OutputInstructionUnshieldedV6,
         SystemTransaction as LedgerSystemTransactionV6,
     },
     verify::WellFormedStrictness as WellFormedStrictnessV6,
@@ -52,7 +53,6 @@ use midnight_transient_crypto_v6::merkle_tree::{
     MerkleTreeDigest as MerkleTreeDigestV6,
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
-use sha2::{Digest, Sha256};
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 static STRICTNESS_V6: LazyLock<WellFormedStrictnessV6> = LazyLock::new(|| {
@@ -569,11 +569,11 @@ fn compute_claim_rewards_intent_hash_v6(
     value: u128,
     nonce: &NonceV6,
 ) -> IntentHash {
-    let mut hasher = Sha256::new();
+    let output = OutputInstructionUnshieldedV6 {
+        amount: value,
+        target_address: *owner,
+        nonce: *nonce,
+    };
 
-    hasher.update(owner.0.0);
-    hasher.update(value.to_le_bytes());
-    hasher.update(nonce.0.0);
-
-    ByteArray(hasher.finalize().into())
+    ByteArray(output.mk_intent_hash(NIGHTV6).0.0)
 }
