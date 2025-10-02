@@ -12,21 +12,16 @@
 // limitations under the License.
 
 use crate::domain::{
-    self, Block, BlockTransactions, ContractAction, DustRegistrationEvent, RegularTransaction,
-    SystemTransaction, Transaction,
-    dust::{
-        DustDtimeUpdate, DustEventProjections, DustGeneration, DustMerkleTreeUpdate, DustSpend,
-        DustUtxo,
-    },
-    node::BlockInfo,
+    self, Block, BlockTransactions, ContractAction, DustEventProjections, DustGenerationInfo,
+    DustMerklePathEntry, DustRegistrationEvent, QualifiedDustOutput, RegularTransaction,
+    SystemTransaction, Transaction, node::BlockInfo,
 };
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteVec, ContractAttributes, ContractBalance, DustCommitment,
-        DustGenerationInfo, DustMerklePathEntry, DustNullifier, LedgerEvent, LedgerEventAttributes,
-        QualifiedDustOutput, TransactionVariant, UnshieldedUtxo,
+        BlockHash, ByteVec, ContractAttributes, ContractBalance, DustCommitment, DustNullifier,
+        LedgerEvent, LedgerEventAttributes, TransactionVariant, UnshieldedUtxo,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -193,8 +188,13 @@ impl domain::storage::Storage for Storage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[cfg_attr(feature = "cloud", sqlx(type_name = "CONTRACT_ACTION_VARIANT"))]
 enum ContractActionVariant {
+    /// A contract deployment.
     Deploy,
+
+    /// A contract call.
     Call,
+
+    /// A contract update.
     Update,
 }
 
@@ -432,58 +432,6 @@ async fn save_system_transaction(
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn save_contract_actions(
-    contract_actions: &[ContractAction],
-    transaction_id: i64,
-    tx: &mut SqlxTransaction,
-) -> Result<(), sqlx::Error> {
-    if contract_actions.is_empty() {
-        return Ok(());
-    }
-
-    let query = indoc! {"
-        INSERT INTO contract_actions (
-            transaction_id,
-            variant,
-            address,
-            state,
-            chain_state,
-            attributes
-        )
-    "};
-
-    let contract_action_ids = QueryBuilder::new(query)
-        .push_values(contract_actions.iter(), |mut q, action| {
-            q.push_bind(transaction_id)
-                .push_bind(ContractActionVariant::from(&action.attributes))
-                .push_bind(&action.address)
-                .push_bind(&action.state)
-                .push_bind(&action.chain_state)
-                .push_bind(Json(&action.attributes));
-        })
-        .push(" RETURNING id")
-        .build_query_as::<(i64,)>()
-        .fetch_all(&mut **tx)
-        .await?
-        .into_iter()
-        .map(|(id,)| id);
-
-    let contract_balances = contract_actions
-        .iter()
-        .zip(contract_action_ids)
-        .flat_map(|(action, action_id)| {
-            action
-                .extracted_balances
-                .iter()
-                .map(move |&balance| (action_id, balance))
-        })
-        .collect::<Vec<_>>();
-    save_contract_balances(&contract_balances, tx).await?;
-
-    Ok(())
-}
-
-#[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_unshielded_utxos(
     utxos: &[UnshieldedUtxo],
     transaction_id: i64,
@@ -581,36 +529,53 @@ async fn save_unshielded_utxos(
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn save_ledger_events(
-    ledger_events: &[LedgerEvent],
+async fn save_contract_actions(
+    contract_actions: &[ContractAction],
     transaction_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    if ledger_events.is_empty() {
+    if contract_actions.is_empty() {
         return Ok(());
     }
 
     let query = indoc! {"
-        INSERT INTO ledger_events (
+        INSERT INTO contract_actions (
             transaction_id,
             variant,
-            grouping,
-            raw,
+            address,
+            state,
+            chain_state,
             attributes
         )
     "};
 
-    QueryBuilder::new(query)
-        .push_values(ledger_events.iter(), |mut q, ledger_event| {
+    let contract_action_ids = QueryBuilder::new(query)
+        .push_values(contract_actions.iter(), |mut q, action| {
             q.push_bind(transaction_id)
-                .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
-                .push_bind(ledger_event.grouping)
-                .push_bind(ledger_event.raw.as_ref())
-                .push_bind(Json(ledger_event.attributes));
+                .push_bind(ContractActionVariant::from(&action.attributes))
+                .push_bind(&action.address)
+                .push_bind(&action.state)
+                .push_bind(&action.chain_state)
+                .push_bind(Json(&action.attributes));
         })
-        .build()
-        .execute(&mut **tx)
-        .await?;
+        .push(" RETURNING id")
+        .build_query_as::<(i64,)>()
+        .fetch_all(&mut **tx)
+        .await?
+        .into_iter()
+        .map(|(id,)| id);
+
+    let contract_balances = contract_actions
+        .iter()
+        .zip(contract_action_ids)
+        .flat_map(|(action, action_id)| {
+            action
+                .extracted_balances
+                .iter()
+                .map(move |&balance| (action_id, balance))
+        })
+        .collect::<Vec<_>>();
+    save_contract_balances(&contract_balances, tx).await?;
 
     Ok(())
 }
@@ -667,6 +632,256 @@ async fn save_identifiers(
             q.push_bind(transaction_id).push_bind(identifier);
         })
         .build()
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn save_ledger_events(
+    ledger_events: &[LedgerEvent],
+    transaction_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    if ledger_events.is_empty() {
+        return Ok(());
+    }
+
+    let query = indoc! {"
+        INSERT INTO ledger_events (
+            transaction_id,
+            variant,
+            grouping,
+            raw,
+            attributes
+        )
+    "};
+
+    QueryBuilder::new(query)
+        .push_values(ledger_events.iter(), |mut q, ledger_event| {
+            q.push_bind(transaction_id)
+                .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
+                .push_bind(ledger_event.grouping)
+                .push_bind(ledger_event.raw.as_ref())
+                .push_bind(Json(ledger_event.attributes));
+        })
+        .build()
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+/// Save all DUST projections from a transaction.
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn save_dust_projections(
+    projections: &DustEventProjections,
+    transaction_id: i64,
+    block_height: u32,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    // Save generations and their UTXOs
+    for generation in &projections.generations {
+        let generation_info_id =
+            save_dust_generation_info(&generation.generation_info, generation.generation_index, tx)
+                .await?;
+
+        // Find corresponding UTXO (they are paired in the same order)
+        for utxo in &projections.utxos {
+            if utxo.generation_index == generation.generation_index {
+                save_dust_utxos(&utxo.output, generation_info_id, tx).await?;
+            }
+        }
+    }
+
+    // Save merkle tree updates
+    for tree_update in &projections.merkle_tree_updates {
+        save_dust_generation_tree_update(
+            tree_update.generation_index,
+            &tree_update.merkle_path,
+            block_height,
+            tx,
+        )
+        .await?;
+    }
+
+    // Mark spent UTXOs
+    for spend in &projections.spends {
+        mark_dust_utxo_spent(spend.commitment, spend.nullifier, transaction_id, tx).await?;
+    }
+
+    // Update dtime for generations
+    if let Some(dtime_update) = &projections.dtime_update {
+        update_dust_generation_dtime(dtime_update.dtime, dtime_update.generation_index, tx).await?;
+    }
+
+    Ok(())
+}
+
+/// Save DUST UTXOs to database.
+#[trace]
+async fn save_dust_utxos(
+    output: &QualifiedDustOutput,
+    generation_info_id: u64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO dust_utxos (
+            generation_info_id,
+            commitment,
+            initial_value
+        )
+        VALUES ($1, $2, $3)
+    "};
+
+    sqlx::query(query)
+        .bind(generation_info_id as i64)
+        .bind(output.nonce.as_ref()) // Using nonce as placeholder for commitment
+        .bind(U128BeBytes::from(output.initial_value))
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+/// Save DUST generation tree update to database.
+#[trace]
+async fn save_dust_generation_tree_update(
+    merkle_index: u64,
+    merkle_path: &[DustMerklePathEntry],
+    block_height: u32,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    // Calculate root from merkle path if available, otherwise use placeholder
+    let root = if !merkle_path.is_empty() {
+        // In production, calculate proper root from merkle path
+        // For now, use placeholder
+        vec![0u8; 32]
+    } else {
+        vec![0u8; 32] // Placeholder root
+    };
+
+    let query = indoc! {"
+        INSERT INTO dust_generation_tree (
+            block_height,
+            merkle_index,
+            root,
+            tree_data
+        )
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (merkle_index) DO UPDATE SET
+            block_height = EXCLUDED.block_height,
+            root = EXCLUDED.root,
+            tree_data = EXCLUDED.tree_data
+    "};
+
+    sqlx::query(query)
+        .bind(block_height as i64)
+        .bind(merkle_index as i64)
+        .bind(&root)
+        .bind(Json(merkle_path))
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+/// Save DUST generation info to database.
+#[trace]
+async fn save_dust_generation_info(
+    generation: &DustGenerationInfo,
+    generation_index: u64,
+    tx: &mut SqlxTransaction,
+) -> Result<u64, sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO dust_generation_info (
+            night_utxo_hash,
+            value,
+            owner,
+            nonce,
+            ctime,
+            merkle_index,
+            dtime
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id
+    "};
+
+    let (id,) = sqlx::query_as::<_, (i64,)>(query)
+        .bind(generation.night_utxo_hash.as_ref())
+        .bind(U128BeBytes::from(generation.value))
+        .bind(generation.owner.as_ref())
+        .bind(generation.nonce.as_ref())
+        .bind(generation.ctime as i64)
+        .bind(generation_index as i64)
+        .bind(if generation.dtime == 0 {
+            None
+        } else {
+            Some(generation.dtime as i64)
+        })
+        .fetch_one(&mut **tx)
+        .await?;
+
+    Ok(id as u64)
+}
+
+/// Mark DUST UTXO as spent.
+#[trace]
+async fn mark_dust_utxo_spent(
+    commitment: DustCommitment,
+    nullifier: DustNullifier,
+    transaction_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    // Update UTXO as spent
+    let update_query = indoc! {"
+        UPDATE dust_utxos
+        SET spent_at_transaction_id = $1
+        WHERE commitment = $2
+    "};
+
+    sqlx::query(update_query)
+        .bind(transaction_id)
+        .bind(commitment.as_ref())
+        .execute(&mut **tx)
+        .await?;
+
+    // Insert nullifier
+    let insert_query = indoc! {"
+        INSERT INTO dust_nullifiers (
+            nullifier,
+            transaction_id
+        )
+        VALUES ($1, $2)
+        ON CONFLICT (nullifier) DO NOTHING
+    "};
+
+    sqlx::query(insert_query)
+        .bind(nullifier.as_ref())
+        .bind(transaction_id)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+/// Update DUST generation dtime.
+#[trace]
+async fn update_dust_generation_dtime(
+    dtime: u64,
+    generation_index: u64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        UPDATE dust_generation_info
+        SET dtime = $1
+        WHERE merkle_index = $2
+    "};
+
+    sqlx::query(query)
+        .bind(dtime as i64)
+        .bind(generation_index as i64)
         .execute(&mut **tx)
         .await?;
 
@@ -792,221 +1007,6 @@ async fn save_dust_registration_events(
             }
         }
     }
-
-    Ok(())
-}
-
-/// Save all DUST projections from a transaction.
-#[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn save_dust_projections(
-    projections: &DustEventProjections,
-    transaction_id: i64,
-    block_height: u32,
-    tx: &mut SqlxTransaction,
-) -> Result<(), sqlx::Error> {
-    // Save generations and their UTXOs
-    for generation in &projections.generations {
-        let generation_info_id =
-            save_dust_generation_info(&generation.generation_info, generation.generation_index, tx)
-                .await?;
-
-        // Find corresponding UTXO (they are paired in the same order)
-        for utxo in &projections.utxos {
-            if utxo.generation_index == generation.generation_index {
-                save_dust_utxos(&utxo.output, generation_info_id, tx).await?;
-            }
-        }
-    }
-
-    // Save merkle tree updates
-    for tree_update in &projections.merkle_tree_updates {
-        save_dust_generation_tree_update(
-            tree_update.generation_index,
-            &tree_update.merkle_path,
-            block_height,
-            tx,
-        )
-        .await?;
-    }
-
-    // Mark spent UTXOs
-    for spend in &projections.spends {
-        mark_dust_utxo_spent(spend.commitment, spend.nullifier, transaction_id, tx).await?;
-    }
-
-    // Update dtime for generations
-    if let Some(dtime_update) = &projections.dtime_update {
-        update_dust_generation_dtime(dtime_update.dtime, dtime_update.generation_index, tx).await?;
-    }
-
-    Ok(())
-}
-
-/// Save DUST generation info to database.
-#[trace]
-async fn save_dust_generation_info(
-    generation: &DustGenerationInfo,
-    generation_index: u64,
-    tx: &mut SqlxTransaction,
-) -> Result<u64, sqlx::Error> {
-    let query = indoc! {"
-        INSERT INTO dust_generation_info (
-            night_utxo_hash,
-            value,
-            owner,
-            nonce,
-            ctime,
-            merkle_index,
-            dtime
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id
-    "};
-
-    let (id,) = sqlx::query_as::<_, (i64,)>(query)
-        .bind(generation.night_utxo_hash.as_ref())
-        .bind(U128BeBytes::from(generation.value).as_ref())
-        .bind(generation.owner.as_ref())
-        .bind(generation.nonce.as_ref())
-        .bind(generation.ctime as i64)
-        .bind(generation_index as i64)
-        .bind(if generation.dtime == 0 {
-            None
-        } else {
-            Some(generation.dtime as i64)
-        })
-        .fetch_one(&mut **tx)
-        .await?;
-
-    Ok(id as u64)
-}
-
-/// Save DUST UTXOs to database.
-#[trace]
-async fn save_dust_utxos(
-    output: &QualifiedDustOutput,
-    generation_info_id: u64,
-    tx: &mut SqlxTransaction,
-) -> Result<(), sqlx::Error> {
-    let query = indoc! {"
-        INSERT INTO dust_utxos (
-            generation_info_id,
-            commitment,
-            initial_value
-        )
-        VALUES ($1, $2, $3)
-    "};
-
-    sqlx::query(query)
-        .bind(generation_info_id as i64)
-        .bind(output.nonce.as_ref()) // Using nonce as placeholder for commitment
-        .bind(U128BeBytes::from(output.initial_value).as_ref())
-        .execute(&mut **tx)
-        .await?;
-
-    Ok(())
-}
-
-/// Save DUST generation tree update to database.
-#[trace]
-async fn save_dust_generation_tree_update(
-    merkle_index: u64,
-    merkle_path: &[DustMerklePathEntry],
-    block_height: u32,
-    tx: &mut SqlxTransaction,
-) -> Result<(), sqlx::Error> {
-    // Calculate root from merkle path if available, otherwise use placeholder
-    let root = if !merkle_path.is_empty() {
-        // In production, calculate proper root from merkle path
-        // For now, use placeholder
-        vec![0u8; 32]
-    } else {
-        vec![0u8; 32] // Placeholder root
-    };
-
-    let query = indoc! {"
-        INSERT INTO dust_generation_tree (
-            block_height,
-            merkle_index,
-            root,
-            tree_data
-        )
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (merkle_index) DO UPDATE SET
-            block_height = EXCLUDED.block_height,
-            root = EXCLUDED.root,
-            tree_data = EXCLUDED.tree_data
-    "};
-
-    sqlx::query(query)
-        .bind(block_height as i64)
-        .bind(merkle_index as i64)
-        .bind(&root)
-        .bind(Json(merkle_path))
-        .execute(&mut **tx)
-        .await?;
-
-    Ok(())
-}
-
-/// Mark DUST UTXO as spent.
-#[trace]
-async fn mark_dust_utxo_spent(
-    commitment: DustCommitment,
-    nullifier: DustNullifier,
-    transaction_id: i64,
-    tx: &mut SqlxTransaction,
-) -> Result<(), sqlx::Error> {
-    // Update UTXO as spent
-    let update_query = indoc! {"
-        UPDATE dust_utxos
-        SET spent_at_transaction_id = $1
-        WHERE commitment = $2
-    "};
-
-    sqlx::query(update_query)
-        .bind(transaction_id)
-        .bind(commitment.as_ref())
-        .execute(&mut **tx)
-        .await?;
-
-    // Insert nullifier
-    let insert_query = indoc! {"
-        INSERT INTO dust_nullifiers (
-            nullifier,
-            transaction_id
-        )
-        VALUES ($1, $2)
-        ON CONFLICT (nullifier) DO NOTHING
-    "};
-
-    sqlx::query(insert_query)
-        .bind(nullifier.as_ref())
-        .bind(transaction_id)
-        .execute(&mut **tx)
-        .await?;
-
-    Ok(())
-}
-
-/// Update DUST generation dtime.
-#[trace]
-async fn update_dust_generation_dtime(
-    dtime: u64,
-    generation_index: u64,
-    tx: &mut SqlxTransaction,
-) -> Result<(), sqlx::Error> {
-    let query = indoc! {"
-        UPDATE dust_generation_info
-        SET dtime = $1
-        WHERE merkle_index = $2
-    "};
-
-    sqlx::query(query)
-        .bind(dtime as i64)
-        .bind(generation_index as i64)
-        .execute(&mut **tx)
-        .await?;
 
     Ok(())
 }
