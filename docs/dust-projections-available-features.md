@@ -107,12 +107,42 @@ Merged 49 commits from main branch, bringing fundamental architectural changes:
 - **Main's layer**: Raw events for maximum flexibility (WASM wallets)
 - **CNGD's layer**: Processed projections for convenience (web wallets, explorers)
 
-### DUST Registration Event Extraction (8eece6b)
+### DUST Registration Event Extraction and Storage (8eece6b, d0a634c)
+
+#### Event Extraction (8eece6b)
 Added extraction of DUST registration events directly from the Substrate runtime's NativeTokenObservation pallet:
 - **Registration**: Captures Cardano stake key → DUST address registration
 - **Deregistration**: Captures registration removal
 - **MappingAdded**: Captures UTXO mapping additions with transaction IDs
 - **MappingRemoved**: Captures UTXO mapping removals
+
+#### Storage Implementation (d0a634c)
+Implemented complete storage layer for persisting registration events to database:
+
+**Database Tables**:
+- `cnight_registrations`: Tracks active/inactive registrations with timestamps
+  - ON CONFLICT updates for Registration/Deregistration events
+  - Fields: cardano_address, dust_address, is_valid, registered_at, removed_at, block_id
+- `dust_utxo_mappings`: Tracks UTXO-specific mappings with transaction IDs
+  - ON CONFLICT updates for MappingAdded/MappingRemoved events
+  - Fields: cardano_address, dust_address, utxo_id, transaction_id, is_active, added_at, removed_at, block_id
+
+**Storage Layer Changes**:
+- Added `save_dust_registration_events()` function in chain-indexer/src/infra/storage.rs
+- Updated `save_block()` trait method to accept `dust_registration_events` parameter
+- Integrated event processing into block persistence transaction
+
+**Type System Consolidation**:
+- Moved core types to indexer-common/src/domain.rs for single source of truth
+- Added backward compatibility re-exports in indexer-common/src/domain/ledger.rs
+- Types: ContractAction, ContractAttributes, ContractBalance, TransactionStructure, SerializedContract*, TransactionHash
+
+**Configuration Restoration**:
+- Restored `DustConfig` struct with merkle tree and privacy settings
+- Added `impl Default for Config` with production defaults:
+  - merkle_tree_batch_size: 1000
+  - privacy_prefix_length: 8
+  - max_registrations_per_address: 10
 
 **Why Separate from Ledger Events?**
 
@@ -123,12 +153,12 @@ Registration events come from the `NativeTokenObservation` pallet at the Substra
 | **Source** | System transactions (ledger state changes) | NativeTokenObservation pallet (runtime) |
 | **Examples** | DustInitialUtxo, DustGenerationDtimeUpdate, DustSpendProcessed | Registration, Deregistration, MappingAdded, MappingRemoved |
 | **When emitted** | During transaction execution affecting ledger state | During off-chain Cardano observation updates |
-| **Storage** | `ledger_events` table (main's design) | `dust_registration_events` field in blocks (CNGD's addition) |
+| **Storage** | `ledger_events` table (main's design) | `cnight_registrations`, `dust_utxo_mappings` tables (CNGD's addition) |
 | **Purpose** | Track DUST coin lifecycle (creation, spending, generation) | Track Night→DUST address associations for Cardano integration |
 
-**Historical Context**: CNGD originally included registration events in the DUST ledger event enum (commit df50427). This was corrected in commit 1128b7b when we realized they weren't ledger events. After the main merge, commit 8eece6b properly implemented them as runtime pallet event extraction.
+**Historical Context**: CNGD originally included registration events in the DUST ledger event enum (commit df50427). This was corrected in commit 1128b7b when we realized they weren't ledger events. After the main merge, commit 8eece6b properly implemented extraction from the runtime pallet, and commit d0a634c completed the storage implementation.
 
-These events are stored in the `dust_registration_events` field of each indexed block, providing the infrastructure layer needed for tracking Night→DUST address associations for Cardano cNIGHT support.
+These events are now fully integrated into block processing, providing complete infrastructure for tracking Night→DUST address associations for Cardano cNIGHT support.
 
 ## Requirements Sources
 
@@ -269,9 +299,16 @@ dust_nullifiers (nullifier, transaction_hash, block_height)
 -- Source: dust.md - "nullifier set at the time of destruction"
 
 -- Registration mapping
-cnight_registrations (cardano_address, dust_address, is_valid)
+cnight_registrations (cardano_address, dust_address, is_valid, registered_at, removed_at, block_id)
 -- Why: Night->Dust address association for generation
 -- Source: dust.md - "table tracks which Dust public key to associate"
+-- Implementation: Upsert on Registration/Deregistration events (commit d0a634c)
+
+-- UTXO mapping tracking
+dust_utxo_mappings (cardano_address, dust_address, utxo_id, transaction_id, is_active, added_at, removed_at, block_id)
+-- Why: Track specific UTXO-level mappings with transaction context
+-- Source: NativeTokenObservation pallet MappingAdded/MappingRemoved events
+-- Implementation: Upsert on mapping events (commit d0a634c)
 
 -- Initial UTXOs
 dust_initial_utxos (night_utxo_hash, dust_owner, nonce, value)
@@ -332,10 +369,11 @@ dust_initial_utxos (night_utxo_hash, dust_owner, nonce, value)
 
 ## Implementation Statistics
 
-- **Total Lines**: ~7,500
-- **GraphQL Schema**: +541 lines
-- **Rust Files**: 8 new domain/storage modules
-- **Database Tables**: 5 new tables
+- **Total Lines**: ~8,000
+- **GraphQL Schema**: +541 lines (schema-v1.graphql)
+- **Rust Files**: 8+ domain/storage modules
+- **Database Tables**: 7 tables (includes cnight_registrations, dust_utxo_mappings)
+- **Storage Functions**: Complete CRUD operations for all DUST entities
 - **Test Coverage**: >80% for core logic
 
 ## Integration Points
@@ -462,9 +500,12 @@ The `feat/cnight-generates-dust` branch contains a complete, requirements-driven
 
 The branch has been updated with main branch integration (49 commits merged) and now includes:
 1. **Dual Event Layer**: Both raw ledger events (from main) and projection layer (from this branch) coexist
-2. **Runtime Event Extraction**: Direct extraction of NativeTokenObservation pallet events for registration tracking
-3. **Updated Dependencies**: Ledger v6.1.0-alpha.3 and Node v0.16.3 with latest protocol features
-4. **Enhanced Architecture**: Maintains backward compatibility while adding new capabilities
+2. **Runtime Event Extraction**: Direct extraction of NativeTokenObservation pallet events for registration tracking (commit 8eece6b)
+3. **Complete Storage Implementation**: Full database persistence for registration events with upsert logic (commit d0a634c)
+4. **Type System Consolidation**: Centralized type definitions with backward compatibility re-exports
+5. **Configuration Restoration**: DustConfig with production defaults restored from original CNGD implementation
+6. **Updated Dependencies**: Ledger v6.1.0-alpha.3 and Node v0.16.3 with latest protocol features
+7. **Enhanced Architecture**: Maintains backward compatibility while adding new capabilities
 
 The implementation is not speculative - it directly implements the DUST mechanics as specified in the ledger documentation and addresses the concrete needs identified by the wallet team. All code is production-ready and follows established patterns. The modular design allows for selective integration of specific features based on requirements.
 
