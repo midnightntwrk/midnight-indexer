@@ -11,9 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{
-    RegularTransaction, SystemTransaction, Transaction, node,
-};
+use crate::domain::{RegularTransaction, SystemTransaction, Transaction, node};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
