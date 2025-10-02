@@ -561,9 +561,9 @@ fn registered_for_dust_generation_v6(
         .contains_key(&initial_nonce)
 }
 
-/// Compute a pseudo-intent-hash for ClaimRewards transactions.
-/// ClaimRewards don't have intents, but we need a unique hash for database constraints.
-/// We use a hash of (owner || value || nonce) to ensure uniqueness.
+/// Compute the intent hash for ClaimRewards transactions.
+/// ClaimRewards don't have intents, but UTXOs need an intent hash.
+/// We compute this hash the same way that the ledger does internally.
 fn compute_claim_rewards_intent_hash_v6(
     owner: &UserAddressV6,
     value: u128,
