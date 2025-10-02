@@ -730,15 +730,23 @@ async fn save_dust_utxos(
         INSERT INTO dust_utxos (
             generation_info_id,
             commitment,
-            initial_value
+            initial_value,
+            owner,
+            nonce,
+            seq,
+            ctime
         )
-        VALUES ($1, $2, $3)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
     "};
 
     sqlx::query(query)
         .bind(generation_info_id as i64)
         .bind(output.nonce.as_ref()) // Using nonce as placeholder for commitment
         .bind(U128BeBytes::from(output.initial_value))
+        .bind(output.owner.as_ref())
+        .bind(output.nonce.as_ref())
+        .bind(output.seq as i32)
+        .bind(output.ctime as i64)
         .execute(&mut **tx)
         .await?;
 
@@ -834,32 +842,18 @@ async fn mark_dust_utxo_spent(
     transaction_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    // Update UTXO as spent
+    // Update UTXO as spent and set nullifier
     let update_query = indoc! {"
         UPDATE dust_utxos
-        SET spent_at_transaction_id = $1
-        WHERE commitment = $2
+        SET spent_at_transaction_id = $1,
+            nullifier = $2
+        WHERE commitment = $3
     "};
 
     sqlx::query(update_query)
         .bind(transaction_id)
-        .bind(commitment.as_ref())
-        .execute(&mut **tx)
-        .await?;
-
-    // Insert nullifier
-    let insert_query = indoc! {"
-        INSERT INTO dust_nullifiers (
-            nullifier,
-            transaction_id
-        )
-        VALUES ($1, $2)
-        ON CONFLICT (nullifier) DO NOTHING
-    "};
-
-    sqlx::query(insert_query)
         .bind(nullifier.as_ref())
-        .bind(transaction_id)
+        .bind(commitment.as_ref())
         .execute(&mut **tx)
         .await?;
 

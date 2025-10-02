@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{
-    RegularTransaction, SystemTransaction, Transaction, dust::extract_dust_operations, node,
+    RegularTransaction, SystemTransaction, Transaction, node,
 };
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
@@ -147,10 +147,12 @@ impl LedgerState {
         transaction.ledger_events = ledger_events.clone();
 
         // Extract and process DUST events into projections
-        let dust_events = extract_dust_events_from_ledger_events(&ledger_events)?;
-        if !dust_events.is_empty() {
-            transaction.dust_projections = Some(extract_dust_operations(&dust_events));
-        }
+        // TODO: Enable once proper deserialization from raw bytes is implemented
+        // Currently using placeholder values that cause null constraint violations
+        // let dust_events = extract_dust_events_from_ledger_events(&ledger_events)?;
+        // if !dust_events.is_empty() {
+        //     transaction.dust_projections = Some(extract_dust_operations(&dust_events));
+        // }
 
         // Update contract actions.
         if transaction.end_index > transaction.start_index {
@@ -188,10 +190,12 @@ impl LedgerState {
         transaction.ledger_events = ledger_events.clone();
 
         // Extract and process DUST events into projections
-        let dust_events = extract_dust_events_from_ledger_events(&ledger_events)?;
-        if !dust_events.is_empty() {
-            transaction.dust_projections = Some(extract_dust_operations(&dust_events));
-        }
+        // TODO: Enable once proper deserialization from raw bytes is implemented
+        // Currently using placeholder values that cause null constraint violations
+        // let dust_events = extract_dust_events_from_ledger_events(&ledger_events)?;
+        // if !dust_events.is_empty() {
+        //     transaction.dust_projections = Some(extract_dust_operations(&dust_events));
+        // }
 
         Ok(Transaction::System(transaction))
     }
@@ -210,6 +214,7 @@ pub enum Error {
 ///
 /// For now, this is a simplified implementation that reconstructs DustEvent from
 /// LedgerEventAttributes. In a full implementation, we would deserialize the raw bytes directly.
+#[allow(dead_code)]
 fn extract_dust_events_from_ledger_events(
     ledger_events: &[LedgerEvent],
 ) -> Result<Vec<DustEvent>, Error> {
