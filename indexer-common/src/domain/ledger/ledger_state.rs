@@ -12,11 +12,14 @@
 // limitations under the License.
 
 use crate::domain::{
-    ApplyRegularTransactionResult, ByteArray, ByteVec, DustOutput, IntentHash, LedgerEvent,
-    NetworkId, Nonce, PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType,
-    SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerState,
-    SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot, TransactionResult,
-    UnshieldedUtxo,
+    ApplyRegularTransactionResult, ByteArray, ByteVec, IntentHash, LedgerEvent, NetworkId, Nonce,
+    PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType, SerializedContractAddress,
+    SerializedLedgerParameters, SerializedLedgerState, SerializedTransaction,
+    SerializedZswapState, SerializedZswapStateRoot, TransactionResult, UnshieldedUtxo,
+    dust::{
+        DustCommitment, DustGenerationInfo, DustMerklePathEntry, DustNullifier,
+        QualifiedDustOutput,
+    },
     ledger::{Error, IntentV6, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
 use fastrace::trace;
@@ -378,19 +381,105 @@ fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<Ledger
 
             EventDetailsV6::ParamChange(..) => Some(LedgerEvent::param_change(raw)),
 
-            EventDetailsV6::DustInitialUtxo { output, .. } => {
-                let output = DustOutput {
+            EventDetailsV6::DustInitialUtxo {
+                output,
+                generation,
+                generation_index,
+                ..
+            } => {
+                let qualified_output = QualifiedDustOutput {
+                    initial_value: output.initial_value,
+                    owner: output.owner.0 .0.to_bytes_le().into(),
                     nonce: output.nonce.0.to_bytes_le().into(),
+                    seq: output.seq,
+                    ctime: output.ctime.to_secs(),
+                    backing_night: output.backing_night.0 .0.into(),
+                    mt_index: output.mt_index,
                 };
-                Some(LedgerEvent::dust_initial_utxo(raw, output))
+
+                let generation_info = DustGenerationInfo {
+                    night_utxo_hash: output.backing_night.0 .0.into(),
+                    value: generation.value,
+                    owner: generation.owner.0 .0.to_bytes_le().into(),
+                    nonce: generation.nonce.0 .0.into(),
+                    ctime: output.ctime.to_secs(),
+                    dtime: generation.dtime.to_secs(),
+                };
+
+                Some(LedgerEvent::dust_initial_utxo(
+                    raw,
+                    qualified_output,
+                    generation_info,
+                    generation_index,
+                ))
             }
 
-            EventDetailsV6::DustGenerationDtimeUpdate { .. } => {
-                Some(LedgerEvent::dust_generation_dtime_update(raw))
+            EventDetailsV6::DustGenerationDtimeUpdate { update, .. } => {
+                // TreeInsertionPath has leaf: (HashOutput, DustGenerationInfo).
+                let generation = &update.leaf.1;
+
+                // Calculate mt_index from the path (from leaf up).
+                let mt_index = update
+                    .path
+                    .iter()
+                    .rev()
+                    .enumerate()
+                    .fold(0u64, |mt_index, (depth, entry)| {
+                        if !entry.goes_left {
+                            mt_index | (1u64 << depth)
+                        } else {
+                            mt_index
+                        }
+                    });
+
+                let generation_info = DustGenerationInfo {
+                    night_utxo_hash: update.leaf.0 .0.into(),
+                    value: generation.value,
+                    owner: generation.owner.0 .0.to_bytes_le().into(),
+                    nonce: generation.nonce.0 .0.into(),
+                    ctime: 0, // DustGenerationInfo from ledger doesn't have ctime, only dtime
+                    dtime: generation.dtime.to_secs(),
+                };
+
+                let merkle_path = update
+                    .path
+                    .iter()
+                    .map(|entry| DustMerklePathEntry {
+                        sibling_hash: entry
+                            .hash
+                            .as_ref()
+                            .map(|hash| hash.0 .0.to_bytes_le().to_vec()),
+                        goes_left: entry.goes_left,
+                    })
+                    .collect();
+
+                Some(LedgerEvent::dust_generation_dtime_update(
+                    raw,
+                    generation_info,
+                    mt_index,
+                    merkle_path,
+                ))
             }
 
-            EventDetailsV6::DustSpendProcessed { .. } => {
-                Some(LedgerEvent::dust_spend_processed(raw))
+            EventDetailsV6::DustSpendProcessed {
+                commitment,
+                commitment_index,
+                nullifier,
+                v_fee,
+                declared_time,
+                ..
+            } => {
+                let dust_commitment: DustCommitment = commitment.0 .0.to_bytes_le().into();
+                let dust_nullifier: DustNullifier = nullifier.0 .0.to_bytes_le().into();
+
+                Some(LedgerEvent::dust_spend_processed(
+                    raw,
+                    dust_commitment,
+                    commitment_index,
+                    dust_nullifier,
+                    v_fee,
+                    declared_time.to_secs(),
+                ))
             }
 
             other => panic!("unexpected EventDetailsV6 variant {other:?}"),

@@ -179,32 +179,63 @@ impl LedgerEvent {
         }
     }
 
-    fn dust_initial_utxo(raw: SerializedLedgerEvent, output: DustOutput) -> Self {
+    fn dust_initial_utxo(
+        raw: SerializedLedgerEvent,
+        output: dust::QualifiedDustOutput,
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+    ) -> Self {
         Self {
             grouping: LedgerEventGrouping::Dust,
             raw,
-            attributes: LedgerEventAttributes::DustInitialUtxo { output },
+            attributes: LedgerEventAttributes::DustInitialUtxo {
+                output,
+                generation_info,
+                generation_index,
+            },
         }
     }
 
-    fn dust_generation_dtime_update(raw: SerializedLedgerEvent) -> Self {
+    fn dust_generation_dtime_update(
+        raw: SerializedLedgerEvent,
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+        merkle_path: Vec<dust::DustMerklePathEntry>,
+    ) -> Self {
         Self {
             grouping: LedgerEventGrouping::Dust,
             raw,
-            attributes: LedgerEventAttributes::DustGenerationDtimeUpdate,
+            attributes: LedgerEventAttributes::DustGenerationDtimeUpdate {
+                generation_info,
+                generation_index,
+                merkle_path,
+            },
         }
     }
 
-    fn dust_spend_processed(raw: SerializedLedgerEvent) -> Self {
+    fn dust_spend_processed(
+        raw: SerializedLedgerEvent,
+        commitment: dust::DustCommitment,
+        commitment_index: u64,
+        nullifier: dust::DustNullifier,
+        v_fee: u128,
+        time: u64,
+    ) -> Self {
         Self {
             grouping: LedgerEventGrouping::Dust,
             raw,
-            attributes: LedgerEventAttributes::DustSpendProcessed,
+            attributes: LedgerEventAttributes::DustSpendProcessed {
+                commitment,
+                commitment_index,
+                nullifier,
+                v_fee,
+                time,
+            },
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LedgerEventAttributes {
     ZswapInput,
 
@@ -212,13 +243,28 @@ pub enum LedgerEventAttributes {
 
     ParamChange,
 
-    DustInitialUtxo { output: DustOutput },
+    DustInitialUtxo {
+        output: dust::QualifiedDustOutput,
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+    },
 
-    DustGenerationDtimeUpdate,
+    DustGenerationDtimeUpdate {
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+        merkle_path: Vec<dust::DustMerklePathEntry>,
+    },
 
-    DustSpendProcessed,
+    DustSpendProcessed {
+        commitment: dust::DustCommitment,
+        commitment_index: u64,
+        nullifier: dust::DustNullifier,
+        v_fee: u128,
+        time: u64,
+    },
 }
 
+/// Minimal DUST output info for backwards compatibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustOutput {
     pub nonce: Nonce,

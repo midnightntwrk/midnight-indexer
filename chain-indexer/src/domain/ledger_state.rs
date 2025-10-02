@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{RegularTransaction, SystemTransaction, Transaction, node};
+use crate::domain::{RegularTransaction, SystemTransaction, Transaction, dust::extract_dust_operations, node};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
@@ -145,12 +145,11 @@ impl LedgerState {
         transaction.ledger_events = ledger_events.clone();
 
         // Extract and process DUST events into projections
-        // TODO: Enable once proper deserialization from raw bytes is implemented
-        // Currently using placeholder values that cause null constraint violations
-        // let dust_events = extract_dust_events_from_ledger_events(&ledger_events)?;
-        // if !dust_events.is_empty() {
-        //     transaction.dust_projections = Some(extract_dust_operations(&dust_events));
-        // }
+        let dust_events =
+            extract_dust_events_from_ledger_events(&ledger_events, transaction.hash)?;
+        if !dust_events.is_empty() {
+            transaction.dust_projections = Some(extract_dust_operations(&dust_events));
+        }
 
         // Update contract actions.
         if transaction.end_index > transaction.start_index {
@@ -188,12 +187,11 @@ impl LedgerState {
         transaction.ledger_events = ledger_events.clone();
 
         // Extract and process DUST events into projections
-        // TODO: Enable once proper deserialization from raw bytes is implemented
-        // Currently using placeholder values that cause null constraint violations
-        // let dust_events = extract_dust_events_from_ledger_events(&ledger_events)?;
-        // if !dust_events.is_empty() {
-        //     transaction.dust_projections = Some(extract_dust_operations(&dust_events));
-        // }
+        let dust_events =
+            extract_dust_events_from_ledger_events(&ledger_events, transaction.hash)?;
+        if !dust_events.is_empty() {
+            transaction.dust_projections = Some(extract_dust_operations(&dust_events));
+        }
 
         Ok(Transaction::System(transaction))
     }
@@ -209,16 +207,14 @@ pub enum Error {
 }
 
 /// Extract DUST events from generic ledger events.
-///
-/// For now, this is a simplified implementation that reconstructs DustEvent from
-/// LedgerEventAttributes. In a full implementation, we would deserialize the raw bytes directly.
-#[allow(dead_code)]
+/// The actual field extraction happens in indexer-common where the events are deserialized.
 fn extract_dust_events_from_ledger_events(
     ledger_events: &[LedgerEvent],
+    transaction_hash: indexer_common::domain::TransactionHash,
 ) -> Result<Vec<DustEvent>, Error> {
     use indexer_common::domain::{
-        LedgerEventAttributes, TransactionHash,
-        dust::{DustEventAttributes, DustGenerationInfo, DustParameters, QualifiedDustOutput},
+        LedgerEventAttributes,
+        dust::DustEventAttributes,
     };
 
     let mut dust_events = Vec::new();
@@ -226,72 +222,59 @@ fn extract_dust_events_from_ledger_events(
     for ledger_event in ledger_events {
         // Check if this is a DUST event by checking the grouping
         if ledger_event.grouping == LedgerEventGrouping::Dust {
-            // Convert LedgerEventAttributes to DustEventAttributes
-            // For now, we create simplified events based on the attributes
-            // In production, we would deserialize from raw bytes
+            // All fields are now properly extracted in indexer-common
             let event_details = match &ledger_event.attributes {
-                LedgerEventAttributes::DustInitialUtxo { output: _ } => {
-                    // Create a simplified DustEventAttributes for initial UTXO
-                    // This is a placeholder - actual implementation would extract from raw
-                    DustEventAttributes::DustInitialUtxo {
-                        output: QualifiedDustOutput {
-                            initial_value: 0,
-                            owner: Default::default(),
-                            nonce: Default::default(),
-                            seq: 0,
-                            ctime: 0,
-                            backing_night: Default::default(),
-                            mt_index: 0,
-                        },
-                        generation_info: DustGenerationInfo {
-                            night_utxo_hash: Default::default(),
-                            value: 0,
-                            owner: Default::default(),
-                            nonce: Default::default(),
-                            ctime: 0,
-                            dtime: 0, // 0 means not spent yet
-                        },
-                        generation_index: 0,
-                    }
-                }
-                LedgerEventAttributes::DustGenerationDtimeUpdate => {
-                    // Create a simplified DustEventAttributes for dtime update
-                    DustEventAttributes::DustGenerationDtimeUpdate {
-                        generation_info: DustGenerationInfo {
-                            night_utxo_hash: Default::default(),
-                            value: 0,
-                            owner: Default::default(),
-                            nonce: Default::default(),
-                            ctime: 0,
-                            dtime: 1, // Non-zero means spent (would be actual timestamp)
-                        },
-                        generation_index: 0,
-                        merkle_path: vec![],
-                    }
-                }
-                LedgerEventAttributes::DustSpendProcessed => {
-                    // Create a simplified DustEventAttributes for spend
-                    DustEventAttributes::DustSpendProcessed {
-                        commitment: Default::default(),
-                        commitment_index: 0,
-                        nullifier: Default::default(),
-                        v_fee: 0,
-                        time: 0,
-                        params: DustParameters {
-                            night_dust_ratio: 5_000_000_000, // 5 DUST per NIGHT
-                            generation_decay_rate: 8_267,    // ~1 week generation time
-                            dust_grace_period: 3 * 60 * 60,  // 3 hours in seconds
-                        },
-                    }
-                }
+                LedgerEventAttributes::DustInitialUtxo {
+                    output,
+                    generation_info,
+                    generation_index,
+                } => DustEventAttributes::DustInitialUtxo {
+                    output: *output,
+                    generation_info: *generation_info,
+                    generation_index: *generation_index,
+                },
+
+                LedgerEventAttributes::DustGenerationDtimeUpdate {
+                    generation_info,
+                    generation_index,
+                    merkle_path,
+                } => DustEventAttributes::DustGenerationDtimeUpdate {
+                    generation_info: *generation_info,
+                    generation_index: *generation_index,
+                    merkle_path: merkle_path.clone(),
+                },
+
+                LedgerEventAttributes::DustSpendProcessed {
+                    commitment,
+                    commitment_index,
+                    nullifier,
+                    v_fee,
+                    time,
+                } => DustEventAttributes::DustSpendProcessed {
+                    commitment: *commitment,
+                    commitment_index: *commitment_index,
+                    nullifier: *nullifier,
+                    v_fee: *v_fee,
+                    time: *time,
+                    // NOTE: params should be extracted from ledger state at the time of the event
+                    // This would require passing ledger state context through the extraction pipeline
+                    // Currently not available due to architectural separation between layers
+                    params: Default::default(),
+                },
+
                 _ => continue, // Not a DUST-specific event
             };
 
             // Create DustEvent with the extracted details
+            // NOTE: We use segment 0 (guaranteed segment) for DUST events because:
+            // 1. DUST is primarily used for transaction fees which must be paid in the guaranteed segment
+            // 2. DUST registrations and initial UTXOs are critical operations in the guaranteed segment
+            // 3. The ledger spec states: "fee payments are processed during the guaranteed segment"
+            // Future improvement: Extract actual segment values from event.source (requires architectural change)
             dust_events.push(DustEvent {
-                transaction_hash: TransactionHash::default(), // Would come from transaction context
-                logical_segment: 0,                           // Would come from segment info
-                physical_segment: 0,                          // Would come from segment info
+                transaction_hash,
+                logical_segment: 0,  // Guaranteed segment - where DUST fee operations occur
+                physical_segment: 0, // Guaranteed segment - where DUST fee operations occur
                 event_details,
             });
         }

@@ -154,8 +154,13 @@ impl DustStorage for Storage {
                 if let Some((value, ctime)) = result {
                     let value_u128: u128 = value.into();
                     night_balance = value_u128;
-                    // Simplified generation rate calculation (1 Speck per NIGHT per second).
-                    generation_rate = value_u128;
+
+                    // DUST generation rate calculation based on ledger spec:
+                    // - generation_decay_rate = 8,267 Specks per Star per second
+                    // - 1 Night = 10^6 Stars
+                    // - Therefore: generation_rate = Stars * 8,267 Specks/second
+                    const GENERATION_DECAY_RATE: u128 = 8_267;
+                    generation_rate = value_u128.saturating_mul(GENERATION_DECAY_RATE);
 
                     // Calculate current capacity based on elapsed time since creation.
                     // Get current timestamp from latest block.
@@ -175,8 +180,14 @@ impl DustStorage for Storage {
                     // Calculate elapsed seconds since creation.
                     let elapsed_seconds = ((current_timestamp - ctime).max(0) as u128) / 1000; // Convert from ms to seconds.
 
-                    // Capacity = NIGHT balance * elapsed_seconds (1 Speck per NIGHT per second).
-                    current_capacity = value_u128.saturating_mul(elapsed_seconds);
+                    // Current capacity = Stars * generation_decay_rate * elapsed_seconds
+                    // Maximum capacity is limited by night_dust_ratio (5 DUST per NIGHT = 5 * 10^15 Specks per 10^6 Stars)
+                    const NIGHT_DUST_RATIO: u128 = 5_000_000_000; // Max Specks per Star
+                    let max_capacity = value_u128.saturating_mul(NIGHT_DUST_RATIO);
+                    let generated_capacity = value_u128
+                        .saturating_mul(GENERATION_DECAY_RATE)
+                        .saturating_mul(elapsed_seconds);
+                    current_capacity = generated_capacity.min(max_capacity);
                 }
             }
 

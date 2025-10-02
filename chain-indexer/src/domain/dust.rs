@@ -92,7 +92,6 @@ pub struct DustDtimeUpdate {
 
 /// Extract operations from DUST events.
 /// This processing happens in the domain layer.
-#[allow(dead_code)]
 pub fn extract_dust_operations(dust_events: &[DustEvent]) -> DustEventProjections {
     let mut result = DustEventProjections {
         generations: Vec::new(),
