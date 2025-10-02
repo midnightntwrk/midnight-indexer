@@ -13,14 +13,20 @@
 
 use crate::domain::{
     self, Block, BlockTransactions, ContractAction, DustRegistrationEvent, RegularTransaction,
-    SystemTransaction, Transaction, node::BlockInfo,
+    SystemTransaction, Transaction,
+    dust::{
+        DustDtimeUpdate, DustEventProjections, DustGeneration, DustMerkleTreeUpdate, DustSpend,
+        DustUtxo,
+    },
+    node::BlockInfo,
 };
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
-        LedgerEventAttributes, TransactionVariant, UnshieldedUtxo,
+        BlockHash, ByteVec, ContractAttributes, ContractBalance, DustCommitment,
+        DustGenerationInfo, DustMerklePathEntry, DustNullifier, LedgerEvent, LedgerEventAttributes,
+        QualifiedDustOutput, TransactionVariant, UnshieldedUtxo,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -319,7 +325,7 @@ async fn save_transactions(
             }
 
             Transaction::System(transaction) => {
-                save_system_transaction(transaction, transaction_id, tx).await?
+                save_system_transaction(transaction, transaction_id, block_id, tx).await?
             }
         }
     }
@@ -400,6 +406,11 @@ async fn save_regular_transaction(
 
     save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
 
+    // Save DUST projections if present
+    if let Some(projections) = &transaction.dust_projections {
+        save_dust_projections(projections, transaction_id, block_id as u32, tx).await?;
+    }
+
     Ok(transaction_id as u64)
 }
 
@@ -407,9 +418,17 @@ async fn save_regular_transaction(
 async fn save_system_transaction(
     transaction: &SystemTransaction,
     transaction_id: i64,
+    block_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    save_ledger_events(&transaction.ledger_events, transaction_id, tx).await
+    save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
+
+    // Save DUST projections if present
+    if let Some(projections) = &transaction.dust_projections {
+        save_dust_projections(projections, transaction_id, block_id as u32, tx).await?;
+    }
+
+    Ok(())
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
@@ -773,6 +792,221 @@ async fn save_dust_registration_events(
             }
         }
     }
+
+    Ok(())
+}
+
+/// Save all DUST projections from a transaction.
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn save_dust_projections(
+    projections: &DustEventProjections,
+    transaction_id: i64,
+    block_height: u32,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    // Save generations and their UTXOs
+    for generation in &projections.generations {
+        let generation_info_id =
+            save_dust_generation_info(&generation.generation_info, generation.generation_index, tx)
+                .await?;
+
+        // Find corresponding UTXO (they are paired in the same order)
+        for utxo in &projections.utxos {
+            if utxo.generation_index == generation.generation_index {
+                save_dust_utxos(&utxo.output, generation_info_id, tx).await?;
+            }
+        }
+    }
+
+    // Save merkle tree updates
+    for tree_update in &projections.merkle_tree_updates {
+        save_dust_generation_tree_update(
+            tree_update.generation_index,
+            &tree_update.merkle_path,
+            block_height,
+            tx,
+        )
+        .await?;
+    }
+
+    // Mark spent UTXOs
+    for spend in &projections.spends {
+        mark_dust_utxo_spent(spend.commitment, spend.nullifier, transaction_id, tx).await?;
+    }
+
+    // Update dtime for generations
+    if let Some(dtime_update) = &projections.dtime_update {
+        update_dust_generation_dtime(dtime_update.dtime, dtime_update.generation_index, tx).await?;
+    }
+
+    Ok(())
+}
+
+/// Save DUST generation info to database.
+#[trace]
+async fn save_dust_generation_info(
+    generation: &DustGenerationInfo,
+    generation_index: u64,
+    tx: &mut SqlxTransaction,
+) -> Result<u64, sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO dust_generation_info (
+            night_utxo_hash,
+            value,
+            owner,
+            nonce,
+            ctime,
+            merkle_index,
+            dtime
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id
+    "};
+
+    let (id,) = sqlx::query_as::<_, (i64,)>(query)
+        .bind(generation.night_utxo_hash.as_ref())
+        .bind(U128BeBytes::from(generation.value).as_ref())
+        .bind(generation.owner.as_ref())
+        .bind(generation.nonce.as_ref())
+        .bind(generation.ctime as i64)
+        .bind(generation_index as i64)
+        .bind(if generation.dtime == 0 {
+            None
+        } else {
+            Some(generation.dtime as i64)
+        })
+        .fetch_one(&mut **tx)
+        .await?;
+
+    Ok(id as u64)
+}
+
+/// Save DUST UTXOs to database.
+#[trace]
+async fn save_dust_utxos(
+    output: &QualifiedDustOutput,
+    generation_info_id: u64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO dust_utxos (
+            generation_info_id,
+            commitment,
+            initial_value
+        )
+        VALUES ($1, $2, $3)
+    "};
+
+    sqlx::query(query)
+        .bind(generation_info_id as i64)
+        .bind(output.nonce.as_ref()) // Using nonce as placeholder for commitment
+        .bind(U128BeBytes::from(output.initial_value).as_ref())
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+/// Save DUST generation tree update to database.
+#[trace]
+async fn save_dust_generation_tree_update(
+    merkle_index: u64,
+    merkle_path: &[DustMerklePathEntry],
+    block_height: u32,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    // Calculate root from merkle path if available, otherwise use placeholder
+    let root = if !merkle_path.is_empty() {
+        // In production, calculate proper root from merkle path
+        // For now, use placeholder
+        vec![0u8; 32]
+    } else {
+        vec![0u8; 32] // Placeholder root
+    };
+
+    let query = indoc! {"
+        INSERT INTO dust_generation_tree (
+            block_height,
+            merkle_index,
+            root,
+            tree_data
+        )
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (merkle_index) DO UPDATE SET
+            block_height = EXCLUDED.block_height,
+            root = EXCLUDED.root,
+            tree_data = EXCLUDED.tree_data
+    "};
+
+    sqlx::query(query)
+        .bind(block_height as i64)
+        .bind(merkle_index as i64)
+        .bind(&root)
+        .bind(Json(merkle_path))
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+/// Mark DUST UTXO as spent.
+#[trace]
+async fn mark_dust_utxo_spent(
+    commitment: DustCommitment,
+    nullifier: DustNullifier,
+    transaction_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    // Update UTXO as spent
+    let update_query = indoc! {"
+        UPDATE dust_utxos
+        SET spent_at_transaction_id = $1
+        WHERE commitment = $2
+    "};
+
+    sqlx::query(update_query)
+        .bind(transaction_id)
+        .bind(commitment.as_ref())
+        .execute(&mut **tx)
+        .await?;
+
+    // Insert nullifier
+    let insert_query = indoc! {"
+        INSERT INTO dust_nullifiers (
+            nullifier,
+            transaction_id
+        )
+        VALUES ($1, $2)
+        ON CONFLICT (nullifier) DO NOTHING
+    "};
+
+    sqlx::query(insert_query)
+        .bind(nullifier.as_ref())
+        .bind(transaction_id)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+/// Update DUST generation dtime.
+#[trace]
+async fn update_dust_generation_dtime(
+    dtime: u64,
+    generation_index: u64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        UPDATE dust_generation_info
+        SET dtime = $1
+        WHERE merkle_index = $2
+    "};
+
+    sqlx::query(query)
+        .bind(dtime as i64)
+        .bind(generation_index as i64)
+        .execute(&mut **tx)
+        .await?;
 
     Ok(())
 }

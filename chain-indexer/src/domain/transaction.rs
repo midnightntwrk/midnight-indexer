@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ContractAction, node};
+use crate::domain::{ContractAction, dust::DustEventProjections, node};
 use indexer_common::domain::{
     ByteArray, LedgerEvent, ProtocolVersion, SerializedTransaction,
     SerializedTransactionIdentifier, SerializedZswapStateRoot, TransactionHash, TransactionResult,
@@ -92,6 +92,9 @@ pub struct RegularTransaction {
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub ledger_events: Vec<LedgerEvent>,
+
+    // DUST projection processing
+    pub dust_projections: Option<DustEventProjections>,
 }
 
 impl From<node::RegularTransaction> for RegularTransaction {
@@ -111,6 +114,7 @@ impl From<node::RegularTransaction> for RegularTransaction {
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
             ledger_events: Default::default(),
+            dust_projections: None,
         }
     }
 }
@@ -124,6 +128,9 @@ pub struct SystemTransaction {
 
     // These fields are set after applying the transaction to the ledger state.
     pub ledger_events: Vec<LedgerEvent>,
+
+    // DUST projection processing
+    pub dust_projections: Option<DustEventProjections>,
 }
 
 impl From<node::SystemTransaction> for SystemTransaction {
@@ -133,6 +140,7 @@ impl From<node::SystemTransaction> for SystemTransaction {
             protocol_version: transaction.protocol_version,
             raw: transaction.raw,
             ledger_events: Default::default(),
+            dust_projections: None,
         }
     }
 }
