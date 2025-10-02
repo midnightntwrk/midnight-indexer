@@ -265,16 +265,12 @@ fn extract_dust_events_from_ledger_events(
                 _ => continue, // Not a DUST-specific event
             };
 
-            // Create DustEvent with the extracted details
-            // NOTE: We use segment 0 (guaranteed segment) for DUST events because:
-            // 1. DUST is primarily used for transaction fees which must be paid in the guaranteed segment
-            // 2. DUST registrations and initial UTXOs are critical operations in the guaranteed segment
-            // 3. The ledger spec states: "fee payments are processed during the guaranteed segment"
-            // Future improvement: Extract actual segment values from event.source (requires architectural change)
+            // DUST events use segment 0 (guaranteed segment) per protocol design:
+            // The ledger spec mandates "fee payments are processed during the guaranteed segment"
             dust_events.push(DustEvent {
                 transaction_hash,
-                logical_segment: 0,  // Guaranteed segment - where DUST fee operations occur
-                physical_segment: 0, // Guaranteed segment - where DUST fee operations occur
+                logical_segment: 0,
+                physical_segment: 0,
                 event_details,
             });
         }
