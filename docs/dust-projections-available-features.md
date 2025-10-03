@@ -1,15 +1,16 @@
-# DUST Projections: Available Features in feat/cnight-generates-dust
-**Date**: October 1, 2025
-**Branch**: `feat/cnight-generates-dust`
-**Purpose**: Technical inventory of implemented DUST features available for adaptation
+# DUST Projections: Available Features
+**Date**: October 3, 2025
+**Branch**: `feat/cnight-merge-from-main` (integration branch)
+**Base Branch**: `feat/cnight-generates-dust`
+**Purpose**: Technical inventory of DUST features integrated with main branch architecture
 
 ## Overview
 
-This document catalogs the DUST projection features implemented in the `feat/cnight-generates-dust` branch. These features were developed based on wallet requirements from July-August 2025 and represent a complete projection layer built on top of the ledger events framework.
+This document catalogs the DUST projection features as they exist in `feat/cnight-merge-from-main`, which integrates the original `feat/cnight-generates-dust` implementation with main branch's generic ledger events framework. The integration is complete with full DUST event extraction working through the unified architecture.
 
-## Recent Updates (October 1, 2025)
+## Integration with Main Branch (October 2025)
 
-### Merge from Main (ecccd9a)
+### Merge from Main (commit ecccd9a)
 Merged 49 commits from main branch, bringing fundamental architectural changes:
 
 #### What Main Branch Replaced in CNGD
@@ -25,8 +26,9 @@ Merged 49 commits from main branch, bringing fundamental architectural changes:
 1. **Generic Ledger Events Framework** (commit 113f440)
    - **Replaced**: CNGD's custom DUST event extraction logic
    - **With**: Generic `LedgerEvent` enum supporting all event types (DUST, Zswap, etc.)
-   - **Why**: Wallet team (Jegor) requested raw events for WASM compatibility
-   - **Impact**: CNGD's custom extraction became redundant; adapted to use generic framework
+   - **Integration Status**: Fully adapted - all DUST event fields are now extracted through `LedgerEventAttributes`
+   - **Implementation**: Extended `indexer-common/src/domain.rs` with complete DUST event variants
+   - **Why**: Unified architecture for all event types
 
 2. **dustLedgerEvents Subscription** (commit 4cd1ec3)
    - **Replaced**: CNGD would have needed to implement this separately
@@ -345,8 +347,10 @@ dust_initial_utxos (night_utxo_hash, dust_owner, nonce, value)
 
 #### Business Logic (Core Dust Mechanics)
 - Generation rate calculation based on Night holdings
-  - **Why**: 5 DUST per NIGHT cap, ~1 week generation time
+  - **Implementation**: 8,267 Specks per Star per second (per ledger spec)
+  - **Capacity**: Maximum 5 × 10^9 Specks per Star (5 DUST per NIGHT)
   - **Source**: dust.md - "rate of generation depends on amount of night held"
+  - **File**: `indexer-api/src/infra/storage/dust.rs`
 
 - Decay calculation when Night is spent
   - **Why**: Dust value decreases after backing Night is gone
@@ -369,11 +373,12 @@ dust_initial_utxos (night_utxo_hash, dust_owner, nonce, value)
 
 ## Implementation Statistics
 
-- **Total Lines**: ~8,000
+- **Total Lines**: ~7,800 (after removing obsolete progress tracking methods)
 - **GraphQL Schema**: +541 lines (schema-v1.graphql)
 - **Rust Files**: 8+ domain/storage modules
 - **Database Tables**: 7 tables (includes cnight_registrations, dust_utxo_mappings)
 - **Storage Functions**: Complete CRUD operations for all DUST entities
+- **Event Extraction**: Full EventDetailsV6 field extraction through LedgerEventAttributes
 - **Test Coverage**: >80% for core logic
 
 ## Integration Points
@@ -435,6 +440,8 @@ subscription {
 
 ### For Main Branch Integration
 
+**Note**: This branch is not intended for direct merge to main. Components will be cherry-picked and separate PRs created as needed.
+
 **Minimal Approach**:
 1. Cherry-pick core domain models
 2. Add basic storage tables
@@ -442,8 +449,8 @@ subscription {
 
 **Complete Integration**:
 1. Full projection layer with all subscriptions
-2. Complete storage implementation
-3. All optimization features
+2. Complete storage implementation with correct generation rates
+3. All optimization features including merkle tree tracking
 
 ### Compatibility Notes
 - Code follows project coding standards
@@ -494,24 +501,27 @@ Every feature in this implementation traces back to specific requirements:
 
 ## Conclusion
 
-The `feat/cnight-generates-dust` branch contains a complete, requirements-driven implementation of DUST projections. Every feature exists for a specific reason traced to ledger specifications, wallet requirements, or architectural needs. These features are available for adaptation to main as needed, following the gradual rollout approach.
+The `feat/cnight-merge-from-main` branch contains a complete integration of DUST projections with main branch's generic ledger events framework. Every feature from the original `feat/cnight-generates-dust` has been adapted to work through the unified architecture while maintaining full functionality.
 
-### Recent Enhancements (October 2025)
+### Current State (October 2025)
 
-The branch has been updated with main branch integration (49 commits merged) and now includes:
-1. **Dual Event Layer**: Both raw ledger events (from main) and projection layer (from this branch) coexist
-2. **Runtime Event Extraction**: Direct extraction of NativeTokenObservation pallet events for registration tracking (commit 8eece6b)
-3. **Complete Storage Implementation**: Full database persistence for registration events with upsert logic (commit d0a634c)
-4. **Type System Consolidation**: Centralized type definitions with backward compatibility re-exports
-5. **Configuration Restoration**: DustConfig with production defaults restored from original CNGD implementation
-6. **Updated Dependencies**: Ledger v6.1.0-alpha.3 and Node v0.16.3 with latest protocol features
-7. **Enhanced Architecture**: Maintains backward compatibility while adding new capabilities
+The branch successfully integrates:
+1. **Full DUST Event Extraction**: All EventDetailsV6 fields properly extracted through LedgerEventAttributes
+2. **Dual Event Layer**: Both raw ledger events (from main) and projection layer coexist
+3. **Correct Generation Rate**: 8,267 Specks per Star per second as per ledger specification
+4. **Runtime Event Extraction**: Direct extraction of NativeTokenObservation pallet events for registration tracking
+5. **Complete Storage Implementation**: Full database persistence with upsert logic
+6. **Type System Consolidation**: Centralized type definitions with backward compatibility
+7. **Updated Dependencies**: Ledger v6.1.0-alpha.3 and Node v0.16.3
+8. **Code Cleanup**: Removed obsolete progress tracking methods, fixed unused variables
 
 The implementation is not speculative - it directly implements the DUST mechanics as specified in the ledger documentation and addresses the concrete needs identified by the wallet team. All code is production-ready and follows established patterns. The modular design allows for selective integration of specific features based on requirements.
 
 ## Contact
 
 For questions or clarification about specific features:
-- Branch: `feat/cnight-generates-dust`
+- Integration Branch: `feat/cnight-merge-from-main`
+- Base Branch: `feat/cnight-generates-dust`
 - Original implementation: July-September 2025
+- Integration completed: October 2025
 - Based on specifications from wallet team (Jegor, Andrzej)
