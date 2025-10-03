@@ -577,3 +577,36 @@ fn compute_claim_rewards_intent_hash_v6(
 
     ByteArray(output.mk_intent_hash(NIGHTV6).0.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::{ByteArray, ledger::ledger_state::compute_claim_rewards_intent_hash_v6};
+    use midnight_base_crypto_v6::hash::HashOutput as HashOutputV6;
+    use midnight_coin_structure_v6::coin::{
+        NIGHT as NIGHTV6, Nonce as NonceV6, UserAddress as UserAddressV6,
+    };
+    use midnight_ledger_v6::structure::OutputInstructionUnshielded as OutputInstructionUnshieldedV6;
+
+    #[test]
+    fn test_claim_rewards_intent_hash_computation() {
+        let owner_bytes = [1u8; 32];
+        let owner = UserAddressV6(HashOutputV6(owner_bytes));
+        let value = 1000000u128;
+        let nonce_bytes = [2u8; 32];
+        let nonce = NonceV6(HashOutputV6(nonce_bytes));
+
+        let intent_hash = compute_claim_rewards_intent_hash_v6(&owner, value, &nonce);
+
+        let output = OutputInstructionUnshieldedV6 {
+            amount: value,
+            target_address: owner,
+            nonce,
+        };
+        let expected_hash = ByteArray(output.mk_intent_hash(NIGHTV6).0.0);
+
+        assert_eq!(intent_hash, expected_hash);
+
+        let intent_hash2 = compute_claim_rewards_intent_hash_v6(&owner, value, &nonce);
+        assert_eq!(intent_hash, intent_hash2);
+    }
+}
