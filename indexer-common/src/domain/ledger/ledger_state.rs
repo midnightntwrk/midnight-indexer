@@ -587,12 +587,20 @@ fn compute_claim_rewards_intent_hash_v6(
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{ByteArray, ledger::ledger_state::compute_claim_rewards_intent_hash_v6};
+    use crate::domain::{
+        ByteArray, NetworkId, TransactionResult,
+        ledger::{TransactionV6, ledger_state::{compute_claim_rewards_intent_hash_v6, make_unshielded_utxos_v6}},
+    };
     use midnight_base_crypto_v6::hash::HashOutput as HashOutputV6;
     use midnight_coin_structure_v6::coin::{
         NIGHT as NIGHTV6, Nonce as NonceV6, UserAddress as UserAddressV6,
     };
-    use midnight_ledger_v6::structure::OutputInstructionUnshielded as OutputInstructionUnshieldedV6;
+    use midnight_ledger_v6::structure::{
+        LedgerState as LedgerStateV6,
+        OutputInstructionUnshielded as OutputInstructionUnshieldedV6,
+        StandardTransaction as StandardTransactionV6,
+    };
+    use midnight_transient_crypto_v6::curve::EmbeddedFr;
 
     #[test]
     fn test_claim_rewards_intent_hash_computation() {
@@ -616,21 +624,9 @@ mod tests {
         let intent_hash2 = compute_claim_rewards_intent_hash_v6(&owner, value, &nonce);
         assert_eq!(intent_hash, intent_hash2);
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::domain::{
-        NetworkId, TransactionResult,
-        ledger::{TransactionV6, ledger_state::make_unshielded_utxos_v6},
-    };
-    use midnight_ledger_v6::structure::LedgerState as LedgerStateV6;
 
     #[test]
     fn test_make_unshielded_utxos_v6() {
-        use midnight_ledger_v6::structure::StandardTransaction as StandardTransactionV6;
-        use midnight_transient_crypto_v6::curve::EmbeddedFr;
-
         let network_id = NetworkId::Undeployed;
 
         let transaction = StandardTransactionV6 {
