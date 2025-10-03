@@ -181,7 +181,8 @@ impl DustStorage for Storage {
                     let elapsed_seconds = ((current_timestamp - ctime).max(0) as u128) / 1000; // Convert from ms to seconds.
 
                     // Current capacity = Stars * generation_decay_rate * elapsed_seconds
-                    // Maximum capacity is limited by night_dust_ratio (5 DUST per NIGHT = 5 * 10^15 Specks per 10^6 Stars)
+                    // Maximum capacity is limited by night_dust_ratio (5 DUST per NIGHT = 5 * 10^15
+                    // Specks per 10^6 Stars)
                     const NIGHT_DUST_RATIO: u128 = 5_000_000_000; // Max Specks per Star
                     let max_capacity = value_u128.saturating_mul(NIGHT_DUST_RATIO);
                     let generated_capacity = value_u128

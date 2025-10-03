@@ -14,11 +14,10 @@
 use crate::domain::{
     ApplyRegularTransactionResult, ByteArray, ByteVec, IntentHash, LedgerEvent, NetworkId, Nonce,
     PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType, SerializedContractAddress,
-    SerializedLedgerParameters, SerializedLedgerState, SerializedTransaction,
-    SerializedZswapState, SerializedZswapStateRoot, TransactionResult, UnshieldedUtxo,
+    SerializedLedgerParameters, SerializedLedgerState, SerializedTransaction, SerializedZswapState,
+    SerializedZswapStateRoot, TransactionResult, UnshieldedUtxo,
     dust::{
-        DustCommitment, DustGenerationInfo, DustMerklePathEntry, DustNullifier,
-        QualifiedDustOutput,
+        DustCommitment, DustGenerationInfo, DustMerklePathEntry, DustNullifier, QualifiedDustOutput,
     },
     ledger::{Error, IntentV6, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
@@ -389,19 +388,19 @@ fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<Ledger
             } => {
                 let qualified_output = QualifiedDustOutput {
                     initial_value: output.initial_value,
-                    owner: output.owner.0 .0.to_bytes_le().into(),
+                    owner: output.owner.0.0.to_bytes_le().into(),
                     nonce: output.nonce.0.to_bytes_le().into(),
                     seq: output.seq,
                     ctime: output.ctime.to_secs(),
-                    backing_night: output.backing_night.0 .0.into(),
+                    backing_night: output.backing_night.0.0.into(),
                     mt_index: output.mt_index,
                 };
 
                 let generation_info = DustGenerationInfo {
-                    night_utxo_hash: output.backing_night.0 .0.into(),
+                    night_utxo_hash: output.backing_night.0.0.into(),
                     value: generation.value,
-                    owner: generation.owner.0 .0.to_bytes_le().into(),
-                    nonce: generation.nonce.0 .0.into(),
+                    owner: generation.owner.0.0.to_bytes_le().into(),
+                    nonce: generation.nonce.0.0.into(),
                     ctime: output.ctime.to_secs(),
                     dtime: generation.dtime.to_secs(),
                 };
@@ -419,24 +418,25 @@ fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<Ledger
                 let generation = &update.leaf.1;
 
                 // Calculate mt_index from the path (from leaf up).
-                let mt_index = update
-                    .path
-                    .iter()
-                    .rev()
-                    .enumerate()
-                    .fold(0u64, |mt_index, (depth, entry)| {
-                        if !entry.goes_left {
-                            mt_index | (1u64 << depth)
-                        } else {
-                            mt_index
-                        }
-                    });
+                let mt_index =
+                    update
+                        .path
+                        .iter()
+                        .rev()
+                        .enumerate()
+                        .fold(0u64, |mt_index, (depth, entry)| {
+                            if !entry.goes_left {
+                                mt_index | (1u64 << depth)
+                            } else {
+                                mt_index
+                            }
+                        });
 
                 let generation_info = DustGenerationInfo {
-                    night_utxo_hash: update.leaf.0 .0.into(),
+                    night_utxo_hash: update.leaf.0.0.into(),
                     value: generation.value,
-                    owner: generation.owner.0 .0.to_bytes_le().into(),
-                    nonce: generation.nonce.0 .0.into(),
+                    owner: generation.owner.0.0.to_bytes_le().into(),
+                    nonce: generation.nonce.0.0.into(),
                     ctime: 0, // DustGenerationInfo from ledger doesn't have ctime, only dtime
                     dtime: generation.dtime.to_secs(),
                 };
@@ -448,7 +448,7 @@ fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<Ledger
                         sibling_hash: entry
                             .hash
                             .as_ref()
-                            .map(|hash| hash.0 .0.to_bytes_le().to_vec()),
+                            .map(|hash| hash.0.0.to_bytes_le().to_vec()),
                         goes_left: entry.goes_left,
                     })
                     .collect();
@@ -469,8 +469,8 @@ fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<Ledger
                 declared_time,
                 ..
             } => {
-                let dust_commitment: DustCommitment = commitment.0 .0.to_bytes_le().into();
-                let dust_nullifier: DustNullifier = nullifier.0 .0.to_bytes_le().into();
+                let dust_commitment: DustCommitment = commitment.0.0.to_bytes_le().into();
+                let dust_nullifier: DustNullifier = nullifier.0.0.to_bytes_le().into();
 
                 Some(LedgerEvent::dust_spend_processed(
                     raw,

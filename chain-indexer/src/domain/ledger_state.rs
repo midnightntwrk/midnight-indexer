@@ -11,7 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{RegularTransaction, SystemTransaction, Transaction, dust::extract_dust_operations, node};
+use crate::domain::{
+    RegularTransaction, SystemTransaction, Transaction, dust::extract_dust_operations, node,
+};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
@@ -145,8 +147,7 @@ impl LedgerState {
         transaction.ledger_events = ledger_events.clone();
 
         // Extract and process DUST events into projections
-        let dust_events =
-            extract_dust_events_from_ledger_events(&ledger_events, transaction.hash)?;
+        let dust_events = extract_dust_events_from_ledger_events(&ledger_events, transaction.hash)?;
         if !dust_events.is_empty() {
             transaction.dust_projections = Some(extract_dust_operations(&dust_events));
         }
@@ -187,8 +188,7 @@ impl LedgerState {
         transaction.ledger_events = ledger_events.clone();
 
         // Extract and process DUST events into projections
-        let dust_events =
-            extract_dust_events_from_ledger_events(&ledger_events, transaction.hash)?;
+        let dust_events = extract_dust_events_from_ledger_events(&ledger_events, transaction.hash)?;
         if !dust_events.is_empty() {
             transaction.dust_projections = Some(extract_dust_operations(&dust_events));
         }
@@ -212,10 +212,7 @@ fn extract_dust_events_from_ledger_events(
     ledger_events: &[LedgerEvent],
     transaction_hash: indexer_common::domain::TransactionHash,
 ) -> Result<Vec<DustEvent>, Error> {
-    use indexer_common::domain::{
-        LedgerEventAttributes,
-        dust::DustEventAttributes,
-    };
+    use indexer_common::domain::{LedgerEventAttributes, dust::DustEventAttributes};
 
     let mut dust_events = Vec::new();
 
@@ -257,8 +254,9 @@ fn extract_dust_events_from_ledger_events(
                     v_fee: *v_fee,
                     time: *time,
                     // NOTE: params should be extracted from ledger state at the time of the event
-                    // This would require passing ledger state context through the extraction pipeline
-                    // Currently not available due to architectural separation between layers
+                    // This would require passing ledger state context through the extraction
+                    // pipeline Currently not available due to architectural
+                    // separation between layers
                     params: Default::default(),
                 },
 
