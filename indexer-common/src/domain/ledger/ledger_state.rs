@@ -403,6 +403,12 @@ fn make_unshielded_utxos_v6(
     transaction_result: &TransactionResult,
     ledger_state: &LedgerStateV6<DefaultDBV6>,
 ) -> (Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>) {
+    // Skip UTXO creation entirely for failed transactions, because no state changes occurred on the
+    // ledger.
+    if matches!(transaction_result, TransactionResult::Failure) {
+        return (vec![], vec![]);
+    }
+
     match ledger_transaction {
         TransactionV6::Standard(transaction) => {
             let successful_segments = match &transaction_result {
@@ -581,12 +587,22 @@ fn compute_claim_rewards_intent_hash_v6(
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{ByteArray, ledger::ledger_state::compute_claim_rewards_intent_hash_v6};
+    use crate::domain::{
+        ByteArray, NetworkId, TransactionResult,
+        ledger::{
+            TransactionV6,
+            ledger_state::{compute_claim_rewards_intent_hash_v6, make_unshielded_utxos_v6},
+        },
+    };
     use midnight_base_crypto_v6::hash::HashOutput as HashOutputV6;
     use midnight_coin_structure_v6::coin::{
         NIGHT as NIGHTV6, Nonce as NonceV6, UserAddress as UserAddressV6,
     };
-    use midnight_ledger_v6::structure::OutputInstructionUnshielded as OutputInstructionUnshieldedV6;
+    use midnight_ledger_v6::structure::{
+        LedgerState as LedgerStateV6, OutputInstructionUnshielded as OutputInstructionUnshieldedV6,
+        StandardTransaction as StandardTransactionV6,
+    };
+    use midnight_transient_crypto_v6::curve::EmbeddedFr;
 
     #[test]
     fn test_claim_rewards_intent_hash_computation() {
@@ -609,5 +625,37 @@ mod tests {
 
         let intent_hash2 = compute_claim_rewards_intent_hash_v6(&owner, value, &nonce);
         assert_eq!(intent_hash, intent_hash2);
+    }
+
+    #[test]
+    fn test_make_unshielded_utxos_v6() {
+        let network_id = NetworkId::Undeployed;
+
+        let transaction = StandardTransactionV6 {
+            network_id: network_id.to_string(),
+            intents: Default::default(),
+            guaranteed_coins: Default::default(),
+            fallible_coins: Default::default(),
+            binding_randomness: EmbeddedFr::from_le_bytes(&[0u8; 32]).unwrap(),
+        };
+        let ledger_transaction = TransactionV6::Standard(transaction);
+
+        let ledger_state = LedgerStateV6::new(network_id);
+
+        let (created, spent) = make_unshielded_utxos_v6(
+            ledger_transaction.clone(),
+            &TransactionResult::Failure,
+            &ledger_state,
+        );
+        assert!(created.is_empty());
+        assert!(spent.is_empty());
+
+        let (created, spent) = make_unshielded_utxos_v6(
+            ledger_transaction,
+            &TransactionResult::Success,
+            &ledger_state,
+        );
+        assert!(created.is_empty());
+        assert!(spent.is_empty());
     }
 }
