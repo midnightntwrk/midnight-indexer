@@ -27,7 +27,7 @@ use midnight_base_crypto_v6::{
     time::Timestamp as TimestampV6,
 };
 use midnight_coin_structure_v6::{
-    coin::{Nonce as NonceV6, UserAddress as UserAddressV6},
+    coin::{NIGHT as NIGHTV6, Nonce as NonceV6, UserAddress as UserAddressV6},
     contract::ContractAddress as ContractAddressV6,
 };
 use midnight_ledger_v6::{
@@ -38,6 +38,7 @@ use midnight_ledger_v6::{
     },
     structure::{
         LedgerParameters as LedgerParametersV6, LedgerState as LedgerStateV6,
+        OutputInstructionUnshielded as OutputInstructionUnshieldedV6,
         SystemTransaction as LedgerSystemTransactionV6,
     },
     verify::WellFormedStrictness as WellFormedStrictnessV6,
@@ -52,7 +53,6 @@ use midnight_transient_crypto_v6::merkle_tree::{
     MerkleTreeDigest as MerkleTreeDigestV6,
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
-use sha2::{Digest, Sha256};
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 static STRICTNESS_V6: LazyLock<WellFormedStrictnessV6> = LazyLock::new(|| {
@@ -561,19 +561,52 @@ fn registered_for_dust_generation_v6(
         .contains_key(&initial_nonce)
 }
 
-/// Compute a pseudo-intent-hash for ClaimRewards transactions.
-/// ClaimRewards don't have intents, but we need a unique hash for database constraints.
-/// We use a hash of (owner || value || nonce) to ensure uniqueness.
+/// Compute the intent hash for ClaimRewards transactions.
+/// ClaimRewards don't have intents, but UTXOs need an intent hash.
+/// We compute this hash the same way that the ledger does internally.
 fn compute_claim_rewards_intent_hash_v6(
     owner: &UserAddressV6,
     value: u128,
     nonce: &NonceV6,
 ) -> IntentHash {
-    let mut hasher = Sha256::new();
+    let output = OutputInstructionUnshieldedV6 {
+        amount: value,
+        target_address: *owner,
+        nonce: *nonce,
+    };
 
-    hasher.update(owner.0.0);
-    hasher.update(value.to_le_bytes());
-    hasher.update(nonce.0.0);
+    ByteArray(output.mk_intent_hash(NIGHTV6).0.0)
+}
 
-    ByteArray(hasher.finalize().into())
+#[cfg(test)]
+mod tests {
+    use crate::domain::{ByteArray, ledger::ledger_state::compute_claim_rewards_intent_hash_v6};
+    use midnight_base_crypto_v6::hash::HashOutput as HashOutputV6;
+    use midnight_coin_structure_v6::coin::{
+        NIGHT as NIGHTV6, Nonce as NonceV6, UserAddress as UserAddressV6,
+    };
+    use midnight_ledger_v6::structure::OutputInstructionUnshielded as OutputInstructionUnshieldedV6;
+
+    #[test]
+    fn test_claim_rewards_intent_hash_computation() {
+        let owner_bytes = [1u8; 32];
+        let owner = UserAddressV6(HashOutputV6(owner_bytes));
+        let value = 1000000u128;
+        let nonce_bytes = [2u8; 32];
+        let nonce = NonceV6(HashOutputV6(nonce_bytes));
+
+        let intent_hash = compute_claim_rewards_intent_hash_v6(&owner, value, &nonce);
+
+        let output = OutputInstructionUnshieldedV6 {
+            amount: value,
+            target_address: owner,
+            nonce,
+        };
+        let expected_hash = ByteArray(output.mk_intent_hash(NIGHTV6).0.0);
+
+        assert_eq!(intent_hash, expected_hash);
+
+        let intent_hash2 = compute_claim_rewards_intent_hash_v6(&owner, value, &nonce);
+        assert_eq!(intent_hash, intent_hash2);
+    }
 }
