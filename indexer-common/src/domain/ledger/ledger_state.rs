@@ -13,7 +13,7 @@
 
 use crate::domain::{
     ApplyRegularTransactionResult, ByteArray, ByteVec, DustOutput, IntentHash, LedgerEvent,
-    NetworkId, Nonce, PROTOCOL_VERSION_000_016_000, ProtocolVersion, SerializedContractAddress,
+    NetworkId, Nonce, PROTOCOL_VERSION_000_017_000, ProtocolVersion, SerializedContractAddress,
     SerializedLedgerParameters, SerializedLedgerState, SerializedTransaction, SerializedZswapState,
     SerializedZswapStateRoot, TokenType, TransactionResult, UnshieldedUtxo,
     ledger::{Error, IntentV6, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
@@ -84,7 +84,7 @@ impl LedgerState {
         ledger_state: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_017_000) {
             let ledger_state = tagged_deserialize_v6(&mut ledger_state.as_ref())
                 .map_err(|error| Error::Io("cannot deserialize LedgerStateV6", error))?;
             Ok(Self::V6 {
@@ -333,7 +333,7 @@ impl ZswapStateRoot {
         zswap_state_root: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_017_000) {
             let digest = MerkleTreeDigestV6::deserialize(&mut zswap_state_root.as_ref(), 0)
                 .map_err(|error| Error::Io("cannot deserialize MerkleTreeDigestV6", error))?;
             Ok(Self::V6(digest))

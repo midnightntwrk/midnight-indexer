@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{
-    ByteArray, PROTOCOL_VERSION_000_016_000, ProtocolVersion, VIEWING_KEY_LEN, ledger::Error,
+    ByteArray, PROTOCOL_VERSION_000_017_000, ProtocolVersion, VIEWING_KEY_LEN, ledger::Error,
 };
 use fastrace::trace;
 use midnight_serialize_v6::Deserializable as DeserializableV6;
@@ -31,7 +31,7 @@ impl SecretKey {
         secret_key: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_017_000) {
             let secret_key = SecretKeyV6::deserialize(&mut secret_key.as_ref(), 0)
                 .map_err(|error| Error::Io("cannot deserialize SecretKeyV6", error))?;
             Ok(Self::V6(secret_key))

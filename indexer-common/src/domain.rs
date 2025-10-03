@@ -32,7 +32,7 @@ pub use viewing_key::*;
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
 
-// Plain bytes.
+// Plain bytes: very simple hashes/identifiers used without serialization.
 pub type BlockAuthor = ByteArray<32>;
 pub type BlockHash = ByteArray<32>;
 pub type IntentHash = ByteArray<32>;
@@ -42,7 +42,11 @@ pub type TokenType = ByteArray<32>;
 pub type TransactionHash = ByteArray<32>;
 pub type UnshieldedAddress = ByteArray<32>;
 
-// Tagged serialization.
+// Untagged serialization: simple and/or stable types that are not expected to change.
+pub type SerializedTransactionIdentifier = ByteVec;
+pub type SerializedZswapStateRoot = ByteVec;
+
+// Tagged serialization: complex types that may evolve; tags allow version-awareness.
 pub type SerializedContractAddress = ByteVec;
 pub type SerializedContractState = ByteVec;
 pub type SerializedLedgerEvent = ByteVec;
@@ -50,10 +54,6 @@ pub type SerializedLedgerParameters = ByteVec;
 pub type SerializedLedgerState = ByteVec;
 pub type SerializedTransaction = ByteVec;
 pub type SerializedZswapState = ByteVec;
-
-// Untagged serialization.
-pub type SerializedTransactionIdentifier = ByteVec;
-pub type SerializedZswapStateRoot = ByteVec;
 
 /// The result of applying a regular transaction to the ledger state along with extracted data.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

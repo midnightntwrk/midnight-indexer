@@ -29,7 +29,7 @@ pub use ledger_state::*;
 pub use transaction::*;
 pub use unshielded::*;
 
-use indexer_common::domain::{PROTOCOL_VERSION_000_016_000, ProtocolVersion};
+use indexer_common::domain::{PROTOCOL_VERSION_000_017_000, ProtocolVersion};
 
 /// This must always point to the latest (highest) supported version.
-pub const PROTOCOL_VERSION: ProtocolVersion = PROTOCOL_VERSION_000_016_000;
+pub const PROTOCOL_VERSION: ProtocolVersion = PROTOCOL_VERSION_000_017_000;
