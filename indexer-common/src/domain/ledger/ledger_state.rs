@@ -403,7 +403,8 @@ fn make_unshielded_utxos_v6(
     transaction_result: &TransactionResult,
     ledger_state: &LedgerStateV6<DefaultDBV6>,
 ) -> (Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>) {
-    // Skip UTXO creation entirely for failed transactions, because no state changes occurred on the ledger.
+    // Skip UTXO creation entirely for failed transactions, because no state changes occurred on the
+    // ledger.
     if matches!(transaction_result, TransactionResult::Failure) {
         return (vec![], vec![]);
     }
