@@ -586,14 +586,17 @@ fn compute_claim_rewards_intent_hash_v6(
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{NetworkId, TransactionResult, ledger::{TransactionV6, ledger_state::make_unshielded_utxos_v6}};
+    use crate::domain::{
+        NetworkId, TransactionResult,
+        ledger::{TransactionV6, ledger_state::make_unshielded_utxos_v6},
+    };
     use midnight_ledger_v6::structure::LedgerState as LedgerStateV6;
 
     #[test]
     fn test_make_unshielded_utxos_skips_failed_transactions() {
-        use midnight_transient_crypto_v6::curve::EmbeddedFr;
         use midnight_ledger_v6::structure::StandardTransaction as StandardTransactionV6;
         use midnight_storage_v6::storage::HashMap;
+        use midnight_transient_crypto_v6::curve::EmbeddedFr;
 
         let network_id = NetworkId::Undeployed;
         let intents = HashMap::new();
@@ -609,20 +612,14 @@ mod tests {
         let ledger_state = LedgerStateV6::new(network_id);
 
         let failure_result = TransactionResult::Failure;
-        let (created, spent) = make_unshielded_utxos_v6(
-            ledger_transaction.clone(),
-            &failure_result,
-            &ledger_state,
-        );
+        let (created, spent) =
+            make_unshielded_utxos_v6(ledger_transaction.clone(), &failure_result, &ledger_state);
         assert_eq!(created.len(), 0);
         assert_eq!(spent.len(), 0);
 
         let success_result = TransactionResult::Success;
-        let (created, spent) = make_unshielded_utxos_v6(
-            ledger_transaction.clone(),
-            &success_result,
-            &ledger_state,
-        );
+        let (created, spent) =
+            make_unshielded_utxos_v6(ledger_transaction.clone(), &success_result, &ledger_state);
         assert_eq!(created.len(), 0);
         assert_eq!(spent.len(), 0);
     }
