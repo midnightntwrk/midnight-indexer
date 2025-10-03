@@ -165,7 +165,7 @@ export default class XRayJsonReporter implements Reporter {
     }
 
     const targetEnv = process.env.TARGET_ENV || 'undeployed';
-    const xrayComponent = process.env.XRAY_COMPONENT || 'unknown component';
+    const xrayComponent = process.env.XRAY_COMPONENT;
     const xrayReportEmptyMeta = process.env.XRAY_REPORT_TESTS_MISSING_METADATA || 'false';
     const xrayTestExecKey = process.env.XRAY_TEST_EXEC_KEY;
     const xrayTestPlanKey = process.env.XRAY_TEST_PLAN_KEY;
