@@ -524,6 +524,7 @@ fn extend_unshielded_utxos_v6(
         intent.fallible_inputs()
     };
     let intent_inputs = intent_inputs.into_iter().map(|spend| {
+        let intent_hash = spend.intent_hash.0.0.into();
         let initial_nonce = make_initial_nonce_v6(spend.output_no, intent_hash);
         let registered_for_dust_generation =
             registered_for_dust_generation_v6(spend.output_no, intent_hash, ledger_state);
