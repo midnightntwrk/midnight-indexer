@@ -26,8 +26,7 @@ use crate::{
 use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject, scalar};
 use derive_more::{Debug, From};
 use indexer_common::domain::{
-    AddressType, ByteArrayLenError, DecodeAddressError, NetworkId, RawUnshieldedAddress,
-    decode_address, encode_address,
+    AddressType, ByteArrayLenError, DecodeAddressError, NetworkId, decode_address, encode_address,
 };
 use log::error;
 use serde::{Deserialize, Serialize};
@@ -165,7 +164,7 @@ impl UnshieldedAddress {
     pub fn try_into_domain(
         &self,
         network_id: NetworkId,
-    ) -> Result<RawUnshieldedAddress, UnshieldedAddressFormatError> {
+    ) -> Result<indexer_common::domain::UnshieldedAddress, UnshieldedAddressFormatError> {
         let bytes = decode_address(&self.0, AddressType::Unshielded, network_id)?;
         let address = bytes.0.try_into()?;
 

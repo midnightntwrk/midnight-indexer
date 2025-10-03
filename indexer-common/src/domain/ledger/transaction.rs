@@ -69,7 +69,7 @@ impl Transaction {
             Self::V6(transaction) => transaction
                 .identifiers()
                 .map(|identifier| {
-                    let identifier = identifier.tagged_serialize_v6().map_err(|error| {
+                    let identifier = identifier.serialize_v6().map_err(|error| {
                         Error::Io("cannot serialize TransactionIdentifierV6", error)
                     })?;
                     Ok(identifier)
@@ -113,9 +113,10 @@ impl Transaction {
                                         .await
                                         .map_err(|error| Error::GetContractState(error.into()))?;
                                     let entry_point =
-                                        call.entry_point.serialize_v6().map_err(|error| {
-                                            Error::Io("cannot serialize EntryPointBufV6", error)
-                                        })?;
+                                        String::from_utf8(call.entry_point.as_ref().to_owned())
+                                            .map_err(|error| {
+                                                Error::FromUtf8("EntryPointBufV6", error)
+                                            })?;
 
                                     Ok(ContractAction {
                                         address,

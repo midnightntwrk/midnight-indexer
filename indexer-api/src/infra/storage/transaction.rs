@@ -23,8 +23,8 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        RawUnshieldedAddress, SerializedTransactionIdentifier, SessionId, TransactionHash,
-        TransactionVariant,
+        SerializedTransactionIdentifier, SessionId, TransactionHash, TransactionVariant,
+        UnshieldedAddress,
     },
     stream::flatten_chunks,
 };
@@ -462,7 +462,7 @@ impl TransactionStorage for Storage {
 
     fn get_transactions_involving_unshielded(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
         mut transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send {
@@ -487,7 +487,7 @@ impl TransactionStorage for Storage {
     #[trace(properties = { "address": "{address}" })]
     async fn get_highest_transaction_id_for_unshielded_address(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
     ) -> Result<Option<u64>, sqlx::Error> {
         let query = indoc! {"
             SELECT MAX(transactions.id)
@@ -640,7 +640,7 @@ impl Storage {
     })]
     async fn get_transactions_involving_unshielded(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
         transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> Result<Vec<Transaction>, sqlx::Error> {

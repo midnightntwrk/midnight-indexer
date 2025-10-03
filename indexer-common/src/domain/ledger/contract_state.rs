@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{
-    ContractBalance, PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType,
+    ContractBalance, PROTOCOL_VERSION_000_016_000, ProtocolVersion, TokenType,
     ledger::{Error, TaggedSerializableV6Ext},
 };
 use fastrace::trace;
@@ -73,7 +73,7 @@ impl ContractState {
                                     })?;
 
                                 let len = token_type.len();
-                                let token_type = RawTokenType::try_from(token_type.as_ref())
+                                let token_type = TokenType::try_from(token_type.as_ref())
                                     .map_err(|_| Error::TokenTypeLen(len))?;
 
                                 Ok(ContractBalance { token_type, amount })

@@ -77,7 +77,7 @@ where
             ContractAttributes::Call { entry_point } => ContractAction::Call(ContractCall {
                 address: address.hex_encode(),
                 state: state.hex_encode(),
-                entry_point: entry_point.hex_encode(),
+                entry_point,
                 chain_state: chain_state.hex_encode(),
                 transaction_id,
                 contract_action_id: id,
@@ -166,8 +166,8 @@ where
     /// The hex-encoded serialized contract-specific zswap state.
     chain_state: HexEncoded,
 
-    /// The hex-encoded serialized entry point.
-    entry_point: HexEncoded,
+    /// The entry point.
+    entry_point: String,
 
     #[graphql(skip)]
     transaction_id: u64,

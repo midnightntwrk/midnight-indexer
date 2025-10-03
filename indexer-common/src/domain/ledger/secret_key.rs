@@ -25,7 +25,7 @@ pub enum SecretKey {
 }
 
 impl SecretKey {
-    /// Deserialize the given serialized secret key using the given protocol version.
+    /// Untagged deserialize the given serialized secret key using the given protocol version.
     #[trace(properties = { "protocol_version": "{protocol_version}" })]
     pub fn deserialize(
         secret_key: impl AsRef<[u8]>,

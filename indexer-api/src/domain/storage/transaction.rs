@@ -14,7 +14,7 @@
 use crate::domain::{Transaction, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{
-    RawUnshieldedAddress, SerializedTransactionIdentifier, SessionId, TransactionHash,
+    SerializedTransactionIdentifier, SessionId, TransactionHash, UnshieldedAddress,
 };
 use std::{fmt::Debug, num::NonZeroU32};
 
@@ -56,7 +56,7 @@ where
     /// transaction ID.
     fn get_transactions_involving_unshielded(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
         from_transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send;
@@ -64,7 +64,7 @@ where
     /// Get the highest transaction ID for the given unshielded address.
     async fn get_highest_transaction_id_for_unshielded_address(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
     ) -> Result<Option<u64>, sqlx::Error>;
 
     /// Get a tuple of end indices:
@@ -113,7 +113,7 @@ impl TransactionStorage for NoopStorage {
 
     fn get_transactions_involving_unshielded(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
         from_transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send {
@@ -122,7 +122,7 @@ impl TransactionStorage for NoopStorage {
 
     async fn get_highest_transaction_id_for_unshielded_address(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
     ) -> Result<Option<u64>, sqlx::Error> {
         unimplemented!()
     }

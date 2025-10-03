@@ -127,9 +127,9 @@ type ContractCall implements ContractAction {
 	"""
 	chainState: HexEncoded!
 	"""
-	The hex-encoded serialized entry point.
+	The entry point.
 	"""
-	entryPoint: HexEncoded!
+	entryPoint: String!
 	"""
 	Transaction for this contract call.
 	"""

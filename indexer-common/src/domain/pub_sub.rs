@@ -13,7 +13,7 @@
 
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-use crate::domain::{RawUnshieldedAddress, SessionId};
+use crate::domain::{SessionId, UnshieldedAddress};
 use derive_more::derive::From;
 use futures::{Stream, stream};
 use serde::{Deserialize, Serialize};
@@ -60,7 +60,7 @@ message!(WalletIndexed);
 /// has been stored in the DB.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnshieldedUtxoIndexed {
-    pub address: RawUnshieldedAddress,
+    pub address: UnshieldedAddress,
 }
 message!(UnshieldedUtxoIndexed);
 

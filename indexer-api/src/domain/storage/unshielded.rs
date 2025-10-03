@@ -18,7 +18,7 @@ use crate::domain::{
         transaction::TransactionStorage, wallet::WalletStorage,
     },
 };
-use indexer_common::domain::RawUnshieldedAddress;
+use indexer_common::domain::UnshieldedAddress;
 use sqlx::Error;
 use std::fmt::Debug;
 
@@ -38,7 +38,7 @@ where
     /// Get all unshielded UTXOs for a given address.
     async fn get_unshielded_utxos_by_address(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
     /// Get unshielded UTXOs created by a specific transaction, ordered by output index.
@@ -57,7 +57,7 @@ where
     /// output index.
     async fn get_unshielded_utxos_by_address_created_by_transaction(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
@@ -65,7 +65,7 @@ where
     /// output index.
     async fn get_unshielded_utxos_by_address_spent_by_transaction(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 }
@@ -74,7 +74,7 @@ where
 impl UnshieldedUtxoStorage for NoopStorage {
     async fn get_unshielded_utxos_by_address(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
     }
@@ -95,7 +95,7 @@ impl UnshieldedUtxoStorage for NoopStorage {
 
     async fn get_unshielded_utxos_by_address_created_by_transaction(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
@@ -103,7 +103,7 @@ impl UnshieldedUtxoStorage for NoopStorage {
 
     async fn get_unshielded_utxos_by_address_spent_by_transaction(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
