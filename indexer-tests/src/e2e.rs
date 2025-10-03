@@ -111,6 +111,11 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
         .await
         .context("test dust ledger events subscription")?;
 
+    // Test DUST queries
+    test_dust_queries(&api_client, &api_url)
+        .await
+        .context("test dust queries")?;
+
     println!("Successfully finished e2e testing");
 
     Ok(())
@@ -857,6 +862,73 @@ where
     Ok(data)
 }
 
+/// Test DUST queries (from feat/cnight-generates-dust)
+async fn test_dust_queries(
+    api_client: &Client,
+    api_url: &str,
+) -> anyhow::Result<()> {
+    use crate::e2e::graphql::{
+        CurrentDustStateQuery, DustEventsByTransactionQuery, DustGenerationStatusQuery,
+        DustMerkleRootQuery, RecentDustEventsQuery,
+    };
+
+    // Test currentDustState query
+    let variables = graphql::current_dust_state_query::Variables {};
+    let state = send_query::<CurrentDustStateQuery>(api_client, api_url, variables)
+        .await
+        .context("query current dust state")?;
+
+    let current_state = state.current_dust_state;
+    println!(
+        "Current DUST state - Block: {}, Registrations: {}",
+        current_state.block_height,
+        current_state.total_registrations
+    );
+
+    // Test recentDustEvents query with limit
+    let variables = graphql::recent_dust_events_query::Variables {
+        limit: Some(10),
+        event_variant: None,
+    };
+    let recent_events = send_query::<RecentDustEventsQuery>(api_client, api_url, variables)
+        .await
+        .context("query recent dust events")?;
+
+    println!("Found {} recent DUST events", recent_events.recent_dust_events.len());
+
+    // Test dustEventsByTransaction - will only work if there are DUST events
+    if let Some(first_event) = recent_events.recent_dust_events.first() {
+        let variables = graphql::dust_events_by_transaction_query::Variables {
+            transaction_hash: first_event.transaction_hash.clone(),
+        };
+        let tx_events = send_query::<DustEventsByTransactionQuery>(api_client, api_url, variables)
+            .await
+            .context("query dust events by transaction")?;
+
+        assert!(!tx_events.dust_events_by_transaction.is_empty());
+    }
+
+    // Test dustGenerationStatus query
+    // Using an example Cardano stake key (would need real ones in production)
+    let variables = graphql::dust_generation_status_query::Variables {
+        cardano_stake_keys: vec![],
+    };
+    let _status = send_query::<DustGenerationStatusQuery>(api_client, api_url, variables)
+        .await
+        .context("query dust generation status")?;
+
+    // Test dustMerkleRoot query
+    let variables = graphql::dust_merkle_root_query::Variables {
+        tree_type: graphql::dust_merkle_root_query::DustMerkleTreeType::COMMITMENT,
+        timestamp: current_state.timestamp,
+    };
+    let _root = send_query::<DustMerkleRootQuery>(api_client, api_url, variables)
+        .await
+        .context("query dust merkle root")?;
+
+    Ok(())
+}
+
 fn viewing_key(network_id: NetworkId) -> &'static str {
     match network_id {
         NetworkId::Undeployed => {
@@ -967,4 +1039,45 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct DustLedgerEventsSubscription;
+
+    // DUST queries from feat/cnight-generates-dust
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustEventsByTransactionQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct RecentDustEventsQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct CurrentDustStateQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustMerkleRootQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustGenerationStatusQuery;
 }
