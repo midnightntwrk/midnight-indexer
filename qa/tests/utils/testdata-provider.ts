@@ -40,7 +40,7 @@ class TestDataProvider {
     );
     const viewingKeysDataFile = await import(`../data/static/${envName}/viewing-keys.json`);
     const transactionsDataFile = await import(`../data/static/${envName}/transactions.json`);
-    const contractsDataFile = await import(`../data/static/${envName}/contracts.json`);
+    const contractsDataFile = await import(`../data/static/${envName}/contract-actions.json`);
     const heightsDataFile = await import(`../data/static/${envName}/heights.json`);
     this.unshieldedAddresses = unshieldedAddressDataFile.default;
     this.blocks = blocksDataFile.default;
@@ -94,15 +94,15 @@ class TestDataProvider {
   }
 
   getContractCallBlockHash() {
-    return this.getBlockData('contract-call-block-hash');
+    return this.getBlockData('ContractCall');
   }
 
   getContractDeployHeight() {
-    return this.getHeightData('contract-deploy-height');
+    return this.getHeightData('ContractDeploy');
   }
 
   getContractCallHeight() {
-    return this.getHeightData('contract-call-height');
+    return this.getHeightData('ContractCall');
   }
 
   getContractUpdateHeight() {
