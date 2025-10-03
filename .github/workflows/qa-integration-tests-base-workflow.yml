@@ -16,11 +16,26 @@ on:
           - qanet
           - devnet
           - testnet02
+      publish_to_xray:
+        type: boolean
+        description: Publish the test results to Xray
+        required: false
+        default: false
       ref:
         type: string
         description: Git ref
         required: false
         default: main
+      node_tag:
+        type: string
+        required: true
+        description: Node ta
+        default: latest
+      indexer_tag:
+        type: string
+        required: true
+        description: Indexer tag
+        default: latest
   workflow_call:
     inputs:
       target_env:
@@ -32,6 +47,21 @@ on:
         type: string
         description: Git ref
         required: false
+      publish_to_xray:
+        type: boolean
+        description: Publish the test results to Xray
+        required: false
+        default: false
+      node_tag:
+        type: string
+        description: Node tag
+        required: false
+        default: latest
+      indexer_tag:
+        type: string
+        description: Indexer tag
+        required: false
+        default: latest
     secrets:
       MIDNIGHTCI_PACKAGES_WRITE:
         required: true
@@ -48,11 +78,15 @@ jobs:
     name: Execute basic integration tests
     permissions:
       contents: read
-      packages: write
+      packages: read
     env:
       TARGET_ENV: ${{ inputs.target_env }}
       GITHUB_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
       NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+      XRAY_COMPONENT: "indexer"
+      XRAY_PROJECT_KEY: "PM"
+      XRAY_TEST_PLAN_KEY: "PM-19197"
+      XRAY_REPORT_TESTS_MISSING_METADATA: "false"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
@@ -74,20 +108,69 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-yarn-
 
+      - name: Add github.com credentials to netrc
+        uses: extractions/netrc@v2
+        with:
+          machine: github.com
+          username: MidnightCI
+          password: ${{ secrets.MIDNIGHTCI_REPO }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: MidnightCI
+          password: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+
+      - name: Startup local environment
+        if: inputs.target_env == 'undeployed'
+        env:
+          NODE_TAG: ${{ inputs.node_tag }}
+          INDEXER_TAG: ${{ inputs.indexer_tag }}
+          APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}
+          APP__INFRA__STORAGE__PASSWORD: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
+          APP__INFRA__PUB_SUB__PASSWORD: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}
+          APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: ${{ secrets.APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD }}
+        run: |
+          . ./.envrc
+          echo "NODE_TAG: $NODE_TAG"
+          echo "INDEXER_TAG: $INDEXER_TAG"
+          bash ./qa/scripts/startup-localenv-with-data.sh
+
       - name: Install dependencies
         working-directory: qa/tests
         run: yarn install --immutable
+
+      - name: Run smoke tests
+        working-directory: qa/tests
+        run: yarn test smoke
 
       - name: Run integration tests
         working-directory: qa/tests
         run: yarn test
 
+      - name: Publish to Xray
+        if: always() && inputs.publish_to_xray == true
+        uses: GiuseppeSalvatoreShielded/TestActions/xray-upload@e5cf0c100e61b96f5bc73963312fc8064d7b2d2d
+        with:
+          test_results_path: ./qa/tests/reports/xray/test-results.json
+          xray_client_id: ${{ secrets.XRAY_CLIENT_ID }}
+          xray_client_secret: ${{ secrets.XRAY_CLIENT_SECRET }}
+
       - name: Upload Integration Test Reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: integration-test-reports
+          name: junit-integration-test-reports
           path: ./qa/tests/reports/custom-junit-report.xml
+          if-no-files-found: warn
+
+      - name: Upload XRay Test Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xray-integration-test-reports
+          path: ./qa/tests/reports/xray/test-results.json
           if-no-files-found: warn
 
       - name: Upload logs
@@ -97,4 +180,3 @@ jobs:
           name: qa-integration-tests-${{ inputs.target_env }}-logs
           path: |
             ./qa/tests/logs
-
