@@ -12,10 +12,10 @@
 // limitations under the License.
 
 use crate::domain::{
-    ContractAction, ContractAttributes, PROTOCOL_VERSION_000_016_000, ProtocolVersion,
+    ContractAction, ContractAttributes, PROTOCOL_VERSION_000_017_000, ProtocolVersion,
     SerializedContractAddress, SerializedContractState, SerializedTransactionIdentifier,
     TransactionHash, TransactionStructure, ViewingKey,
-    ledger::{Error, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
+    ledger::{Error, SerializableV6Ext, TransactionV6},
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
@@ -47,7 +47,7 @@ impl Transaction {
         transaction: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_017_000) {
             let transaction = tagged_deserialize_v6(&mut transaction.as_ref())
                 .map_err(|error| Error::Io("cannot deserialize LedgerTransactionV6", error))?;
             Ok(Self::V6(transaction))
@@ -69,7 +69,7 @@ impl Transaction {
             Self::V6(transaction) => transaction
                 .identifiers()
                 .map(|identifier| {
-                    let identifier = identifier.tagged_serialize_v6().map_err(|error| {
+                    let identifier = identifier.serialize_v6().map_err(|error| {
                         Error::Io("cannot serialize TransactionIdentifierV6", error)
                     })?;
                     Ok(identifier)
@@ -113,9 +113,10 @@ impl Transaction {
                                         .await
                                         .map_err(|error| Error::GetContractState(error.into()))?;
                                     let entry_point =
-                                        call.entry_point.serialize_v6().map_err(|error| {
-                                            Error::Io("cannot serialize EntryPointBufV6", error)
-                                        })?;
+                                        String::from_utf8(call.entry_point.as_ref().to_owned())
+                                            .map_err(|error| {
+                                                Error::FromUtf8("EntryPointBufV6", error)
+                                            })?;
 
                                     Ok(ContractAction {
                                         address,
@@ -231,7 +232,7 @@ impl SystemTransaction {
         transaction: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_017_000) {
             let transaction =
                 tagged_deserialize_v6(&mut transaction.as_ref()).map_err(|error| {
                     Error::Io("cannot deserialize LedgerSystemTransactionV6", error)
@@ -254,7 +255,7 @@ fn serialize_contract_address(
     address: ContractAddressV6,
 ) -> Result<SerializedContractAddress, Error> {
     address
-        .tagged_serialize_v6()
+        .serialize_v6()
         .map_err(|error| Error::Io("cannot serialize ContractAddressV6", error))
 }
 
@@ -271,7 +272,7 @@ fn can_decrypt_v6(key: &SecretKeyV6, offer: &OfferV6<ProofV6, DefaultDBV6>) -> b
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{PROTOCOL_VERSION_000_016_000, ViewingKey, ledger::Transaction};
+    use crate::domain::{PROTOCOL_VERSION_000_017_000, ViewingKey, ledger::Transaction};
     use bip32::{DerivationPath, XPrv};
     use midnight_zswap_v6::keys::{SecretKeys, Seed};
     use std::{fs, str::FromStr};
@@ -281,7 +282,7 @@ mod tests {
     fn test_deserialize_relevant() {
         let transaction = fs::read(format!("{}/tests/tx_1_2_2.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(transaction, PROTOCOL_VERSION_000_016_000)
+        let transaction = Transaction::deserialize(transaction, PROTOCOL_VERSION_000_017_000)
             .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));
@@ -290,7 +291,7 @@ mod tests {
 
         let transaction = fs::read(format!("{}/tests/tx_1_2_3.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(transaction, PROTOCOL_VERSION_000_016_000)
+        let transaction = Transaction::deserialize(transaction, PROTOCOL_VERSION_000_017_000)
             .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));

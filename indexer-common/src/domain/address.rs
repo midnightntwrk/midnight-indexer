@@ -58,8 +58,8 @@ pub enum EncodeAddressError {
     InvalidHrp { expected_hrp: String, hrp: String },
 }
 
-/// Bech32m-decode the given string as a byte vector, thereby validate the given address type and
-/// the given network ID.
+/// Bech32m-decode the given address string as a byte vector, thereby validate the given address
+/// type and the given network ID.
 pub fn decode_address(
     address: impl AsRef<str>,
     address_type: AddressType,
@@ -76,6 +76,7 @@ pub fn decode_address(
     Ok(bytes.into())
 }
 
+/// Bech32m-encode the given address bytes as a string for the given address type and network ID.
 pub fn encode_address(
     address: impl AsRef<[u8]>,
     address_type: AddressType,

@@ -13,10 +13,9 @@
 
 use crate::domain::{
     ApplyRegularTransactionResult, ByteArray, ByteVec, DustOutput, IntentHash, LedgerEvent,
-    NetworkId, Nonce, PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType,
-    SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerState,
-    SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot, TransactionResult,
-    UnshieldedUtxo,
+    NetworkId, Nonce, PROTOCOL_VERSION_000_017_000, ProtocolVersion, SerializedContractAddress,
+    SerializedLedgerParameters, SerializedLedgerState, SerializedTransaction, SerializedZswapState,
+    SerializedZswapStateRoot, TokenType, TransactionResult, UnshieldedUtxo,
     ledger::{Error, IntentV6, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
 use fastrace::trace;
@@ -85,7 +84,7 @@ impl LedgerState {
         ledger_state: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_017_000) {
             let ledger_state = tagged_deserialize_v6(&mut ledger_state.as_ref())
                 .map_err(|error| Error::Io("cannot deserialize LedgerStateV6", error))?;
             Ok(Self::V6 {
@@ -315,7 +314,7 @@ impl LedgerParameters {
     pub fn serialize(&self) -> Result<SerializedLedgerParameters, Error> {
         match self {
             Self::V6(parameters) => parameters
-                .serialize_v6()
+                .tagged_serialize_v6()
                 .map_err(|error| Error::Io("cannot serialize SerializedLedgerParametersV6", error)),
         }
     }
@@ -328,13 +327,13 @@ pub enum ZswapStateRoot {
 }
 
 impl ZswapStateRoot {
-    /// Deserialize the given serialized zswap state root using the given protocol version.
+    /// Untagged deserialize the given serialized zswap state root using the given protocol version.
     #[trace(properties = { "protocol_version": "{protocol_version}" })]
     pub fn deserialize(
         zswap_state_root: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_017_000) {
             let digest = MerkleTreeDigestV6::deserialize(&mut zswap_state_root.as_ref(), 0)
                 .map_err(|error| Error::Io("cannot deserialize MerkleTreeDigestV6", error))?;
             Ok(Self::V6(digest))
@@ -471,7 +470,7 @@ fn make_unshielded_utxos_v6(
 
             let utxo = UnshieldedUtxo {
                 owner: owner.0.0.into(),
-                token_type: RawTokenType::default(), // Native token (all zeros).
+                token_type: TokenType::default(), // Native token (all zeros).
                 value: claim.value,
                 intent_hash,
                 output_index,
