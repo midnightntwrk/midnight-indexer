@@ -1876,12 +1876,14 @@ dependencies = [
 
 [[package]]
 name = "fastrace-axum"
-version = "0.1.1"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c01121973a32679408245cf174dda6f94ecabe001d8ec3751ee06391489dd3f6"
+checksum = "ab4f5f35517f48f18c9f89170c25b356539e4f7ca983db9831e9575c052df844"
 dependencies = [
+ "axum",
  "fastrace",
- "http 1.3.1",
+ "opentelemetry-semantic-conventions",
+ "pin-project",
  "tower-layer",
  "tower-service",
 ]
@@ -4350,6 +4352,12 @@ dependencies = [
  "prost",
  "tonic",
 ]
+
+[[package]]
+name = "opentelemetry-semantic-conventions"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83d059a296a47436748557a353c5e6c5705b9470ef6c95cfc52c21a8814ddac2"
 
 [[package]]
 name = "opentelemetry_sdk"
