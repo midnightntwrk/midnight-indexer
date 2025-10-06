@@ -26,7 +26,7 @@ use midnight_base_crypto_v6::{
     time::Timestamp as TimestampV6,
 };
 use midnight_coin_structure_v6::{
-    coin::{NIGHT as NIGHTV6, Nonce as NonceV6, UserAddress as UserAddressV6},
+    coin::{NIGHT as NIGHTV6, UserAddress as UserAddressV6},
     contract::ContractAddress as ContractAddressV6,
 };
 use midnight_ledger_v6::{
@@ -53,6 +53,8 @@ use midnight_transient_crypto_v6::merkle_tree::{
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
+
+const OUTPUT_INDEX_ZERO: u32 = 0;
 
 static STRICTNESS_V6: LazyLock<WellFormedStrictnessV6> = LazyLock::new(|| {
     let mut strictness = WellFormedStrictnessV6::default();
@@ -457,23 +459,29 @@ fn make_unshielded_utxos_v6(
             (outputs, inputs)
         }
 
+        // ClaimRewards creates a single unshielded UTXO for the claimed amount.
         TransactionV6::ClaimRewards(claim) => {
-            // ClaimRewards creates a single unshielded UTXO for the claimed amount.
-            let owner = UserAddressV6::from(claim.owner.clone());
-            let intent_hash =
-                compute_claim_rewards_intent_hash_v6(&owner, claim.value, &claim.nonce);
-            let output_index = 0;
-
-            let initial_nonce = make_initial_nonce_v6(output_index, intent_hash);
+            let owner = UserAddressV6::from(claim.owner);
+            let intent_hash = {
+                // ClaimRewards don't have intents, but UTXOs need an intent hash. We compute this
+                // hash the same way that the ledger does internally.
+                let output = OutputInstructionUnshieldedV6 {
+                    amount: claim.value,
+                    target_address: owner,
+                    nonce: claim.nonce,
+                };
+                ByteArray(output.mk_intent_hash(NIGHTV6).0.0)
+            };
+            let initial_nonce = make_initial_nonce_v6(OUTPUT_INDEX_ZERO, intent_hash);
             let registered_for_dust_generation =
-                registered_for_dust_generation_v6(output_index, intent_hash, ledger_state);
+                registered_for_dust_generation_v6(OUTPUT_INDEX_ZERO, intent_hash, ledger_state);
 
             let utxo = UnshieldedUtxo {
                 owner: owner.0.0.into(),
                 token_type: TokenType::default(), // Native token (all zeros).
                 value: claim.value,
                 intent_hash,
-                output_index,
+                output_index: OUTPUT_INDEX_ZERO,
                 initial_nonce,
                 registered_for_dust_generation,
             };
@@ -567,64 +575,16 @@ fn registered_for_dust_generation_v6(
         .contains_key(&initial_nonce)
 }
 
-/// Compute the intent hash for ClaimRewards transactions.
-/// ClaimRewards don't have intents, but UTXOs need an intent hash.
-/// We compute this hash the same way that the ledger does internally.
-fn compute_claim_rewards_intent_hash_v6(
-    owner: &UserAddressV6,
-    value: u128,
-    nonce: &NonceV6,
-) -> IntentHash {
-    let output = OutputInstructionUnshieldedV6 {
-        amount: value,
-        target_address: *owner,
-        nonce: *nonce,
-    };
-
-    ByteArray(output.mk_intent_hash(NIGHTV6).0.0)
-}
-
 #[cfg(test)]
 mod tests {
     use crate::domain::{
-        ByteArray, NetworkId, TransactionResult,
-        ledger::{
-            TransactionV6,
-            ledger_state::{compute_claim_rewards_intent_hash_v6, make_unshielded_utxos_v6},
-        },
-    };
-    use midnight_base_crypto_v6::hash::HashOutput as HashOutputV6;
-    use midnight_coin_structure_v6::coin::{
-        NIGHT as NIGHTV6, Nonce as NonceV6, UserAddress as UserAddressV6,
+        NetworkId, TransactionResult,
+        ledger::{TransactionV6, ledger_state::make_unshielded_utxos_v6},
     };
     use midnight_ledger_v6::structure::{
-        LedgerState as LedgerStateV6, OutputInstructionUnshielded as OutputInstructionUnshieldedV6,
-        StandardTransaction as StandardTransactionV6,
+        LedgerState as LedgerStateV6, StandardTransaction as StandardTransactionV6,
     };
     use midnight_transient_crypto_v6::curve::EmbeddedFr;
-
-    #[test]
-    fn test_claim_rewards_intent_hash_computation() {
-        let owner_bytes = [1u8; 32];
-        let owner = UserAddressV6(HashOutputV6(owner_bytes));
-        let value = 1000000u128;
-        let nonce_bytes = [2u8; 32];
-        let nonce = NonceV6(HashOutputV6(nonce_bytes));
-
-        let intent_hash = compute_claim_rewards_intent_hash_v6(&owner, value, &nonce);
-
-        let output = OutputInstructionUnshieldedV6 {
-            amount: value,
-            target_address: owner,
-            nonce,
-        };
-        let expected_hash = ByteArray(output.mk_intent_hash(NIGHTV6).0.0);
-
-        assert_eq!(intent_hash, expected_hash);
-
-        let intent_hash2 = compute_claim_rewards_intent_hash_v6(&owner, value, &nonce);
-        assert_eq!(intent_hash, intent_hash2);
-    }
 
     #[test]
     fn test_make_unshielded_utxos_v6() {
