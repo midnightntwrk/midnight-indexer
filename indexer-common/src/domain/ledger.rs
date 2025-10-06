@@ -23,11 +23,10 @@ pub use transaction::*;
 
 // Re-export types that were moved to domain.rs for backwards compatibility.
 pub use crate::domain::{
-    ContractAction, ContractAttributes, ContractBalance, IntentHash, RawTokenType,
-    RawUnshieldedAddress, SerializedContractAddress, SerializedContractEntryPoint,
+    ContractAction, ContractAttributes, ContractBalance, IntentHash, SerializedContractAddress,
     SerializedContractState, SerializedLedgerState, SerializedTransaction,
-    SerializedTransactionIdentifier, SerializedZswapState, SerializedZswapStateRoot,
-    TransactionHash, TransactionStructure,
+    SerializedTransactionIdentifier, SerializedZswapState, SerializedZswapStateRoot, TokenType,
+    TransactionHash, TransactionStructure, UnshieldedAddress,
 };
 
 use crate::{

@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::domain::{
-    ApplyRegularTransactionResult, ByteArray, ByteVec, DustOutput, IntentHash, LedgerEvent,
-    NetworkId, Nonce, PROTOCOL_VERSION_000_017_000, ProtocolVersion, SerializedContractAddress,
+    ApplyRegularTransactionResult, ByteArray, ByteVec, IntentHash, LedgerEvent, NetworkId, Nonce,
+    PROTOCOL_VERSION_000_017_000, ProtocolVersion, SerializedContractAddress,
     SerializedLedgerParameters, SerializedLedgerState, SerializedTransaction, SerializedZswapState,
     SerializedZswapStateRoot, TokenType, TransactionResult, UnshieldedUtxo,
     dust::{
@@ -21,6 +21,7 @@ use crate::domain::{
     },
     ledger::{Error, IntentV6, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
+use sha2::{Digest, Sha256};
 use fastrace::trace;
 use itertools::Itertools;
 use midnight_base_crypto_v6::{
@@ -668,15 +669,16 @@ fn registered_for_dust_generation_v6(
 /// Compute a pseudo-intent-hash for ClaimRewards transactions.
 /// ClaimRewards don't have intents, but we need a unique hash for database constraints.
 /// We use a hash of (owner || value || nonce) to ensure uniqueness.
+#[allow(dead_code)]
 fn compute_claim_rewards_intent_hash_v6(
     owner: &UserAddressV6,
     value: u128,
-    nonce: &NonceV6,
+    nonce: &InitialNonceV6,
 ) -> IntentHash {
     let mut hasher = Sha256::new();
-    hasher.update(owner.0.0);
+    hasher.update(owner.0 .0);
     hasher.update(value.to_le_bytes());
-    hasher.update(nonce.0.0);
+    hasher.update(nonce.0 .0);
     ByteArray(hasher.finalize().into())
 }
 
