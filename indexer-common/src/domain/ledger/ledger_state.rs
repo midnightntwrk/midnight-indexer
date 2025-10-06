@@ -21,7 +21,6 @@ use crate::domain::{
     },
     ledger::{Error, IntentV6, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
-use sha2::{Digest, Sha256};
 use fastrace::trace;
 use itertools::Itertools;
 use midnight_base_crypto_v6::{
@@ -56,6 +55,7 @@ use midnight_transient_crypto_v6::merkle_tree::{
     MerkleTreeDigest as MerkleTreeDigestV6,
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
+use sha2::{Digest, Sha256};
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 const OUTPUT_INDEX_ZERO: u32 = 0;
@@ -676,9 +676,9 @@ fn compute_claim_rewards_intent_hash_v6(
     nonce: &InitialNonceV6,
 ) -> IntentHash {
     let mut hasher = Sha256::new();
-    hasher.update(owner.0 .0);
+    hasher.update(owner.0.0);
     hasher.update(value.to_le_bytes());
-    hasher.update(nonce.0 .0);
+    hasher.update(nonce.0.0);
     ByteArray(hasher.finalize().into())
 }
 
