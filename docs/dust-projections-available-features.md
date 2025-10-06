@@ -9,7 +9,7 @@ This document catalogs the DUST projection features as they exist in `feat/cnigh
 
 ## Integration with Main Branch (October 2025)
 
-### Merge from Main (commit ecccd9a)
+### First Merge from Main (commit ecccd9a - October 1, 2025)
 Merged 49 commits from main branch, bringing fundamental architectural changes:
 
 #### What Main Branch Replaced in CNGD
@@ -180,6 +180,47 @@ Registration events come from the `NativeTokenObservation` pallet at the Substra
 **Historical Context**: CNGD originally included registration events in the DUST ledger event enum (commit df50427). This was corrected in commit 1128b7b when we realized they weren't ledger events. After the main merge, commit 8eece6b properly implemented extraction from the runtime pallet, and commit d0a634c completed the storage implementation.
 
 These events are now fully integrated into block processing, providing complete infrastructure for tracking Night→DUST address associations for Cardano cNIGHT support.
+
+### Second Merge from Main (commit a5b4af5 - October 6, 2025)
+
+Merged latest main branch updates into `feat/cnight-2nd-merge-from-main`, bringing protocol and dependency upgrades:
+
+#### Protocol and Dependency Updates
+
+- **Protocol Version Upgrade**: 0.16.3-3b7b8d7c → 0.17.0-rc.2
+  - Updated `PROTOCOL_VERSION_000_016_000` → `PROTOCOL_VERSION_000_017_000` throughout codebase
+  - Node metadata and directory structure updated under `.node/0.17.0-rc.2/`
+
+- **Type System Refinements**:
+  - `RawTokenType` → `TokenType` (consistent naming)
+  - `RawUnshieldedAddress` → `UnshieldedAddress` (simplified naming)
+  - Removed `SerializedContractEntryPoint` (no longer needed in protocol)
+
+- **Test Coverage Additions**:
+  - Added `test_make_unshielded_utxos_v6()` for UTXO creation validation
+  - Tests verify no UTXOs created for failed transactions
+  - Tests verify UTXO behavior for successful transactions
+
+#### Integration Work (commit c05ce81)
+
+Post-merge fixes to maintain DUST functionality:
+- Updated backward compatibility re-exports in `indexer-common/src/domain/ledger.rs`
+- Added `Digest` trait import for SHA256 hashing
+- Fixed type references: `NonceV6` → `InitialNonceV6` in `compute_claim_rewards_intent_hash_v6`
+- Added `#[allow(dead_code)]` to unused utility function
+
+#### Merge Conflict Resolutions
+
+1. **chain-indexer/src/infra/subxt_node/runtimes.rs**:
+   - Combined DUST-specific imports (CardanoStakeKey, DustAddress, DustUtxoId) with new protocol version
+   - Maintained NativeTokenObservation pallet event extraction functionality
+
+2. **indexer-common/src/domain/ledger/ledger_state.rs**:
+   - Preserved DUST extraction types (DustCommitment, DustGenerationInfo, DustMerklePathEntry, DustNullifier, QualifiedDustOutput)
+   - Kept `compute_claim_rewards_intent_hash_v6` function for ClaimRewards transaction handling
+   - Integrated test module from main branch
+
+**Status**: All changes compile successfully. DUST functionality maintained through protocol upgrade.
 
 ## Requirements Sources
 
@@ -549,18 +590,20 @@ The branch successfully integrates:
 4. **Correct Generation Rate**: 8,267 Specks per Star per second as per ledger specification
 5. **Runtime Event Extraction**: Direct extraction of NativeTokenObservation pallet events for registration tracking (commits 8eece6b, d0a634c)
 6. **Complete Storage Implementation**: Full database persistence with upsert logic for both ledger events and registration events
-7. **Type System Consolidation**: Centralized type definitions with backward compatibility
+7. **Type System Consolidation**: Centralized type definitions with backward compatibility re-exports (commit c05ce81)
 8. **Comprehensive Test Coverage**: 134 lines of GraphQL queries, 479 lines of test code (commits 4a7cfec, 65a5c37)
-9. **Updated Dependencies**: Ledger v6.1.0-alpha.3 and Node v0.16.3
-10. **Code Cleanup**: Removed obsolete progress tracking methods, fixed unused variables
+9. **Protocol Version**: Upgraded to 0.17.0-rc.2 (commit a5b4af5)
+10. **Updated Dependencies**: Ledger v6.1.0-alpha.3 and Node v0.17.0-rc.2
+11. **Code Cleanup**: Removed obsolete progress tracking methods, fixed unused variables
 
 The implementation is not speculative - it directly implements the DUST mechanics as specified in the ledger documentation and addresses the concrete needs identified by the wallet team. All code is production-ready and follows established patterns. The modular design allows for selective integration of specific features based on requirements.
 
 ## Contact
 
 For questions or clarification about specific features:
-- Current Branch: `feat/cnight-merge-from-main` (merged into `feat/cnight-generates-dust`)
+- Current Branch: `feat/cnight-2nd-merge-from-main` (will be merged into `feat/cnight-merge-from-main`)
 - Original implementation: July-September 2025
-- Main branch integration: October 1, 2025
-- Registration events & test coverage: October 3-6, 2025
+- First main branch integration: October 1, 2025 (commit ecccd9a)
+- Registration events & test coverage: October 3-6, 2025 (commits 8eece6b, d0a634c, 4a7cfec, 65a5c37)
+- Second main branch integration: October 6, 2025 (commit a5b4af5, protocol 0.17.0-rc.2)
 - Based on specifications from wallet team (Jegor, Andrzej) and ledger spec
