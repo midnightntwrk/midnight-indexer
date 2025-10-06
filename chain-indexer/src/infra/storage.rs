@@ -226,8 +226,10 @@ impl From<&LedgerEventAttributes> for LedgerEventVariant {
             LedgerEventAttributes::ZswapOutput => Self::ZswapOutput,
             LedgerEventAttributes::ParamChange => Self::ParamChange,
             LedgerEventAttributes::DustInitialUtxo { .. } => Self::DustInitialUtxo,
-            LedgerEventAttributes::DustGenerationDtimeUpdate => Self::DustGenerationDtimeUpdate,
-            LedgerEventAttributes::DustSpendProcessed => Self::DustSpendProcessed,
+            LedgerEventAttributes::DustGenerationDtimeUpdate { .. } => {
+                Self::DustGenerationDtimeUpdate
+            }
+            LedgerEventAttributes::DustSpendProcessed { .. } => Self::DustSpendProcessed,
         }
     }
 }
@@ -664,7 +666,7 @@ async fn save_ledger_events(
                 .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
                 .push_bind(ledger_event.grouping)
                 .push_bind(ledger_event.raw.as_ref())
-                .push_bind(Json(ledger_event.attributes));
+                .push_bind(Json(&ledger_event.attributes));
         })
         .build()
         .execute(&mut **tx)
