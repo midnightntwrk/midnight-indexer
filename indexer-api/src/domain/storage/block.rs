@@ -13,7 +13,7 @@
 
 use crate::domain::{Block, storage::NoopStorage};
 use futures::{Stream, stream};
-use indexer_common::domain::BlockHash;
+use indexer_common::domain::{BlockHash, SerializedLedgerParameters};
 use std::{fmt::Debug, num::NonZeroU32};
 
 #[trait_variant::make(Send)]
@@ -36,6 +36,12 @@ where
         height: u32,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<Block, sqlx::Error>> + Send;
+
+    /// Get ledger parameters for the given block ID.
+    async fn get_ledger_parameters(
+        &self,
+        block_id: u64,
+    ) -> Result<Option<SerializedLedgerParameters>, sqlx::Error>;
 }
 
 #[allow(unused_variables)]
@@ -58,5 +64,12 @@ impl BlockStorage for NoopStorage {
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<Block, sqlx::Error>> {
         stream::empty()
+    }
+
+    async fn get_ledger_parameters(
+        &self,
+        block_id: u64,
+    ) -> Result<Option<SerializedLedgerParameters>, sqlx::Error> {
+        unimplemented!()
     }
 }

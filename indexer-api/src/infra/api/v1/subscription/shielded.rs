@@ -15,16 +15,13 @@ use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, InnerApiError, ResultExt,
-        v1::{
-            AsBytesExt, HexEncoded, decode_session_id, subscription::get_next_transaction,
-            transaction::Transaction,
-        },
+        v1::{AsBytesExt, HexEncoded, decode_session_id, transaction::RegularTransaction},
     },
 };
 use async_graphql::{Context, SimpleObject, Subscription, Union, async_stream::try_stream};
 use derive_more::Debug;
 use drop_stream::DropStreamExt;
-use fastrace::trace;
+use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{
     Stream, StreamExt,
     future::ok,
@@ -63,7 +60,7 @@ where
     S: Storage,
 {
     /// A transaction relevant for the subscribing wallet.
-    transaction: Transaction<S>,
+    transaction: RegularTransaction<S>,
 
     /// An optional collapsed merkle tree.
     collapsed_merkle_tree: Option<CollapsedMerkleTree>,
@@ -286,7 +283,7 @@ where
 #[trace(properties = { "from": "{from:?}" })]
 async fn make_relevant_transaction<S, Z>(
     from: u64,
-    transaction: domain::Transaction,
+    transaction: domain::RegularTransaction,
     ledger_state_storage: &Z,
     zswap_state_cache: &LedgerStateCache,
 ) -> ApiResult<RelevantTransaction<S>>
@@ -349,4 +346,16 @@ where
         highest_checked_end_index: highest_checked_end_index.unwrap_or_default(),
         highest_relevant_end_index: highest_relevant_end_index.unwrap_or_default(),
     })
+}
+
+async fn get_next_transaction<E>(
+    transactions: &mut (impl Stream<Item = Result<domain::RegularTransaction, E>> + Unpin),
+) -> Result<Option<domain::RegularTransaction>, E> {
+    transactions
+        .try_next()
+        .in_span(Span::root(
+            "subscription.shielded-transactions.get-next-transaction",
+            SpanContext::random(),
+        ))
+        .await
 }

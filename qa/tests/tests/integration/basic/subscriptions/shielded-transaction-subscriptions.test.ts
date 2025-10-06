@@ -23,6 +23,7 @@ import {
   ShieldedTxSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
 import { generateSyntheticViewingKey } from '@utils/bech32-codec';
+import { TestContext } from 'vitest';
 
 describe('shielded transaction subscriptions', () => {
   let indexerWsClient: IndexerWsClient;
@@ -45,7 +46,7 @@ describe('shielded transaction subscriptions', () => {
      * @then Indexer should return a session ID
      */
     test('should return a session ID, given a valid and existing viewing key', async () => {
-      const viewingKey: string = dataProvider.getFaucetsViewingKeys()[0];
+      const viewingKey = dataProvider.getViewingKey();
       log.debug(`viewingKey = ${viewingKey}`);
 
       return indexerWsClient
@@ -98,10 +99,11 @@ describe('shielded transaction subscriptions', () => {
      * @when we open a session with that viewing key
      * @then Indexer should return an error
      */
-    test('should return an error, given a valid viewing key meant for a different network', async () => {
+    test('should return an error, given a valid viewing key meant for a different network', async (context: TestContext) => {
+      context.skip?.(true, 'This test requires the Midnight toolkit to be part of the indexer');
+
       const viewingKeys = {
-        undeployed:
-          'mn_shield-esk_undeployed1qqpsq865grdmey9ucxn02d5zj6e2na52g720fr4sxxsvsa4ep24q9v8ntexfcf',
+        undeployed: dataProvider.getViewingKey(),
       };
       const generatedViewingKey = viewingKeys['undeployed'];
       log.debug(`generatedViewingKey = ${generatedViewingKey}`);
@@ -124,7 +126,7 @@ describe('shielded transaction subscriptions', () => {
      * @then Indexer should terminate the session successfully
      */
     test('should terminate the session successfully, given a valid session ID', async () => {
-      const viewingKey: string = dataProvider.getFaucetsViewingKeys()[0];
+      const viewingKey: string = dataProvider.getViewingKey();
       log.debug(`viewingKey = ${viewingKey}`);
 
       const sessionId = await indexerWsClient.openWalletSession(viewingKey);
@@ -166,7 +168,7 @@ describe('shielded transaction subscriptions', () => {
      * @and we should receive at least one event
      */
     test('should stream wallet events starting from the beginning', async () => {
-      const viewingKey: string = dataProvider.getFaucetsViewingKeys()[0];
+      const viewingKey: string = dataProvider.getViewingKey();
       log.debug(`viewingKey = ${viewingKey}`);
 
       const sessionId: string = await indexerWsClient.openWalletSession(viewingKey);

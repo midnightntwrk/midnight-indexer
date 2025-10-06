@@ -113,7 +113,7 @@ impl SubxtNode {
                 .backend()
                 .metadata_at_version(15, H256(hash.0))
                 .await
-                .map_err(SubxtNodeError::GetMetadata)?;
+                .map_err(|error| SubxtNodeError::GetMetadata(error.into()))?;
 
             let legacy_rpc_methods =
                 LegacyRpcMethods::<SubstrateConfig>::new(self.rpc_client.to_owned().into());
@@ -132,7 +132,7 @@ impl SubxtNode {
                 metadata,
                 self.rpc_client.to_owned(),
             )
-            .map_err(SubxtNodeError::MakeOnlineClient)?;
+            .map_err(|error| SubxtNodeError::MakeOnlineClient(error.into()))?;
 
             self.compatible_online_client = Some((protocol_version, online_client));
         }
@@ -158,7 +158,7 @@ impl SubxtNode {
             .blocks()
             .subscribe_finalized()
             .await
-            .map_err(SubxtNodeError::SubscribeFinalizedBlocks)?
+            .map_err(|error| SubxtNodeError::SubscribeFinalizedBlocks(error.into()))?
             .filter(move |block| {
                 let pass = match block {
                     Ok(block) => {
@@ -189,7 +189,7 @@ impl SubxtNode {
 
                 ready(pass)
             })
-            .map_err(SubxtNodeError::ReceiveBlock);
+            .map_err(|error| SubxtNodeError::ReceiveBlock(error.into()));
 
         Ok(subscribe_finalized_blocks)
     }
@@ -237,8 +237,11 @@ impl SubxtNode {
         let extrinsics = block
             .extrinsics()
             .await
-            .map_err(SubxtNodeError::GetExtrinsics)?;
-        let events = block.events().await.map_err(SubxtNodeError::GetEvents)?;
+            .map_err(|error| SubxtNodeError::GetExtrinsics(error.into()))?;
+        let events = block
+            .events()
+            .await
+            .map_err(|error| SubxtNodeError::GetEvents(error.into()))?;
         let BlockDetails {
             timestamp,
             transactions,
@@ -277,7 +280,7 @@ impl SubxtNode {
             .blocks()
             .at(hash)
             .await
-            .map_err(SubxtNodeError::FetchBlock)
+            .map_err(|error| SubxtNodeError::FetchBlock(error.into()))
     }
 }
 
@@ -430,31 +433,37 @@ pub enum Error {
 #[derive(Debug, Error)]
 pub enum SubxtNodeError {
     #[error("cannot subscribe to finalized blocks")]
-    SubscribeFinalizedBlocks(#[source] subxt::Error),
+    SubscribeFinalizedBlocks(#[source] Box<subxt::Error>),
 
     #[error("cannot receive finalized block")]
-    ReceiveBlock(#[source] subxt::Error),
+    ReceiveBlock(#[source] Box<subxt::Error>),
 
     #[error("cannot fetch block")]
-    FetchBlock(#[source] subxt::Error),
+    FetchBlock(#[source] Box<subxt::Error>),
 
     #[error("cannot get extrinsics")]
-    GetExtrinsics(#[source] subxt::Error),
+    GetExtrinsics(#[source] Box<subxt::Error>),
 
     #[error("cannot get events")]
-    GetEvents(#[source] subxt::Error),
+    GetEvents(#[source] Box<subxt::Error>),
+
+    #[error("cannot next event")]
+    GetNextEvent(#[source] Box<subxt::Error>),
+
+    #[error("cannot decode event as root event")]
+    AsRootEvent(#[source] Box<subxt::Error>),
 
     #[error("cannot get node metadata")]
-    GetMetadata(#[source] subxt::Error),
+    GetMetadata(#[source] Box<subxt::Error>),
 
     #[error("cannot make compatible subxt online client")]
-    MakeOnlineClient(#[source] subxt::Error),
+    MakeOnlineClient(#[source] Box<subxt::Error>),
 
     #[error("cannot fetch authorities")]
-    FetchAuthorities(#[source] subxt::Error),
+    FetchAuthorities(#[source] Box<subxt::Error>),
 
     #[error("cannot use extrinsic as root extrinsic")]
-    AsRootExtrinsic(#[source] subxt::Error),
+    AsRootExtrinsic(#[source] Box<subxt::Error>),
 
     #[error("cannot get runtime version")]
     GetRuntimeVersion(#[source] subxt::ext::subxt_rpcs::Error),

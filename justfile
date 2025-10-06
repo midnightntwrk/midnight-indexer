@@ -23,7 +23,7 @@ fmt-check:
     cargo +{{nightly}} fmt --check
 
 fix:
-    cargo fix --allow-dirty --allow-staged --features {{feature}}
+    cargo fix --allow-dirty --allow-staged --features {{feature}} --tests
 
 lint:
     for package in {{packages}}; do \

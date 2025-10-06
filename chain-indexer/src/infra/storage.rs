@@ -13,14 +13,14 @@
 
 use crate::domain::{
     self, Block, BlockTransactions, ContractAction, RegularTransaction, SystemTransaction,
-    Transaction, TransactionVariant, node::BlockInfo,
+    Transaction, node::BlockInfo,
 };
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
         BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
-        LedgerEventAttributes, UnshieldedUtxo,
+        LedgerEventAttributes, TransactionVariant, UnshieldedUtxo,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -205,6 +205,10 @@ impl From<&ContractAttributes> for ContractActionVariant {
 pub enum LedgerEventVariant {
     ZswapInput,
     ZswapOutput,
+    ParamChange,
+    DustInitialUtxo,
+    DustGenerationDtimeUpdate,
+    DustSpendProcessed,
 }
 
 impl From<&LedgerEventAttributes> for LedgerEventVariant {
@@ -212,6 +216,10 @@ impl From<&LedgerEventAttributes> for LedgerEventVariant {
         match attributes {
             LedgerEventAttributes::ZswapInput => Self::ZswapInput,
             LedgerEventAttributes::ZswapOutput => Self::ZswapOutput,
+            LedgerEventAttributes::ParamChange => Self::ParamChange,
+            LedgerEventAttributes::DustInitialUtxo { .. } => Self::DustInitialUtxo,
+            LedgerEventAttributes::DustGenerationDtimeUpdate => Self::DustGenerationDtimeUpdate,
+            LedgerEventAttributes::DustSpendProcessed => Self::DustSpendProcessed,
         }
     }
 }
@@ -229,7 +237,8 @@ async fn save_block(
             protocol_version,
             parent_hash,
             author,
-            timestamp
+            timestamp,
+            ledger_parameters
         )
     "};
 
@@ -242,6 +251,7 @@ async fn save_block(
                 parent_hash,
                 author,
                 timestamp,
+                ledger_parameters,
                 ..
             } = block;
 
@@ -250,7 +260,8 @@ async fn save_block(
                 .push_bind(protocol_version.0 as i64)
                 .push_bind(parent_hash.as_ref())
                 .push_bind(author.as_ref().map(|a| a.as_ref()))
-                .push_bind(*timestamp as i64);
+                .push_bind(*timestamp as i64)
+                .push_bind(ledger_parameters.as_ref());
         })
         .push(" RETURNING id")
         .build_query_as::<(i64,)>()
@@ -258,7 +269,8 @@ async fn save_block(
         .map_ok(|(id,)| id)
         .await?;
 
-    save_transactions(transactions, block_id, tx).await
+    let max_transaction_id = save_transactions(transactions, block_id, tx).await?;
+    Ok(max_transaction_id)
 }
 
 #[trace(properties = { "block_id": "{block_id}" })]
@@ -469,9 +481,11 @@ async fn save_unshielded_utxos(
                     token_type,
                     value,
                     output_index,
-                    intent_hash
+                    intent_hash,
+                    initial_nonce,
+                    registered_for_dust_generation
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 ON CONFLICT (intent_hash, output_index)
                 DO UPDATE SET spending_transaction_id = $2
                 WHERE unshielded_utxos.spending_transaction_id IS NULL
@@ -483,6 +497,8 @@ async fn save_unshielded_utxos(
                 value,
                 intent_hash,
                 output_index,
+                initial_nonce,
+                registered_for_dust_generation,
             } = utxo;
 
             sqlx::query(query)
@@ -493,6 +509,8 @@ async fn save_unshielded_utxos(
                 .bind(U128BeBytes::from(value))
                 .bind(output_index as i32)
                 .bind(intent_hash.as_ref())
+                .bind(initial_nonce.as_ref())
+                .bind(registered_for_dust_generation)
                 .execute(&mut **tx)
                 .await?;
         }
@@ -504,7 +522,9 @@ async fn save_unshielded_utxos(
                 token_type,
                 value,
                 output_index,
-                intent_hash
+                intent_hash,
+                initial_nonce,
+                registered_for_dust_generation
             )
         "};
 
@@ -516,14 +536,18 @@ async fn save_unshielded_utxos(
                     value,
                     intent_hash,
                     output_index,
+                    initial_nonce,
+                    registered_for_dust_generation,
                 } = utxo;
 
                 q.push_bind(transaction_id)
                     .push_bind(owner.as_ref())
                     .push_bind(token_type.as_ref())
-                    .push_bind(U128BeBytes::from(*value))
+                    .push_bind(U128BeBytes::from(value))
                     .push_bind(*output_index as i32)
-                    .push_bind(intent_hash.as_ref());
+                    .push_bind(intent_hash.as_ref())
+                    .push_bind(initial_nonce.as_ref())
+                    .push_bind(registered_for_dust_generation);
             })
             .build()
             .execute(&mut **tx)

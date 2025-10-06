@@ -24,7 +24,7 @@ export type BlockResponse = GraphQLResponse<{ block: Block }>;
 
 export type TransactionResponse = GraphQLResponse<{ transactions: Transaction[] }>;
 
-export type UnshieldedUtxoResponse = GraphQLResponse<{ unshieldedUtxos: UnshieldedUtxo[] }>;
+export type ContractActionResponse = GraphQLResponse<{ contractAction: ContractAction }>;
 
 export type BlockOffset = {
   hash?: string;
@@ -34,6 +34,11 @@ export type BlockOffset = {
 export type TransactionOffset = {
   hash?: string;
   identifier?: string;
+};
+
+export type ContractActionOffset = {
+  blockOffset?: BlockOffset;
+  transactionOffset?: TransactionOffset;
 };
 
 export type UnshieldedAddress = string;
@@ -78,18 +83,37 @@ export interface TransactionFees {
   estimatedFees: string;
 }
 
+// Base Transaction interface (common to both RegularTransaction and SystemTransaction)
 export interface Transaction {
-  hash: string;
-  id: number;
-  identifiers?: string[];
-  block?: Block;
-  raw?: string;
+  __typename: 'RegularTransaction' | 'SystemTransaction';
+  id?: number;
+  hash?: string;
   protocolVersion?: number;
+  raw?: string;
+  block?: Block;
   transactionResult?: TransactionResult;
   fees?: TransactionFees;
   merkleTreeRoot?: string;
+  contractActions?: ContractAction[];
   unshieldedCreatedOutputs?: UnshieldedUtxo[];
   unshieldedSpentOutputs?: UnshieldedUtxo[];
+  zswapLedgerEvents?: ZswapLedgerEvent[];
+  dustLedgerEvents?: DustLedgerEvent[];
+}
+
+// RegularTransaction interface (includes additional fields)
+export interface RegularTransaction extends Transaction {
+  merkleTreeRoot?: string;
+  identifiers?: string[];
+  startIndex?: number;
+  endIndex?: number;
+  fees?: TransactionFees;
+  transactionResult?: TransactionResult;
+}
+
+// SystemTransaction interface (only base fields)
+export interface SystemTransaction extends Transaction {
+  // No additional fields beyond the base Transaction interface
 }
 
 export type ShieldedTransactionsEvent = ViewingUpdate | ShieldedTransactionsProgress;
@@ -112,16 +136,16 @@ export interface MerkleTreeCollapsedUpdate {
 
 export interface RelevantTransaction {
   __typename: 'RelevantTransaction';
-  transaction: Transaction;
+  transaction: RegularTransaction;
   start: number;
   end: number;
 }
 
 export interface ShieldedTransactionsProgress {
   __typename: 'ShieldedTransactionsProgress';
-  highestIndex: number;
-  highestRelevantIndex: number;
-  highestRelevantWalletIndex: number;
+  highestEndIndex: number;
+  highestCheckedEndIndex: number;
+  highestRelevantEndIndex: number;
 }
 
 export type UnshieldedTransactionEvent = UnshieldedTransaction | UnshieldedTransactionsProgress;
@@ -138,4 +162,51 @@ export interface UnshieldedTransaction {
   spentUtxos: UnshieldedUtxo[];
 }
 
+export type ContractAction = ContractDeploy | ContractCall | ContractUpdate;
+
+export interface ContractDeploy {
+  __typename: 'ContractDeploy';
+  address: string;
+  state: string;
+  chainState: string;
+  transaction: Transaction;
+  unshieldedBalances: ContractBalance[];
+}
+
+export interface ContractCall {
+  __typename: 'ContractCall';
+  address: string;
+  state: string;
+  chainState: string;
+  transaction: Transaction;
+  entryPoint: string;
+  deploy: ContractDeploy;
+  unshieldedBalances: ContractBalance[];
+}
+
+export interface ContractUpdate {
+  __typename: 'ContractUpdate';
+  address: string;
+  state: string;
+  chainState: string;
+  transaction: Transaction;
+  unshieldedBalances: ContractBalance[];
+}
+
+export interface ContractBalance {
+  tokenType: string;
+  amount: string;
+}
+
+export interface ZswapLedgerEvent {
+  id: number;
+  raw: string;
+  maxId: number;
+}
+
+export interface DustLedgerEvent {
+  id: number;
+  raw: string;
+  maxId: number;
+}
 export type ViewingKey = string & { __brand: 'ViewingKey' };

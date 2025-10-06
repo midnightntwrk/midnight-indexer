@@ -1,3 +1,5 @@
+import log from '@utils/logging/logger';
+
 export enum EnvironmentName {
   UNDEPLOYED = 'undeployed',
   QANET = 'qanet',
@@ -25,6 +27,15 @@ const indexerHostByEnvName: Record<string, string> = {
   testnet02: 'indexer.testnet-02.midnight.network',
 };
 
+const nodeHostByEnvName: Record<string, string> = {
+  undeployed: 'localhost:9944',
+  qanet: 'rpc.qanet.dev.midnight.network',
+  nodedev01: 'rpc.node-dev-01.dev.midnight.network',
+  devnet: 'rpc.devnet.midnight.network',
+  testnet: 'rpc.testnet.midnight.network',
+  testnet02: 'rpc.testnet-02.midnight.network',
+};
+
 export class Environment {
   private readonly envName: string;
   private readonly isUndeployed: boolean;
@@ -32,7 +43,8 @@ export class Environment {
   private readonly httpProtocol: string;
   private readonly indexerHost: string;
   private readonly networkId: string;
-
+  private readonly nodeHost: string;
+  private readonly nodeTag: string;
   constructor() {
     // Setting up environment with error checking
     const rawEnv = process.env.TARGET_ENV;
@@ -60,6 +72,9 @@ export class Environment {
     // checked envName
     this.networkId = networkIdByEnvName[this.envName];
     this.indexerHost = indexerHostByEnvName[this.envName];
+    this.nodeHost = nodeHostByEnvName[this.envName];
+    this.nodeTag = process.env.NODE_TAG || '0.16.3-72d4ac2e';
+    log.debug(`Using NODE_TAG: ${this.nodeTag}`);
   }
 
   isUndeployedEnv(): boolean {
@@ -84,6 +99,14 @@ export class Environment {
 
   getIndexerWebsocketBaseURL(): string {
     return `${this.wsProtocol}://${this.indexerHost}`;
+  }
+
+  getNodeWebsocketBaseURL(): string {
+    return `${this.wsProtocol}://${this.nodeHost}`;
+  }
+
+  getNodeVersion(): string {
+    return this.nodeTag;
   }
 }
 

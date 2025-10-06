@@ -24,7 +24,7 @@ anyhow                       = { version = "1.0" }
 assert_matches               = { version = "1.5" }
 async-graphql                = { version = "7.0" }
 async-graphql-axum           = { version = "7.0" }
-async-nats                   = { version = "0.42" }
+async-nats                   = { version = "0.43" }
 async-stream                 = { version = "0.3" }
 axum                         = { version = "0.8" }
 bech32                       = { version = "0.11" }
@@ -51,26 +51,25 @@ log                          = { version = "0.4" }
 logforth                     = { version = "0.27" }
 metrics                      = { version = "0.24" }
 metrics-exporter-prometheus  = { version = "0.17", default-features = false }
-midnight-base-crypto_v6      = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-base-crypto", tag = "ledger-6.1.0-alpha.2" }
-midnight-coin-structure_v6   = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-coin-structure", tag = "ledger-6.1.0-alpha.2" }
-midnight-ledger_v6           = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-ledger", tag = "ledger-6.1.0-alpha.2" }
-midnight-onchain-runtime_v6  = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-onchain-runtime", tag = "ledger-6.1.0-alpha.2" }
-midnight-serialize_v6        = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-serialize", tag = "ledger-6.1.0-alpha.2" }
-midnight-storage_v6          = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-storage", tag = "ledger-6.1.0-alpha.2" }
-midnight-transient-crypto_v6 = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-transient-crypto", tag = "ledger-6.1.0-alpha.2" }
-midnight-zswap_v6            = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-zswap", tag = "ledger-6.1.0-alpha.2" }
+midnight-base-crypto_v6      = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-base-crypto", tag = "ledger-6.1.0-alpha.3" }
+midnight-coin-structure_v6   = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-coin-structure", tag = "ledger-6.1.0-alpha.3" }
+midnight-ledger_v6           = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-ledger", tag = "ledger-6.1.0-alpha.3" }
+midnight-onchain-runtime_v6  = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-onchain-runtime", tag = "ledger-6.1.0-alpha.3" }
+midnight-serialize_v6        = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-serialize", tag = "ledger-6.1.0-alpha.3" }
+midnight-storage_v6          = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-storage", tag = "ledger-6.1.0-alpha.3" }
+midnight-transient-crypto_v6 = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-transient-crypto", tag = "ledger-6.1.0-alpha.3" }
+midnight-zswap_v6            = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-zswap", tag = "ledger-6.1.0-alpha.3" }
 nix                          = { version = "0.30" }
 opentelemetry                = { version = "0.30" }
 opentelemetry-otlp           = { version = "0.30" }
 opentelemetry_sdk            = { version = "0.30" }
 parity-scale-codec           = { version = "3.7" }
 parking_lot                  = { version = "0.12" }
-paste                        = { version = "1.0" }
 reqwest                      = { version = "0.12", default-features = false }
 secrecy                      = { version = "0.10" }
 serde                        = { version = "1.0" }
 serde_json                   = { version = "1.0" }
-serde_with                   = { version = "3.14" }
+serde_with                   = { version = "3.15" }
 sha2                         = { version = "0.10" }
 sqlx                         = { version = "0.8" }
 stream-cancel                = { version = "0.8" }
@@ -81,7 +80,7 @@ testcontainers-modules       = { version = "0.13" }
 thiserror                    = { version = "2.0" }
 tokio                        = { version = "1" }
 tokio-stream                 = { version = "0.1" }
-tokio-tungstenite            = { version = "0.27" }
+tokio-tungstenite            = { version = "0.28" }
 tokio-util                   = { version = "0.7" }
 tower                        = { version = "0.5" }
 tower-http                   = { version = "0.6" }

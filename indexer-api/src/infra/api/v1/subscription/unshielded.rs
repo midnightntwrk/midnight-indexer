@@ -16,7 +16,6 @@ use crate::{
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
         v1::{
-            subscription::get_next_transaction,
             transaction::Transaction,
             unshielded::{UnshieldedAddress, UnshieldedUtxo},
         },
@@ -24,9 +23,9 @@ use crate::{
 };
 use async_graphql::{Context, SimpleObject, Subscription, Union, async_stream::try_stream};
 use derive_more::Debug;
-use fastrace::trace;
+use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt};
-use indexer_common::domain::{NetworkId, RawUnshieldedAddress, Subscriber, UnshieldedUtxoIndexed};
+use indexer_common::domain::{NetworkId, Subscriber, UnshieldedUtxoIndexed};
 use log::{debug, warn};
 use std::{future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
@@ -131,7 +130,7 @@ where
 
 fn make_unshielded_transactions<'a, S, B>(
     cx: &'a Context<'a>,
-    address: RawUnshieldedAddress,
+    address: indexer_common::domain::UnshieldedAddress,
     mut transaction_id: u64,
     trigger: Trigger,
 ) -> impl Stream<Item = ApiResult<UnshieldedTransaction<S>>> + use<'a, S, B>
@@ -152,7 +151,7 @@ where
         debug!(address:?, transaction_id; "streaming events for existing transactions");
 
         let transactions =
-            storage.get_transactions_involving_unshielded(address, transaction_id, BATCH_SIZE);
+            storage.get_transactions_by_unshielded_address(address, transaction_id, BATCH_SIZE);
         let mut transactions = pin!(transactions);
         while let Some(transaction) = get_next_transaction(&mut transactions)
             .await
@@ -181,7 +180,7 @@ where
             .is_some()
         {
             let transactions =
-                storage.get_transactions_involving_unshielded(address, transaction_id, BATCH_SIZE);
+                storage.get_transactions_by_unshielded_address(address, transaction_id, BATCH_SIZE);
             let mut transactions = pin!(transactions);
             while let Some(transaction) =
                 get_next_transaction(&mut transactions)
@@ -213,14 +212,14 @@ where
 async fn make_unshielded_transaction<S>(
     transaction_id: &mut u64,
     storage: &S,
-    address: RawUnshieldedAddress,
+    address: indexer_common::domain::UnshieldedAddress,
     transaction: domain::Transaction,
     network_id: NetworkId,
 ) -> ApiResult<Option<UnshieldedTransaction<S>>>
 where
     S: Storage,
 {
-    *transaction_id = transaction.id;
+    *transaction_id = transaction.id();
     let transaction_id = *transaction_id;
 
     let created = storage
@@ -261,7 +260,7 @@ where
 
 fn progress_updates<'a, S>(
     cx: &'a Context<'a>,
-    address: RawUnshieldedAddress,
+    address: indexer_common::domain::UnshieldedAddress,
 ) -> impl Stream<Item = ApiResult<UnshieldedTransactionsProgress>> + use<'a, S>
 where
     S: Storage,
@@ -271,7 +270,7 @@ where
 }
 
 async fn make_progress_update<S>(
-    address: RawUnshieldedAddress,
+    address: indexer_common::domain::UnshieldedAddress,
     storage: &S,
 ) -> ApiResult<UnshieldedTransactionsProgress>
 where
@@ -288,4 +287,16 @@ where
     Ok(UnshieldedTransactionsProgress {
         highest_transaction_id,
     })
+}
+
+async fn get_next_transaction<E>(
+    transactions: &mut (impl Stream<Item = Result<domain::Transaction, E>> + Unpin),
+) -> Result<Option<domain::Transaction>, E> {
+    transactions
+        .try_next()
+        .in_span(Span::root(
+            "subscription.unshielded-transactions.get-next-transaction",
+            SpanContext::random(),
+        ))
+        .await
 }

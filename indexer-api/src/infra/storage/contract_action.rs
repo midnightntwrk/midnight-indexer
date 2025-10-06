@@ -200,6 +200,7 @@ impl ContractActionStorage for Storage {
             ORDER BY contract_actions.id DESC
             LIMIT 1
         "};
+
         #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
@@ -274,7 +275,7 @@ impl ContractActionStorage for Storage {
     }
 
     #[trace(properties = { "contract_action_id": "{contract_action_id}" })]
-    async fn get_unshielded_balances_by_action_id(
+    async fn get_unshielded_balances_by_contract_action_id(
         &self,
         contract_action_id: u64,
     ) -> Result<Vec<crate::domain::ContractBalance>, sqlx::Error> {

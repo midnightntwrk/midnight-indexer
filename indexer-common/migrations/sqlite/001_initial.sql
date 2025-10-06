@@ -8,7 +8,8 @@ CREATE TABLE blocks (
   protocol_version INTEGER NOT NULL,
   parent_hash BLOB NOT NULL,
   author BLOB,
-  timestamp INTEGER NOT NULL
+  timestamp INTEGER NOT NULL,
+  ledger_parameters BLOB NOT NULL
 );
 --------------------------------------------------------------------------------
 -- transactions
@@ -75,6 +76,8 @@ CREATE TABLE unshielded_utxos (
   value BLOB NOT NULL,
   output_index INTEGER NOT NULL,
   intent_hash BLOB NOT NULL,
+  initial_nonce BLOB NOT NULL,
+  registered_for_dust_generation INTEGER NOT NULL,
   UNIQUE (intent_hash, output_index)
 );
 CREATE INDEX unshielded_creating_idx ON unshielded_utxos (creating_transaction_id);
@@ -86,9 +89,18 @@ CREATE INDEX unshielded_token_type_idx ON unshielded_utxos (token_type);
 --------------------------------------------------------------------------------
 CREATE TABLE ledger_events (
   id INTEGER PRIMARY KEY,
-  transaction_id INTEGER NOT NULL REFERENCES regular_transactions (id),
-  variant TEXT CHECK (variant IN ('ZswapInput', 'ZswapOutput')) NOT NULL,
-  grouping TEXT CHECK (grouping IN ('Zswap')) NOT NULL,
+  transaction_id INTEGER NOT NULL REFERENCES transactions (id),
+  variant TEXT CHECK (
+    variant IN (
+      'ZswapInput',
+      'ZswapOutput',
+      'ParamChange',
+      'DustInitialUtxo',
+      'DustGenerationDtimeUpdate',
+      'DustSpendProcessed'
+    )
+  ) NOT NULL,
+  grouping TEXT CHECK (grouping IN ('Zswap', 'Dust')) NOT NULL,
   raw BYTEA NOT NULL,
   attributes TEXT NOT NULL
 );

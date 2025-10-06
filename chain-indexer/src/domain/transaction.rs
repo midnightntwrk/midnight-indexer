@@ -15,9 +15,9 @@ use crate::domain::{ContractAction, node};
 use indexer_common::domain::{
     ByteArray, LedgerEvent, ProtocolVersion, SerializedTransaction,
     SerializedTransactionIdentifier, SerializedZswapStateRoot, TransactionHash, TransactionResult,
-    UnshieldedUtxo,
+    TransactionVariant, UnshieldedUtxo,
 };
-use sqlx::{FromRow, Type};
+use sqlx::FromRow;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,13 +132,6 @@ impl From<node::SystemTransaction> for SystemTransaction {
             ledger_events: Default::default(),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Type)]
-#[cfg_attr(feature = "cloud", sqlx(type_name = "TRANSACTION_VARIANT"))]
-pub enum TransactionVariant {
-    Regular,
-    System,
 }
 
 /// All serialized transactions from a single block along with metadata needed for ledger state

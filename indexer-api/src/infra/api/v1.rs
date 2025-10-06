@@ -78,13 +78,6 @@ pub enum HexDecodeError {
     Convert(&'static str),
 }
 
-// Needed to derive `Interface` for `ContractAction`. Weird!
-impl From<&HexEncoded> for HexEncoded {
-    fn from(value: &HexEncoded) -> Self {
-        value.to_owned()
-    }
-}
-
 impl TryFrom<String> for HexEncoded {
     type Error = FromHexError;
 

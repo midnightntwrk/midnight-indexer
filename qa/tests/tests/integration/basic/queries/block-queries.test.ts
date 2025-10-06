@@ -20,10 +20,12 @@ import { IndexerHttpClient } from '@utils/indexer/http-client';
 import type {
   Block,
   BlockResponse,
+  RegularTransaction,
   Transaction,
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
 import dataProvider from '@utils/testdata-provider';
+import { TestContext } from 'vitest';
 
 const indexerHttpClient = new IndexerHttpClient();
 
@@ -81,7 +83,12 @@ describe('block queries', () => {
      * @when we send a block query without parameters
      * @then Indexer should return the latest known block
      */
-    test('should return the latest known block', async () => {
+    test('should return the latest known block', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'Latest'],
+        testKey: 'PM-17677',
+      };
+
       log.debug('Requesting latest block from indexer');
       const response: BlockResponse = await indexerHttpClient.getLatestBlock();
 
@@ -99,7 +106,12 @@ describe('block queries', () => {
      * @when we send a block query without parameters
      * @then Indexer should respond with a block according to the requested schema
      */
-    test('should respond with a block according to the requested schema', async () => {
+    test('should respond with a block according to the requested schema', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'Latest', 'SchemaValidation'],
+        testKey: 'PM-17678',
+      };
+
       log.debug('Requesting latest block from indexer');
       const response: BlockResponse = await indexerHttpClient.getLatestBlock();
 
@@ -124,7 +136,12 @@ describe('block queries', () => {
      * @when we send a block query by hash using that hash
      * @then Indexer should respond with the block with that hash
      */
-    test('should return the block with that hash, given that block exists', async () => {
+    test('should return the block with that hash, given that block exists', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHash'],
+        testKey: 'PM-17679',
+      };
+
       // Everything is already checked in getLatestBlockByHash function
       // If the promise resolves, we know that the block exists and the test passes
       const blockByHash = await getLatestBlockByHash();
@@ -136,7 +153,12 @@ describe('block queries', () => {
      * @when we send a block query by hash
      * @then Indexer should respond with a block according to the requested schema
      */
-    test('should return blocks according to the requested schema', async () => {
+    test('should return blocks according to the requested schema', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHash', 'SchemaValidation'],
+        testKey: 'PM-17680',
+      };
+
       const blockByHash = await getLatestBlockByHash();
 
       log.debug('Validating block schema');
@@ -154,7 +176,12 @@ describe('block queries', () => {
      * @when we send a block query by hash using that hash
      * @then Indexer should respond with a null block section
      */
-    test("should return a null block, given a block with that hash doesn't exist", async () => {
+    test("should return a null block, given a block with that hash doesn't exist", async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHash', 'Negative'],
+        testKey: 'PM-17681',
+      };
+
       const allZeroHash = '0000000000000000000000000000000000000000000000000000000000000000';
       log.debug(`Requesting a block with hash ${allZeroHash}`);
 
@@ -172,7 +199,12 @@ describe('block queries', () => {
      * @when we send a block query by hash using them
      * @then Indexer should respond with an error
      */
-    test('should return an error, when the hash is invalid (malformed)', async () => {
+    test('should return an error, when the hash is invalid (malformed)', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHash', 'Negative'],
+        testKey: 'PM-17683',
+      };
+
       const fabricatedMalformedHashes = dataProvider.getFabricatedMalformedHashes();
 
       for (const targetHash of fabricatedMalformedHashes) {
@@ -193,7 +225,12 @@ describe('block queries', () => {
      * @when we send a block query by height using that height
      * @then Indexer should respond with the block with that height
      */
-    test('should return the block with that height, given a valid height', async () => {
+    test('should return the block with that height, given a valid height', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight'],
+        testKey: 'PM-17339',
+      };
+
       // Everything is already checked in getLatestBlockByHeight function
       // If the promise resolves, we know that the block exists and the test passes
       const blockByHeight = await getLatestBlockByHeight();
@@ -205,7 +242,12 @@ describe('block queries', () => {
      * @when we send a block query by height
      * @then Indexer should respond with a block according to the requested schema
      */
-    test('should return a blocks according to the requested schema', async () => {
+    test('should return a blocks according to the requested schema', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'SchemaValidation'],
+        testKey: 'PM-17684',
+      };
+
       // Everything is already checked in getLatestBlockByHeight function
       // If the promise resolves, we know that the block exists and the test passes
       const blockByHeight = await getLatestBlockByHeight();
@@ -225,7 +267,12 @@ describe('block queries', () => {
      * @when we send a block query by height using that height
      * @then Indexer should respond with the genesis block
      */
-    test('should return the genesis block, given height=0 is requested', async () => {
+    test('should return the genesis block, given height=0 is requested', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis'],
+        testKey: 'PM-17685',
+      };
+
       log.debug(`Requesting genesis block (height = 0)`);
 
       const queryResponse = await indexerHttpClient.getBlockByOffset({ height: 0 });
@@ -247,7 +294,12 @@ describe('block queries', () => {
      * @when we send a block query by height using that height
      * @then Indexer should respond with an empty block
      */
-    test('should return an empty body answer, given that block height request is the maximum available height', async () => {
+    test('should return an empty body answer, given that block height request is the maximum available height', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Negative'],
+        testKey: 'PM-17686',
+      };
+
       const maxAllowedBlockHeight = 2 ** 32 - 1; // Note this is the maximum allowed height and will take 800+ years to reach
       log.debug(`Requesting block with max height = ${maxAllowedBlockHeight}`);
 
@@ -267,7 +319,12 @@ describe('block queries', () => {
      * @when we send a block query by height using them
      * @then Indexer should respond with an error
      */
-    test('should return an error, given an invalid height', async () => {
+    test('should return an error, given an invalid height', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Negative'],
+        testKey: 'PM-17687',
+      };
+
       const invalidHeights = dataProvider.getFabricatedMalformedHeights();
 
       for (const targetHeight of invalidHeights) {
@@ -291,7 +348,12 @@ describe('block queries', () => {
      * @when we send a block query with both parameters
      * @then Indexer should respond with an error
      */
-    test('should return an error, as only one parameter at a time can be used', async () => {
+    test('should return an error, as only one parameter at a time can be used', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeightAndHash', 'Negative'],
+        testKey: 'PM-17688',
+      };
+
       // Here we cover the 4 combinations of valid and invalid parameters (hash and height)
       const hashes = [dataProvider.getKnownBlockHash(), 'invalid-hash'];
       const heights = [1, 2 ** 32];
@@ -308,17 +370,17 @@ describe('block queries', () => {
 });
 
 /**
- * Extracts and returns the single transaction from the genesis block.
+ * Extracts and returns all the transactions from the genesis block.
  *
- * @param block - The genesis block object to extract the transaction from.
- * @returns The single Transaction object contained in the genesis block.
+ * @param block - The genesis block object to extract the transactions from.
+ * @returns The array of Transaction objects contained in the genesis block.
  */
-async function extractGenesisTransaction(block: Block): Promise<Transaction> {
+async function extractGenesisTransactions(block: Block): Promise<Transaction[]> {
   expect(block.transactions).toBeDefined();
   expect(block.transactions).not.toBeNull();
-  expect(block.transactions).toHaveLength(1);
+  expect(block.transactions.length).toBeGreaterThanOrEqual(1);
 
-  return block.transactions[0] as Transaction;
+  return block.transactions as Transaction[];
 }
 
 describe(`genesis block`, () => {
@@ -336,16 +398,34 @@ describe(`genesis block`, () => {
 
   describe(`a block query to the genesis block`, async () => {
     /**
-     * Genesis block contains one transaction with pre-fund wallet utxos
+     * Genesis block contains transactions with pre-fund wallet utxos
      *
      * @given the genesis block is queried
      * @when we inspect its transactions
-     * @then it should contain one transaction with pre-fund wallet utxos
+     * @then it should contain transactions with pre-fund wallet utxos
      */
-    test('should contain one transaction with pre-fund wallet utxos', async () => {
-      const genesisTransaction = await extractGenesisTransaction(genesisBlock);
-      expect(genesisTransaction.unshieldedCreatedOutputs).toBeDefined();
-      expect(genesisTransaction.unshieldedCreatedOutputs?.length).toBeGreaterThanOrEqual(1);
+    test('should contain transactions with pre-fund wallet utxos', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets'],
+        testKey: 'PM-17689',
+      };
+
+      const genesisTransactions = await extractGenesisTransactions(genesisBlock);
+      expect(genesisTransactions).toBeDefined();
+      expect(genesisTransactions.length).toBeGreaterThanOrEqual(1);
+
+      for (const transaction of genesisTransactions) {
+        if (transaction.__typename === 'RegularTransaction') {
+          const regularTransaction = transaction as RegularTransaction;
+          if (regularTransaction.identifiers?.length === 1) {
+            expect(regularTransaction.unshieldedCreatedOutputs).toBeDefined();
+            expect(regularTransaction.unshieldedCreatedOutputs?.length).toBeGreaterThanOrEqual(1);
+          } else {
+            expect(regularTransaction.raw).toBeDefined();
+            expect(regularTransaction.raw).not.toBeNull();
+          }
+        }
+      }
     });
 
     /**
@@ -355,40 +435,64 @@ describe(`genesis block`, () => {
      * @when we inspect the utxos in its transaction
      * @then there should be utxos related to exactly 4 pre-fund wallets
      */
-    test('should contain utxos related to exactly 4 pre-fund wallets', async () => {
-      const expectedPreFundWallets = 4;
-      const genesisTransaction = await extractGenesisTransaction(genesisBlock);
+    test('should contain utxos related to exactly 4 pre-fund wallets', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets'],
+        testKey: 'PM-17690',
+      };
 
-      // Loop through all the utxos in the genesis transaction and gather all
+      const expectedPreFundWallets = 4;
+      const genesisTransactions = await extractGenesisTransactions(genesisBlock);
+
+      // Loop through all the utxos in the transactions that have them and gather all
       // the pre-fund wallet addresses
       const preFundWallets: Set<string> = new Set();
-      for (const utxo of genesisTransaction.unshieldedCreatedOutputs!) {
-        preFundWallets.add(utxo.owner);
-        log.debug(`pre-fund wallet found: ${utxo.owner}`);
+      for (const transaction of genesisTransactions) {
+        if (transaction.__typename === 'RegularTransaction') {
+          const regularTransaction = transaction as RegularTransaction;
+          const utxos = regularTransaction.unshieldedCreatedOutputs;
+          if (utxos!.length > 0) {
+            for (const utxo of utxos!) {
+              preFundWallets.add(utxo.owner);
+              log.debug(`pre-fund wallet found: ${utxo.owner}`);
+            }
+          }
+        }
       }
 
       expect(preFundWallets).toHaveLength(expectedPreFundWallets);
     });
 
     /**
-     * Genesis block contains utxos with exactly 3 different tokens
+     * Genesis block contains utxos with exactly 1 token type
      *
      * @given the genesis block is queried
      * @when we inspect the utxos in its transaction
-     * @then there should be utxos with exactly 3 different tokens
+     * @then there should be utxos with exactly 1 token type
      */
-    test('should contain utxos with exactly 3 different tokens', async () => {
-      const expectedTokenTypes = 3;
-      const genesisTransaction = await extractGenesisTransaction(genesisBlock);
-      expect(genesisTransaction.unshieldedCreatedOutputs).toBeDefined();
-      expect(genesisTransaction.unshieldedCreatedOutputs).not.toBeNull();
+    test('should contain utxos with exactly 1 token', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets'],
+        testKey: 'PM-17691',
+      };
 
-      // Loop through all the utxos in the genesis transaction and gather all
-      // available token types
+      const expectedTokenTypes = 1;
+      const genesisTransactions = await extractGenesisTransactions(genesisBlock);
+
+      // Loop through all the utxos in the transactions that have them and gather all
+      // the token types
       const tokenTypes: Set<string> = new Set();
-      for (const utxo of genesisTransaction.unshieldedCreatedOutputs!) {
-        tokenTypes.add(utxo.tokenType);
-        log.debug(`tokenType found: ${utxo.tokenType}`);
+      for (const transaction of genesisTransactions) {
+        if (transaction.__typename === 'RegularTransaction') {
+          const regularTransaction = transaction as RegularTransaction;
+          const utxos = regularTransaction.unshieldedCreatedOutputs;
+          if (utxos!.length > 0) {
+            for (const utxo of utxos!) {
+              tokenTypes.add(utxo.tokenType);
+              log.debug(`tokenType found: ${utxo.tokenType}`);
+            }
+          }
+        }
       }
 
       expect(tokenTypes).toHaveLength(expectedTokenTypes);
@@ -402,21 +506,41 @@ describe(`genesis block`, () => {
      * @then the utxos should be sorted by outputIndex in ascending order
      */
     // https://shielded.atlassian.net/browse/PM-17665
-    test('should contain utxos sorted by outputIndex in ascending order', async () => {
-      const genesisTransaction = await extractGenesisTransaction(genesisBlock);
+    test('should contain utxos sorted by outputIndex in ascending order', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets'],
+        testKey: 'PM-17692',
+      };
 
-      const createdOutputs = genesisTransaction.unshieldedCreatedOutputs;
-      expect(createdOutputs).toBeDefined();
-      expect(createdOutputs).not.toBeNull();
-      expect(createdOutputs?.length).toBeGreaterThanOrEqual(1);
-      const utxos = createdOutputs as UnshieldedUtxo[];
+      const genesisTransactions = await extractGenesisTransactions(genesisBlock);
+
+      // Loop through all the utxos in the transactions that have them and gather all
+      // the output indexes
+      const outputIndexes: Set<number> = new Set();
+      for (const transaction of genesisTransactions) {
+        if (transaction.__typename === 'RegularTransaction') {
+          const regularTransaction = transaction as RegularTransaction;
+          const utxos = regularTransaction.unshieldedCreatedOutputs;
+          if (utxos!.length > 0) {
+            for (const utxo of utxos!) {
+              outputIndexes.add(utxo.outputIndex);
+              log.debug(`outputIndex found: ${utxo.outputIndex}`);
+            }
+          }
+        }
+      }
+
+      expect(outputIndexes).toBeDefined();
+      expect(outputIndexes).not.toBeNull();
+      expect(outputIndexes.size).toBeGreaterThanOrEqual(1);
+      const utxos = Array.from(outputIndexes) as number[];
 
       // Loop through all the utxos in the genesis transaction and check whether the
       // they are sorted by outputIndex in ascending order
-      let previousOutputIndex = utxos[0].outputIndex;
+      let previousOutputIndex = utxos[0];
       let currentOutputIndex: number;
       for (let i = 1; i < utxos.length; i++) {
-        currentOutputIndex = utxos[i].outputIndex;
+        currentOutputIndex = utxos[i];
 
         // NOTE: We don't need to check that outputIndex values are strictly sequential (e.g., 0, 1, 2, ... N);
         // we only need to verify that they are sorted in ascending order.

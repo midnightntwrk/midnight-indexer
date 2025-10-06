@@ -13,27 +13,28 @@
 
 mod block;
 mod contract_action;
+mod dust_ledger_events;
 mod shielded;
 mod unshielded;
 mod zswap_ledger_events;
 
 use crate::{
-    domain::{self, storage::Storage},
+    domain::storage::Storage,
     infra::api::v1::subscription::{
         block::BlockSubscription, contract_action::ContractActionSubscription,
+        dust_ledger_events::DustLedgerEventsSubscription,
         shielded::ShieldedTransactionsSubscription, unshielded::UnshieldedTransactionsSubscription,
         zswap_ledger_events::ZswapLedgerEventsSubscription,
     },
 };
 use async_graphql::MergedSubscription;
-use fastrace::{Span, future::FutureExt, prelude::SpanContext};
-use futures::{Stream, stream::TryStreamExt};
 use indexer_common::domain::{LedgerStateStorage, Subscriber};
 
 #[derive(MergedSubscription)]
 pub struct Subscription<S, B, Z>(
     BlockSubscription<S, B>,
     ContractActionSubscription<S, B>,
+    DustLedgerEventsSubscription<S, B>,
     ShieldedTransactionsSubscription<S, B, Z>,
     UnshieldedTransactionsSubscription<S, B>,
     ZswapLedgerEventsSubscription<S, B>,
@@ -53,21 +54,10 @@ where
         Subscription(
             BlockSubscription::default(),
             ContractActionSubscription::default(),
+            DustLedgerEventsSubscription::default(),
             ShieldedTransactionsSubscription::default(),
             UnshieldedTransactionsSubscription::default(),
             ZswapLedgerEventsSubscription::default(),
         )
     }
-}
-
-async fn get_next_transaction<E>(
-    transactions: &mut (impl Stream<Item = Result<domain::Transaction, E>> + Unpin),
-) -> Result<Option<domain::Transaction>, E> {
-    transactions
-        .try_next()
-        .in_span(Span::root(
-            "subscription.transactions.get-next-transaction",
-            SpanContext::random(),
-        ))
-        .await
 }

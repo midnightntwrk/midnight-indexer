@@ -32,10 +32,11 @@ use std::marker::PhantomData;
 #[derive(Debug, Clone, Interface)]
 #[allow(clippy::duplicated_attributes)]
 #[graphql(
-    field(name = "address", ty = "HexEncoded"),
-    field(name = "state", ty = "HexEncoded"),
-    field(name = "chain_state", ty = "HexEncoded"),
-    field(name = "transaction", ty = "Transaction<S>")
+    field(name = "address", ty = "&HexEncoded"),
+    field(name = "state", ty = "&HexEncoded"),
+    field(name = "chain_state", ty = "&HexEncoded"),
+    field(name = "transaction", ty = "ApiResult<Transaction<S>>"),
+    field(name = "unshielded_balances", ty = "ApiResult<Vec<ContractBalance>>")
 )]
 pub enum ContractAction<S: Storage> {
     /// A contract deployment.
@@ -76,7 +77,7 @@ where
             ContractAttributes::Call { entry_point } => ContractAction::Call(ContractCall {
                 address: address.hex_encode(),
                 state: state.hex_encode(),
-                entry_point: entry_point.hex_encode(),
+                entry_point,
                 chain_state: chain_state.hex_encode(),
                 transaction_id,
                 contract_action_id: id,
@@ -127,16 +128,16 @@ impl<S> ContractDeploy<S>
 where
     S: Storage,
 {
+    /// Transaction for this contract deploy.
     async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
     }
 
     /// Unshielded token balances held by this contract.
-    /// According to the architecture, deployed contracts must have zero balance.
     async fn unshielded_balances(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractBalance>> {
         let storage = cx.get_storage::<S>();
         let balances = storage
-            .get_unshielded_balances_by_action_id(self.contract_action_id)
+            .get_unshielded_balances_by_contract_action_id(self.contract_action_id)
             .await
             .map_err_into_server_error(|| {
                 format!(
@@ -165,8 +166,8 @@ where
     /// The hex-encoded serialized contract-specific zswap state.
     chain_state: HexEncoded,
 
-    /// The hex-encoded serialized entry point.
-    entry_point: HexEncoded,
+    /// The entry point.
+    entry_point: String,
 
     #[graphql(skip)]
     transaction_id: u64,
@@ -186,10 +187,12 @@ impl<S> ContractCall<S>
 where
     S: Storage,
 {
+    /// Transaction for this contract call.
     async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
     }
 
+    /// Contract deploy for this contract call.
     async fn deploy(&self, cx: &Context<'_>) -> ApiResult<ContractDeploy<S>> {
         let action = cx
             .get_storage::<S>()
@@ -212,7 +215,7 @@ where
     async fn unshielded_balances(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractBalance>> {
         let storage = cx.get_storage::<S>();
         let balances = storage
-            .get_unshielded_balances_by_action_id(self.contract_action_id)
+            .get_unshielded_balances_by_contract_action_id(self.contract_action_id)
             .await
             .map_err_into_server_error(|| {
                 format!(
@@ -256,6 +259,7 @@ impl<S> ContractUpdate<S>
 where
     S: Storage,
 {
+    /// Transaction for this contract update.
     async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
     }
@@ -264,7 +268,7 @@ where
     async fn unshielded_balances(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractBalance>> {
         let storage = cx.get_storage::<S>();
         let balances = storage
-            .get_unshielded_balances_by_action_id(self.contract_action_id)
+            .get_unshielded_balances_by_contract_action_id(self.contract_action_id)
             .await
             .map_err_into_server_error(|| {
                 format!(
@@ -295,8 +299,8 @@ where
         .get_storage::<S>()
         .get_transaction_by_id(id)
         .await
-        .map_err_into_server_error(|| format!("get transaction by ID {id})"))?
-        .ok_or_server_error(|| format!("transaction with ID {id} not found"))?;
+        .map_err_into_server_error(|| format!("get transaction by id {id})"))?
+        .ok_or_server_error(|| format!("transaction with id {id} not found"))?;
 
     Ok(transaction.into())
 }

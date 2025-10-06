@@ -2,8 +2,15 @@
 -- types
 --------------------------------------------------------------------------------
 CREATE TYPE CONTRACT_ACTION_VARIANT AS ENUM('Deploy', 'Call', 'Update');
-CREATE TYPE LEDGER_EVENT_GROUPING AS ENUM('Zswap');
-CREATE TYPE LEDGER_EVENT_VARIANT AS ENUM('ZswapInput', 'ZswapOutput');
+CREATE TYPE LEDGER_EVENT_GROUPING AS ENUM('Zswap', 'Dust');
+CREATE TYPE LEDGER_EVENT_VARIANT AS ENUM(
+  'ZswapInput',
+  'ZswapOutput',
+  'ParamChange',
+  'DustInitialUtxo',
+  'DustGenerationDtimeUpdate',
+  'DustSpendProcessed'
+);
 CREATE TYPE TRANSACTION_VARIANT AS ENUM('Regular', 'System');
 --------------------------------------------------------------------------------
 -- blocks
@@ -15,7 +22,8 @@ CREATE TABLE blocks (
   protocol_version BIGINT NOT NULL,
   parent_hash BYTEA NOT NULL,
   author BYTEA,
-  timestamp BIGINT NOT NULL
+  timestamp BIGINT NOT NULL,
+  ledger_parameters BYTEA NOT NULL
 );
 --------------------------------------------------------------------------------
 -- transactions
@@ -74,11 +82,15 @@ CREATE TABLE unshielded_utxos (
   value BYTEA NOT NULL,
   output_index BIGINT NOT NULL,
   intent_hash BYTEA NOT NULL,
+  initial_nonce BYTEA NOT NULL,
+  registered_for_dust_generation BOOLEAN NOT NULL,
   UNIQUE (intent_hash, output_index)
 );
 CREATE INDEX ON unshielded_utxos (creating_transaction_id);
 CREATE INDEX ON unshielded_utxos (spending_transaction_id);
-CREATE INDEX ON unshielded_utxos (OWNER);
+CREATE INDEX ON unshielded_utxos (owner);
+CREATE INDEX ON unshielded_utxos (creating_transaction_id, owner);
+CREATE INDEX ON unshielded_utxos (spending_transaction_id, owner);
 CREATE INDEX ON unshielded_utxos (token_type);
 --------------------------------------------------------------------------------
 -- ledger_events
