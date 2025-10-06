@@ -12,10 +12,10 @@
 // limitations under the License.
 
 use crate::domain::{
-    ApplyRegularTransactionResult, ByteArray, ByteVec, IntentHash, LedgerEvent, NetworkId, Nonce,
-    PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType, SerializedContractAddress,
+    ApplyRegularTransactionResult, ByteArray, ByteVec, DustOutput, IntentHash, LedgerEvent,
+    NetworkId, Nonce, PROTOCOL_VERSION_000_017_000, ProtocolVersion, SerializedContractAddress,
     SerializedLedgerParameters, SerializedLedgerState, SerializedTransaction, SerializedZswapState,
-    SerializedZswapStateRoot, TransactionResult, UnshieldedUtxo,
+    SerializedZswapStateRoot, TokenType, TransactionResult, UnshieldedUtxo,
     dust::{
         DustCommitment, DustGenerationInfo, DustMerklePathEntry, DustNullifier, QualifiedDustOutput,
     },
@@ -29,7 +29,7 @@ use midnight_base_crypto_v6::{
     time::Timestamp as TimestampV6,
 };
 use midnight_coin_structure_v6::{
-    coin::{Nonce as NonceV6, UserAddress as UserAddressV6},
+    coin::{NIGHT as NIGHTV6, UserAddress as UserAddressV6},
     contract::ContractAddress as ContractAddressV6,
 };
 use midnight_ledger_v6::{
@@ -40,6 +40,7 @@ use midnight_ledger_v6::{
     },
     structure::{
         LedgerParameters as LedgerParametersV6, LedgerState as LedgerStateV6,
+        OutputInstructionUnshielded as OutputInstructionUnshieldedV6,
         SystemTransaction as LedgerSystemTransactionV6,
     },
     verify::WellFormedStrictness as WellFormedStrictnessV6,
@@ -54,8 +55,9 @@ use midnight_transient_crypto_v6::merkle_tree::{
     MerkleTreeDigest as MerkleTreeDigestV6,
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
-use sha2::{Digest, Sha256};
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
+
+const OUTPUT_INDEX_ZERO: u32 = 0;
 
 static STRICTNESS_V6: LazyLock<WellFormedStrictnessV6> = LazyLock::new(|| {
     let mut strictness = WellFormedStrictnessV6::default();
@@ -87,7 +89,7 @@ impl LedgerState {
         ledger_state: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_017_000) {
             let ledger_state = tagged_deserialize_v6(&mut ledger_state.as_ref())
                 .map_err(|error| Error::Io("cannot deserialize LedgerStateV6", error))?;
             Ok(Self::V6 {
@@ -317,7 +319,7 @@ impl LedgerParameters {
     pub fn serialize(&self) -> Result<SerializedLedgerParameters, Error> {
         match self {
             Self::V6(parameters) => parameters
-                .serialize_v6()
+                .tagged_serialize_v6()
                 .map_err(|error| Error::Io("cannot serialize SerializedLedgerParametersV6", error)),
         }
     }
@@ -330,13 +332,13 @@ pub enum ZswapStateRoot {
 }
 
 impl ZswapStateRoot {
-    /// Deserialize the given serialized zswap state root using the given protocol version.
+    /// Untagged deserialize the given serialized zswap state root using the given protocol version.
     #[trace(properties = { "protocol_version": "{protocol_version}" })]
     pub fn deserialize(
         zswap_state_root: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_017_000) {
             let digest = MerkleTreeDigestV6::deserialize(&mut zswap_state_root.as_ref(), 0)
                 .map_err(|error| Error::Io("cannot deserialize MerkleTreeDigestV6", error))?;
             Ok(Self::V6(digest))
@@ -492,6 +494,12 @@ fn make_unshielded_utxos_v6(
     transaction_result: &TransactionResult,
     ledger_state: &LedgerStateV6<DefaultDBV6>,
 ) -> (Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>) {
+    // Skip UTXO creation entirely for failed transactions, because no state changes occurred on the
+    // ledger.
+    if matches!(transaction_result, TransactionResult::Failure) {
+        return (vec![], vec![]);
+    }
+
     match ledger_transaction {
         TransactionV6::Standard(transaction) => {
             let successful_segments = match &transaction_result {
@@ -541,23 +549,29 @@ fn make_unshielded_utxos_v6(
             (outputs, inputs)
         }
 
+        // ClaimRewards creates a single unshielded UTXO for the claimed amount.
         TransactionV6::ClaimRewards(claim) => {
-            // ClaimRewards creates a single unshielded UTXO for the claimed amount.
-            let owner = UserAddressV6::from(claim.owner.clone());
-            let intent_hash =
-                compute_claim_rewards_intent_hash_v6(&owner, claim.value, &claim.nonce);
-            let output_index = 0;
-
-            let initial_nonce = make_initial_nonce_v6(output_index, intent_hash);
+            let owner = UserAddressV6::from(claim.owner);
+            let intent_hash = {
+                // ClaimRewards don't have intents, but UTXOs need an intent hash. We compute this
+                // hash the same way that the ledger does internally.
+                let output = OutputInstructionUnshieldedV6 {
+                    amount: claim.value,
+                    target_address: owner,
+                    nonce: claim.nonce,
+                };
+                ByteArray(output.mk_intent_hash(NIGHTV6).0.0)
+            };
+            let initial_nonce = make_initial_nonce_v6(OUTPUT_INDEX_ZERO, intent_hash);
             let registered_for_dust_generation =
-                registered_for_dust_generation_v6(output_index, intent_hash, ledger_state);
+                registered_for_dust_generation_v6(OUTPUT_INDEX_ZERO, intent_hash, ledger_state);
 
             let utxo = UnshieldedUtxo {
                 owner: owner.0.0.into(),
-                token_type: RawTokenType::default(), // Native token (all zeros).
+                token_type: TokenType::default(), // Native token (all zeros).
                 value: claim.value,
                 intent_hash,
-                output_index,
+                output_index: OUTPUT_INDEX_ZERO,
                 initial_nonce,
                 registered_for_dust_generation,
             };
@@ -613,6 +627,7 @@ fn extend_unshielded_utxos_v6(
         intent.fallible_inputs()
     };
     let intent_inputs = intent_inputs.into_iter().map(|spend| {
+        let intent_hash = spend.intent_hash.0.0.into();
         let initial_nonce = make_initial_nonce_v6(spend.output_no, intent_hash);
         let registered_for_dust_generation =
             registered_for_dust_generation_v6(spend.output_no, intent_hash, ledger_state);
@@ -663,4 +678,48 @@ fn compute_claim_rewards_intent_hash_v6(
     hasher.update(value.to_le_bytes());
     hasher.update(nonce.0.0);
     ByteArray(hasher.finalize().into())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::{
+        NetworkId, TransactionResult,
+        ledger::{TransactionV6, ledger_state::make_unshielded_utxos_v6},
+    };
+    use midnight_ledger_v6::structure::{
+        LedgerState as LedgerStateV6, StandardTransaction as StandardTransactionV6,
+    };
+    use midnight_transient_crypto_v6::curve::EmbeddedFr;
+
+    #[test]
+    fn test_make_unshielded_utxos_v6() {
+        let network_id = NetworkId::Undeployed;
+
+        let transaction = StandardTransactionV6 {
+            network_id: network_id.to_string(),
+            intents: Default::default(),
+            guaranteed_coins: Default::default(),
+            fallible_coins: Default::default(),
+            binding_randomness: EmbeddedFr::from_le_bytes(&[0u8; 32]).unwrap(),
+        };
+        let ledger_transaction = TransactionV6::Standard(transaction);
+
+        let ledger_state = LedgerStateV6::new(network_id);
+
+        let (created, spent) = make_unshielded_utxos_v6(
+            ledger_transaction.clone(),
+            &TransactionResult::Failure,
+            &ledger_state,
+        );
+        assert!(created.is_empty());
+        assert!(spent.is_empty());
+
+        let (created, spent) = make_unshielded_utxos_v6(
+            ledger_transaction,
+            &TransactionResult::Success,
+            &ledger_state,
+        );
+        assert!(created.is_empty());
+        assert!(spent.is_empty());
+    }
 }

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{
-    ContractBalance, PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType,
+    ContractBalance, PROTOCOL_VERSION_000_017_000, ProtocolVersion, TokenType,
     ledger::{Error, TaggedSerializableV6Ext},
 };
 use fastrace::trace;
@@ -34,7 +34,7 @@ impl ContractState {
         contract_state: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_016_000) {
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_017_000) {
             let contract_state = tagged_deserialize_v6(&mut contract_state.as_ref())
                 .map_err(|error| Error::Io("cannot deserialize ContractStateV6", error))?;
             Ok(Self::V6(contract_state))
@@ -73,7 +73,7 @@ impl ContractState {
                                     })?;
 
                                 let len = token_type.len();
-                                let token_type = RawTokenType::try_from(token_type.as_ref())
+                                let token_type = TokenType::try_from(token_type.as_ref())
                                     .map_err(|_| Error::TokenTypeLen(len))?;
 
                                 Ok(ContractBalance { token_type, amount })

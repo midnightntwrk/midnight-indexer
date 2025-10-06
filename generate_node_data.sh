@@ -46,14 +46,14 @@ run_toolkit_commands() {
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
         contract-address --network undeployed \
-        --src-file /out/contract_tx_1_deploy.mn --dest-file /out/contract_address.mn
+        --src-file /out/contract_tx_1_deploy.mn | jq -r .untagged > /tmp/contract_address.mn
 
     docker run \
         --rm \
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-        generate-txs --src-files /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 \
+        generate-txs --src-files /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 -r 1 \
         send
 
     # The 'store' function inserts data into a Merkle tree in the test contract
@@ -68,7 +68,7 @@ run_toolkit_commands() {
         generate-txs contract-calls call \
         --call-key store \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
-        --contract-address /out/contract_address.mn
+        --contract-address $(cat /tmp/contract_address.mn)
 
     # Wait for the contract call to be finalized before running maintenance.
     sleep 15
@@ -80,7 +80,7 @@ run_toolkit_commands() {
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
         generate-txs contract-calls maintenance \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
-        --contract-address /out/contract_address.mn
+        --contract-address $(cat /tmp/contract_address.mn)
 }
 
 # Clean up any existing data.
