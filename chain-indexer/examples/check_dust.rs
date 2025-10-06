@@ -5,7 +5,7 @@ use chain_indexer::{
 };
 use futures::{StreamExt, TryStreamExt};
 use indexer_common::domain::{
-    PROTOCOL_VERSION_000_016_000, ledger::SystemTransaction as LedgerSystemTransaction,
+    PROTOCOL_VERSION_000_017_000, ledger::SystemTransaction as LedgerSystemTransaction,
 };
 use std::time::Duration;
 
@@ -13,7 +13,7 @@ use std::time::Duration;
 async fn main() -> anyhow::Result<()> {
     let config = Config {
         url: "ws://localhost:9944".to_string(),
-        genesis_protocol_version: PROTOCOL_VERSION_000_016_000,
+        genesis_protocol_version: PROTOCOL_VERSION_000_017_000,
         reconnect_max_delay: Duration::from_secs(1),
         reconnect_max_attempts: 1,
     };

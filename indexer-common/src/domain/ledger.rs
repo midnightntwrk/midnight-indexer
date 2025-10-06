@@ -23,11 +23,10 @@ pub use transaction::*;
 
 // Re-export types that were moved to domain.rs for backwards compatibility.
 pub use crate::domain::{
-    ContractAction, ContractAttributes, ContractBalance, IntentHash, RawTokenType,
-    RawUnshieldedAddress, SerializedContractAddress, SerializedContractEntryPoint,
+    ContractAction, ContractAttributes, ContractBalance, IntentHash, SerializedContractAddress,
     SerializedContractState, SerializedLedgerState, SerializedTransaction,
-    SerializedTransactionIdentifier, SerializedZswapState, SerializedZswapStateRoot,
-    TransactionHash, TransactionStructure,
+    SerializedTransactionIdentifier, SerializedZswapState, SerializedZswapStateRoot, TokenType,
+    TransactionHash, TransactionStructure, UnshieldedAddress,
 };
 
 use crate::{
@@ -42,7 +41,7 @@ use midnight_serialize_v6::{
 };
 use midnight_storage_v6::DefaultDB as DefaultDBV6;
 use midnight_transient_crypto_v6::commitment::PureGeneratorPedersen as PureGeneratorPedersenV6;
-use std::io;
+use std::{io, string::FromUtf8Error};
 use thiserror::Error;
 
 type TransactionV6 = midnight_ledger_v6::structure::Transaction<
@@ -63,6 +62,9 @@ type IntentV6 = midnight_ledger_v6::structure::Intent<
 pub enum Error {
     #[error("{0}")]
     Io(&'static str, #[source] io::Error),
+
+    #[error("cannot convert {0} to UTF-8 string")]
+    FromUtf8(&'static str, #[source] FromUtf8Error),
 
     #[error("invalid protocol version {0}")]
     InvalidProtocolVersion(ProtocolVersion),

@@ -16,14 +16,14 @@ use crate::{
     infra::storage::Storage,
 };
 use fastrace::trace;
-use indexer_common::domain::RawUnshieldedAddress;
+use indexer_common::domain::UnshieldedAddress;
 use indoc::indoc;
 
 impl UnshieldedUtxoStorage for Storage {
     #[trace(properties = { "address": "{address}" })]
     async fn get_unshielded_utxos_by_address(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -113,7 +113,7 @@ impl UnshieldedUtxoStorage for Storage {
     #[trace(properties = { "address": "{address}", "transaction_id": "{transaction_id}" })]
     async fn get_unshielded_utxos_by_address_created_by_transaction(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
@@ -146,7 +146,7 @@ impl UnshieldedUtxoStorage for Storage {
     #[trace(properties = { "address": "{address}", "transaction_id": "{transaction_id}" })]
     async fn get_unshielded_utxos_by_address_spent_by_transaction(
         &self,
-        address: RawUnshieldedAddress,
+        address: UnshieldedAddress,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"

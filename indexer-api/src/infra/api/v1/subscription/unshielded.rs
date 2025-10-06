@@ -25,7 +25,7 @@ use async_graphql::{Context, SimpleObject, Subscription, Union, async_stream::tr
 use derive_more::Debug;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt};
-use indexer_common::domain::{NetworkId, RawUnshieldedAddress, Subscriber, UnshieldedUtxoIndexed};
+use indexer_common::domain::{NetworkId, Subscriber, UnshieldedUtxoIndexed};
 use log::{debug, warn};
 use std::{future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
@@ -130,7 +130,7 @@ where
 
 fn make_unshielded_transactions<'a, S, B>(
     cx: &'a Context<'a>,
-    address: RawUnshieldedAddress,
+    address: indexer_common::domain::UnshieldedAddress,
     mut transaction_id: u64,
     trigger: Trigger,
 ) -> impl Stream<Item = ApiResult<UnshieldedTransaction<S>>> + use<'a, S, B>
@@ -212,7 +212,7 @@ where
 async fn make_unshielded_transaction<S>(
     transaction_id: &mut u64,
     storage: &S,
-    address: RawUnshieldedAddress,
+    address: indexer_common::domain::UnshieldedAddress,
     transaction: domain::Transaction,
     network_id: NetworkId,
 ) -> ApiResult<Option<UnshieldedTransaction<S>>>
@@ -260,7 +260,7 @@ where
 
 fn progress_updates<'a, S>(
     cx: &'a Context<'a>,
-    address: RawUnshieldedAddress,
+    address: indexer_common::domain::UnshieldedAddress,
 ) -> impl Stream<Item = ApiResult<UnshieldedTransactionsProgress>> + use<'a, S>
 where
     S: Storage,
@@ -270,7 +270,7 @@ where
 }
 
 async fn make_progress_update<S>(
-    address: RawUnshieldedAddress,
+    address: indexer_common::domain::UnshieldedAddress,
     storage: &S,
 ) -> ApiResult<UnshieldedTransactionsProgress>
 where
