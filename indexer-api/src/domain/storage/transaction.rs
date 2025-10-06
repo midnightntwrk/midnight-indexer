@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Transaction, storage::NoopStorage};
+use crate::domain::{RegularTransaction, Transaction, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{
     SerializedTransactionIdentifier, SessionId, TransactionHash, UnshieldedAddress,
@@ -43,18 +43,18 @@ where
         identifier: &SerializedTransactionIdentifier,
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
-    /// Get a stream of all transactions relevant for a wallet with the given session ID, starting
-    /// at the given index, ordered by transaction ID.
+    /// Get a stream of all regular transactions which are relevant for a wallet with the given
+    /// session ID, starting at the given index, ordered by transaction ID.
     fn get_relevant_transactions(
         &self,
         session_id: SessionId,
         index: u64,
         batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send;
+    ) -> impl Stream<Item = Result<RegularTransaction, sqlx::Error>> + Send;
 
-    /// Get all transactions that create or spend unshielded UTXOs for the given address, ordered by
-    /// transaction ID.
-    fn get_transactions_involving_unshielded(
+    /// Get a stream of transactions which create or spend unshielded UTXOs for the given address,
+    /// ordered by transaction ID.
+    fn get_transactions_by_unshielded_address(
         &self,
         address: UnshieldedAddress,
         from_transaction_id: u64,
@@ -107,11 +107,11 @@ impl TransactionStorage for NoopStorage {
         session_id: SessionId,
         index: u64,
         batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send {
+    ) -> impl Stream<Item = Result<RegularTransaction, sqlx::Error>> + Send {
         stream::empty()
     }
 
-    fn get_transactions_involving_unshielded(
+    fn get_transactions_by_unshielded_address(
         &self,
         address: UnshieldedAddress,
         from_transaction_id: u64,

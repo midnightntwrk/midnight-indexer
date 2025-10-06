@@ -55,7 +55,6 @@ impl TransactionStorage for Storage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.id = $1
-            AND transactions.variant = 'Regular'
 
             UNION ALL
 
@@ -98,7 +97,6 @@ impl TransactionStorage for Storage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.id = $1
-            AND transactions.variant = 'Regular'
 
             UNION ALL
 
@@ -160,7 +158,6 @@ impl TransactionStorage for Storage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.block_id = $1
-            AND transactions.variant = 'Regular'
 
             UNION ALL
 
@@ -205,7 +202,6 @@ impl TransactionStorage for Storage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.block_id = $1
-            AND transactions.variant = 'Regular'
 
             UNION ALL
 
@@ -275,7 +271,6 @@ impl TransactionStorage for Storage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.hash = $1
-            AND transactions.variant = 'Regular'
 
             UNION ALL
 
@@ -320,7 +315,6 @@ impl TransactionStorage for Storage {
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             WHERE transactions.hash = $1
-            AND transactions.variant = 'Regular'
 
             UNION ALL
 
@@ -439,7 +433,7 @@ impl TransactionStorage for Storage {
         session_id: SessionId,
         mut index: u64,
         batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<Transaction, sqlx::Error>> + Send {
+    ) -> impl Stream<Item = Result<RegularTransaction, sqlx::Error>> + Send {
         let chunks = try_stream! {
             loop {
                 let transactions = self
@@ -447,10 +441,8 @@ impl TransactionStorage for Storage {
                     .await?;
 
                 match transactions.last() {
-                    Some(Transaction::Regular(t)) => index = t.end_index + 1,
-                    Some(Transaction::System(_)) => panic!("unexpected system transaction"),
+                    Some(transaction) => index = transaction.end_index + 1,
                     None => break,
-
                 }
 
                 yield transactions;
@@ -460,7 +452,7 @@ impl TransactionStorage for Storage {
         flatten_chunks(chunks)
     }
 
-    fn get_transactions_involving_unshielded(
+    fn get_transactions_by_unshielded_address(
         &self,
         address: UnshieldedAddress,
         mut transaction_id: u64,
@@ -469,7 +461,7 @@ impl TransactionStorage for Storage {
         let chunks = try_stream! {
             loop {
                 let transactions = self
-                    .get_transactions_involving_unshielded(address, transaction_id, batch_size)
+                    .get_transactions_by_unshielded_address(address, transaction_id, batch_size)
                     .await?;
 
                 match transactions.last() {
@@ -560,7 +552,7 @@ impl Storage {
         session_id: SessionId,
         index: u64,
         batch_size: NonZeroU32,
-    ) -> Result<Vec<Transaction>, sqlx::Error> {
+    ) -> Result<Vec<RegularTransaction>, sqlx::Error> {
         #[cfg(feature = "cloud")]
         let query = indoc! {"
             SELECT
@@ -618,16 +610,13 @@ impl Storage {
             .bind(index as i64)
             .bind(batch_size.get() as i64)
             .fetch(&*self.pool)
-            .map_ok(Transaction::Regular)
             .try_collect::<Vec<_>>()
             .await?;
 
         #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
-            if let Transaction::Regular(transaction) = transaction {
-                transaction.identifiers =
-                    get_identifiers_for_transaction(transaction.id, &self.pool).await?;
-            }
+            transaction.identifiers =
+                get_identifiers_for_transaction(transaction.id, &self.pool).await?;
         }
 
         Ok(transactions)
@@ -638,7 +627,7 @@ impl Storage {
         "transaction_id": "{transaction_id}",
         "batch_size": "{batch_size}"
     })]
-    async fn get_transactions_involving_unshielded(
+    async fn get_transactions_by_unshielded_address(
         &self,
         address: UnshieldedAddress,
         transaction_id: u64,
@@ -670,7 +659,6 @@ impl Storage {
                     unshielded_utxos.spending_transaction_id = transactions.id
                 WHERE unshielded_utxos.owner = $1
                 AND transactions.id >= $2
-                AND transactions.variant = 'Regular'
 
                 UNION ALL
 
@@ -726,7 +714,6 @@ impl Storage {
                     unshielded_utxos.spending_transaction_id = transactions.id
                 WHERE unshielded_utxos.owner = $1
                 AND transactions.id >= $2
-                AND transactions.variant = 'Regular'
 
                 UNION ALL
 
