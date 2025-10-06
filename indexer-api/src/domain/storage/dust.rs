@@ -19,7 +19,10 @@ use crate::domain::{
     storage::{BlockStorage, NoopStorage},
 };
 use futures::{Stream, stream};
-use indexer_common::domain::{CardanoStakeKey, DustAddress, DustMerkleRoot, DustPrefix};
+use indexer_common::domain::{
+    CardanoStakeKey, DustAddress, DustMerkleRoot, DustPrefix, TransactionHash,
+    dust::{DustEvent, DustEventVariant},
+};
 use std::num::NonZeroU32;
 
 /// DUST storage abstraction.
@@ -91,150 +94,102 @@ pub trait DustStorage: BlockStorage {
     /// Get DUST events by transaction hash.
     async fn get_dust_events_by_transaction(
         &self,
-        transaction_hash: indexer_common::domain::ledger::TransactionHash,
-    ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error>;
+        transaction_hash: TransactionHash,
+    ) -> Result<Vec<DustEvent>, sqlx::Error>;
 
     /// Get recent DUST events with optional filtering.
     async fn get_recent_dust_events(
         &self,
         limit: u32,
-        event_variant: Option<indexer_common::domain::dust::DustEventVariant>,
-    ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error>;
-
-    /// Get progress information for DUST nullifier transactions.
-    async fn get_dust_nullifier_progress(
-        &self,
-        prefixes: &[DustPrefix],
-        min_prefix_length: u32,
-        from_block: u32,
-    ) -> Result<(u32, u32), sqlx::Error>;
-
-    /// Get progress information for DUST commitments.
-    async fn get_dust_commitment_progress(
-        &self,
-        commitment_prefixes: &[DustPrefix],
-        min_prefix_length: u32,
-        start_index: u64,
-    ) -> Result<(u64, u32), sqlx::Error>;
-
-    /// Get progress information for registration updates.
-    async fn get_registration_progress(
-        &self,
-        addresses: &[RegistrationAddress],
-    ) -> Result<(u64, u32), sqlx::Error>;
+        event_variant: Option<DustEventVariant>,
+    ) -> Result<Vec<DustEvent>, sqlx::Error>;
 }
 
-#[allow(unused_variables)]
 impl DustStorage for NoopStorage {
     async fn get_current_dust_state(&self) -> Result<DustSystemState, sqlx::Error> {
-        unimplemented!("NoopStorage")
+        unimplemented!("NoopStorage is only for schema export")
     }
 
     async fn get_dust_generation_status(
         &self,
-        cardano_stake_keys: &[CardanoStakeKey],
+        _cardano_stake_keys: &[CardanoStakeKey],
     ) -> Result<Vec<DustGenerationStatus>, sqlx::Error> {
-        unimplemented!("NoopStorage")
+        unimplemented!("NoopStorage is only for schema export")
     }
 
     async fn get_dust_merkle_root(
         &self,
-        tree_type: DustMerkleTreeType,
-        timestamp: u64,
+        _tree_type: DustMerkleTreeType,
+        _timestamp: u64,
     ) -> Result<Option<DustMerkleRoot>, sqlx::Error> {
-        unimplemented!("NoopStorage")
+        unimplemented!("NoopStorage is only for schema export")
     }
 
     fn get_dust_generations(
         &self,
-        dust_address: &DustAddress,
-        from_generation_index: u64,
-        from_merkle_index: u64,
-        only_active: bool,
-        batch_size: NonZeroU32,
+        _dust_address: &DustAddress,
+        _from_generation_index: u64,
+        _from_merkle_index: u64,
+        _only_active: bool,
+        _batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationEvent, sqlx::Error>> + Send {
         stream::empty()
     }
 
     fn get_dust_nullifier_transactions(
         &self,
-        prefixes: &[DustPrefix],
-        min_prefix_length: u32,
-        from_block: u32,
-        batch_size: NonZeroU32,
+        _prefixes: &[DustPrefix],
+        _min_prefix_length: u32,
+        _from_block: u32,
+        _batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustNullifierTransactionEvent, sqlx::Error>> + Send {
         stream::empty()
     }
 
     fn get_dust_commitments(
         &self,
-        commitment_prefixes: &[DustPrefix],
-        start_index: u64,
-        min_prefix_length: u32,
-        batch_size: NonZeroU32,
+        _commitment_prefixes: &[DustPrefix],
+        _start_index: u64,
+        _min_prefix_length: u32,
+        _batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustCommitmentEvent, sqlx::Error>> + Send {
         stream::empty()
     }
 
     fn get_registration_updates(
         &self,
-        addresses: &[RegistrationAddress],
-        batch_size: NonZeroU32,
+        _addresses: &[RegistrationAddress],
+        _batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<RegistrationUpdate, sqlx::Error>> + Send {
         stream::empty()
     }
 
     async fn get_highest_generation_index_for_dust_address(
         &self,
-        dust_address: &DustAddress,
+        _dust_address: &DustAddress,
     ) -> Result<Option<u64>, sqlx::Error> {
-        unimplemented!("NoopStorage")
+        unimplemented!("NoopStorage is only for schema export")
     }
 
     async fn get_active_generation_count_for_dust_address(
         &self,
-        dust_address: &DustAddress,
+        _dust_address: &DustAddress,
     ) -> Result<u32, sqlx::Error> {
-        unimplemented!("NoopStorage")
+        unimplemented!("NoopStorage is only for schema export")
     }
 
     async fn get_dust_events_by_transaction(
         &self,
-        transaction_hash: indexer_common::domain::ledger::TransactionHash,
-    ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error> {
-        unimplemented!("NoopStorage")
+        _transaction_hash: TransactionHash,
+    ) -> Result<Vec<DustEvent>, sqlx::Error> {
+        unimplemented!("NoopStorage is only for schema export")
     }
 
     async fn get_recent_dust_events(
         &self,
-        limit: u32,
-        event_variant: Option<indexer_common::domain::dust::DustEventVariant>,
-    ) -> Result<Vec<indexer_common::domain::dust::DustEvent>, sqlx::Error> {
-        unimplemented!("NoopStorage")
-    }
-
-    async fn get_dust_nullifier_progress(
-        &self,
-        prefixes: &[DustPrefix],
-        min_prefix_length: u32,
-        from_block: u32,
-    ) -> Result<(u32, u32), sqlx::Error> {
-        unimplemented!("NoopStorage")
-    }
-
-    async fn get_dust_commitment_progress(
-        &self,
-        commitment_prefixes: &[DustPrefix],
-        min_prefix_length: u32,
-        start_index: u64,
-    ) -> Result<(u64, u32), sqlx::Error> {
-        unimplemented!("NoopStorage")
-    }
-
-    async fn get_registration_progress(
-        &self,
-        addresses: &[RegistrationAddress],
-    ) -> Result<(u64, u32), sqlx::Error> {
-        unimplemented!("NoopStorage")
+        _limit: u32,
+        _event_variant: Option<DustEventVariant>,
+    ) -> Result<Vec<DustEvent>, sqlx::Error> {
+        unimplemented!("NoopStorage is only for schema export")
     }
 }

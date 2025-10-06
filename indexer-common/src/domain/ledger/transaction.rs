@@ -12,7 +12,9 @@
 // limitations under the License.
 
 use crate::domain::{
-    ByteArray, ByteVec, PROTOCOL_VERSION_000_016_000, ProtocolVersion, ViewingKey,
+    ContractAction, ContractAttributes, PROTOCOL_VERSION_000_016_000, ProtocolVersion,
+    SerializedContractAddress, SerializedContractState, SerializedTransactionIdentifier,
+    TransactionHash, TransactionStructure, ViewingKey,
     ledger::{Error, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
 use fastrace::trace;
@@ -33,12 +35,6 @@ use midnight_transient_crypto_v6::{
 use midnight_zswap_v6::Offer as OfferV6;
 use serde::Serialize;
 use std::error::Error as StdError;
-
-pub type SerializedContractAddress = ByteVec;
-pub type SerializedContractEntryPoint = ByteVec;
-pub type SerializedContractState = ByteVec;
-pub type SerializedTransactionIdentifier = ByteVec;
-pub type TransactionHash = ByteArray<32>;
 
 /// Facade for `Transaction` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
@@ -222,34 +218,6 @@ impl Transaction {
             },
         }
     }
-}
-
-/// A contract action.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContractAction {
-    pub address: SerializedContractAddress,
-    pub state: SerializedContractState,
-    pub attributes: ContractAttributes,
-}
-
-/// Attributes for a specific contract action.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum ContractAttributes {
-    Deploy,
-    Call {
-        entry_point: SerializedContractEntryPoint,
-    },
-    Update,
-}
-
-/// Transaction structure for fees calculation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TransactionStructure {
-    pub segment_count: usize,
-    pub estimated_input_count: usize,
-    pub estimated_output_count: usize,
-    pub has_contract_operations: bool,
-    pub size: usize,
 }
 
 /// Facade for `SystemTransaction` from `midnight_ledger` across supported (protocol) versions.

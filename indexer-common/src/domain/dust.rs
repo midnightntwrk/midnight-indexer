@@ -13,7 +13,7 @@
 
 pub use crate::domain::{DustCommitment, DustNullifier};
 
-use crate::domain::{DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce, ledger::TransactionHash};
+use crate::domain::{DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce, TransactionHash};
 use serde::{Deserialize, Serialize};
 
 /// DUST event for the indexer domain.

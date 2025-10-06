@@ -14,6 +14,7 @@
 pub mod block;
 pub mod contract_action;
 pub mod dust;
+pub mod ledger_events;
 pub mod mutation;
 pub mod query;
 pub mod subscription;
@@ -76,13 +77,6 @@ pub enum HexDecodeError {
 
     #[error("cannot convert to {0}")]
     Convert(&'static str),
-}
-
-// Needed to derive `Interface` for `ContractAction`. Weird!
-impl From<&HexEncoded> for HexEncoded {
-    fn from(value: &HexEncoded) -> Self {
-        value.to_owned()
-    }
 }
 
 impl TryFrom<String> for HexEncoded {

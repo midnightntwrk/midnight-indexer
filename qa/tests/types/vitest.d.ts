@@ -20,6 +20,6 @@ declare module 'vitest' {
   }
 
   interface TestContext {
-    skip?: (reason?: string) => void;
+    skip?: (condition: boolean, reason?: string) => void;
   }
 }

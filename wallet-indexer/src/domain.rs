@@ -14,7 +14,7 @@
 pub mod storage;
 
 use fastrace::trace;
-use indexer_common::domain::{ProtocolVersion, ViewingKey, ledger, ledger::SerializedTransaction};
+use indexer_common::domain::{ProtocolVersion, SerializedTransaction, ViewingKey, ledger};
 use sqlx::prelude::FromRow;
 
 /// Relevant data of a wallet from the perspective of the Wallet Indexer.

@@ -36,7 +36,7 @@ where
         block_height: u32,
     ) -> Result<BlockTransactions, sqlx::Error>;
 
-    /// Save the given block and return the max regular transaction ID.
+    /// Save the given block with parameters and return the max regular transaction ID.
     async fn save_block(
         &self,
         block: &Block,

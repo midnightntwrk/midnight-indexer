@@ -25,9 +25,9 @@ impl AddressType {
     fn hrp(&self, network_id: NetworkId) -> String {
         let suffix = match network_id {
             NetworkId::Undeployed => "_undeployed",
-            NetworkId::DevNet => "_dev",
-            NetworkId::TestNet => "_test",
-            NetworkId::MainNet => "",
+            NetworkId::Devnet => "_dev",
+            NetworkId::Testnet => "_test",
+            NetworkId::Mainnet => "",
         };
         format!("{}{suffix}", self.hrp_prefix())
     }
@@ -58,6 +58,8 @@ pub enum EncodeAddressError {
     InvalidHrp { expected_hrp: String, hrp: String },
 }
 
+/// Bech32m-decode the given string as a byte vector, thereby validate the given address type and
+/// the given network ID.
 pub fn decode_address(
     address: impl AsRef<str>,
     address_type: AddressType,
@@ -105,8 +107,8 @@ mod tests {
         assert_matches!(decoded, Ok(a) if a == address);
 
         let address = ByteVec::from(vec![0, 1, 2, 3]);
-        let encoded = encode_address(&address, AddressType::Unshielded, NetworkId::MainNet);
-        let decoded = decode_address(encoded, AddressType::Unshielded, NetworkId::MainNet);
+        let encoded = encode_address(&address, AddressType::Unshielded, NetworkId::Mainnet);
+        let decoded = decode_address(encoded, AddressType::Unshielded, NetworkId::Mainnet);
         assert_matches!(decoded, Ok(a) if a == address);
     }
 }

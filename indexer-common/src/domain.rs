@@ -30,10 +30,28 @@ pub use protocol_version::*;
 pub use pub_sub::*;
 pub use viewing_key::*;
 
+use serde::{Deserialize, Serialize};
+use sqlx::Type;
+
 pub type BlockAuthor = ByteArray<32>;
 pub type BlockHash = ByteArray<32>;
+pub type Nonce = ByteArray<32>;
+pub type IntentHash = ByteArray<32>;
+pub type RawTokenType = ByteArray<32>;
+pub type RawUnshieldedAddress = ByteArray<32>;
+pub type SerializedContractAddress = ByteVec;
+pub type SerializedContractEntryPoint = ByteVec;
+pub type SerializedContractState = ByteVec;
+pub type SerializedLedgerEvent = ByteVec;
+pub type SerializedLedgerParameters = ByteVec;
+pub type SerializedLedgerState = ByteVec;
+pub type SerializedTransaction = ByteVec;
+pub type SerializedTransactionIdentifier = ByteVec;
+pub type SerializedZswapState = ByteVec;
+pub type SerializedZswapStateRoot = ByteVec;
+pub type TransactionHash = ByteArray<32>;
 
-// DUST-specific types.
+// DUST-specific types for projection layer (CNGD).
 pub type DustCommitment = ByteArray<32>;
 pub type DustNonce = ByteArray<32>;
 pub type DustNullifier = ByteArray<32>;
@@ -47,3 +65,214 @@ pub type SerializedDustMerkleTree = ByteVec;
 pub type NightUtxoHash = ByteArray<32>;
 pub type NightUtxoNonce = ByteArray<32>;
 pub type DustUtxoId = ByteVec;
+
+/// The result of applying a regular transaction to the ledger state along with extracted data.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ApplyRegularTransactionResult {
+    pub transaction_result: TransactionResult,
+    pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
+    pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
+    pub ledger_events: Vec<LedgerEvent>,
+}
+
+/// The result of applying a transaction to the ledger state.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransactionResult {
+    /// All guaranteed and fallible coins succeeded.
+    Success,
+
+    /// Not all fallible coins succeeded; the value maps segemt ID to success.
+    PartialSuccess(Vec<(u16, bool)>),
+
+    /// Guaranteed coins failed.
+    #[default]
+    Failure,
+}
+
+/// The variant of a transaction: regular or system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[cfg_attr(feature = "cloud", sqlx(type_name = "TRANSACTION_VARIANT"))]
+pub enum TransactionVariant {
+    Regular,
+    System,
+}
+
+/// A contract action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractAction {
+    pub address: SerializedContractAddress,
+    pub state: SerializedContractState,
+    pub attributes: ContractAttributes,
+}
+
+/// Attributes for a specific contract action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContractAttributes {
+    Deploy,
+    Call {
+        entry_point: SerializedContractEntryPoint,
+    },
+    Update,
+}
+
+/// Token balance of a contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContractBalance {
+    /// Token type identifier.
+    pub token_type: RawTokenType,
+
+    /// Balance amount as u128.
+    pub amount: u128,
+}
+
+/// Transaction structure for fees calculation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransactionStructure {
+    pub segment_count: usize,
+    pub estimated_input_count: usize,
+    pub estimated_output_count: usize,
+    pub has_contract_operations: bool,
+    pub size: usize,
+}
+
+/// An unshielded UTXO.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnshieldedUtxo {
+    pub owner: RawUnshieldedAddress,
+    pub token_type: RawTokenType,
+    pub value: u128,
+    pub intent_hash: IntentHash,
+    pub output_index: u32,
+    pub initial_nonce: Nonce,
+    pub registered_for_dust_generation: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LedgerEvent {
+    pub grouping: LedgerEventGrouping,
+    pub raw: SerializedLedgerEvent,
+    pub attributes: LedgerEventAttributes,
+}
+
+impl LedgerEvent {
+    fn zswap_input(raw: SerializedLedgerEvent) -> Self {
+        Self {
+            grouping: LedgerEventGrouping::Zswap,
+            raw,
+            attributes: LedgerEventAttributes::ZswapInput,
+        }
+    }
+
+    fn zswap_output(raw: SerializedLedgerEvent) -> Self {
+        Self {
+            grouping: LedgerEventGrouping::Zswap,
+            raw,
+            attributes: LedgerEventAttributes::ZswapOutput,
+        }
+    }
+
+    fn param_change(raw: SerializedLedgerEvent) -> Self {
+        Self {
+            grouping: LedgerEventGrouping::Dust,
+            raw,
+            attributes: LedgerEventAttributes::ParamChange,
+        }
+    }
+
+    fn dust_initial_utxo(
+        raw: SerializedLedgerEvent,
+        output: dust::QualifiedDustOutput,
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+    ) -> Self {
+        Self {
+            grouping: LedgerEventGrouping::Dust,
+            raw,
+            attributes: LedgerEventAttributes::DustInitialUtxo {
+                output,
+                generation_info,
+                generation_index,
+            },
+        }
+    }
+
+    fn dust_generation_dtime_update(
+        raw: SerializedLedgerEvent,
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+        merkle_path: Vec<dust::DustMerklePathEntry>,
+    ) -> Self {
+        Self {
+            grouping: LedgerEventGrouping::Dust,
+            raw,
+            attributes: LedgerEventAttributes::DustGenerationDtimeUpdate {
+                generation_info,
+                generation_index,
+                merkle_path,
+            },
+        }
+    }
+
+    fn dust_spend_processed(
+        raw: SerializedLedgerEvent,
+        commitment: dust::DustCommitment,
+        commitment_index: u64,
+        nullifier: dust::DustNullifier,
+        v_fee: u128,
+        time: u64,
+    ) -> Self {
+        Self {
+            grouping: LedgerEventGrouping::Dust,
+            raw,
+            attributes: LedgerEventAttributes::DustSpendProcessed {
+                commitment,
+                commitment_index,
+                nullifier,
+                v_fee,
+                time,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LedgerEventAttributes {
+    ZswapInput,
+
+    ZswapOutput,
+
+    ParamChange,
+
+    DustInitialUtxo {
+        output: dust::QualifiedDustOutput,
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+    },
+
+    DustGenerationDtimeUpdate {
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+        merkle_path: Vec<dust::DustMerklePathEntry>,
+    },
+
+    DustSpendProcessed {
+        commitment: dust::DustCommitment,
+        commitment_index: u64,
+        nullifier: dust::DustNullifier,
+        v_fee: u128,
+        time: u64,
+    },
+}
+
+/// Minimal DUST output info for backwards compatibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DustOutput {
+    pub nonce: Nonce,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[cfg_attr(feature = "cloud", sqlx(type_name = "LEDGER_EVENT_GROUPING"))]
+pub enum LedgerEventGrouping {
+    Zswap,
+    Dust,
+}

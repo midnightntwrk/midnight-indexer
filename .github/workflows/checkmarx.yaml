@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           repository: midnightntwrk/upload-sarif-github-action
-          ref: 8202d2182e4c0ebec293f9d9140c3378a2afe16e
+          ref: a0cd00c4e936a5c2fc10d73ef5f3371992350c05
           path: upload-sarif-github-action
           token: ${{ secrets.MIDNIGHTCI_REPO }}
 

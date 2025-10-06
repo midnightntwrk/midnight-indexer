@@ -21,6 +21,15 @@ pub use ledger_state::*;
 pub use secret_key::*;
 pub use transaction::*;
 
+// Re-export types that were moved to domain.rs for backwards compatibility.
+pub use crate::domain::{
+    ContractAction, ContractAttributes, ContractBalance, IntentHash, RawTokenType,
+    RawUnshieldedAddress, SerializedContractAddress, SerializedContractEntryPoint,
+    SerializedContractState, SerializedLedgerState, SerializedTransaction,
+    SerializedTransactionIdentifier, SerializedZswapState, SerializedZswapStateRoot,
+    TransactionHash, TransactionStructure,
+};
+
 use crate::{
     domain::{ByteVec, ProtocolVersion},
     error::BoxError,

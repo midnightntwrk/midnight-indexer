@@ -12,19 +12,20 @@
 // limitations under the License.
 
 use crate::domain::{
-    ByteArray, ByteVec, NetworkId, PROTOCOL_VERSION_000_016_000, ProtocolVersion,
+    ApplyRegularTransactionResult, ByteArray, ByteVec, IntentHash, LedgerEvent, NetworkId, Nonce,
+    PROTOCOL_VERSION_000_016_000, ProtocolVersion, RawTokenType, SerializedContractAddress,
+    SerializedLedgerParameters, SerializedLedgerState, SerializedTransaction, SerializedZswapState,
+    SerializedZswapStateRoot, TransactionResult, UnshieldedUtxo,
     dust::{
-        DustEvent, DustEventAttributes, DustGenerationInfo, DustMerklePathEntry, DustParameters,
-        QualifiedDustOutput,
+        DustCommitment, DustGenerationInfo, DustMerklePathEntry, DustNullifier, QualifiedDustOutput,
     },
-    ledger::{
-        Error, IntentV6, SerializableV6Ext, SerializedContractAddress, TaggedSerializableV6Ext,
-        TransactionV6,
-    },
+    ledger::{Error, IntentV6, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
 use fastrace::trace;
+use itertools::Itertools;
 use midnight_base_crypto_v6::{
-    cost_model::SyntheticCost as SyntheticCostV6, hash::HashOutput as HashOutputV6,
+    cost_model::SyntheticCost as SyntheticCostV6,
+    hash::{HashOutput as HashOutputV6, persistent_commit as persistent_commit_v6},
     time::Timestamp as TimestampV6,
 };
 use midnight_coin_structure_v6::{
@@ -32,31 +33,29 @@ use midnight_coin_structure_v6::{
     contract::ContractAddress as ContractAddressV6,
 };
 use midnight_ledger_v6::{
+    dust::InitialNonce as InitialNonceV6,
+    events::{Event as EventV6, EventDetails as EventDetailsV6},
     semantics::{
         TransactionContext as TransactionContextV6, TransactionResult as TransactionResultV6,
     },
-    structure::{LedgerState as LedgerStateV6, SystemTransaction as LedgerSystemTransactionV6},
+    structure::{
+        LedgerParameters as LedgerParametersV6, LedgerState as LedgerStateV6,
+        SystemTransaction as LedgerSystemTransactionV6,
+    },
     verify::WellFormedStrictness as WellFormedStrictnessV6,
 };
 use midnight_onchain_runtime_v6::context::BlockContext as BlockContextV6;
-use midnight_serialize_v6::{Deserializable, tagged_deserialize as tagged_deserialize_v6};
+use midnight_serialize_v6::{
+    Deserializable as DeserializableV6, tagged_deserialize as tagged_deserialize_v6,
+};
 use midnight_storage_v6::DefaultDB as DefaultDBV6;
 use midnight_transient_crypto_v6::merkle_tree::{
     MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV6,
     MerkleTreeDigest as MerkleTreeDigestV6,
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::HashSet, sync::LazyLock};
-
-pub type IntentHash = ByteArray<32>;
-pub type RawTokenType = ByteArray<32>;
-pub type RawUnshieldedAddress = ByteArray<32>;
-pub type SerializedLedgerState = ByteVec;
-pub type SerializedTransaction = ByteVec;
-pub type SerializedZswapState = ByteVec;
-pub type SerializedZswapStateRoot = ByteVec;
+use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 static STRICTNESS_V6: LazyLock<WellFormedStrictnessV6> = LazyLock::new(|| {
     let mut strictness = WellFormedStrictnessV6::default();
@@ -111,7 +110,7 @@ impl LedgerState {
     }
 
     /// Apply the given serialized regular transaction to this ledger state and return the
-    /// transaction result, DUST events, and the created and spent unshielded UTXOs.
+    /// transaction result as well as the created and spent unshielded UTXOs.
     #[trace]
     pub fn apply_regular_transaction(
         &mut self,
@@ -139,70 +138,60 @@ impl LedgerState {
                     whitelist: None,
                 };
 
-                // Assume midnight-node has already validated included transactions.
                 let cost = ledger_transaction
-                    .cost(&ledger_state.parameters)
+                    .cost(&ledger_state.parameters, true)
                     .map_err(|error| Error::TransactionCost(error.into()))?;
                 let verified_ledger_transaction = ledger_transaction
                     .well_formed(&cx.ref_state, *STRICTNESS_V6, cx.block_context.tblock)
                     .map_err(|error| Error::MalformedTransaction(error.into()))?;
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
+                let block_fullness = *block_fullness + cost;
 
-                // Get DUST parameters before updating self.
-                let dust_params = DustParameters {
-                    night_dust_ratio: ledger_state.parameters.dust.night_dust_ratio,
-                    generation_decay_rate: ledger_state.parameters.dust.generation_decay_rate,
-                    dust_grace_period: ledger_state.parameters.dust.dust_grace_period.as_seconds()
-                        as u64,
+                let (transaction_result, events) = match transaction_result {
+                    TransactionResultV6::Success(events) => (TransactionResult::Success, events),
+
+                    TransactionResultV6::PartialSuccess(segments, events) => {
+                        let segments = segments
+                            .into_iter()
+                            .map(|(id, result)| (id, result.is_ok()))
+                            .collect::<Vec<_>>();
+                        (TransactionResult::PartialSuccess(segments), events)
+                    }
+
+                    TransactionResultV6::Failure(_) => (TransactionResult::Failure, vec![]),
                 };
 
-                let block_fullness = *block_fullness + cost;
+                let ledger_events = make_ledger_events_v6(events)?;
+
+                let (created_unshielded_utxos, spent_unshielded_utxos) = make_unshielded_utxos_v6(
+                    ledger_transaction,
+                    &transaction_result,
+                    &ledger_state,
+                );
 
                 *self = Self::V6 {
                     ledger_state,
                     block_fullness,
                 };
 
-                let (transaction_result, dust_events) = match transaction_result {
-                    TransactionResultV6::Success(events) => {
-                        let dust_events = extract_dust_events_v6(&events, &dust_params);
-                        (TransactionResult::Success, dust_events)
-                    }
-
-                    TransactionResultV6::PartialSuccess(segments, events) => {
-                        let dust_events = extract_dust_events_v6(&events, &dust_params);
-                        let segments = segments
-                            .into_iter()
-                            .map(|(id, result)| (id, result.is_ok()))
-                            .collect::<Vec<_>>();
-                        (TransactionResult::PartialSuccess(segments), dust_events)
-                    }
-
-                    TransactionResultV6::Failure(_) => (TransactionResult::Failure, vec![]),
-                };
-
-                let (created_unshielded_utxos, spent_unshielded_utxos) =
-                    extract_unshielded_utxos_v6(ledger_transaction, &transaction_result);
-
                 Ok(ApplyRegularTransactionResult {
                     transaction_result,
-                    dust_events,
                     created_unshielded_utxos,
                     spent_unshielded_utxos,
+                    ledger_events,
                 })
             }
         }
     }
 
-    /// Apply the given serialized system transaction to this ledger state and return any DUST
-    /// events.
+    /// Apply the given serialized system transaction to this ledger state.
     #[trace]
     pub fn apply_system_transaction(
         &mut self,
         transaction: &SerializedTransaction,
         block_timestamp: u64,
-    ) -> Result<Vec<DustEvent>, Error> {
+    ) -> Result<Vec<LedgerEvent>, Error> {
         match self {
             Self::V6 {
                 ledger_state,
@@ -218,25 +207,16 @@ impl LedgerState {
                 let (ledger_state, events) = ledger_state
                     .apply_system_tx(&ledger_transaction, timestamp_v6(block_timestamp))
                     .map_err(|error| Error::SystemTransaction(error.into()))?;
-
-                // Get DUST parameters before updating self.
-                let dust_params = DustParameters {
-                    night_dust_ratio: ledger_state.parameters.dust.night_dust_ratio,
-                    generation_decay_rate: ledger_state.parameters.dust.generation_decay_rate,
-                    dust_grace_period: ledger_state.parameters.dust.dust_grace_period.as_seconds()
-                        as u64,
-                };
-
                 let block_fullness = *block_fullness + cost;
+
+                let ledger_events = make_ledger_events_v6(events)?;
 
                 *self = Self::V6 {
                     ledger_state,
                     block_fullness,
                 };
 
-                // Extract DUST events from system transaction events.
-                let dust_events = extract_dust_events_v6(&events, &dust_params);
-                Ok(dust_events)
+                Ok(ledger_events)
             }
         }
     }
@@ -283,25 +263,7 @@ impl LedgerState {
         }
     }
 
-    /// Extract the UTXOs.
-    pub fn extract_utxos(&self) -> Vec<UnshieldedUtxo> {
-        match self {
-            Self::V6 { ledger_state, .. } => ledger_state
-                .utxo
-                .utxos
-                .keys()
-                .map(|utxo| UnshieldedUtxo {
-                    value: utxo.value,
-                    owner: utxo.owner.0.0.into(),
-                    token_type: utxo.type_.0.0.into(),
-                    intent_hash: utxo.intent_hash.0.0.into(),
-                    output_index: utxo.output_no,
-                })
-                .collect(),
-        }
-    }
-
-    /// Extract the serialized merkle-tree collapsed update for the given indices.
+    /// Get the serialized merkle-tree collapsed update for the given indices.
     pub fn collapsed_update(&self, start_index: u64, end_index: u64) -> Result<ByteVec, Error> {
         match self {
             Self::V6 { ledger_state, .. } => MerkleTreeCollapsedUpdateV6::new(
@@ -316,7 +278,10 @@ impl LedgerState {
     }
 
     /// To be called after applying transactions.
-    pub fn post_apply_transactions(&mut self, block_timestamp: u64) -> Result<(), Error> {
+    pub fn post_apply_transactions(
+        &mut self,
+        block_timestamp: u64,
+    ) -> Result<LedgerParameters, Error> {
         match self {
             Self::V6 {
                 ledger_state,
@@ -327,48 +292,35 @@ impl LedgerState {
                     .post_block_update(timestamp, *block_fullness)
                     .map_err(|error| Error::BlockLimitExceeded(error.into()))?;
 
+                let ledger_parameters = ledger_state.parameters.deref().to_owned();
+
                 *self = Self::V6 {
                     ledger_state,
                     block_fullness: Default::default(),
                 };
 
-                Ok(())
+                Ok(LedgerParameters::V6(ledger_parameters))
             }
         }
     }
 }
 
-/// The result of applying a transaction to the ledger state.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TransactionResult {
-    /// All guaranteed and fallible coins succeeded.
-    Success,
-
-    /// Not all fallible coins succeeded; the value maps segemt ID to success.
-    PartialSuccess(Vec<(u16, bool)>),
-
-    /// Guaranteed coins failed.
-    #[default]
-    Failure,
+/// Facade for ledger parameters across supported (protocol) versions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LedgerParameters {
+    V6(LedgerParametersV6),
 }
 
-/// An unshielded UTXO.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UnshieldedUtxo {
-    pub owner: RawUnshieldedAddress,
-    pub token_type: RawTokenType,
-    pub value: u128,
-    pub intent_hash: IntentHash,
-    pub output_index: u32,
-}
-
-/// Result of applying a regular transaction to the ledger state.
-#[derive(Debug)]
-pub struct ApplyRegularTransactionResult {
-    pub transaction_result: TransactionResult,
-    pub dust_events: Vec<DustEvent>,
-    pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
-    pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
+impl LedgerParameters {
+    /// Serialize these ledger parameters.
+    #[trace]
+    pub fn serialize(&self) -> Result<SerializedLedgerParameters, Error> {
+        match self {
+            Self::V6(parameters) => parameters
+                .serialize_v6()
+                .map_err(|error| Error::Io("cannot serialize SerializedLedgerParametersV6", error)),
+        }
+    }
 }
 
 /// Facade for zswap state root across supported (protocol) versions.
@@ -408,9 +360,137 @@ fn timestamp_v6(block_timestamp: u64) -> TimestampV6 {
     TimestampV6::from_secs(block_timestamp / 1000)
 }
 
-fn extract_unshielded_utxos_v6(
+fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<LedgerEvent>, Error> {
+    events
+        .into_iter()
+        .map(|event| {
+            let raw = event
+                .tagged_serialize_v6()
+                .map_err(|error| Error::Io("cannot serialize EventV6", error))?;
+            Ok((event, raw))
+        })
+        .filter_map_ok(|(event, raw)| match event.content {
+            EventDetailsV6::ZswapInput { .. } => Some(LedgerEvent::zswap_input(raw)),
+
+            EventDetailsV6::ZswapOutput { .. } => Some(LedgerEvent::zswap_output(raw)),
+
+            EventDetailsV6::ContractDeploy { .. } => None,
+
+            EventDetailsV6::ContractLog { .. } => None,
+
+            EventDetailsV6::ParamChange(..) => Some(LedgerEvent::param_change(raw)),
+
+            EventDetailsV6::DustInitialUtxo {
+                output,
+                generation,
+                generation_index,
+                ..
+            } => {
+                let qualified_output = QualifiedDustOutput {
+                    initial_value: output.initial_value,
+                    owner: output.owner.0.0.to_bytes_le().into(),
+                    nonce: output.nonce.0.to_bytes_le().into(),
+                    seq: output.seq,
+                    ctime: output.ctime.to_secs(),
+                    backing_night: output.backing_night.0.0.into(),
+                    mt_index: output.mt_index,
+                };
+
+                let generation_info = DustGenerationInfo {
+                    night_utxo_hash: output.backing_night.0.0.into(),
+                    value: generation.value,
+                    owner: generation.owner.0.0.to_bytes_le().into(),
+                    nonce: generation.nonce.0.0.into(),
+                    ctime: output.ctime.to_secs(),
+                    dtime: generation.dtime.to_secs(),
+                };
+
+                Some(LedgerEvent::dust_initial_utxo(
+                    raw,
+                    qualified_output,
+                    generation_info,
+                    generation_index,
+                ))
+            }
+
+            EventDetailsV6::DustGenerationDtimeUpdate { update, .. } => {
+                // TreeInsertionPath has leaf: (HashOutput, DustGenerationInfo).
+                let generation = &update.leaf.1;
+
+                // Calculate mt_index from the path (from leaf up).
+                let mt_index =
+                    update
+                        .path
+                        .iter()
+                        .rev()
+                        .enumerate()
+                        .fold(0u64, |mt_index, (depth, entry)| {
+                            if !entry.goes_left {
+                                mt_index | (1u64 << depth)
+                            } else {
+                                mt_index
+                            }
+                        });
+
+                let generation_info = DustGenerationInfo {
+                    night_utxo_hash: update.leaf.0.0.into(),
+                    value: generation.value,
+                    owner: generation.owner.0.0.to_bytes_le().into(),
+                    nonce: generation.nonce.0.0.into(),
+                    ctime: 0, // DustGenerationInfo from ledger doesn't have ctime, only dtime
+                    dtime: generation.dtime.to_secs(),
+                };
+
+                let merkle_path = update
+                    .path
+                    .iter()
+                    .map(|entry| DustMerklePathEntry {
+                        sibling_hash: entry
+                            .hash
+                            .as_ref()
+                            .map(|hash| hash.0.0.to_bytes_le().to_vec()),
+                        goes_left: entry.goes_left,
+                    })
+                    .collect();
+
+                Some(LedgerEvent::dust_generation_dtime_update(
+                    raw,
+                    generation_info,
+                    mt_index,
+                    merkle_path,
+                ))
+            }
+
+            EventDetailsV6::DustSpendProcessed {
+                commitment,
+                commitment_index,
+                nullifier,
+                v_fee,
+                declared_time,
+                ..
+            } => {
+                let dust_commitment: DustCommitment = commitment.0.0.to_bytes_le().into();
+                let dust_nullifier: DustNullifier = nullifier.0.0.to_bytes_le().into();
+
+                Some(LedgerEvent::dust_spend_processed(
+                    raw,
+                    dust_commitment,
+                    commitment_index,
+                    dust_nullifier,
+                    v_fee,
+                    declared_time.to_secs(),
+                ))
+            }
+
+            other => panic!("unexpected EventDetailsV6 variant {other:?}"),
+        })
+        .collect::<Result<_, _>>()
+}
+
+fn make_unshielded_utxos_v6(
     ledger_transaction: TransactionV6,
     transaction_result: &TransactionResult,
+    ledger_state: &LedgerStateV6<DefaultDBV6>,
 ) -> (Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>) {
     match ledger_transaction {
         TransactionV6::Standard(transaction) => {
@@ -429,18 +509,32 @@ fn extract_unshielded_utxos_v6(
             let mut outputs = vec![];
             let mut inputs = vec![];
 
-            for segment_id in transaction.segments() {
+            for segment in transaction.segments() {
                 // Guaranteed phase.
-                if segment_id == 0 {
+                if segment == 0 {
                     for intent in transaction.intents.values() {
-                        extend_v6(&mut outputs, &mut inputs, segment_id, &intent, true);
+                        extend_unshielded_utxos_v6(
+                            &mut outputs,
+                            &mut inputs,
+                            segment,
+                            &intent,
+                            true,
+                            ledger_state,
+                        );
                     }
 
                 // Fallible phase.
-                } else if let Some(intent) = transaction.intents.get(&segment_id)
-                    && successful_segments.contains(&segment_id)
+                } else if let Some(intent) = transaction.intents.get(&segment)
+                    && successful_segments.contains(&segment)
                 {
-                    extend_v6(&mut outputs, &mut inputs, segment_id, &intent, false);
+                    extend_unshielded_utxos_v6(
+                        &mut outputs,
+                        &mut inputs,
+                        segment,
+                        &intent,
+                        false,
+                        ledger_state,
+                    );
                 }
             }
 
@@ -450,26 +544,36 @@ fn extract_unshielded_utxos_v6(
         TransactionV6::ClaimRewards(claim) => {
             // ClaimRewards creates a single unshielded UTXO for the claimed amount.
             let owner = UserAddressV6::from(claim.owner.clone());
-            let intent_hash = compute_claim_rewards_intent_hash(&owner, claim.value, &claim.nonce);
+            let intent_hash =
+                compute_claim_rewards_intent_hash_v6(&owner, claim.value, &claim.nonce);
+            let output_index = 0;
+
+            let initial_nonce = make_initial_nonce_v6(output_index, intent_hash);
+            let registered_for_dust_generation =
+                registered_for_dust_generation_v6(output_index, intent_hash, ledger_state);
 
             let utxo = UnshieldedUtxo {
                 owner: owner.0.0.into(),
                 token_type: RawTokenType::default(), // Native token (all zeros).
                 value: claim.value,
                 intent_hash,
-                output_index: 0,
+                output_index,
+                initial_nonce,
+                registered_for_dust_generation,
             };
+
             (vec![utxo], vec![]) // Creates one UTXO, spends none.
         }
     }
 }
 
-fn extend_v6(
+fn extend_unshielded_utxos_v6(
     outputs: &mut Vec<UnshieldedUtxo>,
     inputs: &mut Vec<UnshieldedUtxo>,
     segment_id: u16,
     intent: &IntentV6,
     guaranteed: bool,
+    ledger_state: &LedgerStateV6<DefaultDBV6>,
 ) {
     let intent_hash = intent
         .erase_proofs()
@@ -485,12 +589,21 @@ fn extend_v6(
     let intent_outputs = intent_outputs
         .into_iter()
         .enumerate()
-        .map(|(output_index, output)| UnshieldedUtxo {
-            owner: output.owner.0.0.into(),
-            token_type: output.type_.0.0.into(),
-            value: output.value,
-            intent_hash,
-            output_index: output_index as u32,
+        .map(|(output_index, output)| {
+            let output_index = output_index as u32;
+            let initial_nonce = make_initial_nonce_v6(output_index, intent_hash);
+            let registered_for_dust_generation =
+                registered_for_dust_generation_v6(output_index, intent_hash, ledger_state);
+
+            UnshieldedUtxo {
+                owner: output.owner.0.0.into(),
+                token_type: output.type_.0.0.into(),
+                value: output.value,
+                intent_hash,
+                output_index,
+                initial_nonce,
+                registered_for_dust_generation,
+            }
         });
     outputs.extend(intent_outputs);
 
@@ -499,130 +612,48 @@ fn extend_v6(
     } else {
         intent.fallible_inputs()
     };
-    let intent_inputs = intent_inputs.into_iter().map(|spend| UnshieldedUtxo {
-        owner: UserAddressV6::from(spend.owner).0.0.into(),
-        token_type: spend.type_.0.0.into(),
-        value: spend.value,
-        intent_hash,
-        output_index: spend.output_no,
+    let intent_inputs = intent_inputs.into_iter().map(|spend| {
+        let initial_nonce = make_initial_nonce_v6(spend.output_no, intent_hash);
+        let registered_for_dust_generation =
+            registered_for_dust_generation_v6(spend.output_no, intent_hash, ledger_state);
+
+        UnshieldedUtxo {
+            owner: UserAddressV6::from(spend.owner).0.0.into(),
+            token_type: spend.type_.0.0.into(),
+            value: spend.value,
+            intent_hash,
+            output_index: spend.output_no,
+            initial_nonce,
+            registered_for_dust_generation,
+        }
     });
     inputs.extend(intent_inputs);
 }
 
-/// Extract DUST events from ledger events.
-fn extract_dust_events_v6<D>(
-    events: &[midnight_ledger_v6::events::Event<D>],
-    dust_params: &DustParameters,
-) -> Vec<DustEvent>
-where
-    D: midnight_storage_v6::db::DB,
-{
-    use midnight_ledger_v6::events::EventDetails as LedgerEventDetails;
+fn make_initial_nonce_v6(output_index: u32, intent_hash: IntentHash) -> Nonce {
+    let intent_hash_v6 = HashOutputV6(intent_hash.0);
+    let initial_nonce = InitialNonceV6(persistent_commit_v6(&output_index, intent_hash_v6));
+    ByteArray(initial_nonce.0.0)
+}
 
-    events
-        .iter()
-        .filter_map(|event| {
-            let dust_event_details = match &event.content {
-                LedgerEventDetails::DustInitialUtxo {
-                    output,
-                    generation,
-                    generation_index,
-                    ..
-                } => Some(DustEventAttributes::DustInitialUtxo {
-                    output: QualifiedDustOutput {
-                        initial_value: output.initial_value,
-                        owner: output.owner.0.0.to_bytes_le().into(),
-                        nonce: output.nonce.0.to_bytes_le().into(),
-                        seq: output.seq,
-                        ctime: output.ctime.to_secs(),
-                        backing_night: output.backing_night.0.0.into(),
-                        mt_index: output.mt_index,
-                    },
-                    generation_info: DustGenerationInfo {
-                        night_utxo_hash: output.backing_night.0.0.into(),
-                        value: generation.value,
-                        owner: generation.owner.0.0.to_bytes_le().into(),
-                        nonce: generation.nonce.0.0.into(),
-                        ctime: output.ctime.to_secs(),
-                        dtime: generation.dtime.to_secs(),
-                    },
-                    generation_index: *generation_index,
-                }),
-
-                LedgerEventDetails::DustGenerationDtimeUpdate { update, .. } => {
-                    // TreeInsertionPath has leaf: (HashOutput, DustGenerationInfo).
-                    let generation = &update.leaf.1;
-                    // Calculate mt_index from the path.
-                    // The path is from leaf up, so we need to process it in reverse.
-                    // Each goes_left: false adds a power of 2 to the index.
-                    let mt_index = update.path.iter().rev().enumerate().fold(
-                        0u64,
-                        |mt_index, (depth, entry)| {
-                            if !entry.goes_left {
-                                mt_index | (1u64 << depth)
-                            } else {
-                                mt_index
-                            }
-                        },
-                    );
-
-                    // Preserve the merkle path!
-                    let merkle_path = update
-                        .path
-                        .iter()
-                        .map(|entry| DustMerklePathEntry {
-                            sibling_hash: entry.hash.map(|h| h.0.0.to_bytes_le().to_vec()),
-                            goes_left: entry.goes_left,
-                        })
-                        .collect();
-
-                    Some(DustEventAttributes::DustGenerationDtimeUpdate {
-                        generation_info: DustGenerationInfo {
-                            night_utxo_hash: generation.nonce.0.0.into(),
-                            value: generation.value,
-                            owner: generation.owner.0.0.to_bytes_le().into(),
-                            nonce: generation.nonce.0.0.into(),
-                            ctime: 0, // Not available in the event, use placeholder.
-                            dtime: generation.dtime.to_secs(),
-                        },
-                        generation_index: mt_index,
-                        merkle_path,
-                    })
-                }
-
-                LedgerEventDetails::DustSpendProcessed {
-                    commitment,
-                    commitment_index,
-                    nullifier,
-                    v_fee,
-                    declared_time,
-                    ..
-                } => Some(DustEventAttributes::DustSpendProcessed {
-                    commitment: commitment.0.0.to_bytes_le().into(),
-                    commitment_index: *commitment_index,
-                    nullifier: nullifier.0.0.to_bytes_le().into(),
-                    v_fee: *v_fee,
-                    time: declared_time.to_secs(),
-                    params: *dust_params,
-                }),
-
-                _ => None,
-            };
-
-            dust_event_details.map(|details| DustEvent {
-                transaction_hash: event.source.transaction_hash.0.0.into(),
-                logical_segment: event.source.logical_segment,
-                physical_segment: event.source.physical_segment,
-                event_details: details,
-            })
-        })
-        .collect()
+fn registered_for_dust_generation_v6(
+    output_index: u32,
+    intent_hash: IntentHash,
+    ledger_state: &LedgerStateV6<DefaultDBV6>,
+) -> bool {
+    let intent_hash_v6 = HashOutputV6(intent_hash.0);
+    let initial_nonce = InitialNonceV6(persistent_commit_v6(&output_index, intent_hash_v6));
+    ledger_state
+        .dust
+        .generation
+        .night_indices
+        .contains_key(&initial_nonce)
 }
 
 /// Compute a pseudo-intent-hash for ClaimRewards transactions.
 /// ClaimRewards don't have intents, but we need a unique hash for database constraints.
 /// We use a hash of (owner || value || nonce) to ensure uniqueness.
-fn compute_claim_rewards_intent_hash(
+fn compute_claim_rewards_intent_hash_v6(
     owner: &UserAddressV6,
     value: u128,
     nonce: &NonceV6,

@@ -11,15 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::ledger::{
-    SerializedContractAddress, SerializedContractEntryPoint, SerializedContractState,
-    SerializedZswapState,
+use indexer_common::domain::{
+    ContractAttributes, SerializedContractAddress, SerializedContractState, SerializedZswapState,
 };
-use serde::Deserialize;
 use sqlx::FromRow;
 
 /// A contract action.
-
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct ContractAction {
     #[sqlx(try_from = "i64")]
@@ -36,17 +33,4 @@ pub struct ContractAction {
 
     #[sqlx(try_from = "i64")]
     pub transaction_id: u64,
-}
-
-/// Attributes for a specific [ContractAction].
-#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
-pub enum ContractAttributes {
-    #[default]
-    Deploy,
-
-    Call {
-        entry_point: SerializedContractEntryPoint,
-    },
-
-    Update,
 }

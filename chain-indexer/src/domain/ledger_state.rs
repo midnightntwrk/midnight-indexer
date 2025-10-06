@@ -12,14 +12,15 @@
 // limitations under the License.
 
 use crate::domain::{
-    RegularTransaction, SystemTransaction, Transaction, TransactionVariant,
-    dust::extract_dust_operations, node,
+    RegularTransaction, SystemTransaction, Transaction, dust::extract_dust_operations, node,
 };
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
-    BlockHash, NetworkId,
-    ledger::{ContractState, SerializedTransaction},
+    ApplyRegularTransactionResult, BlockHash, LedgerEvent, LedgerEventGrouping, NetworkId,
+    SerializedTransaction, TransactionVariant,
+    dust::DustEvent,
+    ledger::{self, LedgerParameters},
 };
 use std::ops::DerefMut;
 use thiserror::Error;
@@ -47,7 +48,7 @@ impl LedgerState {
         transactions: impl Iterator<Item = &'a (TransactionVariant, SerializedTransaction)>,
         block_parent_hash: BlockHash,
         block_timestamp: u64,
-    ) -> Result<(), Error> {
+    ) -> Result<LedgerParameters, Error> {
         for (variant, transaction) in transactions {
             match variant {
                 TransactionVariant::Regular => {
@@ -56,8 +57,6 @@ impl LedgerState {
                         block_parent_hash,
                         block_timestamp,
                     )?;
-                    // DUST events and UTXOs are already stored in the ledger state.
-                    // and don't need to be processed here when replaying stored transactions.
                 }
 
                 TransactionVariant::System => {
@@ -66,9 +65,9 @@ impl LedgerState {
             }
         }
 
-        self.post_apply_transactions(block_timestamp)?;
+        let ledger_parameters = self.post_apply_transactions(block_timestamp)?;
 
-        Ok(())
+        Ok(ledger_parameters)
     }
 
     /// Apply the given node transactions to this ledger state and return domain transactions.
@@ -78,7 +77,7 @@ impl LedgerState {
         transactions: impl IntoIterator<Item = node::Transaction>,
         block_parent_hash: BlockHash,
         block_timestamp: u64,
-    ) -> Result<Vec<Transaction>, Error> {
+    ) -> Result<(Vec<Transaction>, LedgerParameters), Error> {
         let transactions = transactions
             .into_iter()
             .map(|transaction| {
@@ -86,9 +85,9 @@ impl LedgerState {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        self.post_apply_transactions(block_timestamp)?;
+        let ledger_parameters = self.post_apply_transactions(block_timestamp)?;
 
-        Ok(transactions)
+        Ok((transactions, ledger_parameters))
     }
 
     /// The highest used zswap state index or none.
@@ -129,21 +128,31 @@ impl LedgerState {
     ) -> Result<Transaction, Error> {
         let mut transaction = RegularTransaction::from(transaction);
 
-        // Apply transaction and set start and end indices; end index is exclusive!
-        transaction.start_index = self.zswap_first_free();
-        let result =
-            self.apply_regular_transaction(&transaction.raw, block_parent_hash, block_timestamp)?;
-        transaction.end_index = self.zswap_first_free();
+        // Apply transaction.
+        let start_index = self.zswap_first_free();
+        let ApplyRegularTransactionResult {
+            transaction_result,
+            created_unshielded_utxos,
+            spent_unshielded_utxos,
+            ledger_events,
+        } = self.apply_regular_transaction(&transaction.raw, block_parent_hash, block_timestamp)?;
 
         // Update transaction.
-        transaction.transaction_result = result.transaction_result;
-        transaction.dust_events = result.dust_events;
+        transaction.transaction_result = transaction_result;
         transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize()?;
-        transaction.created_unshielded_utxos = result.created_unshielded_utxos;
-        transaction.spent_unshielded_utxos = result.spent_unshielded_utxos;
+        transaction.start_index = start_index;
+        transaction.end_index = self.zswap_first_free();
+        transaction.created_unshielded_utxos = created_unshielded_utxos;
+        transaction.spent_unshielded_utxos = spent_unshielded_utxos;
+        transaction.ledger_events = ledger_events.clone();
 
-        // Extract operations from DUST events (dust.rs::extract_dust_operations).
-        transaction.dust_event_projections = extract_dust_operations(&transaction.dust_events);
+        // Extract and process DUST events into projections
+        let dust_events = extract_dust_events_from_ledger_events(&ledger_events, transaction.hash)?;
+        if !dust_events.is_empty() {
+            transaction.dust_projections = Some(extract_dust_operations(&dust_events));
+        }
+
+        // Update contract actions.
         if transaction.end_index > transaction.start_index {
             for contract_action in transaction.contract_actions.iter_mut() {
                 let zswap_state = self.extract_contract_zswap_state(&contract_action.address)?;
@@ -153,13 +162,15 @@ impl LedgerState {
 
         // Update extracted balances of contract actions.
         for contract_action in &mut transaction.contract_actions {
-            let contract_state =
-                ContractState::deserialize(&contract_action.state, transaction.protocol_version)?;
+            let contract_state = ledger::ContractState::deserialize(
+                &contract_action.state,
+                transaction.protocol_version,
+            )?;
             let balances = contract_state.balances()?;
             contract_action.extracted_balances = balances;
         }
 
-        Ok(Transaction::Regular(Box::new(transaction)))
+        Ok(Transaction::Regular(transaction.into()))
     }
 
     #[trace(properties = {
@@ -172,20 +183,17 @@ impl LedgerState {
         block_parent_hash: BlockHash,
         block_timestamp: u64,
     ) -> Result<Transaction, Error> {
-        let mut transaction = SystemTransaction::try_from(transaction)
-            .map_err(|error| Error::ProcessingError(error.to_string()))?;
+        let mut transaction = SystemTransaction::from(transaction);
+        let ledger_events = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
+        transaction.ledger_events = ledger_events.clone();
 
-        // Apply system transaction and get DUST events from ledger state.
-        // This is the single source of DUST events (from
-        // indexer_common::domain::ledger::LedgerState::apply_system_transaction),
-        // consistent with regular transactions.
-        let dust_events = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
-        transaction.dust_events = dust_events;
+        // Extract and process DUST events into projections
+        let dust_events = extract_dust_events_from_ledger_events(&ledger_events, transaction.hash)?;
+        if !dust_events.is_empty() {
+            transaction.dust_projections = Some(extract_dust_operations(&dust_events));
+        }
 
-        // Extract operations from DUST events (dust.rs::extract_dust_operations).
-        transaction.dust_event_projections = extract_dust_operations(&transaction.dust_events);
-
-        Ok(Transaction::System(Box::new(transaction)))
+        Ok(Transaction::System(transaction))
     }
 }
 
@@ -194,6 +202,77 @@ pub enum Error {
     #[error("cannot apply transaction")]
     ApplyTransaction(#[from] indexer_common::domain::ledger::Error),
 
-    #[error("cannot process system transaction: {0}")]
-    ProcessingError(String),
+    #[error("cannot deserialize DUST event: {0}")]
+    DeserializeDustEvent(String),
+}
+
+/// Extract DUST events from generic ledger events.
+/// The actual field extraction happens in indexer-common where the events are deserialized.
+fn extract_dust_events_from_ledger_events(
+    ledger_events: &[LedgerEvent],
+    transaction_hash: indexer_common::domain::TransactionHash,
+) -> Result<Vec<DustEvent>, Error> {
+    use indexer_common::domain::{LedgerEventAttributes, dust::DustEventAttributes};
+
+    let mut dust_events = Vec::new();
+
+    for ledger_event in ledger_events {
+        // Check if this is a DUST event by checking the grouping
+        if ledger_event.grouping == LedgerEventGrouping::Dust {
+            // All fields are now properly extracted in indexer-common
+            let event_details = match &ledger_event.attributes {
+                LedgerEventAttributes::DustInitialUtxo {
+                    output,
+                    generation_info,
+                    generation_index,
+                } => DustEventAttributes::DustInitialUtxo {
+                    output: *output,
+                    generation_info: *generation_info,
+                    generation_index: *generation_index,
+                },
+
+                LedgerEventAttributes::DustGenerationDtimeUpdate {
+                    generation_info,
+                    generation_index,
+                    merkle_path,
+                } => DustEventAttributes::DustGenerationDtimeUpdate {
+                    generation_info: *generation_info,
+                    generation_index: *generation_index,
+                    merkle_path: merkle_path.clone(),
+                },
+
+                LedgerEventAttributes::DustSpendProcessed {
+                    commitment,
+                    commitment_index,
+                    nullifier,
+                    v_fee,
+                    time,
+                } => DustEventAttributes::DustSpendProcessed {
+                    commitment: *commitment,
+                    commitment_index: *commitment_index,
+                    nullifier: *nullifier,
+                    v_fee: *v_fee,
+                    time: *time,
+                    // NOTE: params should be extracted from ledger state at the time of the event
+                    // This would require passing ledger state context through the extraction
+                    // pipeline Currently not available due to architectural
+                    // separation between layers
+                    params: Default::default(),
+                },
+
+                _ => continue, // Not a DUST-specific event
+            };
+
+            // DUST events use segment 0 (guaranteed segment) per protocol design:
+            // The ledger spec mandates "fee payments are processed during the guaranteed segment"
+            dust_events.push(DustEvent {
+                transaction_hash,
+                logical_segment: 0,
+                physical_segment: 0,
+                event_details,
+            });
+        }
+    }
+
+    Ok(dust_events)
 }

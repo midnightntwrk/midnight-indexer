@@ -28,14 +28,11 @@ indoc              = { workspace = true }
 itertools          = { workspace = true }
 log                = { workspace = true, features = [ "kv_std" ] }
 metrics            = { workspace = true }
-midnight-ledger_v6 = { workspace = true }
 parity-scale-codec = { workspace = true }
 parking_lot        = { workspace = true }
 paste              = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
-serde_json         = { workspace = true }
 serde_with         = { workspace = true }
-sha2               = { workspace = true }
 sqlx               = { workspace = true, features = [ "runtime-tokio", "time" ] }
 subxt              = { workspace = true, features = [ "reconnecting-rpc-client" ] }
 thiserror          = { workspace = true }
@@ -43,10 +40,9 @@ tokio              = { workspace = true, features = [ "macros", "rt-multi-thread
 trait-variant      = { workspace = true }
 
 [dev-dependencies]
-clap                          = { workspace = true, features = [ "derive" ] }
-fake                          = { workspace = true }
-midnight-base-crypto_v6       = { workspace = true }
-midnight-transient-crypto_v6  = { workspace = true }
+clap               = { workspace = true, features = [ "derive" ] }
+fake               = { workspace = true }
+midnight-ledger_v6 = { workspace = true }
 
 [features]
 cloud      = [ "indexer-common/cloud" ]

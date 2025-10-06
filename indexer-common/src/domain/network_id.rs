@@ -26,18 +26,18 @@ const MAIN_NET: &str = "mainnet";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkId {
     Undeployed,
-    DevNet,
-    TestNet,
-    MainNet,
+    Devnet,
+    Testnet,
+    Mainnet,
 }
 
 impl Display for NetworkId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             NetworkId::Undeployed => write!(f, "{UNDEPLOYED}"),
-            NetworkId::DevNet => write!(f, "{DEV_NET}"),
-            NetworkId::TestNet => write!(f, "{TEST_NET}"),
-            NetworkId::MainNet => write!(f, "{MAIN_NET}"),
+            NetworkId::Devnet => write!(f, "{DEV_NET}"),
+            NetworkId::Testnet => write!(f, "{TEST_NET}"),
+            NetworkId::Mainnet => write!(f, "{MAIN_NET}"),
         }
     }
 }
@@ -62,9 +62,9 @@ impl TryFrom<&str> for NetworkId {
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s.to_lowercase().as_str() {
             UNDEPLOYED => Ok(Self::Undeployed),
-            DEV_NET => Ok(Self::DevNet),
-            TEST_NET => Ok(Self::TestNet),
-            MAIN_NET => Ok(Self::MainNet),
+            DEV_NET => Ok(Self::Devnet),
+            TEST_NET => Ok(Self::Testnet),
+            MAIN_NET => Ok(Self::Mainnet),
             _ => Err(UnknownNetworkIdError(s.to_owned())),
         }
     }
@@ -86,13 +86,13 @@ mod tests {
         let network_id = NetworkId::Undeployed.to_string().parse::<NetworkId>();
         assert_matches!(network_id, Ok(NetworkId::Undeployed));
 
-        let network_id = NetworkId::DevNet.to_string().parse::<NetworkId>();
-        assert_matches!(network_id, Ok(NetworkId::DevNet));
+        let network_id = NetworkId::Devnet.to_string().parse::<NetworkId>();
+        assert_matches!(network_id, Ok(NetworkId::Devnet));
 
-        let network_id = NetworkId::TestNet.to_string().parse::<NetworkId>();
-        assert_matches!(network_id, Ok(NetworkId::TestNet));
+        let network_id = NetworkId::Testnet.to_string().parse::<NetworkId>();
+        assert_matches!(network_id, Ok(NetworkId::Testnet));
 
-        let network_id = NetworkId::MainNet.to_string().parse::<NetworkId>();
-        assert_matches!(network_id, Ok(NetworkId::MainNet));
+        let network_id = NetworkId::Mainnet.to_string().parse::<NetworkId>();
+        assert_matches!(network_id, Ok(NetworkId::Mainnet));
     }
 }

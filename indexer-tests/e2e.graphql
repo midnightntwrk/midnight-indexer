@@ -5,6 +5,7 @@ query BlockQuery($block_offset: BlockOffset) {
         protocolVersion
         timestamp
         author
+        ledgerParameters
         parent {
             hash
             height
@@ -12,84 +13,173 @@ query BlockQuery($block_offset: BlockOffset) {
         transactions {
             hash
             protocolVersion
-            transactionResult {
-                status
-                segments {
-                    id
-                    success
-                }
-            }
-            fees {
-                paidFees
-                estimatedFees
-            }
-            identifiers
             block {
                 hash
             }
             contractActions {
-                __typename
-                ... on ContractDeploy {
-                    address
-                    transaction {
+                address
+                transaction {
+                    hash
+                    block {
                         hash
+                        height
+                    }
+                    __typename
+                    ... on RegularTransaction {
                         transactionResult {
                             status
+                            segments {
+                                id
+                                success
+                            }
                         }
                         identifiers
-                        block {
-                            hash
-                            height
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
                         }
                     }
+                }
+                unshieldedBalances {
+                    tokenType
+                    amount
                 }
                 __typename
                 ... on ContractCall {
-                    address
-                    transaction {
-                        hash
-                        transactionResult {
-                            status
-                        }
-                        identifiers
-                        block {
-                            hash
-                            height
-                        }
-                    }
+                    entryPoint
                     deploy {
                         address
-                    }
-                }
-                __typename
-                ... on ContractUpdate {
-                    address
-                    transaction {
-                        transactionResult {
-                            status
-                        }
-                        hash
-                        identifiers
-                        block {
-                            hash
-                            height
-                        }
                     }
                 }
             }
             unshieldedCreatedOutputs {
                 owner
-                value
                 tokenType
-                intentHash
+                value
                 outputIndex
+                intentHash
+                initialNonce
+                registeredForDustGeneration
+                createdAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
+                spentAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
             }
             unshieldedSpentOutputs {
                 owner
-                value
                 tokenType
-                intentHash
+                value
                 outputIndex
+                intentHash
+                initialNonce
+                registeredForDustGeneration
+                createdAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
+                spentAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
+            }
+            zswapLedgerEvents {
+                id
+            }
+            dustLedgerEvents {
+                id
+                __typename
+                ... on DustInitialUtxo {
+                    output {
+                        nonce
+                    }
+                }
+            }
+            __typename
+            ... on RegularTransaction {
+                transactionResult {
+                    status
+                    segments {
+                        id
+                        success
+                    }
+                }
+                identifiers
+                startIndex
+                endIndex
+                fees {
+                    paidFees
+                    estimatedFees
+                }
             }
         }
     }
@@ -99,84 +189,173 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
     transactions(offset: $transaction_offset) {
         hash
         protocolVersion
-        transactionResult {
-            status
-            segments {
-                id
-                success
-            }
-        }
-        fees {
-            paidFees
-            estimatedFees
-        }
-        identifiers
         block {
             hash
         }
         contractActions {
-            __typename
-            ... on ContractDeploy {
-                address
-                transaction {
+            address
+            transaction {
+                hash
+                block {
                     hash
+                    height
+                }
+                __typename
+                ... on RegularTransaction {
                     transactionResult {
                         status
+                        segments {
+                            id
+                            success
+                        }
                     }
                     identifiers
-                    block {
-                        hash
-                        height
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
                     }
                 }
+            }
+            unshieldedBalances {
+                tokenType
+                amount
             }
             __typename
             ... on ContractCall {
-                address
-                transaction {
-                    hash
-                    transactionResult {
-                        status
-                    }
-                    identifiers
-                    block {
-                        hash
-                        height
-                    }
-                }
+                entryPoint
                 deploy {
                     address
-                }
-            }
-            __typename
-            ... on ContractUpdate {
-                address
-                transaction {
-                    hash
-                    transactionResult {
-                        status
-                    }
-                    identifiers
-                    block {
-                        hash
-                        height
-                    }
                 }
             }
         }
         unshieldedCreatedOutputs {
             owner
-            value
             tokenType
-            intentHash
+            value
             outputIndex
+            intentHash
+            initialNonce
+            registeredForDustGeneration
+            createdAtTransaction {
+                hash
+                __typename
+                ... on RegularTransaction {
+                    transactionResult {
+                        status
+                        segments {
+                            id
+                            success
+                        }
+                    }
+                    identifiers
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
+                    }
+                }
+            }
+            spentAtTransaction {
+                hash
+                __typename
+                ... on RegularTransaction {
+                    transactionResult {
+                        status
+                        segments {
+                            id
+                            success
+                        }
+                    }
+                    identifiers
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
+                    }
+                }
+            }
         }
         unshieldedSpentOutputs {
             owner
-            value
             tokenType
-            intentHash
+            value
             outputIndex
+            intentHash
+            initialNonce
+            registeredForDustGeneration
+            createdAtTransaction {
+                hash
+                __typename
+                ... on RegularTransaction {
+                    transactionResult {
+                        status
+                        segments {
+                            id
+                            success
+                        }
+                    }
+                    identifiers
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
+                    }
+                }
+            }
+            spentAtTransaction {
+                hash
+                __typename
+                ... on RegularTransaction {
+                    transactionResult {
+                        status
+                        segments {
+                            id
+                            success
+                        }
+                    }
+                    identifiers
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
+                    }
+                }
+            }
+        }
+        zswapLedgerEvents {
+            id
+        }
+        dustLedgerEvents {
+            id
+            __typename
+            ... on DustInitialUtxo {
+                output {
+                    nonce
+                }
+            }
+        }
+        __typename
+        ... on RegularTransaction {
+            transactionResult {
+                status
+                segments {
+                    id
+                    success
+                }
+            }
+            identifiers
+            startIndex
+            endIndex
+            fees {
+                paidFees
+                estimatedFees
+            }
         }
     }
 }
@@ -186,52 +365,40 @@ query ContractActionQuery(
     $contract_action_offset: ContractActionOffset
 ) {
     contractAction(address: $address, offset: $contract_action_offset) {
-        __typename
-        ... on ContractDeploy {
-            address
-            transaction {
+        address
+        transaction {
+            hash
+            block {
                 hash
+                height
+            }
+            __typename
+            ... on RegularTransaction {
                 transactionResult {
                     status
+                    segments {
+                        id
+                        success
+                    }
                 }
                 identifiers
-                block {
-                    hash
-                    height
+                startIndex
+                endIndex
+                fees {
+                    paidFees
+                    estimatedFees
                 }
             }
+        }
+        unshieldedBalances {
+            tokenType
+            amount
         }
         __typename
         ... on ContractCall {
-            address
-            transaction {
-                hash
-                transactionResult {
-                    status
-                }
-                identifiers
-                block {
-                    hash
-                    height
-                }
-            }
+            entryPoint
             deploy {
                 address
-            }
-        }
-        __typename
-        ... on ContractUpdate {
-            address
-            transaction {
-                hash
-                transactionResult {
-                    status
-                }
-                identifiers
-                block {
-                    hash
-                    height
-                }
             }
         }
     }
@@ -252,6 +419,7 @@ subscription BlockSubscription($block_offset: BlockOffset) {
         protocolVersion
         timestamp
         author
+        ledgerParameters
         parent {
             hash
             height
@@ -259,84 +427,173 @@ subscription BlockSubscription($block_offset: BlockOffset) {
         transactions {
             hash
             protocolVersion
-            transactionResult {
-                status
-                segments {
-                    id
-                    success
-                }
-            }
-            fees {
-                paidFees
-                estimatedFees
-            }
-            identifiers
             block {
                 hash
             }
             contractActions {
-                __typename
-                ... on ContractDeploy {
-                    address
-                    transaction {
+                address
+                transaction {
+                    hash
+                    block {
                         hash
+                        height
+                    }
+                    __typename
+                    ... on RegularTransaction {
                         transactionResult {
                             status
+                            segments {
+                                id
+                                success
+                            }
                         }
                         identifiers
-                        block {
-                            hash
-                            height
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
                         }
                     }
+                }
+                unshieldedBalances {
+                    tokenType
+                    amount
                 }
                 __typename
                 ... on ContractCall {
-                    address
-                    transaction {
-                        hash
-                        transactionResult {
-                            status
-                        }
-                        identifiers
-                        block {
-                            hash
-                            height
-                        }
-                    }
+                    entryPoint
                     deploy {
                         address
-                    }
-                }
-                __typename
-                ... on ContractUpdate {
-                    address
-                    transaction {
-                        hash
-                        transactionResult {
-                            status
-                        }
-                        identifiers
-                        block {
-                            hash
-                            height
-                        }
                     }
                 }
             }
             unshieldedCreatedOutputs {
                 owner
-                value
                 tokenType
-                intentHash
+                value
                 outputIndex
+                intentHash
+                initialNonce
+                registeredForDustGeneration
+                createdAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
+                spentAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
             }
             unshieldedSpentOutputs {
                 owner
-                value
                 tokenType
-                intentHash
+                value
                 outputIndex
+                intentHash
+                initialNonce
+                registeredForDustGeneration
+                createdAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
+                spentAtTransaction {
+                    hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
+                }
+            }
+            zswapLedgerEvents {
+                id
+            }
+            dustLedgerEvents {
+                id
+                __typename
+                ... on DustInitialUtxo {
+                    output {
+                        nonce
+                    }
+                }
+            }
+            __typename
+            ... on RegularTransaction {
+                transactionResult {
+                    status
+                    segments {
+                        id
+                        success
+                    }
+                }
+                identifiers
+                startIndex
+                endIndex
+                fees {
+                    paidFees
+                    estimatedFees
+                }
             }
         }
     }
@@ -350,52 +607,40 @@ subscription ContractActionSubscription(
         address: $address
         offset: $contract_action_subscription_offset
     ) {
-        __typename
-        ... on ContractDeploy {
-            address
-            transaction {
+        address
+        transaction {
+            hash
+            block {
                 hash
+                height
+            }
+            __typename
+            ... on RegularTransaction {
                 transactionResult {
                     status
+                    segments {
+                        id
+                        success
+                    }
                 }
                 identifiers
-                block {
-                    hash
-                    height
+                startIndex
+                endIndex
+                fees {
+                    paidFees
+                    estimatedFees
                 }
             }
+        }
+        unshieldedBalances {
+            tokenType
+            amount
         }
         __typename
         ... on ContractCall {
-            address
-            transaction {
-                hash
-                transactionResult {
-                    status
-                }
-                identifiers
-                block {
-                    hash
-                    height
-                }
-            }
+            entryPoint
             deploy {
                 address
-            }
-        }
-        __typename
-        ... on ContractUpdate {
-            address
-            transaction {
-                hash
-                transactionResult {
-                    status
-                }
-                identifiers
-                block {
-                    hash
-                    height
-                }
             }
         }
     }
@@ -429,8 +674,22 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
         ... on UnshieldedTransaction {
             transaction {
                 hash
-                block {
-                    height
+                __typename
+                ... on RegularTransaction {
+                    transactionResult {
+                        status
+                        segments {
+                            id
+                            success
+                        }
+                    }
+                    identifiers
+                    startIndex
+                    endIndex
+                    fees {
+                        paidFees
+                        estimatedFees
+                    }
                 }
             }
             createdUtxos {
@@ -439,8 +698,27 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                 value
                 outputIndex
                 intentHash
+                initialNonce
+                registeredForDustGeneration
                 createdAtTransaction {
                     hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
                 }
             }
             spentUtxos {
@@ -449,11 +727,47 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                 value
                 outputIndex
                 intentHash
+                initialNonce
+                registeredForDustGeneration
                 createdAtTransaction {
                     hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
                 }
                 spentAtTransaction {
                     hash
+                    __typename
+                    ... on RegularTransaction {
+                        transactionResult {
+                            status
+                            segments {
+                                id
+                                success
+                            }
+                        }
+                        identifiers
+                        startIndex
+                        endIndex
+                        fees {
+                            paidFees
+                            estimatedFees
+                        }
+                    }
                 }
             }
         }
@@ -464,6 +778,25 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
     }
 }
 
+subscription ZswapLedgerEventsSubscription($id: Int) {
+    zswapLedgerEvents(id: $id) {
+        id
+    }
+}
+
+subscription DustLedgerEventsSubscription($id: Int) {
+    dustLedgerEvents(id: $id) {
+        id
+        __typename
+        ... on DustInitialUtxo {
+            output {
+                nonce
+            }
+        }
+    }
+}
+
+# DUST Queries from feat/cnight-generates-dust
 query DustEventsByTransactionQuery($transactionHash: HexEncoded!) {
     dustEventsByTransaction(transactionHash: $transactionHash) {
         transactionHash
@@ -572,7 +905,6 @@ query RecentDustEventsQuery($limit: Int, $eventVariant: DustEventVariant) {
     }
 }
 
-
 query CurrentDustStateQuery {
     currentDustState {
         commitmentTreeRoot
@@ -595,117 +927,5 @@ query DustGenerationStatusQuery($cardanoStakeKeys: [HexEncoded!]!) {
         generationRate
         currentCapacity
         nightBalance
-    }
-}
-
-subscription DustGenerationsSubscription(
-    $dustAddress: HexEncoded!,
-    $fromGenerationIndex: Int,
-    $fromMerkleIndex: Int,
-    $onlyActive: Boolean
-) {
-    dustGenerations(
-        dustAddress: $dustAddress,
-        fromGenerationIndex: $fromGenerationIndex,
-        fromMerkleIndex: $fromMerkleIndex,
-        onlyActive: $onlyActive
-    ) {
-        __typename
-        ... on DustGenerationInfo {
-            nightUtxoHash
-            value
-            owner
-            nonce
-            dtime
-            merkleIndex
-        }
-        ... on DustGenerationMerkleUpdate {
-            index
-            collapsedUpdate
-            blockHeight
-            merklePath {
-                siblingHash
-                goesLeft
-            }
-        }
-        ... on DustGenerationProgress {
-            highestIndex
-            activeGenerationCount
-        }
-    }
-}
-
-subscription DustNullifierTransactionsSubscription(
-    $prefixes: [HexEncoded!]!,
-    $minPrefixLength: Int!,
-    $fromBlock: Int
-) {
-    dustNullifierTransactions(
-        prefixes: $prefixes,
-        minPrefixLength: $minPrefixLength,
-        fromBlock: $fromBlock
-    ) {
-        __typename
-        ... on DustNullifierTransaction {
-            transactionHash
-            blockHeight
-            matchingNullifierPrefixes
-        }
-        ... on DustNullifierTransactionProgress {
-            highestBlock
-            matchedCount
-        }
-    }
-}
-
-subscription DustCommitmentsSubscription(
-    $commitmentPrefixes: [HexEncoded!]!,
-    $startIndex: Int!,
-    $minPrefixLength: Int!
-) {
-    dustCommitments(
-        commitmentPrefixes: $commitmentPrefixes,
-        startIndex: $startIndex,
-        minPrefixLength: $minPrefixLength
-    ) {
-        __typename
-        ... on DustCommitment {
-            commitment
-            nullifier
-            value
-            owner
-        }
-        ... on DustCommitmentMerkleUpdate {
-            index
-            collapsedUpdate
-            blockHeight
-            merklePath {
-                siblingHash
-                goesLeft
-            }
-        }
-        ... on DustCommitmentProgress {
-            highestIndex
-            commitmentCount
-        }
-    }
-}
-
-subscription DustRegistrationUpdatesSubscription(
-    $addresses: [RegistrationAddress!]!
-) {
-    dustRegistrationUpdates(addresses: $addresses) {
-        __typename
-        ... on RegistrationUpdate {
-            cardanoStakeKey
-            dustAddress
-            isActive
-            registeredAt
-            removedAt
-        }
-        ... on RegistrationUpdateProgress {
-            latestTimestamp
-            updateCount
-        }
     }
 }

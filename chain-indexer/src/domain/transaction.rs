@@ -11,27 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{
-    ContractAction,
-    dust::{DustEvent, DustEventProjections},
-    node,
-};
+use crate::domain::{ContractAction, dust::DustEventProjections, node};
 use indexer_common::domain::{
-    ByteArray, ProtocolVersion,
-    ledger::{
-        self, NightDistribution, ParameterUpdate, SerializedTransaction,
-        SerializedTransactionIdentifier, SerializedZswapStateRoot, ShieldedTreasuryPayment,
-        TransactionHash, TransactionResult, UnshieldedTreasuryPayment, UnshieldedUtxo,
-    },
+    ByteArray, LedgerEvent, ProtocolVersion, SerializedTransaction,
+    SerializedTransactionIdentifier, SerializedZswapStateRoot, TransactionHash, TransactionResult,
+    TransactionVariant, UnshieldedUtxo, ledger::Error as LedgerError,
 };
-use sqlx::{FromRow, Type};
+use sqlx::FromRow;
 use std::fmt::Debug;
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Transaction {
     Regular(Box<RegularTransaction>),
-    System(Box<SystemTransaction>),
+    System(SystemTransaction),
 }
 
 impl Transaction {
@@ -73,16 +66,16 @@ impl TryFrom<node::Transaction> for Transaction {
                 Ok(Transaction::Regular(Box::new(regular_transaction.into())))
             }
 
-            node::Transaction::System(system_transaction) => Ok(Transaction::System(Box::new(
-                system_transaction.try_into()?,
-            ))),
+            node::Transaction::System(system_transaction) => {
+                Ok(Transaction::System(system_transaction.into()))
+            }
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegularTransaction {
-    // These fields come from node::Transaction.
+    // These fields come from the node.
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
     pub raw: SerializedTransaction,
@@ -91,15 +84,17 @@ pub struct RegularTransaction {
     pub paid_fees: u128,
     pub estimated_fees: u128,
 
-    // These fields come from applying the node transactions to the ledger state.
+    // These fields are set after applying the transaction to the ledger state.
     pub transaction_result: TransactionResult,
     pub merkle_tree_root: SerializedZswapStateRoot,
     pub start_index: u64,
     pub end_index: u64,
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
-    pub dust_events: Vec<DustEvent>,
-    pub dust_event_projections: DustEventProjections,
+    pub ledger_events: Vec<LedgerEvent>,
+
+    // DUST projection processing
+    pub dust_projections: Option<DustEventProjections>,
 }
 
 impl From<node::RegularTransaction> for RegularTransaction {
@@ -118,69 +113,42 @@ impl From<node::RegularTransaction> for RegularTransaction {
             end_index: Default::default(),
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
-            dust_events: Default::default(),
-            dust_event_projections: Default::default(),
+            ledger_events: Default::default(),
+            dust_projections: None,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemTransaction {
-    // These fields come from node::SystemTransaction.
+    // These fields come from the node.
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
     pub raw: SerializedTransaction,
 
-    // Additional data extracted from from domain::ledger::SystemTransaction.
-    pub reserve_distribution: Option<u128>,
-    pub parameter_update: Option<ParameterUpdate>,
-    pub night_distribution: Option<NightDistribution>,
-    pub treasury_income: Option<(u128, String)>,
-    pub treasury_payment_shielded: Option<ShieldedTreasuryPayment>,
-    pub treasury_payment_unshielded: Option<UnshieldedTreasuryPayment>,
+    // These fields are set after applying the transaction to the ledger state.
+    pub ledger_events: Vec<LedgerEvent>,
 
-    // These fields come from applying the node transactions to the ledger state.
-    pub dust_events: Vec<DustEvent>,
-    pub dust_event_projections: DustEventProjections,
+    // DUST projection processing
+    pub dust_projections: Option<DustEventProjections>,
 }
 
-impl TryFrom<node::SystemTransaction> for SystemTransaction {
-    type Error = DeserializeSystemTransactionError;
-
-    fn try_from(transaction: node::SystemTransaction) -> Result<Self, Self::Error> {
-        let ledger_transaction =
-            ledger::SystemTransaction::deserialize(&transaction.raw, transaction.protocol_version)?;
-
-        // Extract metadata from the transaction.
-        let metadata = ledger_transaction.extract_metadata(&transaction.hash);
-
-        Ok(Self {
+impl From<node::SystemTransaction> for SystemTransaction {
+    fn from(transaction: node::SystemTransaction) -> Self {
+        Self {
             hash: transaction.hash,
             protocol_version: transaction.protocol_version,
             raw: transaction.raw,
-            reserve_distribution: metadata.reserve_distribution,
-            parameter_update: metadata.parameter_update,
-            night_distribution: metadata.night_distribution,
-            treasury_income: metadata.treasury_income,
-            treasury_payment_shielded: metadata.treasury_payment_shielded,
-            treasury_payment_unshielded: metadata.treasury_payment_unshielded,
-            dust_events: Default::default(),
-            dust_event_projections: Default::default(),
-        })
+            ledger_events: Default::default(),
+            dust_projections: None,
+        }
     }
 }
 
 /// Error type for system transaction processing.
 #[derive(Debug, Error)]
 #[error("cannot deserialize system transaction")]
-pub struct DeserializeSystemTransactionError(#[from] ledger::Error);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Type)]
-#[cfg_attr(feature = "cloud", sqlx(type_name = "TRANSACTION_VARIANT"))]
-pub enum TransactionVariant {
-    Regular,
-    System,
-}
+pub struct DeserializeSystemTransactionError(#[from] LedgerError);
 
 /// All serialized transactions from a single block along with metadata needed for ledger state
 /// application.
