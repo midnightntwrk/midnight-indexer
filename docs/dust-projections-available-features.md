@@ -1,7 +1,6 @@
 # DUST Projections: Available Features
-**Date**: October 3, 2025
-**Branch**: `feat/cnight-merge-from-main` (integration branch)
-**Base Branch**: `feat/cnight-generates-dust`
+**Date**: October 6, 2025
+**Branch**: `feat/cnight-merge-from-main` (merged into `feat/cnight-generates-dust`)
 **Purpose**: Technical inventory of DUST features integrated with main branch architecture
 
 ## Overview
@@ -47,11 +46,31 @@ Merged 49 commits from main branch, bringing fundamental architectural changes:
    - Node v0.16.3 (commit 872c93a)
    - Transaction fee calculation in chain-indexer (merged from main)
 
-#### What CNGD Kept
+#### What CNGD Kept and Adapted
 
-- **Projection layer**: All queries and subscriptions (`dustGenerations`, `dustCommitments`, etc.)
-- **Merkle tree maintenance**: Generation/commitment tree tracking
-- **Registration tracking**: Moved from ledger events to runtime pallet events (see below)
+**Projection Queries (Kept)**:
+- `currentDustState`, `dustGenerationStatus`, `dustMerkleRoot`, `dustEventsByTransaction`, `recentDustEvents`
+
+**Projection Subscriptions (Replaced)**:
+
+The main branch's `dustLedgerEvents` subscription replaces four projection-based subscriptions from the original `feat/cnight-generates-dust` branch:
+
+| Original CNGD Subscription | Purpose | Replaced By |
+|---------------------------|---------|-------------|
+| `dustGenerations` | Stream generation info with merkle updates for wallet reconstruction | `dustLedgerEvents` |
+| `dustNullifierTransactions` | Stream regular transactions containing DUST nullifiers | `dustLedgerEvents` |
+| `dustCommitments` | Stream DUST commitments with merkle tree updates, filtered by prefix | `dustLedgerEvents` |
+| `dustRegistrationUpdates` | Stream registration changes for multiple address types | `dustLedgerEvents` |
+
+**Why This Change?**
+- **WASM Compatibility**: WASM wallets need raw serialized events that can be deserialized using the ledger's `Event.deserialize()` method
+- **Maximum Flexibility**: Raw events allow wallets to implement their own projection logic
+- **Reduced Complexity**: Single unified subscription for all DUST events rather than multiple specialized endpoints
+- **Consistency**: Matches the pattern used for `zswapLedgerEvents` in the same commit (4cd1ec36d)
+
+**Other Features (Kept)**:
+- **Merkle tree maintenance**: Generation/commitment tree tracking for projection queries
+- **Registration tracking**: Moved from ledger events to runtime pallet events (commits 8eece6b, d0a634c)
 - **Database tables**: Projection tables coexist with main's ledger_events table
 
 #### Architecture After Merge
@@ -208,7 +227,9 @@ Added in commit 8eece6b - extracts DUST registration events at the Substrate run
 
 ### 2. GraphQL API Extensions
 
-#### Subscriptions (Why These Exist)
+#### Subscriptions (Historical - Replaced by dustLedgerEvents)
+
+**Note**: The following projection-based subscriptions from the original `feat/cnight-generates-dust` were replaced by main branch's `dustLedgerEvents` subscription, which provides raw serialized events for WASM compatibility. This section documents the original design rationale.
 
 - **`dustGenerations`** - Stream generation info with merkle updates for wallet reconstruction
   - **Why**: Ledger spec requires tracking generation/decay over time. Wallet needs to know current Dust value.
@@ -366,6 +387,16 @@ dust_initial_utxos (night_utxo_hash, dust_owner, nonce, value)
 
 ### 6. Testing Infrastructure
 
+**Comprehensive Test Coverage** (commits 4a7cfec, 65a5c37):
+- **test_dust_events_queries()**: Validates DUST event types and counts across all event variants
+- **test_dust_comprehensive_coverage()**: Tests filters, pagination, and correlation between events
+- **test_additional_dust_queries()**: Validates `currentDustState`, `dustGenerationStatus`, `dustMerkleRoot` queries
+- **GraphQL Queries**: 134 lines of DUST-specific queries in `indexer-tests/e2e.graphql`
+- **Test Code**: 479 lines validating all DUST functionality
+- **Transaction Interface**: Tests properly handle polymorphism (RegularTransaction/SystemTransaction)
+- **Infrastructure Fixes**: Pattern matching fixes, GraphQL max_complexity increased to 600
+
+**General Testing Infrastructure**:
 - Integration tests for all DUST operations
 - End-to-end tests with simulated blockchain
 - Mock data generators for development
@@ -373,13 +404,17 @@ dust_initial_utxos (night_utxo_hash, dust_owner, nonce, value)
 
 ## Implementation Statistics
 
-- **Total Lines**: ~7,800 (after removing obsolete progress tracking methods)
+- **Total Lines**: ~8,000 (including test coverage restoration)
 - **GraphQL Schema**: +541 lines (schema-v1.graphql)
 - **Rust Files**: 8+ domain/storage modules
 - **Database Tables**: 7 tables (includes cnight_registrations, dust_utxo_mappings)
 - **Storage Functions**: Complete CRUD operations for all DUST entities
 - **Event Extraction**: Full EventDetailsV6 field extraction through LedgerEventAttributes
-- **Test Coverage**: >80% for core logic
+- **Test Coverage**:
+  - Core logic: >80% coverage
+  - E2E tests: 134 lines of GraphQL queries (commits 4a7cfec, 65a5c37)
+  - Test code: 479 lines covering all DUST functionality
+  - Test functions: test_dust_events_queries, test_dust_comprehensive_coverage, test_additional_dust_queries
 
 ## Integration Points
 
@@ -501,27 +536,31 @@ Every feature in this implementation traces back to specific requirements:
 
 ## Conclusion
 
-The `feat/cnight-merge-from-main` branch contains a complete integration of DUST projections with main branch's generic ledger events framework. Every feature from the original `feat/cnight-generates-dust` has been adapted to work through the unified architecture while maintaining full functionality.
+The `feat/cnight-merge-from-main` branch (merged into `feat/cnight-generates-dust`) contains a complete integration of DUST projections with main branch's generic ledger events framework. Every feature from the original `feat/cnight-generates-dust` has been adapted to work through the unified architecture while maintaining full functionality. The integration includes both ledger-level DUST events and runtime-level registration events, along with comprehensive test coverage.
 
 ### Current State (October 2025)
 
 The branch successfully integrates:
 1. **Full DUST Event Extraction**: All EventDetailsV6 fields properly extracted through LedgerEventAttributes
 2. **Dual Event Layer**: Both raw ledger events (from main) and projection layer coexist
-3. **Correct Generation Rate**: 8,267 Specks per Star per second as per ledger specification
-4. **Runtime Event Extraction**: Direct extraction of NativeTokenObservation pallet events for registration tracking
-5. **Complete Storage Implementation**: Full database persistence with upsert logic
-6. **Type System Consolidation**: Centralized type definitions with backward compatibility
-7. **Updated Dependencies**: Ledger v6.1.0-alpha.3 and Node v0.16.3
-8. **Code Cleanup**: Removed obsolete progress tracking methods, fixed unused variables
+3. **GraphQL API**:
+   - Projection queries: `currentDustState`, `dustGenerationStatus`, `dustMerkleRoot`, `dustEventsByTransaction`, `recentDustEvents`
+   - Subscriptions: Original projection-based subscriptions replaced by main's `dustLedgerEvents` (raw events)
+4. **Correct Generation Rate**: 8,267 Specks per Star per second as per ledger specification
+5. **Runtime Event Extraction**: Direct extraction of NativeTokenObservation pallet events for registration tracking (commits 8eece6b, d0a634c)
+6. **Complete Storage Implementation**: Full database persistence with upsert logic for both ledger events and registration events
+7. **Type System Consolidation**: Centralized type definitions with backward compatibility
+8. **Comprehensive Test Coverage**: 134 lines of GraphQL queries, 479 lines of test code (commits 4a7cfec, 65a5c37)
+9. **Updated Dependencies**: Ledger v6.1.0-alpha.3 and Node v0.16.3
+10. **Code Cleanup**: Removed obsolete progress tracking methods, fixed unused variables
 
 The implementation is not speculative - it directly implements the DUST mechanics as specified in the ledger documentation and addresses the concrete needs identified by the wallet team. All code is production-ready and follows established patterns. The modular design allows for selective integration of specific features based on requirements.
 
 ## Contact
 
 For questions or clarification about specific features:
-- Integration Branch: `feat/cnight-merge-from-main`
-- Base Branch: `feat/cnight-generates-dust`
+- Current Branch: `feat/cnight-merge-from-main` (merged into `feat/cnight-generates-dust`)
 - Original implementation: July-September 2025
-- Integration completed: October 2025
-- Based on specifications from wallet team (Jegor, Andrzej)
+- Main branch integration: October 1, 2025
+- Registration events & test coverage: October 3-6, 2025
+- Based on specifications from wallet team (Jegor, Andrzej) and ledger spec
