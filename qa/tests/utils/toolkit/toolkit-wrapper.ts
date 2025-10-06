@@ -395,6 +395,74 @@ class ToolkitWrapper {
   };
 }
 
+async callContract(opts: {
+  contractAddress: string;
+  methodName: string;
+  args?: string[];
+  rngSeed?: string;
+}): Promise<{
+  callTxPath: string;
+  outDir: string;
+}> {
+  if (!this.startedContainer) {
+    throw new Error("Container is not started. Call start() first.");
+  }
+
+  const outDir = this.config.targetDir ?? '/tmp/toolkit/';
+  mkdirSync(outDir, { recursive: true });
+
+  // Create a contract address file that the toolkit expects
+  const addressFile = "contract_address.mn";
+  const outAddressFile = join(outDir, addressFile);
+  
+  // Write the contract address to a file in the exact format that deployContract creates
+  const fs = require('fs');
+  
+  // Copy the exact format from the working deployment
+  // The working format is: 6d69646e696768743a636f6e74726163742d616464726573735b76325d3a + <32-byte-hex-address>
+  const headerHex = "6d69646e696768743a636f6e74726163742d616464726573735b76325d3a";
+  const addressHex = opts.contractAddress.toLowerCase();
+  const fullHex = headerHex + addressHex;
+  
+  fs.writeFileSync(outAddressFile, fullHex);
+
+  const callTx = "call_tx.mn";
+  const outCallTx = join(outDir, callTx);
+
+  // Generate contract call transaction (matching the working example exactly)
+  const result = await this.startedContainer.exec([
+    "/midnight-node-toolkit",
+    "generate-txs",
+    "contract-calls",
+    "call",
+    "--call-key",
+    opts.methodName,
+    "--rng-seed",
+    opts.rngSeed ?? "0000000000000000000000000000000000000000000000000000000000000037",
+    "--contract-address",
+    `/out/${addressFile}`,
+  ]);
+
+  if (result.exitCode !== 0) {
+    const e = result.stderr || result.output || "Unknown error";
+    throw new Error(`generate-txs contract-calls call failed: ${e}`);
+  }
+
+  // Move the generated call transaction to our output directory
+  const tempCallTx = join(outDir, "contract_tx_1_call.mn");
+  if (existsSync(tempCallTx)) {
+    // Copy to our desired location
+    fs.copyFileSync(tempCallTx, outCallTx);
+  } else {
+    throw new Error("generate-txs contract-calls call did not produce expected call transaction");
+  }
+
+  return {
+    callTxPath: outCallTx,
+    outDir,
+  };
+}
+
 }
 
 export { ToolkitWrapper, ToolkitConfig, ToolkitTransactionResult };
