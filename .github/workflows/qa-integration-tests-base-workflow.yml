@@ -80,8 +80,8 @@ jobs:
       packages: read
     env:
       TARGET_ENV: ${{ inputs.target_env }}
-      GITHUB_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-      NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+      GITHUB_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+      NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
       XRAY_COMPONENT: "indexer"
       XRAY_PROJECT_KEY: "PM"
       XRAY_TEST_PLAN_KEY: "PM-19197"
