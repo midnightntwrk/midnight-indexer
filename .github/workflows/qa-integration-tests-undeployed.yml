@@ -1,0 +1,32 @@
+name: Indexer QA Integration Tests - undeployed
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_to_xray:
+        type: boolean
+        description: Publish the test results to Xray
+        required: false
+        default: false
+      node_tag:
+        type: string
+        description: Node tag
+        required: false
+        default: latest
+      indexer_tag:
+        type: string
+        description: Indexer tag
+        required: false
+        default: latest
+
+jobs:
+  test:
+    name: Indexer QA Integration Tests on undeployed
+    uses: ./.github/workflows/qa-integration-tests-base-workflow.yml
+    with:
+      target_env: undeployed
+      ref: main
+      publish_to_xray: ${{ inputs.publish_to_xray }}
+      node_tag: ${{ inputs.node_tag }}
+      indexer_tag: ${{ inputs.indexer_tag }}
+    secrets: inherit
