@@ -88,7 +88,9 @@ CREATE TABLE unshielded_utxos (
 );
 CREATE INDEX ON unshielded_utxos (creating_transaction_id);
 CREATE INDEX ON unshielded_utxos (spending_transaction_id);
-CREATE INDEX ON unshielded_utxos (OWNER);
+CREATE INDEX ON unshielded_utxos (owner);
+CREATE INDEX ON unshielded_utxos (creating_transaction_id, owner);
+CREATE INDEX ON unshielded_utxos (spending_transaction_id, owner);
 CREATE INDEX ON unshielded_utxos (token_type);
 --------------------------------------------------------------------------------
 -- ledger_events

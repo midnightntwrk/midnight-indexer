@@ -151,7 +151,7 @@ where
         debug!(address:?, transaction_id; "streaming events for existing transactions");
 
         let transactions =
-            storage.get_transactions_involving_unshielded(address, transaction_id, BATCH_SIZE);
+            storage.get_transactions_by_unshielded_address(address, transaction_id, BATCH_SIZE);
         let mut transactions = pin!(transactions);
         while let Some(transaction) = get_next_transaction(&mut transactions)
             .await
@@ -180,7 +180,7 @@ where
             .is_some()
         {
             let transactions =
-                storage.get_transactions_involving_unshielded(address, transaction_id, BATCH_SIZE);
+                storage.get_transactions_by_unshielded_address(address, transaction_id, BATCH_SIZE);
             let mut transactions = pin!(transactions);
             while let Some(transaction) =
                 get_next_transaction(&mut transactions)
