@@ -221,14 +221,6 @@ CREATE INDEX ON dust_utxo_mappings(block_id);
 -- The node needs to expose merkle tree update events before we can populate them.
 -- The ledger has internal MerkleTree<DustGenerationInfo> and MerkleTree<()> for commitments,
 -- but doesn't expose tree updates as events yet.
-CREATE TABLE dust_commitment_tree(
-    id BIGSERIAL PRIMARY KEY,
-    block_height BIGINT NOT NULL,
-    merkle_index BIGINT NOT NULL UNIQUE,
-    root BYTEA NOT NULL,
-    tree_data JSONB NOT NULL
-);
-
 CREATE TABLE dust_generation_tree(
     id BIGSERIAL PRIMARY KEY,
     block_height BIGINT NOT NULL,
@@ -237,45 +229,4 @@ CREATE TABLE dust_generation_tree(
     tree_data JSONB NOT NULL
 );
 
-CREATE INDEX ON dust_commitment_tree(merkle_index);
 CREATE INDEX ON dust_generation_tree(merkle_index);
-
--- NIGHT distribution tracking
-CREATE TABLE IF NOT EXISTS night_distributions (
-    id BIGSERIAL PRIMARY KEY,
-    transaction_id BIGINT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-    claim_kind TEXT NOT NULL, -- Type of claim
-    outputs JSONB NOT NULL, -- Serialized outputs
-    total_amount BYTEA NOT NULL, -- u128 as 16 bytes
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX ON night_distributions(transaction_id);
-CREATE INDEX ON night_distributions(created_at);
-
--- Treasury income tracking
-CREATE TABLE IF NOT EXISTS treasury_income (
-    id BIGSERIAL PRIMARY KEY,
-    transaction_id BIGINT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-    amount BYTEA NOT NULL, -- u128 as 16 bytes
-    source TEXT NOT NULL, -- Source of income (e.g., 'block_rewards')
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX ON treasury_income(transaction_id);
-CREATE INDEX ON treasury_income(created_at);
-
--- Treasury payments tracking
-CREATE TABLE IF NOT EXISTS treasury_payments (
-    id BIGSERIAL PRIMARY KEY,
-    transaction_id BIGINT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-    payment_type TEXT NOT NULL, -- 'shielded' or 'unshielded'
-    token_type TEXT NOT NULL, -- Token type being paid
-    outputs JSONB NOT NULL, -- Serialized output instructions
-    total_amount BYTEA, -- u128 as 16 bytes (optional, computed from outputs)
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX ON treasury_payments(transaction_id);
-CREATE INDEX ON treasury_payments(payment_type);
-CREATE INDEX ON treasury_payments(created_at);

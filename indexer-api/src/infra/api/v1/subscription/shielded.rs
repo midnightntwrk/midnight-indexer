@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{self, LedgerStateCache, Transaction, storage::Storage},
+    domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, InnerApiError, ResultExt,
         v1::{AsBytesExt, HexEncoded, decode_session_id, transaction::RegularTransaction},
@@ -230,7 +230,7 @@ where
 
         let transactions = storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
         let mut transactions = pin!(transactions);
-        while let Some(Transaction::Regular(transaction)) = get_next_transaction(&mut transactions)
+        while let Some(transaction) = get_next_transaction(&mut transactions)
             .await
             .map_err_into_server_error(|| "get next transaction")?
         {
@@ -259,7 +259,7 @@ where
             let transactions =
                 storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
             let mut transactions = pin!(transactions);
-            while let Some(Transaction::Regular(transaction)) =  get_next_transaction(&mut transactions)
+            while let Some(transaction) =  get_next_transaction(&mut transactions)
                 .await
                 .map_err_into_server_error(|| "get next transaction")?
             {
