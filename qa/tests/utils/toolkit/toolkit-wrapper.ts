@@ -268,181 +268,57 @@ class ToolkitWrapper {
     return this.parseTransactionOutput(rawOutput);
   }
 
-  async deployContract(opts?: {
-    contractConfigPath?: string;
-    compiledContractDir?: string;
-    network?: string;
-  }): Promise<DeployContractResult> {
+  async callContract(
+    contractAddress: string,
+    callKey: string,
+    rngSeed: string,
+  ): Promise<ToolkitTransactionResult> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
-    const outDir = this.config.targetDir!;
 
-    const contractConfigPath =
-      opts?.contractConfigPath ?? '/toolkit-js/test/contract/contract.config.ts';
-    const compiledContractDir =
-      opts?.compiledContractDir ?? '/toolkit-js/test/contract/managed/counter';
-    const network = (opts?.network ?? this.runtime.network).toLowerCase();
-
-    const deployIntent = 'deploy.bin';
-    const deployTx = 'deploy_tx.mn';
-    const addressFile = 'contract_address.mn';
-    const stateFile = 'contract_state.mn';
-    const initialPrivateState = 'initial_state.json';
-
-    const outDeployIntent = join(outDir, deployIntent);
-    const outDeployTx = join(outDir, deployTx);
-    const outAddressFile = join(outDir, addressFile);
-    const outStateFile = join(outDir, stateFile);
-    const outInitialState = join(outDir, initialPrivateState);
-    const zswapFile = 'temp.json';
-    const coinPublicSeed = '00000000000000000000000000000001';
-    const addressInfo = await this.showAddress(coinPublicSeed);
-    const coinPublic = addressInfo.coinPublic;
-    let addressRaw = '';
-
-    // 1) generate-intent deploy
-    {
-      const result = await this.startedContainer.exec([
-        '/midnight-node-toolkit',
-        'generate-intent',
-        'deploy',
-        '-c',
-        contractConfigPath,
-        '--output-intent',
-        `/out/${deployIntent}`,
-        '--output-private-state',
-        `/out/${initialPrivateState}`,
-        '--coin-public',
-        coinPublic,
-        '--output-zswap-state',
-        `/out/${zswapFile}`,
-      ]);
-      if (result.exitCode !== 0) {
-        const e = result.stderr || result.output || 'Unknown error';
-        throw new Error(`generate-intent deploy failed: ${e}`);
-      }
-      if (!existsSync(outDeployIntent) || !existsSync(outInitialState)) {
-        throw new Error('generate-intent deploy did not produce expected outputs');
-      }
-    }
-
-    // 2) send-intent -> bytes (.mn)
-    {
-      const result = await this.startedContainer.exec([
-        '/midnight-node-toolkit',
-        'send-intent',
-        '--intent-file',
-        `/out/${deployIntent}`,
-        '--compiled-contract-dir',
-        compiledContractDir,
-        '--to-bytes',
-        '--dest-file',
-        `/out/${deployTx}`,
-      ]);
-      if (result.exitCode !== 0) {
-        const e = result.stderr || result.output || 'Unknown error';
-        throw new Error(`send-intent failed: ${e}`);
-      }
-      if (!existsSync(outDeployTx)) {
-        throw new Error(`send-intent did not produce /out/${deployTx}`);
-      }
-    }
-
-    // 3) generate-txs ... send
-    {
-      const result = await this.startedContainer.exec([
-        '/midnight-node-toolkit',
-        'generate-txs',
-        '--src-file',
-        `/out/${deployTx}`,
-        '-r',
-        '1',
-        'send',
-      ]);
-      if (result.exitCode !== 0) {
-        const e = result.stderr || result.output || 'Unknown error';
-        throw new Error(`generate-txs send failed: ${e}`);
-      }
-    }
-
-    // 4) contract-address -> file
-    const taggedAddress = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
-      'contract-address',
-      '--tagged',
-      '--src-file',
-      `/out/${deployTx}`,
+    // Write contract address to a file in HEX-ENCODED tagged format AS TEXT
+    // The targetDir (e.g., /tmp/toolkit/) is mounted to /out in the container
+    // File format: hex("midnight:contract-address[v2]:" + raw_address_bytes)
+    const tag = Buffer.from('midnight:contract-address[v2]:', 'utf8');
+    const addressBytes = Buffer.from(contractAddress, 'hex');
+    const taggedAddressHex = Buffer.concat([tag, addressBytes]).toString('hex');
+    
+    const contractAddressFile = `/out/contract_address_call.mn`;
+    const writeCommand = `echo -n "${taggedAddressHex}" > ${contractAddressFile}`;  // Write as hex text, not binary
+    
+    const writeResult = await this.startedContainer.exec([
+      'sh',
+      '-c',
+      writeCommand,
     ]);
-    log.debug(`contract-address taggedAddress:\n${JSON.stringify(taggedAddress, null, 2)}`);
-    if (taggedAddress.exitCode !== 0) {
-      const e = taggedAddress.stderr || taggedAddress.output || 'Unknown error';
-      throw new Error(`contract-address failed: ${e}`);
+
+    if (writeResult.exitCode !== 0) {
+      throw new Error(`Failed to write contract address to file: ${writeResult.stderr || writeResult.output}`);
     }
 
-    const untaggedAddress = await this.startedContainer.exec([
+    // Pass the FILE PATH directly - the toolkit expects a path to the hex-encoded tagged address file
+    const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
-      'contract-address',
-      '--src-file',
-      `/out/${deployTx}`,
+      'generate-txs',
+      'contract-calls',
+      'call',
+      '--call-key',
+      callKey,
+      '--rng-seed',
+      rngSeed,
+      '--contract-address',
+      contractAddressFile,
     ]);
-    log.debug(`contract-address untaggedAddress:\n${JSON.stringify(untaggedAddress, null, 2)}`);
-    if (untaggedAddress.exitCode !== 0) {
-      const e = untaggedAddress.stderr || untaggedAddress.output || 'Unknown error';
-      throw new Error(`contract-address failed: ${e}`);
+
+    if (result.exitCode !== 0) {
+      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
+      throw new Error(`Toolkit command failed with exit code ${result.exitCode}: ${errorMessage}`);
     }
 
-    // The CLI may print JSON or a typed line — extract a typed string.
-    const contractAddressInfo = {
-      tagged: taggedAddress.output.trim(),
-      untagged: untaggedAddress.output.trim(),
-    };
-
-    log.debug(
-      `contract-address command result.output:\n${JSON.stringify(contractAddressInfo, null, 2)}`,
-    );
-
-    // persist EXACTLY the typed string (no JSON)
-    fs.writeFileSync(outAddressFile, contractAddressInfo.tagged + '\n', 'utf8');
-
-    // share with later steps
-    addressRaw = contractAddressInfo.tagged;
-
-    if (!existsSync(outAddressFile)) {
-      throw new Error('contract-address did not produce /out/contract_address.mn');
-    }
-
-    const raw = readFileSync(outAddressFile, 'utf8').trim();
-    const hex = contractAddressInfo.untagged;
-
-    // 5) quick state read — pass the address exactly as written by the toolkit
-    {
-      const result = await this.startedContainer.exec([
-        '/midnight-node-toolkit',
-        'contract-state',
-        '--contract-address',
-        addressRaw,
-        '--dest-file',
-        '/out/contract_state.mn',
-      ]);
-      if (result.exitCode !== 0) {
-        const e = result.stderr || result.output || 'Unknown error';
-        throw new Error(`contract-state failed: ${e}`);
-      }
-      if (!existsSync(outStateFile)) {
-        throw new Error('contract-state did not produce /out/contract_state.mn');
-      }
-    }
-
-    return {
-      addressRaw: raw,
-      addressUntagged: contractAddressInfo.untagged,
-      addressTagged: contractAddressInfo.tagged,
-      deployTxPath: outDeployTx,
-      statePath: outStateFile,
-      outDir,
-    };
+    const rawOutput = result.output.trim();
+    return this.parseTransactionOutput(rawOutput);
   }
 }
 
-export { ToolkitWrapper, ToolkitConfig };
+export { ToolkitWrapper, ToolkitConfig, ToolkitTransactionResult };
