@@ -12,13 +12,6 @@ CREATE TYPE LEDGER_EVENT_VARIANT AS ENUM(
   'DustSpendProcessed'
 );
 
--- DUST_EVENT_TYPE is kept for CNGD projection tables compatibility
-CREATE TYPE DUST_EVENT_TYPE AS ENUM(
-    'DustInitialUtxo',
-    'DustGenerationDtimeUpdate',
-    'DustSpendProcessed'
-);
-
 CREATE TYPE TRANSACTION_VARIANT AS ENUM('Regular', 'System');
 --------------------------------------------------------------------------------
 -- blocks
@@ -245,20 +238,6 @@ CREATE TABLE dust_generation_tree(
 
 CREATE INDEX ON dust_commitment_tree(merkle_index);
 CREATE INDEX ON dust_generation_tree(merkle_index);
-
--- DUST events projection (parsed from ledger_events)
-CREATE TABLE dust_events(
-    id BIGSERIAL PRIMARY KEY,
-    transaction_id BIGINT NOT NULL REFERENCES transactions(id),
-    transaction_hash BYTEA NOT NULL,
-    logical_segment INTEGER NOT NULL,
-    physical_segment INTEGER NOT NULL,
-    event_type DUST_EVENT_TYPE NOT NULL,
-    event_data JSONB NOT NULL
-);
-
-CREATE INDEX ON dust_events(transaction_id);
-CREATE INDEX ON dust_events(event_type);
 
 -- System transaction metadata tracking
 -- Reserve distribution tracking
