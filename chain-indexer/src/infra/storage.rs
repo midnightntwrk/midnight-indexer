@@ -190,11 +190,7 @@ impl domain::storage::Storage for Storage {
 enum ContractActionVariant {
     /// A contract deployment.
     Deploy,
-
-    /// A contract call.
     Call,
-
-    /// A contract update.
     Update,
 }
 
@@ -423,6 +419,14 @@ async fn save_system_transaction(
     block_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
+    save_unshielded_utxos(
+        &transaction.created_unshielded_utxos,
+        transaction_id,
+        false,
+        tx,
+    )
+    .await?;
+
     save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
 
     // Save DUST projections if present
@@ -582,6 +586,41 @@ async fn save_contract_actions(
     Ok(())
 }
 
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn save_ledger_events(
+    ledger_events: &[LedgerEvent],
+    transaction_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    if ledger_events.is_empty() {
+        return Ok(());
+    }
+
+    let query = indoc! {"
+        INSERT INTO ledger_events (
+            transaction_id,
+            variant,
+            grouping,
+            raw,
+            attributes
+        )
+    "};
+
+    QueryBuilder::new(query)
+        .push_values(ledger_events.iter(), |mut q, ledger_event| {
+            q.push_bind(transaction_id)
+                .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
+                .push_bind(ledger_event.grouping)
+                .push_bind(ledger_event.raw.as_ref())
+                .push_bind(Json(&ledger_event.attributes));
+        })
+        .build()
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
 #[trace]
 async fn save_contract_balances(
     balances: &[(i64, ContractBalance)],
@@ -632,41 +671,6 @@ async fn save_identifiers(
     QueryBuilder::new(query)
         .push_values(identifiers.iter(), |mut q, identifier| {
             q.push_bind(transaction_id).push_bind(identifier);
-        })
-        .build()
-        .execute(&mut **tx)
-        .await?;
-
-    Ok(())
-}
-
-#[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn save_ledger_events(
-    ledger_events: &[LedgerEvent],
-    transaction_id: i64,
-    tx: &mut SqlxTransaction,
-) -> Result<(), sqlx::Error> {
-    if ledger_events.is_empty() {
-        return Ok(());
-    }
-
-    let query = indoc! {"
-        INSERT INTO ledger_events (
-            transaction_id,
-            variant,
-            grouping,
-            raw,
-            attributes
-        )
-    "};
-
-    QueryBuilder::new(query)
-        .push_values(ledger_events.iter(), |mut q, ledger_event| {
-            q.push_bind(transaction_id)
-                .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
-                .push_bind(ledger_event.grouping)
-                .push_bind(ledger_event.raw.as_ref())
-                .push_bind(Json(&ledger_event.attributes));
         })
         .build()
         .execute(&mut **tx)

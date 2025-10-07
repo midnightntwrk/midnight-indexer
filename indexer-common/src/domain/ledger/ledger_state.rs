@@ -12,10 +12,11 @@
 // limitations under the License.
 
 use crate::domain::{
-    ApplyRegularTransactionResult, ByteArray, ByteVec, IntentHash, LedgerEvent, NetworkId, Nonce,
-    PROTOCOL_VERSION_000_017_000, ProtocolVersion, SerializedContractAddress,
-    SerializedLedgerParameters, SerializedLedgerState, SerializedTransaction, SerializedZswapState,
-    SerializedZswapStateRoot, TokenType, TransactionResult, UnshieldedUtxo,
+    ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, ByteArray, ByteVec, IntentHash,
+    LedgerEvent, NetworkId, Nonce, PROTOCOL_VERSION_000_017_000, ProtocolVersion,
+    SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerState,
+    SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot, TokenType,
+    TransactionResult, UnshieldedUtxo,
     dust::{
         DustCommitment, DustGenerationInfo, DustMerklePathEntry, DustNullifier, QualifiedDustOutput,
     },
@@ -41,7 +42,7 @@ use midnight_ledger_v6::{
     structure::{
         LedgerParameters as LedgerParametersV6, LedgerState as LedgerStateV6,
         OutputInstructionUnshielded as OutputInstructionUnshieldedV6,
-        SystemTransaction as LedgerSystemTransactionV6,
+        SystemTransaction as SystemTransactionV6,
     },
     verify::WellFormedStrictness as WellFormedStrictnessV6,
 };
@@ -120,7 +121,7 @@ impl LedgerState {
         transaction: &SerializedTransaction,
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
-    ) -> Result<ApplyRegularTransactionResult, Error> {
+    ) -> Result<ApplyRegularTransactionOutcome, Error> {
         match self {
             Self::V6 {
                 ledger_state,
@@ -178,7 +179,7 @@ impl LedgerState {
                     block_fullness,
                 };
 
-                Ok(ApplyRegularTransactionResult {
+                Ok(ApplyRegularTransactionOutcome {
                     transaction_result,
                     created_unshielded_utxos,
                     spent_unshielded_utxos,
@@ -194,23 +195,26 @@ impl LedgerState {
         &mut self,
         transaction: &SerializedTransaction,
         block_timestamp: u64,
-    ) -> Result<Vec<LedgerEvent>, Error> {
+    ) -> Result<ApplySystemTransactionOutcome, Error> {
         match self {
             Self::V6 {
                 ledger_state,
                 block_fullness,
             } => {
-                let ledger_transaction =
-                    tagged_deserialize_v6::<LedgerSystemTransactionV6>(&mut transaction.as_ref())
+                let transaction =
+                    tagged_deserialize_v6::<SystemTransactionV6>(&mut transaction.as_ref())
                         .map_err(|error| {
-                        Error::Io("cannot deserialize LedgerSystemTransactionV6", error)
-                    })?;
+                            Error::Io("cannot deserialize SystemTransactionV6", error)
+                        })?;
 
-                let cost = ledger_transaction.cost(&ledger_state.parameters);
+                let cost = transaction.cost(&ledger_state.parameters);
                 let (ledger_state, events) = ledger_state
-                    .apply_system_tx(&ledger_transaction, timestamp_v6(block_timestamp))
+                    .apply_system_tx(&transaction, timestamp_v6(block_timestamp))
                     .map_err(|error| Error::SystemTransaction(error.into()))?;
                 let block_fullness = *block_fullness + cost;
+
+                let created_unshielded_utxos =
+                    make_unshielded_utxos_for_system_transaction_v6(transaction, &ledger_state);
 
                 let ledger_events = make_ledger_events_v6(events)?;
 
@@ -219,7 +223,10 @@ impl LedgerState {
                     block_fullness,
                 };
 
-                Ok(ledger_events)
+                Ok(ApplySystemTransactionOutcome {
+                    created_unshielded_utxos,
+                    ledger_events,
+                })
             }
         }
     }
@@ -579,6 +586,46 @@ fn make_unshielded_utxos_v6(
 
             (vec![utxo], vec![]) // Creates one UTXO, spends none.
         }
+    }
+}
+
+fn make_unshielded_utxos_for_system_transaction_v6(
+    transaction: SystemTransactionV6,
+    ledger_state: &LedgerStateV6<DefaultDBV6>,
+) -> Vec<UnshieldedUtxo> {
+    match transaction {
+        SystemTransactionV6::PayFromTreasuryUnshielded {
+            outputs,
+            token_type,
+        } => {
+            outputs
+                .iter()
+                .enumerate()
+                .map(|(index, output)| {
+                    // Compute intent_hash same way ledger does:
+                    // midnight-ledger/ledger/src/structure.rs:589
+                    let intent_hash = output.clone().mk_intent_hash(token_type);
+                    let initial_nonce =
+                        make_initial_nonce_v6(index as u32, ByteArray(intent_hash.0.0));
+
+                    UnshieldedUtxo {
+                        owner: output.target_address.0.0.into(),
+                        token_type: token_type.0.0.into(),
+                        value: output.amount,
+                        intent_hash: ByteArray(intent_hash.0.0),
+                        output_index: index as u32,
+                        initial_nonce,
+                        registered_for_dust_generation: registered_for_dust_generation_v6(
+                            index as u32,
+                            ByteArray(intent_hash.0.0),
+                            ledger_state,
+                        ),
+                    }
+                })
+                .collect()
+        }
+
+        _ => vec![], // Other system transaction types don't create unshielded UTXOs.
     }
 }
 

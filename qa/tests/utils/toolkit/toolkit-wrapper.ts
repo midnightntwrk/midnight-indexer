@@ -187,16 +187,9 @@ class ToolkitWrapper {
       throw new Error('Container is not started. Call start() first.');
     }
 
-    const sourceUrl = env.getNodeWebsocketBaseURL();
-    const destUrl = env.getNodeWebsocketBaseURL();
-
     const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'generate-txs',
-      '--src-url',
-      sourceUrl,
-      '--dest-url',
-      destUrl,
       'single-tx',
       '--source-seed',
       sourceSeed,

@@ -1,4 +1,4 @@
-// This file is part of midnightntwrk/midnight-indexer
+// This file is part of midnightntwrk/midnight-indexer.
 // Copyright (C) 2025 Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,19 +13,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-declare module 'vitest' {
-  interface Assertion<T> {
-    toBeError(): void;
-    toBeSuccess(): void;
-  }
-
-  interface TestContext {
-    skip?: (condition: boolean, reason?: string) => void;
-    task?: {
-      meta: {
-        done?: boolean;
-        custom?: Record<string, any>;
-      };
-    };
-  }
-}
+export { default as CustomJUnitReporter } from './custom-junit/custom-junit-reporter';
+export { default as XRayJsonReporter } from './custom-xray-json/xray-json-reporter';

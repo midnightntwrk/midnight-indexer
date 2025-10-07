@@ -17,8 +17,8 @@ use crate::domain::{
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
-    ApplyRegularTransactionResult, BlockHash, LedgerEvent, LedgerEventGrouping, NetworkId,
-    SerializedTransaction, TransactionVariant,
+    ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerEvent,
+    LedgerEventGrouping, NetworkId, SerializedTransaction, TransactionVariant,
     dust::DustEvent,
     ledger::{self, LedgerParameters},
 };
@@ -130,7 +130,7 @@ impl LedgerState {
 
         // Apply transaction.
         let start_index = self.zswap_first_free();
-        let ApplyRegularTransactionResult {
+        let ApplyRegularTransactionOutcome {
             transaction_result,
             created_unshielded_utxos,
             spent_unshielded_utxos,
@@ -184,7 +184,15 @@ impl LedgerState {
         block_timestamp: u64,
     ) -> Result<Transaction, Error> {
         let mut transaction = SystemTransaction::from(transaction);
-        let ledger_events = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
+
+        // Apply transaction.
+        let ApplySystemTransactionOutcome {
+            created_unshielded_utxos,
+            ledger_events,
+        } = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
+
+        // Update transaction.
+        transaction.created_unshielded_utxos = created_unshielded_utxos;
         transaction.ledger_events = ledger_events.clone();
 
         // Extract and process DUST events into projections
@@ -193,7 +201,7 @@ impl LedgerState {
             transaction.dust_projections = Some(extract_dust_operations(&dust_events));
         }
 
-        Ok(Transaction::System(transaction))
+        Ok(Transaction::System(Box::new(transaction)))
     }
 }
 

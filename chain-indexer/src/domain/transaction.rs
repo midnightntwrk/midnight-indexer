@@ -24,7 +24,7 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Transaction {
     Regular(Box<RegularTransaction>),
-    System(SystemTransaction),
+    System(Box<SystemTransaction>),
 }
 
 impl Transaction {
@@ -67,7 +67,7 @@ impl TryFrom<node::Transaction> for Transaction {
             }
 
             node::Transaction::System(system_transaction) => {
-                Ok(Transaction::System(system_transaction.into()))
+                Ok(Transaction::System(Box::new(system_transaction.into())))
             }
         }
     }
@@ -127,6 +127,7 @@ pub struct SystemTransaction {
     pub raw: SerializedTransaction,
 
     // These fields are set after applying the transaction to the ledger state.
+    pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub ledger_events: Vec<LedgerEvent>,
 
     // DUST projection processing
@@ -139,6 +140,7 @@ impl From<node::SystemTransaction> for SystemTransaction {
             hash: transaction.hash,
             protocol_version: transaction.protocol_version,
             raw: transaction.raw,
+            created_unshielded_utxos: Default::default(),
             ledger_events: Default::default(),
             dust_projections: None,
         }
