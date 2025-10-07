@@ -586,36 +586,6 @@ async fn save_contract_actions(
     Ok(())
 }
 
-#[trace]
-async fn save_contract_balances(
-    balances: &[(i64, ContractBalance)],
-    tx: &mut SqlxTransaction,
-) -> Result<(), sqlx::Error> {
-    if balances.is_empty() {
-        return Ok(());
-    }
-
-    let query = indoc! {"
-        INSERT INTO contract_balances (
-            contract_action_id,
-            token_type,
-            amount
-        )
-    "};
-
-    QueryBuilder::new(query)
-        .push_values(balances.iter(), |mut q, (action_id, balance)| {
-            q.push_bind(*action_id)
-                .push_bind(balance.token_type.as_ref())
-                .push_bind(U128BeBytes::from(balance.amount));
-        })
-        .build()
-        .execute(&mut **tx)
-        .await?;
-
-    Ok(())
-}
-
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_ledger_events(
     ledger_events: &[LedgerEvent],
@@ -643,6 +613,36 @@ async fn save_ledger_events(
                 .push_bind(ledger_event.grouping)
                 .push_bind(ledger_event.raw.as_ref())
                 .push_bind(Json(ledger_event.attributes));
+        })
+        .build()
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace]
+async fn save_contract_balances(
+    balances: &[(i64, ContractBalance)],
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    if balances.is_empty() {
+        return Ok(());
+    }
+
+    let query = indoc! {"
+        INSERT INTO contract_balances (
+            contract_action_id,
+            token_type,
+            amount
+        )
+    "};
+
+    QueryBuilder::new(query)
+        .push_values(balances.iter(), |mut q, (action_id, balance)| {
+            q.push_bind(*action_id)
+                .push_bind(balance.token_type.as_ref())
+                .push_bind(U128BeBytes::from(balance.amount));
         })
         .build()
         .execute(&mut **tx)
