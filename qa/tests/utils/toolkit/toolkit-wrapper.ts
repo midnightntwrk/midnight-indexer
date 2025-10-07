@@ -16,7 +16,7 @@
 import log from '@utils/logging/logger';
 import { env, networkIdByEnvName } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
-import { existsSync, readFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 
@@ -113,13 +113,11 @@ class ToolkitWrapper {
     this.config.targetDir = config.targetDir || '/tmp/toolkit/';
     this.config.nodeTag = config.nodeTag || env.getNodeVersion();
     this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${env.getEnvName()}-${randomId}`;
-    mkdirSync(this.config.targetDir!, { recursive: true });
-    mkdirSync(this.config.syncCacheDir!, { recursive: true });
 
     const toolkitImage =
       config.toolkitImage ??
       process.env.TOOLKIT_IMAGE ??
-      `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${process.env.NODE_TAG ?? "0.16.3-3b7b8d7c"}`;
+      `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${process.env.NODE_TAG ?? "0.17.0-rc.2"}`;
 
     const nodeContainer =
       config.nodeContainer ??
@@ -256,9 +254,8 @@ class ToolkitWrapper {
   if (!this.startedContainer) {
     throw new Error("Container is not started. Call start() first.");
   }
-  const outDir = this.config.targetDir ?? '/tmp/toolkit/';
-  mkdirSync(outDir, { recursive: true });
-
+  const outDir = this.config.targetDir!; '/tmp/toolkit/';
+ 
   const contractConfigPath = opts?.contractConfigPath ?? "/toolkit-js/test/contract/contract.config.ts";
   const compiledContractDir = opts?.compiledContractDir ?? "/toolkit-js/test/contract/managed/counter";
   const network = (opts?.network ?? this.runtime.network).toLowerCase();  

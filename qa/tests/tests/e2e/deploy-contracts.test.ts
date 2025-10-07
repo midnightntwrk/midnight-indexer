@@ -21,14 +21,6 @@ import * as os from "node:os";
 
 import { ToolkitWrapper } from "../../utils/toolkit/toolkit-wrapper";
 
-// Parse typed ("midnight:contract-address[vX]:<64-hex>") or bare <64-hex>.
-function parseContractAddress(raw: string): string {
-  const s = raw.trim().replace(/^"+|"+$/g, "");
-  const m = s.match(/(?:midnight:contract-address(?:\[[vV]\d+\])?:)?([0-9A-Fa-f]{64})\b/);
-  if (!m) throw new Error(`unexpected contract-address format: ${raw}`);
-  return m[1].toLowerCase();
-}
-
 describe("deploy contracts via toolkit wrapper", () => {
   it(
     "deploys the sample counter contract and returns its address",
@@ -53,9 +45,13 @@ describe("deploy contracts via toolkit wrapper", () => {
         const ms = Date.now() - t0;
                 
         // One-liner summary; helpful but not noisy
+        const contractAddressRaw =
+        (res as any).addressRaw ??
+        fs.readFileSync(path.join(outDir, "contract_address.mn"), "utf8").trim();
+
         console.log(
-          `deploy-contracts | addr=${res.addressHex} | toolkit=${toolkitImage} | node=${nodeContainer} | network=${network} | tx=${path.basename(
-             res.deployTxPath,
+        `contract-address=${contractAddressRaw} | toolkit=${toolkitImage} | node=${nodeContainer} | network=${network} | tx=${path.basename(
+         res.deployTxPath,
         )} | out=${outDir} | dur=${ms}ms`,
         );
 
