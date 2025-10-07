@@ -146,7 +146,7 @@ jobs:
 
       - name: Run integration tests
         working-directory: qa/tests
-        run: yarn test
+        run: yarn test integration
 
       - name: Publish to Xray
         if: always() && inputs.publish_to_xray == true
