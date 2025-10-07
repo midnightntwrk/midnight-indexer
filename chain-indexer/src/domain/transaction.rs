@@ -24,7 +24,7 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Transaction {
     Regular(Box<RegularTransaction>),
-    System(SystemTransaction),
+    System(Box<SystemTransaction>),
 }
 
 impl Transaction {
@@ -67,7 +67,7 @@ impl TryFrom<node::Transaction> for Transaction {
             }
 
             node::Transaction::System(system_transaction) => {
-                Ok(Transaction::System(system_transaction.into()))
+                Ok(Transaction::System(Box::new(system_transaction.into())))
             }
         }
     }

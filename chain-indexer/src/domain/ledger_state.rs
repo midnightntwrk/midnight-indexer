@@ -201,7 +201,7 @@ impl LedgerState {
             transaction.dust_projections = Some(extract_dust_operations(&dust_events));
         }
 
-        Ok(Transaction::System(transaction))
+        Ok(Transaction::System(Box::new(transaction)))
     }
 }
 
