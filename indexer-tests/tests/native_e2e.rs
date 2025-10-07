@@ -313,7 +313,7 @@ async fn start_indexer_api(postgres_port: u16, nats_url: &str) -> anyhow::Result
             format!("{}/indexer-api/config.yaml", &*WS_DIR),
         )
         .env("APP__INFRA__API__PORT", api_port.to_string())
-        .env("APP__INFRA__API__MAX_COMPLEXITY", "500")
+        .env("APP__INFRA__API__MAX_COMPLEXITY", "550")
         .env("APP__INFRA__PUB_SUB__URL", nats_url)
         .env("APP__INFRA__STORAGE__PORT", postgres_port.to_string())
         .env("APP__INFRA__LEDGER_STATE_STORAGE__URL", nats_url)
@@ -339,7 +339,7 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
             format!("{}/indexer-standalone/config.yaml", &*WS_DIR),
         )
         .env("APP__INFRA__API__PORT", api_port.to_string())
-        .env("APP__INFRA__API__MAX_COMPLEXITY", "500")
+        .env("APP__INFRA__API__MAX_COMPLEXITY", "550")
         .env("APP__INFRA__NODE__URL", node_url)
         .env("APP__INFRA__STORAGE__CNN_URL", sqlite_file)
         .env("APP__TELEMETRY__TRACING__ENABLED", "true")

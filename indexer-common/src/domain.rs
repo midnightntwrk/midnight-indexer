@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod dust;
 pub mod ledger;
 
 mod address;
@@ -41,6 +42,15 @@ pub type SessionId = ByteArray<32>;
 pub type TokenType = ByteArray<32>;
 pub type TransactionHash = ByteArray<32>;
 pub type UnshieldedAddress = ByteArray<32>;
+
+// DUST-specific types for dustGenerationStatus query.
+pub type DustNonce = ByteArray<32>;
+pub type DustOwner = ByteArray<32>;
+pub type DustAddress = ByteArray<32>;
+pub type CardanoStakeKey = ByteVec;
+pub type NightUtxoHash = ByteArray<32>;
+pub type NightUtxoNonce = ByteArray<32>;
+pub type DustUtxoId = ByteVec;
 
 // Untagged serialization: simple and/or stable types that are not expected to change.
 pub type SerializedTransactionIdentifier = ByteVec;
@@ -173,19 +183,37 @@ impl LedgerEvent {
         }
     }
 
-    fn dust_initial_utxo(raw: SerializedLedgerEvent, output: DustOutput) -> Self {
+    fn dust_initial_utxo(
+        raw: SerializedLedgerEvent,
+        output: dust::QualifiedDustOutput,
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+    ) -> Self {
         Self {
             grouping: LedgerEventGrouping::Dust,
             raw,
-            attributes: LedgerEventAttributes::DustInitialUtxo { output },
+            attributes: LedgerEventAttributes::DustInitialUtxo {
+                output,
+                generation_info,
+                generation_index,
+            },
         }
     }
 
-    fn dust_generation_dtime_update(raw: SerializedLedgerEvent) -> Self {
+    fn dust_generation_dtime_update(
+        raw: SerializedLedgerEvent,
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+        merkle_path: Vec<dust::DustMerklePathEntry>,
+    ) -> Self {
         Self {
             grouping: LedgerEventGrouping::Dust,
             raw,
-            attributes: LedgerEventAttributes::DustGenerationDtimeUpdate,
+            attributes: LedgerEventAttributes::DustGenerationDtimeUpdate {
+                generation_info,
+                generation_index,
+                merkle_path,
+            },
         }
     }
 
@@ -198,7 +226,7 @@ impl LedgerEvent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LedgerEventAttributes {
     ZswapInput,
 
@@ -206,13 +234,22 @@ pub enum LedgerEventAttributes {
 
     ParamChange,
 
-    DustInitialUtxo { output: DustOutput },
+    DustInitialUtxo {
+        output: dust::QualifiedDustOutput,
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+    },
 
-    DustGenerationDtimeUpdate,
+    DustGenerationDtimeUpdate {
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+        merkle_path: Vec<dust::DustMerklePathEntry>,
+    },
 
     DustSpendProcessed,
 }
 
+/// Minimal DUST output info for backwards compatibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustOutput {
     pub nonce: Nonce,

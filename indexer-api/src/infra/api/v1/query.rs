@@ -14,11 +14,12 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ApiResult, ContextExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v1::{
             HexEncoded,
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
+            dust::DustGenerationStatus,
             transaction::{Transaction, TransactionOffset},
         },
     },
@@ -199,5 +200,34 @@ where
         };
 
         Ok(contract_action.map(Into::into))
+    }
+
+    /// Get DUST generation status for specific Cardano stake keys.
+    #[trace]
+    async fn dust_generation_status(
+        &self,
+        cx: &Context<'_>,
+        cardano_stake_keys: Vec<HexEncoded>,
+    ) -> ApiResult<Vec<DustGenerationStatus>> {
+        // DOS protection: limit to 10 keys.
+        Some(())
+            .filter(|_| cardano_stake_keys.len() <= 10)
+            .ok_or_client_error(|| "maximum 10 stake keys allowed per request")?;
+
+        let storage = cx.get_storage::<S>();
+
+        // Convert HexEncoded to binary.
+        let binary_keys = cardano_stake_keys
+            .into_iter()
+            .map(|key| key.hex_decode::<indexer_common::domain::CardanoStakeKey>())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err_into_client_error(|| "invalid stake key")?;
+
+        let statuses = storage
+            .get_dust_generation_status(&binary_keys)
+            .await
+            .map_err_into_server_error(|| "get DUST generation status")?;
+
+        Ok(statuses.into_iter().map(Into::into).collect())
     }
 }
