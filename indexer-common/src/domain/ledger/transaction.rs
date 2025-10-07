@@ -33,7 +33,6 @@ use midnight_transient_crypto_v6::{
     encryption::SecretKey as SecretKeyV6, proofs::Proof as ProofV6,
 };
 use midnight_zswap_v6::Offer as OfferV6;
-use serde::Serialize;
 use std::error::Error as StdError;
 
 /// Facade for `Transaction` from `midnight_ledger` across supported (protocol) versions.

@@ -31,6 +31,7 @@ import type {
   UnshieldedTransactionsProgress,
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
+import { TestContext } from 'vitest';
 
 let indexerWsClient: IndexerWsClient;
 
@@ -196,9 +197,12 @@ describe('unshielded transaction subscriptions', async () => {
       expect(highestFoundTransactionId).toBe(highestTransactionId);
     });
 
-    test.skip('IMPLEMENT ME: should stream unshielded transaction events that adheres to the expected schema', async () => {
-      // TODO: implement the following test that checks the schema of the unshielded transaction events
-    });
+    test.todo(
+      'IMPLEMENT ME: should stream unshielded transaction events that adheres to the expected schema',
+      async () => {
+        // TODO: implement the following test that checks the schema of the unshielded transaction events
+      },
+    );
 
     /**
      * Subscribing to unshielded transaction events for an address without transactions
@@ -333,7 +337,13 @@ describe('unshielded transaction subscriptions', async () => {
      * @and we should receive a progress message with the highest transaction ID
      * @and the highest transaction ID in events should match the progress message
      */
-    test('should return a stream of transactions containing that address, starting from transaction id = 0', async () => {
+    test('should return a stream of transactions containing that address, starting from transaction id = 0', async ({
+      task,
+    }: TestContext) => {
+      task!.meta.custom = {
+        labels: ['UnshieldedTokens', 'Subscription', 'Transaction'],
+      };
+
       const targetTransactionId = 0;
       const targetAddress = dataProvider.getUnshieldedAddress('existing');
 

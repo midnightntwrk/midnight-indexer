@@ -148,6 +148,11 @@ describe('unshielded transactions', () => {
      * @then the block should contain the transaction with outputs for both addresses
      */
     test('should be reported by the indexer through a block query by hash', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHash', 'UnshieldedToken'],
+        testKey: 'PM-17711',
+      };
+
       context.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",
@@ -182,6 +187,11 @@ describe('unshielded transactions', () => {
      * @then the returned transactions should include outputs for both addresses involved
      */
     test('should be reported by the indexer through a transaction query by hash', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Transaction', 'ByHash', 'UnshieldedToken'],
+        testKey: 'PM-17712',
+      };
+
       context.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",
@@ -221,6 +231,11 @@ describe('unshielded transactions', () => {
      * @then we should receive a transaction event that includes created and spent UTXOs for the source address
      */
     test('should be reported by the indexer through an unshielded transaction event for the source address', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Subscription', 'Transaction', 'UnshieldedToken'],
+        testKey: 'PM-17713',
+      };
+
       context.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",
@@ -255,6 +270,11 @@ describe('unshielded transactions', () => {
      * @then we should receive a transaction event that includes a created UTXO for the destination
      */
     test('should be reported by the indexer through an unshielded transaction event for the destination address', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Subscription', 'Transaction', 'UnshieldedToken'],
+        testKey: 'PM-17714',
+      };
+
       context.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",
@@ -288,6 +308,11 @@ describe('unshielded transactions', () => {
      * @then there should be two created outputs and one spent output reflecting the transfer of 1 NIGHT
      */
     test('should have transferred 1 NIGHT from the source to the destination address', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['UnshieldedTokens'],
+        testKey: 'PM-17715',
+      };
+
       context.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",

@@ -12,10 +12,11 @@
 // limitations under the License.
 
 use crate::domain::{
-    ApplyRegularTransactionResult, ByteArray, ByteVec, IntentHash, LedgerEvent, NetworkId, Nonce,
-    PROTOCOL_VERSION_000_017_000, ProtocolVersion, SerializedContractAddress,
-    SerializedLedgerParameters, SerializedLedgerState, SerializedTransaction, SerializedZswapState,
-    SerializedZswapStateRoot, TokenType, TransactionResult, UnshieldedUtxo,
+    ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, ByteArray, ByteVec, IntentHash,
+    LedgerEvent, NetworkId, Nonce, PROTOCOL_VERSION_000_017_000, ProtocolVersion,
+    SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerState,
+    SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot, TokenType,
+    TransactionResult, UnshieldedUtxo,
     dust::{
         DustCommitment, DustGenerationInfo, DustMerklePathEntry, DustNullifier, QualifiedDustOutput,
     },
@@ -120,7 +121,7 @@ impl LedgerState {
         transaction: &SerializedTransaction,
         block_parent_hash: ByteArray<32>,
         block_timestamp: u64,
-    ) -> Result<ApplyRegularTransactionResult, Error> {
+    ) -> Result<ApplyRegularTransactionOutcome, Error> {
         match self {
             Self::V6 {
                 ledger_state,
@@ -178,7 +179,7 @@ impl LedgerState {
                     block_fullness,
                 };
 
-                Ok(ApplyRegularTransactionResult {
+                Ok(ApplyRegularTransactionOutcome {
                     transaction_result,
                     created_unshielded_utxos,
                     spent_unshielded_utxos,
@@ -194,7 +195,7 @@ impl LedgerState {
         &mut self,
         transaction: &SerializedTransaction,
         block_timestamp: u64,
-    ) -> Result<Vec<LedgerEvent>, Error> {
+    ) -> Result<ApplySystemTransactionOutcome, Error> {
         match self {
             Self::V6 {
                 ledger_state,
@@ -214,12 +215,26 @@ impl LedgerState {
 
                 let ledger_events = make_ledger_events_v6(events)?;
 
+                // Extract created unshielded UTXOs from system transaction
+                // System transactions only create UTXOs (from ClaimRewards), they don't spend any
+                let created_unshielded_utxos = match &ledger_transaction {
+                    LedgerSystemTransactionV6::ClaimRewards(claim_rewards_tx) => {
+                        extract_unshielded_outputs_from_claim_rewards_v6(
+                            claim_rewards_tx,
+                            &ledger_state,
+                        )
+                    }
+                };
+
                 *self = Self::V6 {
                     ledger_state,
                     block_fullness,
                 };
 
-                Ok(ledger_events)
+                Ok(ApplySystemTransactionOutcome {
+                    created_unshielded_utxos,
+                    ledger_events,
+                })
             }
         }
     }
@@ -580,6 +595,42 @@ fn make_unshielded_utxos_v6(
             (vec![utxo], vec![]) // Creates one UTXO, spends none.
         }
     }
+}
+
+fn extract_unshielded_outputs_from_claim_rewards_v6(
+    claim: &midnight_ledger_v6::structure::ClaimRewards,
+    ledger_state: &LedgerStateV6<DefaultDBV6>,
+) -> Vec<UnshieldedUtxo> {
+    use midnight_ledger_v6::structure::ClaimRewards as ClaimRewardsV6;
+    use midnight_token_primitives_v6::night_token::get as NIGHTV6;
+    use midnight_user_v6::user_address::UserAddress as UserAddressV6;
+
+    let owner = UserAddressV6::from(claim.owner);
+    let intent_hash = {
+        // ClaimRewards don't have intents, but UTXOs need an intent hash. We compute this
+        // hash the same way that the ledger does internally.
+        let output = OutputInstructionUnshieldedV6 {
+            amount: claim.value,
+            target_address: owner,
+            nonce: claim.nonce,
+        };
+        ByteArray(output.mk_intent_hash(NIGHTV6).0.0)
+    };
+    let initial_nonce = make_initial_nonce_v6(OUTPUT_INDEX_ZERO, intent_hash);
+    let registered_for_dust_generation =
+        registered_for_dust_generation_v6(OUTPUT_INDEX_ZERO, intent_hash, ledger_state);
+
+    let utxo = UnshieldedUtxo {
+        owner: owner.0.0.into(),
+        token_type: TokenType::default(), // Native token (all zeros).
+        value: claim.value,
+        intent_hash,
+        output_index: OUTPUT_INDEX_ZERO,
+        initial_nonce,
+        registered_for_dust_generation,
+    };
+
+    vec![utxo]
 }
 
 fn extend_unshielded_utxos_v6(

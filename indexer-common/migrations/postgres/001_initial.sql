@@ -11,7 +11,6 @@ CREATE TYPE LEDGER_EVENT_VARIANT AS ENUM(
   'DustGenerationDtimeUpdate',
   'DustSpendProcessed'
 );
-
 CREATE TYPE TRANSACTION_VARIANT AS ENUM('Regular', 'System');
 --------------------------------------------------------------------------------
 -- blocks
@@ -89,7 +88,9 @@ CREATE TABLE unshielded_utxos (
 );
 CREATE INDEX ON unshielded_utxos (creating_transaction_id);
 CREATE INDEX ON unshielded_utxos (spending_transaction_id);
-CREATE INDEX ON unshielded_utxos (OWNER);
+CREATE INDEX ON unshielded_utxos (owner);
+CREATE INDEX ON unshielded_utxos (creating_transaction_id, owner);
+CREATE INDEX ON unshielded_utxos (spending_transaction_id, owner);
 CREATE INDEX ON unshielded_utxos (token_type);
 --------------------------------------------------------------------------------
 -- ledger_events
@@ -238,29 +239,6 @@ CREATE TABLE dust_generation_tree(
 
 CREATE INDEX ON dust_commitment_tree(merkle_index);
 CREATE INDEX ON dust_generation_tree(merkle_index);
-
--- System transaction metadata tracking
--- Reserve distribution tracking
-CREATE TABLE IF NOT EXISTS reserve_distributions (
-    id BIGSERIAL PRIMARY KEY,
-    transaction_id BIGINT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-    amount BYTEA NOT NULL, -- u128 as 16 bytes
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX ON reserve_distributions(transaction_id);
-CREATE INDEX ON reserve_distributions(created_at);
-
--- Parameter updates tracking
-CREATE TABLE IF NOT EXISTS parameter_updates (
-    id BIGSERIAL PRIMARY KEY,
-    transaction_id BIGINT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-    parameters JSONB NOT NULL, -- Serialized LedgerParameters
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX ON parameter_updates(transaction_id);
-CREATE INDEX ON parameter_updates(created_at);
 
 -- NIGHT distribution tracking
 CREATE TABLE IF NOT EXISTS night_distributions (

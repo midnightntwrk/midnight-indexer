@@ -459,20 +459,18 @@ async fn index_block(
     // Publish UnshieldedUtxoIndexed events for affected addresses.
     let addresses = transactions
         .iter()
-        .filter_map(|t| match t {
-            Transaction::Regular(t) => Some(t),
-            Transaction::System(_) => None,
-        })
-        .fold(HashSet::new(), |mut addresses, transaction| {
-            let utxos = transaction
+        .flat_map(|transaction| match transaction {
+            Transaction::Regular(transaction) => transaction
                 .created_unshielded_utxos
                 .iter()
-                .chain(transaction.spent_unshielded_utxos.iter());
-            for utxo in utxos {
-                addresses.insert(utxo.owner.to_owned());
+                .chain(transaction.spent_unshielded_utxos.iter()),
+
+            Transaction::System(transaction) => {
+                transaction.created_unshielded_utxos.iter().chain(&[])
             }
-            addresses
-        });
+        })
+        .map(|utxo| utxo.owner)
+        .collect::<HashSet<_>>();
     for address in addresses {
         publisher
             .publish(&UnshieldedUtxoIndexed { address })

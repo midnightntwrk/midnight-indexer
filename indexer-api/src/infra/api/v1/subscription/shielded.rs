@@ -349,8 +349,8 @@ where
 }
 
 async fn get_next_transaction<E>(
-    transactions: &mut (impl Stream<Item = Result<domain::Transaction, E>> + Unpin),
-) -> Result<Option<domain::Transaction>, E> {
+    transactions: &mut (impl Stream<Item = Result<domain::RegularTransaction, E>> + Unpin),
+) -> Result<Option<domain::RegularTransaction>, E> {
     transactions
         .try_next()
         .in_span(Span::root(

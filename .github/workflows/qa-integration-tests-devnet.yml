@@ -2,6 +2,12 @@ name: Indexer QA Integration Tests - devnet
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_to_xray:
+        type: boolean
+        description: Publish the test results to Xray
+        required: false
+        default: false
 
 jobs:
   test:
@@ -10,4 +16,5 @@ jobs:
     with:
       target_env: devnet
       ref: main
+      publish_to_xray: ${{ inputs.publish_to_xray }}
     secrets: inherit
