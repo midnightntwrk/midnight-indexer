@@ -55,12 +55,19 @@ pub type SerializedLedgerState = ByteVec;
 pub type SerializedTransaction = ByteVec;
 pub type SerializedZswapState = ByteVec;
 
-/// The result of applying a regular transaction to the ledger state along with extracted data.
+/// The outcome of applying a regular transaction to the ledger state along with extracted data.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct ApplyRegularTransactionResult {
+pub struct ApplyRegularTransactionOutcome {
     pub transaction_result: TransactionResult,
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
+    pub ledger_events: Vec<LedgerEvent>,
+}
+
+/// The outcome of applying a system transaction to the ledger state along with extracted data.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ApplySystemTransactionOutcome {
+    pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub ledger_events: Vec<LedgerEvent>,
 }
 

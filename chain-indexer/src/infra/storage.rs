@@ -405,6 +405,14 @@ async fn save_system_transaction(
     transaction_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
+    save_unshielded_utxos(
+        &transaction.created_unshielded_utxos,
+        transaction_id,
+        false,
+        tx,
+    )
+    .await?;
+
     save_ledger_events(&transaction.ledger_events, transaction_id, tx).await
 }
 
