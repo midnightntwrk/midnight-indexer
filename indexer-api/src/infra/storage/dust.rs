@@ -33,7 +33,7 @@ use indexer_common::{
     domain::{
         CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustMerkleUpdate, DustNonce,
         DustNullifier, DustOwner, DustPrefix, NightUtxoHash,
-        dust::{DustEvent, DustEventAttributes, DustEventVariant, DustMerklePathEntry},
+        dust::{DustEvent, DustEventVariant, DustMerklePathEntry},
         ledger::TransactionHash,
     },
     infra::sqlx::{SqlxOption, U128BeBytes},
@@ -718,19 +718,22 @@ impl DustStorage for Storage {
         &self,
         transaction_hash: TransactionHash,
     ) -> Result<Vec<DustEvent>, sqlx::Error> {
+        use indexer_common::domain::{LedgerEventAttributes, dust::DustEventAttributes};
+
         #[derive(FromRow)]
         struct DustEventRow {
             transaction_hash: TransactionHash,
-            logical_segment: i32,
-            physical_segment: i32,
-            event_data: Json<DustEventAttributes>,
+            attributes: Json<LedgerEventAttributes>,
         }
 
         let query = indoc! {"
-            SELECT transaction_hash, logical_segment, physical_segment, event_data
-            FROM dust_events
-            WHERE transaction_hash = $1
-            ORDER BY logical_segment, physical_segment
+            SELECT transactions.hash as transaction_hash, ledger_events.attributes
+            FROM ledger_events
+            JOIN transactions ON transactions.id = ledger_events.transaction_id
+            WHERE transactions.hash = $1
+                AND ledger_events.grouping = 'Dust'
+                AND ledger_events.variant IN ('DustInitialUtxo', 'DustGenerationDtimeUpdate', 'DustSpendProcessed')
+            ORDER BY ledger_events.id
         "};
 
         let rows = sqlx::query_as::<_, DustEventRow>(query)
@@ -740,11 +743,51 @@ impl DustStorage for Storage {
 
         Ok(rows
             .into_iter()
-            .map(|row| DustEvent {
-                transaction_hash: row.transaction_hash,
-                logical_segment: row.logical_segment as u16,
-                physical_segment: row.physical_segment as u16,
-                event_details: row.event_data.0,
+            .map(|row| {
+                // Convert LedgerEventAttributes to DustEventAttributes
+                let event_details = match row.attributes.0 {
+                    LedgerEventAttributes::DustInitialUtxo {
+                        output,
+                        generation_info,
+                        generation_index,
+                    } => DustEventAttributes::DustInitialUtxo {
+                        output,
+                        generation_info,
+                        generation_index,
+                    },
+                    LedgerEventAttributes::DustGenerationDtimeUpdate {
+                        generation_info,
+                        generation_index,
+                        merkle_path,
+                    } => DustEventAttributes::DustGenerationDtimeUpdate {
+                        generation_info,
+                        generation_index,
+                        merkle_path,
+                    },
+                    LedgerEventAttributes::DustSpendProcessed {
+                        commitment,
+                        commitment_index,
+                        nullifier,
+                        v_fee,
+                        time,
+                    } => DustEventAttributes::DustSpendProcessed {
+                        commitment,
+                        commitment_index,
+                        nullifier,
+                        v_fee,
+                        time,
+                        params: Default::default(),
+                    },
+                    _ => unreachable!("Only DUST events should be queried"),
+                };
+
+                DustEvent {
+                    transaction_hash: row.transaction_hash,
+                    // DUST events use segment 0 (guaranteed segment) per protocol design
+                    logical_segment: 0,
+                    physical_segment: 0,
+                    event_details,
+                }
             })
             .collect())
     }
@@ -755,31 +798,34 @@ impl DustStorage for Storage {
         limit: u32,
         event_variant: Option<DustEventVariant>,
     ) -> Result<Vec<DustEvent>, sqlx::Error> {
+        use indexer_common::domain::{LedgerEventAttributes, dust::DustEventAttributes};
+
         #[derive(FromRow)]
         struct DustEventRow {
             transaction_hash: TransactionHash,
-            logical_segment: i32,
-            physical_segment: i32,
-            event_data: Json<DustEventAttributes>,
+            attributes: Json<LedgerEventAttributes>,
         }
 
         let query = if event_variant.is_some() {
             // Filter by event type.
             indoc! {"
-                SELECT de.transaction_hash, de.logical_segment, de.physical_segment, de.event_data
-                FROM dust_events de
-                JOIN transactions t ON t.id = de.transaction_id
-                WHERE de.event_type = $1
-                ORDER BY t.id DESC, de.logical_segment, de.physical_segment
+                SELECT transactions.hash as transaction_hash, ledger_events.attributes
+                FROM ledger_events
+                JOIN transactions ON transactions.id = ledger_events.transaction_id
+                WHERE ledger_events.grouping = 'Dust'
+                    AND ledger_events.variant = $1
+                ORDER BY ledger_events.id DESC
                 LIMIT $2
             "}
         } else {
             // Get all event types.
             indoc! {"
-                SELECT de.transaction_hash, de.logical_segment, de.physical_segment, de.event_data
-                FROM dust_events de
-                JOIN transactions t ON t.id = de.transaction_id
-                ORDER BY t.id DESC, de.logical_segment, de.physical_segment
+                SELECT transactions.hash as transaction_hash, ledger_events.attributes
+                FROM ledger_events
+                JOIN transactions ON transactions.id = ledger_events.transaction_id
+                WHERE ledger_events.grouping = 'Dust'
+                    AND ledger_events.variant IN ('DustInitialUtxo', 'DustGenerationDtimeUpdate', 'DustSpendProcessed')
+                ORDER BY ledger_events.id DESC
                 LIMIT $1
             "}
         };
@@ -799,11 +845,51 @@ impl DustStorage for Storage {
 
         Ok(rows
             .into_iter()
-            .map(|row| DustEvent {
-                transaction_hash: row.transaction_hash,
-                logical_segment: row.logical_segment as u16,
-                physical_segment: row.physical_segment as u16,
-                event_details: row.event_data.0,
+            .map(|row| {
+                // Convert LedgerEventAttributes to DustEventAttributes
+                let event_details = match row.attributes.0 {
+                    LedgerEventAttributes::DustInitialUtxo {
+                        output,
+                        generation_info,
+                        generation_index,
+                    } => DustEventAttributes::DustInitialUtxo {
+                        output,
+                        generation_info,
+                        generation_index,
+                    },
+                    LedgerEventAttributes::DustGenerationDtimeUpdate {
+                        generation_info,
+                        generation_index,
+                        merkle_path,
+                    } => DustEventAttributes::DustGenerationDtimeUpdate {
+                        generation_info,
+                        generation_index,
+                        merkle_path,
+                    },
+                    LedgerEventAttributes::DustSpendProcessed {
+                        commitment,
+                        commitment_index,
+                        nullifier,
+                        v_fee,
+                        time,
+                    } => DustEventAttributes::DustSpendProcessed {
+                        commitment,
+                        commitment_index,
+                        nullifier,
+                        v_fee,
+                        time,
+                        params: Default::default(),
+                    },
+                    _ => unreachable!("Only DUST events should be queried"),
+                };
+
+                DustEvent {
+                    transaction_hash: row.transaction_hash,
+                    // DUST events use segment 0 (guaranteed segment) per protocol design
+                    logical_segment: 0,
+                    physical_segment: 0,
+                    event_details,
+                }
             })
             .collect())
     }

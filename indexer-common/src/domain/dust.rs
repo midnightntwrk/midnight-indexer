@@ -150,7 +150,7 @@ impl Default for DustParameters {
 
 /// DUST event type for database storage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(type_name = "DUST_EVENT_TYPE", rename_all = "PascalCase")]
+#[sqlx(type_name = "LEDGER_EVENT_VARIANT", rename_all = "PascalCase")]
 pub enum DustEventVariant {
     /// Initial DUST UTXO creation.
     DustInitialUtxo,

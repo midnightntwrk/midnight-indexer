@@ -825,7 +825,7 @@ async fn save_dust_generation_info(
         .bind(generation.nonce.as_ref())
         .bind(generation.ctime as i64)
         .bind(generation_index as i64)
-        .bind(if generation.dtime == 0 {
+        .bind(if generation.dtime == u64::MAX {
             None
         } else {
             Some(generation.dtime as i64)
