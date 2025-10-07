@@ -33,7 +33,7 @@ use indexer_common::{
     domain::{
         CardanoStakeKey, DustAddress, DustCommitment, DustMerkleRoot, DustMerkleUpdate, DustNonce,
         DustNullifier, DustOwner, DustPrefix, NightUtxoHash,
-        dust::{DustEvent, DustEventAttributes, DustEventVariant, DustMerklePathEntry},
+        dust::{DustEvent, DustEventVariant, DustMerklePathEntry},
         ledger::TransactionHash,
     },
     infra::sqlx::{SqlxOption, U128BeBytes},
