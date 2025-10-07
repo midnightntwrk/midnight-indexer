@@ -323,7 +323,7 @@ async fn save_transactions(
             }
 
             Transaction::System(transaction) => {
-                save_system_transaction(transaction, transaction_id, tx).await?
+                save_system_transaction(transaction, transaction_id, block_id, tx).await?
             }
         }
     }
@@ -612,7 +612,7 @@ async fn save_ledger_events(
                 .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
                 .push_bind(ledger_event.grouping)
                 .push_bind(ledger_event.raw.as_ref())
-                .push_bind(Json(ledger_event.attributes));
+                .push_bind(Json(&ledger_event.attributes));
         })
         .build()
         .execute(&mut **tx)
