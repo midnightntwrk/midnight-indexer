@@ -27,8 +27,8 @@ use byte_unit::{Byte, UnitType};
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{
-    BlockIndexed, LedgerStateStorage, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxo,
-    UnshieldedUtxoIndexed, ledger,
+    BlockIndexed, LedgerStateStorage, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxoIndexed,
+    ledger,
 };
 use log::{info, warn};
 use parking_lot::RwLock;
@@ -40,8 +40,6 @@ use tokio::{
     signal::unix::Signal,
     task::{self},
 };
-
-const EMPTY_UNSHIELDED_UTXOS: &[UnshieldedUtxo] = &[];
 
 #[serde_as]
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -437,10 +435,9 @@ async fn index_block(
                 .iter()
                 .chain(transaction.spent_unshielded_utxos.iter()),
 
-            Transaction::System(transaction) => transaction
-                .created_unshielded_utxos
-                .iter()
-                .chain(EMPTY_UNSHIELDED_UTXOS),
+            Transaction::System(transaction) => {
+                transaction.created_unshielded_utxos.iter().chain(&[])
+            }
         })
         .map(|utxo| utxo.owner)
         .collect::<HashSet<_>>();

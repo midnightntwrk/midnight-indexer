@@ -209,7 +209,7 @@ impl LedgerState {
                 let block_fullness = *block_fullness + cost;
 
                 let created_unshielded_utxos =
-                    make_unshielded_utxo_for_system_transaction_v6(transaction, &ledger_state);
+                    make_unshielded_utxos_for_system_transaction_v6(transaction, &ledger_state);
 
                 let ledger_events = make_ledger_events_v6(events)?;
 
@@ -497,7 +497,7 @@ fn make_unshielded_utxos_for_regular_transaction_v6(
     }
 }
 
-fn make_unshielded_utxo_for_system_transaction_v6(
+fn make_unshielded_utxos_for_system_transaction_v6(
     transaction: SystemTransactionV6,
     ledger_state: &LedgerStateV6<DefaultDBV6>,
 ) -> Vec<UnshieldedUtxo> {
