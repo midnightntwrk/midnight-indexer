@@ -233,7 +233,7 @@ describe('unshielded transactions', () => {
     test('should be reported by the indexer through an unshielded transaction event for the source address', async (context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['Subscription', 'Transaction', 'UnshieldedToken'],
-        testKey: 'PM-177113',
+        testKey: 'PM-17713',
       };
 
       context.skip?.(
@@ -272,7 +272,7 @@ describe('unshielded transactions', () => {
     test('should be reported by the indexer through an unshielded transaction event for the destination address', async (context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['Subscription', 'Transaction', 'UnshieldedToken'],
-        testKey: 'PM-177114',
+        testKey: 'PM-17714',
       };
 
       context.skip?.(
@@ -310,7 +310,7 @@ describe('unshielded transactions', () => {
     test('should have transferred 1 NIGHT from the source to the destination address', async (context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['UnshieldedTokens'],
-        testKey: 'PM-177115',
+        testKey: 'PM-17715',
       };
 
       context.skip?.(
