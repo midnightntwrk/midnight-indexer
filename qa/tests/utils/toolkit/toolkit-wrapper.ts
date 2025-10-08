@@ -30,11 +30,16 @@ export type ShowAddressOption =
   | 'unshielded-user-address-untagged';
 
 interface AddressInfo {
-  shielded: string
-  unshielded: string
-  coinPublic: string
-  congPublicTagged: string
-  unshieldedUserAddressUntagged: string
+  shielded: string;
+  unshielded: string;
+  coinPublic: string;
+  coinPublicTagged: string;
+  unshieldedUserAddressUntagged: string;
+}
+
+interface ContractAddressInfo {
+  tagged: string;
+  untagged: string;
 }
 
 interface ToolkitConfig {
@@ -49,7 +54,7 @@ interface ToolkitConfig {
   coinSeed?: string;
 }
 
-interface ToolkitTransactionResult {
+export interface ToolkitTransactionResult {
   txHash: string;
   blockHash?: string;
   status: 'sent' | 'confirmed';
@@ -63,6 +68,15 @@ interface LogEntry {
   timestamp: number;
   tx_hash?: string;
   block_hash?: string;
+}
+
+export interface DeployContractResult {
+  addressRaw: string;
+  addressUntagged: string;
+  addressTagged: string;
+  deployTxPath: string;
+  statePath: string;
+  outDir: string;
 }
 
 class ToolkitWrapper {
@@ -108,62 +122,6 @@ class ToolkitWrapper {
       status,
       rawOutput: output,
     };
-  }
-
-  private parseContractAddress(raw: string): string {
-    const s = (raw ?? '').trim();
-    // If the CLI printed JSON (0.17+), prefer the typed field.
-    if (s.startsWith('{')) {
-      try {
-        const j = JSON.parse(s);
-        if (j && typeof j.tagged === 'string' && j.tagged.trim()) {
-          return this.parseContractAddress(j.tagged);
-        }
-        if (j && typeof j.untagged === 'string' && j.untagged.trim()) {
-          const u = j.untagged.trim();
-          if (/^[0-9A-Fa-f]{64}$/.test(u)) return u.toLowerCase();
-        }
-      } catch {
-        // fall through to regex
-      }
-    }
-
-    // Robust fallback: find either typed or bare 64-hex anywhere in the string.
-    const m =
-      s.match(/midnight:contract-address(?:\[[vV]\d+\])?:([0-9A-Fa-f]{64})/) ||
-      s.match(/([0-9A-Fa-f]{64})\b/);
-
-    if (!m) throw new Error(`unexpected contract-address format: ${raw}`);
-    return m[1].toLowerCase();
-  }
-
-  private async resolveCoinPublic(network: string, seedFromConfig?: string): Promise<string> {
-    if (!this.startedContainer) {
-      throw new Error('Container is not started. Call start() first.');
-    }
-
-    // Derive it from a seed
-    const seed =
-      seedFromConfig?.trim() ||
-      process.env.COIN_SEED?.trim() ||
-      '0000000000000000000000000000000000000000000000000000000000000001';
-
-    const r = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
-      'show-address',
-      '--network',
-      network,
-      '--seed',
-      seed,
-      '--coin-public',
-    ]);
-
-    if (r.exitCode !== 0) {
-      const e = r.stderr || r.output || 'Unknown error';
-      throw new Error(`show-address --coin-public failed: ${e}`);
-    }
-
-    return (r.output || '').trim();
   }
 
   constructor(config: ToolkitConfig) {
@@ -225,12 +183,12 @@ class ToolkitWrapper {
   }
 
   /**
-   * Show address infomration from a seed
+   * Show address information from a seed
    *
    * @param seed - The seed to use
    * @returns The address information as a JSON object
    */
-  async showAddress(seed: string): Promise<Record<string, string>> {
+  async showAddress(seed: string): Promise<AddressInfo> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
@@ -252,7 +210,7 @@ class ToolkitWrapper {
     }
 
     // Extract the json object and return it as is
-    return JSON.parse(response.output.trim());
+    return JSON.parse(response.output);
   }
 
   async showViewingKey(seed: string): Promise<string> {
@@ -293,10 +251,6 @@ class ToolkitWrapper {
     const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'generate-txs',
-      '--src-url',
-      sourceUrl,
-      '--dest-url',
-      destUrl,
       'single-tx',
       '--source-seed',
       sourceSeed,
@@ -319,18 +273,11 @@ class ToolkitWrapper {
     contractConfigPath?: string;
     compiledContractDir?: string;
     network?: string;
-  }): Promise<{
-    addressRaw: string;
-    addressHex: string;
-    deployTxPath: string;
-    statePath: string;
-    outDir: string;
-  }> {
+  }): Promise<DeployContractResult> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
     const outDir = this.config.targetDir!;
-    ('/tmp/toolkit/');
 
     const contractConfigPath =
       opts?.contractConfigPath ?? '/toolkit-js/test/contract/contract.config.ts';
@@ -350,9 +297,9 @@ class ToolkitWrapper {
     const outStateFile = join(outDir, stateFile);
     const outInitialState = join(outDir, initialPrivateState);
     const zswapFile = 'temp.json';
-    const coinPublicSeed = '00000000000000000000000000000001'
-    const addressInfo: Record<string, string> = await this.showAddress(coinPublicSeed);
-    const coinPublic = addressInfo['coinPublic'];
+    const coinPublicSeed = '00000000000000000000000000000001';
+    const addressInfo = await this.showAddress(coinPublicSeed);
+    const coinPublic = addressInfo.coinPublic;
     let addressRaw = '';
 
     // 1) generate-intent deploy
@@ -421,55 +368,35 @@ class ToolkitWrapper {
     }
 
     // 4) contract-address -> file
-    {
-      const result = await this.startedContainer.exec([
-        '/midnight-node-toolkit',
-        'contract-address',
-        '--network',
-        network,
-        '--src-file',
-        '/out/deploy_tx.mn',
-      ]);
-      if (result.exitCode !== 0) {
-        const e = result.stderr || result.output || 'Unknown error';
-        throw new Error(`contract-address failed: ${e}`);
-      }
+    const result = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'contract-address',
+      '--network',
+      network,
+      '--src-file',
+      '/out/deploy_tx.mn',
+    ]);
+    if (result.exitCode !== 0) {
+      const e = result.stderr || result.output || 'Unknown error';
+      throw new Error(`contract-address failed: ${e}`);
+    }
 
-      // The CLI may print JSON or a typed line — extract a typed string.
-      const out = (result.output || '').trim();
+    // The CLI may print JSON or a typed line — extract a typed string.
+    log.debug(`contract-address command result.output:\n${result.output}`);
+    const contractAddressInfo = JSON.parse(result.output);
 
-      // If JSON, prefer 'tagged'; else find the typed address in free text.
-      let typed = '';
-      if (out.startsWith('{')) {
-        try {
-          const j = JSON.parse(out);
-          if (j && typeof j.tagged === 'string') typed = j.tagged.trim();
-        } catch {
-          // ignore and fall back to regex
-        }
-      }
-      if (!typed) {
-        const mm = out.match(/midnight:contract-address(?:\[[vV]\d+\])?:[0-9A-Fa-f]{64}/);
-        if (mm) typed = mm[0];
-      }
-      if (!typed) {
-        throw new Error(`unexpected contract-address output: ${out.slice(0, 200)}`);
-      }
+    // persist EXACTLY the typed string (no JSON)
+    fs.writeFileSync(outAddressFile, contractAddressInfo.tagged + '\n', 'utf8');
 
-      // persist EXACTLY the typed string (no JSON)
-      fs.writeFileSync(outAddressFile, typed + '\n', 'utf8');
+    // share with later steps
+    addressRaw = contractAddressInfo.tagged;
 
-      // share with later steps
-      addressRaw = typed;
-      const addressHex = this.parseContractAddress(typed);
-
-      if (!existsSync(outAddressFile)) {
-        throw new Error('contract-address did not produce /out/contract_address.mn');
-      }
+    if (!existsSync(outAddressFile)) {
+      throw new Error('contract-address did not produce /out/contract_address.mn');
     }
 
     const raw = readFileSync(outAddressFile, 'utf8').trim();
-    const hex = this.parseContractAddress(raw);
+    const hex = contractAddressInfo.untagged;
 
     // 5) quick state read — pass the address exactly as written by the toolkit
     {
@@ -492,7 +419,8 @@ class ToolkitWrapper {
 
     return {
       addressRaw: raw,
-      addressHex: hex,
+      addressUntagged: contractAddressInfo.untagged,
+      addressTagged: contractAddressInfo.tagged,
       deployTxPath: outDeployTx,
       statePath: outStateFile,
       outDir,
@@ -500,4 +428,4 @@ class ToolkitWrapper {
   }
 }
 
-export { ToolkitWrapper, ToolkitConfig, ToolkitTransactionResult };
+export { ToolkitWrapper, ToolkitConfig };

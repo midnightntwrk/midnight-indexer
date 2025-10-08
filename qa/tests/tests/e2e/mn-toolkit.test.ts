@@ -33,7 +33,7 @@ describe('mn-toolkit', () => {
   });
 
   test('mn-toolkit show shielded address test', async () => {
-    const address = await toolkit.showAddress(seed, 'shielded');
+    const address = (await toolkit.showAddress(seed)).shielded;
 
     log.info(`Shielded address: ${address}`);
 
@@ -41,7 +41,7 @@ describe('mn-toolkit', () => {
   });
 
   test('mn-toolkit show unshielded address test', async () => {
-    const address = await toolkit.showAddress(seed, 'unshielded');
+    const address = (await toolkit.showAddress(seed)).unshielded;
 
     log.info(`Unshielded address: ${address}`);
 
