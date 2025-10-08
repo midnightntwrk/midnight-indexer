@@ -85,7 +85,7 @@ where
             .get_transaction_by_id(id)
             .await
             .map_err_into_server_error(|| format!("get transaction by id {id})"))?
-            .ok_or_server_error(|| format!("transaction with id {id} not found"))?;
+            .some_or_server_error(|| format!("transaction with id {id} not found"))?;
 
         Ok(transaction.into())
     }
@@ -101,7 +101,7 @@ where
             .get_transaction_by_id(id)
             .await
             .map_err_into_server_error(|| format!("get transaction by id {id}"))?
-            .ok_or_server_error(|| format!("transaction with id {id} not found"))?;
+            .some_or_server_error(|| format!("transaction with id {id} not found"))?;
 
         Ok(Some(transaction.into()))
     }

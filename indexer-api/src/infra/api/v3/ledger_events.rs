@@ -73,16 +73,18 @@ impl From<LedgerEvent> for DustLedgerEvent {
                 max_id: ledger_event.max_id,
             }),
 
-            LedgerEventAttributes::DustInitialUtxo { output } => {
+            LedgerEventAttributes::DustInitialUtxo { output, .. } => {
                 DustLedgerEvent::DustInitialUtxo(DustInitialUtxo {
                     id: ledger_event.id,
                     raw: ledger_event.raw.hex_encode(),
                     max_id: ledger_event.max_id,
-                    output: output.into(),
+                    output: DustOutput {
+                        nonce: output.nonce.hex_encode(),
+                    },
                 })
             }
 
-            LedgerEventAttributes::DustGenerationDtimeUpdate => {
+            LedgerEventAttributes::DustGenerationDtimeUpdate { .. } => {
                 DustLedgerEvent::DustGenerationDtimeUpdate(DustGenerationDtimeUpdate {
                     id: ledger_event.id,
                     raw: ledger_event.raw.hex_encode(),

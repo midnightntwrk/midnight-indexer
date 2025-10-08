@@ -143,3 +143,39 @@ CREATE TABLE relevant_transactions (
   transaction_id BIGINT NOT NULL REFERENCES transactions (id),
   UNIQUE (wallet_id, transaction_id)
 );
+
+--------------------------------------------------------------------------------
+-- DUST Generation Status Tables
+-- These tables support the dustGenerationStatus GraphQL query for Protofire dApp
+--------------------------------------------------------------------------------
+
+-- DUST generation information tracking
+CREATE TABLE dust_generation_info(
+    id BIGSERIAL PRIMARY KEY,
+    night_utxo_hash BYTEA NOT NULL,
+    value BYTEA NOT NULL,
+    owner BYTEA NOT NULL,
+    nonce BYTEA NOT NULL,
+    ctime BIGINT NOT NULL,
+    merkle_index BIGINT NOT NULL,
+    dtime BIGINT
+);
+
+CREATE INDEX ON dust_generation_info(owner);
+CREATE INDEX ON dust_generation_info(night_utxo_hash);
+
+-- cNIGHT registration tracking
+CREATE TABLE cnight_registrations(
+    id BIGSERIAL PRIMARY KEY,
+    cardano_address BYTEA NOT NULL,
+    dust_address BYTEA NOT NULL,
+    valid BOOLEAN NOT NULL,
+    registered_at BIGINT NOT NULL,
+    removed_at BIGINT,
+    block_id BIGINT REFERENCES blocks(id),
+    UNIQUE (cardano_address, dust_address)
+);
+
+CREATE INDEX ON cnight_registrations(cardano_address);
+CREATE INDEX ON cnight_registrations(dust_address);
+CREATE INDEX ON cnight_registrations(block_id);
