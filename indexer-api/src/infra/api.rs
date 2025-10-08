@@ -27,7 +27,7 @@ use derive_more::Debug;
 use fastrace_axum::FastraceLayer;
 use indexer_common::{
     domain::{LedgerStateStorage, NetworkId, Subscriber},
-    error::StdErrorExt as _,
+    error::StdErrorExt,
 };
 use log::{error, info, warn};
 use metrics::{Gauge, gauge};
@@ -186,13 +186,11 @@ where
         .nest("/api/v1", v1_app)
         .with_state(caught_up)
         .layer(
-            ServiceBuilder::new().layer(
-                ServiceBuilder::new()
-                    .layer(FastraceLayer)
-                    .layer(RequestBodyLimitLayer::new(request_body_limit))
-                    .layer(CorsLayer::permissive())
-                    .and_then(transform_lentgh_limit_exceeded),
-            ),
+            ServiceBuilder::new()
+                .layer(FastraceLayer)
+                .layer(RequestBodyLimitLayer::new(request_body_limit))
+                .and_then(transform_lentgh_limit_exceeded)
+                .layer(CorsLayer::permissive()),
         )
 }
 
