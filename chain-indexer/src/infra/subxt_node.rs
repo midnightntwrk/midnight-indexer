@@ -493,6 +493,9 @@ pub enum SubxtNodeError {
 
     #[error("invalid protocol version {0}")]
     InvalidProtocolVersion(ProtocolVersion),
+
+    #[error("invalid DUST address length")]
+    InvalidDustAddress,
 }
 
 #[trace]

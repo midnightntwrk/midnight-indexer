@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{DustNonce, DustOwner, NightUtxoHash, NightUtxoNonce};
+use crate::domain::{DustOwner, NightUtxoHash, Nonce};
 use serde::{Deserialize, Serialize};
 
 /// Qualified DUST output information.
@@ -24,7 +24,7 @@ pub struct QualifiedDustOutput {
     pub owner: DustOwner,
 
     /// Nonce for this DUST UTXO.
-    pub nonce: DustNonce,
+    pub nonce: Nonce,
 
     /// Sequence number.
     pub seq: u32,
@@ -33,7 +33,7 @@ pub struct QualifiedDustOutput {
     pub ctime: u64,
 
     /// Backing Night UTXO nonce.
-    pub backing_night: NightUtxoNonce,
+    pub backing_night: Nonce,
 
     /// Merkle tree index.
     pub mt_index: u64,
@@ -61,7 +61,7 @@ pub struct DustGenerationInfo {
     pub owner: DustOwner,
 
     /// Initial nonce.
-    pub nonce: DustNonce,
+    pub nonce: Nonce,
 
     /// Creation time.
     pub ctime: u64,

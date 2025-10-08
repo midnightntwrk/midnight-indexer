@@ -44,12 +44,10 @@ pub type TransactionHash = ByteArray<32>;
 pub type UnshieldedAddress = ByteArray<32>;
 
 // DUST-specific types for dustGenerationStatus query.
-pub type DustNonce = ByteArray<32>;
 pub type DustOwner = ByteArray<32>;
 pub type DustAddress = ByteArray<32>;
 pub type CardanoStakeKey = ByteVec;
 pub type NightUtxoHash = ByteArray<32>;
-pub type NightUtxoNonce = ByteArray<32>;
 pub type DustUtxoId = ByteVec;
 
 // Untagged serialization: simple and/or stable types that are not expected to change.

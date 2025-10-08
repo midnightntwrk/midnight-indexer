@@ -54,10 +54,9 @@ pub struct Block {
     pub dust_registration_events: Vec<DustRegistrationEvent>,
 }
 
-impl From<Block> for (domain::Block, Vec<Transaction>, Vec<DustRegistrationEvent>) {
-    fn from(block: Block) -> (domain::Block, Vec<Transaction>, Vec<DustRegistrationEvent>) {
+impl From<Block> for (domain::Block, Vec<Transaction>) {
+    fn from(block: Block) -> (domain::Block, Vec<Transaction>) {
         let transactions = block.transactions;
-        let dust_registration_events = block.dust_registration_events;
         let block = domain::Block {
             hash: block.hash,
             height: block.height,
@@ -66,10 +65,11 @@ impl From<Block> for (domain::Block, Vec<Transaction>, Vec<DustRegistrationEvent
             author: block.author,
             timestamp: block.timestamp,
             zswap_state_root: block.zswap_state_root,
+            dust_registration_events: block.dust_registration_events,
             ledger_parameters: Default::default(),
         };
 
-        (block, transactions, dust_registration_events)
+        (block, transactions)
     }
 }
 

@@ -216,11 +216,11 @@ DUST generation status for a specific Cardano stake key.
 """
 type DustGenerationStatus {
 	"""
-	Cardano stake key.
+	The hex-encoded Cardano stake key.
 	"""
 	cardanoStakeKey: HexEncoded!
 	"""
-	Associated DUST address if registered.
+	The hex-encoded associated DUST address if registered.
 	"""
 	dustAddress: HexEncoded
 	"""

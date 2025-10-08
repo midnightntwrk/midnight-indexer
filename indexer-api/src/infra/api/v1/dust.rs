@@ -21,15 +21,14 @@ use crate::{
     infra::api::v1::{AsBytesExt, HexEncoded},
 };
 use async_graphql::SimpleObject;
-use serde::{Deserialize, Serialize};
 
 /// DUST generation status for a specific Cardano stake key.
-#[derive(Debug, Clone, SimpleObject, Serialize, Deserialize)]
+#[derive(Debug, Clone, SimpleObject)]
 pub struct DustGenerationStatus {
-    /// Cardano stake key.
+    /// The hex-encoded Cardano stake key.
     pub cardano_stake_key: HexEncoded,
 
-    /// Associated DUST address if registered.
+    /// The hex-encoded associated DUST address if registered.
     pub dust_address: Option<HexEncoded>,
 
     /// Whether this stake key is registered.

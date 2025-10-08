@@ -193,58 +193,62 @@ async fn make_block_details_runtime_0_17(
             Event::NativeTokenObservation(native_token_event) => match native_token_event {
                 NativeTokenObservationEvent::Registration(event) => {
                     let cardano_address = CardanoStakeKey::from(event.cardano_address.0);
-                    if let Ok(dust_address_array) =
-                        TryInto::<[u8; 32]>::try_into(event.dust_address)
-                    {
-                        dust_registration_events.push(DustRegistrationEvent::Registration {
-                            cardano_address,
-                            dust_address: DustAddress::from(dust_address_array),
-                        });
-                    }
+                    let dust_address_array: [u8; 32] = event
+                        .dust_address
+                        .try_into()
+                        .map_err(|_| SubxtNodeError::InvalidDustAddress)?;
+
+                    dust_registration_events.push(DustRegistrationEvent::Registration {
+                        cardano_address,
+                        dust_address: DustAddress::from(dust_address_array),
+                    });
                 }
 
                 NativeTokenObservationEvent::Deregistration(event) => {
                     let cardano_address = CardanoStakeKey::from(event.cardano_address.0);
-                    if let Ok(dust_address_array) =
-                        TryInto::<[u8; 32]>::try_into(event.dust_address)
-                    {
-                        dust_registration_events.push(DustRegistrationEvent::Deregistration {
-                            cardano_address,
-                            dust_address: DustAddress::from(dust_address_array),
-                        });
-                    }
+                    let dust_address_array: [u8; 32] = event
+                        .dust_address
+                        .try_into()
+                        .map_err(|_| SubxtNodeError::InvalidDustAddress)?;
+
+                    dust_registration_events.push(DustRegistrationEvent::Deregistration {
+                        cardano_address,
+                        dust_address: DustAddress::from(dust_address_array),
+                    });
                 }
 
                 NativeTokenObservationEvent::MappingAdded(event) => {
                     let cardano_address = CardanoStakeKey::from(event.cardano_address.0);
-                    if let (Ok(dust_address_bytes), Ok(utxo_id_bytes)) = (
-                        const_hex::decode(&event.dust_address),
-                        const_hex::decode(&event.utxo_id),
-                    ) && let Ok(dust_address_array) =
-                        TryInto::<[u8; 32]>::try_into(dust_address_bytes)
-                    {
-                        dust_registration_events.push(DustRegistrationEvent::MappingAdded {
-                            cardano_address,
-                            dust_address: DustAddress::from(dust_address_array),
-                            utxo_id: DustUtxoId::from(utxo_id_bytes),
-                        });
-                    }
+                    let dust_address_bytes = const_hex::decode(&event.dust_address)
+                        .map_err(|_| SubxtNodeError::InvalidDustAddress)?;
+                    let utxo_id_bytes = const_hex::decode(&event.utxo_id)
+                        .map_err(|_| SubxtNodeError::InvalidDustAddress)?;
+                    let dust_address_array: [u8; 32] = dust_address_bytes
+                        .try_into()
+                        .map_err(|_| SubxtNodeError::InvalidDustAddress)?;
+
+                    dust_registration_events.push(DustRegistrationEvent::MappingAdded {
+                        cardano_address,
+                        dust_address: DustAddress::from(dust_address_array),
+                        utxo_id: DustUtxoId::from(utxo_id_bytes),
+                    });
                 }
 
                 NativeTokenObservationEvent::MappingRemoved(event) => {
                     let cardano_address = CardanoStakeKey::from(event.cardano_address.0);
-                    if let (Ok(dust_address_bytes), Ok(utxo_id_bytes)) = (
-                        const_hex::decode(&event.dust_address),
-                        const_hex::decode(&event.utxo_id),
-                    ) && let Ok(dust_address_array) =
-                        TryInto::<[u8; 32]>::try_into(dust_address_bytes)
-                    {
-                        dust_registration_events.push(DustRegistrationEvent::MappingRemoved {
-                            cardano_address,
-                            dust_address: DustAddress::from(dust_address_array),
-                            utxo_id: DustUtxoId::from(utxo_id_bytes),
-                        });
-                    }
+                    let dust_address_bytes = const_hex::decode(&event.dust_address)
+                        .map_err(|_| SubxtNodeError::InvalidDustAddress)?;
+                    let utxo_id_bytes = const_hex::decode(&event.utxo_id)
+                        .map_err(|_| SubxtNodeError::InvalidDustAddress)?;
+                    let dust_address_array: [u8; 32] = dust_address_bytes
+                        .try_into()
+                        .map_err(|_| SubxtNodeError::InvalidDustAddress)?;
+
+                    dust_registration_events.push(DustRegistrationEvent::MappingRemoved {
+                        cardano_address,
+                        dust_address: DustAddress::from(dust_address_array),
+                        utxo_id: DustUtxoId::from(utxo_id_bytes),
+                    });
                 }
 
                 _ => {}
