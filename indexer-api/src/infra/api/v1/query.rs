@@ -210,9 +210,9 @@ where
         cardano_stake_keys: Vec<HexEncoded>,
     ) -> ApiResult<Vec<DustGenerationStatus>> {
         // DOS protection: limit to 10 keys.
-        (cardano_stake_keys.len() > 10)
+        (cardano_stake_keys.len() <= 10)
             .then_some(())
-            .some_or_client_error(|| "maximum 10 stake keys allowed per request")?;
+            .some_or_client_error(|| "maximum of ten stake keys allowed")?;
 
         let storage = cx.get_storage::<S>();
 
