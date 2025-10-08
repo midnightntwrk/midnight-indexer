@@ -226,7 +226,11 @@ type DustGenerationStatus {
 	"""
 	Whether this stake key is registered.
 	"""
-	isRegistered: Boolean!
+	registered: Boolean!
+	"""
+	NIGHT balance backing generation.
+	"""
+	nightBalance: String!
 	"""
 	Generation rate in Specks per second.
 	"""
@@ -235,10 +239,6 @@ type DustGenerationStatus {
 	Current DUST capacity.
 	"""
 	currentCapacity: String!
-	"""
-	NIGHT balance backing generation.
-	"""
-	nightBalance: String!
 }
 
 type DustInitialUtxo implements DustLedgerEvent {

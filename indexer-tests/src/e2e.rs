@@ -582,7 +582,7 @@ async fn test_dust_generation_status_query(
 
     for status in &response.dust_generation_status {
         // All test keys should be unregistered.
-        assert!(!status.is_registered);
+        assert!(!status.registered);
         assert!(status.dust_address.is_none());
         // Unregistered addresses have zero rates and balances.
         assert_eq!(status.generation_rate, "0");

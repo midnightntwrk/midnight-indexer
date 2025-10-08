@@ -24,14 +24,14 @@ pub struct DustGenerationStatus {
     pub dust_address: Option<DustAddress>,
 
     /// Whether this stake key is registered.
-    pub is_registered: bool,
+    pub registered: bool,
+
+    /// NIGHT balance backing generation.
+    pub night_balance: u128,
 
     /// Generation rate in Specks per second.
     pub generation_rate: u128,
 
     /// Current DUST capacity.
     pub current_capacity: u128,
-
-    /// NIGHT balance backing generation.
-    pub night_balance: u128,
 }

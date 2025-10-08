@@ -170,7 +170,7 @@ CREATE TABLE cnight_registrations(
     id INTEGER PRIMARY KEY,
     cardano_address BLOB NOT NULL,
     dust_address BLOB NOT NULL,
-    is_valid BOOLEAN NOT NULL,
+    valid BOOLEAN NOT NULL,
     registered_at INTEGER NOT NULL,
     removed_at INTEGER,
     block_id INTEGER REFERENCES blocks(id),

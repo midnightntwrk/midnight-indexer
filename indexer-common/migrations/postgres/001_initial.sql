@@ -169,7 +169,7 @@ CREATE TABLE cnight_registrations(
     id BIGSERIAL PRIMARY KEY,
     cardano_address BYTEA NOT NULL,
     dust_address BYTEA NOT NULL,
-    is_valid BOOLEAN NOT NULL,
+    valid BOOLEAN NOT NULL,
     registered_at BIGINT NOT NULL,
     removed_at BIGINT,
     block_id BIGINT REFERENCES blocks(id),

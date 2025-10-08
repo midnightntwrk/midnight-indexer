@@ -25,12 +25,12 @@ impl DustStorage for Storage {
         &self,
         cardano_stake_keys: &[CardanoStakeKey],
     ) -> Result<Vec<DustGenerationStatus>, sqlx::Error> {
-        let mut statuses = Vec::new();
+        let mut statuses = vec![];
 
         for stake_key in cardano_stake_keys {
             // Query registration info.
             let registration_query = indoc! {"
-                SELECT dust_address, is_valid
+                SELECT dust_address, valid
                 FROM cnight_registrations
                 WHERE cardano_address = $1 AND removed_at IS NULL
                 ORDER BY registered_at DESC
@@ -42,23 +42,25 @@ impl DustStorage for Storage {
                 .fetch_optional(&*self.pool)
                 .await?;
 
-            let (dust_address, is_registered) = result
-                .map(|(addr, valid)| {
+            let (dust_address, registered) = match result {
+                Some((addr, valid)) => {
+                    let address_array: [u8; 32] = addr
+                        .try_into()
+                        .map_err(|_| sqlx::Error::Decode("Invalid DUST address length".into()))?;
                     (
-                        indexer_common::domain::DustAddress::from(
-                            TryInto::<[u8; 32]>::try_into(addr).unwrap(),
-                        ),
+                        indexer_common::domain::DustAddress::from(address_array),
                         valid,
                     )
-                })
-                .unwrap_or_else(|| (indexer_common::domain::DustAddress::from([0u8; 32]), false));
+                }
+                None => (indexer_common::domain::DustAddress::from([0u8; 32]), false),
+            };
 
             let mut generation_rate = 0u128;
             let mut current_capacity = 0u128;
             let mut night_balance = 0u128;
 
             // Query active generation info if registered.
-            if is_registered {
+            if registered {
                 let generation_query = indoc! {"
                     SELECT value, ctime
                     FROM dust_generation_info
@@ -79,7 +81,7 @@ impl DustStorage for Storage {
                     // DUST generation rate calculation based on ledger spec:
                     // - generation_decay_rate = 8,267 Specks per Star per second
                     // - 1 Night = 10^6 Stars
-                    // - Therefore: generation_rate = Stars * 8,267 Specks/second
+                    // - Therefore: generation_rate = Stars * 8,267 Specks/second.
                     const GENERATION_DECAY_RATE: u128 = 8_267;
                     generation_rate = value_u128.saturating_mul(GENERATION_DECAY_RATE);
 
@@ -101,10 +103,10 @@ impl DustStorage for Storage {
                     // Calculate elapsed seconds since creation.
                     let elapsed_seconds = ((current_timestamp - ctime).max(0) as u128) / 1000; // Convert from ms to seconds.
 
-                    // Current capacity = Stars * generation_decay_rate * elapsed_seconds
+                    // Current capacity = Stars * generation_decay_rate * elapsed_seconds.
                     // Maximum capacity is limited by night_dust_ratio (5 DUST per NIGHT = 5 * 10^15
-                    // Specks per 10^6 Stars)
-                    const NIGHT_DUST_RATIO: u128 = 5_000_000_000; // Max Specks per Star
+                    // Specks per 10^6 Stars).
+                    const NIGHT_DUST_RATIO: u128 = 5_000_000_000; // Max Specks per Star.
                     let max_capacity = value_u128.saturating_mul(NIGHT_DUST_RATIO);
                     let generated_capacity = value_u128
                         .saturating_mul(GENERATION_DECAY_RATE)
@@ -114,12 +116,12 @@ impl DustStorage for Storage {
             }
 
             statuses.push(DustGenerationStatus {
-                cardano_stake_key: stake_key.clone(),
-                dust_address: is_registered.then_some(dust_address),
-                is_registered,
+                cardano_stake_key: stake_key.to_owned(),
+                dust_address: registered.then_some(dust_address),
+                registered,
+                night_balance,
                 generation_rate,
                 current_capacity,
-                night_balance,
             });
         }
 

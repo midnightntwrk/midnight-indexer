@@ -800,9 +800,9 @@ query DustGenerationStatusQuery($cardanoStakeKeys: [HexEncoded!]!) {
     dustGenerationStatus(cardanoStakeKeys: $cardanoStakeKeys) {
         cardanoStakeKey
         dustAddress
-        isRegistered
+        registered
+        nightBalance
         generationRate
         currentCapacity
-        nightBalance
     }
 }

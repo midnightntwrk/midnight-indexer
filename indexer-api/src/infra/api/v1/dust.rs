@@ -33,16 +33,16 @@ pub struct DustGenerationStatus {
     pub dust_address: Option<HexEncoded>,
 
     /// Whether this stake key is registered.
-    pub is_registered: bool,
+    pub registered: bool,
+
+    /// NIGHT balance backing generation.
+    pub night_balance: String,
 
     /// Generation rate in Specks per second.
     pub generation_rate: String,
 
     /// Current DUST capacity.
     pub current_capacity: String,
-
-    /// NIGHT balance backing generation.
-    pub night_balance: String,
 }
 
 impl From<domain::DustGenerationStatus> for DustGenerationStatus {
@@ -50,10 +50,10 @@ impl From<domain::DustGenerationStatus> for DustGenerationStatus {
         Self {
             cardano_stake_key: status.cardano_stake_key.hex_encode(),
             dust_address: status.dust_address.map(|addr| addr.hex_encode()),
-            is_registered: status.is_registered,
+            registered: status.registered,
+            night_balance: status.night_balance.to_string(),
             generation_rate: status.generation_rate.to_string(),
             current_capacity: status.current_capacity.to_string(),
-            night_balance: status.night_balance.to_string(),
         }
     }
 }

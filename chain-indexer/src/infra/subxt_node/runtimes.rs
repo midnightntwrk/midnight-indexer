@@ -167,7 +167,7 @@ async fn make_block_details_runtime_0_17(
         })
         .collect::<Vec<_>>();
 
-    let mut dust_registration_events = Vec::new();
+    let mut dust_registration_events = vec![];
 
     for event_details in events.iter() {
         let event_details =

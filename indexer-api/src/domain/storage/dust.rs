@@ -35,6 +35,6 @@ impl DustStorage for NoopStorage {
         &self,
         cardano_stake_keys: &[CardanoStakeKey],
     ) -> Result<Vec<DustGenerationStatus>, sqlx::Error> {
-        Ok(Vec::new())
+        Ok(vec![])
     }
 }

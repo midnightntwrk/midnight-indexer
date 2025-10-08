@@ -83,15 +83,34 @@ pub struct DustParameters {
     pub dust_grace_period: u64,
 }
 
+/// Initial DUST parameters as specified in the ledger specification.
+/// These values are defined in midnight-ledger/spec/dust.md and determine the economic
+/// properties of DUST generation and decay.
+///
+/// # Unit Conversions
+/// - 1 Night = 10^6 Stars (atomic unit of Night).
+/// - 1 Dust = 10^15 Specks (atomic unit of Dust).
+///
+/// # Parameter Explanations
+///
+/// ## night_dust_ratio = 5_000_000_000 Specks per Star
+/// This represents the maximum DUST that can be generated per NIGHT:
+/// - Target: 5 DUST per NIGHT.
+/// - Calculation: (5 DUST × 10^15 Specks/DUST) / (10^6 Stars/NIGHT) = 5 × 10^9 Specks/Star.
+/// ## generation_decay_rate = 8_267 Specks per Star per second
+/// This rate produces an approximately 1-week generation time to reach maximum capacity:
+/// - Time to max = night_dust_ratio / generation_decay_rate.
+/// - = 5_000_000_000 / 8_267 seconds.
+/// - = 604,760 seconds.
+/// - ≈ 7.0002 days ≈ 1 week.
+/// ## dust_grace_period = 10,800 seconds (3 hours)
+/// Maximum time window allowed for DUST spends to prevent transactions from living indefinitely
+/// while still accommodating network congestion.
 impl Default for DustParameters {
     fn default() -> Self {
-        // Initial DUST parameters from the ledger.
         Self {
-            // 5 DUST per NIGHT.
             night_dust_ratio: 5_000_000_000,
-            // Works out to a generation time of approximately 1 week.
             generation_decay_rate: 8_267,
-            // 3 hours in seconds.
             dust_grace_period: 3 * 60 * 60,
         }
     }

@@ -663,6 +663,7 @@ async fn save_identifiers(
 
     Ok(())
 }
+
 #[trace]
 async fn save_dust_registration_events(
     events: &[DustRegistrationEvent],
@@ -670,8 +671,6 @@ async fn save_dust_registration_events(
     block_timestamp: u64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    use crate::domain::DustRegistrationEvent;
-
     for event in events {
         match event {
             DustRegistrationEvent::Registration {
@@ -682,13 +681,13 @@ async fn save_dust_registration_events(
                     INSERT INTO cnight_registrations (
                         cardano_address,
                         dust_address,
-                        is_valid,
+                        valid,
                         registered_at,
                         block_id
                     ) VALUES ($1, $2, $3, $4, $5)
                     ON CONFLICT (cardano_address, dust_address)
                     DO UPDATE SET
-                        is_valid = EXCLUDED.is_valid,
+                        valid = EXCLUDED.valid,
                         registered_at = EXCLUDED.registered_at,
                         removed_at = NULL,
                         block_id = EXCLUDED.block_id
@@ -710,11 +709,11 @@ async fn save_dust_registration_events(
             } => {
                 let query = indoc! {"
                     UPDATE cnight_registrations
-                    SET is_valid = $1,
+                    SET valid = $1,
                         removed_at = $2,
                         block_id = $3
                     WHERE cardano_address = $4
-                      AND dust_address = $5
+                    AND dust_address = $5
                 "};
 
                 sqlx::query(query)
@@ -727,7 +726,7 @@ async fn save_dust_registration_events(
                     .await?;
             }
 
-            // MappingAdded and MappingRemoved are not part of this minimal cherry-pick
+            // MappingAdded and MappingRemoved are not part of this minimal cherry-pick.
             _ => {}
         }
     }
