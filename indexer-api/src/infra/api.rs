@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod v1;
+pub mod v3;
 
 use crate::domain::{Api, LedgerStateCache, storage::Storage};
 use async_graphql::Context;
@@ -171,7 +171,7 @@ where
 {
     let zswap_state_cache = LedgerStateCache::new(network_id);
 
-    let v1_app = v1::make_app(
+    let v3_app = v3::make_app(
         network_id,
         zswap_state_cache,
         storage,
@@ -183,7 +183,7 @@ where
 
     Router::new()
         .route("/ready", get(ready))
-        .nest("/api/v1", v1_app)
+        .nest("/api/v3", v3_app)
         .with_state(caught_up)
         .layer(
             ServiceBuilder::new()

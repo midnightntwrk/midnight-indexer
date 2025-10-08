@@ -1,17 +1,17 @@
-# Midnight Indexer API Documentation v1
+# Midnight Indexer API Documentation v3
 
 The Midnight Indexer API exposes a GraphQL API that enables clients to query and subscribe to blockchain data—blocks, transactions, contracts, and shielded/unshielded transaction events—indexed from the Midnight blockchain. These capabilities facilitate both historical lookups and real-time monitoring.
 
-**Disclaimer:**  
-The examples provided here are illustrative and may need updating if the API changes. Always consider [`indexer-api/graphql/schema-v1.graphql`](../../../indexer-api/graphql/schema-v1.graphql) as the primary source of truth. Adjust queries as necessary to match the latest schema.
+**Disclaimer:**
+The examples provided here are illustrative and may need updating if the API changes. Always consider [`indexer-api/graphql/schema-v3.graphql`](../../../indexer-api/graphql/schema-v3.graphql) as the primary source of truth. Adjust queries as necessary to match the latest schema.
 
 ## GraphQL Schema
 
-The GraphQL schema is defined in [`indexer-api/graphql/schema-v1.graphql`](../../../indexer-api/graphql/schema-v1.graphql). It specifies all queries, mutations, subscriptions, and their types, including arguments and return structures.
+The GraphQL schema is defined in [`indexer-api/graphql/schema-v3.graphql`](../../../indexer-api/graphql/schema-v3.graphql). It specifies all queries, mutations, subscriptions, and their types, including arguments and return structures.
 
 ## Overview of Operations
 
-- **Queries**: Fetch blocks, transactions, and contract actions.  
+- **Queries**: Fetch blocks, transactions, and contract actions.
   Examples:
     - Retrieve the latest block or a specific block by hash or height.
     - Look up transactions by their hash or identifier.
@@ -32,13 +32,13 @@ The GraphQL schema is defined in [`indexer-api/graphql/schema-v1.graphql`](../..
 
 **HTTP (Queries & Mutations):**
 ```
-POST https://<host>:<port>/api/v1/graphql
+POST https://<host>:<port>/api/v3/graphql
 Content-Type: application/json
 ```
 
 **WebSocket (Subscriptions):**
 ```
-wss://<host>:<port>/api/v1/graphql/ws
+wss://<host>:<port>/api/v3/graphql/ws
 Sec-WebSocket-Protocol: graphql-transport-ws
 ```
 
@@ -253,7 +253,7 @@ query {
 ```graphql
 query {
   contractAction(
-    address: "3031323...", 
+    address: "3031323...",
     offset: { blockOffset: { height: 10 } }
   ) {
     __typename
@@ -390,7 +390,7 @@ Establishes a session for a given wallet viewing key in **either** bech32m or he
 ```graphql
 mutation {
   # Provide the bech32m format:
-  connect(viewingKey: "mn_shield-esk1abcdef...") 
+  connect(viewingKey: "mn_shield-esk1abcdef...")
 }
 ```
 
