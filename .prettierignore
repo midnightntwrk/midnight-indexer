@@ -1,0 +1,4 @@
+# Exclude GitHub Actions workflow files from prettier formatting
+# This allows dependabot/renovate to use their standard formatting (e.g., 2 spaces before comments)
+# without triggering prettier violations
+.github/workflows/
