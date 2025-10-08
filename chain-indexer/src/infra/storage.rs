@@ -597,7 +597,7 @@ async fn save_ledger_events(
                 .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
                 .push_bind(ledger_event.grouping)
                 .push_bind(ledger_event.raw.as_ref())
-                .push_bind(Json(ledger_event.attributes.clone()));
+                .push_bind(Json(&ledger_event.attributes));
         })
         .build()
         .execute(&mut **tx)
