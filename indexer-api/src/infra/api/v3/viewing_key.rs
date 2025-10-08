@@ -63,7 +63,7 @@ pub enum ViewingKeyFormatError {
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::api::v1::viewing_key::ViewingKey;
+    use crate::infra::api::v3::viewing_key::ViewingKey;
     use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_017_000};
 
     #[test]

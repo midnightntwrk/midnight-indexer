@@ -47,10 +47,10 @@ test:
     fi
     cargo nextest run --workspace --exclude indexer-standalone --features {{feature}}
     # Check indexer-api schema:
-    cargo run -p indexer-api --bin indexer-api-cli print-api-schema-v1 > \
-        indexer-api/graphql/schema-v1.graphql.check
-    @if ! cmp -s indexer-api/graphql/schema-v1.graphql indexer-api/graphql/schema-v1.graphql.check; then \
-        echo "schema-v1.graphql has changes!"; exit 1; \
+    cargo run -p indexer-api --bin indexer-api-cli print-api-schema-v3 > \
+        indexer-api/graphql/schema-v3.graphql.check
+    @if ! cmp -s indexer-api/graphql/schema-v3.graphql indexer-api/graphql/schema-v3.graphql.check; then \
+        echo "schema-v3.graphql has changes!"; exit 1; \
     fi
 
 doc:
@@ -72,8 +72,8 @@ coverage:
     ./coverage.sh {{nightly}}
 
 generate-indexer-api-schema:
-    cargo run -p indexer-api --bin indexer-api-cli print-api-schema-v1 > \
-        indexer-api/graphql/schema-v1.graphql
+    cargo run -p indexer-api --bin indexer-api-cli print-api-schema-v3 > \
+        indexer-api/graphql/schema-v3.graphql
 
 build-docker-image package profile="dev":
     tag=$(git rev-parse --short=8 HEAD) && \
