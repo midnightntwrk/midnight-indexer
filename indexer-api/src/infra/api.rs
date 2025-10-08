@@ -18,10 +18,10 @@ use async_graphql::Context;
 use axum::{
     Router,
     body::Body,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-    routing::get,
+    extract::{OriginalUri, State},
+    http::{StatusCode, Uri},
+    response::{IntoResponse, Redirect, Response},
+    routing::{any, get},
 };
 use derive_more::Debug;
 use fastrace_axum::FastraceLayer;
@@ -184,6 +184,8 @@ where
     Router::new()
         .route("/ready", get(ready))
         .nest("/api/v3", v3_app)
+        .route("/api/v1/{*rest}", any(redirect_api_v1_to_latest))
+        .route("/api/{*rest}", any(redirect_api_to_latest))
         .with_state(caught_up)
         .layer(
             ServiceBuilder::new()
@@ -204,6 +206,25 @@ async fn ready(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
     } else {
         StatusCode::OK.into_response()
     }
+}
+
+async fn redirect_api_to_latest(OriginalUri(uri): OriginalUri) -> Redirect {
+    redirect_to_latest(uri, "/api")
+}
+
+async fn redirect_api_v1_to_latest(OriginalUri(uri): OriginalUri) -> Redirect {
+    redirect_to_latest(uri, "/api/v1")
+}
+
+fn redirect_to_latest(uri: Uri, target: &str) -> Redirect {
+    let mut path = uri.path().replacen(target, "/api/v3", 1);
+
+    if let Some(query) = uri.query() {
+        path.push('?');
+        path.push_str(query);
+    }
+
+    Redirect::permanent(&path)
 }
 
 /// This is a workaround for async-graphql swallowing `LengthLimitError`s returned by the
