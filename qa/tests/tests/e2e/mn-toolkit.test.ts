@@ -15,7 +15,6 @@
 
 import { randomBytes } from 'crypto';
 import log from '@utils/logging/logger';
-import { env } from '../../environment/model';
 import '@utils/logging/test-logging-hooks';
 import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 
@@ -34,7 +33,7 @@ describe('mn-toolkit', () => {
   });
 
   test('mn-toolkit show shielded address test', async () => {
-    const address = await toolkit.showAddress(seed, 'shielded');
+    const address = (await toolkit.showAddress(seed)).shielded;
 
     log.info(`Shielded address: ${address}`);
 
@@ -42,7 +41,7 @@ describe('mn-toolkit', () => {
   });
 
   test('mn-toolkit show unshielded address test', async () => {
-    const address = await toolkit.showAddress(seed, 'unshielded');
+    const address = (await toolkit.showAddress(seed)).unshielded;
 
     log.info(`Unshielded address: ${address}`);
 

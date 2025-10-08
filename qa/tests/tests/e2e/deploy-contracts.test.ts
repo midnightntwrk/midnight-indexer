@@ -12,57 +12,74 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-//
 
-import * as fs from "node:fs";
-import * as path from "node:path";
-import * as os from "node:os";
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { IndexerHttpClient } from '@utils/indexer/http-client';
+import { ToolkitWrapper, DeployContractResult } from '@utils/toolkit/toolkit-wrapper';
+import { TestContext } from 'vitest';
 
-import { ToolkitWrapper } from "../../utils/toolkit/toolkit-wrapper";
+// Use a unique /out dir so artifacts are easy to inspect if needed.
+const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-deploy-'));
 
-describe("deploy contracts via toolkit wrapper", () => {
-  it(
-    "deploys the sample counter contract and returns its address",
-    async () => {
-      const t0 = Date.now();
+describe('contract actions', () => {
+  let toolkit: ToolkitWrapper;
+  let result: DeployContractResult;
 
-      // Use a unique /out dir so artifacts are easy to inspect if needed.
-      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "toolkit-deploy-"));
+  beforeAll(async () => {
+    toolkit = new ToolkitWrapper({
+      targetDir: outDir, // mounts to /out in the running toolkit container
+    });
 
-      const wrapper = new ToolkitWrapper({
-        targetDir: outDir, // mounts to /out in the running toolkit container
-        // nodeTag, containerName, etc. are auto-filled from env by the wrapper
-      });
+    await toolkit.start();
 
-      try {
-        await wrapper.start();
+    result = await toolkit.deployContract();
+  }, 300_000);
 
-        // Deploy using the wrapper
-        const res = await wrapper.deployContract();
-        const { toolkitImage, nodeContainer, network } = wrapper.runtime;
+  afterAll(async () => {
+    await toolkit.stop();
+  });
 
-        const ms = Date.now() - t0;
-                
-        // One-liner summary; helpful but not noisy
-        const contractAddressRaw =
-        (res as any).addressRaw ??
-        fs.readFileSync(path.join(outDir, "contract_address.mn"), "utf8").trim();
+  describe('a midnight contract successfully deployed on chain', async () => {
+    test('should reported the address of the contract', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['ContractActions', 'ContractDeploy', 'Query', 'Toolkit'],
+      };
 
-        console.log(
-        `contract-address=${contractAddressRaw} | toolkit=${toolkitImage} | node=${nodeContainer} | network=${network} | tx=${path.basename(
-         res.deployTxPath,
-        )} | out=${outDir} | dur=${ms}ms`,
-        );
+      const contractAddressRaw = result.addressRaw;
 
-        // Basic assertions
-        expect(res.addressHex).toMatch(/^[0-9a-f]{64}$/i);
-        expect(fs.existsSync(res.deployTxPath)).toBe(true);
-        expect(fs.existsSync(res.statePath)).toBe(true);
-      } finally {
-        await wrapper.stop();
-      }
-    },
-    300_000,
-  );
+      console.log('contractAddressRaw: ', contractAddressRaw);
+
+      // Basic assertions
+      expect(result.addressUntagged).toMatch(/^[0-9a-f]{64}$/i);
+      expect(fs.existsSync(result.deployTxPath)).toBe(true);
+      expect(fs.existsSync(result.statePath)).toBe(true);
+    });
+
+    test('should be reported by a contract query by address using the untagged address', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['ContractActions', 'ContractDeploy', 'Query', 'Toolkit'],
+      };
+
+      const contractAddressRaw = result.addressUntagged;
+
+      const response = await new IndexerHttpClient().getContractAction(contractAddressRaw);
+      expect(response).toBeSuccess();
+      expect(response.data?.contractAction).not.toBeNull();
+      expect(response.data?.contractAction?.address).toBe(contractAddressRaw);
+    });
+
+    test('should not be reported by a contract query by address using the tagged address', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['ContractActions', 'ContractDeploy', 'Query', 'Toolkit', 'Negative'],
+      };
+
+      const contractAddressRaw = result.addressTagged;
+
+      const response = await new IndexerHttpClient().getContractAction(contractAddressRaw);
+      expect(response).toBeSuccess();
+      expect(response.data?.contractAction).toBeNull();
+    });
+  });
 });

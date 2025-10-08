@@ -15,7 +15,6 @@
 
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
-import { env } from '../../environment/model';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 
@@ -41,8 +40,8 @@ describe('shielded transactions', () => {
     await toolkit.start();
 
     // Derive shielded addresses from seeds
-    sourceAddress = await toolkit.showAddress(sourceSeed, 'shielded');
-    destinationAddress = await toolkit.showAddress(destinationSeed, 'shielded');
+    sourceAddress = (await toolkit.showAddress(sourceSeed)).shielded;
+    destinationAddress = (await toolkit.showAddress(destinationSeed)).shielded;
 
     // Submit one shielded->shielded transfer (1 NIGHT)
     transactionResult = await toolkit.generateSingleTx(
