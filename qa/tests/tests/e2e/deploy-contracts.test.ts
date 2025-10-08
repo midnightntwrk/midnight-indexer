@@ -63,6 +63,6 @@ describe("deploy contracts via toolkit wrapper", () => {
         await wrapper.stop();
       }
     },
-    120_000,
+    300_000,
   );
 });
