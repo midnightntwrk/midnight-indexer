@@ -18,7 +18,7 @@
 
 use crate::{
     domain,
-    infra::api::v1::{AsBytesExt, HexEncoded},
+    infra::api::v3::{AsBytesExt, HexEncoded},
 };
 use async_graphql::SimpleObject;
 

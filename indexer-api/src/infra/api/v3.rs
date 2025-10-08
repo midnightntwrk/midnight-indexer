@@ -29,7 +29,7 @@ use crate::{
     },
     infra::api::{
         ApiResult, Metrics, OptionExt, ResultExt,
-        v1::{block::BlockOffset, mutation::Mutation, query::Query, subscription::Subscription},
+        v3::{block::BlockOffset, mutation::Mutation, query::Query, subscription::Subscription},
     },
 };
 use async_graphql::{Schema, SchemaBuilder, scalar};
