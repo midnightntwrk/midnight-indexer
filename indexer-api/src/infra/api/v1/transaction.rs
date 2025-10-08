@@ -400,7 +400,7 @@ where
         .get_block_by_hash(block_hash)
         .await
         .map_err_into_server_error(|| format!("get block by hash {}", block_hash))?
-        .ok_or_server_error(|| format!("block with hash {} not found", block_hash))?;
+        .some_or_server_error(|| format!("block with hash {} not found", block_hash))?;
 
     Ok(block.into())
 }

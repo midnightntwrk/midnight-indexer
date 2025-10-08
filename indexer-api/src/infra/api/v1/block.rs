@@ -91,7 +91,7 @@ where
             .map_err_into_server_error(|| {
                 format!("get ledger parameters for block id {}", self.id)
             })?
-            .ok_or_server_error(|| format!("block with id {} not found", self.id))?;
+            .some_or_server_error(|| format!("block with id {} not found", self.id))?;
 
         Ok(parameters.hex_encode())
     }
