@@ -31,6 +31,7 @@ interface ToolkitConfig {
   toolkitImage?: string
   nodeContainer?: string
   network?: string
+  coinSeed?: string;
 }
 
 interface ToolkitTransactionResult {
@@ -95,13 +96,61 @@ class ToolkitWrapper {
   }
 
   private parseContractAddress(raw: string): string {
-    const s = raw.trim().replace(/^"+|"+$/g, "");
-    const m = s.match(/(?:midnight:contract-address(?:\[[vV]\d+\])?:)?([0-9A-Fa-f]{64})\b/);
-    
-    if (!m) throw new Error(`unexpected contract-address format: ${raw}`);
-    
-    return m[1].toLowerCase();
+  const s = (raw ?? "").trim();
+  // If the CLI printed JSON (0.17+), prefer the typed field.
+  if (s.startsWith("{")) {
+    try {
+      const j = JSON.parse(s);
+      if (j && typeof j.tagged === "string" && j.tagged.trim()) {
+        return this.parseContractAddress(j.tagged);
+      }
+      if (j && typeof j.untagged === "string" && j.untagged.trim()) {
+        const u = j.untagged.trim();
+        if (/^[0-9A-Fa-f]{64}$/.test(u)) return u.toLowerCase();
+      }
+    } catch {
+      // fall through to regex
+    }
   }
+
+  // Robust fallback: find either typed or bare 64-hex anywhere in the string.
+  const m =
+    s.match(/midnight:contract-address(?:\[[vV]\d+\])?:([0-9A-Fa-f]{64})/) ||
+    s.match(/([0-9A-Fa-f]{64})\b/);
+
+  if (!m) throw new Error(`unexpected contract-address format: ${raw}`);
+  return m[1].toLowerCase();
+}
+
+  private async resolveCoinPublic(network: string, seedFromConfig?: string): Promise<string> {
+  if (!this.startedContainer) {
+    throw new Error('Container is not started. Call start() first.');
+  }
+
+  // Derive it from a seed
+  const seed =
+    seedFromConfig?.trim() ||
+    process.env.COIN_SEED?.trim() ||
+    "0000000000000000000000000000000000000000000000000000000000000001";
+
+  const r = await this.startedContainer.exec([
+    "/midnight-node-toolkit",
+    "show-address",
+    "--network",
+    network,
+    "--seed",
+    seed,
+    "--coin-public",
+  ]);
+
+  if (r.exitCode !== 0) {
+    const e = r.stderr || r.output || "Unknown error";
+    throw new Error(`show-address --coin-public failed: ${e}`);
+  }
+
+  return (r.output || "").trim();
+  }
+
 
   constructor(config: ToolkitConfig) {
     this.config = config;
@@ -271,6 +320,10 @@ class ToolkitWrapper {
   const outAddressFile = join(outDir, addressFile);
   const outStateFile = join(outDir, stateFile);
   const outInitialState = join(outDir, initialPrivateState);
+  const zswapFile = "temp.json"; 
+  const coinPublic = await this.resolveCoinPublic(network, this.config.coinSeed);
+  let addressRaw = "";
+  let addressHex = "";
 
   // 1) generate-intent deploy
   {
@@ -284,6 +337,8 @@ class ToolkitWrapper {
       `/out/${deployIntent}`,
       "--output-private-state",
       `/out/${initialPrivateState}`,
+      "--coin-public", coinPublic,
+      "--output-zswap-state", `/out/${zswapFile}`,
     ]);
     if (result.exitCode !== 0) {
       const e = result.stderr || result.output || "Unknown error";
@@ -299,7 +354,7 @@ class ToolkitWrapper {
     const result = await this.startedContainer.exec([
       "/midnight-node-toolkit",
       "send-intent",
-      "--intent-files",
+      "--intent-file",
       `/out/${deployIntent}`,
       "--compiled-contract-dir",
       compiledContractDir,
@@ -336,19 +391,47 @@ class ToolkitWrapper {
   // 4) contract-address -> file
   {
     const result = await this.startedContainer.exec([
-      "/midnight-node-toolkit",
-      "contract-address",
-      "--src-file",
-      `/out/${deployTx}`,
-      "--network",
-      network,
-      "--dest-file",
-      `/out/${addressFile}`,
-    ]);
-    if (result.exitCode !== 0) {
-      const e = result.stderr || result.output || "Unknown error";
-      throw new Error(`contract-address failed: ${e}`);
+    "/midnight-node-toolkit",
+    "contract-address",
+    "--network",
+    network,
+    "--src-file",
+    "/out/deploy_tx.mn",
+  ]);
+  if (result.exitCode !== 0) {
+    const e = result.stderr || result.output || "Unknown error";
+    throw new Error(`contract-address failed: ${e}`);
+  }
+
+  // The CLI may print JSON or a typed line — extract a typed string.
+  const out = (result.output || "").trim();
+
+  // If JSON, prefer 'tagged'; else find the typed address in free text.
+  let typed = "";
+  if (out.startsWith("{")) {
+    try {
+      const j = JSON.parse(out);
+      if (j && typeof j.tagged === "string") typed = j.tagged.trim();
+    } catch {
+      // ignore and fall back to regex
     }
+  }
+  if (!typed) {
+    const mm = out.match(/midnight:contract-address(?:\[[vV]\d+\])?:[0-9A-Fa-f]{64}/);
+    if (mm) typed = mm[0];
+  }
+  if (!typed) {
+    throw new Error(`unexpected contract-address output: ${out.slice(0, 200)}`);
+  }
+
+  // persist EXACTLY the typed string (no JSON)
+  const fs = await import("node:fs");
+  fs.writeFileSync(outAddressFile, typed + "\n", "utf8");
+
+  // share with later steps
+  addressRaw = typed;
+  addressHex = this.parseContractAddress(typed);
+
     if (!existsSync(outAddressFile)) {
       throw new Error("contract-address did not produce /out/contract_address.mn");
     }
@@ -363,10 +446,10 @@ class ToolkitWrapper {
       "/midnight-node-toolkit",
       "contract-state",
       "--contract-address",
-      raw,
+      addressRaw,                      
       "--dest-file",
-      `/out/${stateFile}`,
-    ]);
+      "/out/contract_state.mn",
+]);
     if (result.exitCode !== 0) {
       const e = result.stderr || result.output || "Unknown error";
       throw new Error(`contract-state failed: ${e}`);
