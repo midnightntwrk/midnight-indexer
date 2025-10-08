@@ -15,54 +15,50 @@
 //
 //
 
-import * as fs from "node:fs";
-import * as path from "node:path";
-import * as os from "node:os";
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
 
-import { ToolkitWrapper } from "../../utils/toolkit/toolkit-wrapper";
+import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 
-describe("deploy contracts via toolkit wrapper", () => {
-  it(
-    "deploys the sample counter contract and returns its address",
-    async () => {
-      const t0 = Date.now();
+describe('deploy contracts via toolkit wrapper', () => {
+  it('deploys the sample counter contract and returns its address', async () => {
+    const t0 = Date.now();
 
-      // Use a unique /out dir so artifacts are easy to inspect if needed.
-      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "toolkit-deploy-"));
+    // Use a unique /out dir so artifacts are easy to inspect if needed.
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-deploy-'));
 
-      const wrapper = new ToolkitWrapper({
-        targetDir: outDir, // mounts to /out in the running toolkit container
-        // nodeTag, containerName, etc. are auto-filled from env by the wrapper
-      });
+    const wrapper = new ToolkitWrapper({
+      targetDir: outDir, // mounts to /out in the running toolkit container
+      // nodeTag, containerName, etc. are auto-filled from env by the wrapper
+    });
 
-      try {
-        await wrapper.start();
+    try {
+      await wrapper.start();
 
-        // Deploy using the wrapper
-        const res = await wrapper.deployContract();
-        const { toolkitImage, nodeContainer, network } = wrapper.runtime;
+      // Deploy using the wrapper
+      const res = await wrapper.deployContract();
+      const { toolkitImage, nodeContainer, network } = wrapper.runtime;
 
-        const ms = Date.now() - t0;
-                
-        // One-liner summary; helpful but not noisy
-        const contractAddressRaw =
+      const ms = Date.now() - t0;
+
+      // One-liner summary; helpful but not noisy
+      const contractAddressRaw =
         (res as any).addressRaw ??
-        fs.readFileSync(path.join(outDir, "contract_address.mn"), "utf8").trim();
+        fs.readFileSync(path.join(outDir, 'contract_address.mn'), 'utf8').trim();
 
-        console.log(
+      console.log(
         `contract-address=${contractAddressRaw} | toolkit=${toolkitImage} | node=${nodeContainer} | network=${network} | tx=${path.basename(
-         res.deployTxPath,
+          res.deployTxPath,
         )} | out=${outDir} | dur=${ms}ms`,
-        );
+      );
 
-        // Basic assertions
-        expect(res.addressHex).toMatch(/^[0-9a-f]{64}$/i);
-        expect(fs.existsSync(res.deployTxPath)).toBe(true);
-        expect(fs.existsSync(res.statePath)).toBe(true);
-      } finally {
-        await wrapper.stop();
-      }
-    },
-    300_000,
-  );
+      // Basic assertions
+      expect(res.addressHex).toMatch(/^[0-9a-f]{64}$/i);
+      expect(fs.existsSync(res.deployTxPath)).toBe(true);
+      expect(fs.existsSync(res.statePath)).toBe(true);
+    } finally {
+      await wrapper.stop();
+    }
+  }, 300_000);
 });

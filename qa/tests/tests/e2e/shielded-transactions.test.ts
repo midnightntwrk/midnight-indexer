@@ -15,7 +15,6 @@
 
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
-import { env } from '../../environment/model';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 

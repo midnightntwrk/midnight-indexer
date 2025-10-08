@@ -14,7 +14,6 @@
 // limitations under the License.
 
 import log from '@utils/logging/logger';
-import { env } from '../../environment/model';
 import '@utils/logging/test-logging-hooks';
 import { TestContext } from 'vitest';
 

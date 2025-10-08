@@ -15,7 +15,6 @@
 
 import { randomBytes } from 'crypto';
 import log from '@utils/logging/logger';
-import { env } from '../../environment/model';
 import '@utils/logging/test-logging-hooks';
 import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 
