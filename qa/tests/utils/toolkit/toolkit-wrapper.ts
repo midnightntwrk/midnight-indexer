@@ -345,7 +345,7 @@ class ToolkitWrapper {
         throw new Error(`send-intent failed: ${e}`);
       }
       if (!existsSync(outDeployTx)) {
-        throw new Error('send-intent did not produce /out/deploy_tx.mn');
+        throw new Error(`send-intent did not produce /out/${deployTx}`);
       }
     }
 
@@ -367,22 +367,40 @@ class ToolkitWrapper {
     }
 
     // 4) contract-address -> file
-    const result = await this.startedContainer.exec([
+    const taggedAddress = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'contract-address',
-      '--network',
-      network,
+      '--tagged',
       '--src-file',
-      '/out/deploy_tx.mn',
+      `/out/${deployTx}`,
     ]);
-    if (result.exitCode !== 0) {
-      const e = result.stderr || result.output || 'Unknown error';
+    log.debug(`contract-address taggedAddress:\n${JSON.stringify(taggedAddress, null, 2)}`);
+    if (taggedAddress.exitCode !== 0) {
+      const e = taggedAddress.stderr || taggedAddress.output || 'Unknown error';
+      throw new Error(`contract-address failed: ${e}`);
+    }
+
+    const untaggedAddress = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'contract-address',
+      '--src-file',
+      `/out/${deployTx}`,
+    ]);
+    log.debug(`contract-address untaggedAddress:\n${JSON.stringify(untaggedAddress, null, 2)}`);
+    if (untaggedAddress.exitCode !== 0) {
+      const e = untaggedAddress.stderr || untaggedAddress.output || 'Unknown error';
       throw new Error(`contract-address failed: ${e}`);
     }
 
     // The CLI may print JSON or a typed line — extract a typed string.
-    log.debug(`contract-address command result.output:\n${result.output}`);
-    const contractAddressInfo = JSON.parse(result.output);
+    const contractAddressInfo = {
+      tagged: taggedAddress.output.trim(),
+      untagged: untaggedAddress.output.trim(),
+    };
+
+    log.debug(
+      `contract-address command result.output:\n${JSON.stringify(contractAddressInfo, null, 2)}`,
+    );
 
     // persist EXACTLY the typed string (no JSON)
     fs.writeFileSync(outAddressFile, contractAddressInfo.tagged + '\n', 'utf8');
