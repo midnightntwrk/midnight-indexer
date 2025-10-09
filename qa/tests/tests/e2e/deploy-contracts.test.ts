@@ -13,12 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import os from 'os';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
+import { TestContext } from 'vitest';
+import log from '@utils/logging/logger';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ToolkitWrapper, DeployContractResult } from '@utils/toolkit/toolkit-wrapper';
-import { TestContext } from 'vitest';
 
 // Use a unique /out dir so artifacts are easy to inspect if needed.
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-deploy-'));
@@ -49,7 +50,7 @@ describe('contract actions', () => {
 
       const contractAddressRaw = result.addressRaw;
 
-      console.log('contractAddressRaw: ', contractAddressRaw);
+      log.debug(`contractAddressRaw: ${contractAddressRaw}`);
 
       // Basic assertions
       expect(result.addressUntagged).toMatch(/^[0-9a-f]{64}$/i);
