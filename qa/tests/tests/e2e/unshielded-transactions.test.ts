@@ -14,7 +14,6 @@
 // limitations under the License.
 
 import log from '@utils/logging/logger';
-import { env } from '../../environment/model';
 import '@utils/logging/test-logging-hooks';
 import { TestContext } from 'vitest';
 
@@ -48,10 +47,6 @@ describe('unshielded transactions', () => {
   let sourceAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
   let destinationAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
 
-  // Historical events from the indexer websocket for both the source and destination addresses
-  let historicalSourceAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
-  let historicalDestinationAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
-
   // Functions to unsubscribe from the indexer websocket for both the source and destination addresses
   let sourceAddrUnscribeFromEvents: () => void;
   let destAddrUnscribeFromEvents: () => void;
@@ -63,7 +58,6 @@ describe('unshielded transactions', () => {
     // Connecting to the indexer websocket
     await indexerWsClient.connectionInit();
 
-    const randomId = Math.random().toString(36).substring(2, 12);
     toolkit = new ToolkitWrapper({});
     await toolkit.start();
 
@@ -71,8 +65,8 @@ describe('unshielded transactions', () => {
     const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
 
     // Getting the addresses from their seeds
-    sourceAddress = await toolkit.showAddress(sourceSeed, 'unshielded');
-    destinationAddress = await toolkit.showAddress(destinationSeed, 'unshielded');
+    sourceAddress = (await toolkit.showAddress(sourceSeed)).unshielded;
+    destinationAddress = (await toolkit.showAddress(destinationSeed)).unshielded;
 
     // Creating the unshielded transaction subscription parameter for the source address (just the address)
     let unshieldedTransactionParam: UnshieldedTransactionSubscriptionParams = {
@@ -113,12 +107,10 @@ describe('unshielded transactions', () => {
     // Wait until source events count stabilizes, then snapshot to historical array
     let drained = await waitForEventsStabilization(sourceAddressEvents, 500);
     log.info(`Source events count stabilized: ${drained.length}`);
-    historicalSourceAddressEvents = drained;
 
     // Wait until destination events count stabilizes, then snapshot to historical array
     drained = await waitForEventsStabilization(destinationAddressEvents, 1000);
     log.info(`Destination events count stabilized: ${drained.length}`);
-    historicalDestinationAddressEvents = drained;
 
     // Generating and submitting the transaction to node
     transactionResult = await toolkit.generateSingleTx(
