@@ -110,11 +110,11 @@ where
     }
 }
 
-impl<S> From<(domain::UnshieldedUtxo, NetworkId)> for UnshieldedUtxo<S>
+impl<S> From<(domain::UnshieldedUtxo, &NetworkId)> for UnshieldedUtxo<S>
 where
     S: Storage,
 {
-    fn from((utxo, network_id): (domain::UnshieldedUtxo, NetworkId)) -> Self {
+    fn from((utxo, network_id): (domain::UnshieldedUtxo, &NetworkId)) -> Self {
         let domain::UnshieldedUtxo {
             creating_transaction_id,
             spending_transaction_id,
@@ -156,13 +156,10 @@ pub enum UnshieldedOffset {
 
 /// Bech32m-encoded unshielded address.
 ///
-/// Format:
-/// - MainNet: `mn_addr` + bech32m data
-/// - DevNet: `mn_addr_dev` + bech32m data
+/// Examples:
+/// - Main-Net: `mn_addr` + bech32m data
 /// - TestNet: `mn_addr_test` + bech32m data
-/// - Undeployed: `mn_addr_undeployed` + bech32m data
-///
-/// The inner string is validated to ensure proper bech32m-encoding and correct HRP prefix.
+/// - undeployed: `mn_addr_undeployed` + bech32m data
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, Serialize, Deserialize)]
 pub struct UnshieldedAddress(pub String);
 
@@ -178,7 +175,7 @@ impl UnshieldedAddress {
     ///   "dev", "test", "undeployed"
     pub fn try_into_domain(
         &self,
-        network_id: NetworkId,
+        network_id: &NetworkId,
     ) -> Result<indexer_common::domain::UnshieldedAddress, UnshieldedAddressFormatError> {
         let bytes = decode_address(&self.0, AddressType::Unshielded, network_id)?;
         let address = bytes.0.try_into()?;

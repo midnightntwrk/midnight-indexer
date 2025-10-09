@@ -90,7 +90,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
         .context("test dust generation status query")?;
 
     // Test mutations.
-    test_connect_mutation(&api_client, &api_url, network_id)
+    test_connect_mutation(&api_client, &api_url, &network_id)
         .await
         .context("test connect mutation query")?;
     test_disconnect_mutation(&api_client, &api_url)
@@ -101,7 +101,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_contract_actions_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test contract action subscription")?;
-    test_shielded_transactions_subscription(&ws_api_url, network_id)
+    test_shielded_transactions_subscription(&ws_api_url, &network_id)
         .await
         .context("test shielded transactions subscription")?;
     test_unshielded_transactions_subscription(&indexer_data, &ws_api_url)
@@ -597,7 +597,7 @@ async fn test_dust_generation_status_query(
 async fn test_connect_mutation(
     api_client: &Client,
     api_url: &str,
-    network_id: NetworkId,
+    network_id: &NetworkId,
 ) -> anyhow::Result<()> {
     // Valid viewing key.
     let viewing_key = ViewingKey::from(viewing_key(network_id));
@@ -712,7 +712,7 @@ async fn test_contract_actions_subscription(
 /// Test the shielded transactions subscription.
 async fn test_shielded_transactions_subscription(
     ws_api_url: &str,
-    network_id: NetworkId,
+    network_id: &NetworkId,
 ) -> anyhow::Result<()> {
     let session_id = ViewingKey::from(viewing_key(network_id))
         .try_into_domain(network_id, PROTOCOL_VERSION_000_017_000)?
@@ -899,20 +899,15 @@ where
     Ok(data)
 }
 
-fn viewing_key(network_id: NetworkId) -> &'static str {
-    match network_id {
-        NetworkId::Undeployed => {
+fn viewing_key(network_id: &NetworkId) -> &'static str {
+    match network_id.as_ref() {
+        "undeployed" => {
             "mn_shield-esk_undeployed1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs9ete5h"
         }
-        NetworkId::Devnet => {
-            "mn_shield-esk_dev1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsp7rsx2"
-        }
-        NetworkId::Testnet => {
-            "mn_shield-esk_test1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsuv0u5j"
-        }
-        NetworkId::Mainnet => {
-            "mn_shield-esk1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsucf6ww"
-        }
+        "dev" => "mn_shield-esk_dev1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsp7rsx2",
+        "test" => "mn_shield-esk_test1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsuv0u5j",
+        "" => "mn_shield-esk1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsucf6ww",
+        other => panic!("unexpected network ID {other}"),
     }
 }
 

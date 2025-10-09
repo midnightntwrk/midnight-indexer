@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn test_make_unshielded_utxos_v6() {
-        let network_id = NetworkId::Undeployed;
+        let network_id = NetworkId::from("undeployed");
 
         let transaction = StandardTransactionV6 {
             network_id: network_id.to_string(),

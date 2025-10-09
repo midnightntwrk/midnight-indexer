@@ -14,8 +14,6 @@
 #[cfg(any(feature = "cloud", feature = "standalone"))]
 use anyhow::Context;
 #[cfg(any(feature = "cloud", feature = "standalone"))]
-use indexer_common::domain::NetworkId;
-#[cfg(any(feature = "cloud", feature = "standalone"))]
 use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
@@ -99,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
     println!("Indexer API ready");
 
     // Run the tests.
-    let result = indexer_tests::e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
+    let result = indexer_tests::e2e::run("undeployed".into(), "localhost", api_port, false).await;
 
     // Terminate Indexer components using SIGTERM and wait which is imporant for coverage data to be
     // written and to avoid zombie processes.
@@ -134,7 +132,7 @@ async fn main() -> anyhow::Result<()> {
     println!("Indexer API ready");
 
     // Run the tests.
-    let result = indexer_tests::e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
+    let result = indexer_tests::e2e::run("undeployed".into(), "localhost", api_port, false).await;
 
     // Terminate Indexer using SIGTERM and wait which is imporant for coverage data to be written
     // and to avoid zombie processes.

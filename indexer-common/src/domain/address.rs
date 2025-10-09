@@ -22,14 +22,14 @@ pub enum AddressType {
 }
 
 impl AddressType {
-    fn hrp(&self, network_id: NetworkId) -> String {
-        let suffix = match network_id {
-            NetworkId::Undeployed => "_undeployed",
-            NetworkId::Devnet => "_dev",
-            NetworkId::Testnet => "_test",
-            NetworkId::Mainnet => "",
-        };
-        format!("{}{suffix}", self.hrp_prefix())
+    fn hrp(&self, network_id: &NetworkId) -> String {
+        let prefix = self.hrp_prefix();
+
+        if network_id.eq_ignore_ascii_case("mainnet") {
+            prefix.to_string()
+        } else {
+            format!("{prefix}_{network_id}")
+        }
     }
 
     fn hrp_prefix(&self) -> &'static str {
@@ -63,7 +63,7 @@ pub enum EncodeAddressError {
 pub fn decode_address(
     address: impl AsRef<str>,
     address_type: AddressType,
-    network_id: NetworkId,
+    network_id: &NetworkId,
 ) -> Result<ByteVec, DecodeAddressError> {
     let (hrp, bytes) = bech32::decode(address.as_ref())?;
 
@@ -80,7 +80,7 @@ pub fn decode_address(
 pub fn encode_address(
     address: impl AsRef<[u8]>,
     address_type: AddressType,
-    network_id: NetworkId,
+    network_id: &NetworkId,
 ) -> String {
     let hrp = Hrp::parse(&address_type.hrp(network_id)).expect("HRP for address can be parsed");
     bech32::encode::<Bech32m>(hrp, address.as_ref())
@@ -89,8 +89,23 @@ pub fn encode_address(
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{AddressType, ByteVec, NetworkId, decode_address, encode_address};
+    use crate::domain::{AddressType, ByteVec, decode_address, encode_address};
     use assert_matches::assert_matches;
+
+    #[test]
+    fn test_encode_address() {
+        let address = ByteVec::from(vec![0, 1, 2, 3]);
+
+        let encoded = encode_address(
+            &address,
+            AddressType::SecretEncryptionKey,
+            &"undeployed".into(),
+        );
+        assert!(encoded.starts_with("mn_shield-esk_undeployed1"));
+
+        let encoded = encode_address(&address, AddressType::Unshielded, &"mainnet".into());
+        assert!(encoded.starts_with("mn_addr1"));
+    }
 
     #[test]
     fn test_encode_decode_address() {
@@ -98,18 +113,18 @@ mod tests {
         let encoded = encode_address(
             &address,
             AddressType::SecretEncryptionKey,
-            NetworkId::Undeployed,
+            &"undeployed".into(),
         );
         let decoded = decode_address(
             encoded,
             AddressType::SecretEncryptionKey,
-            NetworkId::Undeployed,
+            &"undeployed".into(),
         );
         assert_matches!(decoded, Ok(a) if a == address);
 
         let address = ByteVec::from(vec![0, 1, 2, 3]);
-        let encoded = encode_address(&address, AddressType::Unshielded, NetworkId::Mainnet);
-        let decoded = decode_address(encoded, AddressType::Unshielded, NetworkId::Mainnet);
+        let encoded = encode_address(&address, AddressType::Unshielded, &"mainnet".into());
+        let decoded = decode_address(encoded, AddressType::Unshielded, &"mainnet".into());
         assert_matches!(decoded, Ok(a) if a == address);
     }
 }

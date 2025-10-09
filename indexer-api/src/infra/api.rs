@@ -169,7 +169,7 @@ where
     B: Subscriber,
     Z: LedgerStateStorage,
 {
-    let zswap_state_cache = LedgerStateCache::new(network_id);
+    let zswap_state_cache = LedgerStateCache::new(network_id.clone());
 
     let v3_app = v3::make_app(
         network_id,
@@ -261,7 +261,7 @@ async fn shutdown_signal() {
 }
 
 trait ContextExt {
-    fn get_network_id(&self) -> NetworkId;
+    fn get_network_id(&self) -> &NetworkId;
 
     fn get_storage<S>(&self) -> &S
     where
@@ -281,9 +281,8 @@ trait ContextExt {
 }
 
 impl ContextExt for Context<'_> {
-    fn get_network_id(&self) -> NetworkId {
+    fn get_network_id(&self) -> &NetworkId {
         self.data::<NetworkId>()
-            .copied()
             .expect("NetworkId is stored in Context")
     }
 

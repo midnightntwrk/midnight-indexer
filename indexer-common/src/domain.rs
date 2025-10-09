@@ -17,15 +17,14 @@ pub mod ledger;
 mod address;
 mod bytes;
 mod ledger_state_storage;
-mod network_id;
 mod protocol_version;
 mod pub_sub;
 mod viewing_key;
 
 pub use address::*;
 pub use bytes::*;
+use derive_more::{Deref, Display, From, Into};
 pub use ledger_state_storage::*;
-pub use network_id::*;
 pub use protocol_version::*;
 pub use pub_sub::*;
 pub use viewing_key::*;
@@ -62,6 +61,12 @@ pub type SerializedLedgerParameters = ByteVec;
 pub type SerializedLedgerState = ByteVec;
 pub type SerializedTransaction = ByteVec;
 pub type SerializedZswapState = ByteVec;
+
+/// Network identifier.
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Deref, From, Into, Deserialize)]
+#[deref(forward)]
+#[from(&str)]
+pub struct NetworkId(pub String);
 
 /// The outcome of applying a regular transaction to the ledger state along with extracted data.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

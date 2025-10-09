@@ -1038,7 +1038,6 @@ dependencies = [
  "parity-scale-codec",
  "parking_lot",
  "serde",
- "serde_with",
  "sqlx",
  "subxt",
  "thiserror 2.0.17",
@@ -2980,7 +2979,6 @@ dependencies = [
  "metrics",
  "secrecy",
  "serde",
- "serde_with",
  "sqlx",
  "stream-cancel",
  "thiserror 2.0.17",
@@ -3054,7 +3052,6 @@ dependencies = [
  "log",
  "secrecy",
  "serde",
- "serde_with",
  "tokio",
  "wallet-indexer",
 ]

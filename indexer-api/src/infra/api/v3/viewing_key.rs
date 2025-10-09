@@ -41,7 +41,7 @@ impl ViewingKey {
     })]
     pub fn try_into_domain(
         self,
-        network_id: NetworkId,
+        network_id: &NetworkId,
         protocol_version: ProtocolVersion,
     ) -> Result<indexer_common::domain::ViewingKey, ViewingKeyFormatError> {
         let bytes = decode_address(&self.0, AddressType::SecretEncryptionKey, network_id)?;
@@ -64,7 +64,7 @@ pub enum ViewingKeyFormatError {
 #[cfg(test)]
 mod tests {
     use crate::infra::api::v3::viewing_key::ViewingKey;
-    use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_017_000};
+    use indexer_common::domain::PROTOCOL_VERSION_000_017_000;
 
     #[test]
     fn test_try_into_domain() {
@@ -72,7 +72,7 @@ mod tests {
             "mn_shield-esk_undeployed1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs9ete5h",
         );
         let domain_viewing_key =
-            viewing_key.try_into_domain(NetworkId::Undeployed, PROTOCOL_VERSION_000_017_000);
+            viewing_key.try_into_domain(&"undeployed".into(), PROTOCOL_VERSION_000_017_000);
         println!("{domain_viewing_key:?}");
         assert!(domain_viewing_key.is_ok());
     }

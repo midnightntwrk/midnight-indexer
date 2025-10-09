@@ -81,15 +81,23 @@ pub struct Error(#[from] sqlx::Error);
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub host: String,
+
     pub port: u16,
+
     pub dbname: String,
+
     pub user: String,
+
     pub password: SecretString,
+
     #[serde_as(as = "DisplayFromStr")]
     pub sslmode: PgSslMode,
+
     pub max_connections: u32,
+
     #[serde(with = "humantime_serde")]
     pub idle_timeout: Duration,
+
     #[serde(with = "humantime_serde")]
     pub max_lifetime: Duration,
 }

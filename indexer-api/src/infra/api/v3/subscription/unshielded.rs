@@ -214,7 +214,7 @@ async fn make_unshielded_transaction<S>(
     storage: &S,
     address: indexer_common::domain::UnshieldedAddress,
     transaction: domain::Transaction,
-    network_id: NetworkId,
+    network_id: &NetworkId,
 ) -> ApiResult<Option<UnshieldedTransaction<S>>>
 where
     S: Storage,
