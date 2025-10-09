@@ -13,7 +13,7 @@
 
 use crate::{
     domain::{LedgerEvent, storage::Storage},
-    infra::api::{ApiResult, ContextExt, ResultExt, v1::ledger_events::ZswapLedgerEvent},
+    infra::api::{ApiResult, ContextExt, ResultExt, v3::ledger_events::ZswapLedgerEvent},
 };
 use async_graphql::{Context, Subscription};
 use async_stream::try_stream;

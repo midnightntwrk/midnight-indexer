@@ -379,7 +379,7 @@ async fn index_block(
 
     // First save and update the block with its transactions.
     let max_transaction_id = storage
-        .save_block(&block, &transactions)
+        .save_block(&block, &transactions, &block.dust_registration_events)
         .await
         .context("save block")?;
 
@@ -429,20 +429,18 @@ async fn index_block(
     // Publish UnshieldedUtxoIndexed events for affected addresses.
     let addresses = transactions
         .iter()
-        .filter_map(|t| match t {
-            Transaction::Regular(t) => Some(t),
-            Transaction::System(_) => None,
-        })
-        .fold(HashSet::new(), |mut addresses, transaction| {
-            let utxos = transaction
+        .flat_map(|transaction| match transaction {
+            Transaction::Regular(transaction) => transaction
                 .created_unshielded_utxos
                 .iter()
-                .chain(transaction.spent_unshielded_utxos.iter());
-            for utxo in utxos {
-                addresses.insert(utxo.owner.to_owned());
+                .chain(transaction.spent_unshielded_utxos.iter()),
+
+            Transaction::System(transaction) => {
+                transaction.created_unshielded_utxos.iter().chain(&[])
             }
-            addresses
-        });
+        })
+        .map(|utxo| utxo.owner)
+        .collect::<HashSet<_>>();
     for address in addresses {
         publisher
             .publish(&UnshieldedUtxoIndexed { address })
@@ -519,6 +517,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Default::default(),
     });
 
     static BLOCK_1: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -530,6 +529,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Default::default(),
     });
 
     static BLOCK_2: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -541,6 +541,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Default::default(),
     });
 
     static BLOCK_3: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -552,6 +553,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Default::default(),
     });
 
     pub const ZERO_HASH: BlockHash = ByteArray([0; 32]);

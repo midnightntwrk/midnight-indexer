@@ -27,7 +27,7 @@ futures                      = { workspace = true }
 humantime-serde              = { workspace = true }
 itertools                    = { workspace = true }
 log                          = { workspace = true, features = [ "kv_std" ] }
-logforth                     = { workspace = true, features = [ "append-fastrace", "diagnostic-fastrace", "layout-json" ] }
+logforth                     = { workspace = true, features = [ "append-fastrace", "diagnostic-fastrace", "starter-log" ] }
 metrics-exporter-prometheus  = { workspace = true, features = [ "http-listener" ] }
 midnight-base-crypto_v6      = { workspace = true }
 midnight-coin-structure_v6   = { workspace = true }

@@ -36,7 +36,7 @@ use fastrace_opentelemetry::OpenTelemetryReporter;
 use logforth::{
     append::{FastraceEvent, Stdout},
     diagnostic::FastraceDiagnostic,
-    filter::EnvFilter,
+    filter::env_filter::EnvFilterBuilder,
     layout::JsonLayout,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -103,10 +103,10 @@ pub struct MetricsConfig {
 ///
 /// If logging has already been initialized.
 pub fn init_logging() {
-    logforth::builder()
+    logforth::starter_log::builder()
         .dispatch(|dispatch| {
             dispatch
-                .filter(EnvFilter::from_default_env())
+                .filter(EnvFilterBuilder::from_default_env().build())
                 .diagnostic(FastraceDiagnostic::default())
                 .append(Stdout::default().with_layout(JsonLayout::default()))
                 .append(FastraceEvent::default())

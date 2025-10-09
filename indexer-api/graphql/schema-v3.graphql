@@ -211,6 +211,36 @@ type DustGenerationDtimeUpdate implements DustLedgerEvent {
 	maxId: Int!
 }
 
+"""
+DUST generation status for a specific Cardano stake key.
+"""
+type DustGenerationStatus {
+	"""
+	The hex-encoded Cardano stake key.
+	"""
+	cardanoStakeKey: HexEncoded!
+	"""
+	The hex-encoded associated DUST address if registered.
+	"""
+	dustAddress: HexEncoded
+	"""
+	Whether this stake key is registered.
+	"""
+	registered: Boolean!
+	"""
+	NIGHT balance backing generation.
+	"""
+	nightBalance: String!
+	"""
+	Generation rate in Specks per second.
+	"""
+	generationRate: String!
+	"""
+	Current DUST capacity.
+	"""
+	currentCapacity: String!
+}
+
 type DustInitialUtxo implements DustLedgerEvent {
 	"""
 	The ID of this dust ledger event.
@@ -305,6 +335,10 @@ type Query {
 	Find a contract action for the given address and optional offset.
 	"""
 	contractAction(address: HexEncoded!, offset: ContractActionOffset): ContractAction
+	"""
+	Get DUST generation status for specific Cardano stake keys.
+	"""
+	dustGenerationStatus(cardanoStakeKeys: [HexEncoded!]!): [DustGenerationStatus!]!
 }
 
 """

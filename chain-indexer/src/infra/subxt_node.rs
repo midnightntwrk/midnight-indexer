@@ -245,6 +245,7 @@ impl SubxtNode {
         let BlockDetails {
             timestamp,
             transactions,
+            dust_registration_events,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
 
         let transactions = stream::iter(transactions)
@@ -261,6 +262,7 @@ impl SubxtNode {
             timestamp: timestamp.unwrap_or(0),
             zswap_state_root,
             transactions,
+            dust_registration_events,
         };
 
         debug!(
@@ -491,6 +493,9 @@ pub enum SubxtNodeError {
 
     #[error("invalid protocol version {0}")]
     InvalidProtocolVersion(ProtocolVersion),
+
+    #[error("invalid DUST address length")]
+    InvalidDustAddress,
 }
 
 #[trace]

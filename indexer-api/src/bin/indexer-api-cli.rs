@@ -30,14 +30,14 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    PrintApiSchemaV1,
+    PrintApiSchemaV3,
 }
 
 impl Cli {
     fn run(self) -> anyhow::Result<()> {
         match self.command {
-            Command::PrintApiSchemaV1 => {
-                let schema = indexer_api::infra::api::v1::export_schema();
+            Command::PrintApiSchemaV3 => {
+                let schema = indexer_api::infra::api::v3::export_schema();
                 println!("{schema}");
             }
         };

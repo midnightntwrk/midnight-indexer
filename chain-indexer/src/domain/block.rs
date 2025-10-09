@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::domain::DustRegistrationEvent;
 use indexer_common::domain::{
     BlockAuthor, BlockHash, ProtocolVersion, SerializedLedgerParameters, ledger::ZswapStateRoot,
 };
@@ -26,6 +27,9 @@ pub struct Block {
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
     pub zswap_state_root: ZswapStateRoot,
+
+    // DUST registration events for this block.
+    pub dust_registration_events: Vec<DustRegistrationEvent>,
 
     // These fields are set after applying transactions to the ledger state.
     pub ledger_parameters: SerializedLedgerParameters,

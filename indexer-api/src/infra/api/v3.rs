@@ -13,6 +13,7 @@
 
 pub mod block;
 pub mod contract_action;
+pub mod dust;
 pub mod ledger_events;
 pub mod mutation;
 pub mod query;
@@ -28,7 +29,7 @@ use crate::{
     },
     infra::api::{
         ApiResult, Metrics, OptionExt, ResultExt,
-        v1::{block::BlockOffset, mutation::Mutation, query::Query, subscription::Subscription},
+        v3::{block::BlockOffset, mutation::Mutation, query::Query, subscription::Subscription},
     },
 };
 use async_graphql::{Schema, SchemaBuilder, scalar};
@@ -193,7 +194,7 @@ async fn resolve_height(offset: Option<BlockOffset>, storage: &impl Storage) -> 
                     .get_block_by_hash(hash)
                     .await
                     .map_err_into_server_error(|| format!("get block by hash {hash}"))?
-                    .ok_or_client_error(|| format!("block with hash {hash} not found"))?;
+                    .some_or_client_error(|| format!("block with hash {hash} not found"))?;
 
                 Ok(block.height)
             }
@@ -203,7 +204,7 @@ async fn resolve_height(offset: Option<BlockOffset>, storage: &impl Storage) -> 
                     .get_block_by_height(height)
                     .await
                     .map_err_into_server_error(|| "get block by height")?
-                    .ok_or_client_error(|| format!("block with height {height} not found"))?;
+                    .some_or_client_error(|| format!("block with height {height} not found"))?;
 
                 Ok(height)
             }

@@ -795,3 +795,14 @@ subscription DustLedgerEventsSubscription($id: Int) {
         }
     }
 }
+
+query DustGenerationStatusQuery($cardanoStakeKeys: [HexEncoded!]!) {
+    dustGenerationStatus(cardanoStakeKeys: $cardanoStakeKeys) {
+        cardanoStakeKey
+        dustAddress
+        registered
+        nightBalance
+        generationRate
+        currentCapacity
+    }
+}
