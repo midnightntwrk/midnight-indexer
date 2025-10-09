@@ -34,7 +34,7 @@ describe('mn-toolkit contract calls', () => {
 
   /**
    * Test contract call using the deployed test contract
-   * 
+   *
    * @given we have a deployed contract at a known address
    * @when we call a contract function using the toolkit
    * @then the transaction should be generated and submitted successfully
@@ -65,4 +65,3 @@ describe('mn-toolkit contract calls', () => {
     expect(['sent', 'confirmed']).toContain(result.status);
   }, 600000); // Increase timeout to 10 minutes for contract calls (syncing + proving + submitting)
 });
-

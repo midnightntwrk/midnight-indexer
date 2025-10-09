@@ -283,18 +283,16 @@ class ToolkitWrapper {
     const tag = Buffer.from('midnight:contract-address[v2]:', 'utf8');
     const addressBytes = Buffer.from(contractAddress, 'hex');
     const taggedAddressHex = Buffer.concat([tag, addressBytes]).toString('hex');
-    
+
     const contractAddressFile = `/out/contract_address_call.mn`;
-    const writeCommand = `echo -n "${taggedAddressHex}" > ${contractAddressFile}`;  // Write as hex text, not binary
-    
-    const writeResult = await this.startedContainer.exec([
-      'sh',
-      '-c',
-      writeCommand,
-    ]);
+    const writeCommand = `echo -n "${taggedAddressHex}" > ${contractAddressFile}`; // Write as hex text, not binary
+
+    const writeResult = await this.startedContainer.exec(['sh', '-c', writeCommand]);
 
     if (writeResult.exitCode !== 0) {
-      throw new Error(`Failed to write contract address to file: ${writeResult.stderr || writeResult.output}`);
+      throw new Error(
+        `Failed to write contract address to file: ${writeResult.stderr || writeResult.output}`,
+      );
     }
 
     // Pass the FILE PATH directly - the toolkit expects a path to the hex-encoded tagged address file
