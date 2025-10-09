@@ -66,7 +66,7 @@ interface LogEntry {
   message: string;
   target: string;
   timestamp: number;
-  tx_hash?: string;
+  midnight_tx_hash?: string;
   block_hash?: string;
 }
 
@@ -98,8 +98,8 @@ class ToolkitWrapper {
       try {
         const logEntry: LogEntry = JSON.parse(line);
 
-        if (logEntry.tx_hash) {
-          txHash = logEntry.tx_hash;
+        if (logEntry.midnight_tx_hash) {
+          txHash = logEntry.midnight_tx_hash;
         }
 
         if (logEntry.block_hash) {
@@ -257,6 +257,8 @@ class ToolkitWrapper {
       amount.toString(),
     ]);
 
+    log.debug(`Generate single transaction output:\n${result.output}`);
+
     if (result.exitCode !== 0) {
       const errorMessage = result.stderr || result.output || 'Unknown error occurred';
       throw new Error(`Toolkit command failed with exit code ${result.exitCode}: ${errorMessage}`);
@@ -352,7 +354,7 @@ class ToolkitWrapper {
       const result = await this.startedContainer.exec([
         '/midnight-node-toolkit',
         'generate-txs',
-        '--src-files',
+        '--src-file',
         `/out/${deployTx}`,
         '-r',
         '1',
