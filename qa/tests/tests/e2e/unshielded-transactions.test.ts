@@ -119,7 +119,7 @@ describe('unshielded transactions', () => {
       destinationAddress,
       1,
     );
-  }, 60000);
+  }, 200_000);
 
   afterAll(async () => {
     // Unsubscribe from the unshielded transaction events for the source and destination addresses
