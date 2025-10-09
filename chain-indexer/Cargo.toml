@@ -32,7 +32,7 @@ parity-scale-codec = { workspace = true }
 parking_lot        = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
 serde_with         = { workspace = true }
-sqlx               = { workspace = true, features = [ "runtime-tokio", "time" ] }
+sqlx               = { workspace = true, features = [ "time" ] }
 subxt              = { workspace = true, features = [ "reconnecting-rpc-client" ] }
 thiserror          = { workspace = true }
 tokio              = { workspace = true, features = [ "macros", "rt-multi-thread", "time", "signal" ] }

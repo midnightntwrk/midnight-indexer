@@ -65,7 +65,7 @@ thiserror              = { workspace = true }
 tokio                  = { workspace = true, features = [ "macros", "rt-multi-thread" ] }
 
 [features]
-cloud      = [ "async-nats", "serde_with", "sqlx/postgres" ]
+cloud      = [ "async-nats", "serde_with", "sqlx/postgres", "sqlx/tls-rustls" ]
 standalone = [ "sqlx/sqlite" ]
 
 [lints.rust]
