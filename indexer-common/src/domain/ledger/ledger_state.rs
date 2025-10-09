@@ -27,7 +27,10 @@ use midnight_base_crypto_v6::{
     time::Timestamp as TimestampV6,
 };
 use midnight_coin_structure_v6::{
-    coin::{NIGHT as NIGHTV6, UserAddress as UserAddressV6},
+    coin::{
+        NIGHT as NIGHTV6, UnshieldedTokenType as UnshieldedTokenTypeV6,
+        UserAddress as UserAddressV6,
+    },
     contract::ContractAddress as ContractAddressV6,
 };
 use midnight_ledger_v6::{
@@ -39,7 +42,7 @@ use midnight_ledger_v6::{
     structure::{
         LedgerParameters as LedgerParametersV6, LedgerState as LedgerStateV6,
         OutputInstructionUnshielded as OutputInstructionUnshieldedV6,
-        SystemTransaction as SystemTransactionV6,
+        SystemTransaction as SystemTransactionV6, Utxo as UtxoV6,
     },
     verify::WellFormedStrictness as WellFormedStrictnessV6,
 };
@@ -535,7 +538,7 @@ fn make_unshielded_utxos_for_regular_transaction_v6(
         // ClaimRewards creates a single unshielded UTXO for the claimed amount.
         TransactionV6::ClaimRewards(claim) => {
             let owner = UserAddressV6::from(claim.owner);
-            let intent_hash = {
+            let ledger_intent_hash = {
                 // ClaimRewards don't have intents, but UTXOs need an intent hash. We compute this
                 // hash the same way that the ledger does internally.
                 let output = OutputInstructionUnshieldedV6 {
@@ -543,11 +546,19 @@ fn make_unshielded_utxos_for_regular_transaction_v6(
                     target_address: owner,
                     nonce: claim.nonce,
                 };
-                ByteArray(output.mk_intent_hash(NIGHTV6).0.0)
+                output.mk_intent_hash(NIGHTV6)
             };
+            let intent_hash = ledger_intent_hash.0.0.into();
             let initial_nonce = make_initial_nonce_v6(OUTPUT_INDEX_ZERO, intent_hash);
             let registered_for_dust_generation =
                 registered_for_dust_generation_v6(OUTPUT_INDEX_ZERO, intent_hash, ledger_state);
+            let utxo = UtxoV6 {
+                value: claim.value,
+                owner,
+                type_: UnshieldedTokenTypeV6::default(),
+                intent_hash: ledger_intent_hash,
+                output_no: OUTPUT_INDEX_ZERO,
+            };
 
             let utxo = UnshieldedUtxo {
                 owner: owner.0.0.into(),
@@ -555,6 +566,7 @@ fn make_unshielded_utxos_for_regular_transaction_v6(
                 value: claim.value,
                 intent_hash,
                 output_index: OUTPUT_INDEX_ZERO,
+                ctime: ctime_v6(&utxo, ledger_state),
                 initial_nonce,
                 registered_for_dust_generation,
             };
@@ -579,22 +591,28 @@ fn make_unshielded_utxos_for_system_transaction_v6(
                 .map(|(index, output)| {
                     // Compute intent_hash same way ledger does:
                     // midnight-ledger/ledger/src/structure.rs:589
-                    let intent_hash = output.clone().mk_intent_hash(token_type);
-                    let initial_nonce =
-                        make_initial_nonce_v6(index as u32, ByteArray(intent_hash.0.0));
+                    let ledger_intent_hash = output.clone().mk_intent_hash(token_type);
+                    let intent_hash = ledger_intent_hash.0.0.into();
+                    let initial_nonce = make_initial_nonce_v6(index as u32, intent_hash);
+                    let registered_for_dust_generation =
+                        registered_for_dust_generation_v6(index as u32, intent_hash, ledger_state);
+                    let utxo = UtxoV6 {
+                        value: output.amount,
+                        owner: output.target_address,
+                        type_: token_type,
+                        intent_hash: ledger_intent_hash,
+                        output_no: OUTPUT_INDEX_ZERO,
+                    };
 
                     UnshieldedUtxo {
                         owner: output.target_address.0.0.into(),
                         token_type: token_type.0.0.into(),
                         value: output.amount,
-                        intent_hash: ByteArray(intent_hash.0.0),
+                        intent_hash,
                         output_index: index as u32,
+                        ctime: ctime_v6(&utxo, ledger_state),
                         initial_nonce,
-                        registered_for_dust_generation: registered_for_dust_generation_v6(
-                            index as u32,
-                            ByteArray(intent_hash.0.0),
-                            ledger_state,
-                        ),
+                        registered_for_dust_generation,
                     }
                 })
                 .collect()
@@ -612,11 +630,11 @@ fn extend_unshielded_utxos_v6(
     guaranteed: bool,
     ledger_state: &LedgerStateV6<DefaultDBV6>,
 ) {
-    let intent_hash = intent
+    let ledger_intent_hash = intent
         .erase_proofs()
         .erase_signatures()
         .intent_hash(segment_id);
-    let intent_hash = intent_hash.0.0.into();
+    let intent_hash = ledger_intent_hash.0.0.into();
 
     let intent_outputs = if guaranteed {
         intent.guaranteed_outputs()
@@ -631,6 +649,13 @@ fn extend_unshielded_utxos_v6(
             let initial_nonce = make_initial_nonce_v6(output_index, intent_hash);
             let registered_for_dust_generation =
                 registered_for_dust_generation_v6(output_index, intent_hash, ledger_state);
+            let utxo = UtxoV6 {
+                value: output.value,
+                owner: output.owner,
+                type_: output.type_,
+                intent_hash: ledger_intent_hash,
+                output_no: output_index,
+            };
 
             UnshieldedUtxo {
                 owner: output.owner.0.0.into(),
@@ -638,6 +663,7 @@ fn extend_unshielded_utxos_v6(
                 value: output.value,
                 intent_hash,
                 output_index,
+                ctime: ctime_v6(&utxo, ledger_state),
                 initial_nonce,
                 registered_for_dust_generation,
             }
@@ -654,6 +680,13 @@ fn extend_unshielded_utxos_v6(
         let initial_nonce = make_initial_nonce_v6(spend.output_no, intent_hash);
         let registered_for_dust_generation =
             registered_for_dust_generation_v6(spend.output_no, intent_hash, ledger_state);
+        let utxo = UtxoV6 {
+            value: spend.value,
+            owner: UserAddressV6::from(spend.owner.clone()),
+            type_: spend.type_,
+            intent_hash: ledger_intent_hash,
+            output_no: spend.output_no,
+        };
 
         UnshieldedUtxo {
             owner: UserAddressV6::from(spend.owner).0.0.into(),
@@ -661,6 +694,7 @@ fn extend_unshielded_utxos_v6(
             value: spend.value,
             intent_hash,
             output_index: spend.output_no,
+            ctime: ctime_v6(&utxo, ledger_state),
             initial_nonce,
             registered_for_dust_generation,
         }
@@ -686,6 +720,14 @@ fn registered_for_dust_generation_v6(
         .generation
         .night_indices
         .contains_key(&initial_nonce)
+}
+
+fn ctime_v6(utxo: &UtxoV6, ledger_state: &LedgerStateV6<DefaultDBV6>) -> Option<u64> {
+    ledger_state
+        .utxo
+        .utxos
+        .get(utxo)
+        .map(|meta| meta.ctime.to_secs())
 }
 
 #[cfg(test)]

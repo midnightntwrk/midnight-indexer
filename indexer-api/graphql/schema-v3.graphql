@@ -664,13 +664,17 @@ type UnshieldedUtxo {
 	"""
 	value: String!
 	"""
+	The hex-encoded serialized intent hash.
+	"""
+	intentHash: HexEncoded!
+	"""
 	Index of this output within its creating transaction.
 	"""
 	outputIndex: Int!
 	"""
-	The hex-encoded serialized intent hash.
+	The creation time in seconds.
 	"""
-	intentHash: HexEncoded!
+	ctime: Int
 	"""
 	The hex-encoded initial nonce for DUST generation tracking.
 	"""

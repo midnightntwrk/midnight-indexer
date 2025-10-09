@@ -33,8 +33,9 @@ impl UnshieldedUtxoStorage for Storage {
                 owner,
                 token_type,
                 value,
-                output_index,
                 intent_hash,
+                output_index,
+                ctime,
                 initial_nonce,
                 registered_for_dust_generation
             FROM unshielded_utxos
@@ -63,8 +64,9 @@ impl UnshieldedUtxoStorage for Storage {
                 owner,
                 token_type,
                 value,
-                output_index,
                 intent_hash,
+                output_index,
+                ctime,
                 initial_nonce,
                 registered_for_dust_generation
             FROM unshielded_utxos
@@ -93,8 +95,9 @@ impl UnshieldedUtxoStorage for Storage {
                 owner,
                 token_type,
                 value,
-                output_index,
                 intent_hash,
+                output_index,
+                ctime,
                 initial_nonce,
                 registered_for_dust_generation
             FROM unshielded_utxos
@@ -124,8 +127,9 @@ impl UnshieldedUtxoStorage for Storage {
                 owner,
                 token_type,
                 value,
-                output_index,
                 intent_hash,
+                output_index,
+                ctime,
                 initial_nonce,
                 registered_for_dust_generation
             FROM unshielded_utxos
@@ -157,8 +161,9 @@ impl UnshieldedUtxoStorage for Storage {
                 owner,
                 token_type,
                 value,
-                output_index,
                 intent_hash,
+                output_index,
+                ctime,
                 initial_nonce,
                 registered_for_dust_generation
             FROM unshielded_utxos

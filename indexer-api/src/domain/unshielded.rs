@@ -17,7 +17,7 @@ use indexer_common::{
 };
 use sqlx::FromRow;
 
-/// Represents an unshielded UTXO at the API-domain level.
+/// An unshielded UTXO.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct UnshieldedUtxo {
     /// Database ID of the transaction that created this UTXO.
@@ -38,12 +38,15 @@ pub struct UnshieldedUtxo {
     #[sqlx(try_from = "U128BeBytes")]
     pub value: u128,
 
+    /// Hash of the intent that created this UTXO.
+    pub intent_hash: IntentHash,
+
     /// Matches ledger's u32 type but stored as BIGINT since u32 max exceeds PostgreSQL INT range.
     #[sqlx(try_from = "i64")]
     pub output_index: u32,
 
-    /// Hash of the intent that created this UTXO.
-    pub intent_hash: IntentHash,
+    #[sqlx(try_from = "SqlxOption<i64>")]
+    pub ctime: Option<u64>,
 
     /// Initial nonce for DUST generation tracking.
     pub initial_nonce: Nonce,
