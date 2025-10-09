@@ -145,6 +145,7 @@ pub struct UnshieldedUtxo {
     pub value: u128,
     pub intent_hash: IntentHash,
     pub output_index: u32,
+    pub ctime: Option<u64>,
     pub initial_nonce: Nonce,
     pub registered_for_dust_generation: bool,
 }

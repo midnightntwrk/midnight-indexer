@@ -49,11 +49,14 @@ where
     /// UTXO value (quantity) as a string to support u128.
     value: String,
 
+    /// The hex-encoded serialized intent hash.
+    intent_hash: HexEncoded,
+
     /// Index of this output within its creating transaction.
     output_index: u32,
 
-    /// The hex-encoded serialized intent hash.
-    intent_hash: HexEncoded,
+    /// The creation time in seconds.
+    ctime: Option<u64>,
 
     /// The hex-encoded initial nonce for DUST generation tracking.
     initial_nonce: HexEncoded,
@@ -112,18 +115,30 @@ where
     S: Storage,
 {
     fn from((utxo, network_id): (domain::UnshieldedUtxo, NetworkId)) -> Self {
-        let owner = encode_address(utxo.owner, AddressType::Unshielded, network_id).into();
+        let domain::UnshieldedUtxo {
+            creating_transaction_id,
+            spending_transaction_id,
+            owner,
+            token_type,
+            value,
+            intent_hash,
+            output_index,
+            ctime,
+            initial_nonce,
+            registered_for_dust_generation,
+        } = utxo;
 
         Self {
-            owner,
-            token_type: utxo.token_type.hex_encode(),
-            value: utxo.value.to_string(),
-            output_index: utxo.output_index,
-            intent_hash: utxo.intent_hash.hex_encode(),
-            initial_nonce: utxo.initial_nonce.hex_encode(),
-            registered_for_dust_generation: utxo.registered_for_dust_generation,
-            creating_transaction_id: utxo.creating_transaction_id,
-            spending_transaction_id: utxo.spending_transaction_id,
+            creating_transaction_id,
+            spending_transaction_id,
+            owner: encode_address(owner, AddressType::Unshielded, network_id).into(),
+            token_type: token_type.hex_encode(),
+            value: value.to_string(),
+            intent_hash: intent_hash.hex_encode(),
+            output_index,
+            ctime,
+            initial_nonce: initial_nonce.hex_encode(),
+            registered_for_dust_generation,
             _s: PhantomData,
         }
     }
