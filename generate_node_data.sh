@@ -37,7 +37,7 @@ run_toolkit_commands() {
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
         generate-txs --dest-file /out/contract_tx_1_deploy.mn --to-bytes \
-        contract-calls deploy \
+        contract-simple deploy \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037'
 
     docker run \
@@ -45,15 +45,15 @@ run_toolkit_commands() {
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-        contract-address --network undeployed \
-        --src-file /out/contract_tx_1_deploy.mn | jq -r .untagged > /tmp/contract_address.mn
+        contract-address  \
+        --src-file /out/contract_tx_1_deploy.mn > /tmp/contract_address.mn
 
     docker run \
         --rm \
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-        generate-txs --src-files /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 -r 1 \
+        generate-txs --src-file /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 \
         send
 
     # The 'store' function inserts data into a Merkle tree in the test contract
@@ -65,7 +65,7 @@ run_toolkit_commands() {
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-        generate-txs contract-calls call \
+        generate-txs contract-simple call \
         --call-key store \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
         --contract-address $(cat /tmp/contract_address.mn)
@@ -78,7 +78,7 @@ run_toolkit_commands() {
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-        generate-txs contract-calls maintenance \
+        generate-txs contract-simple maintenance \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
         --contract-address $(cat /tmp/contract_address.mn)
 }
