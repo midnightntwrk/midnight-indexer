@@ -266,6 +266,56 @@ class ToolkitWrapper {
     return this.parseTransactionOutput(rawOutput);
   }
 
+  async callContract(
+    contractAddress: string,
+    callKey: string,
+    rngSeed: string,
+  ): Promise<ToolkitTransactionResult> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    // Write contract address to a file in HEX-ENCODED tagged format AS TEXT
+    // The targetDir (e.g., /tmp/toolkit/) is mounted to /out in the container
+    // File format: hex("midnight:contract-address[v2]:" + raw_address_bytes)
+    const tag = Buffer.from('midnight:contract-address[v2]:', 'utf8');
+    const addressBytes = Buffer.from(contractAddress, 'hex');
+    const taggedAddressHex = Buffer.concat([tag, addressBytes]).toString('hex');
+
+    const contractAddressFile = `/out/contract_address_call.mn`;
+    const writeCommand = `echo -n "${taggedAddressHex}" > ${contractAddressFile}`; // Write as hex text, not binary
+
+    const writeResult = await this.startedContainer.exec(['sh', '-c', writeCommand]);
+
+    if (writeResult.exitCode !== 0) {
+      throw new Error(
+        `Failed to write contract address to file: ${writeResult.stderr || writeResult.output}`,
+      );
+    }
+
+    // Pass the FILE PATH directly - the toolkit expects a path to the hex-encoded tagged address file
+    const result = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'generate-txs',
+      'contract-calls',
+      'call',
+      '--call-key',
+      callKey,
+      '--rng-seed',
+      rngSeed,
+      '--contract-address',
+      contractAddressFile,
+    ]);
+
+    if (result.exitCode !== 0) {
+      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
+      throw new Error(`Toolkit command failed with exit code ${result.exitCode}: ${errorMessage}`);
+    }
+
+    const rawOutput = result.output.trim();
+    return this.parseTransactionOutput(rawOutput);
+  }
+
   async deployContract(opts?: {
     contractConfigPath?: string;
     compiledContractDir?: string;
