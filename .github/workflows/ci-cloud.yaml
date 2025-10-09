@@ -27,7 +27,7 @@ jobs:
           toolchain_toml: "rust-toolchain.toml"
         run: |
           toolchain=$(grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/')
-          echo "toolchain=$toolchain" | tee -a $GITHUB_OUTPUT
+          echo "toolchain=$toolchain" | tee -a "$GITHUB_OUTPUT"
 
   check:
     runs-on: ubuntu-latest-8-core-x64

@@ -27,9 +27,9 @@ jobs:
           toolchain_toml: "rust-toolchain.toml"
         run: |
           toolchain=$(grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/')
-          echo "toolchain=$toolchain" | tee -a $GITHUB_ENV
+          echo "toolchain=$toolchain" | tee -a "$GITHUB_ENV"
           version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
-          echo "version=$version" | tee -a $GITHUB_ENV
+          echo "version=$version" | tee -a "$GITHUB_ENV"
 
       - name: Add github.com credentials to netrc
         uses: extractions/netrc@v2
