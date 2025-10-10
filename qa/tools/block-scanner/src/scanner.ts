@@ -16,7 +16,7 @@
 import fs from "fs";
 import path from "path";
 import { TARGET_ENV, INDEXER_WS_URL, INDEXER_HTTP_URL } from "./env.js";
-import { Block, RegularTransaction, Transaction } from "./indexer-types.js";
+import { Block, RegularTransaction } from "./indexer-types.js";
 import { updateTestDataFiles } from "./test-data-handler.js";
 
 // Configuration constants
@@ -24,9 +24,9 @@ const CONFIG = {
   TMP_DIR: "tmp_scan",
   TIMEOUT_MS: 600_000,
   QUERY_TIMEOUT_MS: 10_000,
-  CONNECTION_TIMEOUT_MS: 2000,
+  CONNECTION_TIMEOUT_MS: 2_000,
   WS_PROTOCOL: "graphql-transport-ws",
-  SPINNER_UPDATE_INTERVAL_MS: 2000,
+  SPINNER_UPDATE_INTERVAL_MS: 100,
   PROGRESS_UPDATE_INTERVAL: 100,
 } as const;
 
@@ -164,6 +164,21 @@ class BlockScanManager {
  * Creates a spinner utility for CLI progress indication
  */
 function createSpinner() {
+  const isCI = process.env.CI === "true";
+
+  // In CI environments, disable spinner completely
+  if (isCI) {
+    return {
+      update(blockCount: number) {
+        // No-op in CI
+      },
+      clear() {
+        // No-op in CI
+      },
+    };
+  }
+
+  // Local terminal spinner with animation
   const spinnerChars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   let spinnerIndex = 0;
   let lastUpdate = Date.now();
