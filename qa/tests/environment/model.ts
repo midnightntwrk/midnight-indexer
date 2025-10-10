@@ -1,3 +1,18 @@
+// This file is part of midnightntwrk/midnight-indexer.
+// Copyright (C) 2025 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 import log from '@utils/logging/logger';
 
 export enum EnvironmentName {
@@ -5,8 +20,15 @@ export enum EnvironmentName {
   QANET = 'qanet',
   NODEDEV01 = 'nodedev01',
   DEVNET = 'devnet',
+  PREVIEW = 'preview',
   TESTNET = 'testnet',
   TESTNET02 = 'testnet02',
+}
+
+export enum LedgerNetworkId {
+  UNDEPLOYED = 'undeployed',
+  DEVNET = 'devnet',
+  TESTNET = 'testnet',
 }
 
 export const networkIdByEnvName: Record<string, string> = {
@@ -14,8 +36,15 @@ export const networkIdByEnvName: Record<string, string> = {
   qanet: 'Devnet',
   nodedev01: 'Devnet',
   devnet: 'Devnet',
+  preview: 'Devnet',
   testnet: 'Testnet',
   testnet02: 'Testnet',
+};
+
+export const bech32mTagsByLedgerNetworkId: Record<string, string> = {
+  undeployed: 'undeployed',
+  devnet: 'dev',
+  testnet: 'test',
 };
 
 const indexerHostByEnvName: Record<string, string> = {
@@ -23,6 +52,7 @@ const indexerHostByEnvName: Record<string, string> = {
   qanet: 'indexer.qanet.dev.midnight.network',
   nodedev01: 'indexer.node-dev-01.dev.midnight.network',
   devnet: 'indexer.devnet.midnight.network',
+  preview: 'indexer.preview.midnight.network',
   testnet: 'indexer.testnet.midnight.network',
   testnet02: 'indexer.testnet-02.midnight.network',
 };
@@ -32,6 +62,7 @@ const nodeHostByEnvName: Record<string, string> = {
   qanet: 'rpc.qanet.dev.midnight.network',
   nodedev01: 'rpc.node-dev-01.dev.midnight.network',
   devnet: 'rpc.devnet.midnight.network',
+  preview: 'rpc.preview.midnight.network',
   testnet: 'rpc.testnet.midnight.network',
   testnet02: 'rpc.testnet-02.midnight.network',
 };
@@ -103,6 +134,10 @@ export class Environment {
 
   getNodeWebsocketBaseURL(): string {
     return `${this.wsProtocol}://${this.nodeHost}`;
+  }
+
+  getBech32mTagByLedgerNetworkId(networkId: string): string {
+    return bech32mTagsByLedgerNetworkId[networkId];
   }
 
   getNodeVersion(): string {

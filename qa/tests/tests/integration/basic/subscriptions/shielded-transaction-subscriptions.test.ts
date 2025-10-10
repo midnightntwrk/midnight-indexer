@@ -13,7 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { TestContext } from 'vitest';
+import { randomBytes } from 'crypto';
 import log from '@utils/logging/logger';
+import { LedgerNetworkId, env } from 'environment/model';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from 'utils/testdata-provider';
 import {
@@ -23,30 +26,51 @@ import {
   ShieldedTxSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
 import { generateSyntheticViewingKey } from '@utils/bech32-codec';
-import { TestContext } from 'vitest';
+import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 
 describe('shielded transaction subscriptions', () => {
+  let randomSeed: string;
+  let toolkit: ToolkitWrapper;
   let indexerWsClient: IndexerWsClient;
 
   beforeEach(async () => {
+    // Initialise a random seed used for the viewing key operations
+    randomSeed = randomBytes(32).toString('hex');
+
+    // Initialise the toolkit wrapper
+    toolkit = new ToolkitWrapper({});
+    await toolkit.start();
+
+    // Initialise the indexer websocket client and connect to it
     indexerWsClient = new IndexerWsClient();
     await indexerWsClient.connectionInit();
   });
 
   afterEach(async () => {
+    // Close the indexer websocket client
     await indexerWsClient.connectionClose();
+
+    // Stop the toolkit wrapper
+    await toolkit.stop();
   });
 
   describe('opening a session with viewing key', () => {
     /**
-     * Opening a session with a valid and existing viewing key returns a session ID
+     * Opening a session with a valid viewing key returns a session ID
      *
-     * @given a valid and existing viewing key
+     * Note: The only requirement is the viewing key is valid and matches the
+     * target network is meant for. In essence, it might be a viewing key for
+     * a wallet that doesn't exist, but that is ok because that is enough to open
+     * a session. Then if the wallet doesn't exist (i.e. no relevant transactions),
+     * the subscription will not stream any transaction data, that's all!
+     *
+     * @given a valid viewing key
      * @when we open a session with that viewing key
      * @then Indexer should return a session ID
      */
-    test('should return a session ID, given a valid and existing viewing key', async () => {
-      const viewingKey = dataProvider.getViewingKey();
+    test('should return a session ID, given a valid viewing key', async () => {
+      log.info(`randomSeed = ${randomSeed}`);
+      const viewingKey = await toolkit.showViewingKey(randomSeed);
       log.debug(`viewingKey = ${viewingKey}`);
 
       return indexerWsClient
@@ -99,20 +123,21 @@ describe('shielded transaction subscriptions', () => {
      * @when we open a session with that viewing key
      * @then Indexer should return an error
      */
-    test('should return an error, given a valid viewing key meant for a different network', async (context: TestContext) => {
-      context.skip?.(true, 'This test requires the Midnight toolkit to be part of the indexer');
+    test('should return an error, given a valid viewing key meant for a different network', async (ctx: TestContext) => {
+      log.info(`Seed for viewing key = ${randomSeed}`);
 
-      const viewingKeys = {
-        undeployed: dataProvider.getViewingKey(),
-      };
-      const generatedViewingKey = viewingKeys['undeployed'];
-      log.debug(`generatedViewingKey = ${generatedViewingKey}`);
-
-      // Expect the promise to reject with an error
-      for (const network of Object.keys(viewingKeys)) {
-        const viewingKey = viewingKeys[network as keyof typeof viewingKeys];
+      // Get all the ledger network ids
+      const networkIds = Object.values(LedgerNetworkId);
+      for (const networkId of networkIds) {
+        log.debug(`networkId = ${networkId}`);
+        const viewingKey = await toolkit.showViewingKey(randomSeed, networkId);
         log.debug(`viewingKey = ${viewingKey}`);
-        await expect.soft(indexerWsClient.openWalletSession(viewingKey)).rejects.toThrow();
+        if (networkId === env.getNetworkId().toLowerCase()) {
+          continue;
+        }
+        await expect
+          .soft(indexerWsClient.openWalletSession(viewingKey))
+          .rejects.toThrow(/expected HRP.*but was/);
       }
     });
   });
@@ -126,7 +151,8 @@ describe('shielded transaction subscriptions', () => {
      * @then Indexer should terminate the session successfully
      */
     test('should terminate the session successfully, given a valid session ID', async () => {
-      const viewingKey: string = dataProvider.getViewingKey();
+      // Gets the viewing key for the random seed using toolkit
+      const viewingKey = await toolkit.showViewingKey(randomSeed);
       log.debug(`viewingKey = ${viewingKey}`);
 
       const sessionId = await indexerWsClient.openWalletSession(viewingKey);
@@ -154,7 +180,9 @@ describe('shielded transaction subscriptions', () => {
       const sessionId = 'invalid-session-id';
       log.debug(`sessionId = ${sessionId}`);
 
-      await expect.soft(indexerWsClient.closeWalletSession(sessionId)).rejects.toThrow();
+      await expect
+        .soft(indexerWsClient.closeWalletSession(sessionId))
+        .rejects.toThrow(/Unexpected payload in disconnect response/);
     });
   });
 
@@ -167,8 +195,10 @@ describe('shielded transaction subscriptions', () => {
      * @then Indexer should stream wallet events starting from the beginning
      * @and we should receive at least one event
      */
-    test('should stream wallet events starting from the beginning', async () => {
-      const viewingKey: string = dataProvider.getViewingKey();
+    test.only('should stream wallet events starting from the beginning, given there are relevant transactions', async () => {
+      // Seed with transaction from which we get viewing key
+      const seedWithTransactions = '0'.repeat(63) + '1';
+      const viewingKey = await toolkit.showViewingKey(seedWithTransactions);
       log.debug(`viewingKey = ${viewingKey}`);
 
       const sessionId: string = await indexerWsClient.openWalletSession(viewingKey);
@@ -177,25 +207,26 @@ describe('shielded transaction subscriptions', () => {
       const shieldedTxSubscriptionHandler: SubscriptionHandlers<ShieldedTxSubscriptionResponse> = {
         next: (payload) => {
           log.debug(`Received data:\n${JSON.stringify(payload)}`);
-          if (payload.data) {
-            receivedEvents.push(payload);
-          }
+          receivedEvents.push(payload);
         },
         complete: () => {
           log.debug('Completed sent from Indexer');
         },
       };
 
-      const unscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
+      const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
         shieldedTxSubscriptionHandler,
         sessionId,
       );
 
-      await new Promise((res) => setTimeout(res, 200));
+      await new Promise((res) => setTimeout(res, 2000));
 
-      unscribe();
+      unsubscribe();
 
       expect(receivedEvents.length).toBeGreaterThanOrEqual(1);
+      receivedEvents.forEach((event) => {
+        expect(event).toBeSuccess();
+      });
     });
   });
 });

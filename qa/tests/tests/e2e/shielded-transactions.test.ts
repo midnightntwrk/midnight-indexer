@@ -43,7 +43,7 @@ describe('shielded transactions', () => {
     sourceAddress = (await toolkit.showAddress(sourceSeed)).shielded;
     destinationAddress = (await toolkit.showAddress(destinationSeed)).shielded;
 
-    // Submit one shielded->shielded transfer (1 NIGHT)
+    // Submit one shielded->shielded transfer (1 STAR)
     transactionResult = await toolkit.generateSingleTx(
       sourceSeed,
       'shielded',
@@ -64,7 +64,7 @@ describe('shielded transactions', () => {
     await Promise.all([toolkit.stop()]);
   });
 
-  describe('a successful shielded transaction transferring 1 Token between two wallets', async () => {
+  describe('a successful shielded transaction transferring 1 Shielded Token between two wallets', async () => {
     /**
      * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
      * that transaction in the block through a block query by hash, using the block hash reported by the toolkit.
@@ -127,5 +127,51 @@ describe('shielded transactions', () => {
         transactionResponse?.data?.transactions?.map((tx: Transaction) => `0x${tx.hash}`),
       ).toContain(transactionResult.txHash);
     });
+
+    /**
+     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction through an shielded transaction event for the source viewing key.
+     *
+     * @given we subscribe to unshielded transaction events for the source viewing key
+     * @when we submit an shielded transaction to node
+     * @then we should receive a transaction event that includes created and spent UTXOs for the source viewing key
+     */
+    test.todo(
+      'should be reported by the indexer through an unshielded transaction event for the source address',
+      async (context: TestContext) => {
+        // Implement me
+      },
+    );
+
+    /**
+     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction through an shielded transaction event for the destination viewing key.
+     *
+     * @given we subscribe to unshielded transaction events for the destination viewing key
+     * @when we submit an shielded transaction to node
+     * @then we should receive a transaction event that includes created and spent UTXOs for the destination viewing key
+     */
+    test.todo(
+      'should be reported by the indexer through an unshielded transaction event for the destination address',
+      async (context: TestContext) => {
+        // Implement me
+      },
+    );
+
+    /**
+     * Once an unshielded transaction has been submitted to node and confirmed, we should see the transaction
+     * giving 1 Unshielded Token to the destination address.
+     *
+     * @given a confirmed unshielded transaction between two wallets
+     * @when we inspect the containing block for shielded transaction details
+     * @then there should be a balance change that reflects the transfer of 1 Shielded Token
+     */
+    test.todo(
+      'should have transferred 1 token from the source to the destination address',
+      async (context: TestContext) => {
+        // Implement me but... can we really implement this test? We need to be able to view the transaction details in
+        // the block and use the viewing key for that. Does the toolkit offer that level of support?
+      },
+    );
   });
 });

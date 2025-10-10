@@ -32,6 +32,14 @@ else
 fi
 
 docker exec $DOCKER_FLAGS toolkit-${ENVIRONMENT} \
-    /midnight-node-toolkit show-address \
-    --network $NETWORK_ID \
+    /midnight-node-toolkit show-wallet --help 
+
+# Debug: print the full docker command
+echo "Running: docker exec $DOCKER_FLAGS toolkit-${ENVIRONMENT} /midnight-node-toolkit show-wallet --src-url $NODE_URL --seed $SEED"
+echo ""
+
+docker exec $DOCKER_FLAGS toolkit-${ENVIRONMENT} \
+    /midnight-node-toolkit show-wallet \
+    --src-url $NODE_URL \
     --seed $SEED
+

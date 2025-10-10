@@ -105,6 +105,7 @@ describe('transaction queries', () => {
   describe('a transaction query by identifier', () => {
     /**
      * A transaction query by identifier with a valid & existing identifier returns the expected transaction
+     * We use one of the identifiers from the regular transactions in the genesis block.
      *
      * @given a valid identifier for an existing transaction
      * @when we send a transaction query with that identifier
@@ -193,6 +194,9 @@ describe('transaction queries', () => {
      * @then Indexer should return an error
      */
     test('should return an error, as only one parameter at a time can be used', async () => {
+      // Note here we are building an offset object with random validly formed hash and identifier
+      // The fact these are random doesn't matter because the indexer should reject the query with an
+      // error before trying to see if a transaction with that hash and identifier exists.
       const offset: TransactionOffset = {
         hash: '77171f02184423c06e743439273af9e4557c5edf39cdf4125282dba2191e2ad4',
         identifier: '00000000246b12dc2c378d42c8a463db0501b85d93645c4e3fa0e2862590667be36c8b48',

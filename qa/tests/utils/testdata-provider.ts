@@ -37,6 +37,7 @@ class TestDataProvider {
     const envName = env.getEnvName();
     const baseDir = `data/static/${envName}`;
 
+    this.blocks = importJsoncData(`${baseDir}/blocks.jsonc`);
     this.contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`);
     this.unshieldedAddresses = importJsoncData(`${baseDir}/unshielded-addresses.json`);
 

@@ -15,24 +15,16 @@
 
 export const SHIELDED_TRANSACTION_SUBSCRIPTION_BY_SESSION_ID = `subscription WalletSyncEventSubscription ($SESSION_ID: String){
     shieldedTransactions (sessionId: $SESSION_ID) {
-        ... on ViewingUpdate {
+        ... on RelevantTransaction {
             __typename
-            index
-            update {
-                ... on MerkleTreeCollapsedUpdate {
-                __typename
-                start
-                end
+            transaction {
+                hash
+            }
+            collapsedMerkleTree {
+                startIndex
+                endIndex
                 update
-                }
-                ... on RelevantTransaction {
-                __typename
-                transaction {
-                    hash
-                }
-                start
-                end
-                }
+                protocolVersion
             }
         }
         ... on ShieldedTransactionsProgress {

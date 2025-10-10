@@ -19,7 +19,13 @@ import { TestContext } from 'vitest';
 
 import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import { Transaction, UnshieldedTransaction, UnshieldedUtxo } from '@utils/indexer/indexer-types';
+import {
+  Transaction,
+  UnshieldedTransaction,
+  UnshieldedTransactionEvent,
+  UnshieldedTransactionsProgress,
+  UnshieldedUtxo,
+} from '@utils/indexer/indexer-types';
 import {
   IndexerWsClient,
   UnshieldedTransactionSubscriptionParams,
@@ -27,6 +33,7 @@ import {
 } from '@utils/indexer/websocket-client';
 import { getBlockByHashWithRetry } from './test-utils';
 import { waitForEventsStabilization } from './test-utils';
+import { retry } from '@utils/retry-helper';
 
 // To run: yarn test e2e
 describe('unshielded transactions', () => {
@@ -46,6 +53,11 @@ describe('unshielded transactions', () => {
   // Events from the indexer websocket for both the source and destination addresses
   let sourceAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
   let destinationAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
+
+  // Historical events from the indexer websocket for both the source and destination addresses
+  // We use these two arrays to capture events before submitting the transaction
+  let historicalSourceEvents: UnshieldedTxSubscriptionResponse[] = [];
+  let historicalDestinationEvents: UnshieldedTxSubscriptionResponse[] = [];
 
   // Functions to unsubscribe from the indexer websocket for both the source and destination addresses
   let sourceAddrUnscribeFromEvents: () => void;
@@ -105,12 +117,12 @@ describe('unshielded transactions', () => {
     );
 
     // Wait until source events count stabilizes, then snapshot to historical array
-    let drained = await waitForEventsStabilization(sourceAddressEvents, 500);
-    log.info(`Source events count stabilized: ${drained.length}`);
+    historicalSourceEvents = await waitForEventsStabilization(sourceAddressEvents, 1000);
+    log.info(`Source events count stabilized: ${historicalSourceEvents.length}`);
 
     // Wait until destination events count stabilizes, then snapshot to historical array
-    drained = await waitForEventsStabilization(destinationAddressEvents, 1000);
-    log.info(`Destination events count stabilized: ${drained.length}`);
+    historicalDestinationEvents = await waitForEventsStabilization(destinationAddressEvents, 1000);
+    log.info(`Destination events count stabilized: ${historicalDestinationEvents.length}`);
 
     // Generating and submitting the transaction to node
     transactionResult = await toolkit.generateSingleTx(
@@ -130,7 +142,40 @@ describe('unshielded transactions', () => {
     await Promise.all([toolkit.stop(), indexerWsClient.connectionClose()]);
   });
 
-  describe('a successful unshielded transaction transferring 1 NIGHT between two wallets', async () => {
+  /**
+   * Helper function to find a progress update event with an incremented transaction ID.
+   * This is the logic used inside the retry function for both source and destination address tests.
+   *
+   * @param events - The events array to search
+   * @param baselineTransactionId - The transaction ID to compare against
+   * @param addressLabel - Label for error messages (e.g., 'source' or 'destination')
+   * @returns The found event
+   * @throws Error if no matching event is found
+   */
+  function findProgressUpdateEvent(
+    events: UnshieldedTxSubscriptionResponse[],
+    baselineTransactionId: number,
+    addressLabel: string,
+  ): UnshieldedTxSubscriptionResponse {
+    const event = events.find((event) => {
+      const txEvent = event.data?.unshieldedTransactions as UnshieldedTransactionEvent;
+
+      log.debug(`waiting for UnshieldedTransactionsProgress event`);
+      if (txEvent.__typename === 'UnshieldedTransactionsProgress') {
+        const progressUpdate = txEvent as UnshieldedTransactionsProgress;
+        log.debug(`progressUpdate received: ${JSON.stringify(progressUpdate, null, 2)}`);
+        if (progressUpdate.highestTransactionId > baselineTransactionId) {
+          return true;
+        }
+      }
+    });
+    if (!event) {
+      throw new Error(`${addressLabel} address progress update event not found yet`);
+    }
+    return event;
+  }
+
+  describe('a successful unshielded transaction transferring 1 STAR between two addresses', async () => {
     /**
      * Once an unshielded transaction has been submitted to node and confirmed, the indexer should report
      * that transaction in the block through a block query by hash, using the block hash reported by the toolkit.
@@ -141,7 +186,7 @@ describe('unshielded transactions', () => {
      */
     test('should be reported by the indexer through a block query by hash', async (context: TestContext) => {
       context.task!.meta.custom = {
-        labels: ['Query', 'Block', 'ByHash', 'UnshieldedToken'],
+        labels: ['Query', 'Block', 'ByHash', 'UnshieldedTokens'],
         testKey: 'PM-17711',
       };
 
@@ -180,7 +225,7 @@ describe('unshielded transactions', () => {
      */
     test('should be reported by the indexer through a transaction query by hash', async (context: TestContext) => {
       context.task!.meta.custom = {
-        labels: ['Query', 'Transaction', 'ByHash', 'UnshieldedToken'],
+        labels: ['Query', 'Transaction', 'ByHash', 'UnshieldedTokens'],
         testKey: 'PM-17712',
       };
 
@@ -201,16 +246,16 @@ describe('unshielded transactions', () => {
         'No transactions found',
       ).toBeGreaterThan(0);
 
-      // Find our specific transaction by hash
+      // Find our specific transaction that contains unshielded created outputs for the source address
       const sourceAddresInTx = transactionResponse.data?.transactions?.find((tx: Transaction) =>
         tx.unshieldedCreatedOutputs?.find((output: any) => output.owner === sourceAddress),
       );
+      expect(sourceAddresInTx).toBeDefined();
 
+      // Find our specific transaction that contains unshielded created outputs for the destination address
       const destAddresInTx = transactionResponse.data?.transactions?.find((tx: Transaction) =>
         tx.unshieldedCreatedOutputs?.find((output: any) => output.owner === destinationAddress),
       );
-
-      expect(sourceAddresInTx).toBeDefined();
       expect(destAddresInTx).toBeDefined();
     });
 
@@ -224,7 +269,7 @@ describe('unshielded transactions', () => {
      */
     test('should be reported by the indexer through an unshielded transaction event for the source address', async (context: TestContext) => {
       context.task!.meta.custom = {
-        labels: ['Subscription', 'Transaction', 'UnshieldedToken'],
+        labels: ['Subscription', 'Transaction', 'UnshieldedTokens'],
         testKey: 'PM-17713',
       };
 
@@ -235,21 +280,28 @@ describe('unshielded transactions', () => {
 
       // Wait for the unshielded transaction event for the source address to be reported by the indexer
       // through the unshielded transaction subscription. Note this is an async operation, so we need
-      // to try a few times and wait for the event to be reported.
-      let sourceAddressEvent: UnshieldedTxSubscriptionResponse | undefined;
-      for (let attempt = 0; attempt < 3 && sourceAddressEvent == null; attempt++) {
-        sourceAddressEvent = sourceAddressEvents.find((event) => {
-          const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
-          return (
-            txEvent.__typename === 'UnshieldedTransaction' &&
-            txEvent.createdUtxos?.some((utxo: UnshieldedUtxo) => utxo.owner === sourceAddress) &&
-            txEvent.spentUtxos?.some((utxo: UnshieldedUtxo) => utxo.owner === sourceAddress)
-          );
-        });
-        if (sourceAddressEvent == null && attempt < 2) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
-      }
+      // to retry a few times.
+      const sourceAddressEvent = await retry(
+        async () => {
+          const event = sourceAddressEvents.find((event) => {
+            const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
+            return (
+              txEvent.__typename === 'UnshieldedTransaction' &&
+              txEvent.createdUtxos?.some((utxo: UnshieldedUtxo) => utxo.owner === sourceAddress) &&
+              txEvent.spentUtxos?.some((utxo: UnshieldedUtxo) => utxo.owner === sourceAddress)
+            );
+          });
+          if (!event) {
+            throw new Error('Source address transaction event not found yet');
+          }
+          return event;
+        },
+        {
+          maxRetries: 2,
+          delayMs: 1000,
+          retryLabel: 'find source address transaction event',
+        },
+      );
       expect(sourceAddressEvent).toBeDefined();
     });
 
@@ -263,7 +315,7 @@ describe('unshielded transactions', () => {
      */
     test('should be reported by the indexer through an unshielded transaction event for the destination address', async (context: TestContext) => {
       context.task!.meta.custom = {
-        labels: ['Subscription', 'Transaction', 'UnshieldedToken'],
+        labels: ['Subscription', 'Transaction', 'UnshieldedTokens'],
         testKey: 'PM-17714',
       };
 
@@ -274,32 +326,41 @@ describe('unshielded transactions', () => {
 
       // Wait for the unshielded transaction event for the destination address to be reported by the indexer
       // through the unshielded transaction subscription. Note this is an async operation, so we need
-      // to try a few times and wait for the event to be reported.
-      let destinationAddressEvent: UnshieldedTxSubscriptionResponse | undefined;
-      for (let attempt = 0; attempt < 3 && destinationAddressEvent == null; attempt++) {
-        destinationAddressEvent = destinationAddressEvents.find((event) => {
-          const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
-          return (
-            txEvent.__typename === 'UnshieldedTransaction' &&
-            txEvent.createdUtxos?.some((utxo: UnshieldedUtxo) => utxo.owner === destinationAddress)
-          );
-        });
-        if (destinationAddressEvent == null && attempt < 2) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
-      }
+      // to retry a few times.
+      const destinationAddressEvent = await retry(
+        async () => {
+          const event = destinationAddressEvents.find((event) => {
+            const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
+            return (
+              txEvent.__typename === 'UnshieldedTransaction' &&
+              txEvent.createdUtxos?.some(
+                (utxo: UnshieldedUtxo) => utxo.owner === destinationAddress,
+              )
+            );
+          });
+          if (!event) {
+            throw new Error('Destination address transaction event not found yet');
+          }
+          return event;
+        },
+        {
+          maxRetries: 2,
+          delayMs: 1000,
+          retryLabel: 'find destination address transaction event',
+        },
+      );
       expect(destinationAddressEvent).toBeDefined();
     });
 
     /**
      * Once an unshielded transaction has been submitted to node and confirmed, we should see the transaction
-     * giving 1 NIGHT to the destination address.
+     * giving 1 STAR to the destination address.
      *
      * @given a confirmed unshielded transaction between two wallets
      * @when we inspect the containing block for unshielded outputs
-     * @then there should be two created outputs and one spent output reflecting the transfer of 1 NIGHT
+     * @then there should be two created outputs and one spent output reflecting the transfer of 1 STAR
      */
-    test('should have transferred 1 NIGHT from the source to the destination address', async (context: TestContext) => {
+    test('should have transferred 1 STAR from the source to the destination address', async (context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['UnshieldedTokens'],
         testKey: 'PM-17715',
@@ -339,6 +400,132 @@ describe('unshielded transactions', () => {
 
       const spentOutput = unshieldedTx?.unshieldedSpentOutputs?.[0];
       expect(spentOutput?.owner).toBe(sourceAddress);
+    });
+
+    /**
+     * Once an unshielded transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction through a progress update event for the source address.
+     *
+     * @given we subscribe to unshielded transaction events for the source address
+     * @when we submit an unshielded transaction to node
+     * @then we should receive a progress update event from indexer
+     * @and the progress count should be incremented by 1
+     */
+    test('should be reported by the indexer through a progress update event for the source address', async (context: TestContext) => {
+      const progressUpdatesBeforeTransaction = historicalSourceEvents.filter((event) => {
+        return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
+      });
+
+      log.debug('Progress updates before transaction:');
+      progressUpdatesBeforeTransaction!.forEach((update) => {
+        log.debug(`${JSON.stringify(update, null, 2)}`);
+      });
+
+      const highestTransactionIdBeforeTransaction = (
+        progressUpdatesBeforeTransaction![progressUpdatesBeforeTransaction!.length - 1].data
+          ?.unshieldedTransactions as UnshieldedTransactionsProgress
+      ).highestTransactionId;
+      log.info(
+        `Highest transaction ID before transaction: ${highestTransactionIdBeforeTransaction}`,
+      );
+
+      const progressUpdatesAfterTransaction = sourceAddressEvents.filter((event) => {
+        return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
+      });
+
+      log.debug('Progress updates after transaction:');
+      progressUpdatesAfterTransaction!.forEach((update) => {
+        log.debug(`${JSON.stringify(update, null, 2)}`);
+      });
+
+      // Wait for the progress update event for the source address to be reported by the indexer
+      // through the unshielded transaction subscription. Note this is an async operation, so we need
+      // to retry a few times.
+      const sourceAddressEvent = await retry(
+        async () =>
+          findProgressUpdateEvent(
+            sourceAddressEvents,
+            highestTransactionIdBeforeTransaction,
+            'source',
+          ),
+        {
+          maxRetries: 5,
+          delayMs: 2000,
+          retryLabel: 'find source address progress update event',
+        },
+      );
+
+      expect(sourceAddressEvent).toBeDefined();
+      const highestTransactionIdAfterTransaction = (
+        sourceAddressEvent.data?.unshieldedTransactions as UnshieldedTransactionsProgress
+      ).highestTransactionId;
+      log.info(`Highest transaction ID after transaction: ${highestTransactionIdAfterTransaction}`);
+      expect(highestTransactionIdAfterTransaction).toBeGreaterThan(
+        highestTransactionIdBeforeTransaction,
+      );
+    });
+
+    /**
+     * Once an unshielded transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction through a progress update event for the destination address.
+     *
+     * @given we subscribe to unshielded transaction events for the destination address
+     * @when we submit an unshielded transaction to node
+     * @then we should receive a progress update event from indexer
+     * @and the progress count should be incremented by 1
+     */
+    test('should be reported by the indexer through a progress update event for the destination address', async (context: TestContext) => {
+      const progressUpdatesBeforeTransaction = historicalDestinationEvents.filter((event) => {
+        return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
+      });
+
+      log.debug('Progress updates before transaction:');
+      progressUpdatesBeforeTransaction!.forEach((update) => {
+        log.debug(`${JSON.stringify(update, null, 2)}`);
+      });
+
+      const highestTransactionIdBeforeTransaction = (
+        progressUpdatesBeforeTransaction![progressUpdatesBeforeTransaction!.length - 1].data
+          ?.unshieldedTransactions as UnshieldedTransactionsProgress
+      ).highestTransactionId;
+      log.info(
+        `Highest transaction ID before transaction: ${highestTransactionIdBeforeTransaction}`,
+      );
+
+      const progressUpdatesAfterTransaction = destinationAddressEvents.filter((event) => {
+        return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
+      });
+
+      log.debug('Progress updates after transaction:');
+      progressUpdatesAfterTransaction!.forEach((update) => {
+        log.debug(`${JSON.stringify(update, null, 2)}`);
+      });
+
+      // Wait for the progress update event for the destination address to be reported by the indexer
+      // through the unshielded transaction subscription. Note this is an async operation, so we need
+      // to retry a few times.
+      const destinationAddressEvent = await retry(
+        async () =>
+          findProgressUpdateEvent(
+            destinationAddressEvents,
+            highestTransactionIdBeforeTransaction,
+            'destination',
+          ),
+        {
+          maxRetries: 5,
+          delayMs: 2000,
+          retryLabel: 'find destination address progress update event',
+        },
+      );
+
+      expect(destinationAddressEvent).toBeDefined();
+      const highestTransactionIdAfterTransaction = (
+        destinationAddressEvent.data?.unshieldedTransactions as UnshieldedTransactionsProgress
+      ).highestTransactionId;
+      log.info(`Highest transaction ID after transaction: ${highestTransactionIdAfterTransaction}`);
+      expect(highestTransactionIdAfterTransaction).toBeGreaterThan(
+        highestTransactionIdBeforeTransaction,
+      );
     });
   });
 });

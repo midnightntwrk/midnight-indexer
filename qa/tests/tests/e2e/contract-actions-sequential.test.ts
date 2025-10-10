@@ -74,6 +74,7 @@ describe.sequential('contract actions', () => {
       const transactionResponse = await getTransactionByHashWithRetry(deployTxHash);
 
       // Verify the transaction appears in the response
+      expect(transactionResponse).toBeSuccess();
       expect(transactionResponse?.data?.transactions).toBeDefined();
       expect(transactionResponse?.data?.transactions?.length).toBeGreaterThan(0);
 
@@ -104,6 +105,7 @@ describe.sequential('contract actions', () => {
       const blockResponse = await getBlockByHashWithRetry(deployBlockHash);
 
       // Verify the block appears in the response
+      expect(blockResponse).toBeSuccess();
       expect(blockResponse?.data?.block).toBeDefined();
       expect(blockResponse?.data?.block?.transactions).toBeDefined();
       expect(blockResponse?.data?.block?.transactions?.length).toBeGreaterThan(0);
@@ -132,7 +134,7 @@ describe.sequential('contract actions', () => {
 
       // Query the contract action by address (using the contract address for GraphQL queries)
       const contractActionResponse = await indexerHttpClient.getContractAction(
-        deployResult.addressUntagged,
+        deployResult['contract-address-untagged'],
       );
 
       // Verify the contract action appears in the response
@@ -144,7 +146,7 @@ describe.sequential('contract actions', () => {
       // Verify it has ContractDeploy-specific fields
       if (contractAction?.__typename === 'ContractDeploy') {
         expect(contractAction.address).toBeDefined();
-        expect(contractAction.address).toBe(deployResult.addressUntagged);
+        expect(contractAction.address).toBe(deployResult['contract-address-untagged']);
       }
     }, 60000);
   });
@@ -231,7 +233,7 @@ describe.sequential('contract actions', () => {
 
       // Query the contract action by address (using the contract address for GraphQL queries)
       const contractActionResponse = await indexerHttpClient.getContractAction(
-        deployResult.addressUntagged,
+        deployResult['contract-address-untagged'],
       );
 
       // Verify the contract action appears in the response
@@ -242,7 +244,7 @@ describe.sequential('contract actions', () => {
 
       if (contractAction?.__typename === 'ContractCall') {
         expect(contractAction.address).toBeDefined();
-        expect(contractAction.address).toBe(deployResult.addressUntagged);
+        expect(contractAction.address).toBe(deployResult['contract-address-untagged']);
         expect(contractAction.entryPoint).toBeDefined();
         expect(contractAction.deploy).toBeDefined();
         expect(contractAction.deploy?.address).toBeDefined();

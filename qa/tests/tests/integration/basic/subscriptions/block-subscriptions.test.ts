@@ -94,7 +94,7 @@ describe('block subscriptions', () => {
       // Here block offset is undefined, which will result in building
       // a query without blockoffset parameter. This will fetch the latest
       // block and stream the new blocks as they are produced
-      const unscribe = indexerWsClient.subscribeToBlockEvents(blockSubscriptionHandler);
+      const unsubscribe = indexerWsClient.subscribeToBlockEvents(blockSubscriptionHandler);
 
       // Blocks on MN are produced 6 secs apart. Taking into account the time indexer
       // takes to process blocks when they are produced, we should expect a similar
@@ -103,7 +103,7 @@ describe('block subscriptions', () => {
       const maxTimeBetweenBlocks = 8_000;
       await eventCoordinator.waitForAll(['twoBlocksReceived'], maxTimeBetweenBlocks);
 
-      unscribe();
+      unsubscribe();
 
       // In 6 seconds window we should have received at
       // least 1 block, maybe 2 but no more than that
@@ -156,14 +156,14 @@ describe('block subscriptions', () => {
         },
       };
 
-      const unscribe = indexerWsClient.subscribeToBlockEvents(
+      const unsubscribe = indexerWsClient.subscribeToBlockEvents(
         blockSubscriptionHandler,
         blockOffset,
       );
 
       await eventCoordinator.waitForAny(['expectedBlocksReceived', 'error']);
 
-      unscribe();
+      unsubscribe();
 
       // Even if after we received the expected number of blocks, we unsubscribe,
       // we might receive more blocks due to race conditions, so we expect at least 10
@@ -325,14 +325,14 @@ describe('block subscriptions', () => {
         },
       };
 
-      const unscribe = indexerWsClient.subscribeToBlockEvents(
+      const unsubscribe = indexerWsClient.subscribeToBlockEvents(
         blockSubscriptionHandler,
         blockOffset,
       );
 
       await eventCoordinator.waitFor('expectedBlocksReceived');
 
-      unscribe();
+      unsubscribe();
 
       // We ask for 20 blocks but due to race conditions we might receive more depending on who is faster...
       // ... the test unscribing or the indexer sending blocks
