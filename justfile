@@ -86,7 +86,7 @@ build-docker-image package profile="dev":
         -f {{package}}/Dockerfile \
         .
 
-run-chain-indexer node="ws://localhost:9944" network_id="Undeployed":
+run-chain-indexer node="ws://localhost:9944" network_id="undeployed":
     docker compose up -d --wait postgres nats
     RUST_LOG=chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,tracing::span=off,midnight_ledger=warn,info \
         CONFIG_FILE=chain-indexer/config.yaml \
@@ -94,21 +94,21 @@ run-chain-indexer node="ws://localhost:9944" network_id="Undeployed":
         APP__INFRA__NODE__URL={{node}} \
         cargo run -p chain-indexer --features {{feature}}
 
-run-wallet-indexer network_id="Undeployed":
+run-wallet-indexer network_id="undeployed":
     docker compose up -d --wait postgres nats
     RUST_LOG=wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
         CONFIG_FILE=wallet-indexer/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         cargo run -p wallet-indexer --features {{feature}}
 
-run-indexer-api network_id="Undeployed":
+run-indexer-api network_id="undeployed":
     docker compose up -d --wait postgres nats
     RUST_LOG=indexer_api=debug,indexer_common=debug,info \
         CONFIG_FILE=indexer-api/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         cargo run -p indexer-api --bin indexer-api --features {{feature}}
 
-run-indexer-standalone node="ws://localhost:9944" network_id="Undeployed":
+run-indexer-standalone node="ws://localhost:9944" network_id="undeployed":
     mkdir -p target/data
     RUST_LOG=indexer=debug,chain_indexer=debug,wallet_indexer=debug,indexer_api=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
         CONFIG_FILE=indexer-standalone/config.yaml \

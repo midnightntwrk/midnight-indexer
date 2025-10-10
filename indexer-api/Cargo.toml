@@ -35,7 +35,6 @@ log                = { workspace = true, features = [ "kv" ] }
 metrics            = { workspace = true }
 secrecy            = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
-serde_with         = { workspace = true }
 sqlx               = { workspace = true, features = [ "time" ] }
 stream-cancel      = { workspace = true }
 thiserror          = { workspace = true }

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use clap::{Parser, command};
+use clap::{Parser, command, value_parser};
 use indexer_common::domain::NetworkId;
 use indexer_tests::e2e;
 
@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
 #[command()]
 struct Cli {
     /// The network ID the Indexer is deployed to.
-    #[arg(long)]
+    #[arg(long, value_parser = value_parser!(NetworkId))]
     network_id: NetworkId,
 
     /// The Indexer API host, e.g. `localhost`.

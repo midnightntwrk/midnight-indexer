@@ -17,17 +17,19 @@ pub mod ledger;
 mod address;
 mod bytes;
 mod ledger_state_storage;
-mod network_id;
 mod protocol_version;
 mod pub_sub;
 mod viewing_key;
 
+use std::str::FromStr;
+
 pub use address::*;
 pub use bytes::*;
+use derive_more::{Deref, Display, Into};
 pub use ledger_state_storage::*;
-pub use network_id::*;
 pub use protocol_version::*;
 pub use pub_sub::*;
+use thiserror::Error;
 pub use viewing_key::*;
 
 use serde::{Deserialize, Serialize};
@@ -62,6 +64,46 @@ pub type SerializedLedgerParameters = ByteVec;
 pub type SerializedLedgerState = ByteVec;
 pub type SerializedTransaction = ByteVec;
 pub type SerializedZswapState = ByteVec;
+
+/// Network identifier.
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Deref, Into, Deserialize)]
+#[deref(forward)]
+#[serde(try_from = "String")]
+pub struct NetworkId(pub String);
+
+impl TryFrom<String> for NetworkId {
+    type Error = InvalidNetworkIdError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        if s.is_empty() {
+            Err(InvalidNetworkIdError::Empty)
+        } else {
+            Ok(Self(s))
+        }
+    }
+}
+
+impl TryFrom<&str> for NetworkId {
+    type Error = InvalidNetworkIdError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.to_owned().try_into()
+    }
+}
+
+impl FromStr for NetworkId {
+    type Err = InvalidNetworkIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.try_into()
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum InvalidNetworkIdError {
+    #[error("network ID must not be empty")]
+    Empty,
+}
 
 /// The outcome of applying a regular transaction to the ledger state along with extracted data.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
