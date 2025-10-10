@@ -142,7 +142,7 @@ export class IndexerWsClient {
   private ws: WebSocket;
 
   /** The endpoint where to send graphql subscriptions */
-  private readonly graphqlAPIEndpoint: string = '/api/v1/graphql/ws';
+  private readonly graphqlAPIEndpoint: string = '/api/v3/graphql/ws';
 
   /** Counter to generate unique operation IDs */
   private nextId = 0;
