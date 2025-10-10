@@ -17,6 +17,7 @@ const INDEXER_BASE_URL: Record<string, string> = {
   undeployed: "localhost:8088",
   nodedev01: "indexer.node-dev-01.dev.midnight.network",
   devnet: "indexer.devnet.midnight.network",
+  preview: "indexer.preview.midnight.network",
   qanet: "indexer.qanet.dev.midnight.network",
   testnet02: "indexer.testnet-02.midnight.network",
 };
@@ -35,8 +36,8 @@ if (Bun.env.TARGET_ENV === undefined || Bun.env.TARGET_ENV === "") {
 
 export const INDEXER_WS_URL: string =
   TARGET_ENV === "undeployed"
-    ? "ws://localhost:8088/api/v1/graphql/ws"
-    : `wss://${INDEXER_BASE_URL[TARGET_ENV]}/api/v1/graphql/ws`;
+    ? "ws://localhost:8088/api/v3/graphql/ws"
+    : `wss://${INDEXER_BASE_URL[TARGET_ENV]}/api/v3/graphql/ws`;
 
 export const INDEXER_HTTP_URL: string =
   TARGET_ENV === "undeployed"
