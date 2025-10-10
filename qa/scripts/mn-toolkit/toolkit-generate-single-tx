@@ -2,94 +2,60 @@
 
 set -e
 
-bash scripts/toolkit-start $1 $3
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Check if the script is executed from the root directory
-if [ ! -f "justfile" ]; then
-    echo "Error: This script must be executed from the root directory of the project"
-    exit 1
-fi
+# Source common functions
+source "$SCRIPT_DIR/toolkit-common.sh"
 
-CHAIN=$1
-if [ -z "$CHAIN" ]; then
-    echo "Please provide a chain id"
-    echo "Usage: $0 <chain_id> <seed>"
-    exit 1
-fi
-if [ "$CHAIN" != "undeployed" ] && [ "$CHAIN" != "devnet" ] && [ "$CHAIN" != "testnet02" ] && [ "$CHAIN" != "nodedev01" ]; then
-    echo "Please provide a valid chain id (undeployed, devnet, testnet02, nodedev01)"
-    echo "Usage: $0 <chain_id> <seed>"
-    exit 1
-fi
 
-NETWORK_ID=""
+# Auto-detect the environment from the running toolkit
+ENVIRONMENT=$(get_toolkit_environment) || exit 1
 
-#Switch case for the chain id
-case $CHAIN in
-    "undeployed")
-        CHAIN_URL="ws://localhost:9944"
-        NETWORK_ID="undeployed"
-        ;;
-    "devnet")
-        CHAIN_URL="wss://rpc.devnet.midnight.network"
-        NETWORK_ID="devnet"
-        ;;
-    "testnet02")
-        CHAIN_URL="wss://rpc.testnet02.midnight.network"
-        NETWORK_ID="testnet"
-        ;;
-    "qanet")
-        CHAIN_URL="wss://rpc.qanet.dev.midnight.network"
-        NETWORK_ID="devnet"
-        ;;
-    "nodedev01")
-        CHAIN_URL="wss://rpc.node-dev-01.dev.midnight.network"
-        NETWORK_ID="devnet"
-        ;;
-esac
+# Validate environment using shared function
+validate_environment "$ENVIRONMENT" || exit 1
 
-SEED=$2
+# Get network configuration using the detected environment
+get_network_config "$ENVIRONMENT" || exit 1
+# Use CHAIN_URL for backward compatibility (same as NODE_URL)
+CHAIN_URL=$NODE_URL
+
+SEED=$1
 if [ -z "$SEED" ]; then
     echo "Please provide a seed"
-    echo "Usage: $0 <chain_id> <seed>"
+    echo "Usage: $0 <seed>"
+    echo ""
+    echo "Note: This script assumes a toolkit container is already running."
+    echo "      Use 'toolkit-start <environment> [node_tag]' to start one first."
     exit 1
-fi
-
-# NODE_TAG is optional - if not provided, use default
-NODE_TAG=$3
-if [ -z "$NODE_TAG" ]; then
-    # This is not ideal, NODE_TAG to use depends on the specific chain where node might be running
-    # with another version
-    echo "NODE_TAG not specified, deriving it from justfile"
-    NODE_TAG=`cat justfile |grep "node_version :="|awk -F " " '{print $3}'|sed s/\"//g` 
-    
-    # Validate NODE_TAG format: <number>.<number>.<number><optional -alpha, -beta, -rc and number>
-    if [[ ! "$NODE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]*)?$ ]]; then
-        echo "Warning: NODE_TAG from justfile ($NODE_TAG) doesn't match expected format"
-        echo "Expected format: <number>.<number>.<number> or <number>.<number>.<number>-<alpha|beta|rc>[<number>]"
-        echo "Using fallback NODE_TAG"
-        NODE_TAG="0.13.2-rc.2"
-    fi
-    
-    echo "NODE_TAG derived from justfile: $NODE_TAG"
 fi
 
 echo "Generating Destination Addresses off the wallet seed"
 echo ""
 DEST_WALLET_SEED="0000000000000000000000000000000000000000000000000000000987654321"
-DEST_SHIELDED_ADDR=$(bash scripts/toolkit-show-address $CHAIN shielded $DEST_WALLET_SEED | tr -d '\r\n')
+ADDRESSES_JSON=$(bash toolkit-show-address $DEST_WALLET_SEED)
+DEST_SHIELDED_ADDR=$(echo "$ADDRESSES_JSON" | jq -r '.shielded')
 echo "DEST_SHIELDED_ADDR: $DEST_SHIELDED_ADDR"
-DEST_UNSHIELDED_ADDR=$(bash scripts/toolkit-show-address $CHAIN unshielded $DEST_WALLET_SEED | tr -d '\r\n')
+DEST_UNSHIELDED_ADDR=$(echo "$ADDRESSES_JSON" | jq -r '.unshielded')
 echo "DEST_UNSHIELDED_ADDR: $DEST_UNSHIELDED_ADDR"
 
 
-docker exec -it toolkit-${CHAIN} \
+# Use -it only if running in a TTY, otherwise just -i
+if [ -t 0 ]; then
+    DOCKER_FLAGS="-it"
+else
+    DOCKER_FLAGS="-i"
+fi
+
+# Debug: print the full docker command
+echo "Running: docker exec $DOCKER_FLAGS toolkit-${ENVIRONMENT} /midnight-node-toolkit generate-txs --src-url $CHAIN_URL --dest-url $CHAIN_URL single-tx --source-seed \"$SEED\" --unshielded-amount 2 --destination-address \"$DEST_UNSHIELDED_ADDR\""
+echo ""
+
+docker exec $DOCKER_FLAGS toolkit-${ENVIRONMENT} \
     /midnight-node-toolkit generate-txs \
     --src-url $CHAIN_URL \
     --dest-url $CHAIN_URL  \
     single-tx \
     --source-seed "$SEED" \
-    --shielded-amount 1 \
     --unshielded-amount 2 \
-    --destination-address "$DEST_SHIELDED_ADDR" \
     --destination-address "$DEST_UNSHIELDED_ADDR"

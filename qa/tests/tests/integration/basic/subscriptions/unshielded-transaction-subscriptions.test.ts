@@ -81,7 +81,7 @@ async function subscribeToUnshieldedTransactionEvents(
       },
     };
 
-  const unscribe = indexerWsClient.subscribeToUnshieldedTransactionEvents(
+  const unsubscribe = indexerWsClient.subscribeToUnshieldedTransactionEvents(
     unshieldedTransactionSubscriptionHandler,
     subscriptionParams,
   );
@@ -91,7 +91,7 @@ async function subscribeToUnshieldedTransactionEvents(
   // is received before unscribing from transaction events
   await Promise.race([stopConditionPromise, timeoutPromise, completePromise]);
 
-  unscribe();
+  unsubscribe();
 
   return receivedUnshieldedTransactions;
 }
@@ -179,7 +179,7 @@ describe('unshielded transaction subscriptions', async () => {
         if (transactionEvent.__typename === 'UnshieldedTransaction') {
           highestFoundTransactionId = Math.max(
             highestFoundTransactionId,
-            transactionEvent.transaction.id,
+            transactionEvent.transaction.id!,
           );
         } else if (transactionEvent.__typename === 'UnshieldedTransactionsProgress') {
           highestTransactionId = transactionEvent.highestTransactionId;
@@ -340,9 +340,9 @@ describe('unshielded transaction subscriptions', async () => {
     test('should return a stream of transactions containing that address, starting from transaction id = 0', async ({
       task,
     }: TestContext) => {
-      task!.meta.custom = {
-        labels: ['UnshieldedTokens', 'Subscription', 'Transaction'],
-      };
+      // task!.meta.custom = {
+      //   labels: ['UnshieldedTokens', 'Subscription', 'Transaction'],
+      // };
 
       const targetTransactionId = 0;
       const targetAddress = dataProvider.getUnshieldedAddress('existing');
@@ -374,7 +374,7 @@ describe('unshielded transaction subscriptions', async () => {
           // otherwise the indexer shouldn't have sent this message
           expect(foundAddressInCreatedUtxos || foundAddressInSpentUtxos).toBe(true);
 
-          foundTransactionIds.push(transactionEvent.transaction.id);
+          foundTransactionIds.push(transactionEvent.transaction.id!);
         } else if (transactionEvent.__typename === 'UnshieldedTransactionsProgress') {
           highestTransactionId = transactionEvent.highestTransactionId;
         }
@@ -489,7 +489,7 @@ describe('unshielded transaction subscriptions', async () => {
           highestTransactionId = transactionProgressEvent.highestTransactionId;
         } else if (transactionEvent.__typename === 'UnshieldedTransaction') {
           const unshieldedTransaction = transactionEvent as UnshieldedTransaction;
-          foundTransactionIds.push(unshieldedTransaction.transaction.id);
+          foundTransactionIds.push(unshieldedTransaction.transaction.id!);
         }
       });
 
