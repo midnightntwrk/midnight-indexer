@@ -147,6 +147,7 @@ interface TransactionDataFile {
 interface ContractActionEntry {
   "action-type": string;
   "block-height": number;
+  "block-hash": string;
 }
 
 /**
@@ -639,6 +640,7 @@ function updateContracDataFile(
             contractActionsMap[address].push({
               "action-type": actionType,
               "block-height": block.height,
+              "block-hash": block.hash,
             });
           }
         }

@@ -143,7 +143,7 @@ describe('contract action subscriptions', () => {
 
       // We get a known block hash from before the latest action
       // This should be a block hash that contains historical contract actions
-      const historicalBlockHash = dataProvider.getContractDeployBlockHash();
+      const historicalBlockHash = await dataProvider.getContractDeployBlockHash();
 
       // We collect all received contract actions
       const receivedContractActions: ContractActionSubscriptionResponse[] = [];
