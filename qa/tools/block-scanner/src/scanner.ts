@@ -422,6 +422,7 @@ async function main(): Promise<boolean> {
   }
 
   const receivedBlocks: Block[] = [];
+  let blocksWithTransactions = 0;
   let transactionsFound = 0;
   let contractActionsFound = 0;
 
@@ -434,7 +435,8 @@ async function main(): Promise<boolean> {
       if (payload.data !== undefined) {
         receivedBlocks.push(payload.data.blocks);
         if (payload.data?.blocks.transactions.length > 0) {
-          transactionsFound++;
+          transactionsFound += payload.data?.blocks.transactions.length;
+          blocksWithTransactions++;
 
           // Write the block to file as a json line
           blocksFile.write(JSON.stringify(payload.data.blocks) + "\n");
@@ -525,10 +527,11 @@ async function main(): Promise<boolean> {
 
   console.info("[INFO ] - Block fetching completed!");
   console.info(`[INFO ] - Summary report:
-    - Total blocks scanned  : ${receivedBlocks.length}
-    - Transactions found    : ${transactionsFound}
-    - Contract actions found: ${contractActionsFound}
-    - Scan duration        : ${scanDuration} seconds`);
+    - Total blocks scanned   : ${receivedBlocks.length}
+    - Blocks with txs        : ${blocksWithTransactions}
+    - Total txs found        : ${transactionsFound}
+    - Contract actions found : ${contractActionsFound}
+    - Scan duration          : ${scanDuration} seconds`);
 
   // Update test data files if folder path was provided
   if (testDataFolder) {
