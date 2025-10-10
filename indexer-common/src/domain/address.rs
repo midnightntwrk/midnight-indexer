@@ -99,11 +99,15 @@ mod tests {
         let encoded = encode_address(
             &address,
             AddressType::SecretEncryptionKey,
-            &"undeployed".into(),
+            &"undeployed".try_into().unwrap(),
         );
         assert!(encoded.starts_with("mn_shield-esk_undeployed1"));
 
-        let encoded = encode_address(&address, AddressType::Unshielded, &"mainnet".into());
+        let encoded = encode_address(
+            &address,
+            AddressType::Unshielded,
+            &"mainnet".try_into().unwrap(),
+        );
         assert!(encoded.starts_with("mn_addr1"));
     }
 
@@ -113,18 +117,26 @@ mod tests {
         let encoded = encode_address(
             &address,
             AddressType::SecretEncryptionKey,
-            &"undeployed".into(),
+            &"undeployed".try_into().unwrap(),
         );
         let decoded = decode_address(
             encoded,
             AddressType::SecretEncryptionKey,
-            &"undeployed".into(),
+            &"undeployed".try_into().unwrap(),
         );
         assert_matches!(decoded, Ok(a) if a == address);
 
         let address = ByteVec::from(vec![0, 1, 2, 3]);
-        let encoded = encode_address(&address, AddressType::Unshielded, &"mainnet".into());
-        let decoded = decode_address(encoded, AddressType::Unshielded, &"mainnet".into());
+        let encoded = encode_address(
+            &address,
+            AddressType::Unshielded,
+            &"mainnet".try_into().unwrap(),
+        );
+        let decoded = decode_address(
+            encoded,
+            AddressType::Unshielded,
+            &"mainnet".try_into().unwrap(),
+        );
         assert_matches!(decoded, Ok(a) if a == address);
     }
 }

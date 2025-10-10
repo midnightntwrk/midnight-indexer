@@ -33,8 +33,8 @@ impl ViewingKey {
     ///
     /// Format expectations:
     /// - For mainnet: "mn_shield-esk" + bech32m data
-    /// - For other networks: "mn_shield-esk_" + network-id + bech32m data where network-id is one
-    ///   of: "dev", "test", "undeployed"
+    /// - For other networks: "mn_shield-esk_" + network-id + bech32m data where network-id can be
+    ///   any non-empty alphanumeric string (e.g., "undeployed", "preview", "qanet", "preprod")
     #[trace(properties = {
         "network_id": "{network_id}",
         "protocol_version": "{protocol_version}"
@@ -71,8 +71,10 @@ mod tests {
         let viewing_key = ViewingKey::from(
             "mn_shield-esk_undeployed1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs9ete5h",
         );
-        let domain_viewing_key =
-            viewing_key.try_into_domain(&"undeployed".into(), PROTOCOL_VERSION_000_017_000);
+        let domain_viewing_key = viewing_key.try_into_domain(
+            &"undeployed".try_into().unwrap(),
+            PROTOCOL_VERSION_000_017_000,
+        );
         println!("{domain_viewing_key:?}");
         assert!(domain_viewing_key.is_ok());
     }

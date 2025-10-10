@@ -156,10 +156,9 @@ pub enum UnshieldedOffset {
 
 /// Bech32m-encoded unshielded address.
 ///
-/// Examples:
-/// - Main-Net: `mn_addr` + bech32m data
-/// - TestNet: `mn_addr_test` + bech32m data
-/// - undeployed: `mn_addr_undeployed` + bech32m data
+/// The format depends on the network ID:
+/// - Mainnet: `mn_addr` + bech32m data (no network ID suffix)
+/// - Other networks: `mn_addr_` + network-id + bech32m data
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, Serialize, Deserialize)]
 pub struct UnshieldedAddress(pub String);
 
@@ -168,11 +167,6 @@ scalar!(UnshieldedAddress);
 impl UnshieldedAddress {
     /// Converts this API address into a domain address, validating the bech32m format and
     /// network ID.
-    ///
-    /// Format expectations:
-    /// - For mainnet: "mn_addr" + bech32m data
-    /// - For other networks: "mn_addr_" + network-id + bech32m data where network-id is one of:
-    ///   "dev", "test", "undeployed"
     pub fn try_into_domain(
         &self,
         network_id: &NetworkId,
