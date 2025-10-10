@@ -14,11 +14,11 @@
 // limitations under the License.
 
 import fs from 'fs';
+import path from 'path';
 import log from '@utils/logging/logger';
-import { env, networkIdByEnvName } from '../../environment/model';
+import { retry } from '../retry-helper';
+import { env } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
-import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
 
 export type AddressType = 'shielded' | 'unshielded';
 
@@ -83,7 +83,6 @@ class ToolkitWrapper {
   private container: GenericContainer;
   private startedContainer?: StartedTestContainer;
   private config: ToolkitConfig;
-  public readonly runtime!: { toolkitImage: string; nodeContainer: string; network: string };
 
   private parseTransactionOutput(output: string): ToolkitTransactionResult {
     const lines = output.trim().split('\n');
@@ -145,8 +144,6 @@ class ToolkitWrapper {
 
     const network = (config.network ?? process.env.TARGET_ENV ?? 'undeployed').toLowerCase();
 
-    this.runtime = { toolkitImage, nodeContainer, network };
-
     log.debug(`Toolkit container name: ${this.config.containerName}`);
     log.debug(`Toolkit target dir: ${this.config.targetDir}`);
     log.debug(`Toolkit node tag: ${this.config.nodeTag}`);
@@ -172,8 +169,11 @@ class ToolkitWrapper {
   }
 
   async start() {
-    const image = this.runtime.toolkitImage;
-    this.startedContainer = await this.container.start();
+    this.startedContainer = await retry(async () => this.container.start(), {
+      maxRetries: 2,
+      delayMs: 2000,
+      retryLabel: 'start toolkit container',
+    });
   }
 
   async stop() {
@@ -186,9 +186,10 @@ class ToolkitWrapper {
    * Show address information from a seed
    *
    * @param seed - The seed to use
+   * @param networkId - The network ID to use (default: current target environment)
    * @returns The address information as a JSON object
    */
-  async showAddress(seed: string): Promise<AddressInfo> {
+  async showAddress(seed: string, networkId?: string): Promise<AddressInfo> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
@@ -197,7 +198,7 @@ class ToolkitWrapper {
       '/midnight-node-toolkit',
       'show-address',
       '--network',
-      env.getEnvName().toLowerCase(),
+      networkId ?? env.getEnvName().toLowerCase(),
       '--seed',
       seed,
     ]);
@@ -213,7 +214,14 @@ class ToolkitWrapper {
     return JSON.parse(response.output);
   }
 
-  async showViewingKey(seed: string): Promise<string> {
+  /**
+   * Show viewing key information from a seed
+   *
+   * @param seed - The seed to use
+   * @param networkId - The network ID to use (default: current target environment)
+   * @returns The viewing key as a string
+   */
+  async showViewingKey(seed: string, networkId?: string): Promise<string> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
@@ -222,7 +230,7 @@ class ToolkitWrapper {
       '/midnight-node-toolkit',
       'show-viewing-key',
       '--network',
-      env.getEnvName().toLowerCase(),
+      networkId ?? env.getEnvName().toLowerCase(),
       '--seed',
       seed,
     ]);
@@ -235,6 +243,15 @@ class ToolkitWrapper {
     return result.output.trim();
   }
 
+  /**
+   * Generate a single transaction
+   *
+   * @param sourceSeed - The source seed to use
+   * @param addressType - The address type to use
+   * @param destinationAddress - The destination address to use
+   * @param amount - The amount to use
+   * @returns The transaction result
+   */
   async generateSingleTx(
     sourceSeed: string,
     addressType: AddressType,
@@ -248,6 +265,10 @@ class ToolkitWrapper {
     const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'generate-txs',
+      '--src-url',
+      env.getNodeWebsocketBaseURL(),
+      '--dest-url',
+      env.getNodeWebsocketBaseURL(),
       'single-tx',
       '--source-seed',
       sourceSeed,
@@ -282,20 +303,20 @@ class ToolkitWrapper {
       opts?.contractConfigPath ?? '/toolkit-js/test/contract/contract.config.ts';
     const compiledContractDir =
       opts?.compiledContractDir ?? '/toolkit-js/test/contract/managed/counter';
-    const network = (opts?.network ?? this.runtime.network).toLowerCase();
 
-    const deployIntent = 'deploy.bin';
+    const zswapFile = 'temp.json';
     const deployTx = 'deploy_tx.mn';
-    const addressFile = 'contract_address.mn';
+    const deployIntent = 'deploy.bin';
     const stateFile = 'contract_state.mn';
+    const addressFile = 'contract_address.mn';
     const initialPrivateState = 'initial_state.json';
 
-    const outDeployIntent = join(outDir, deployIntent);
-    const outDeployTx = join(outDir, deployTx);
-    const outAddressFile = join(outDir, addressFile);
-    const outStateFile = join(outDir, stateFile);
-    const outInitialState = join(outDir, initialPrivateState);
-    const zswapFile = 'temp.json';
+    const outDeployIntent = path.join(outDir, deployIntent);
+    const outDeployTx = path.join(outDir, deployTx);
+    const outAddressFile = path.join(outDir, addressFile);
+    const outStateFile = path.join(outDir, stateFile);
+    const outInitialState = path.join(outDir, initialPrivateState);
+
     const coinPublicSeed = '00000000000000000000000000000001';
     const addressInfo = await this.showAddress(coinPublicSeed);
     const coinPublic = addressInfo.coinPublic;
@@ -322,7 +343,7 @@ class ToolkitWrapper {
         const e = result.stderr || result.output || 'Unknown error';
         throw new Error(`generate-intent deploy failed: ${e}`);
       }
-      if (!existsSync(outDeployIntent) || !existsSync(outInitialState)) {
+      if (!fs.existsSync(outDeployIntent) || !fs.existsSync(outInitialState)) {
         throw new Error('generate-intent deploy did not produce expected outputs');
       }
     }
@@ -344,7 +365,7 @@ class ToolkitWrapper {
         const e = result.stderr || result.output || 'Unknown error';
         throw new Error(`send-intent failed: ${e}`);
       }
-      if (!existsSync(outDeployTx)) {
+      if (!fs.existsSync(outDeployTx)) {
         throw new Error(`send-intent did not produce /out/${deployTx}`);
       }
     }
@@ -408,11 +429,11 @@ class ToolkitWrapper {
     // share with later steps
     addressRaw = contractAddressInfo.tagged;
 
-    if (!existsSync(outAddressFile)) {
+    if (!fs.existsSync(outAddressFile)) {
       throw new Error('contract-address did not produce /out/contract_address.mn');
     }
 
-    const raw = readFileSync(outAddressFile, 'utf8').trim();
+    const raw = fs.readFileSync(outAddressFile, 'utf8').trim();
     const hex = contractAddressInfo.untagged;
 
     // 5) quick state read — pass the address exactly as written by the toolkit
@@ -429,7 +450,7 @@ class ToolkitWrapper {
         const e = result.stderr || result.output || 'Unknown error';
         throw new Error(`contract-state failed: ${e}`);
       }
-      if (!existsSync(outStateFile)) {
+      if (!fs.existsSync(outStateFile)) {
         throw new Error('contract-state did not produce /out/contract_state.mn');
       }
     }

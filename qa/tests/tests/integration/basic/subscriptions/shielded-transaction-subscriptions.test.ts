@@ -14,6 +14,7 @@
 // limitations under the License.
 
 import log from '@utils/logging/logger';
+import { networkIdByEnvName, LedgerNetworkId, env } from 'environment/model';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from 'utils/testdata-provider';
 import {
@@ -24,6 +25,7 @@ import {
 } from '@utils/indexer/websocket-client';
 import { generateSyntheticViewingKey } from '@utils/bech32-codec';
 import { TestContext } from 'vitest';
+import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 
 describe('shielded transaction subscriptions', () => {
   let indexerWsClient: IndexerWsClient;
@@ -100,19 +102,46 @@ describe('shielded transaction subscriptions', () => {
      * @then Indexer should return an error
      */
     test('should return an error, given a valid viewing key meant for a different network', async (context: TestContext) => {
-      context.skip?.(true, 'This test requires the Midnight toolkit to be part of the indexer');
+      //context.skip?.(true, 'This test requires the Midnight toolkit to be part of the indexer');
 
-      const viewingKeys = {
-        undeployed: dataProvider.getViewingKey(),
-      };
-      const generatedViewingKey = viewingKeys['undeployed'];
-      log.debug(`generatedViewingKey = ${generatedViewingKey}`);
+      const basicSeed = '0000000000000000000000000000000000000000000000000000000000000001';
+      const toolkit = new ToolkitWrapper({});
 
-      // Expect the promise to reject with an error
-      for (const network of Object.keys(viewingKeys)) {
-        const viewingKey = viewingKeys[network as keyof typeof viewingKeys];
-        log.debug(`viewingKey = ${viewingKey}`);
-        await expect.soft(indexerWsClient.openWalletSession(viewingKey)).rejects.toThrow();
+      try {
+        await toolkit.start();
+
+        // Get all the ledger network ids
+        const networkIds = Object.values(LedgerNetworkId);
+        for (const networkId of networkIds) {
+          log.debug(`networkId = ${networkId}`);
+          const viewingKey = await toolkit.showViewingKey(basicSeed, networkId);
+          log.debug(`viewingKey = ${viewingKey}`);
+          if (networkId === env.getNetworkId().toLowerCase()) {
+            continue;
+          }
+          await expect.soft(indexerWsClient.openWalletSession(viewingKey)).rejects.toThrow();
+        }
+
+        // const viewingKeys = {
+        //   undeployed: await toolkit.showViewingKey(basicSeed, 'undeployed'),
+        //   devnet: await toolkit.showViewingKey(basicSeed, 'devnet'),
+        //   testnet: await toolkit.showViewingKey(basicSeed, 'testnet'),
+        //   testnet02: await toolkit.showViewingKey(basicSeed, 'testnet'),
+        //   qanet: await toolkit.showViewingKey(basicSeed, 'devnet'),
+        //   preview: await toolkit.showViewingKey(basicSeed, 'preview'),
+        //   nodedev01: await toolkit.showViewingKey(basicSeed, 'nodedev01'),
+        // };
+        // const generatedViewingKey = viewingKeys['undeployed'];
+        // log.debug(`generatedViewingKey = ${generatedViewingKey}`);
+
+        // // Expect the promise to reject with an error
+        // for (const network of Object.keys(viewingKeys)) {
+        //   const viewingKey = viewingKeys[network as keyof typeof viewingKeys];
+        //   log.debug(`viewingKey = ${viewingKey}`);
+        //   await expect.soft(indexerWsClient.openWalletSession(viewingKey)).rejects.toThrow();
+        // }
+      } finally {
+        await toolkit.stop();
       }
     });
   });
