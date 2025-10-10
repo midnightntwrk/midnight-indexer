@@ -9,6 +9,7 @@
     "generate:data": "bun run src/scanner.ts ../../tests/data/static/"
   },
   "dependencies": {
+    "comment-json": "^4.4.1",
     "graphql-ws": "^6.0.5",
     "ws": "^8.18.2"
   },
