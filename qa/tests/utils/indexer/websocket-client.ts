@@ -16,6 +16,7 @@
 import { env } from 'environment/model';
 import { GraphQLError } from 'graphql';
 import log from '@utils/logging/logger';
+import { retry } from '@utils/retry-helper';
 import type {
   Block,
   BlockOffset,
@@ -163,20 +164,22 @@ export class IndexerWsClient {
    * Initialises the websocket connection with a connection_init message
    */
   async connectionInit(payload?: Record<string, unknown>): Promise<void> {
-    // Let's wait 2 secs for the connection to be established first, before sending
-    // the connection init
-    const timeoutMs = 2000;
-    log.debug(`Ready state = ${IndexerWsClient.getStateName(this.ws.readyState)}`);
-    if (this.ws.readyState !== WebSocket.OPEN) {
-      const maxTime = Date.now() + timeoutMs;
-      while (this.ws.readyState !== WebSocket.OPEN) {
-        if (Date.now() > maxTime) {
-          throw new Error('WebSocket connection timeout');
+    // Wait up to 2 seconds for the connection to be established before sending
+    // the connection init (retry every 50ms, up to 40 attempts total = 2000ms)
+    const state = IndexerWsClient.getStateName(this.ws.readyState);
+    log.debug(`Current websocket state: ${state}`);
+    await retry(
+      async () => {
+        if (this.ws.readyState !== WebSocket.OPEN) {
+          throw new Error(`WebSocket still in state: ${state}`);
         }
-        await new Promise((res) => setTimeout(res, 50));
-        log.debug(`Ready state = ${IndexerWsClient.getStateName(this.ws.readyState)}`);
-      }
-    }
+      },
+      {
+        maxRetries: 20, // 20 total attempts × 100ms = 2000ms timeout
+        delayMs: 100,
+        retryLabel: 'websocket connection ready check',
+      },
+    );
 
     const init: GraphQLConnectionInitMessage = {
       type: 'connection_init',
@@ -187,7 +190,7 @@ export class IndexerWsClient {
       const timeout = setTimeout(() => {
         this.ws.removeEventListener('message', onMessage);
         reject(new Error('Timed out waiting for connection_ack'));
-      }, timeoutMs);
+      }, 2000);
 
       const onMessage = (event: MessageEvent) => {
         const message = JSON.parse(event.data);
@@ -219,11 +222,12 @@ export class IndexerWsClient {
       this.ws.close(); // initiate close
     });
 
-    const timeout = new Promise<void>((_, reject) =>
+    const timeoutPromise = new Promise<void>((_, reject) =>
       setTimeout(() => reject(new Error('WebSocket did not close within 2 seconds.')), 2000),
     );
 
-    await Promise.race([closePromise, timeout]);
+    // Either the connection gets closed or we timeout
+    await Promise.race([closePromise, timeoutPromise]);
   }
 
   /** Generates a new unique operation ID */
