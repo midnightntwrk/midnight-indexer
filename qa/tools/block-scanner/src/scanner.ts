@@ -358,6 +358,7 @@ async function main(): Promise<boolean> {
     console.error("[ERROR] - Failed to connect to indexer:", error);
     return false;
   }
+  console.info(`[INFO ] - Indexer is ready!`);
 
   console.info(
     `[INFO ] - Connecting to indexer on ${TARGET_ENV} through websocket channel ${INDEXER_WS_URL}`,
