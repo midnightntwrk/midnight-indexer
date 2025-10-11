@@ -25,6 +25,8 @@ const CONFIG = {
   TIMEOUT_MS: 600_000,
   QUERY_TIMEOUT_MS: 10_000,
   CONNECTION_TIMEOUT_MS: 2_000,
+  CONNECTION_MAX_RETRIES: 4,
+  CONNECTION_RETRY_BASE_DELAY_MS: 2_000,
   WS_PROTOCOL: "graphql-transport-ws",
   SPINNER_UPDATE_INTERVAL_MS: 100,
   PROGRESS_UPDATE_INTERVAL: 100,
@@ -219,7 +221,7 @@ function decodeReadyState(readyState: number): string {
 async function connectionInit(ws: WebSocket) {
   const timeoutMs = CONFIG.CONNECTION_TIMEOUT_MS;
   console.debug(
-    `[DEBUG] - We are ${decodeReadyState(ws.readyState)} with the indexer`,
+    `[DEBUG] - Websocket connection status: ${decodeReadyState(ws.readyState)}`,
   );
 
   const maxTime = Date.now() + timeoutMs;
@@ -227,10 +229,14 @@ async function connectionInit(ws: WebSocket) {
     if (Date.now() > maxTime) {
       throw new Error("WebSocket connection timeout");
     }
-    await new Promise((res) => setTimeout(res, 50));
+    await new Promise((res) => setTimeout(res, 200));
     console.debug(
-      `[DEBUG] - We are ${decodeReadyState(ws.readyState)} with the indexer`,
+      `[DEBUG] - Web socket connection status: ${decodeReadyState(ws.readyState)}`,
     );
+
+    if (ws.readyState === WebSocket.CLOSED) {
+      throw new Error("Indexer websocket connection closed unexpectedly");
+    }
   }
 
   const response: Promise<{ type: string }> = new Promise((resolve, reject) => {
@@ -259,6 +265,38 @@ async function connectionInit(ws: WebSocket) {
   if ((await response).type !== "connection_ack") {
     throw new Error("connection_ack message wasn't received");
   }
+}
+
+async function connectionInitWithRetry(): Promise<WebSocket> {
+  let lastError: Error | undefined;
+  const maxRetries: number = CONFIG.CONNECTION_MAX_RETRIES;
+  const baseDelayMs: number = CONFIG.CONNECTION_RETRY_BASE_DELAY_MS;
+
+  let ws: WebSocket;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.info(`[INFO ] - Connection attempt ${attempt}/${maxRetries}`);
+      ws = new WebSocket(INDEXER_WS_URL, CONFIG.WS_PROTOCOL);
+      await connectionInit(ws);
+      console.info(`[INFO ] - Successfully connected on attempt ${attempt}`);
+      return ws; // Success!
+    } catch (error) {
+      lastError = error as Error;
+      console.warn(
+        `[WARN ] - Connection attempt ${attempt}/${maxRetries} failed: ${lastError.message}`,
+      );
+
+      if (attempt < maxRetries) {
+        const delayMs = baseDelayMs * Math.pow(2, attempt - 1); // Exponential backoff
+        console.info(`[INFO ] - Retrying in ${delayMs}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  throw new Error(
+    `Failed to initialize connection after ${maxRetries} attempts. Last error: ${lastError?.message}`,
+  );
 }
 
 function generateCustomId(): string {
@@ -378,9 +416,10 @@ async function main(): Promise<boolean> {
   console.info(
     `[INFO ] - Connecting to indexer on ${TARGET_ENV} through websocket channel ${INDEXER_WS_URL}`,
   );
-  const indexerWs = new WebSocket(INDEXER_WS_URL, CONFIG.WS_PROTOCOL);
+
+  // Initialize the websocket connection with retry
+  const indexerWs = await connectionInitWithRetry();
   indexerWs.onmessage = handleMessage.bind(indexerWs);
-  await connectionInit(indexerWs);
 
   // One-shot query to get the latest block height at start time
   async function getLatestBlockHeight(
