@@ -198,7 +198,7 @@ class ToolkitWrapper {
       '/midnight-node-toolkit',
       'show-address',
       '--network',
-      networkId ?? env.getEnvName().toLowerCase(),
+      networkId ?? env.getNetworkId().toLowerCase(),
       '--seed',
       seed,
     ]);
@@ -230,7 +230,7 @@ class ToolkitWrapper {
       '/midnight-node-toolkit',
       'show-viewing-key',
       '--network',
-      networkId ?? env.getEnvName().toLowerCase(),
+      networkId ?? env.getNetworkId().toLowerCase(),
       '--seed',
       seed,
     ]);
