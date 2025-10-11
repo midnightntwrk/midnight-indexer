@@ -43,7 +43,7 @@ describe('shielded transactions', () => {
     sourceAddress = (await toolkit.showAddress(sourceSeed)).shielded;
     destinationAddress = (await toolkit.showAddress(destinationSeed)).shielded;
 
-    // Submit one shielded->shielded transfer (1 NIGHT)
+    // Submit one shielded->shielded transfer (1 STAR)
     transactionResult = await toolkit.generateSingleTx(
       sourceSeed,
       'shielded',

@@ -48,9 +48,6 @@ interface ToolkitConfig {
   chain?: string;
   nodeTag?: string;
   syncCacheDir?: string;
-  toolkitImage?: string;
-  nodeContainer?: string;
-  network?: string;
   coinSeed?: string;
 }
 
@@ -134,20 +131,10 @@ class ToolkitWrapper {
     this.config.nodeTag = config.nodeTag || env.getNodeVersion();
     this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${env.getEnvName()}-${randomId}`;
 
-    const toolkitImage =
-      config.toolkitImage ??
-      process.env.TOOLKIT_IMAGE ??
-      `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${process.env.NODE_TAG ?? '0.17.0-rc.2'}`;
-
-    const nodeContainer =
-      config.nodeContainer ?? process.env.NODE_CONTAINER ?? 'midnight-indexer-node-1';
-
-    const network = (config.network ?? process.env.TARGET_ENV ?? 'undeployed').toLowerCase();
-
-    log.debug(`Toolkit container name: ${this.config.containerName}`);
-    log.debug(`Toolkit target dir: ${this.config.targetDir}`);
-    log.debug(`Toolkit node tag: ${this.config.nodeTag}`);
-    log.debug(`Toolkit sync cache dir: ${this.config.syncCacheDir}`);
+    log.debug(`Toolkit container name   : ${this.config.containerName}`);
+    log.debug(`Toolkit target dir       : ${this.config.targetDir}`);
+    log.debug(`Toolkit node/toolkit tag : ${this.config.nodeTag}`);
+    log.debug(`Toolkit sync cache dir   : ${this.config.syncCacheDir}`);
 
     this.container = new GenericContainer(
       `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeTag}`,
@@ -171,7 +158,7 @@ class ToolkitWrapper {
   async start() {
     this.startedContainer = await retry(async () => this.container.start(), {
       maxRetries: 2,
-      delayMs: 2000,
+      delayMs: 2_000,
       retryLabel: 'start toolkit container',
     });
   }
@@ -244,7 +231,7 @@ class ToolkitWrapper {
   }
 
   /**
-   * Generate a single transaction
+   * Generate a single shie.ded or unshieldedtransaction
    *
    * @param sourceSeed - The source seed to use
    * @param addressType - The address type to use
@@ -289,6 +276,40 @@ class ToolkitWrapper {
     return this.parseTransactionOutput(rawOutput);
   }
 
+  /**
+   * Get the contract address from a deployed transaction
+   *
+   * @param contractFile - The contract file to use
+   * @param tagType - Whether the address should be tagged or untagged
+   * @returns The contract address
+   */
+  async getContractAddress(contractFile: string, tagType: 'tagged' | 'untagged'): Promise<string> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    const addressResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'contract-address',
+      ...(tagType === 'tagged' ? ['--tagged'] : []),
+      '--src-file',
+      `/out/${contractFile}`,
+    ]);
+    log.debug(`contract-address taggedAddress:\n${JSON.stringify(addressResult, null, 2)}`);
+    if (addressResult.exitCode !== 0) {
+      const e = addressResult.stderr || addressResult.output || 'Unknown error';
+      throw new Error(`contract-address failed: ${e}`);
+    }
+
+    return addressResult.output.trim();
+  }
+
+  /**
+   * Deploy a contract
+   *
+   * @param opts - The options for the deployment
+   * @returns
+   */
   async deployContract(opts?: {
     contractConfigPath?: string;
     compiledContractDir?: string;
@@ -387,41 +408,13 @@ class ToolkitWrapper {
       }
     }
 
-    // 4) contract-address -> file
-    const taggedAddress = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
-      'contract-address',
-      '--tagged',
-      '--src-file',
-      `/out/${deployTx}`,
-    ]);
-    log.debug(`contract-address taggedAddress:\n${JSON.stringify(taggedAddress, null, 2)}`);
-    if (taggedAddress.exitCode !== 0) {
-      const e = taggedAddress.stderr || taggedAddress.output || 'Unknown error';
-      throw new Error(`contract-address failed: ${e}`);
-    }
-
-    const untaggedAddress = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
-      'contract-address',
-      '--src-file',
-      `/out/${deployTx}`,
-    ]);
-    log.debug(`contract-address untaggedAddress:\n${JSON.stringify(untaggedAddress, null, 2)}`);
-    if (untaggedAddress.exitCode !== 0) {
-      const e = untaggedAddress.stderr || untaggedAddress.output || 'Unknown error';
-      throw new Error(`contract-address failed: ${e}`);
-    }
-
-    // The CLI may print JSON or a typed line — extract a typed string.
+    // Get tagged and untagged contract addresss and build an object with them
     const contractAddressInfo = {
-      tagged: taggedAddress.output.trim(),
-      untagged: untaggedAddress.output.trim(),
+      tagged: await this.getContractAddress(deployTx, 'tagged'),
+      untagged: await this.getContractAddress(deployTx, 'untagged'),
     };
 
-    log.debug(
-      `contract-address command result.output:\n${JSON.stringify(contractAddressInfo, null, 2)}`,
-    );
+    log.debug(`Contract address info:\n${JSON.stringify(contractAddressInfo, null, 2)}`);
 
     // persist EXACTLY the typed string (no JSON)
     fs.writeFileSync(outAddressFile, contractAddressInfo.tagged + '\n', 'utf8');
@@ -434,7 +427,6 @@ class ToolkitWrapper {
     }
 
     const raw = fs.readFileSync(outAddressFile, 'utf8').trim();
-    const hex = contractAddressInfo.untagged;
 
     // 5) quick state read — pass the address exactly as written by the toolkit
     {

@@ -130,7 +130,7 @@ describe('unshielded transactions', () => {
     await Promise.all([toolkit.stop(), indexerWsClient.connectionClose()]);
   });
 
-  describe('a successful unshielded transaction transferring 1 NIGHT between two wallets', async () => {
+  describe('a successful unshielded transaction transferring 1 STAR between two addresses', async () => {
     /**
      * Once an unshielded transaction has been submitted to node and confirmed, the indexer should report
      * that transaction in the block through a block query by hash, using the block hash reported by the toolkit.
@@ -293,13 +293,13 @@ describe('unshielded transactions', () => {
 
     /**
      * Once an unshielded transaction has been submitted to node and confirmed, we should see the transaction
-     * giving 1 NIGHT to the destination address.
+     * giving 1 STAR to the destination address.
      *
      * @given a confirmed unshielded transaction between two wallets
      * @when we inspect the containing block for unshielded outputs
-     * @then there should be two created outputs and one spent output reflecting the transfer of 1 NIGHT
+     * @then there should be two created outputs and one spent output reflecting the transfer of 1 STAR
      */
-    test('should have transferred 1 NIGHT from the source to the destination address', async (context: TestContext) => {
+    test('should have transferred 1 STAR from the source to the destination address', async (context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['UnshieldedTokens'],
         testKey: 'PM-17715',

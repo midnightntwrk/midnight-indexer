@@ -20,7 +20,7 @@ import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit
 import { env, LedgerNetworkId } from 'environment/model';
 
 // To run: yarn test e2e
-describe('mn-toolkit', () => {
+describe('key material derivation validation', () => {
   let toolkit: ToolkitWrapper;
   const seed = randomBytes(32).toString('hex');
 
