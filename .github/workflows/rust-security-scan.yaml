@@ -1,5 +1,17 @@
 name: rust-security-scan
 
+# NOTE: This workflow uses 'pull_request' event (not 'pull_request_target') because we need to
+# checkout and scan the PR code. This means fork PRs don't have access to secrets.
+# We cannot use 'pull_request_target' because that would be unsafe - it would give untrusted
+# fork PR code access to secrets.
+#
+# Fork PR behavior:
+# - cargo-deny runs successfully (no secrets needed)
+# - SARIF uploads to GitHub Security (no secrets needed)
+# - netrc and Checkmarx BYOR upload are skipped (require secrets)
+#
+# This is acceptable because fork PRs still get security scanning via cargo-deny.
+
 on:
   push:
     branches: [main]
@@ -21,7 +33,9 @@ jobs:
       - name: Install cargo-deny
         run: cargo install cargo-deny
 
+      # Skip for fork PRs (no secrets available)
       - name: Add github.com credentials to netrc
+        if: github.event.pull_request.head.repo.full_name == github.repository
         uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4  # v2.0.1
         with:
           machine: github.com
@@ -59,8 +73,10 @@ jobs:
         with:
           sarif_file: scan.sarif
 
+      # Skip Checkmarx BYOR upload for fork PRs (no secrets available)
       # TODO: Remove this checkout step once upload-sarif-github-action repo is made public
       - name: Checkout Upload action repository
+        if: github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: midnightntwrk/upload-sarif-github-action
@@ -69,6 +85,7 @@ jobs:
           token: ${{ secrets.MIDNIGHTCI_REPO }}
 
       - name: Upload SARIF to Checkmarx
+        if: github.event.pull_request.head.repo.full_name == github.repository
         uses: ./upload-sarif-github-action
         with:
           sarif-file: scan.sarif
