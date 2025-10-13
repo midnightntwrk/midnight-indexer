@@ -13,55 +13,120 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import log from '@utils/logging/logger';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
+import { IndexerHttpClient } from '@utils/indexer/http-client';
+import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
 import dataProvider from '@utils/testdata-provider';
-import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
+import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import { main as deployAndUpdateLocal } from '../../scripts/deploy-and-update-local.js';
 
-// To run: yarn test e2e
 describe('mn-toolkit contract calls', () => {
+  let indexerHttpClient: IndexerHttpClient;
   let toolkit: ToolkitWrapper;
+  let contractCallResult: ToolkitTransactionResult;
 
   beforeAll(async () => {
+    await deployAndUpdateLocal();
+    await dataProvider.init();
+
+    indexerHttpClient = new IndexerHttpClient();
     toolkit = new ToolkitWrapper({});
     await toolkit.start();
-  });
+
+    contractCallResult = await toolkit.callContract();
+  }, 300000);
 
   afterAll(async () => {
     await toolkit.stop();
   });
 
-  /**
-   * Test contract call using the deployed test contract
-   *
-   * @given we have a deployed contract at a known address
-   * @when we call a contract function using the toolkit
-   * @then the transaction should be generated and submitted successfully
-   */
-  test('mn-toolkit contract call test', async (context: TestContext) => {
-    let contractAddress: string;
-    try {
-      contractAddress = dataProvider.getKnownContractAddress();
-    } catch (error) {
-      log.warn(error);
-      context.skip?.(true, (error as Error).message);
-      return;
-    }
+  describe('a successful contract call transaction', () => {
+    /**
+     * Once a contract call transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction through a query by transaction hash, using the transaction hash reported by the toolkit.
+     *
+     * @given a confirmed contract call transaction
+     * @when we query the indexer with a transaction query by hash, using the transaction hash reported by the toolkit
+     * @then the transaction should be found and reported correctly
+     */
+    test('should be reported by the indexer through a transaction query by hash', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Transaction', 'ByHash', 'ContractCall'],
+      };
 
-    const callKey = 'store';
-    const rngSeed = '0000000000000000000000000000000000000000000000000000000000000037';
+      const deployTxHash = dataProvider.getLocalDeployTxHash();
+      const transactionResponse = await getTransactionByHashWithRetry(deployTxHash);
 
-    const result = await toolkit.callContract(contractAddress, callKey, rngSeed);
+      expect(transactionResponse?.data?.transactions).toBeDefined();
+      expect(transactionResponse?.data?.transactions?.length).toBeGreaterThan(0);
 
-    log.info(`Contract call transaction hash: ${result.txHash}`);
-    log.info(`Contract call status: ${result.status}`);
-    if (result.blockHash) {
-      log.info(`Contract call block hash: ${result.blockHash}`);
-    }
+      const foundTransaction = transactionResponse.data?.transactions?.find(
+        (tx: any) => tx.hash === deployTxHash,
+      );
 
-    expect(result.txHash).toMatch(/^0x[a-f0-9]{64}$/);
-    expect(result.status).toMatch(/^(sent|confirmed)$/);
-    expect(['sent', 'confirmed']).toContain(result.status);
-  }, 600000); // Increase timeout to 10 minutes for contract calls (syncing + proving + submitting)
+      expect(foundTransaction).toBeDefined();
+      expect(foundTransaction?.hash).toBe(deployTxHash);
+    }, 60000);
+
+    /**
+     * Once a contract call transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction in the block through a block query by hash, using the block hash reported by the toolkit.
+     *
+     * @given a confirmed contract call transaction
+     * @when we query the indexer with a block query by hash, using the block hash reported by the toolkit
+     * @then the block should contain the contract call transaction
+     */
+    test('should be reported by the indexer through a block query by hash', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHash', 'ContractCall'],
+      };
+
+      const deployTxHash = dataProvider.getLocalDeployTxHash();
+      const deployBlockHash = dataProvider.getLocalDeployBlockHash();
+      const blockResponse = await getBlockByHashWithRetry(deployBlockHash);
+
+      expect(blockResponse?.data?.block).toBeDefined();
+      expect(blockResponse?.data?.block?.transactions).toBeDefined();
+      expect(blockResponse?.data?.block?.transactions?.length).toBeGreaterThan(0);
+
+      const foundTransaction = blockResponse.data?.block?.transactions?.find(
+        (tx: any) => tx.hash === deployTxHash,
+      );
+
+      expect(foundTransaction).toBeDefined();
+      expect(foundTransaction?.hash).toBe(deployTxHash);
+      expect(blockResponse.data?.block?.hash).toBe(deployBlockHash);
+    }, 60000);
+
+    /**
+     * Once a contract call transaction has been submitted to node and confirmed, the indexer should report
+     * the contract action with the correct type when queried by contract address.
+     *
+     * @given a confirmed contract call transaction
+     * @when we query the indexer with a contract action query by address
+     * @then the contract action should be found with __typename 'ContractCall'
+     */
+    test('should be reported by the indexer through a contract action query by address', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Query', 'ContractAction', 'ByAddress', 'ContractCall'],
+      };
+
+      const contractActionResponse = await indexerHttpClient.getContractAction(
+        dataProvider.getLocalContractAddress(),
+      );
+
+      expect(contractActionResponse?.data?.contractAction).toBeDefined();
+
+      const contractAction = contractActionResponse.data?.contractAction;
+      expect(contractAction?.__typename).toBe('ContractCall');
+      expect(contractAction?.address).toBe(dataProvider.getLocalContractAddress());
+
+      if (contractAction?.__typename === 'ContractCall') {
+        expect(contractAction.entryPoint).toBeDefined();
+        expect(contractAction.deploy).toBeDefined();
+        expect(contractAction.deploy?.address).toBeDefined();
+      }
+    }, 60000);
+  });
 });

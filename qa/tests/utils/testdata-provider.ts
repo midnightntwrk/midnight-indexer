@@ -198,6 +198,75 @@ class TestDataProvider {
     // Return a valid format hash that doesn't exist (all zeros)
     return '0000000000000000000000000000000000000000000000000000000000000000';
   }
+
+  getLocalContractAddressUntagged() {
+    if (
+      !this.local.hasOwnProperty('contract-address-untagged') ||
+      this.local['contract-address-untagged'] === undefined
+    ) {
+      throw new Error(
+        `Test data provider is missing the contract-address-untagged data for ${env.getEnvName()} environment`,
+      );
+    }
+    return this.local['contract-address-untagged'];
+  }
+
+  getLocalContractAddressTagged() {
+    if (
+      !this.local.hasOwnProperty('contract-address-tagged') ||
+      this.local['contract-address-tagged'] === undefined
+    ) {
+      throw new Error(
+        `Test data provider is missing the contract-address-tagged data for ${env.getEnvName()} environment`,
+      );
+    }
+    return this.local['contract-address-tagged'];
+  }
+
+  getLocalCoinPublic() {
+    if (!this.local.hasOwnProperty('coin-public') || this.local['coin-public'] === undefined) {
+      throw new Error(
+        `Test data provider is missing the coin-public data for ${env.getEnvName()} environment`,
+      );
+    }
+    return this.local['coin-public'];
+  }
+
+  getLocalContractAddress() {
+    if (
+      !this.local.hasOwnProperty('contract-address') ||
+      this.local['contract-address'] === undefined
+    ) {
+      throw new Error(
+        `Test data provider is missing the contract-address data for ${env.getEnvName()} environment`,
+      );
+    }
+    return this.local['contract-address'];
+  }
+
+  getLocalDeployTxHash() {
+    if (
+      !this.local.hasOwnProperty('deploy-tx-hash') ||
+      this.local['deploy-tx-hash'] === undefined
+    ) {
+      throw new Error(
+        `Test data provider is missing the deploy-tx-hash data for ${env.getEnvName()} environment`,
+      );
+    }
+    return this.local['deploy-tx-hash'];
+  }
+
+  getLocalDeployBlockHash() {
+    if (
+      !this.local.hasOwnProperty('deploy-block-hash') ||
+      this.local['deploy-block-hash'] === undefined
+    ) {
+      throw new Error(
+        `Test data provider is missing the deploy-block-hash data for ${env.getEnvName()} environment`,
+      );
+    }
+    return this.local['deploy-block-hash'];
+  }
 }
 
 const dataProvider = await new TestDataProvider().init();

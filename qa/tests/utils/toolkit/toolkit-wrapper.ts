@@ -71,12 +71,10 @@ interface LogEntry {
 }
 
 export interface DeployContractResult {
-  addressRaw: string;
   addressUntagged: string;
   addressTagged: string;
-  deployTxPath: string;
-  statePath: string;
-  outDir: string;
+  contractAddress: string;
+  coinPublic: string;
 }
 
 class ToolkitWrapper {
@@ -182,12 +180,6 @@ class ToolkitWrapper {
     }
   }
 
-  /**
-   * Show address information from a seed
-   *
-   * @param seed - The seed to use
-   * @returns The address information as a JSON object
-   */
   async showAddress(seed: string): Promise<AddressInfo> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
@@ -209,7 +201,6 @@ class ToolkitWrapper {
       );
     }
 
-    // Extract the json object and return it as is
     return JSON.parse(response.output);
   }
 
@@ -269,54 +260,293 @@ class ToolkitWrapper {
   }
 
   async callContract(
-    contractAddress: string,
-    callKey: string,
-    rngSeed: string,
+    callKey: string = 'increment',
+    rngSeed: string = '0000000000000000000000000000000000000000000000000000000000000037',
   ): Promise<ToolkitTransactionResult> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
 
-    // Write contract address to a file in HEX-ENCODED tagged format AS TEXT
-    // The targetDir (e.g., /tmp/toolkit/) is mounted to /out in the container
-    // File format: hex("midnight:contract-address[v2]:" + raw_address_bytes)
-    const tag = Buffer.from('midnight:contract-address[v2]:', 'utf8');
-    const addressBytes = Buffer.from(contractAddress, 'hex');
-    const taggedAddressHex = Buffer.concat([tag, addressBytes]).toString('hex');
+    const { env } = await import('../../environment/model.js');
+    const localDataPath = join(
+      __dirname,
+      '../../data/static',
+      env.getEnvName(),
+      'local.json',
+    );
+    const localData = JSON.parse(readFileSync(localDataPath, 'utf8'));
 
-    const contractAddressFile = `/out/contract_address_call.mn`;
-    const writeCommand = `echo -n "${taggedAddressHex}" > ${contractAddressFile}`; // Write as hex text, not binary
+    const contractAddressUntagged = localData['contract-address-untagged'];
+    const contractAddressTagged = localData['contract-address-tagged'];
+    const coinPublic = localData['coin-public'];
 
-    const writeResult = await this.startedContainer.exec(['sh', '-c', writeCommand]);
+    const intentFile = `/out/${callKey}_intent.bin`;
+    const txFile = `/out/${callKey}_tx.mn`;
+    const stateFile = `/out/current_state.mn`;
+    const privateStateFile = `/out/${callKey}_private_state.json`;
 
-    if (writeResult.exitCode !== 0) {
-      throw new Error(
-        `Failed to write contract address to file: ${writeResult.stderr || writeResult.output}`,
-      );
+    log.info('Getting current contract state...');
+    const contractStateResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'contract-state',
+      '--contract-address',
+      contractAddressTagged,
+      '--dest-file',
+      stateFile,
+    ]);
+
+    if (contractStateResult.exitCode !== 0) {
+      const errorMessage =
+        contractStateResult.stderr || contractStateResult.output || 'Unknown error occurred';
+      throw new Error(`Failed to get contract state: ${errorMessage}`);
     }
 
-    // Pass the FILE PATH directly - the toolkit expects a path to the hex-encoded tagged address file
+    log.info(`Generating ${callKey} circuit intent...`);
+    const generateIntentResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'generate-intent',
+      'circuit',
+      '-c',
+      '/toolkit-js/test/contract/contract.config.ts',
+      '--toolkit-js-path',
+      '/toolkit-js',
+      '--contract-address',
+      contractAddressUntagged,
+      '--coin-public',
+      coinPublic,
+      '--input-onchain-state',
+      stateFile,
+      '--input-private-state',
+      '/out/initial_state.json',
+      '--output-intent',
+      intentFile,
+      '--output-private-state',
+      privateStateFile,
+      '--output-zswap-state',
+      `/out/${callKey}_zswap.json`,
+      callKey,
+    ]);
+
+    if (generateIntentResult.exitCode !== 0) {
+      const errorMessage =
+        generateIntentResult.stderr || generateIntentResult.output || 'Unknown error occurred';
+      throw new Error(`Failed to generate circuit intent: ${errorMessage}`);
+    }
+
+    log.info('Converting intent to transaction...');
+    const sendIntentResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'send-intent',
+      '--intent-file',
+      intentFile,
+      '--compiled-contract-dir',
+      '/toolkit-js/test/contract/managed/counter',
+      '--to-bytes',
+      '--dest-file',
+      txFile,
+    ]);
+
+    if (sendIntentResult.exitCode !== 0) {
+      const errorMessage =
+        sendIntentResult.stderr || sendIntentResult.output || 'Unknown error occurred';
+      throw new Error(`Failed to send intent: ${errorMessage}`);
+    }
+
+    log.info('Submitting transaction to network...');
     const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'generate-txs',
-      'contract-calls',
-      'call',
-      '--call-key',
-      callKey,
-      '--rng-seed',
-      rngSeed,
-      '--contract-address',
-      contractAddressFile,
+      '--src-files',
+      txFile,
+      '-r',
+      '1',
+      'send',
     ]);
 
     if (result.exitCode !== 0) {
       const errorMessage = result.stderr || result.output || 'Unknown error occurred';
-      throw new Error(`Toolkit command failed with exit code ${result.exitCode}: ${errorMessage}`);
+      throw new Error(`Failed to submit transaction: ${errorMessage}`);
     }
 
     const rawOutput = result.output.trim();
     return this.parseTransactionOutput(rawOutput);
   }
+
+  async deployContract(opts?: {
+    contractConfigPath?: string;
+    compiledContractDir?: string;
+    network?: string;
+  }): Promise<DeployContractResult> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+    const outDir = this.config.targetDir!;
+
+    const contractConfigPath =
+      opts?.contractConfigPath ?? '/toolkit-js/test/contract/contract.config.ts';
+    const compiledContractDir =
+      opts?.compiledContractDir ?? '/toolkit-js/test/contract/managed/counter';
+    const network = (opts?.network ?? this.runtime.network).toLowerCase();
+
+    const deployIntent = 'deploy.bin';
+    const deployTx = 'deploy_tx.mn';
+    const addressFile = 'contract_address.mn';
+    const stateFile = 'contract_state.mn';
+    const initialPrivateState = 'initial_state.json';
+
+    const outDeployIntent = join(outDir, deployIntent);
+    const outDeployTx = join(outDir, deployTx);
+    const outAddressFile = join(outDir, addressFile);
+    const outStateFile = join(outDir, stateFile);
+    const outInitialState = join(outDir, initialPrivateState);
+    const zswapFile = 'temp.json';
+    const coinPublicSeed = '0000000000000000000000000000000000000000000000000000000000000001';
+    const addressInfo = await this.showAddress(coinPublicSeed);
+    const coinPublic = addressInfo.coinPublic;
+
+    {
+      const result = await this.startedContainer.exec([
+        '/midnight-node-toolkit',
+        'generate-intent',
+        'deploy',
+        '-c',
+        contractConfigPath,
+        '--output-intent',
+        `/out/${deployIntent}`,
+        '--output-private-state',
+        `/out/${initialPrivateState}`,
+        '--coin-public',
+        coinPublic,
+        '--output-zswap-state',
+        `/out/${zswapFile}`,
+      ]);
+      if (result.exitCode !== 0) {
+        const e = result.stderr || result.output || 'Unknown error';
+        throw new Error(`generate-intent deploy failed: ${e}`);
+      }
+      if (!existsSync(outDeployIntent) || !existsSync(outInitialState)) {
+        throw new Error('generate-intent deploy did not produce expected outputs');
+      }
+    }
+
+    {
+      const result = await this.startedContainer.exec([
+        '/midnight-node-toolkit',
+        'send-intent',
+        '--intent-file',
+        `/out/${deployIntent}`,
+        '--compiled-contract-dir',
+        compiledContractDir,
+        '--to-bytes',
+        '--dest-file',
+        `/out/${deployTx}`,
+      ]);
+      if (result.exitCode !== 0) {
+        const e = result.stderr || result.output || 'Unknown error';
+        throw new Error(`send-intent failed: ${e}`);
+      }
+      if (!existsSync(outDeployTx)) {
+        throw new Error('send-intent did not produce /out/deploy_tx.mn');
+      }
+    }
+
+    {
+      const result = await this.startedContainer.exec([
+        '/midnight-node-toolkit',
+        'generate-txs',
+        '--src-files',
+        `/out/${deployTx}`,
+        '-r',
+        '1',
+        'send',
+      ]);
+      if (result.exitCode !== 0) {
+        const e = result.stderr || result.output || 'Unknown error';
+        throw new Error(`generate-txs send failed: ${e}`);
+      }
+    }
+
+    const result = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'contract-address',
+      '--network',
+      network,
+      '--src-file',
+      '/out/deploy_tx.mn',
+      '--dest-file',
+      '/out/contract_address.json',
+    ]);
+    if (result.exitCode !== 0) {
+      const e = result.stderr || result.output || 'Unknown error';
+      throw new Error(`contract-address failed: ${e}`);
+    }
+
+    log.debug(`contract-address stdout: ${result.output}`);
+
+    let contractAddressInfo: any;
+
+    if (result.output && result.output.trim()) {
+      try {
+        contractAddressInfo = JSON.parse(result.output.trim());
+        log.debug(`Parsed contract address from stdout: ${JSON.stringify(contractAddressInfo)}`);
+      } catch (e) {
+        log.debug(`Failed to parse stdout as JSON: ${e}`);
+      }
+    }
+
+    if (!contractAddressInfo) {
+      const addressJsonPath = join(outDir, 'contract_address.json');
+      if (existsSync(addressJsonPath)) {
+        const addressFileContent = readFileSync(addressJsonPath, 'utf8').trim();
+        log.debug(`Contract address file content: "${addressFileContent}"`);
+        try {
+          contractAddressInfo = JSON.parse(addressFileContent);
+          log.debug(`Parsed contract address from file: ${JSON.stringify(contractAddressInfo)}`);
+        } catch (e) {
+          log.debug(`Failed to parse file as JSON: ${e}`);
+          contractAddressInfo = {
+            tagged: addressFileContent,
+            untagged: addressFileContent.replace(/^.*:/, ''),
+          };
+        }
+      } else {
+        throw new Error('contract-address did not produce output or file');
+      }
+    }
+
+    fs.writeFileSync(outAddressFile, contractAddressInfo.tagged + '\n', 'utf8');
+
+    const hexPrefix = '6d69646e696768743a636f6e74726163742d616464726573735b76325d3a';
+    let contractAddress = contractAddressInfo.untagged;
+    if (contractAddress.startsWith(hexPrefix)) {
+      contractAddress = contractAddress.substring(hexPrefix.length);
+    }
+
+    {
+      const result = await this.startedContainer.exec([
+        '/midnight-node-toolkit',
+        'contract-state',
+        '--contract-address',
+        contractAddressInfo.tagged,
+        '--dest-file',
+        '/out/contract_state.mn',
+      ]);
+      if (result.exitCode !== 0) {
+        const e = result.stderr || result.output || 'Unknown error';
+        throw new Error(`contract-state failed: ${e}`);
+      }
+      if (!existsSync(outStateFile)) {
+        throw new Error('contract-state did not produce /out/contract_state.mn');
+      }
+    }
+
+    return {
+      addressUntagged: contractAddressInfo.untagged,
+      addressTagged: contractAddressInfo.tagged,
+      contractAddress,
+      coinPublic,
+    };
+  }
 }
 
-export { ToolkitWrapper, ToolkitConfig, ToolkitTransactionResult };
+export { ToolkitWrapper, ToolkitConfig ,ToolkitTransactionResult};
