@@ -26,10 +26,13 @@ import type {
   ContractAction,
   ContractActionOffset,
   ContractActionResponse,
+  DustGenerationStatus,
+  DustGenerationStatusResponse,
 } from './indexer-types';
 import { GET_LATEST_BLOCK, GET_BLOCK_BY_OFFSET } from './graphql/block-queries';
 import { GET_TRANSACTION_BY_OFFSET } from './graphql/transaction-queries';
 import { GET_CONTRACT_ACTION, GET_CONTRACT_ACTION_BY_OFFSET } from './graphql/contract-queries';
+import { GET_DUST_GENERATION_STATUS } from './graphql/dust-queries';
 
 /**
  * HTTP client for interacting with the Midnight Indexer GraphQL API
@@ -172,6 +175,33 @@ export class IndexerHttpClient {
       query,
       variables,
     );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  /**
+   * Retrieves DUST generation status for given Cardano stake keys from the indexer
+   * @param cardanoStakeKeys - Array of hex-encoded Cardano stake keys to query
+   * @param queryOverride - Optional custom GraphQL query to override the default DUST generation status query
+   * @returns Promise resolving to the DUST generation status response containing status for each stake key
+   */
+  async getDustGenerationStatus(
+    cardanoStakeKeys: string[],
+    queryOverride?: string,
+  ): Promise<DustGenerationStatusResponse> {
+    log.debug(`Target URL endpoint ${this.getTargetUrl()}`);
+
+    const query = queryOverride || GET_DUST_GENERATION_STATUS;
+    const variables = { CARDANO_STAKE_KEYS: cardanoStakeKeys };
+
+    log.debug(`Using query\n${query}`);
+    log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
+
+    const response = await this.client.rawRequest<{
+      dustGenerationStatus: DustGenerationStatus[];
+    }>(query, variables);
 
     log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
 
