@@ -11,7 +11,7 @@
 
 import { ToolkitWrapper } from '../utils/toolkit/toolkit-wrapper.js';
 import { IndexerHttpClient } from '../utils/indexer/http-client.js';
-import { writeFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 async function retry<T>(
@@ -95,7 +95,7 @@ async function main() {
 
     console.log('\n4. Updating local.json...');
     const localJsonPath = join(__dirname, '../data/static/undeployed/local.json');
-
+    
     writeFileSync(localJsonPath, JSON.stringify(localData, null, 2) + '\n', 'utf-8');
 
     console.log('\n' + '='.repeat(80));

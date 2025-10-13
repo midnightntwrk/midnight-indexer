@@ -20,14 +20,24 @@ import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-u
 import dataProvider from '@utils/testdata-provider';
 import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 import { main as deployAndUpdateLocal } from '../../scripts/deploy-and-update-local.js';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 describe('mn-toolkit contract calls', () => {
   let indexerHttpClient: IndexerHttpClient;
   let toolkit: ToolkitWrapper;
   let contractCallResult: ToolkitTransactionResult;
 
+  const getLocalData = () => {
+    const localJsonPath = join(__dirname, '../../data/static/undeployed/local.json');
+    return JSON.parse(readFileSync(localJsonPath, 'utf8'));
+  };
+
   beforeAll(async () => {
+    await dataProvider.init();
     await deployAndUpdateLocal();
+    
+    await new Promise(resolve => setTimeout(resolve, 100));
     await dataProvider.init();
 
     indexerHttpClient = new IndexerHttpClient();
@@ -55,7 +65,8 @@ describe('mn-toolkit contract calls', () => {
         labels: ['Query', 'Transaction', 'ByHash', 'ContractCall'],
       };
 
-      const deployTxHash = dataProvider.getLocalDeployTxHash();
+      const localData = getLocalData();
+      const deployTxHash = localData['deploy-tx-hash'];
       const transactionResponse = await getTransactionByHashWithRetry(deployTxHash);
 
       expect(transactionResponse?.data?.transactions).toBeDefined();
@@ -82,8 +93,9 @@ describe('mn-toolkit contract calls', () => {
         labels: ['Query', 'Block', 'ByHash', 'ContractCall'],
       };
 
-      const deployTxHash = dataProvider.getLocalDeployTxHash();
-      const deployBlockHash = dataProvider.getLocalDeployBlockHash();
+      const localData = getLocalData();
+      const deployTxHash = localData['deploy-tx-hash'];
+      const deployBlockHash = localData['deploy-block-hash'];
       const blockResponse = await getBlockByHashWithRetry(deployBlockHash);
 
       expect(blockResponse?.data?.block).toBeDefined();
@@ -112,20 +124,20 @@ describe('mn-toolkit contract calls', () => {
         labels: ['Query', 'ContractAction', 'ByAddress', 'ContractCall'],
       };
 
-      const contractActionResponse = await indexerHttpClient.getContractAction(
-        dataProvider.getLocalContractAddress(),
-      );
+      const localData = getLocalData();
+      const contractAddress = localData['contract-address'];
+      const contractActionResponse = await indexerHttpClient.getContractAction(contractAddress);
 
       expect(contractActionResponse?.data?.contractAction).toBeDefined();
 
       const contractAction = contractActionResponse.data?.contractAction;
       expect(contractAction?.__typename).toBe('ContractCall');
-      expect(contractAction?.address).toBe(dataProvider.getLocalContractAddress());
+      expect(contractAction?.address).toBe(contractAddress);
 
       if (contractAction?.__typename === 'ContractCall') {
         expect(contractAction.entryPoint).toBeDefined();
         expect(contractAction.deploy).toBeDefined();
-        expect(contractAction.deploy?.address).toBeDefined();
+        expect(contractAction.deploy?.address).toBe(contractAddress);
       }
     }, 60000);
   });

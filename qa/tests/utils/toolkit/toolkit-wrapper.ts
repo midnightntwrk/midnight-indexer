@@ -274,11 +274,15 @@ class ToolkitWrapper {
       env.getEnvName(),
       'local.json',
     );
+    
     const localData = JSON.parse(readFileSync(localDataPath, 'utf8'));
-
     const contractAddressUntagged = localData['contract-address-untagged'];
     const contractAddressTagged = localData['contract-address-tagged'];
     const coinPublic = localData['coin-public'];
+    
+    if (!contractAddressUntagged || !contractAddressTagged || !coinPublic) {
+      throw new Error('Missing required contract data in local.json');
+    }
 
     const intentFile = `/out/${callKey}_intent.bin`;
     const txFile = `/out/${callKey}_tx.mn`;

@@ -118,8 +118,6 @@ class TestDataProvider {
     return this.getBlockHeightOfContractAction('ContractUpdate');
   }
 
-  // TODO: this is a temporary and random viewing key, it should be removed once we can derive them
-  // from the wallet
   getViewingKey() {
     return 'mn_shield-esk_undeployed1d45kgmnfva58gwn9de3hy7tsw35k7m3dwdjkxun9wskkketetdmrzhf6wdwg0q0t85zu4sgm8ldgf66hkxmupkjn3spfncne2gtykttjjhjq2mjpxh8';
   }
