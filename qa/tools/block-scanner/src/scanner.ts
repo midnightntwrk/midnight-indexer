@@ -564,12 +564,13 @@ async function main(): Promise<boolean> {
   ]);
 
   // Check if we exited due to an error
-  if (scanManager.getSubscriptionError()) {
+  const subscriptionError = scanManager.getSubscriptionError();
+  if (subscriptionError) {
     // Clear the spinner line
     spinner.clear();
 
     console.error(
-      "[ERROR] - Block scanning failed due to indexer subscription error",
+      `[ERROR] - Block scanning failed due to indexer subscription error: ${subscriptionError.message}`,
     );
 
     // Clean up and exit without throwing
