@@ -22,6 +22,7 @@ class TestDataProvider {
   private transactions: Record<string, string>;
   private contracts: Record<string, string>;
   private heights: Record<string, number>;
+  private cardanoStakeKeys: Record<string, string>;
 
   constructor() {
     this.unshieldedAddresses = {};
@@ -30,6 +31,7 @@ class TestDataProvider {
     this.transactions = {};
     this.contracts = {};
     this.heights = {};
+    this.cardanoStakeKeys = {};
   }
 
   async init(): Promise<this> {
@@ -42,12 +44,16 @@ class TestDataProvider {
     const transactionsDataFile = await import(`../data/static/${envName}/transactions.json`);
     const contractsDataFile = await import(`../data/static/${envName}/contracts.json`);
     const heightsDataFile = await import(`../data/static/${envName}/heights.json`);
+    const cardanoStakeKeysDataFile = await import(
+      `../data/static/${envName}/cardano-stake-keys.json`
+    );
     this.unshieldedAddresses = unshieldedAddressDataFile.default;
     this.blocks = blocksDataFile.default;
     this.viewingKeys = viewingKeysDataFile.default;
     this.transactions = transactionsDataFile.default;
     this.contracts = contractsDataFile.default;
     this.heights = heightsDataFile.default;
+    this.cardanoStakeKeys = cardanoStakeKeysDataFile.default;
     return this;
   }
 
@@ -227,6 +233,32 @@ class TestDataProvider {
   getNonExistingHash() {
     // Return a valid format hash that doesn't exist (all zeros)
     return '0000000000000000000000000000000000000000000000000000000000000000';
+  }
+
+  getCardanoStakeKey(property: string) {
+    if (
+      !this.cardanoStakeKeys.hasOwnProperty(property) ||
+      this.cardanoStakeKeys[property] === undefined
+    ) {
+      throw new Error(
+        `Test data provider is missing the cardano stake key data for ${property} for ${env.getEnvName()} environment`,
+      );
+    }
+    return this.cardanoStakeKeys[property];
+  }
+
+  getRandomCardanoStakeKey() {
+    // Generate a random 64-character hex string
+    const randomHexString = Math.random().toString(16).substring(2, 64);
+    return randomHexString;
+  }
+
+  getFabricatedMalformedCardanoStakeKeys() {
+    return [
+      '', // empty string
+      'G'.repeat(64), // invalid hex characters
+      '0123456789abcdef@', // special character
+    ];
   }
 }
 

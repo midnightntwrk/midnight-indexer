@@ -17,9 +17,10 @@ import { randomBytes } from 'crypto';
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import { env, LedgerNetworkId } from 'environment/model';
 
 // To run: yarn test e2e
-describe('mn-toolkit', () => {
+describe('key material derivation validation', () => {
   let toolkit: ToolkitWrapper;
   const seed = randomBytes(32).toString('hex');
 
@@ -32,27 +33,114 @@ describe('mn-toolkit', () => {
     await toolkit.stop();
   });
 
-  test('mn-toolkit show shielded address test', async () => {
-    const address = (await toolkit.showAddress(seed)).shielded;
+  describe('a midnight shielded address', () => {
+    /**
+     * Test that the shielded address shows with the expected prefix for the current network ID
+     *
+     * @given a randomly generated seed
+     * @when we show the shielded address for the current network ID
+     * @then the address should start with the expected prefix
+     */
+    test('should show with the expected prefix for the current network ID', async () => {
+      const address = (await toolkit.showAddress(seed)).shielded;
 
-    log.info(`Shielded address: ${address}`);
+      log.info(`Shielded address: ${address}`);
 
-    expect(address).toMatch(/^mn_shield-addr_/);
+      const addressPrefix = 'mn_shield-addr_';
+      expect(address).toMatch(new RegExp(`^${addressPrefix}`));
+    });
+
+    /**
+     * Test that the shielded address shows with the expected prefix for all network IDs
+     *
+     * @given a randomly generated seed
+     * @when we show the shielded address for all network IDs
+     * @then the address should start with the expected prefix
+     */
+    test('should show with the expected prefix for all network IDs', async () => {
+      // For all known networks check if the right prefix is present
+      const networkIds = Object.values(LedgerNetworkId);
+      for (const networkId of networkIds) {
+        const address = (await toolkit.showAddress(seed, networkId)).shielded;
+        log.info(`Shielded address: ${address}`);
+
+        const addressPrefix = `mn_shield-addr_${env.getBech32mTagByLedgerNetworkId(networkId)}`;
+        expect(address).toMatch(new RegExp(`^${addressPrefix}`));
+      }
+    });
   });
 
-  test('mn-toolkit show unshielded address test', async () => {
-    const address = (await toolkit.showAddress(seed)).unshielded;
+  describe('a midnight unshielded address', () => {
+    /**
+     * Test that the unshielded address shows with the expected prefix for the current network ID
+     *
+     * @given a randomly generated seed
+     * @when we show the unshielded address for the current network ID
+     * @then the address should start with the expected prefix
+     */
+    test('should show with the expected prefix for the current network ID', async () => {
+      const address = (await toolkit.showAddress(seed)).unshielded;
 
-    log.info(`Unshielded address: ${address}`);
+      log.info(`Unshielded address: ${address}`);
 
-    expect(address).toMatch(/^mn_addr_/);
+      const addressPrefix = 'mn_addr_';
+      expect(address).toMatch(new RegExp(`^${addressPrefix}`));
+    });
+
+    /**
+     * Test that the unshielded address shows with the expected prefix for all network IDs
+     *
+     * @given a randomly generated seed
+     * @when we show the unshielded address for all network IDs
+     * @then the address should start with the expected prefix
+     */
+    test('should show with the expected prefix for all network IDs', async () => {
+      // For all known networks check if the right prefix is present
+      const networkIds = Object.values(LedgerNetworkId);
+      for (const networkId of networkIds) {
+        const address = (await toolkit.showAddress(seed, networkId)).unshielded;
+        log.info(`Unshielded address: ${address}`);
+
+        const addressPrefix = `mn_addr_${env.getBech32mTagByLedgerNetworkId(networkId)}`;
+        expect(address).toMatch(new RegExp(`^${addressPrefix}`));
+      }
+    });
   });
 
-  test('mn-toolkit show viewing key test', async () => {
-    const viewingKey = await toolkit.showViewingKey(seed);
+  describe('a midnight viewing key', () => {
+    /**
+     * Test that the viewing key shows with the expected prefix for the current network ID
+     *
+     * @given a randomly generated seed
+     * @when we show the viewing key for the current network ID
+     * @then the viewing key should start with the expected prefix
+     */
+    test('should show with the expected prefix for the current network ID', async () => {
+      const viewingKey = await toolkit.showViewingKey(seed);
 
-    log.info(`Viewing key: ${viewingKey}`);
+      log.info(`Viewing key: ${viewingKey}`);
 
-    expect(viewingKey).toMatch(/^mn_shield-esk_/);
+      const addressPrefix = 'mn_shield-esk_';
+      expect(viewingKey).toMatch(new RegExp(`^${addressPrefix}`));
+    });
+
+    /**
+     * Test that the viewing key shows with the expected prefix for all network IDs
+     *
+     * @given a randomly generated seed
+     * @when we show the viewing key for all network IDs
+     * @then the viewing key should start with the expected prefix
+     */
+    test('should show with the expected prefix for all network IDs', async () => {
+      // For all known networks check if the right prefix is present
+      const networkIds = Object.values(LedgerNetworkId);
+      for (const networkId of networkIds) {
+        const address = await toolkit.showViewingKey(seed, networkId);
+        log.info(`Viewing key for ${networkId}: ${address}`);
+
+        const addressPrefix = `mn_shield-esk_${env.getBech32mTagByLedgerNetworkId(networkId)}`;
+        expect(address).toMatch(new RegExp(`^${addressPrefix}`));
+      }
+    });
   });
 });

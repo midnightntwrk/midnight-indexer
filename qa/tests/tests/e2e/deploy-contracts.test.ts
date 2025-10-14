@@ -46,6 +46,7 @@ describe('contract actions', () => {
     test('should reported the address of the contract', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['ContractActions', 'ContractDeploy', 'Query', 'Toolkit'],
+        testKey: 'PM-18982',
       };
 
       const contractAddressRaw = result.addressRaw;
@@ -61,6 +62,7 @@ describe('contract actions', () => {
     test('should be reported by a contract query by address using the untagged address', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['ContractActions', 'ContractDeploy', 'Query', 'Toolkit'],
+        testKey: 'PM-18981',
       };
 
       const contractAddressRaw = result.addressUntagged;
@@ -74,6 +76,7 @@ describe('contract actions', () => {
     test('should not be reported by a contract query by address using the tagged address', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['ContractActions', 'ContractDeploy', 'Query', 'Toolkit', 'Negative'],
+        testKey: 'PM-18980',
       };
 
       const contractAddressRaw = result.addressTagged;
