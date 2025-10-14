@@ -1,6 +1,6 @@
 # Block Scanner
 
-This is a Bun-based implementation of the block scanner for the midnight Network block chain. It provides the ability to scan a Midnight blockchain using the midnight Indexer. It collects all the blocks with some information (discarding the empty blocks) and stores the transactions in a data file, useful for later processing.
+This is a Bun-based implementation of the block scanner for the midnight network block chain. It provides the ability to scan a midnight blockchain using the midnight Indexer. It collects all the blocks with some information (discarding the empty blocks) and stores the transactions in a data file, useful for later processing.
 
 ## Use case
 
@@ -11,7 +11,7 @@ Right now there are 2 use cases for this tool:
 ## Prerequisites
 
 - [Bun](https://bun.sh) installed on your system
-- Access to a midnight Network indexer endpoint (or local/undeployed environment)
+- Access to a midnight network indexer endpoint (or undeployed environment setup locally)
 
 ## Installation
 
@@ -31,11 +31,11 @@ bun run src/scanner.ts
 # Run with specific environment
 TARGET_ENV=devnet bun run src/scanner.ts
 
-# Run with test data folder
-bun run src/scanner.ts /path/to/test/data/folder
+# Run to generate test data for the indexer tests
+bun run src/scanner.ts <path/to/test/data/folder>
 ```
 
-### Available Environments
+### Available Environments (these might change in future)
 
 - `undeployed` - Local development (ws://localhost:8088/api/v3/graphql/ws)
 - `nodedev01` - Node dev environment
@@ -65,25 +65,27 @@ bun run build:scanner
 # Run the scanner (default will target undeployed)
 bun run scan
 
-# Run the scanner against the desired target environment
+# Run the scanner against the selected target environment
 TARGET_ENV=undeployed bun run scan
 ```
 
 ## Configuration
 
-The scanner uses the same configuration as the original version:
+The scanner uses this information as configuration input:
 
-- Environment variables for target environment
-- WebSocket URLs for different networks
-- GraphQL subscription queries
-- File output in JSONL format
+- Environment variables for target environment (`TARGET_ENV`, defaults to `undeployed`)
+
+other information are provided already, but could require future updates based on the midnight indexer and midnight network evolution
+- WebSocket URLs for different networks (automatically extracted from the target environment)
+- GraphQL subscription queries (available in a separate GraphQL file)
+
 
 ## Output
 
 The scanner creates:
 - `tmp_scan/` directory for temporary files
-- `{TARGET_ENV}_blocks.jsonl` - Raw block data
-- `contract-actions.jsonc` - Processed contract actions (if test data folder provided)
+- `{TARGET_ENV}_blocks.jsonl` - Raw block data stored for post processing
+- `*.jsonc` - A number of jsonc files created from the templates which are needed as Indexer test data
 
 ## Troubleshooting
 
@@ -98,7 +100,7 @@ The scanner creates:
 Enable debug logging by setting the log level:
 
 ```bash
-DEBUG=* bun run src/scanner.ts
+DEBUG=* bun run scan
 ```
 
 ## Performance Notes
