@@ -1,7 +1,17 @@
-#!/usr/bin/env ts-node
 // This file is part of midnightntwrk/midnight-indexer
 // Copyright (C) 2025 Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 /**
  * Deploys a contract and updates local.json with deployment details
@@ -10,28 +20,7 @@
  */
 
 import { ToolkitWrapper } from '../utils/toolkit/toolkit-wrapper.js';
-import { IndexerHttpClient } from '../utils/indexer/http-client.js';
-import { readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
-
-async function retry<T>(
-  fn: () => Promise<T>,
-  condition: (result: T) => boolean,
-  maxAttempts = 30,
-  delayMs = 2000,
-): Promise<T> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const result = await fn();
-    if (condition(result)) {
-      return result;
-    }
-    if (attempt < maxAttempts) {
-      console.log(`   Attempt ${attempt}/${maxAttempts} - Waiting for indexer to catch up...`);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-  throw new Error(`Condition not met after ${maxAttempts} attempts`);
-}
+import { LocalDataUtils } from '../utils/local-data-utils.js';
 
 async function main() {
   console.log('='.repeat(80));
@@ -39,7 +28,7 @@ async function main() {
   console.log('='.repeat(80));
 
   const toolkit = new ToolkitWrapper({});
-  const indexerClient = new IndexerHttpClient();
+  const localDataUtils = new LocalDataUtils();
 
   try {
     console.log('\n1. Starting toolkit...');
@@ -54,55 +43,9 @@ async function main() {
     console.log(`   Contract Address:      ${deployResult.contractAddress}`);
     console.log(`   Coin Public:           ${deployResult.coinPublic}`);
 
-    console.log('\n3. Querying indexer for deployment details...');
-    let deployTxHash = '';
-    let deployBlockHash = '';
+    console.log('\n3. Updating local.json with deployment data from indexer...');
+    await localDataUtils.writeDeploymentData(deployResult);
 
-    try {
-      const contractActionResponse = await retry(
-        () => indexerClient.getContractAction(deployResult.contractAddress),
-        (response) => {
-          return (
-            response?.data?.contractAction?.__typename === 'ContractDeploy' &&
-            response?.data?.contractAction?.transaction?.hash !== undefined
-          );
-        },
-        30,
-        2000,
-      );
-
-      const contractAction = contractActionResponse.data?.contractAction;
-      if (contractAction?.__typename === 'ContractDeploy') {
-        deployTxHash = contractAction.transaction?.hash || '';
-        deployBlockHash = contractAction.transaction?.block?.hash || '';
-        console.log(`   ✅ Found deployment in indexer!`);
-        console.log(`   Deploy Tx Hash:        ${deployTxHash}`);
-        console.log(`   Deploy Block Hash:     ${deployBlockHash}`);
-      }
-    } catch (error) {
-      console.warn(`   ⚠️  Could not fetch deployment details from indexer: ${error}`);
-      console.warn(`   The deploy-tx-hash and deploy-block-hash will be empty.`);
-    }
-
-    const localData = {
-      'contract-address-untagged': deployResult.addressUntagged,
-      'contract-address-tagged': deployResult.addressTagged,
-      'contract-address': deployResult.contractAddress,
-      'coin-public': deployResult.coinPublic,
-      'deploy-tx-hash': deployTxHash,
-      'deploy-block-hash': deployBlockHash,
-    };
-
-    console.log('\n4. Updating local.json...');
-    const localJsonPath = join(__dirname, '../data/static/undeployed/local.json');
-    
-    writeFileSync(localJsonPath, JSON.stringify(localData, null, 2) + '\n', 'utf-8');
-
-    console.log('\n' + '='.repeat(80));
-    console.log('✅ SUCCESS - local.json updated with deployment data:');
-    console.log('='.repeat(80));
-    console.log(JSON.stringify(localData, null, 2));
-    console.log('='.repeat(80));
     console.log('\nThe test will use this deployed contract to make contract calls.');
     console.log('Run the e2e tests with:');
     console.log('  TARGET_ENV=undeployed yarn test mn-toolkit-contract-call');

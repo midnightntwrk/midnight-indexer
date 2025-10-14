@@ -51,6 +51,34 @@ export function getTransactionByHashWithRetry(hash: string): Promise<Transaction
   );
 }
 
+export function getContractDeploymentHashes(
+  contractAddress: string,
+): Promise<{ txHash: string; blockHash: string }> {
+  return retry(
+    async () => {
+      const indexerClient = new IndexerHttpClient();
+      const contractActionResponse = await indexerClient.getContractAction(contractAddress);
+
+      if (contractActionResponse?.data?.contractAction?.__typename === 'ContractDeploy') {
+        const contractAction = contractActionResponse.data.contractAction;
+        const txHash = contractAction.transaction?.hash || '';
+        const blockHash = contractAction.transaction?.block?.hash || '';
+
+        if (!txHash || !blockHash) {
+          throw new Error('Missing transaction hash or block hash in contract deployment');
+        }
+
+        return { txHash, blockHash };
+      }
+
+      throw new Error('Contract action is not a deployment or not found');
+    },
+    (result) => result.txHash !== '' && result.blockHash !== '',
+    30,
+    2000,
+  );
+}
+
 /**
  * Wait until the provided events array stabilizes (its length stops changing between checks),
  * then drain and return its contents.

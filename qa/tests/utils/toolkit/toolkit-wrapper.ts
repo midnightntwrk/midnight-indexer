@@ -268,18 +268,13 @@ class ToolkitWrapper {
     }
 
     const { env } = await import('../../environment/model.js');
-    const localDataPath = join(
-      __dirname,
-      '../../data/static',
-      env.getEnvName(),
-      'local.json',
-    );
-    
+    const localDataPath = join(__dirname, '../../data/static', env.getEnvName(), 'local.json');
+
     const localData = JSON.parse(readFileSync(localDataPath, 'utf8'));
     const contractAddressUntagged = localData['contract-address-untagged'];
     const contractAddressTagged = localData['contract-address-tagged'];
     const coinPublic = localData['coin-public'];
-    
+
     if (!contractAddressUntagged || !contractAddressTagged || !coinPublic) {
       throw new Error('Missing required contract data in local.json');
     }
@@ -485,16 +480,13 @@ class ToolkitWrapper {
       throw new Error(`contract-address failed: ${e}`);
     }
 
-    log.debug(`contract-address stdout: ${result.output}`);
-
     let contractAddressInfo: any;
 
     if (result.output && result.output.trim()) {
       try {
         contractAddressInfo = JSON.parse(result.output.trim());
-        log.debug(`Parsed contract address from stdout: ${JSON.stringify(contractAddressInfo)}`);
       } catch (e) {
-        log.debug(`Failed to parse stdout as JSON: ${e}`);
+        // Failed to parse stdout, will try file
       }
     }
 
@@ -502,12 +494,9 @@ class ToolkitWrapper {
       const addressJsonPath = join(outDir, 'contract_address.json');
       if (existsSync(addressJsonPath)) {
         const addressFileContent = readFileSync(addressJsonPath, 'utf8').trim();
-        log.debug(`Contract address file content: "${addressFileContent}"`);
         try {
           contractAddressInfo = JSON.parse(addressFileContent);
-          log.debug(`Parsed contract address from file: ${JSON.stringify(contractAddressInfo)}`);
         } catch (e) {
-          log.debug(`Failed to parse file as JSON: ${e}`);
           contractAddressInfo = {
             tagged: addressFileContent,
             untagged: addressFileContent.replace(/^.*:/, ''),

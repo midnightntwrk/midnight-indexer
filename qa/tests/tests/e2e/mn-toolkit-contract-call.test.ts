@@ -36,8 +36,8 @@ describe('mn-toolkit contract calls', () => {
   beforeAll(async () => {
     await dataProvider.init();
     await deployAndUpdateLocal();
-    
-    await new Promise(resolve => setTimeout(resolve, 100));
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
     await dataProvider.init();
 
     indexerHttpClient = new IndexerHttpClient();
