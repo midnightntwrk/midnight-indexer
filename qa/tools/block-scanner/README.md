@@ -1,17 +1,17 @@
 # Block Scanner
 
-This is a Bun-based implementation of the block scanner for the Midnight Network block chain. It provides the ability to scan a Midtnight blockchain using the Midnight Indexer. It collects all the blocks with some information (discarding the empty blocks) and stores the transactions in a data file, useful for later processing.
+This is a Bun-based implementation of the block scanner for the midnight Network block chain. It provides the ability to scan a Midnight blockchain using the midnight Indexer. It collects all the blocks with some information (discarding the empty blocks) and stores the transactions in a data file, useful for later processing.
 
 ## Use case
 
 Right now there are 2 use cases for this tool:
 1. It gives the ability to scan the chain for data
-2. It is used to prepare test data for the QA tests that target the Midnight Indexer
+2. It is used to prepare test data for the QA tests that target the midnight Indexer
 
 ## Prerequisites
 
 - [Bun](https://bun.sh) installed on your system
-- Access to a Midnight Network indexer endpoint (or local/undeployed environment)
+- Access to a midnight Network indexer endpoint (or local/undeployed environment)
 
 ## Installation
 
@@ -37,7 +37,7 @@ bun run src/scanner.ts /path/to/test/data/folder
 
 ### Available Environments
 
-- `undeployed` - Local development (ws://localhost:8088/api/v1/graphql/ws)
+- `undeployed` - Local development (ws://localhost:8088/api/v3/graphql/ws)
 - `nodedev01` - Node dev environment
 - `devnet` - Development network
 - `qanet` - QA network
@@ -63,10 +63,10 @@ These other scripts are needed to build and run the scanner
 bun run build:scanner
 
 # Run the scanner (default will target undeployed)
-bun run run:scanner
+bun run scan
 
 # Run the scanner against the desired target environment
-TARGET_ENV=undeployed bun run run:scanner
+TARGET_ENV=undeployed bun run scan
 ```
 
 ## Configuration
@@ -83,7 +83,7 @@ The scanner uses the same configuration as the original version:
 The scanner creates:
 - `tmp_scan/` directory for temporary files
 - `{TARGET_ENV}_blocks.jsonl` - Raw block data
-- `contracts-actions.json` - Processed contract actions (if test data folder provided)
+- `contract-actions.jsonc` - Processed contract actions (if test data folder provided)
 
 ## Troubleshooting
 

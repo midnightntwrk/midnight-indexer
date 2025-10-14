@@ -244,7 +244,7 @@ export function updateTestDataFiles(
 
     updateBlockDataFile(folderPath, sourceBlockData);
     updateTransactionDataFile(folderPath, sourceBlockData);
-    updateContracDataFile(folderPath, sourceBlockData);
+    updateContractDataFile(folderPath, sourceBlockData);
 
     console.info("[INFO ] - All test data files updated successfully");
   } catch (error) {
@@ -522,11 +522,11 @@ function updateBlockDataFile(
     const dataObject: BlockDataFile =
       loadTemplateFile<BlockDataFile>(templateFilePath);
 
-    const startIndex = inputDataArray.length - 100;
-    const endIndex = -1;
+    const maxBlocks = 100;
+    const startIndex = Math.max(0, inputDataArray.length - maxBlocks);
 
-    dataObject.latest = inputDataArray[0];
-    dataObject["other-blocks"] = inputDataArray.slice(startIndex, endIndex);
+    dataObject.latest = inputDataArray[inputDataArray.length - 1];
+    dataObject["other-blocks"] = inputDataArray.slice(startIndex);
 
     // Write the data to the target folder
     writeJsonFile<BlockDataFile>(
@@ -610,7 +610,7 @@ function updateTransactionDataFile(
  * @param destinationPath - Path to the test data folder
  * @param sourceBlockData - Path to the data file containing blocks
  */
-function updateContracDataFile(
+function updateContractDataFile(
   destinationPath: string,
   sourceBlockData: string,
 ): void {

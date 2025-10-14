@@ -32,6 +32,8 @@ const CONFIG = {
   PROGRESS_UPDATE_INTERVAL: 100,
 } as const;
 
+type Config = typeof CONFIG;
+
 // Parse command line arguments
 const args = Bun.argv.slice(2);
 const testDataFolder = args[0]; // First argument is the test data folder path
@@ -334,6 +336,17 @@ function handleMessage(event: MessageEvent) {
   }
 }
 
+/**
+ * Subscribes to block events from the websocket connection to the
+ * indexer through the GraphQL API
+ *
+ * @param ws - The WebSocket connection to the indexer
+ * @param blockOffset - The block offset to start from
+ * @param handlers - The handlers to handle the block events
+ * @param queryOverride - The query override to use
+ * @param variablesOverride - The variables override to use
+ * @returns Unsubscribe function to stop the subscription
+ */
 function subscribeToBlockEvents(
   ws: WebSocket,
   blockOffset: BlockOffset | undefined,
@@ -363,9 +376,6 @@ function subscribeToBlockEvents(
     : undefined;
 
   if (queryOverride) query = queryOverride;
-
-  //   console.debug(query);
-  //   console.debug(JSON.stringify(variables));
 
   const payload = {
     id,
@@ -404,6 +414,9 @@ async function main(): Promise<boolean> {
     if (!httpReadyResponse.ok) {
       console.error(
         `[ERROR] - Indexer is not ready on ${TARGET_ENV} (${INDEXER_HTTP_URL})`,
+      );
+      console.error(
+        `[ERROR] - Replied with status ${httpReadyResponse.status}: ${httpReadyResponse.statusText}`,
       );
       return false;
     }
@@ -532,7 +545,7 @@ async function main(): Promise<boolean> {
   const reachedPromise = scanManager.createReachedPromise();
   const errorPromise = scanManager.createErrorPromise();
 
-  const unscribe = subscribeToBlockEvents(
+  const unsubscribe = subscribeToBlockEvents(
     indexerWs,
     { height: 0 },
     scanManager.getWrappedHandler(),
@@ -540,7 +553,7 @@ async function main(): Promise<boolean> {
 
   console.info("[INFO ] - Subscribed to block updates!");
   console.info(
-    `[INFO ] - Streaming ${targetHeight} blocks(or ${TIMEOUT_MS / 1000}s timeout) ...`,
+    `[INFO ] - Streaming ${targetHeight} blocks (or ${TIMEOUT_MS / 1000}s timeout) ...`,
   );
   console.info(`[INFO ] - ... this might take a while`);
 
@@ -567,8 +580,8 @@ async function main(): Promise<boolean> {
   // Clear the spinner line before final messages
   spinner.clear();
 
-  console.info("[INFO ] - Unscribing from block updates");
-  unscribe();
+  console.info("[INFO ] - Unsubscribing from block updates");
+  unsubscribe();
 
   console.debug("[DEBUG] - Closing websocket connection");
 
