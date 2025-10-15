@@ -30,7 +30,7 @@ jobs:
       # This is what makes it safe with pull_request_target
 
       - name: Checkmarx Full Scan
-        uses: midnightntwrk/upload-sarif-github-action/checkmarx-scan-public@3b9a00b556853664122fd72ad61d15d94cacecfa
+        uses: midnightntwrk/upload-sarif-github-action/checkmarx-scan-public@d96d3ffc1c42f5769d972413da59dc1b438d7761
         with:
           cx-client-id: ${{ secrets.CX_CLIENT_ID }}
           cx-client-secret: ${{ secrets.CX_CLIENT_SECRET_EU }}
