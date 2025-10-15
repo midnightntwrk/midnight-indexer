@@ -19,7 +19,6 @@ import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
 import dataProvider from '@utils/testdata-provider';
 import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
-import { main as deployAndUpdateLocal } from '../../scripts/deploy-and-update-local.js';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -35,14 +34,20 @@ describe('mn-toolkit contract calls', () => {
 
   beforeAll(async () => {
     await dataProvider.init();
-    await deployAndUpdateLocal();
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await dataProvider.init();
 
     indexerHttpClient = new IndexerHttpClient();
     toolkit = new ToolkitWrapper({});
     await toolkit.start();
+
+    // Deploy contract with logging and test data writing enabled
+    await toolkit.deployContract({
+      enableLogging: true,
+      writeTestData: true,
+      dataDir: 'data/static/undeployed',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await dataProvider.init();
 
     contractCallResult = await toolkit.callContract();
   }, 300000);

@@ -1,6 +1,17 @@
 // This file is part of midnightntwrk/midnight-indexer
 // Copyright (C) 2025 Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
@@ -8,6 +19,7 @@ import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
 import { ToolkitWrapper, DeployContractResult } from '@utils/toolkit/toolkit-wrapper';
 import { LocalDataUtils, LocalData } from '@utils/local-data-utils';
+import { env } from '../../environment/model';
 import { mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -36,18 +48,17 @@ describe.sequential('contract actions', () => {
 
   describe('a transaction to deploy a smart contract', () => {
     beforeAll(async () => {
-      deployResult = await toolkit.deployContract();
+      // Deploy contract with logging and test data writing enabled
+      deployResult = await toolkit.deployContract({
+        enableLogging: true,
+        writeTestData: true,
+        dataDir: `data/static/${env.getEnvName()}`,
+      });
 
-      // Give the indexer time to process the deployment
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      // Create local.json file for callContract to read from
-      const { LocalDataUtils } = await import('@utils/local-data-utils');
-      const { env } = await import('../../environment/model');
-      const localDataUtils = new LocalDataUtils(`data/static/${env.getEnvName()}`);
-      await localDataUtils.writeDeploymentData(deployResult);
-
       // Read the local data to get the deployment hashes
+      const localDataUtils = new LocalDataUtils(`data/static/${env.getEnvName()}`);
       localData = localDataUtils.readLocalData();
     }, 150000);
 
@@ -133,11 +144,11 @@ describe.sequential('contract actions', () => {
 
       const contractAction = contractActionResponse.data?.contractAction;
       expect(contractAction?.__typename).toBe('ContractDeploy');
-      expect(contractAction?.address).toBe(deployResult.contractAddress);
 
       // Verify it has ContractDeploy-specific fields
       if (contractAction?.__typename === 'ContractDeploy') {
         expect(contractAction.address).toBeDefined();
+        expect(contractAction.address).toBe(deployResult.contractAddress);
       }
     }, 60000);
   });
@@ -230,10 +241,10 @@ describe.sequential('contract actions', () => {
 
       const contractAction = contractActionResponse.data?.contractAction;
       expect(contractAction?.__typename).toBe('ContractCall');
-      expect(contractAction?.address).toBe(deployResult.contractAddress);
 
-      // Verify it has ContractCall-specific fields
       if (contractAction?.__typename === 'ContractCall') {
+        expect(contractAction.address).toBeDefined();
+        expect(contractAction.address).toBe(deployResult.contractAddress);
         expect(contractAction.entryPoint).toBeDefined();
         expect(contractAction.deploy).toBeDefined();
         expect(contractAction.deploy?.address).toBeDefined();
@@ -255,13 +266,10 @@ describe.sequential('contract actions', () => {
      * @when we query the indexer with a transaction query by hash, using the transaction hash reported by the toolkit
      * @then the transaction should be found and reported correctly
      */
-    test('should be reported by the indexer through a transaction query by hash', async (context: TestContext) => {
+    test.skip('should be reported by the indexer through a transaction query by hash', async (context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['Query', 'Transaction', 'ByHash', 'ContractUpdate'],
       };
-
-      // TODO: This test is empty until updateContract method is implemented
-      expect(true).toBe(true); // Placeholder assertion
     }, 60000);
 
     /**
@@ -272,13 +280,10 @@ describe.sequential('contract actions', () => {
      * @when we query the indexer with a block query by hash, using the block hash reported by the toolkit
      * @then the block should contain the contract update transaction
      */
-    test('should be reported by the indexer through a block query by hash', async (context: TestContext) => {
+    test.skip('should be reported by the indexer through a block query by hash', async (context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHash', 'ContractUpdate'],
       };
-
-      // TODO: This test is empty until updateContract method is implemented
-      expect(true).toBe(true); // Placeholder assertion
     }, 60000);
 
     /**
@@ -289,13 +294,10 @@ describe.sequential('contract actions', () => {
      * @when we query the indexer with a contract action query by address
      * @then the contract action should be found with __typename 'ContractUpdate'
      */
-    test('should be reported by the indexer through a contract action query by address', async (context: TestContext) => {
+    test.skip('should be reported by the indexer through a contract action query by address', async (context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['Query', 'ContractAction', 'ByAddress', 'ContractUpdate'],
       };
-
-      // TODO: This test is empty until updateContract method is implemented
-      expect(true).toBe(true); // Placeholder assertion
     }, 60000);
   });
 });

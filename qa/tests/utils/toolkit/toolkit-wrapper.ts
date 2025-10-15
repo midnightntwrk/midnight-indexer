@@ -19,6 +19,7 @@ import { env, networkIdByEnvName } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { LocalDataUtils } from '@utils/local-data-utils';
 
 export type AddressType = 'shielded' | 'unshielded';
 
@@ -375,10 +376,25 @@ class ToolkitWrapper {
     contractConfigPath?: string;
     compiledContractDir?: string;
     network?: string;
+    enableLogging?: boolean;
+    writeTestData?: boolean;
+    dataDir?: string;
   }): Promise<DeployContractResult> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
+
+    const enableLogging = opts?.enableLogging ?? false;
+    const writeTestData = opts?.writeTestData ?? false;
+    const dataDir = opts?.dataDir ?? `data/static/${env.getEnvName()}`;
+
+    if (enableLogging) {
+      log.info('='.repeat(80));
+      log.info('CONTRACT DEPLOYMENT');
+      log.info('='.repeat(80));
+      log.info('\n1. Starting contract deployment...');
+    }
+
     const outDir = this.config.targetDir!;
 
     const contractConfigPath =
@@ -533,12 +549,35 @@ class ToolkitWrapper {
       }
     }
 
-    return {
+    const deployResult = {
       addressUntagged: contractAddressInfo.untagged,
       addressTagged: contractAddressInfo.tagged,
       contractAddress,
       coinPublic,
     };
+
+    if (enableLogging) {
+      log.info('\n✅ Contract deployed successfully!');
+      log.info(`   Address (Untagged):    ${deployResult.addressUntagged}`);
+      log.info(`   Address (Tagged):      ${deployResult.addressTagged}`);
+      log.info(`   Contract Address:      ${deployResult.contractAddress}`);
+      log.info(`   Coin Public:           ${deployResult.coinPublic}`);
+    }
+
+    if (writeTestData) {
+      if (enableLogging) {
+        log.info('\n2. Updating local.json with deployment data from indexer...');
+      }
+      const localDataUtils = new LocalDataUtils(dataDir);
+      await localDataUtils.writeDeploymentData(deployResult);
+
+      if (enableLogging) {
+        log.info('\nThe test will use this deployed contract to make contract calls.');
+        log.info('='.repeat(80));
+      }
+    }
+
+    return deployResult;
   }
 }
 
