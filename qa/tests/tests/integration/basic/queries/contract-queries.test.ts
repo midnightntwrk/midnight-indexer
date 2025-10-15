@@ -120,7 +120,7 @@ describe('contract queries', () => {
       let contractDeployBlockHash: string;
       try {
         existingContractAddress = dataProvider.getKnownContractAddress();
-        contractDeployBlockHash = dataProvider.getContractDeployBlockHash();
+        contractDeployBlockHash = await dataProvider.getContractDeployBlockHash();
       } catch (error) {
         log.warn(error);
         context.skip?.(true, (error as Error).message);
@@ -146,7 +146,7 @@ describe('contract queries', () => {
       let contractUpdateBlockHash: string;
       try {
         existingContractAddress = dataProvider.getKnownContractAddress();
-        contractUpdateBlockHash = dataProvider.getContractUpdateBlockHash();
+        contractUpdateBlockHash = await dataProvider.getContractUpdateBlockHash();
       } catch (error) {
         log.warn(error);
         context.skip?.(true, (error as Error).message);
@@ -173,7 +173,7 @@ describe('contract queries', () => {
       let contractDeployHeight: number;
       try {
         existingContractAddress = dataProvider.getKnownContractAddress();
-        contractDeployHeight = dataProvider.getContractDeployHeight();
+        contractDeployHeight = await dataProvider.getContractDeployBlockHeight();
       } catch (error) {
         log.warn(error);
         context.skip?.(true, (error as Error).message);
@@ -199,7 +199,7 @@ describe('contract queries', () => {
       let contractUpdateHeight: number;
       try {
         existingContractAddress = dataProvider.getKnownContractAddress();
-        contractUpdateHeight = dataProvider.getContractUpdateHeight();
+        contractUpdateHeight = await dataProvider.getContractUpdateHeight();
       } catch (error) {
         log.warn(error);
         context.skip?.(true, (error as Error).message);
@@ -227,8 +227,8 @@ describe('contract queries', () => {
 
       try {
         existingContractAddress = dataProvider.getKnownContractAddress();
-        contractDeployHeight = dataProvider.getContractDeployHeight();
-        contractCallHeight = dataProvider.getContractCallHeight();
+        contractDeployHeight = await dataProvider.getContractDeployBlockHeight();
+        contractCallHeight = await dataProvider.getContractCallHeight();
       } catch (error) {
         log.warn(error);
         context.skip?.(true, (error as Error).message);
@@ -262,7 +262,7 @@ describe('contract queries', () => {
     test('should return null when contract with valid address and valid offset does not exist', async (context: TestContext) => {
       let knownBlockHash: string;
       try {
-        knownBlockHash = dataProvider.getKnownBlockHash();
+        knownBlockHash = await dataProvider.getKnownBlockHash();
       } catch (error) {
         log.warn(error);
         context.skip?.(true, (error as Error).message);
@@ -300,7 +300,7 @@ describe('contract queries', () => {
     test('should return error when contract with invalid address and valid hash', async (context: TestContext) => {
       let knownBlockHash: string;
       try {
-        knownBlockHash = dataProvider.getKnownBlockHash();
+        knownBlockHash = await dataProvider.getKnownBlockHash();
       } catch (error) {
         log.warn(error);
         context.skip?.(true, (error as Error).message);
@@ -338,7 +338,7 @@ describe('contract queries', () => {
     test('should return error when contract with valid address and invalid hash', async (context: TestContext) => {
       let knownBlockHash: string;
       try {
-        knownBlockHash = dataProvider.getKnownBlockHash();
+        knownBlockHash = await dataProvider.getKnownBlockHash();
       } catch (error) {
         log.warn(error);
         context.skip?.(true, (error as Error).message);
