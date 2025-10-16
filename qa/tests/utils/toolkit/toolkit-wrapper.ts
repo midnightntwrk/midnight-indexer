@@ -15,11 +15,11 @@
 
 import fs from 'fs';
 import log from '@utils/logging/logger';
-import { env, networkIdByEnvName } from '../../environment/model';
+import { env } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { LocalDataUtils } from '@utils/local-data-utils';
+import { getContractDeploymentHashes } from '../../tests/e2e/test-utils';
 
 export type AddressType = 'shielded' | 'unshielded';
 
@@ -68,6 +68,7 @@ interface LogEntry {
 
 export interface DeployContractResult {
   addressUntagged: string;
+  addressTagged: string;
   coinPublic: string;
 }
 
@@ -99,7 +100,6 @@ class ToolkitWrapper {
           status = 'confirmed';
         }
       } catch (error) {
-        // Skip lines that aren't valid JSON
         continue;
       }
     }
@@ -173,6 +173,12 @@ class ToolkitWrapper {
       await this.startedContainer.stop();
     }
   }
+
+  /* Show address information from a seed
+   *
+   * @param seed - The seed to use
+   * @returns The address information as a JSON object
+   */
 
   async showAddress(seed: string): Promise<AddressInfo> {
     if (!this.startedContainer) {
@@ -261,7 +267,6 @@ class ToolkitWrapper {
       throw new Error('Container is not started. Call start() first.');
     }
 
-    const { env } = await import('../../environment/model.js');
     const localDataPath = join(__dirname, '../../data/static', env.getEnvName(), 'local.json');
 
     const localData = JSON.parse(readFileSync(localDataPath, 'utf8'));
@@ -367,7 +372,6 @@ class ToolkitWrapper {
   async deployContract(opts?: {
     contractConfigPath?: string;
     compiledContractDir?: string;
-    enableLogging?: boolean;
     writeTestData?: boolean;
     dataDir?: string;
   }): Promise<DeployContractResult> {
@@ -375,16 +379,8 @@ class ToolkitWrapper {
       throw new Error('Container is not started. Call start() first.');
     }
 
-    const enableLogging = opts?.enableLogging ?? false;
     const writeTestData = opts?.writeTestData ?? false;
     const dataDir = opts?.dataDir ?? `data/static/${env.getEnvName()}`;
-
-    if (enableLogging) {
-      log.info('='.repeat(80));
-      log.info('CONTRACT DEPLOYMENT');
-      log.info('='.repeat(80));
-      log.info('\n1. Starting contract deployment...');
-    }
 
     const outDir = this.config.targetDir!;
 
@@ -485,28 +481,30 @@ class ToolkitWrapper {
       throw new Error('contract-address did not produce output');
     }
 
+    // Create tagged address by prepending the midnight:contract-address[v2]: prefix (in hex)
+    const taggedPrefix = '6d69646e696768743a636f6e74726163742d616464726573735b76325d3a';
+    const contractAddressTagged = taggedPrefix + contractAddressUntagged;
+
     const deployResult = {
       addressUntagged: contractAddressUntagged,
+      addressTagged: contractAddressTagged,
       coinPublic,
     };
 
-    if (enableLogging) {
-      log.info('\n✅ Contract deployed successfully!');
-      log.info(`   Contract Address:      ${deployResult.addressUntagged}`);
-      log.info(`   Coin Public:           ${deployResult.coinPublic}`);
-    }
-
     if (writeTestData) {
-      if (enableLogging) {
-        log.info('\n2. Updating local.json with deployment data from indexer...');
-      }
-      const localDataUtils = new LocalDataUtils(dataDir);
-      await localDataUtils.writeDeploymentData(deployResult);
+      // Get deployment hashes from the indexer
+      const { txHash, blockHash } = await getContractDeploymentHashes(deployResult.addressUntagged);
 
-      if (enableLogging) {
-        log.info('\nThe test will use this deployed contract to make contract calls.');
-        log.info('='.repeat(80));
-      }
+      const localData = {
+        'contract-address-untagged': deployResult.addressUntagged,
+        'contract-address-tagged': deployResult.addressTagged,
+        'coin-public': deployResult.coinPublic,
+        'deploy-tx-hash': txHash,
+        'deploy-block-hash': blockHash,
+      };
+
+      const localJsonPath = join(dataDir, 'local.json');
+      writeFileSync(localJsonPath, JSON.stringify(localData, null, 2) + '\n', 'utf-8');
     }
 
     return deployResult;

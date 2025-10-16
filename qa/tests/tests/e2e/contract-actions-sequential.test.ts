@@ -14,22 +14,22 @@
 // limitations under the License.
 
 import type { TestContext } from 'vitest';
+import { mkdtempSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+
 import '@utils/logging/test-logging-hooks';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
 import { ToolkitWrapper, DeployContractResult } from '@utils/toolkit/toolkit-wrapper';
-import { LocalDataUtils, LocalData } from '@utils/local-data-utils';
 import { env } from '../../environment/model';
-import { mkdtempSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import dataProvider from '@utils/testdata-provider';
 
 // To run: yarn test e2e
 describe.sequential('contract actions', () => {
   let indexerHttpClient: IndexerHttpClient;
   let toolkit: ToolkitWrapper;
   let deployResult: DeployContractResult;
-  let localData: LocalData;
   let outDir: string;
 
   beforeAll(async () => {
@@ -48,18 +48,12 @@ describe.sequential('contract actions', () => {
 
   describe('a transaction to deploy a smart contract', () => {
     beforeAll(async () => {
-      // Deploy contract with logging and test data writing enabled
       deployResult = await toolkit.deployContract({
-        enableLogging: true,
         writeTestData: true,
         dataDir: `data/static/${env.getEnvName()}`,
       });
 
       await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // Read the local data to get the deployment hashes
-      const localDataUtils = new LocalDataUtils(`data/static/${env.getEnvName()}`);
-      localData = localDataUtils.readLocalData();
     }, 150000);
 
     /**
@@ -76,7 +70,8 @@ describe.sequential('contract actions', () => {
       };
 
       // The expected transaction might take a bit more to show up by indexer, so we retry a few times
-      const transactionResponse = await getTransactionByHashWithRetry(localData['deploy-tx-hash']);
+      const deployTxHash = dataProvider.getLocalDeployTxHash();
+      const transactionResponse = await getTransactionByHashWithRetry(deployTxHash);
 
       // Verify the transaction appears in the response
       expect(transactionResponse?.data?.transactions).toBeDefined();
@@ -84,11 +79,11 @@ describe.sequential('contract actions', () => {
 
       // Find our specific transaction by hash
       const foundTransaction = transactionResponse.data?.transactions?.find(
-        (tx: any) => tx.hash === localData['deploy-tx-hash'],
+        (tx: any) => tx.hash === deployTxHash,
       );
 
       expect(foundTransaction).toBeDefined();
-      expect(foundTransaction?.hash).toBe(localData['deploy-tx-hash']);
+      expect(foundTransaction?.hash).toBe(deployTxHash);
     }, 15000);
 
     /**
@@ -104,8 +99,9 @@ describe.sequential('contract actions', () => {
         labels: ['Query', 'Block', 'ByHash', 'ContractDeploy'],
       };
 
-      // The expected block might take a bit more to show up by indexer, so we retry a few times
-      const blockResponse = await getBlockByHashWithRetry(localData['deploy-block-hash']);
+      const deployTxHash = dataProvider.getLocalDeployTxHash();
+      const deployBlockHash = dataProvider.getLocalDeployBlockHash();
+      const blockResponse = await getBlockByHashWithRetry(deployBlockHash);
 
       // Verify the block appears in the response
       expect(blockResponse?.data?.block).toBeDefined();
@@ -114,11 +110,11 @@ describe.sequential('contract actions', () => {
 
       // Find our specific transaction in the block
       const foundTransaction = blockResponse.data?.block?.transactions?.find(
-        (tx: any) => tx.hash === localData['deploy-tx-hash'],
+        (tx: any) => tx.hash === deployTxHash,
       );
 
-      expect(foundTransaction?.hash).toBe(localData['deploy-tx-hash']);
-      expect(blockResponse.data?.block?.hash).toBe(localData['deploy-block-hash']);
+      expect(foundTransaction?.hash).toBe(deployTxHash);
+      expect(blockResponse.data?.block?.hash).toBe(deployBlockHash);
     }, 15000);
 
     /**
@@ -158,7 +154,7 @@ describe.sequential('contract actions', () => {
       await toolkit.callContract();
 
       // Give the indexer time to process the contract call
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 3000));
     }, 150000);
 
     /**
@@ -174,7 +170,9 @@ describe.sequential('contract actions', () => {
         labels: ['Query', 'Transaction', 'ByHash', 'ContractCall'],
       };
 
-      const transactionResponse = await getTransactionByHashWithRetry(localData['deploy-tx-hash']);
+      const transactionResponse = await getTransactionByHashWithRetry(
+        dataProvider.getLocalDeployTxHash(),
+      );
 
       // Verify the transaction appears in the response
       expect(transactionResponse?.data?.transactions).toBeDefined();
@@ -182,11 +180,11 @@ describe.sequential('contract actions', () => {
 
       // Find our specific transaction by hash
       const foundTransaction = transactionResponse.data?.transactions?.find(
-        (tx: any) => tx.hash === localData['deploy-tx-hash'],
+        (tx: any) => tx.hash === dataProvider.getLocalDeployTxHash(),
       );
 
       expect(foundTransaction).toBeDefined();
-      expect(foundTransaction?.hash).toBe(localData['deploy-tx-hash']);
+      expect(foundTransaction?.hash).toBe(dataProvider.getLocalDeployTxHash());
     }, 60000);
 
     /**
@@ -202,7 +200,7 @@ describe.sequential('contract actions', () => {
         labels: ['Query', 'Block', 'ByHash', 'ContractCall'],
       };
 
-      const blockResponse = await getBlockByHashWithRetry(localData['deploy-block-hash']);
+      const blockResponse = await getBlockByHashWithRetry(dataProvider.getLocalDeployBlockHash());
 
       // Verify the block appears in the response
       expect(blockResponse?.data?.block).toBeDefined();
@@ -211,11 +209,11 @@ describe.sequential('contract actions', () => {
 
       // Find our specific transaction in the block
       const foundTransaction = blockResponse.data?.block?.transactions?.find(
-        (tx: any) => tx.hash === localData['deploy-tx-hash'],
+        (tx: any) => tx.hash === dataProvider.getLocalDeployTxHash(),
       );
 
-      expect(foundTransaction?.hash).toBe(localData['deploy-tx-hash']);
-      expect(blockResponse.data?.block?.hash).toBe(localData['deploy-block-hash']);
+      expect(foundTransaction?.hash).toBe(dataProvider.getLocalDeployTxHash());
+      expect(blockResponse.data?.block?.hash).toBe(dataProvider.getLocalDeployBlockHash());
     }, 60000);
 
     /**
