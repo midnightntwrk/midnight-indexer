@@ -36,7 +36,7 @@ clap                         = { version = "4.5" }
 const-hex                    = { version = "1.17" }
 derive_more                  = { version = "2.0" }
 drop-stream                  = { version = "0.3" }
-fake                         = { version = "2.10" }
+fake                         = { version = "4.4" }
 fastrace                     = { version = "0.7" }
 fastrace-axum                = { version = "0.1" }
 fastrace-opentelemetry       = { version = "0.14" }
