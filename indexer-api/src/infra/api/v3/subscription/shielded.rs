@@ -234,8 +234,9 @@ where
             .await
             .map_err_into_server_error(|| "get next transaction")?
         {
-            // The end index is "exclusive", i.e. the next free index; hence no +1 here!
-            index = transaction.end_index;
+            // Capture end_index before transaction is moved.
+            let next_index = transaction.end_index;
+
             yield make_relevant_transaction(
                 index,
                 transaction,
@@ -243,6 +244,9 @@ where
                 zswap_state_cache,
             )
             .await?;
+
+            // The end index is "exclusive", i.e. the next free index; hence no +1 here!
+            index = next_index;
         }
 
         // Stream live transactions.
@@ -263,8 +267,9 @@ where
                 .await
                 .map_err_into_server_error(|| "get next transaction")?
             {
-                // The end index is "exclusive", i.e. the next free index; hence no +1 here!
-                index = transaction.end_index;
+                // Capture end_index before transaction is moved.
+                let next_index = transaction.end_index;
+
                 yield make_relevant_transaction(
                     index,
                     transaction,
@@ -272,6 +277,9 @@ where
                     zswap_state_cache,
                 )
                 .await?;
+
+                // The end index is "exclusive", i.e. the next free index; hence no +1 here!
+                index = next_index;
             }
         }
 
