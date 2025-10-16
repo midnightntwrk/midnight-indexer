@@ -48,12 +48,12 @@ describe('contract actions', () => {
         labels: ['ContractActions', 'ContractDeploy', 'Query', 'Toolkit'],
       };
 
-      const contractAddressRaw = result.addressRaw;
+      const contractAddressRaw = result.contractAddress;
 
       log.debug(`contractAddressRaw: ${contractAddressRaw}`);
 
       // Basic assertions
-      expect(result.addressUntagged).toMatch(/^[0-9a-f]{64}$/i);
+      expect(contractAddressRaw).toMatch(/^[0-9a-f]{64}$/i);
       expect(fs.existsSync(result.deployTxPath)).toBe(true);
       expect(fs.existsSync(result.statePath)).toBe(true);
     });
@@ -63,7 +63,7 @@ describe('contract actions', () => {
         labels: ['ContractActions', 'ContractDeploy', 'Query', 'Toolkit'],
       };
 
-      const contractAddressRaw = result.addressUntagged;
+      const contractAddressRaw = result.contractAddress;
 
       const response = await new IndexerHttpClient().getContractAction(contractAddressRaw);
       expect(response).toBeSuccess();
