@@ -356,7 +356,7 @@ class ToolkitWrapper {
     const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'generate-txs',
-      '--src-files',
+      '--src-file',
       txFile,
       '-r',
       '1',
@@ -469,7 +469,7 @@ class ToolkitWrapper {
       const result = await this.startedContainer.exec([
         '/midnight-node-toolkit',
         'generate-txs',
-        '--src-files',
+        '--src-file',
         `/out/${deployTx}`,
         '-r',
         '1',
@@ -484,12 +484,8 @@ class ToolkitWrapper {
     const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'contract-address',
-      '--network',
-      network,
       '--src-file',
       '/out/deploy_tx.mn',
-      '--dest-file',
-      '/out/contract_address.json',
     ]);
     if (result.exitCode !== 0) {
       const e = result.stderr || result.output || 'Unknown error';
@@ -499,28 +495,14 @@ class ToolkitWrapper {
     let contractAddressInfo: any;
 
     if (result.output && result.output.trim()) {
-      try {
-        contractAddressInfo = JSON.parse(result.output.trim());
-      } catch (e) {
-        // Failed to parse stdout, will try file
-      }
-    }
-
-    if (!contractAddressInfo) {
-      const addressJsonPath = join(outDir, 'contract_address.json');
-      if (existsSync(addressJsonPath)) {
-        const addressFileContent = readFileSync(addressJsonPath, 'utf8').trim();
-        try {
-          contractAddressInfo = JSON.parse(addressFileContent);
-        } catch (e) {
-          contractAddressInfo = {
-            tagged: addressFileContent,
-            untagged: addressFileContent.replace(/^.*:/, ''),
-          };
-        }
-      } else {
-        throw new Error('contract-address did not produce output or file');
-      }
+      const output = result.output.trim();
+      // The output is just the contract address string (tagged format)
+      contractAddressInfo = {
+        tagged: output,
+        untagged: output.replace(/^.*:/, ''),
+      };
+    } else {
+      throw new Error('contract-address did not produce output');
     }
 
     fs.writeFileSync(outAddressFile, contractAddressInfo.tagged + '\n', 'utf8');
