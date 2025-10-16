@@ -36,7 +36,7 @@ jobs:
       # Skip for fork PRs (no secrets available)
       - name: Add github.com credentials to netrc
         if: github.event.pull_request.head.repo.full_name == github.repository
-        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4  # v2.0.1
+        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4 # v2.0.1
         with:
           machine: github.com
           username: MidnightCI
