@@ -38,11 +38,6 @@ interface AddressInfo {
   unshieldedUserAddressUntagged: string;
 }
 
-interface ContractAddressInfo {
-  tagged: string;
-  untagged: string;
-}
-
 interface ToolkitConfig {
   containerName?: string;
   targetDir?: string;
@@ -73,8 +68,6 @@ interface LogEntry {
 
 export interface DeployContractResult {
   addressUntagged: string;
-  addressTagged: string;
-  contractAddress: string;
   coinPublic: string;
 }
 
@@ -273,10 +266,9 @@ class ToolkitWrapper {
 
     const localData = JSON.parse(readFileSync(localDataPath, 'utf8'));
     const contractAddressUntagged = localData['contract-address-untagged'];
-    const contractAddressTagged = localData['contract-address-tagged'];
     const coinPublic = localData['coin-public'];
 
-    if (!contractAddressUntagged || !contractAddressTagged || !coinPublic) {
+    if (!contractAddressUntagged || !coinPublic) {
       throw new Error('Missing required contract data in local.json');
     }
 
@@ -290,7 +282,7 @@ class ToolkitWrapper {
       '/midnight-node-toolkit',
       'contract-state',
       '--contract-address',
-      contractAddressTagged,
+      contractAddressUntagged,
       '--dest-file',
       stateFile,
     ]);
@@ -375,7 +367,6 @@ class ToolkitWrapper {
   async deployContract(opts?: {
     contractConfigPath?: string;
     compiledContractDir?: string;
-    network?: string;
     enableLogging?: boolean;
     writeTestData?: boolean;
     dataDir?: string;
@@ -401,18 +392,13 @@ class ToolkitWrapper {
       opts?.contractConfigPath ?? '/toolkit-js/test/contract/contract.config.ts';
     const compiledContractDir =
       opts?.compiledContractDir ?? '/toolkit-js/test/contract/managed/counter';
-    const network = (opts?.network ?? this.runtime.network).toLowerCase();
 
     const deployIntent = 'deploy.bin';
     const deployTx = 'deploy_tx.mn';
-    const addressFile = 'contract_address.mn';
-    const stateFile = 'contract_state.mn';
     const initialPrivateState = 'initial_state.json';
 
     const outDeployIntent = join(outDir, deployIntent);
     const outDeployTx = join(outDir, deployTx);
-    const outAddressFile = join(outDir, addressFile);
-    const outStateFile = join(outDir, stateFile);
     const outInitialState = join(outDir, initialPrivateState);
     const zswapFile = 'temp.json';
     const coinPublicSeed = '0000000000000000000000000000000000000000000000000000000000000001';
@@ -492,57 +478,21 @@ class ToolkitWrapper {
       throw new Error(`contract-address failed: ${e}`);
     }
 
-    let contractAddressInfo: any;
+    // The toolkit now returns the contract address in untagged format (just the hex string)
+    const contractAddressUntagged = result.output && result.output.trim();
 
-    if (result.output && result.output.trim()) {
-      const output = result.output.trim();
-      // The output is just the contract address string (tagged format)
-      contractAddressInfo = {
-        tagged: output,
-        untagged: output.replace(/^.*:/, ''),
-      };
-    } else {
+    if (!contractAddressUntagged) {
       throw new Error('contract-address did not produce output');
     }
 
-    fs.writeFileSync(outAddressFile, contractAddressInfo.tagged + '\n', 'utf8');
-
-    const hexPrefix = '6d69646e696768743a636f6e74726163742d616464726573735b76325d3a';
-    let contractAddress = contractAddressInfo.untagged;
-    if (contractAddress.startsWith(hexPrefix)) {
-      contractAddress = contractAddress.substring(hexPrefix.length);
-    }
-
-    {
-      const result = await this.startedContainer.exec([
-        '/midnight-node-toolkit',
-        'contract-state',
-        '--contract-address',
-        contractAddressInfo.tagged,
-        '--dest-file',
-        '/out/contract_state.mn',
-      ]);
-      if (result.exitCode !== 0) {
-        const e = result.stderr || result.output || 'Unknown error';
-        throw new Error(`contract-state failed: ${e}`);
-      }
-      if (!existsSync(outStateFile)) {
-        throw new Error('contract-state did not produce /out/contract_state.mn');
-      }
-    }
-
     const deployResult = {
-      addressUntagged: contractAddressInfo.untagged,
-      addressTagged: contractAddressInfo.tagged,
-      contractAddress,
+      addressUntagged: contractAddressUntagged,
       coinPublic,
     };
 
     if (enableLogging) {
       log.info('\n✅ Contract deployed successfully!');
-      log.info(`   Address (Untagged):    ${deployResult.addressUntagged}`);
-      log.info(`   Address (Tagged):      ${deployResult.addressTagged}`);
-      log.info(`   Contract Address:      ${deployResult.contractAddress}`);
+      log.info(`   Contract Address:      ${deployResult.addressUntagged}`);
       log.info(`   Coin Public:           ${deployResult.coinPublic}`);
     }
 
@@ -563,4 +513,4 @@ class ToolkitWrapper {
   }
 }
 
-export { ToolkitWrapper, ToolkitConfig ,ToolkitTransactionResult};
+export { ToolkitWrapper, ToolkitConfig };

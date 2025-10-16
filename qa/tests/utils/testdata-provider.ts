@@ -26,11 +26,13 @@ class TestDataProvider {
   private unshieldedAddresses: Record<string, string>;
   private blocks: Record<string, string>;
   private contracts: any[];
+  private local: Record<string, any>;
 
   constructor() {
     this.unshieldedAddresses = {};
     this.blocks = {};
     this.contracts = [];
+    this.local = {};
   }
 
   async init(): Promise<this> {
@@ -39,6 +41,8 @@ class TestDataProvider {
 
     this.contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`);
     this.unshieldedAddresses = importJsoncData(`${baseDir}/unshielded-addresses.json`);
+    this.local = importJsoncData(`${baseDir}/local.json`);
+
     return this;
   }
 
@@ -209,18 +213,6 @@ class TestDataProvider {
     return this.local['contract-address-untagged'];
   }
 
-  getLocalContractAddressTagged() {
-    if (
-      !this.local.hasOwnProperty('contract-address-tagged') ||
-      this.local['contract-address-tagged'] === undefined
-    ) {
-      throw new Error(
-        `Test data provider is missing the contract-address-tagged data for ${env.getEnvName()} environment`,
-      );
-    }
-    return this.local['contract-address-tagged'];
-  }
-
   getLocalCoinPublic() {
     if (!this.local.hasOwnProperty('coin-public') || this.local['coin-public'] === undefined) {
       throw new Error(
@@ -228,18 +220,6 @@ class TestDataProvider {
       );
     }
     return this.local['coin-public'];
-  }
-
-  getLocalContractAddress() {
-    if (
-      !this.local.hasOwnProperty('contract-address') ||
-      this.local['contract-address'] === undefined
-    ) {
-      throw new Error(
-        `Test data provider is missing the contract-address data for ${env.getEnvName()} environment`,
-      );
-    }
-    return this.local['contract-address'];
   }
 
   getLocalDeployTxHash() {

@@ -9,8 +9,6 @@ import { getContractDeploymentHashes } from '../tests/e2e/test-utils';
 
 export interface LocalData {
   'contract-address-untagged': string;
-  'contract-address-tagged': string;
-  'contract-address': string;
   'coin-public': string;
   'deploy-tx-hash': string;
   'deploy-block-hash': string;
@@ -32,12 +30,10 @@ export class LocalDataUtils {
    * @param deployResult - The deployment result from toolkit
    */
   async writeDeploymentData(deployResult: DeployContractResult): Promise<void> {
-    const { txHash, blockHash } = await getContractDeploymentHashes(deployResult.contractAddress);
+    const { txHash, blockHash } = await getContractDeploymentHashes(deployResult.addressUntagged);
 
     const localData: LocalData = {
       'contract-address-untagged': deployResult.addressUntagged,
-      'contract-address-tagged': deployResult.addressTagged,
-      'contract-address': deployResult.contractAddress,
       'coin-public': deployResult.coinPublic,
       'deploy-tx-hash': txHash,
       'deploy-block-hash': blockHash,
@@ -95,8 +91,6 @@ export class LocalDataUtils {
   validateLocalData(data: LocalData): boolean {
     const requiredFields: (keyof LocalData)[] = [
       'contract-address-untagged',
-      'contract-address-tagged',
-      'contract-address',
       'coin-public',
       'deploy-tx-hash',
       'deploy-block-hash',

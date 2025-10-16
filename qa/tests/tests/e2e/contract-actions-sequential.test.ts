@@ -136,7 +136,7 @@ describe.sequential('contract actions', () => {
 
       // Query the contract action by address (using the contract address for GraphQL queries)
       const contractActionResponse = await indexerHttpClient.getContractAction(
-        deployResult.contractAddress,
+        deployResult.addressUntagged,
       );
 
       // Verify the contract action appears in the response
@@ -148,7 +148,7 @@ describe.sequential('contract actions', () => {
       // Verify it has ContractDeploy-specific fields
       if (contractAction?.__typename === 'ContractDeploy') {
         expect(contractAction.address).toBeDefined();
-        expect(contractAction.address).toBe(deployResult.contractAddress);
+        expect(contractAction.address).toBe(deployResult.addressUntagged);
       }
     }, 60000);
   });
@@ -233,7 +233,7 @@ describe.sequential('contract actions', () => {
 
       // Query the contract action by address (using the contract address for GraphQL queries)
       const contractActionResponse = await indexerHttpClient.getContractAction(
-        deployResult.contractAddress,
+        deployResult.addressUntagged,
       );
 
       // Verify the contract action appears in the response
@@ -244,7 +244,7 @@ describe.sequential('contract actions', () => {
 
       if (contractAction?.__typename === 'ContractCall') {
         expect(contractAction.address).toBeDefined();
-        expect(contractAction.address).toBe(deployResult.contractAddress);
+        expect(contractAction.address).toBe(deployResult.addressUntagged);
         expect(contractAction.entryPoint).toBeDefined();
         expect(contractAction.deploy).toBeDefined();
         expect(contractAction.deploy?.address).toBeDefined();
