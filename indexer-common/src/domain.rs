@@ -11,22 +11,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod dust;
 pub mod ledger;
 
 mod address;
 mod bytes;
 mod ledger_state_storage;
-mod network_id;
 mod protocol_version;
 mod pub_sub;
 mod viewing_key;
 
+use std::str::FromStr;
+
 pub use address::*;
 pub use bytes::*;
+use derive_more::{Deref, Display, Into};
 pub use ledger_state_storage::*;
-pub use network_id::*;
 pub use protocol_version::*;
 pub use pub_sub::*;
+use thiserror::Error;
 pub use viewing_key::*;
 
 use serde::{Deserialize, Serialize};
@@ -42,6 +45,13 @@ pub type TokenType = ByteArray<32>;
 pub type TransactionHash = ByteArray<32>;
 pub type UnshieldedAddress = ByteArray<32>;
 
+// DUST-specific types for dustGenerationStatus query.
+pub type DustOwner = ByteArray<32>;
+pub type DustAddress = ByteArray<32>;
+pub type CardanoStakeKey = ByteVec;
+pub type NightUtxoHash = ByteArray<32>;
+pub type DustUtxoId = ByteVec;
+
 // Untagged serialization: simple and/or stable types that are not expected to change.
 pub type SerializedTransactionIdentifier = ByteVec;
 pub type SerializedZswapStateRoot = ByteVec;
@@ -55,12 +65,59 @@ pub type SerializedLedgerState = ByteVec;
 pub type SerializedTransaction = ByteVec;
 pub type SerializedZswapState = ByteVec;
 
-/// The result of applying a regular transaction to the ledger state along with extracted data.
+/// Network identifier.
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Deref, Into, Deserialize)]
+#[deref(forward)]
+#[serde(try_from = "String")]
+pub struct NetworkId(pub String);
+
+impl TryFrom<String> for NetworkId {
+    type Error = InvalidNetworkIdError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        if s.is_empty() {
+            Err(InvalidNetworkIdError::Empty)
+        } else {
+            Ok(Self(s))
+        }
+    }
+}
+
+impl TryFrom<&str> for NetworkId {
+    type Error = InvalidNetworkIdError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.to_owned().try_into()
+    }
+}
+
+impl FromStr for NetworkId {
+    type Err = InvalidNetworkIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.try_into()
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum InvalidNetworkIdError {
+    #[error("network ID must not be empty")]
+    Empty,
+}
+
+/// The outcome of applying a regular transaction to the ledger state along with extracted data.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct ApplyRegularTransactionResult {
+pub struct ApplyRegularTransactionOutcome {
     pub transaction_result: TransactionResult,
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
+    pub ledger_events: Vec<LedgerEvent>,
+}
+
+/// The outcome of applying a system transaction to the ledger state along with extracted data.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ApplySystemTransactionOutcome {
+    pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub ledger_events: Vec<LedgerEvent>,
 }
 
@@ -130,6 +187,7 @@ pub struct UnshieldedUtxo {
     pub value: u128,
     pub intent_hash: IntentHash,
     pub output_index: u32,
+    pub ctime: Option<u64>,
     pub initial_nonce: Nonce,
     pub registered_for_dust_generation: bool,
 }
@@ -166,19 +224,37 @@ impl LedgerEvent {
         }
     }
 
-    fn dust_initial_utxo(raw: SerializedLedgerEvent, output: DustOutput) -> Self {
+    fn dust_initial_utxo(
+        raw: SerializedLedgerEvent,
+        output: dust::QualifiedDustOutput,
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+    ) -> Self {
         Self {
             grouping: LedgerEventGrouping::Dust,
             raw,
-            attributes: LedgerEventAttributes::DustInitialUtxo { output },
+            attributes: LedgerEventAttributes::DustInitialUtxo {
+                output,
+                generation_info,
+                generation_index,
+            },
         }
     }
 
-    fn dust_generation_dtime_update(raw: SerializedLedgerEvent) -> Self {
+    fn dust_generation_dtime_update(
+        raw: SerializedLedgerEvent,
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+        merkle_path: Vec<dust::DustMerklePathEntry>,
+    ) -> Self {
         Self {
             grouping: LedgerEventGrouping::Dust,
             raw,
-            attributes: LedgerEventAttributes::DustGenerationDtimeUpdate,
+            attributes: LedgerEventAttributes::DustGenerationDtimeUpdate {
+                generation_info,
+                generation_index,
+                merkle_path,
+            },
         }
     }
 
@@ -191,7 +267,7 @@ impl LedgerEvent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LedgerEventAttributes {
     ZswapInput,
 
@@ -199,13 +275,22 @@ pub enum LedgerEventAttributes {
 
     ParamChange,
 
-    DustInitialUtxo { output: DustOutput },
+    DustInitialUtxo {
+        output: dust::QualifiedDustOutput,
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+    },
 
-    DustGenerationDtimeUpdate,
+    DustGenerationDtimeUpdate {
+        generation_info: dust::DustGenerationInfo,
+        generation_index: u64,
+        merkle_path: Vec<dust::DustMerklePathEntry>,
+    },
 
     DustSpendProcessed,
 }
 
+/// Minimal DUST output info for backwards compatibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DustOutput {
     pub nonce: Nonce,

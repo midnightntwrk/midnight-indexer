@@ -15,7 +15,6 @@
 
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
-import { env } from '../../environment/model';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 
@@ -41,8 +40,8 @@ describe('shielded transactions', () => {
     await toolkit.start();
 
     // Derive shielded addresses from seeds
-    sourceAddress = await toolkit.showAddress(sourceSeed, 'shielded');
-    destinationAddress = await toolkit.showAddress(destinationSeed, 'shielded');
+    sourceAddress = (await toolkit.showAddress(sourceSeed)).shielded;
+    destinationAddress = (await toolkit.showAddress(destinationSeed)).shielded;
 
     // Submit one shielded->shielded transfer (1 NIGHT)
     transactionResult = await toolkit.generateSingleTx(
@@ -59,7 +58,7 @@ describe('shielded transactions', () => {
       status: transactionResult.status,
     };
     log.info(`\nTX hashes from toolkit: ${JSON.stringify(summary, null, 2)} \n`);
-  }, 120_000);
+  }, 200_000);
 
   afterAll(async () => {
     await Promise.all([toolkit.stop()]);
@@ -113,6 +112,9 @@ describe('shielded transactions', () => {
         "Toolkit transaction hasn't been confirmed",
       );
 
+      log.info(
+        `Verifying indexer reports a shielded transaction by hash: ${transactionResult.txHash}`,
+      );
       // The expected transaction might take a bit more to show up by indexer, so we retry a few times
       const transactionResponse = await new IndexerHttpClient().getShieldedTransaction({
         hash: transactionResult.txHash,
@@ -121,9 +123,9 @@ describe('shielded transactions', () => {
       expect(transactionResponse).toBeSuccess();
       expect(transactionResponse?.data?.transactions).toBeDefined();
       expect(transactionResponse?.data?.transactions?.length).toBeGreaterThan(0);
-      expect(transactionResponse?.data?.transactions?.map((tx: Transaction) => tx.hash)).toContain(
-        transactionResult.txHash,
-      );
+      expect(
+        transactionResponse?.data?.transactions?.map((tx: Transaction) => `0x${tx.hash}`),
+      ).toContain(transactionResult.txHash);
     });
   });
 });

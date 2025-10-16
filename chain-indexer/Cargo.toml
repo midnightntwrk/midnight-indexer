@@ -18,6 +18,7 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 anyhow             = { workspace = true }
 async-stream       = { workspace = true }
 byte-unit          = { workspace = true }
+const-hex          = { workspace = true }
 derive_more        = { workspace = true, features = [ "from" ] }
 fastrace           = { workspace = true, features = [ "enable" ] }
 futures            = { workspace = true }
@@ -30,8 +31,7 @@ metrics            = { workspace = true }
 parity-scale-codec = { workspace = true }
 parking_lot        = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
-serde_with         = { workspace = true }
-sqlx               = { workspace = true, features = [ "runtime-tokio", "time" ] }
+sqlx               = { workspace = true, features = [ "time" ] }
 subxt              = { workspace = true, features = [ "reconnecting-rpc-client" ] }
 thiserror          = { workspace = true }
 tokio              = { workspace = true, features = [ "macros", "rt-multi-thread", "time", "signal" ] }

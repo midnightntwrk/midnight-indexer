@@ -48,7 +48,7 @@ import { GET_CONTRACT_ACTION, GET_CONTRACT_ACTION_BY_OFFSET } from './graphql/co
  */
 export class IndexerHttpClient {
   private client: GraphQLClient;
-  private readonly graphqlAPIEndpoint: string = '/api/v1/graphql';
+  private readonly graphqlAPIEndpoint: string = '/api/v3/graphql';
   private targetUrl: string;
 
   /**

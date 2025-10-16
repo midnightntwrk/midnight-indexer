@@ -13,7 +13,6 @@
 
 use indexer_common::{domain::NetworkId, infra::pool, telemetry};
 use serde::Deserialize;
-use serde_with::{DisplayFromStr, serde_as};
 use std::{num::NonZeroUsize, time::Duration};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -30,10 +29,8 @@ pub struct Config {
     pub telemetry_config: telemetry::Config,
 }
 
-#[serde_as]
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ApplicationConfig {
-    #[serde_as(as = "DisplayFromStr")]
     pub network_id: NetworkId,
     pub blocks_buffer: usize,
     pub save_ledger_state_after: u32,

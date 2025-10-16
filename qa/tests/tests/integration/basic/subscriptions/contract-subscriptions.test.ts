@@ -140,10 +140,10 @@ describe('contract action subscriptions', () => {
     test('should stream historical and new contract actions from a specific block hash', async () => {
       // We get a known contract address from test data provider
       const contractAddress = dataProvider.getKnownContractAddress();
-      
+
       // We get a known block hash from before the latest action
       // This should be a block hash that contains historical contract actions
-      const historicalBlockHash = dataProvider.getContractDeployBlockHash();
+      const historicalBlockHash = await dataProvider.getContractDeployBlockHash();
 
       // We collect all received contract actions
       const receivedContractActions: ContractActionSubscriptionResponse[] = [];
@@ -200,7 +200,7 @@ describe('contract action subscriptions', () => {
           const firstActionBlockHash = firstAction.transaction.block.hash;
           log.debug(`First action block hash: ${firstActionBlockHash}`);
           log.debug(`Requested historical block hash: ${historicalBlockHash}`);
-          
+
           // Note: In a real blockchain, we would compare block heights or hashes
           // For this test, we verify that we received actions and that they match the contract address
           expect(firstActionBlockHash).toBeDefined();

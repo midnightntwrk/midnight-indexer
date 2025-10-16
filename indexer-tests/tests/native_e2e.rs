@@ -14,8 +14,6 @@
 #[cfg(any(feature = "cloud", feature = "standalone"))]
 use anyhow::Context;
 #[cfg(any(feature = "cloud", feature = "standalone"))]
-use indexer_common::domain::NetworkId;
-#[cfg(any(feature = "cloud", feature = "standalone"))]
 use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
@@ -99,7 +97,13 @@ async fn main() -> anyhow::Result<()> {
     println!("Indexer API ready");
 
     // Run the tests.
-    let result = indexer_tests::e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
+    let result = indexer_tests::e2e::run(
+        "undeployed".try_into().unwrap(),
+        "localhost",
+        api_port,
+        false,
+    )
+    .await;
 
     // Terminate Indexer components using SIGTERM and wait which is imporant for coverage data to be
     // written and to avoid zombie processes.
@@ -134,7 +138,13 @@ async fn main() -> anyhow::Result<()> {
     println!("Indexer API ready");
 
     // Run the tests.
-    let result = indexer_tests::e2e::run(NetworkId::Undeployed, "localhost", api_port, false).await;
+    let result = indexer_tests::e2e::run(
+        "undeployed".try_into().unwrap(),
+        "localhost",
+        api_port,
+        false,
+    )
+    .await;
 
     // Terminate Indexer using SIGTERM and wait which is imporant for coverage data to be written
     // and to avoid zombie processes.
@@ -313,7 +323,7 @@ async fn start_indexer_api(postgres_port: u16, nats_url: &str) -> anyhow::Result
             format!("{}/indexer-api/config.yaml", &*WS_DIR),
         )
         .env("APP__INFRA__API__PORT", api_port.to_string())
-        .env("APP__INFRA__API__MAX_COMPLEXITY", "500")
+        .env("APP__INFRA__API__MAX_COMPLEXITY", "505")
         .env("APP__INFRA__PUB_SUB__URL", nats_url)
         .env("APP__INFRA__STORAGE__PORT", postgres_port.to_string())
         .env("APP__INFRA__LEDGER_STATE_STORAGE__URL", nats_url)
@@ -339,7 +349,7 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
             format!("{}/indexer-standalone/config.yaml", &*WS_DIR),
         )
         .env("APP__INFRA__API__PORT", api_port.to_string())
-        .env("APP__INFRA__API__MAX_COMPLEXITY", "500")
+        .env("APP__INFRA__API__MAX_COMPLEXITY", "505")
         .env("APP__INFRA__NODE__URL", node_url)
         .env("APP__INFRA__STORAGE__CNN_URL", sqlite_file)
         .env("APP__TELEMETRY__TRACING__ENABLED", "true")

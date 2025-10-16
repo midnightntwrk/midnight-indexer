@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::domain::{
-    self, Block, BlockTransactions, ContractAction, RegularTransaction, SystemTransaction,
-    Transaction, node::BlockInfo,
+    self, Block, BlockTransactions, ContractAction, DustRegistrationEvent, RegularTransaction,
+    SystemTransaction, Transaction, node::BlockInfo,
 };
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
@@ -173,9 +173,11 @@ impl domain::storage::Storage for Storage {
         &self,
         block: &Block,
         transactions: &[Transaction],
+        dust_registration_events: &[DustRegistrationEvent],
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        let max_transaction_id = save_block(block, transactions, &mut tx).await?;
+        let max_transaction_id =
+            save_block(block, transactions, dust_registration_events, &mut tx).await?;
         tx.commit().await?;
 
         Ok(max_transaction_id)
@@ -218,7 +220,9 @@ impl From<&LedgerEventAttributes> for LedgerEventVariant {
             LedgerEventAttributes::ZswapOutput => Self::ZswapOutput,
             LedgerEventAttributes::ParamChange => Self::ParamChange,
             LedgerEventAttributes::DustInitialUtxo { .. } => Self::DustInitialUtxo,
-            LedgerEventAttributes::DustGenerationDtimeUpdate => Self::DustGenerationDtimeUpdate,
+            LedgerEventAttributes::DustGenerationDtimeUpdate { .. } => {
+                Self::DustGenerationDtimeUpdate
+            }
             LedgerEventAttributes::DustSpendProcessed => Self::DustSpendProcessed,
         }
     }
@@ -228,6 +232,7 @@ impl From<&LedgerEventAttributes> for LedgerEventVariant {
 async fn save_block(
     block: &Block,
     transactions: &[Transaction],
+    dust_registration_events: &[DustRegistrationEvent],
     tx: &mut SqlxTransaction,
 ) -> Result<Option<u64>, sqlx::Error> {
     let query = indoc! {"
@@ -270,6 +275,7 @@ async fn save_block(
         .await?;
 
     let max_transaction_id = save_transactions(transactions, block_id, tx).await?;
+    save_dust_registration_events(dust_registration_events, block_id, block.timestamp, tx).await?;
     Ok(max_transaction_id)
 }
 
@@ -405,6 +411,14 @@ async fn save_system_transaction(
     transaction_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
+    save_unshielded_utxos(
+        &transaction.created_unshielded_utxos,
+        transaction_id,
+        false,
+        tx,
+    )
+    .await?;
+
     save_ledger_events(&transaction.ledger_events, transaction_id, tx).await
 }
 
@@ -480,12 +494,13 @@ async fn save_unshielded_utxos(
                     owner,
                     token_type,
                     value,
-                    output_index,
                     intent_hash,
+                    output_index,
+                    ctime,
                     initial_nonce,
                     registered_for_dust_generation
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 ON CONFLICT (intent_hash, output_index)
                 DO UPDATE SET spending_transaction_id = $2
                 WHERE unshielded_utxos.spending_transaction_id IS NULL
@@ -497,6 +512,7 @@ async fn save_unshielded_utxos(
                 value,
                 intent_hash,
                 output_index,
+                ctime,
                 initial_nonce,
                 registered_for_dust_generation,
             } = utxo;
@@ -507,8 +523,9 @@ async fn save_unshielded_utxos(
                 .bind(owner.as_ref())
                 .bind(token_type.as_ref())
                 .bind(U128BeBytes::from(value))
-                .bind(output_index as i32)
                 .bind(intent_hash.as_ref())
+                .bind(output_index as i64)
+                .bind(ctime.map(|n| n as i64))
                 .bind(initial_nonce.as_ref())
                 .bind(registered_for_dust_generation)
                 .execute(&mut **tx)
@@ -521,8 +538,9 @@ async fn save_unshielded_utxos(
                 owner,
                 token_type,
                 value,
-                output_index,
                 intent_hash,
+                output_index,
+                ctime,
                 initial_nonce,
                 registered_for_dust_generation
             )
@@ -536,6 +554,7 @@ async fn save_unshielded_utxos(
                     value,
                     intent_hash,
                     output_index,
+                    ctime,
                     initial_nonce,
                     registered_for_dust_generation,
                 } = utxo;
@@ -544,8 +563,9 @@ async fn save_unshielded_utxos(
                     .push_bind(owner.as_ref())
                     .push_bind(token_type.as_ref())
                     .push_bind(U128BeBytes::from(value))
-                    .push_bind(*output_index as i32)
                     .push_bind(intent_hash.as_ref())
+                    .push_bind(*output_index as i64)
+                    .push_bind(ctime.map(|n| n as i64))
                     .push_bind(initial_nonce.as_ref())
                     .push_bind(registered_for_dust_generation);
             })
@@ -583,7 +603,7 @@ async fn save_ledger_events(
                 .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
                 .push_bind(ledger_event.grouping)
                 .push_bind(ledger_event.raw.as_ref())
-                .push_bind(Json(ledger_event.attributes));
+                .push_bind(Json(&ledger_event.attributes));
         })
         .build()
         .execute(&mut **tx)
@@ -646,6 +666,76 @@ async fn save_identifiers(
         .build()
         .execute(&mut **tx)
         .await?;
+
+    Ok(())
+}
+
+#[trace]
+async fn save_dust_registration_events(
+    events: &[DustRegistrationEvent],
+    block_id: i64,
+    block_timestamp: u64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    for event in events {
+        match event {
+            DustRegistrationEvent::Registration {
+                cardano_address,
+                dust_address,
+            } => {
+                let query = indoc! {"
+                    INSERT INTO cnight_registrations (
+                        cardano_address,
+                        dust_address,
+                        valid,
+                        registered_at,
+                        block_id
+                    ) VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (cardano_address, dust_address)
+                    DO UPDATE SET
+                        valid = EXCLUDED.valid,
+                        registered_at = EXCLUDED.registered_at,
+                        removed_at = NULL,
+                        block_id = EXCLUDED.block_id
+                "};
+
+                sqlx::query(query)
+                    .bind(cardano_address.as_ref())
+                    .bind(dust_address.as_ref())
+                    .bind(true)
+                    .bind(block_timestamp as i64)
+                    .bind(block_id)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+
+            DustRegistrationEvent::Deregistration {
+                cardano_address,
+                dust_address,
+            } => {
+                let query = indoc! {"
+                    UPDATE cnight_registrations
+                    SET valid = $1,
+                        removed_at = $2,
+                        block_id = $3
+                    WHERE cardano_address = $4
+                    AND dust_address = $5
+                "};
+
+                sqlx::query(query)
+                    .bind(false)
+                    .bind(block_timestamp as i64)
+                    .bind(block_id)
+                    .bind(cardano_address.as_ref())
+                    .bind(dust_address.as_ref())
+                    .execute(&mut **tx)
+                    .await?;
+            }
+
+            // MappingAdded and MappingRemoved are not part of this minimal cherry-pick.
+            _ => {}
+        }
+    }
 
     Ok(())
 }

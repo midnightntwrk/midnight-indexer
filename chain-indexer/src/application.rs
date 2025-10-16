@@ -33,7 +33,6 @@ use indexer_common::domain::{
 use log::{info, warn};
 use parking_lot::RwLock;
 use serde::Deserialize;
-use serde_with::{DisplayFromStr, serde_as};
 use std::{collections::HashSet, error::Error as StdError, future::ready, pin::pin, sync::Arc};
 use tokio::{
     select,
@@ -41,10 +40,8 @@ use tokio::{
     task::{self},
 };
 
-#[serde_as]
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    #[serde_as(as = "DisplayFromStr")]
     pub network_id: NetworkId,
     pub blocks_buffer: usize,
     pub save_ledger_state_after: u32,
@@ -60,7 +57,13 @@ pub async fn run(
     publisher: impl Publisher,
     mut sigterm: Signal,
 ) -> anyhow::Result<()> {
-    let network_id = config.network_id;
+    let Config {
+        network_id,
+        blocks_buffer,
+        save_ledger_state_after,
+        caught_up_max_distance,
+        caught_up_leeway,
+    } = config;
 
     // Initialize highes block.
     let highest_block = storage
@@ -92,7 +95,7 @@ pub async fn run(
             Ok::<_, anyhow::Error>((ledger_state.into(), Some(block_height)))
         })
         .transpose()?
-        .unwrap_or_else(|| (LedgerState::new(network_id), Default::default()));
+        .unwrap_or_else(|| (LedgerState::new(network_id.clone()), Default::default()));
 
     // Reset ledger state if storage is behind ledger state storage (which should not happen during
     // normal operations, but e.g. by a database reset).
@@ -181,12 +184,14 @@ pub async fn run(
     let index_blocks_task = task::spawn(async move {
         let blocks = blocks(highest_block, node)
             .map(ready)
-            .buffered(config.blocks_buffer);
+            .buffered(blocks_buffer);
         let mut blocks = pin!(blocks);
         let mut caught_up = false;
 
         while let Some(next_ledger_state) = get_and_index_block(
-            config,
+            save_ledger_state_after,
+            caught_up_max_distance,
+            caught_up_leeway,
             &mut blocks,
             ledger_state,
             &highest_block_on_node,
@@ -273,7 +278,9 @@ where
 #[allow(clippy::too_many_arguments)]
 #[trace]
 async fn get_and_index_block<E>(
-    config: Config,
+    save_ledger_state_after: u32,
+    caught_up_max_distance: u32,
+    caught_up_leeway: u32,
     blocks: &mut (impl Stream<Item = Result<node::Block, E>> + Unpin),
     ledger_state: LedgerState,
     highest_block_on_node: &Arc<RwLock<Option<BlockInfo>>>,
@@ -293,7 +300,9 @@ where
     match block {
         Some(block) => {
             let ledger_state = index_block(
-                config,
+                save_ledger_state_after,
+                caught_up_max_distance,
+                caught_up_leeway,
                 block,
                 ledger_state,
                 highest_block_on_node,
@@ -322,7 +331,9 @@ async fn get_next_block<E>(
 #[allow(clippy::too_many_arguments)]
 #[trace]
 async fn index_block(
-    config: Config,
+    save_ledger_state_after: u32,
+    caught_up_max_distance: u32,
+    caught_up_leeway: u32,
     block: node::Block,
     mut ledger_state: LedgerState,
     highest_block_on_node: &Arc<RwLock<Option<BlockInfo>>>,
@@ -332,13 +343,6 @@ async fn index_block(
     publisher: &impl Publisher,
     metrics: &Metrics,
 ) -> Result<LedgerState, anyhow::Error> {
-    let Config {
-        save_ledger_state_after,
-        caught_up_max_distance,
-        caught_up_leeway,
-        ..
-    } = config;
-
     let (mut block, transactions) = block.into();
 
     let (transactions, ledger_parameters) = ledger_state
@@ -379,7 +383,7 @@ async fn index_block(
 
     // First save and update the block with its transactions.
     let max_transaction_id = storage
-        .save_block(&block, &transactions)
+        .save_block(&block, &transactions, &block.dust_registration_events)
         .await
         .context("save block")?;
 
@@ -429,20 +433,18 @@ async fn index_block(
     // Publish UnshieldedUtxoIndexed events for affected addresses.
     let addresses = transactions
         .iter()
-        .filter_map(|t| match t {
-            Transaction::Regular(t) => Some(t),
-            Transaction::System(_) => None,
-        })
-        .fold(HashSet::new(), |mut addresses, transaction| {
-            let utxos = transaction
+        .flat_map(|transaction| match transaction {
+            Transaction::Regular(transaction) => transaction
                 .created_unshielded_utxos
                 .iter()
-                .chain(transaction.spent_unshielded_utxos.iter());
-            for utxo in utxos {
-                addresses.insert(utxo.owner.to_owned());
+                .chain(transaction.spent_unshielded_utxos.iter()),
+
+            Transaction::System(transaction) => {
+                transaction.created_unshielded_utxos.iter().chain(&[])
             }
-            addresses
-        });
+        })
+        .map(|utxo| utxo.owner)
+        .collect::<HashSet<_>>();
     for address in addresses {
         publisher
             .publish(&UnshieldedUtxoIndexed { address })
@@ -519,6 +521,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Default::default(),
     });
 
     static BLOCK_1: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -530,6 +533,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Default::default(),
     });
 
     static BLOCK_2: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -541,6 +545,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Default::default(),
     });
 
     static BLOCK_3: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -552,6 +557,7 @@ mod tests {
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
         transactions: Default::default(),
+        dust_registration_events: Default::default(),
     });
 
     pub const ZERO_HASH: BlockHash = ByteArray([0; 32]);

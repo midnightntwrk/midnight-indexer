@@ -74,8 +74,9 @@ CREATE TABLE unshielded_utxos (
   owner BLOB NOT NULL,
   token_type BLOB NOT NULL,
   value BLOB NOT NULL,
-  output_index INTEGER NOT NULL,
   intent_hash BLOB NOT NULL,
+  output_index INTEGER NOT NULL,
+  ctime INTEGER,
   initial_nonce BLOB NOT NULL,
   registered_for_dust_generation INTEGER NOT NULL,
   UNIQUE (intent_hash, output_index)
@@ -144,3 +145,34 @@ CREATE TABLE relevant_transactions (
   transaction_id INTEGER NOT NULL REFERENCES transactions (id),
   UNIQUE (wallet_id, transaction_id)
 );
+--------------------------------------------------------------------------------
+-- DUST Generation Status Tables
+-- These tables support the dustGenerationStatus GraphQL query for Protofire dApp
+--------------------------------------------------------------------------------
+-- DUST generation information tracking
+CREATE TABLE dust_generation_info (
+  id INTEGER PRIMARY KEY,
+  night_utxo_hash BLOB NOT NULL,
+  value BLOB NOT NULL,
+  owner BLOB NOT NULL,
+  nonce BLOB NOT NULL,
+  ctime INTEGER NOT NULL,
+  merkle_index INTEGER NOT NULL,
+  dtime INTEGER
+);
+CREATE INDEX dust_generation_info_owner_idx ON dust_generation_info (owner);
+CREATE INDEX dust_generation_info_night_utxo_hash_idx ON dust_generation_info (night_utxo_hash);
+-- cNIGHT registration tracking
+CREATE TABLE cnight_registrations (
+  id INTEGER PRIMARY KEY,
+  cardano_address BLOB NOT NULL,
+  dust_address BLOB NOT NULL,
+  valid BOOLEAN NOT NULL,
+  registered_at INTEGER NOT NULL,
+  removed_at INTEGER,
+  block_id INTEGER REFERENCES blocks (id),
+  UNIQUE (cardano_address, dust_address)
+);
+CREATE INDEX cnight_registrations_cardano_address_idx ON cnight_registrations (cardano_address);
+CREATE INDEX cnight_registrations_dust_address_idx ON cnight_registrations (dust_address);
+CREATE INDEX cnight_registrations_block_id_idx ON cnight_registrations (block_id);

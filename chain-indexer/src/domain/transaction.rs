@@ -120,6 +120,7 @@ pub struct SystemTransaction {
     pub raw: SerializedTransaction,
 
     // These fields are set after applying the transaction to the ledger state.
+    pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub ledger_events: Vec<LedgerEvent>,
 }
 
@@ -129,6 +130,7 @@ impl From<node::SystemTransaction> for SystemTransaction {
             hash: transaction.hash,
             protocol_version: transaction.protocol_version,
             raw: transaction.raw,
+            created_unshielded_utxos: Default::default(),
             ledger_events: Default::default(),
         }
     }

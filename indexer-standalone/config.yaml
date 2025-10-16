@@ -1,7 +1,7 @@
 run_migrations: true
 
 application:
-  network_id: "Undeployed"
+  network_id: "undeployed"
   blocks_buffer: 10
   save_ledger_state_after: 1000
   caught_up_max_distance: 10

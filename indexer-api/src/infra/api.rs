@@ -11,23 +11,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod v1;
+pub mod v3;
 
 use crate::domain::{Api, LedgerStateCache, storage::Storage};
 use async_graphql::Context;
 use axum::{
     Router,
     body::Body,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-    routing::get,
+    extract::{OriginalUri, State},
+    http::{StatusCode, Uri},
+    response::{IntoResponse, Redirect, Response},
+    routing::{any, get},
 };
 use derive_more::Debug;
 use fastrace_axum::FastraceLayer;
 use indexer_common::{
     domain::{LedgerStateStorage, NetworkId, Subscriber},
-    error::StdErrorExt as _,
+    error::StdErrorExt,
 };
 use log::{error, info, warn};
 use metrics::{Gauge, gauge};
@@ -169,9 +169,9 @@ where
     B: Subscriber,
     Z: LedgerStateStorage,
 {
-    let zswap_state_cache = LedgerStateCache::new(network_id);
+    let zswap_state_cache = LedgerStateCache::new(network_id.clone());
 
-    let v1_app = v1::make_app(
+    let v3_app = v3::make_app(
         network_id,
         zswap_state_cache,
         storage,
@@ -183,16 +183,16 @@ where
 
     Router::new()
         .route("/ready", get(ready))
-        .nest("/api/v1", v1_app)
+        .nest("/api/v3", v3_app)
+        .route("/api/v1/{*rest}", any(redirect_api_v1_to_latest))
+        .route("/api/{*rest}", any(redirect_api_to_latest))
         .with_state(caught_up)
         .layer(
-            ServiceBuilder::new().layer(
-                ServiceBuilder::new()
-                    .layer(FastraceLayer)
-                    .layer(RequestBodyLimitLayer::new(request_body_limit))
-                    .layer(CorsLayer::permissive())
-                    .and_then(transform_lentgh_limit_exceeded),
-            ),
+            ServiceBuilder::new()
+                .layer(FastraceLayer)
+                .layer(RequestBodyLimitLayer::new(request_body_limit))
+                .and_then(transform_lentgh_limit_exceeded)
+                .layer(CorsLayer::permissive()),
         )
 }
 
@@ -206,6 +206,25 @@ async fn ready(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
     } else {
         StatusCode::OK.into_response()
     }
+}
+
+async fn redirect_api_to_latest(OriginalUri(uri): OriginalUri) -> Redirect {
+    redirect_to_latest(uri, "/api")
+}
+
+async fn redirect_api_v1_to_latest(OriginalUri(uri): OriginalUri) -> Redirect {
+    redirect_to_latest(uri, "/api/v1")
+}
+
+fn redirect_to_latest(uri: Uri, target: &str) -> Redirect {
+    let mut path = uri.path().replacen(target, "/api/v3", 1);
+
+    if let Some(query) = uri.query() {
+        path.push('?');
+        path.push_str(query);
+    }
+
+    Redirect::permanent(&path)
 }
 
 /// This is a workaround for async-graphql swallowing `LengthLimitError`s returned by the
@@ -242,7 +261,7 @@ async fn shutdown_signal() {
 }
 
 trait ContextExt {
-    fn get_network_id(&self) -> NetworkId;
+    fn get_network_id(&self) -> &NetworkId;
 
     fn get_storage<S>(&self) -> &S
     where
@@ -262,9 +281,8 @@ trait ContextExt {
 }
 
 impl ContextExt for Context<'_> {
-    fn get_network_id(&self) -> NetworkId {
+    fn get_network_id(&self) -> &NetworkId {
         self.data::<NetworkId>()
-            .copied()
             .expect("NetworkId is stored in Context")
     }
 
@@ -335,24 +353,24 @@ where
 }
 
 trait OptionExt<T> {
-    fn ok_or_server_error<S>(self, message: impl Fn() -> S) -> Result<T, ApiError>
+    fn some_or_server_error<S>(self, message: impl Fn() -> S) -> Result<T, ApiError>
     where
         S: ToString;
 
-    fn ok_or_client_error<S>(self, message: impl Fn() -> S) -> Result<T, ApiError>
+    fn some_or_client_error<S>(self, message: impl Fn() -> S) -> Result<T, ApiError>
     where
         S: ToString;
 }
 
 impl<T> OptionExt<T> for Option<T> {
-    fn ok_or_server_error<S>(self, message: impl Fn() -> S) -> Result<T, ApiError>
+    fn some_or_server_error<S>(self, message: impl Fn() -> S) -> Result<T, ApiError>
     where
         S: ToString,
     {
         self.ok_or_else(|| ApiError::Server(InnerApiError(message().to_string(), None)))
     }
 
-    fn ok_or_client_error<S>(self, message: impl Fn() -> S) -> Result<T, ApiError>
+    fn some_or_client_error<S>(self, message: impl Fn() -> S) -> Result<T, ApiError>
     where
         S: ToString,
     {

@@ -1,7 +1,7 @@
 run_migrations: true
 
 application:
-  network_id: "Undeployed"
+  network_id: "undeployed"
 
 infra:
   storage:

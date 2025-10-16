@@ -83,7 +83,7 @@ By default it connects to a local Midnight Node at `ws://localhost:9944` and exp
 
 | Env Var | Meaning | Default |
 |---|---|---|
-| APP__APPLICATION__NETWORK_ID | Network ID: MainNet, TestNet, DevNet or Undeployed | `Undeployed` |
+| APP__APPLICATION__NETWORK_ID | Network ID | `undeployed` |
 | APP__INFRA__STORAGE__CNN_URL | SQlite connection URL | `/data/indexer.sqlite` |
 | APP__INFRA__NODE__URL | WebSocket Endpoint of Midnight Node | `ws://localhost:9944` |
 | APP__INFRA__API__PORT | Port of the GraphQL API | `8088` |
@@ -102,7 +102,7 @@ The Chain Indexer, Indexer API and Wallet Indexer can be run as separate executa
 
 | Env Var | Meaning | Default |
 |---|---|---|
-| APP__APPLICATION__NETWORK_ID | Network ID: MainNet, TestNet, DevNet or Undeployed | `Undeployed` |
+| APP__APPLICATION__NETWORK_ID | Network ID | `undeployed` |
 | APP__INFRA__STORAGE__HOST | PostgreSQL host | `localhost` |
 | APP__INFRA__STORAGE__PORT | PostgreSQL port | `5432` |
 | APP__INFRA__STORAGE__DBNAME | PostgreSQL database name | `indexer` |
@@ -119,7 +119,7 @@ For the full set of configuration options see [config.yaml](chain-indexer/config
 
 | Env Var | Meaning | Default |
 |---|---|---|
-| APP__APPLICATION__NETWORK_ID | Network ID: MainNet, TestNet, DevNet or Undeployed | `Undeployed` |
+| APP__APPLICATION__NETWORK_ID | Network ID | `undeployed` |
 | APP__INFRA__STORAGE__HOST | PostgreSQL host | `localhost` |
 | APP__INFRA__STORAGE__PORT | PostgreSQL port | `5432` |
 | APP__INFRA__STORAGE__DBNAME | PostgreSQL database name | `indexer` |
@@ -137,7 +137,7 @@ For the full set of configuration options see [config.yaml](indexer-api/config.y
 
 | Env Var | Meaning | Default |
 |---|---|---|
-| APP__APPLICATION__NETWORK_ID | Network ID: MainNet, TestNet, DevNet or Undeployed | `Undeployed` |
+| APP__APPLICATION__NETWORK_ID | Network ID | `undeployed` |
 | APP__INFRA__STORAGE__HOST | PostgreSQL host | `localhost` |
 | APP__INFRA__STORAGE__PORT | PostgreSQL port | `5432` |
 | APP__INFRA__STORAGE__DBNAME | PostgreSQL database name | `indexer` |

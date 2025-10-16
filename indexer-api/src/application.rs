@@ -17,17 +17,14 @@ use futures::{TryStreamExt, future::ok};
 use indexer_common::domain::{BlockIndexed, NetworkId, Subscriber};
 use log::{debug, warn};
 use serde::Deserialize;
-use serde_with::{DisplayFromStr, serde_as};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
 use tokio::{select, signal::unix::Signal, task};
 
-#[serde_as]
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    #[serde_as(as = "DisplayFromStr")]
     pub network_id: NetworkId,
 }
 

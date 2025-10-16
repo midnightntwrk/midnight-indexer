@@ -16,9 +16,9 @@
 use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
-        ContractActionSubscription, DisconnectMutation, DustLedgerEventsSubscription,
-        ShieldedTransactionsSubscription, TransactionsQuery, UnshieldedTransactionsSubscription,
-        ZswapLedgerEventsSubscription, block_query,
+        ContractActionSubscription, DisconnectMutation, DustGenerationStatusQuery,
+        DustLedgerEventsSubscription, ShieldedTransactionsSubscription, TransactionsQuery,
+        UnshieldedTransactionsSubscription, ZswapLedgerEventsSubscription, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
@@ -29,8 +29,8 @@ use crate::{
         },
         connect_mutation,
         contract_action_query::{self},
-        contract_action_subscription, disconnect_mutation, dust_ledger_events_subscription,
-        shielded_transactions_subscription, transactions_query,
+        contract_action_subscription, disconnect_mutation, dust_generation_status_query,
+        dust_ledger_events_subscription, shielded_transactions_subscription, transactions_query,
         unshielded_transactions_subscription, zswap_ledger_events_subscription,
     },
     graphql_ws_client,
@@ -38,7 +38,7 @@ use crate::{
 use anyhow::{Context, bail};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
-use indexer_api::infra::api::v1::{AsBytesExt, viewing_key::ViewingKey};
+use indexer_api::infra::api::v3::{AsBytesExt, viewing_key::ViewingKey};
 use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_017_000};
 use itertools::Itertools;
 use reqwest::Client;
@@ -59,7 +59,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     println!("Starting e2e testing");
 
     let (api_url, ws_api_url) = {
-        let core = format!("{host}:{port}/api/v1/graphql");
+        let core = format!("{host}:{port}/api/v3/graphql");
 
         if secure {
             (format!("https://{core}"), format!("wss://{core}/ws"))
@@ -85,9 +85,12 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_contract_action_query(&indexer_data, &api_client, &api_url)
         .await
         .context("test contract action query")?;
+    test_dust_generation_status_query(&api_client, &api_url)
+        .await
+        .context("test dust generation status query")?;
 
     // Test mutations.
-    test_connect_mutation(&api_client, &api_url, network_id)
+    test_connect_mutation(&api_client, &api_url, &network_id)
         .await
         .context("test connect mutation query")?;
     test_disconnect_mutation(&api_client, &api_url)
@@ -98,7 +101,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_contract_actions_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test contract action subscription")?;
-    test_shielded_transactions_subscription(&ws_api_url, network_id)
+    test_shielded_transactions_subscription(&ws_api_url, &network_id)
         .await
         .context("test shielded transactions subscription")?;
     test_unshielded_transactions_subscription(&indexer_data, &ws_api_url)
@@ -551,11 +554,50 @@ async fn test_contract_action_query(
     Ok(())
 }
 
+/// Test the dustGenerationStatus query.
+async fn test_dust_generation_status_query(
+    api_client: &Client,
+    api_url: &str,
+) -> anyhow::Result<()> {
+    // Test with empty stake keys list.
+    let variables = dust_generation_status_query::Variables {
+        cardano_stake_keys: vec![],
+    };
+    let response = send_query::<DustGenerationStatusQuery>(api_client, api_url, variables).await?;
+    assert!(response.dust_generation_status.is_empty());
+
+    // Test with non-existent stake keys - should return unregistered status.
+    let variables = dust_generation_status_query::Variables {
+        cardano_stake_keys: vec![
+            "0x0000000000000000000000000000000000000000000000000000000000000001"
+                .try_into()
+                .unwrap(),
+            "0x0000000000000000000000000000000000000000000000000000000000000002"
+                .try_into()
+                .unwrap(),
+        ],
+    };
+    let response = send_query::<DustGenerationStatusQuery>(api_client, api_url, variables).await?;
+    assert_eq!(response.dust_generation_status.len(), 2);
+
+    for status in &response.dust_generation_status {
+        // All test keys should be unregistered.
+        assert!(!status.registered);
+        assert!(status.dust_address.is_none());
+        // Unregistered addresses have zero rates and balances.
+        assert_eq!(status.generation_rate, "0");
+        assert_eq!(status.current_capacity, "0");
+        assert_eq!(status.night_balance, "0");
+    }
+
+    Ok(())
+}
+
 /// Test the connect mutation.
 async fn test_connect_mutation(
     api_client: &Client,
     api_url: &str,
-    network_id: NetworkId,
+    network_id: &NetworkId,
 ) -> anyhow::Result<()> {
     // Valid viewing key.
     let viewing_key = ViewingKey::from(viewing_key(network_id));
@@ -670,7 +712,7 @@ async fn test_contract_actions_subscription(
 /// Test the shielded transactions subscription.
 async fn test_shielded_transactions_subscription(
     ws_api_url: &str,
-    network_id: NetworkId,
+    network_id: &NetworkId,
 ) -> anyhow::Result<()> {
     let session_id = ViewingKey::from(viewing_key(network_id))
         .try_into_domain(network_id, PROTOCOL_VERSION_000_017_000)?
@@ -857,32 +899,27 @@ where
     Ok(data)
 }
 
-fn viewing_key(network_id: NetworkId) -> &'static str {
-    match network_id {
-        NetworkId::Undeployed => {
+fn viewing_key(network_id: &NetworkId) -> &'static str {
+    match network_id.as_ref() {
+        "undeployed" => {
             "mn_shield-esk_undeployed1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs9ete5h"
         }
-        NetworkId::Devnet => {
-            "mn_shield-esk_dev1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsp7rsx2"
-        }
-        NetworkId::Testnet => {
-            "mn_shield-esk_test1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsuv0u5j"
-        }
-        NetworkId::Mainnet => {
-            "mn_shield-esk1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsucf6ww"
-        }
+        "dev" => "mn_shield-esk_dev1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsp7rsx2",
+        "test" => "mn_shield-esk_test1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsuv0u5j",
+        "mainnet" => "mn_shield-esk1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsucf6ww",
+        other => panic!("unexpected network ID {other}"),
     }
 }
 
 mod graphql {
     use graphql_client::GraphQLQuery;
-    use indexer_api::infra::api::v1::{
+    use indexer_api::infra::api::v3::{
         HexEncoded, mutation::Unit, unshielded::UnshieldedAddress, viewing_key::ViewingKey,
     };
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -890,7 +927,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -898,7 +935,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -906,7 +943,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -914,7 +951,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -922,7 +959,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -930,7 +967,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -938,7 +975,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -946,7 +983,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -954,7 +991,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -962,9 +999,17 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v1.graphql",
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct DustLedgerEventsSubscription;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustGenerationStatusQuery;
 }

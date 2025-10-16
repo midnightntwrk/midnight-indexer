@@ -108,7 +108,7 @@ async fn run() -> anyhow::Result<()> {
         let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
         chain_indexer::application::run(
-            application_config.into(),
+            application_config.clone().into(),
             node,
             storage,
             ledger_state_storage.clone(),
@@ -128,7 +128,7 @@ async fn run() -> anyhow::Result<()> {
         );
         let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
-        indexer_api::application::run(application_config.into(), api, subscriber, sigterm)
+        indexer_api::application::run(application_config.clone().into(), api, subscriber, sigterm)
     });
 
     let wallet_indexer = task::spawn({

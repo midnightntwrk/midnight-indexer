@@ -13,41 +13,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import fs from 'fs';
+import { parse } from 'jsonc-parser';
 import { env } from '../environment/model';
+
+function importJsoncData(filePath: string): any {
+  const fileContent = fs.readFileSync(filePath, 'utf-8');
+  return parse(fileContent);
+}
 
 class TestDataProvider {
   private unshieldedAddresses: Record<string, string>;
   private blocks: Record<string, string>;
-  private viewingKeys: Record<string, string[]>;
-  private transactions: Record<string, string>;
-  private contracts: Record<string, string>;
-  private heights: Record<string, number>;
+  private contracts: any[];
 
   constructor() {
     this.unshieldedAddresses = {};
     this.blocks = {};
-    this.viewingKeys = {};
-    this.transactions = {};
-    this.contracts = {};
-    this.heights = {};
+    this.contracts = [];
   }
 
   async init(): Promise<this> {
     const envName = env.getEnvName();
-    const blocksDataFile = await import(`../data/static/${envName}/blocks.json`);
-    const unshieldedAddressDataFile = await import(
-      `../data/static/${envName}/unshielded-addresses.json`
-    );
-    const viewingKeysDataFile = await import(`../data/static/${envName}/viewing-keys.json`);
-    const transactionsDataFile = await import(`../data/static/${envName}/transactions.json`);
-    const contractsDataFile = await import(`../data/static/${envName}/contracts.json`);
-    const heightsDataFile = await import(`../data/static/${envName}/heights.json`);
-    this.unshieldedAddresses = unshieldedAddressDataFile.default;
-    this.blocks = blocksDataFile.default;
-    this.viewingKeys = viewingKeysDataFile.default;
-    this.transactions = transactionsDataFile.default;
-    this.contracts = contractsDataFile.default;
-    this.heights = heightsDataFile.default;
+    const baseDir = `data/static/${envName}`;
+
+    this.contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`);
+    this.unshieldedAddresses = importJsoncData(`${baseDir}/unshielded-addresses.json`);
     return this;
   }
 
@@ -63,92 +54,74 @@ class TestDataProvider {
     return this.unshieldedAddresses[property];
   }
 
-  private getBlockData(property: string) {
-    if (!this.blocks.hasOwnProperty(property) || this.blocks[property] === undefined) {
-      throw new Error(
-        `Test data provider is missing the ${property} data for ${env.getEnvName()} environment`,
-      );
+  private findContractAction(actionType: string): any {
+    // Contracts is an array of contract objects with a contract-actions array
+    // NOTE: it could be empty if there are no contracts with all the actions types
+    for (const contract of this.contracts as any[]) {
+      if (contract['contract-actions']) {
+        const action = contract['contract-actions'].find(
+          (a: any) => a['action-type'] === actionType,
+        );
+        if (action) {
+          return action;
+        }
+      }
     }
-    return this.blocks[property];
+    return null;
   }
 
-  private getHeightData(property: string) {
-    if (!this.heights.hasOwnProperty(property) || this.heights[property] === undefined) {
-      throw new Error(
-        `Test data provider is missing the ${property} data for ${env.getEnvName()} environment`,
-      );
+  private getBlockData(actionType: string): Promise<string> {
+    const action = this.findContractAction(actionType);
+    if (action && action['block-hash'] !== undefined) {
+      return Promise.resolve(action['block-hash']);
     }
-    return this.heights[property];
+    return Promise.reject(
+      new Error(
+        `Test data provider missing the block hash for action type ${actionType} in ${env.getEnvName()} environment`,
+      ),
+    );
+  }
+
+  private getBlockHeightOfContractAction(actionType: string): Promise<number> {
+    const action = this.findContractAction(actionType);
+    if (action && action['block-height'] !== undefined) {
+      return Promise.resolve(parseInt(action['block-height']));
+    }
+    return Promise.reject(
+      new Error(
+        `Test data provider is missing the block height for action type ${actionType} in ${env.getEnvName()} environment`,
+      ),
+    );
   }
 
   getKnownBlockHash() {
-    return this.getBlockData('known-hash');
+    return this.getBlockData('ContractDeploy');
   }
 
   getContractDeployBlockHash() {
-    return this.getBlockData('contract-deploy-block-hash');
+    return this.getBlockData('ContractDeploy');
   }
 
   getContractUpdateBlockHash() {
-    return this.getBlockData('contract-update-block-hash');
+    return this.getBlockData('ContractUpdate');
   }
 
-  getContractCallBlockHash() {
-    return this.getBlockData('contract-call-block-hash');
+  getContractDeployBlockHeight() {
+    return this.getBlockHeightOfContractAction('ContractDeploy');
   }
 
-  getContractDeployHeight() {
-    return this.getHeightData('contract-deploy-height');
+  getContractCallBlockHeight() {
+    return this.getBlockHeightOfContractAction('ContractCall');
   }
 
-  getContractCallHeight() {
-    return this.getHeightData('contract-call-height');
-  }
-
-  getContractUpdateHeight() {
-    return this.getHeightData('contract-update-height');
+  getContractUpdateBlockHeight() {
+    return this.getBlockHeightOfContractAction('ContractUpdate');
   }
 
   // TODO: this is a temporary and random viewing key, it should be removed once we can derive them
   // from the wallet
   getViewingKey() {
     return 'mn_shield-esk_undeployed1d45kgmnfva58gwn9de3hy7tsw35k7m3dwdjkxun9wskkketetdmrzhf6wdwg0q0t85zu4sgm8ldgf66hkxmupkjn3spfncne2gtykttjjhjq2mjpxh8';
-  }
-
-  getFaucetsViewingKeys() {
-    if (
-      !this.viewingKeys.hasOwnProperty('pre-fund-faucet') ||
-      this.viewingKeys['pre-fund-faucet'] === undefined
-    ) {
-      throw new Error(
-        `Test data provider is missing the pre-fund-faucet viewing keys data for ${env.getEnvName()} environment`,
-      );
-    }
-    return this.viewingKeys['pre-fund-faucet'];
-  }
-
-  getKnownTransactionHash() {
-    if (
-      !this.transactions.hasOwnProperty('known-hash') ||
-      this.transactions['known-hash'] === undefined
-    ) {
-      throw new Error(
-        `Test data provider is missing the known transaction hash data for ${env.getEnvName()} environment`,
-      );
-    }
-    return this.transactions['known-hash'];
-  }
-
-  getKnownTransactionId() {
-    if (
-      !this.transactions.hasOwnProperty('known-id') ||
-      this.transactions['known-id'] === undefined
-    ) {
-      throw new Error(
-        `Test data provider is missing the known transaction id data for ${env.getEnvName()} environment`,
-      );
-    }
-    return this.transactions['known-id'];
   }
 
   getFabricatedMalformedHashes() {
@@ -178,15 +151,12 @@ class TestDataProvider {
   }
 
   getKnownContractAddress() {
-    if (
-      !this.contracts.hasOwnProperty('known-address') ||
-      this.contracts['known-address'] === undefined
-    ) {
+    if (this.contracts.length === 0 || !this.contracts[0]['contract-address']) {
       throw new Error(
         `Test data provider is missing the known contract address data for ${env.getEnvName()} environment`,
       );
     }
-    return this.contracts['known-address'];
+    return this.contracts[0]['contract-address'];
   }
 
   getNonExistingContractAddress() {
