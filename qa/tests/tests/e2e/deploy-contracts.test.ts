@@ -13,13 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import os from 'os';
 import fs from 'fs';
 import path from 'path';
-import { TestContext } from 'vitest';
-import log from '@utils/logging/logger';
+import os from 'os';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ToolkitWrapper, DeployContractResult } from '@utils/toolkit/toolkit-wrapper';
+import { TestContext } from 'vitest';
 
 // Use a unique /out dir so artifacts are easy to inspect if needed.
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-deploy-'));
@@ -48,12 +47,12 @@ describe('contract actions', () => {
         labels: ['ContractActions', 'ContractDeploy', 'Query', 'Toolkit'],
       };
 
-      const contractAddressRaw = result.contractAddress;
+      const contractAddressRaw = result.addressRaw;
 
-      log.debug(`contractAddressRaw: ${contractAddressRaw}`);
+      console.log('contractAddressRaw: ', contractAddressRaw);
 
       // Basic assertions
-      expect(contractAddressRaw).toMatch(/^[0-9a-f]{64}$/i);
+      expect(result.addressUntagged).toMatch(/^[0-9a-f]{64}$/i);
       expect(fs.existsSync(result.deployTxPath)).toBe(true);
       expect(fs.existsSync(result.statePath)).toBe(true);
     });
@@ -63,7 +62,7 @@ describe('contract actions', () => {
         labels: ['ContractActions', 'ContractDeploy', 'Query', 'Toolkit'],
       };
 
-      const contractAddressRaw = result.contractAddress;
+      const contractAddressRaw = result.addressUntagged;
 
       const response = await new IndexerHttpClient().getContractAction(contractAddressRaw);
       expect(response).toBeSuccess();

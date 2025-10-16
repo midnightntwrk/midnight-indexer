@@ -76,8 +76,6 @@ export interface DeployContractResult {
   addressTagged: string;
   contractAddress: string;
   coinPublic: string;
-  deployTxPath: string;
-  statePath: string;
 }
 
 class ToolkitWrapper {
@@ -556,8 +554,6 @@ class ToolkitWrapper {
       addressTagged: contractAddressInfo.tagged,
       contractAddress,
       coinPublic,
-      deployTxPath: outDeployTx,
-      statePath: outStateFile,
     };
 
     if (enableLogging) {
