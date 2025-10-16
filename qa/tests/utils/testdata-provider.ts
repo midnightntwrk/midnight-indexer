@@ -39,6 +39,7 @@ class TestDataProvider {
 
     this.contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`);
     this.unshieldedAddresses = importJsoncData(`${baseDir}/unshielded-addresses.json`);
+
     return this;
   }
 
@@ -118,8 +119,6 @@ class TestDataProvider {
     return this.getBlockHeightOfContractAction('ContractUpdate');
   }
 
-  // TODO: this is a temporary and random viewing key, it should be removed once we can derive them
-  // from the wallet
   getViewingKey() {
     return 'mn_shield-esk_undeployed1d45kgmnfva58gwn9de3hy7tsw35k7m3dwdjkxun9wskkketetdmrzhf6wdwg0q0t85zu4sgm8ldgf66hkxmupkjn3spfncne2gtykttjjhjq2mjpxh8';
   }
@@ -197,6 +196,33 @@ class TestDataProvider {
   getNonExistingHash() {
     // Return a valid format hash that doesn't exist (all zeros)
     return '0000000000000000000000000000000000000000000000000000000000000000';
+  }
+
+  // Lazy load local data (read from file each time, as it's generated at runtime)
+  private loadLocalData() {
+    const envName = env.getEnvName();
+    const baseDir = `data/static/${envName}`;
+    return importJsoncData(`${baseDir}/local.json`);
+  }
+
+  getLocalDeployTxHash() {
+    const local = this.loadLocalData();
+    if (!local.hasOwnProperty('deploy-tx-hash') || local['deploy-tx-hash'] === undefined) {
+      throw new Error(
+        `Test data provider is missing the deploy-tx-hash data for ${env.getEnvName()} environment`,
+      );
+    }
+    return local['deploy-tx-hash'];
+  }
+
+  getLocalDeployBlockHash() {
+    const local = this.loadLocalData();
+    if (!local.hasOwnProperty('deploy-block-hash') || local['deploy-block-hash'] === undefined) {
+      throw new Error(
+        `Test data provider is missing the deploy-block-hash data for ${env.getEnvName()} environment`,
+      );
+    }
+    return local['deploy-block-hash'];
   }
 }
 

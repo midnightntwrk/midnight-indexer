@@ -15,10 +15,11 @@
 
 import fs from 'fs';
 import log from '@utils/logging/logger';
-import { env, networkIdByEnvName } from '../../environment/model';
+import { env } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { getContractDeploymentHashes } from '../../tests/e2e/test-utils';
 
 export type AddressType = 'shielded' | 'unshielded';
 
@@ -35,11 +36,6 @@ interface AddressInfo {
   coinPublic: string;
   coinPublicTagged: string;
   unshieldedUserAddressUntagged: string;
-}
-
-interface ContractAddressInfo {
-  tagged: string;
-  untagged: string;
 }
 
 interface ToolkitConfig {
@@ -71,12 +67,9 @@ interface LogEntry {
 }
 
 export interface DeployContractResult {
-  addressRaw: string;
   addressUntagged: string;
   addressTagged: string;
-  deployTxPath: string;
-  statePath: string;
-  outDir: string;
+  coinPublic: string;
 }
 
 class ToolkitWrapper {
@@ -107,7 +100,6 @@ class ToolkitWrapper {
           status = 'confirmed';
         }
       } catch (error) {
-        // Skip lines that aren't valid JSON
         continue;
       }
     }
@@ -182,12 +174,12 @@ class ToolkitWrapper {
     }
   }
 
-  /**
-   * Show address information from a seed
+  /* Show address information from a seed
    *
    * @param seed - The seed to use
    * @returns The address information as a JSON object
    */
+
   async showAddress(seed: string): Promise<AddressInfo> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
@@ -209,7 +201,6 @@ class ToolkitWrapper {
       );
     }
 
-    // Extract the json object and return it as is
     return JSON.parse(response.output);
   }
 
@@ -268,40 +259,148 @@ class ToolkitWrapper {
     return this.parseTransactionOutput(rawOutput);
   }
 
+  async callContract(
+    callKey: string = 'increment',
+    rngSeed: string = '0000000000000000000000000000000000000000000000000000000000000037',
+  ): Promise<ToolkitTransactionResult> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    const localDataPath = join(__dirname, '../../data/static', env.getEnvName(), 'local.json');
+
+    const localData = JSON.parse(readFileSync(localDataPath, 'utf8'));
+    const contractAddressUntagged = localData['contract-address-untagged'];
+    const coinPublic = localData['coin-public'];
+
+    if (!contractAddressUntagged || !coinPublic) {
+      throw new Error('Missing required contract data in local.json');
+    }
+
+    const intentFile = `/out/${callKey}_intent.bin`;
+    const txFile = `/out/${callKey}_tx.mn`;
+    const stateFile = `/out/current_state.mn`;
+    const privateStateFile = `/out/${callKey}_private_state.json`;
+
+    log.info('Getting current contract state...');
+    const contractStateResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'contract-state',
+      '--contract-address',
+      contractAddressUntagged,
+      '--dest-file',
+      stateFile,
+    ]);
+
+    if (contractStateResult.exitCode !== 0) {
+      const errorMessage =
+        contractStateResult.stderr || contractStateResult.output || 'Unknown error occurred';
+      throw new Error(`Failed to get contract state: ${errorMessage}`);
+    }
+
+    log.info(`Generating ${callKey} circuit intent...`);
+    const generateIntentResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'generate-intent',
+      'circuit',
+      '-c',
+      '/toolkit-js/test/contract/contract.config.ts',
+      '--toolkit-js-path',
+      '/toolkit-js',
+      '--contract-address',
+      contractAddressUntagged,
+      '--coin-public',
+      coinPublic,
+      '--input-onchain-state',
+      stateFile,
+      '--input-private-state',
+      '/out/initial_state.json',
+      '--output-intent',
+      intentFile,
+      '--output-private-state',
+      privateStateFile,
+      '--output-zswap-state',
+      `/out/${callKey}_zswap.json`,
+      callKey,
+    ]);
+
+    if (generateIntentResult.exitCode !== 0) {
+      const errorMessage =
+        generateIntentResult.stderr || generateIntentResult.output || 'Unknown error occurred';
+      throw new Error(`Failed to generate circuit intent: ${errorMessage}`);
+    }
+
+    log.info('Converting intent to transaction...');
+    const sendIntentResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'send-intent',
+      '--intent-file',
+      intentFile,
+      '--compiled-contract-dir',
+      '/toolkit-js/test/contract/managed/counter',
+      '--to-bytes',
+      '--dest-file',
+      txFile,
+    ]);
+
+    if (sendIntentResult.exitCode !== 0) {
+      const errorMessage =
+        sendIntentResult.stderr || sendIntentResult.output || 'Unknown error occurred';
+      throw new Error(`Failed to send intent: ${errorMessage}`);
+    }
+
+    log.info('Submitting transaction to network...');
+    const result = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'generate-txs',
+      '--src-file',
+      txFile,
+      '-r',
+      '1',
+      'send',
+    ]);
+
+    if (result.exitCode !== 0) {
+      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
+      throw new Error(`Failed to submit transaction: ${errorMessage}`);
+    }
+
+    const rawOutput = result.output.trim();
+    return this.parseTransactionOutput(rawOutput);
+  }
+
   async deployContract(opts?: {
     contractConfigPath?: string;
     compiledContractDir?: string;
-    network?: string;
+    writeTestData?: boolean;
+    dataDir?: string;
   }): Promise<DeployContractResult> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
+
+    const writeTestData = opts?.writeTestData ?? false;
+    const dataDir = opts?.dataDir ?? `data/static/${env.getEnvName()}`;
+
     const outDir = this.config.targetDir!;
 
     const contractConfigPath =
       opts?.contractConfigPath ?? '/toolkit-js/test/contract/contract.config.ts';
     const compiledContractDir =
       opts?.compiledContractDir ?? '/toolkit-js/test/contract/managed/counter';
-    const network = (opts?.network ?? this.runtime.network).toLowerCase();
 
     const deployIntent = 'deploy.bin';
     const deployTx = 'deploy_tx.mn';
-    const addressFile = 'contract_address.mn';
-    const stateFile = 'contract_state.mn';
     const initialPrivateState = 'initial_state.json';
 
     const outDeployIntent = join(outDir, deployIntent);
     const outDeployTx = join(outDir, deployTx);
-    const outAddressFile = join(outDir, addressFile);
-    const outStateFile = join(outDir, stateFile);
     const outInitialState = join(outDir, initialPrivateState);
     const zswapFile = 'temp.json';
-    const coinPublicSeed = '00000000000000000000000000000001';
+    const coinPublicSeed = '0000000000000000000000000000000000000000000000000000000000000001';
     const addressInfo = await this.showAddress(coinPublicSeed);
     const coinPublic = addressInfo.coinPublic;
-    let addressRaw = '';
 
-    // 1) generate-intent deploy
     {
       const result = await this.startedContainer.exec([
         '/midnight-node-toolkit',
@@ -327,7 +426,6 @@ class ToolkitWrapper {
       }
     }
 
-    // 2) send-intent -> bytes (.mn)
     {
       const result = await this.startedContainer.exec([
         '/midnight-node-toolkit',
@@ -345,11 +443,10 @@ class ToolkitWrapper {
         throw new Error(`send-intent failed: ${e}`);
       }
       if (!existsSync(outDeployTx)) {
-        throw new Error(`send-intent did not produce /out/${deployTx}`);
+        throw new Error('send-intent did not produce /out/deploy_tx.mn');
       }
     }
 
-    // 3) generate-txs ... send
     {
       const result = await this.startedContainer.exec([
         '/midnight-node-toolkit',
@@ -366,82 +463,51 @@ class ToolkitWrapper {
       }
     }
 
-    // 4) contract-address -> file
-    const taggedAddress = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
-      'contract-address',
-      '--tagged',
-      '--src-file',
-      `/out/${deployTx}`,
-    ]);
-    log.debug(`contract-address taggedAddress:\n${JSON.stringify(taggedAddress, null, 2)}`);
-    if (taggedAddress.exitCode !== 0) {
-      const e = taggedAddress.stderr || taggedAddress.output || 'Unknown error';
-      throw new Error(`contract-address failed: ${e}`);
-    }
-
-    const untaggedAddress = await this.startedContainer.exec([
+    const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'contract-address',
       '--src-file',
-      `/out/${deployTx}`,
+      '/out/deploy_tx.mn',
     ]);
-    log.debug(`contract-address untaggedAddress:\n${JSON.stringify(untaggedAddress, null, 2)}`);
-    if (untaggedAddress.exitCode !== 0) {
-      const e = untaggedAddress.stderr || untaggedAddress.output || 'Unknown error';
+    if (result.exitCode !== 0) {
+      const e = result.stderr || result.output || 'Unknown error';
       throw new Error(`contract-address failed: ${e}`);
     }
 
-    // The CLI may print JSON or a typed line — extract a typed string.
-    const contractAddressInfo = {
-      tagged: taggedAddress.output.trim(),
-      untagged: untaggedAddress.output.trim(),
-    };
+    // The toolkit now returns the contract address in untagged format (just the hex string)
+    const contractAddressUntagged = result.output && result.output.trim();
 
-    log.debug(
-      `contract-address command result.output:\n${JSON.stringify(contractAddressInfo, null, 2)}`,
-    );
-
-    // persist EXACTLY the typed string (no JSON)
-    fs.writeFileSync(outAddressFile, contractAddressInfo.tagged + '\n', 'utf8');
-
-    // share with later steps
-    addressRaw = contractAddressInfo.tagged;
-
-    if (!existsSync(outAddressFile)) {
-      throw new Error('contract-address did not produce /out/contract_address.mn');
+    if (!contractAddressUntagged) {
+      throw new Error('contract-address did not produce output');
     }
 
-    const raw = readFileSync(outAddressFile, 'utf8').trim();
-    const hex = contractAddressInfo.untagged;
+    // Create tagged address by prepending the midnight:contract-address[v2]: prefix (in hex)
+    const taggedPrefix = '6d69646e696768743a636f6e74726163742d616464726573735b76325d3a';
+    const contractAddressTagged = taggedPrefix + contractAddressUntagged;
 
-    // 5) quick state read — pass the address exactly as written by the toolkit
-    {
-      const result = await this.startedContainer.exec([
-        '/midnight-node-toolkit',
-        'contract-state',
-        '--contract-address',
-        addressRaw,
-        '--dest-file',
-        '/out/contract_state.mn',
-      ]);
-      if (result.exitCode !== 0) {
-        const e = result.stderr || result.output || 'Unknown error';
-        throw new Error(`contract-state failed: ${e}`);
-      }
-      if (!existsSync(outStateFile)) {
-        throw new Error('contract-state did not produce /out/contract_state.mn');
-      }
+    const deployResult = {
+      addressUntagged: contractAddressUntagged,
+      addressTagged: contractAddressTagged,
+      coinPublic,
+    };
+
+    if (writeTestData) {
+      // Get deployment hashes from the indexer
+      const { txHash, blockHash } = await getContractDeploymentHashes(deployResult.addressUntagged);
+
+      const localData = {
+        'contract-address-untagged': deployResult.addressUntagged,
+        'contract-address-tagged': deployResult.addressTagged,
+        'coin-public': deployResult.coinPublic,
+        'deploy-tx-hash': txHash,
+        'deploy-block-hash': blockHash,
+      };
+
+      const localJsonPath = join(dataDir, 'local.json');
+      writeFileSync(localJsonPath, JSON.stringify(localData, null, 2) + '\n', 'utf-8');
     }
 
-    return {
-      addressRaw: raw,
-      addressUntagged: contractAddressInfo.untagged,
-      addressTagged: contractAddressInfo.tagged,
-      deployTxPath: outDeployTx,
-      statePath: outStateFile,
-      outDir,
-    };
+    return deployResult;
   }
 }
 

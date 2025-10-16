@@ -1,4 +1,4 @@
-import { BlockResponse } from '@utils/indexer/indexer-types';
+import { BlockResponse, TransactionResponse } from '@utils/indexer/indexer-types';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 
 function retry<T>(
@@ -33,18 +33,49 @@ function retry<T>(
   });
 }
 
-/**
- * Simple retry mechanism: try every 500ms for up to 6 seconds
- * Retry getting a block by hash until the block is found or the maximum number of attempts is reached.
- * @param hash - The hash of the block to get.
- * @returns The block response.
- */
 export function getBlockByHashWithRetry(hash: string): Promise<BlockResponse> {
   return retry(
     () => new IndexerHttpClient().getBlockByOffset({ hash }),
     (response) => response.data?.block != null,
-    12,
-    500,
+    30,
+    2000,
+  );
+}
+
+export function getTransactionByHashWithRetry(hash: string): Promise<TransactionResponse> {
+  return retry(
+    () => new IndexerHttpClient().getShieldedTransaction({ hash }),
+    (response) => response.data?.transactions != null && response.data.transactions.length > 0,
+    30,
+    2000,
+  );
+}
+
+export function getContractDeploymentHashes(
+  contractAddress: string,
+): Promise<{ txHash: string; blockHash: string }> {
+  return retry(
+    async () => {
+      const indexerClient = new IndexerHttpClient();
+      const contractActionResponse = await indexerClient.getContractAction(contractAddress);
+
+      if (contractActionResponse?.data?.contractAction?.__typename === 'ContractDeploy') {
+        const contractAction = contractActionResponse.data.contractAction;
+        const txHash = contractAction.transaction?.hash || '';
+        const blockHash = contractAction.transaction?.block?.hash || '';
+
+        if (!txHash || !blockHash) {
+          throw new Error('Missing transaction hash or block hash in contract deployment');
+        }
+
+        return { txHash, blockHash };
+      }
+
+      throw new Error('Contract action is not a deployment or not found');
+    },
+    (result) => result.txHash !== '' && result.blockHash !== '',
+    30,
+    2000,
   );
 }
 
