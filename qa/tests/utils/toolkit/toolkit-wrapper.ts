@@ -14,7 +14,7 @@
 // limitations under the License.
 
 import fs from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { retry } from '../retry-helper';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
@@ -121,7 +121,7 @@ class ToolkitWrapper {
 
     this.config.containerName =
       config.containerName || `mn-toolkit-${env.getEnvName()}-${randomId}`;
-    this.config.targetDir = config.targetDir || '/tmp/toolkit/';
+    this.config.targetDir = config.targetDir || resolve('./.tmp/toolkit');
     this.config.nodeTag = config.nodeTag || env.getNodeVersion();
     this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${env.getEnvName()}-${randomId}`;
 
