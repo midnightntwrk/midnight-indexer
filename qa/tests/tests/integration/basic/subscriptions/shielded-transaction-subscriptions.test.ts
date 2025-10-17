@@ -18,7 +18,6 @@ import { randomBytes } from 'crypto';
 import log from '@utils/logging/logger';
 import { LedgerNetworkId, env } from 'environment/model';
 import '@utils/logging/test-logging-hooks';
-import dataProvider from 'utils/testdata-provider';
 import {
   IndexerWsClient,
   SubscriptionHandlers,
@@ -33,13 +32,22 @@ describe('shielded transaction subscriptions', () => {
   let toolkit: ToolkitWrapper;
   let indexerWsClient: IndexerWsClient;
 
+  beforeAll(async () => {
+    // Initialise the toolkit wrapper
+    log.debug('Creating the wrapper');
+    toolkit = new ToolkitWrapper({});
+    log.debug('Starting the wrapper');
+    await toolkit.start();
+    log.debug('Wrapper startedrapper');
+  });
+
+  afterAll(async () => {
+    await toolkit.stop();
+  });
+
   beforeEach(async () => {
     // Initialise a random seed used for the viewing key operations
     randomSeed = randomBytes(32).toString('hex');
-
-    // Initialise the toolkit wrapper
-    toolkit = new ToolkitWrapper({});
-    await toolkit.start();
 
     // Initialise the indexer websocket client and connect to it
     indexerWsClient = new IndexerWsClient();
@@ -49,12 +57,9 @@ describe('shielded transaction subscriptions', () => {
   afterEach(async () => {
     // Close the indexer websocket client
     await indexerWsClient.connectionClose();
-
-    // Stop the toolkit wrapper
-    await toolkit.stop();
   });
 
-  describe('opening a session with viewing key', () => {
+  describe('opening a session with viewing key', async () => {
     /**
      * Opening a session with a valid viewing key returns a session ID
      *
@@ -142,7 +147,7 @@ describe('shielded transaction subscriptions', () => {
     });
   });
 
-  describe('closing a session with session ID', () => {
+  describe('closing a session with session ID', async () => {
     /**
      * Closing a session with a valid session ID terminates the session successfully
      *
@@ -186,7 +191,7 @@ describe('shielded transaction subscriptions', () => {
     });
   });
 
-  describe('a subscription to wallet updates providing viewing key only', () => {
+  describe('a subscription to wallet updates providing viewing key only', async () => {
     /**
      * Subscribing to wallet updates with a valid viewing key streams wallet events
      *
@@ -195,7 +200,7 @@ describe('shielded transaction subscriptions', () => {
      * @then Indexer should stream wallet events starting from the beginning
      * @and we should receive at least one event
      */
-    test.only('should stream wallet events starting from the beginning, given there are relevant transactions', async () => {
+    test('should stream wallet events starting from the beginning, given there are relevant transactions', async () => {
       // Seed with transaction from which we get viewing key
       const seedWithTransactions = '0'.repeat(63) + '1';
       const viewingKey = await toolkit.showViewingKey(seedWithTransactions);
