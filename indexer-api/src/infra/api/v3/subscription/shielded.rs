@@ -234,8 +234,7 @@ where
             .await
             .map_err_into_server_error(|| "get next transaction")?
         {
-            // Capture end_index before transaction is moved.
-            let next_index = transaction.end_index;
+            let end_index = transaction.end_index;
 
             yield make_relevant_transaction(
                 index,
@@ -246,7 +245,7 @@ where
             .await?;
 
             // The end index is "exclusive", i.e. the next free index; hence no +1 here!
-            index = next_index;
+            index = end_index;
         }
 
         // Stream live transactions.
@@ -267,8 +266,7 @@ where
                 .await
                 .map_err_into_server_error(|| "get next transaction")?
             {
-                // Capture end_index before transaction is moved.
-                let next_index = transaction.end_index;
+                let end_index = transaction.end_index;
 
                 yield make_relevant_transaction(
                     index,
@@ -279,7 +277,7 @@ where
                 .await?;
 
                 // The end index is "exclusive", i.e. the next free index; hence no +1 here!
-                index = next_index;
+                index = end_index;
             }
         }
 
@@ -288,9 +286,9 @@ where
     }
 }
 
-#[trace(properties = { "from": "{from:?}" })]
+#[trace(properties = { "index": "{index:?}" })]
 async fn make_relevant_transaction<S, Z>(
-    from: u64,
+    index: u64,
     transaction: domain::RegularTransaction,
     ledger_state_storage: &Z,
     zswap_state_cache: &LedgerStateCache,
@@ -299,14 +297,15 @@ where
     S: Storage,
     Z: LedgerStateStorage,
 {
-    debug!(from, transaction:?; "making relevant transaction");
+    debug!(index, transaction:?; "making relevant transaction");
 
-    let collapsed_merkle_tree = if from == transaction.start_index || transaction.start_index == 0 {
+    let collapsed_merkle_tree = if index == transaction.start_index || transaction.start_index == 0
+    {
         None
     } else {
         let collapsed_merkle_tree = zswap_state_cache
             .collapsed_update(
-                from,
+                index,
                 transaction.start_index - 1,
                 ledger_state_storage,
                 transaction.protocol_version,
