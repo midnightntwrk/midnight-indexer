@@ -44,9 +44,9 @@ jobs:
           toolchain_toml: "rust-toolchain.toml"
         run: |
           toolchain=$(grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/')
-          echo "toolchain=$toolchain" | tee -a $GITHUB_ENV
+          echo "toolchain=$toolchain" | tee -a "$GITHUB_ENV"
           version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
-          echo "version=$version" | tee -a $GITHUB_ENV
+          echo "version=$version" | tee -a "$GITHUB_ENV"
 
       - name: Add github.com credentials to netrc
         uses: extractions/netrc@v2
@@ -140,7 +140,7 @@ jobs:
           toolchain_toml: "rust-toolchain.toml"
         run: |
           version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
-          echo "version=$version" | tee -a $GITHUB_ENV
+          echo "version=$version" | tee -a "$GITHUB_ENV"
 
       - name: Add github.com credentials to netrc
         uses: extractions/netrc@v2
@@ -180,19 +180,19 @@ jobs:
           # Extract the single tag
           INDEXER_TAG=$(echo "${{ steps.meta.outputs.tags }}" | cut -d ':' -f2)
           echo "Using INDEXER_TAG=$INDEXER_TAG"
-          echo "INDEXER_TAG=$INDEXER_TAG" >> $GITHUB_ENV
+          echo "INDEXER_TAG=$INDEXER_TAG" >> "$GITHUB_ENV"
 
       - name: Set up Node Tag to target
         run: |
           # Use workflow dispatch input if provided, otherwise read from NODE_VERSION file
           if [ -n "${{ github.event.inputs.node_tag }}" ]; then
             echo "Using node tag from workflow dispatch: ${{ github.event.inputs.node_tag }}"
-            echo "NODE_TAG=${{ github.event.inputs.node_tag }}" >> $GITHUB_ENV
+            echo "NODE_TAG=${{ github.event.inputs.node_tag }}" >> "$GITHUB_ENV"
           else
             echo "Reading node tag from NODE_VERSION file..."
             node_tag=$(cat NODE_VERSION)
             echo "Using node tag: $node_tag"
-            echo "NODE_TAG=$node_tag" >> $GITHUB_ENV
+            echo "NODE_TAG=$node_tag" >> "$GITHUB_ENV"
           fi
 
       - name: Docker Compose Up
