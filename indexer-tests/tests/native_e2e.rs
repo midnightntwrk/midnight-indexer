@@ -22,7 +22,7 @@ use nix::{
 use std::process::{Child, Command};
 #[cfg(any(feature = "cloud", feature = "standalone"))]
 use std::{
-    env,
+    env, fs,
     net::TcpListener,
     path::Path,
     sync::LazyLock,
@@ -40,6 +40,8 @@ use testcontainers::{
 use testcontainers_modules::postgres::Postgres;
 #[cfg(any(feature = "cloud", feature = "standalone"))]
 use tokio::time::sleep;
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+use walkdir::WalkDir;
 
 #[cfg(any(feature = "cloud", feature = "standalone"))]
 const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -179,6 +181,30 @@ async fn start_node() -> anyhow::Result<NodeHandle> {
     let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
     copy(&node_dir, &temp_dir, &CopyOptions::default())
         .context("copy .node directory into tempdir")?;
+
+    // Make chain directory writable by container user (appuser).
+    // The new node container runs as non-root user (appuser) for security,
+    // so the bind-mounted directory needs to be writable by all users.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let chain_dir = temp_dir.path().join(NODE_VERSION.trim()).join("chain");
+        if chain_dir.exists() {
+            fs::set_permissions(&chain_dir, fs::Permissions::from_mode(0o777))
+                .context("set permissions on chain directory")?;
+
+            // Recursively set permissions on all subdirectories and files.
+            for entry in WalkDir::new(&chain_dir) {
+                let entry = entry.context("walk chain directory")?;
+                let path = entry.path();
+                let mode = if path.is_dir() { 0o777 } else { 0o666 };
+                fs::set_permissions(path, fs::Permissions::from_mode(mode))
+                    .with_context(|| format!("set permissions on {}", path.display()))?;
+            }
+        }
+    }
+
     let node_path = temp_dir
         .path()
         .join(NODE_VERSION.trim())
