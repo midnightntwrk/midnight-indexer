@@ -45,11 +45,12 @@ interface ToolkitConfig {
   nodeTag?: string;
   syncCacheDir?: string;
   coinSeed?: string;
+  warmupCache?: boolean;
 }
 
 export interface ToolkitTransactionResult {
   txHash: string;
-  blockHash?: string;
+  blockHash: string;
   status: 'sent' | 'confirmed';
   rawOutput: string;
 }
@@ -106,9 +107,12 @@ class ToolkitWrapper {
       throw new Error('Could not extract transaction hash from toolkit output');
     }
 
+    // Remove 0x prefix if present to match indexer API format (which doesn't use 0x prefix)
+    const removeHexPrefix = (hash: string) => (hash.startsWith('0x') ? hash.slice(2) : hash);
+
     return {
-      txHash,
-      blockHash,
+      txHash: removeHexPrefix(txHash),
+      blockHash: blockHash ? removeHexPrefix(blockHash) : '',
       status,
       rawOutput: output,
     };
@@ -119,11 +123,39 @@ class ToolkitWrapper {
 
     const randomId = Math.random().toString(36).slice(2, 12);
 
-    this.config.containerName =
-      config.containerName || `mn-toolkit-${env.getEnvName()}-${randomId}`;
+    const envName = env.getEnvName();
+
+    this.config.containerName = config.containerName || `mn-toolkit-${envName}-${randomId}`;
     this.config.targetDir = config.targetDir || resolve('./.tmp/toolkit');
     this.config.nodeTag = config.nodeTag || env.getNodeVersion();
-    this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${env.getEnvName()}-${randomId}`;
+    this.config.warmupCache = config.warmupCache || false;
+
+    // Ensure the target directory exists
+    if (!fs.existsSync(this.config.targetDir)) {
+      fs.mkdirSync(this.config.targetDir, { recursive: true });
+      log.debug(`Created target directory: ${this.config.targetDir}`);
+    }
+
+    // This block is making sure that if we explicitly provide a target dir
+    if (this.config.warmupCache) {
+      this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${envName}`;
+    } else {
+      this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${envName}-${randomId}`;
+      // copy the golden sync cache directory to the instance-specific cache
+      const goldenCacheDir = `${this.config.targetDir}/.sync_cache-${envName}`;
+
+      if (!fs.existsSync(goldenCacheDir)) {
+        throw new Error(
+          `Golden cache directory not found at: ${goldenCacheDir}\n` +
+            `Please ensure the global setup has run to warm up the cache, or run with warmupCache: true first.`,
+        );
+      }
+
+      fs.cpSync(goldenCacheDir, this.config.syncCacheDir, { recursive: true });
+      log.debug(
+        `Copied sync cache from golden cache to instance cache: ${this.config.syncCacheDir}`,
+      );
+    }
 
     log.debug(`Toolkit container name   : ${this.config.containerName}`);
     log.debug(`Toolkit target dir       : ${this.config.targetDir}`);
@@ -149,7 +181,27 @@ class ToolkitWrapper {
       .withCommand(['sleep', 'infinity']); // equivalent to sleep infinity
   }
 
+  /**
+   * Start the toolkit container
+   * This method starts the Docker container with retry logic to handle transient failures.
+   *
+   * @returns A promise that resolves when the container has successfully started
+   *
+   * @throws Error if the container fails to start after the maximum number of retries
+   */
   async start() {
+    // Clean up output directory from previous runs (excluding sync cache)
+    if (this.config.targetDir && fs.existsSync(this.config.targetDir)) {
+      const files = fs.readdirSync(this.config.targetDir);
+      for (const file of files) {
+        if (!file.startsWith('.sync_cache')) {
+          const filePath = join(this.config.targetDir, file);
+          fs.rmSync(filePath, { recursive: true, force: true });
+        }
+      }
+      log.debug(`Cleaned output directory: ${this.config.targetDir}`);
+    }
+
     this.startedContainer = await retry(async () => this.container.start(), {
       maxRetries: 2,
       delayMs: 2_000,
@@ -157,9 +209,53 @@ class ToolkitWrapper {
     });
   }
 
+  /**
+   * Stop the toolkit container and cleanup resources
+   *
+   * This method stops the running Docker container and removes the instance-specific sync cache
+   * directory (unless warmupCache is enabled). Cleanup errors are logged as warnings but do not
+   * throw exceptions.
+   *
+   * @returns A promise that resolves when the container has stopped and cleanup is complete
+   */
   async stop() {
     if (this.startedContainer) {
       await this.startedContainer.stop();
+    }
+
+    // Cleanup instance-specific cache directory (not the golden cache)
+    if (!this.config.warmupCache && this.config.syncCacheDir) {
+      try {
+        fs.rmSync(this.config.syncCacheDir, { recursive: true, force: true });
+        log.debug(`Cleaned up instance-specific sync cache: ${this.config.syncCacheDir}`);
+      } catch (error) {
+        log.warn(`Failed to cleanup sync cache: ${error}`);
+      }
+    }
+  }
+
+  /**
+   * Warm up the cache by generating a single unshielded transaction
+   * This method displays sync progress to the console during warmup.
+   *
+   * @returns void
+   */
+  async warmupCache() {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    // We use generate single tx to warm up the cache because it will try to sync the cache
+    // before it gets to validate the arguments that are explicitly wrong.
+    try {
+      await this.generateSingleTx(
+        '0'.repeat(64), // Invalid seed
+        'unshielded',
+        (await this.showAddress('0'.repeat(63) + '9')).unshielded,
+        1,
+      );
+    } catch (error) {
+      // Do nothing as we are actually expecting an error
     }
   }
 
@@ -311,6 +407,7 @@ class ToolkitWrapper {
    *
    * @param callKey - The contract function to call (e.g., 'increment'). Defaults to 'increment'.
    * @param rngSeed - The random number generator seed for the transaction. Defaults to a fixed seed.
+   * @param dataDir - Directory where test data (local.json) is located. Defaults to 'data/static/{envName}'.
    * @returns A promise that resolves to the transaction result containing the transaction hash,
    *          optional block hash, and submission status.
    * @throws Error if the container is not started or if any step in the contract call process fails.
@@ -318,12 +415,14 @@ class ToolkitWrapper {
   async callContract(
     callKey: string = 'increment',
     rngSeed: string = '0000000000000000000000000000000000000000000000000000000000000037',
+    dataDir?: string,
   ): Promise<ToolkitTransactionResult> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
 
-    const localDataPath = join(__dirname, '../../data/static', env.getEnvName(), 'local.json');
+    const dataDirPath = dataDir ?? `data/static/${env.getEnvName()}`;
+    const localDataPath = join(dataDirPath, 'local.json');
 
     const localData = JSON.parse(fs.readFileSync(localDataPath, 'utf8'));
     const contractAddressUntagged = localData['contract-address-untagged'];
