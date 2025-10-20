@@ -160,9 +160,12 @@ services:
     ports:
       - "9944:9944"
     volumes:
-      - "./target/data/node:/node"
+      - node_data:/node
     environment:
       SHOW_CONFIG: "false"
       CFG_PRESET: "dev"
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  node_data:
