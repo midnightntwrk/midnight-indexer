@@ -39,6 +39,7 @@ class TestDataProvider {
 
     this.contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`);
     this.unshieldedAddresses = importJsoncData(`${baseDir}/unshielded-addresses.json`);
+    this.blocks = importJsoncData(`${baseDir}/blocks.jsonc`);
 
     return this;
   }
@@ -97,6 +98,13 @@ class TestDataProvider {
 
   getKnownBlockHash() {
     return this.getBlockData('ContractDeploy');
+  }
+
+  getBlockHashFromBlocks() {
+    if (this.blocks && this.blocks['other-blocks'] && this.blocks['other-blocks'].length > 0) {
+      return this.blocks['other-blocks'][0]; // Return the first block hash from the array
+    }
+    throw new Error('No block hashes available in blocks.jsonc');
   }
 
   getContractDeployBlockHash() {
