@@ -86,4 +86,4 @@ tower                        = { version = "0.5" }
 tower-http                   = { version = "0.6" }
 trait-variant                = { version = "0.1" }
 uuid                         = { version = "1.18" }
-walkdir                      = { version = "2" }
+walkdir                      = { version = "2.5" }

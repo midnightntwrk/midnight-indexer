@@ -18,8 +18,6 @@ use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
 };
-#[cfg(all(unix, any(feature = "cloud", feature = "standalone")))]
-use std::os::unix::fs::PermissionsExt;
 #[cfg(any(feature = "cloud", feature = "standalone"))]
 use std::process::{Child, Command};
 #[cfg(any(feature = "cloud", feature = "standalone"))]
@@ -189,6 +187,8 @@ async fn start_node() -> anyhow::Result<NodeHandle> {
     // so the bind-mounted directory needs to be writable by all users.
     #[cfg(unix)]
     {
+        use std::os::unix::fs::PermissionsExt;
+
         let chain_dir = temp_dir.path().join(NODE_VERSION.trim()).join("chain");
         if chain_dir.exists() {
             fs::set_permissions(&chain_dir, fs::Permissions::from_mode(0o777))
