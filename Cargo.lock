@@ -3043,6 +3043,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
+ "walkdir",
 ]
 
 [[package]]
