@@ -4,11 +4,8 @@
 
 - [📦 Prerequisites](#-prerequisites)
 - [🧰 Install Dependencies](#-install-dependencies)
-- [🔐 Environment Setup](#-environment-setup)
-- [🔑 Required Access to Private Midnight Repositories](#-required-access-to-private-midnight-repositories)
+- [🔐 Environmental Setup](#-environment-setup)
   - [🏢 Organization Access](#-organization-access)
-  - [🪪 GitHub Personal Access Token (Classic)](#-github-personal-access-token-classic)
-  - [🐳 Docker Authentication to GitHub Container Registry](#docker-authentication-to-github-container-registry)
 - [🚀 Getting Started (Local Undeployed Environment)](#-getting-started-local-undeployed-environment)
 - [🌐 Running Against Deployed Environments](#-running-against-deployed-environments)
 - [✨ Features](#-features)
@@ -40,84 +37,20 @@ yarn install --immutable
 
 ## 🔐 Environment Setup
 
-As we allow zero secrets in the git repository, you need to define a couple of environment variables for build (tests) and runtime (tests). Notice that the values are just used locally for testing and can be chosen arbitrarily; `APP__INFRA__SECRET` must be a hex-encoded 32-byte value.
-
-It is recommended to provide these environment variables via a `~/.midnight-indexer.envrc` or `./.envrc.local` file which is sourced by the `.envrc` file:
-
-```bash
-export APP__INFRA__STORAGE__PASSWORD=indexer
-export APP__INFRA__PUB_SUB__PASSWORD=indexer
-export APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD=indexer
-export APP__INFRA__SECRET=303132333435363738393031323334353637383930313233343536373839303132
-```
-Then in your shell, enable them (with [direnv](https://direnv.net/) or manual sourcing):
-
-```bash
-source .envrc
-```
-
----
-
-## 🔑 Required Access to Private Midnight Repositories
 ### Organization Access 
-Your GitHub account must be a member of the midnight-ntwrk organization to read private repositories and pull images:
+> Your GitHub account must be a member of the midnight-ntwrk organization to read private repositories and pull images: https://github.com/midnight-ntwrk/
 
-Org: https://github.com/midnight-ntwrk/
+Before running the QA tests, make sure your local environment is configured according to the setup steps described in the main project README.
 
-### GitHub Personal Access Token (Classic)
-Create a **classic** PAT:
+#### Step 1 — [Environment Variables](../../README.md#environment-variables)
 
-**1. Go to**  https://github.com/settings/tokens  
-Then click: **“Generate new token” → “Generate new token (classic)”**  
+#### Step 2 — [Required Configuration for Private Repositories](../../README.md#required-configuration-for-private-repositories)
 
-**2.Name your token**  
+#### Step 3 — [GitHub Personal Access Token (PAT)](../../README.md#github-personal-access-token-pat)
 
-**3. Set expiration**  
-Pick a sufficiently long period (e.g., 90 days) or No expiration
+#### Step 4 — [~/.netrc Setup](../../README.md#netrc-setup)
 
-**4. Select scopes**  
-Check the following boxes:
-- `repo` (all)
-- `read:packages`
-- `read:org`
-
-**5. Generate & copy**  
-Click **Generate token**, then **copy** the token value. You won’t see it again.
-
-**6. Save it securely**  
-You can store it in your keychain/1Password and also reference it via env var `GITHUB_TOKEN` when needed:
-```bash
-export GITHUB_TOKEN=<YOUR_GITHUB_PAT>
-```
-
-**7. `~/.netrc` setup**  
-
-**Create or update the file:**
-```bash
-nano ~/.netrc
-```
-
-**Add the following lines:**
-```netrc
-machine github.com
-  login <YOUR_GITHUB_ID>
-  password <YOUR_GITHUB_PAT>
-```
-
-**Save & secure the file:**
-```bash
-chmod 600 ~/.netrc
-```
-
-### Docker authentication to GitHub Container Registry
-You must authenticate Docker with GitHub’s Container Registry (**ghcr.io**) before pulling private Midnight images (e.g., Indexer, Node, NATS, Postgres).
-
-```bash
-echo $GITHUB_TOKEN | docker login ghcr.io -u <YOUR_GITHUB_ID> --password-stdin
-```
-Expected output: `Login Succeeded`
-
-> Replace `<YOUR_GITHUB_ID>` and tokens appropriately. Keep tokens out of version control.
+#### Step 5 — [Docker Authentication](../../README.md#docker-authentication)
 
 ---
 ## 🚀 Getting Started (Local Undeployed Environment)
@@ -156,6 +89,8 @@ source .envrc
 ```
 
 ### 4) Set versions
+
+By default, the latest Node and Indexer tags are used:
 ```bash
 export NODE_TAG=${NODE_TAG:-latest}
 export INDEXER_TAG=${INDEXER_TAG:-latest}
@@ -166,6 +101,8 @@ If you want to pin specific versions, you can override them:
 export NODE_TAG=0.17.0-rc.4
 export INDEXER_TAG=3.0.0-alpha.5
 ```
+
+For full instructions on updating the Node version, see the [Updating Node Version Guide](../../docs/updating-node-version.md)
 
 ### 5) Start the local environment 
 
