@@ -8,8 +8,7 @@
 - [🔑 Required Access to Private Midnight Repositories](#-required-access-to-private-midnight-repositories)
   - [🏢 Organization Access](#-organization-access)
   - [🪪 GitHub Personal Access Token (Classic)](#-github-personal-access-token-classic)
-  - [📂 Netrc Setup](#-netrc-setup)
-  - [🐳 Docker Authentication to GitHub Container Registry](#-docker-authentication-to-github-container-registry)
+  - [🐳 Docker Authentication to GitHub Container Registry](#docker-authentication-to-github-container-registry)
 - [🚀 Getting Started (Local Undeployed Environment)](#-getting-started-local-undeployed-environment)
 - [🌐 Running Against Deployed Environments](#-running-against-deployed-environments)
 - [✨ Features](#-features)
@@ -60,12 +59,12 @@ source .envrc
 ---
 
 ## 🔑 Required Access to Private Midnight Repositories
-### Organisation Access 
+### Organization Access 
 Your GitHub account must be a member of the midnight-ntwrk organization to read private repositories and pull images:
 
 Org: https://github.com/midnight-ntwrk/
 
-### GitHub Personal Access Token (classic)
+### GitHub Personal Access Token (Classic)
 Create a **classic** PAT:
 
 **1. Go to**  https://github.com/settings/tokens  
