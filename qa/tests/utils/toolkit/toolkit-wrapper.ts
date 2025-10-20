@@ -322,7 +322,7 @@ class ToolkitWrapper {
   }
 
   /**
-   * Generate a single shielded or unshielded transaction
+   * Generate and submit a single shielded or unshielded transaction
    *
    * @param sourceSeed - The source seed to use
    * @param addressType - The address type to use
@@ -371,7 +371,7 @@ class ToolkitWrapper {
   /**
    * Extract the contract address from a deployed transaction file.
    * This method uses the toolkit's contract-address command to retrieve either a tagged
-   * (with 'midnight:contract-address[v2]:' prefix) or untagged (raw hex) contract address.
+   * or untagged contract address.
    *
    * @param contractFile - The name of the contract transaction file (e.g., 'deploy_tx.mn')
    *                       located in the toolkit's output directory (/out/).

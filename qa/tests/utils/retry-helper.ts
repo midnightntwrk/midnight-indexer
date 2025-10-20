@@ -40,7 +40,7 @@ export interface RetryOptions {
 /**
  * Retry an async function up to N times if it fails.
  *
- * This function implements a SYNCHRONOUS retry pattern (try → wait → retry),
+ * This function implements a retry pattern (try → wait → retry),
  * but must be async because:
  * 1. JavaScript requires async/await to implement delays (can't block the event loop)
  * 2. The functions being retried are typically async operations (network calls, etc.)

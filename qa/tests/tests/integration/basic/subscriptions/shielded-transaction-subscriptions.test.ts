@@ -38,7 +38,7 @@ describe('shielded transaction subscriptions', () => {
     toolkit = new ToolkitWrapper({});
     log.debug('Starting the wrapper');
     await toolkit.start();
-    log.debug('Wrapper startedrapper');
+    log.debug('Wrapper started');
   });
 
   afterAll(async () => {
