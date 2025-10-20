@@ -122,26 +122,40 @@ Expected output: `Login Succeeded`
 ---
 ## 🚀 Getting Started (Local Undeployed Environment)
 
-Indexer can be executed locally (this is known as `undeployed` environment). The easiest way is through the compose file at the root of the repo. Note that the indexer can be executed as a single `standalone` docker container or using the `cloud` configuration, which is made up by a number of containers (including nats and postgres). Both docker compose profiles also spin up a Midnight node container, used as a main component dependency to feed data required by the indexer.
+Indexer can be executed locally (this is known as `undeployed` environment). You can start it in two ways, depending on whether you want a clean or pre-seeded environment:
 
-1) From **qa/tests**, ensure dependencies are installed:
+### **Option 1 — Using the compose file directly**
+
+Brings up all core services (Node, Indexer, NATS, Postgres) but starts the blockchain from genesis, meaning there will no pre-existing blocks or transactions until you create them. 
+
+See **Step 5** below for how to start it.
+
+### **Option 2 — Using the helper startup script (recommended for testing)**
+
+This method wraps the compose command and additionally seeds the environment with sample data (blocks and transactions).
+
+See **Step 5** below for how to use the script.
+
+Once you’ve chosen your preferred setup, follow the steps below to install dependencies and run the tests.
+
+### 1) From **qa/tests**, ensure dependencies are installed:
 ```bash
 cd qa/tests
 yarn install --immutable
 ```
 
-2) Move to the **repo root**:
+### 2) Move to the **repo root**:
 ```bash
 cd ../..   # move up to the repo root
 ```
 
-3) Load env 
+### 3) Load env 
 
 ```bash
 source .envrc
 ```
 
-4) Set versions
+### 4) Set versions
 ```bash
 export NODE_TAG=${NODE_TAG:-latest}
 export INDEXER_TAG=${INDEXER_TAG:-latest}
@@ -153,7 +167,19 @@ export NODE_TAG=0.17.0-rc.4
 export INDEXER_TAG=3.0.0-alpha.5
 ```
 
-5) Start the local environment with seeded data using the helper script:
+### 5) Start the local environment 
+
+Choose one of the following options:
+
+#### **Option 1 — Compose directly (clean chain):**
+
+```bash
+docker compose --profile cloud up -d
+```
+> Starts all containers, but the chain begins from genesis (no existing blocks or transactions).
+
+#### **Option 2 — Helper startup script (pre-seeded data):**
+
 ```bash
 bash qa/scripts/startup-localenv-with-data.sh
 ```
@@ -162,7 +188,7 @@ That script will:
 - wait for all containers to become healthy
 - seed sample data for GraphQL testing
 
-6) Run the tests from the QA folder:
+### 6) Run the tests from the QA folder:
 ```bash
 cd qa/tests
 TARGET_ENV=undeployed yarn test 
@@ -174,9 +200,9 @@ TARGET_ENV=undeployed yarn test
 ## 🌐 Running Against Deployed Environments
 
 There are a number of deployed environments that are used for testing components of the Midnight network. The are:
-  - Devnet
-  - QANet
-  - Testnet02
+  - devnet
+  - qanet
+  - testnet02
 
 To execute the tests against these environments just change the TARGET_ENV variable accordingly (NOTE: use lower case for environment names)
 ```bash
