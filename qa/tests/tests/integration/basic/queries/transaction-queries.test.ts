@@ -50,7 +50,7 @@ describe('transaction queries', () => {
 
       const transactionQueryResponses: TransactionResponse[] = [];
       for (const transactionHash of transactionHashes!) {
-        const transactionQueryResponse = await indexerHttpClient.getShieldedTransaction({
+        const transactionQueryResponse = await indexerHttpClient.getTransactionByOffset({
           hash: transactionHash,
         });
         expect(transactionQueryResponse).toBeSuccess();
@@ -71,7 +71,7 @@ describe('transaction queries', () => {
         hash: '0000000000000000000000000000000000000000000000000000000000000000',
       };
 
-      const response = await indexerHttpClient.getShieldedTransaction(transactionOffset);
+      const response = await indexerHttpClient.getTransactionByOffset(transactionOffset);
 
       expect(response).toBeSuccess();
       expect(response.data?.transactions).toBeDefined();
@@ -95,7 +95,7 @@ describe('transaction queries', () => {
 
         log.info(`Send a transaction query with an hash longer than expected: ${targetHash}`);
         const response: TransactionResponse =
-          await indexerHttpClient.getShieldedTransaction(offset);
+          await indexerHttpClient.getTransactionByOffset(offset);
 
         expect.soft(response).toBeError();
       }
@@ -127,7 +127,7 @@ describe('transaction queries', () => {
       );
 
       for (const identifier of identifiers) {
-        const transactionQueryResponse = await indexerHttpClient.getShieldedTransaction({
+        const transactionQueryResponse = await indexerHttpClient.getTransactionByOffset({
           identifier: identifier,
         });
         expect(transactionQueryResponse).toBeSuccess();
@@ -156,7 +156,7 @@ describe('transaction queries', () => {
       };
 
       const response: TransactionResponse =
-        await indexerHttpClient.getShieldedTransaction(transactionOffset);
+        await indexerHttpClient.getTransactionByOffset(transactionOffset);
 
       expect(response).toBeSuccess();
       expect(response.data!.transactions).toBeDefined();
@@ -178,7 +178,7 @@ describe('transaction queries', () => {
           identifier: invalidIdentifier,
         };
 
-        const response = await indexerHttpClient.getShieldedTransaction(transactionOffset);
+        const response = await indexerHttpClient.getTransactionByOffset(transactionOffset);
 
         expect.soft(response).toBeError();
       }
@@ -205,7 +205,7 @@ describe('transaction queries', () => {
       log.info(
         "Send a transaction query with offset containing both hash and identifier: this shouldn't be allowed",
       );
-      let response: TransactionResponse = await indexerHttpClient.getShieldedTransaction(offset);
+      let response: TransactionResponse = await indexerHttpClient.getTransactionByOffset(offset);
 
       expect(response).toBeError();
     });
@@ -225,7 +225,7 @@ async function getGenesisTransactions(): Promise<Transaction[]> {
 
   const transactionQueryResponses: TransactionResponse[] = [];
   for (const transactionHash of transactionHashes!) {
-    const transactionQueryResponse = await indexerHttpClient.getShieldedTransaction({
+    const transactionQueryResponse = await indexerHttpClient.getTransactionByOffset({
       hash: transactionHash,
     });
     expect(transactionQueryResponse).toBeSuccess();

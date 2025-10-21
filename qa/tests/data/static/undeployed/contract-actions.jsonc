@@ -6,17 +6,17 @@
       {
         "action-type": "ContractDeploy",
         "block-height": 9,
-        "block-hash": "e303a9625b7852b89ea22dda643a17d29faade9eece88965ca67b7796b276b54"
+        "block-hash": "a48c80850bbdb767d6644548768bd005262445a73dc1d256698d1b698bf8ac40"
       },
       {
         "action-type": "ContractCall",
         "block-height": 13,
-        "block-hash": "28b1d829a677dc286eaeca6956c18e015640bd2f132a57bd2b33a38d4b86feb5"
+        "block-hash": "9333e353ab0eab07cd551515f03e336a8072bdef6c637547dee783479e602a25"
       },
       {
         "action-type": "ContractUpdate",
         "block-height": 19,
-        "block-hash": "63b9b03475571607f1974e0421bdc382122b7e81b87cf4137009fb8b6e429aa2"
+        "block-hash": "e8de9355147554d65053f8efdb7c219b3c173412eb451ae91303d49d187e7bae"
       }
     ]
   }

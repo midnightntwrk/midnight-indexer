@@ -235,7 +235,7 @@ describe('unshielded transactions', () => {
       );
 
       // The expected transaction might take a bit more to show up by indexer, so we retry a few times
-      const transactionResponse = await indexerHttpClient.getShieldedTransaction({
+      const transactionResponse = await indexerHttpClient.getTransactionByOffset({
         hash: transactionResult.txHash,
       });
 
