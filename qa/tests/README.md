@@ -52,6 +52,9 @@ Before running the QA tests, make sure your local environment is configured acco
 
 #### Step 5 — [Docker Authentication](../../README.md#docker-authentication)
 
+#### Step 6 — [GPG Setup (Signed Git Commits)](../../README.md#gpg-setup-signed-git-commits)
+> This is required to push signed commits to Midnight repositories
+
 ---
 ## 🚀 Getting Started (Local Undeployed Environment)
 
@@ -136,7 +139,7 @@ TARGET_ENV=undeployed yarn test
 
 ## 🌐 Running Against Deployed Environments
 
-There are a number of deployed environments that are used for testing components of the Midnight network. The are:
+There are a number of deployed environments that are used for testing components of the Midnight network. They are:
   - devnet
   - qanet
   - testnet02
