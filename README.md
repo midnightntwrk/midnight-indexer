@@ -216,6 +216,112 @@ password <YOUR_GITHUB_PAT>
 echo $GITHUB_TOKEN | docker login ghcr.io -u <YOUR_GITHUB_ID> --password-stdin
 ```
 
+#### GPG Setup (Signed Git Commits)
+
+All contributors are required to **cryptographically sign their Git commits** using GPG. This confirms the identity of each contributor and marks commits as verified.
+
+##### Step 0: Prerequisites (once)
+
+**macOS**
+```bash
+brew install gnupg pinentry-mac
+# Optional: ensure macOS uses GUI pinentry for passphrase prompts
+echo "pinentry-program $(which pinentry-mac)" > ~/.gnupg/gpg-agent.conf
+killall gpg-agent || true
+```
+
+**Linux (Ubuntu/Debian)**
+```bash
+sudo apt-get update && sudo apt-get install -y gnupg pinentry-curses
+# pinentry-curses gives a passphrase prompt in the terminal
+# On desktops, you can install pinentry-gtk2 instead
+```
+##### Step 1: Generate a GPG key (ed25519)
+
+```bash
+gpg --quick-generate-key "Your Name <you@example.com>" ed25519 sign 2y
+```
+- Replace **Your name** and **<you@example.com>** with the one you use for Git.
+- `sign` limits the key’s usage to signing (good hygiene).
+- `2y` sets the key to expire in 2 years (you can renew later).
+
+Already have a key? List them with:
+
+```bash
+gpg --list-secret-keys --keyid-format=long
+```
+
+Copy the key ID (the long hex after sec) for the next step—looks like ABCDEF1234567890.
+
+##### Step 2: Tell Git to always sign
+
+Set this globally (applies to all repositories):
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+
+# Use OpenPGP (GPG) for signing
+git config --global gpg.format openpgp
+
+# If your key ID is ABCDEF1234567890:
+git config --global user.signingkey ABCDEF1234567890
+
+# Always sign commits and tags
+git config --global commit.gpgsign true
+git config --global tag.gpgsign true
+```
+
+##### Step 3: Add the GPG_TTY line to your shell config (critical)
+
+This ensures the pinentry prompt works in your terminal.
+
+**macOS (zsh default)**
+```bash
+echo 'export GPG_TTY=$(tty)' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**Linux (bash)**
+```bash
+echo 'export GPG_TTY=$(tty)' >> ~/.bashrc
+source ~/.bashrc
+```
+
+##### Step 4: Upload your public key to your Git host (GitHub/GitLab)
+
+Export your public key:
+```bash
+gpg --armor --export ABCDEF1234567890
+```
+
+Copy the entire block including:
+
+```bash
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+...
+-----END PGP PUBLIC KEY BLOCK-----
+```
+Then upload it to your Git host:
+
+**GitHub**: Settings → SSH and GPG keys → “New GPG key”
+**GitLab**: Preferences → GPG Keys → “Add key”
+
+> Make sure your Git email matches the email on the key and on the remote host account settings.
+
+##### Step 5: Test it
+
+In any repo:
+
+```bash
+git commit --allow-empty -m "test: signed commit"
+git log --show-signature -1
+```
+
+You should see a “Good signature” line. 
+If it asks for a passphrase, that’s normal—the agent can cache it.
+
+
 ### LICENSE
 
 Apache 2.0.
