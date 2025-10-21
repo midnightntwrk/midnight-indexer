@@ -187,6 +187,9 @@ impl IndexerData {
             .flat_map(|block| block.transactions.to_owned())
             .collect::<Vec<_>>();
 
+        // Verify that there are transactions.
+        assert!(!transactions.is_empty());
+
         // Verify various properties for regular transactions.
         let regular_transactions = transactions
             .iter()
@@ -236,6 +239,9 @@ impl IndexerData {
             .flat_map(|transaction| transaction.contract_actions.iter().cloned())
             .collect::<Vec<_>>();
 
+        // Verify that there are contract actions.
+        assert!(!contract_actions.is_empty());
+
         // Verify that contract calls and their deploy have the same address.
         assert!(
             contract_actions
@@ -257,6 +263,9 @@ impl IndexerData {
             .flat_map(|transaction| transaction.unshielded_created_outputs.to_owned())
             .collect::<Vec<_>>();
 
+        // Verify that there are unshielded UTXOs.
+        assert!(!unshielded_utxos.is_empty());
+
         // Collect ledger events.
         let zswap_ledger_events = transactions
             .iter()
@@ -266,6 +275,10 @@ impl IndexerData {
             .iter()
             .flat_map(|transaction| transaction.dust_ledger_events.to_owned())
             .collect::<Vec<_>>();
+
+        // Verify that there are ledger events.
+        assert!(!zswap_ledger_events.is_empty());
+        assert!(!dust_ledger_events.is_empty());
 
         Ok(Self {
             blocks,
