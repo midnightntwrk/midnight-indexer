@@ -67,19 +67,19 @@ async function subscribeToUnshieldedTransactionEvents(
   });
 
   const unshieldedTransactionSubscriptionHandler: SubscriptionHandlers<UnshieldedTxSubscriptionResponse> =
-    {
-      next: (payload) => {
-        log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
-        receivedUnshieldedTransactions.push(payload);
-        if (stopCondition(receivedUnshieldedTransactions)) {
-          stopListening();
-        }
-      },
-      complete: () => {
-        log.debug('Complete message sent from Indexer');
-        completePromiseResolver();
-      },
-    };
+  {
+    next: (payload) => {
+      log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
+      receivedUnshieldedTransactions.push(payload);
+      if (stopCondition(receivedUnshieldedTransactions)) {
+        stopListening();
+      }
+    },
+    complete: () => {
+      log.debug('Complete message sent from Indexer');
+      completePromiseResolver();
+    },
+  };
 
   const unsubscribe = indexerWsClient.subscribeToUnshieldedTransactionEvents(
     unshieldedTransactionSubscriptionHandler,
@@ -197,12 +197,64 @@ describe('unshielded transaction subscriptions', async () => {
       expect(highestFoundTransactionId).toBe(highestTransactionId);
     });
 
-    test.todo(
-      'IMPLEMENT ME: should stream unshielded transaction events that adheres to the expected schema',
-      async () => {
-        // TODO: implement the following test that checks the schema of the unshielded transaction events
-      },
-    );
+    /**
+     * Subscribing to unshielded transaction events should stream messages that fully
+     * adhere to the expected GraphQL schema for both UnshieldedTransaction and
+     * UnshieldedTransactionsProgress types.
+     *
+     * @given an existing unshielded address that has transactions
+     * @when we subscribe to unshielded transaction events for that address
+     * @then every message should match the expected schema fields and types
+     */
+    test('should stream unshielded transaction events that adhere to the expected schema', async () => {
+      const unshieldedAddress = dataProvider.getUnshieldedAddress('existing');
+      const messages = await subscribeToUnshieldedTransactionEvents(
+        { address: unshieldedAddress },
+        (messages) => messages.length >= 10,
+        1000,
+      );
+      // Ensure we received at least one event
+      expect(messages.length).toBeGreaterThanOrEqual(1);
+
+      messages.forEach((msg, i) => {
+        expect(
+          msg.errors,
+          `Received unexpected error message at index ${i}: ${JSON.stringify(msg.errors)}`,
+        ).toBeUndefined();
+        expect(msg.data).toBeDefined();
+        expect(msg.data?.unshieldedTransactions).toBeDefined();
+
+        log.debug(`Validating message at index ${i}: ${JSON.stringify(msg.data, null, 2)}`);
+        const transactionEvent: UnshieldedTransactionEvent =
+          msg.data?.unshieldedTransactions as UnshieldedTransactionEvent;
+
+        switch (transactionEvent.__typename) {
+          case 'UnshieldedTransaction': {
+            const unshieldedTx = transactionEvent as UnshieldedTransaction;
+
+            expect(unshieldedTx.transaction).toBeDefined();
+            expect(unshieldedTx.transaction.id).toEqual(expect.any(Number));
+
+            ['createdUtxos', 'spentUtxos'].forEach((field) => {
+              const utxos = (unshieldedTx as any)[field];
+              expect(Array.isArray(utxos)).toBe(true);
+              utxos.forEach((utxo: UnshieldedUtxo) => {
+                expect(utxo.owner).toMatch(/^mn_addr_/);
+              });
+            });
+            break;
+          }
+          case 'UnshieldedTransactionsProgress': {
+            const progress = transactionEvent as UnshieldedTransactionsProgress;
+            expect(progress.highestTransactionId).toEqual(expect.any(Number));
+            break;
+          }
+          default:
+            throw new Error(`Unexpected __typename: ${transactionEvent.__typename}`);
+        }
+      });
+    });
+
 
     /**
      * Subscribing to unshielded transaction events for an address without transactions
@@ -262,8 +314,8 @@ describe('unshielded transaction subscriptions', async () => {
       expect(msg.data).toBeDefined();
       expect(msg.data).toBeNull();
       expect(msg.errors).toBeDefined();
-      // TODO: soft assert on the error message
-      expect((msg.errors as GraphQLError[])[0].message).toMatch(/^invalid address/);
+      const errorMessage = (msg.errors as GraphQLError[])[0].message;
+      expect.soft(errorMessage).toMatch(/^invalid address/i);
     });
 
     /**

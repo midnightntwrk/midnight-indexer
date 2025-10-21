@@ -305,7 +305,7 @@ describe('block subscriptions', () => {
       // So we need to make sure there are at least 20 blocks on chain, if not
       // we skip the test becausee the precondition is not met
       if (latestBlock?.height && latestBlock?.height < 20) {
-        skip?.('Skipping as we want at least 20 blocks to be produced');
+        skip?.(true, 'Skipping as we want at least 20 blocks to be produced');
       }
 
       const blockMessagesReceived: BlockSubscriptionResponse[] = [];
@@ -450,7 +450,7 @@ describe('block subscriptions', () => {
      * @then we should receive an error message indicating that only one parameter at a time can be used
      */
     test('should return an error message, as only only one parameter at a time can be used', async () => {
-      const blockOffset: BlockOffset = { height: 1, hash: dataProvider.getKnownBlockHash() };
+      const blockOffset: BlockOffset = { height: 1, hash: await dataProvider.getKnownBlockHash() };
 
       const blockMessagesReceived: BlockSubscriptionResponse[] = [];
 
