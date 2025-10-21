@@ -218,7 +218,7 @@ echo $GITHUB_TOKEN | docker login ghcr.io -u <YOUR_GITHUB_ID> --password-stdin
 
 #### GPG Setup (Signed Git Commits)
 
-All contributors are required to **cryptographically sign their Git commits** using GPG. All commits to this repository should be cryptographically signed using GPG.
+All contributors are required to **cryptographically sign their Git commits** using GPG. This confirms the identity of each contributor and marks commits as verified.
 
 ##### Step 0: Prerequisites (once)
 
