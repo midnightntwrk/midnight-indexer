@@ -5,10 +5,11 @@
 - Be environment-aware so calls use the correct RPC URLs and network IDs.
 
 
-## Commands
+## Commands supported/mapped
 - showAddress
 - showViewingKey
+- getContractAddress
 - deployContract
 - callContract
 - updateContract (TBD)
-- getContractAddress
+
