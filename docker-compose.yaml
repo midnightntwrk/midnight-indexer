@@ -37,7 +37,7 @@ services:
       APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: $APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD
       APP__INFRA__LEDGER_STATE_STORAGE__URL: "nats:4222"
     healthcheck:
-      test: [ "CMD-SHELL", "cat /var/run/chain-indexer/running" ]
+      test: ["CMD-SHELL", "cat /var/run/chain-indexer/running"]
       start_interval: "2s"
       start_period: "30s"
       interval: "5s"
@@ -62,7 +62,7 @@ services:
       APP__INFRA__PUB_SUB__URL: "nats:4222"
       APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
     healthcheck:
-      test: [ "CMD-SHELL", "cat /var/run/wallet-indexer/running" ]
+      test: ["CMD-SHELL", "cat /var/run/wallet-indexer/running"]
       start_interval: "2s"
       start_period: "30s"
       interval: "5s"
@@ -91,7 +91,7 @@ services:
       APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: $APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD
       APP__INFRA__LEDGER_STATE_STORAGE__URL: "nats:4222"
     healthcheck:
-      test: [ "CMD-SHELL", "cat /var/run/indexer-api/running" ]
+      test: ["CMD-SHELL", "cat /var/run/indexer-api/running"]
       start_interval: "2s"
       start_period: "30s"
       interval: "5s"
@@ -99,10 +99,10 @@ services:
       retries: 2
 
   indexer-standalone:
-    depends_on:
-      - node
     profiles:
       - standalone
+    depends_on:
+      - node
     image: "ghcr.io/midnight-ntwrk/indexer-standalone:${INDEXER_TAG:-latest}"
     restart: "no"
     ports:
@@ -112,7 +112,7 @@ services:
       APP__INFRA__SECRET: $APP__INFRA__SECRET
       APP__INFRA__NODE__URL: "ws://node:9944"
     healthcheck:
-      test: [ "CMD-SHELL", "cat /var/run/indexer-standalone/running" ]
+      test: ["CMD-SHELL", "cat /var/run/indexer-standalone/running"]
       start_interval: "2s"
       start_period: "30s"
       interval: "5s"
@@ -133,7 +133,7 @@ services:
       POSTGRES_DB: "indexer"
       POSTGRES_PASSWORD: $APP__INFRA__STORAGE__PASSWORD
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U indexer" ]
+      test: ["CMD-SHELL", "pg_isready -U indexer"]
       interval: "5s"
       timeout: "2s"
       retries: 2
@@ -145,7 +145,8 @@ services:
       - cloud
     image: "nats:2.11.1"
     restart: "always"
-    command: [ "--user", "indexer", "--pass", $APP__INFRA__PUB_SUB__PASSWORD, "-js" ]
+    command:
+      ["--user", "indexer", "--pass", $APP__INFRA__PUB_SUB__PASSWORD, "-js"]
     ports:
       - "4222:4222"
     volumes:
@@ -154,7 +155,7 @@ services:
       - no-new-privileges:true
 
   node:
-    profiles: [ cloud, standalone ]
+    profiles: [cloud, standalone]
     image: "ghcr.io/midnight-ntwrk/midnight-node:${NODE_TAG:-latest}"
     restart: "always"
     ports:
