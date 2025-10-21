@@ -57,7 +57,7 @@ describe.sequential('contract actions', () => {
 
     /**
      * Once a contract deployment transaction has been submitted to node and confirmed, the indexer should report
-     * that transaction through a query by transaction hash, using the transaction hash reported by the toolkit.
+     * that transaction through a transaction query by hash, using the transaction hash reported by the toolkit.
      *
      * @given a confirmed contract deployment transaction
      * @when we query the indexer with a transaction query by hash, using the transaction hash reported by the toolkit

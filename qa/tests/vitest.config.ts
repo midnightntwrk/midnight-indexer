@@ -13,26 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import path from 'path';
 import { defineConfig } from 'vitest/config';
 import XRayJsonReporter from './utils/reporters/custom-xray-json/xray-json-reporter';
 import CustomJUnitReporter from './utils/reporters/custom-junit/custom-junit-reporter';
 
+// Main Vitest configuration - common settings and projects
+// - smoke tests: quick health checks, no cache warmup
+// - e2e tests: includes global setup for toolkit cache warmup
+// - integration tests: runs without cache warmup
+// Note: slowTestThreshold is set globally (3000ms) as per-project thresholds don't work in Vitest 3.2.4
 export default defineConfig({
   test: {
-    globals: true,
-    environment: 'node',
-    globalSetup: [
-      path.resolve(__dirname, './utils/logging/setup.ts'),
-      path.resolve(__dirname, './setup/global-setup.ts'),
-    ],
-    setupFiles: [path.resolve(__dirname, './utils/custom-matchers.ts')],
-    coverage: {
-      reporter: ['text', 'json', 'html'],
-    },
-    testTimeout: 15000,
-    slowTestThreshold: 800,
-    retry: 1, // Retry failed tests one extra time just for random glitches
+    // Root-level reporters for all projects
     reporters: [
       'verbose',
       new XRayJsonReporter(),
@@ -50,17 +42,14 @@ export default defineConfig({
         },
       ],
     ],
-  },
-  resolve: {
-    alias: {
-      graphql: path.resolve(__dirname, 'node_modules/graphql'),
-      '@utils': path.resolve(__dirname, './utils'),
-    },
-    // This ensures ESM loading doesn't split contexts
-    conditions: ['node'],
-    mainFields: ['module', 'main'],
-  },
-  optimizeDeps: {
-    include: ['graphql'], // force deduped version
+    // Note: slowTestThreshold per-project doesn't work in Vitest 3.2.4
+    // Setting a single threshold for all projects
+    slowTestThreshold: 3000,
+    // Projects reference individual config files
+    projects: [
+      './vitest.config.smoke.ts',
+      './vitest.config.e2e.ts',
+      './vitest.config.integration.ts',
+    ],
   },
 });

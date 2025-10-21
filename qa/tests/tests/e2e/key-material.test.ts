@@ -16,10 +16,9 @@
 import { randomBytes } from 'crypto';
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
-import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 import { env, LedgerNetworkId } from 'environment/model';
+import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 
-// To run: yarn test e2e
 describe('key material derivation validation', () => {
   let toolkit: ToolkitWrapper;
   const seed = randomBytes(32).toString('hex');
