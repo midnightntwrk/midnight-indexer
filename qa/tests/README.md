@@ -57,13 +57,13 @@ Before running the QA tests, make sure your local environment is configured acco
 
 Indexer can be executed locally (this is known as `undeployed` environment). You can start it in two ways, depending on whether you want a clean or pre-seeded environment:
 
-### **Option 1 — Using the compose file directly**
+#### **Option 1 — Using the compose file directly**
 
 Brings up all core services (Node, Indexer, NATS, Postgres) but starts the blockchain from genesis, meaning there will no pre-existing blocks or transactions until you create them. 
 
 See **Step 5** below for how to start it.
 
-### **Option 2 — Using the helper startup script (recommended for testing)**
+#### **Option 2 — Using the helper startup script (recommended for testing)**
 
 This method wraps the compose command and additionally seeds the environment with sample data (blocks and transactions).
 
