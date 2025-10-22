@@ -175,7 +175,7 @@ Base interface for all contract actions:
 interface ContractAction {
   address: HexEncoded!
   state: HexEncoded!
-  chainState: HexEncoded!
+  zswapState: HexEncoded!
   transaction: Transaction!
   unshieldedBalances: [ContractBalance!]!
 }
@@ -466,7 +466,7 @@ query {
     __typename
     address
     state
-    chainState
+    zswapState
     transaction {
       hash
       block {
@@ -705,7 +705,7 @@ subscription WatchContract($address: HexEncoded!) {
   contractActions(address: $address) {
     __typename
     state
-    chainState
+    zswapState
     unshieldedBalances {
       tokenType
       amount
