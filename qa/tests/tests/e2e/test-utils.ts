@@ -35,7 +35,7 @@ function retry<T>(
 
 export function getBlockByHashWithRetry(hash: string): Promise<BlockResponse> {
   return retry(
-    () => new IndexerHttpClient().getBlockByOffset({ hash }),
+    () => new IndexerHttpClient().getBlockByOffset({ hash: hash }),
     (response) => response.data?.block != null,
     30,
     2000,
@@ -44,7 +44,7 @@ export function getBlockByHashWithRetry(hash: string): Promise<BlockResponse> {
 
 export function getTransactionByHashWithRetry(hash: string): Promise<TransactionResponse> {
   return retry(
-    () => new IndexerHttpClient().getShieldedTransaction({ hash }),
+    () => new IndexerHttpClient().getTransactionByOffset({ hash: hash }),
     (response) => response.data?.transactions != null && response.data.transactions.length > 0,
     30,
     2000,

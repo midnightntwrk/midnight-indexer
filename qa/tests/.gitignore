@@ -23,3 +23,5 @@ coverage/
 
 # Report files
 reports/
+xray_id.txt
+.tmp/

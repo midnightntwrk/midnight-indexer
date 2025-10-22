@@ -4,8 +4,10 @@
   "scripts": {
     "format": "prettier --write '**/*.{js,jsx,json,ts,tsx,graphql,gql}'",
     "audit": "yarn npm audit && echo 'No known vulnerabilities found.'",
-    "test": "vitest run",
-    "test:smoke": "vitest run smoke",
+    "test": "vitest run --project smoke --project e2e --project integration",
+    "test:e2e": "vitest run --project e2e",
+    "test:smoke": "vitest run --project smoke",
+    "test:integration": "vitest run --project integration",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "clean:logs": "rm -rf logs/",
