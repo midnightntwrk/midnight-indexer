@@ -80,7 +80,6 @@ build-docker-image package profile="dev":
     docker build \
         --build-arg "RUST_VERSION={{rust_version}}" \
         --build-arg "PROFILE={{profile}}" \
-        --secret id=netrc,src=$NETRC \
         -t ghcr.io/midnight-ntwrk/{{package}}:${tag} \
         -t ghcr.io/midnight-ntwrk/{{package}}:latest \
         -f {{package}}/Dockerfile \

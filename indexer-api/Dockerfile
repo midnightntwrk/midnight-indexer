@@ -1,5 +1,5 @@
 ARG RUST_VERSION
-FROM lukemathwalker/cargo-chef:0.1.72-rust-$RUST_VERSION-bookworm AS chef
+FROM lukemathwalker/cargo-chef:0.1.73-rust-$RUST_VERSION-bookworm AS chef
 WORKDIR /build
 
 FROM chef AS planner
@@ -9,13 +9,10 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 SHELL ["/bin/bash", "-c"]
 ARG PROFILE=release
-RUN git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
 COPY --from=planner /build/recipe.json recipe.json
-RUN --mount=type=secret,id=netrc,target=/root/.netrc \
-    cargo chef cook --profile $PROFILE --recipe-path recipe.json
+RUN cargo chef cook --profile $PROFILE --recipe-path recipe.json
 COPY . .
-RUN --mount=type=secret,id=netrc,target=/root/.netrc \
-    cargo build -p indexer-api --locked --features cloud --profile $PROFILE && \
+RUN cargo build -p indexer-api --locked --features cloud --profile $PROFILE && \
     mkdir -p /runtime/usr/local/bin && \
     mv "./target/${PROFILE/dev/debug}/indexer-api" /runtime/usr/local/bin && \
     mv /build/indexer-api/bin/entrypoint.sh /runtime/usr/local/bin && \
