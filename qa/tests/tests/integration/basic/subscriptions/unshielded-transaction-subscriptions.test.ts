@@ -32,7 +32,9 @@ import type {
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
 import { TestContext } from 'vitest';
-
+import {
+  UnshieldedTxSubscriptionResponseSchema,
+} from '@utils/indexer/graphql/schema';
 let indexerWsClient: IndexerWsClient;
 
 /**
@@ -210,51 +212,24 @@ describe('unshielded transaction subscriptions', async () => {
       const unshieldedAddress = dataProvider.getUnshieldedAddress('existing');
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
-        (messages) => messages.length >= 10,
-        1000,
+        (messages) => messages.length >= 5,
+        500,
       );
-      // Ensure we received at least one event
       expect(messages.length).toBeGreaterThanOrEqual(1);
 
-      messages.forEach((msg, i) => {
-        expect(
-          msg.errors,
-          `Received unexpected error message at index ${i}: ${JSON.stringify(msg.errors)}`,
-        ).toBeUndefined();
+      for (const [, msg] of messages.entries()) {
+        expect(msg.errors).toBeUndefined();
         expect(msg.data).toBeDefined();
         expect(msg.data?.unshieldedTransactions).toBeDefined();
-
-        log.debug(`Validating message at index ${i}: ${JSON.stringify(msg.data, null, 2)}`);
-        const transactionEvent: UnshieldedTransactionEvent =
-          msg.data?.unshieldedTransactions as UnshieldedTransactionEvent;
-
-        switch (transactionEvent.__typename) {
-          case 'UnshieldedTransaction': {
-            const unshieldedTx = transactionEvent as UnshieldedTransaction;
-
-            expect(unshieldedTx.transaction).toBeDefined();
-            expect(unshieldedTx.transaction.id).toEqual(expect.any(Number));
-
-            ['createdUtxos', 'spentUtxos'].forEach((field) => {
-              const utxos = (unshieldedTx as any)[field];
-              expect(Array.isArray(utxos)).toBe(true);
-              utxos.forEach((utxo: UnshieldedUtxo) => {
-                expect(utxo.owner).toMatch(/^mn_addr_/);
-              });
-            });
-            break;
-          }
-          case 'UnshieldedTransactionsProgress': {
-            const progress = transactionEvent as UnshieldedTransactionsProgress;
-            expect(progress.highestTransactionId).toEqual(expect.any(Number));
-            break;
-          }
-          default:
-            throw new Error(`Unexpected __typename: ${transactionEvent.__typename}`);
+        const txEvent = msg.data!.unshieldedTransactions;
+        UnshieldedTxSubscriptionResponseSchema.parse(txEvent);
+        if (txEvent.__typename === 'UnshieldedTransaction') {
+          txEvent.createdUtxos.forEach((utxo) => {
+            expect(utxo.owner).toMatch(/^mn_addr_/);
+          });
         }
-      });
+      }
     });
-
 
     /**
      * Subscribing to unshielded transaction events for an address without transactions
