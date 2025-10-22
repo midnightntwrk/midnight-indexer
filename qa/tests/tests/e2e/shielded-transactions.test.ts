@@ -15,7 +15,7 @@
 
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
-import { IndexerHttpClient } from '@utils/indexer/http-client';
+import dataProvider from '@utils/testdata-provider';
 import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 
 import type { Transaction } from '@utils/indexer/indexer-types';
@@ -27,7 +27,7 @@ describe('shielded transactions', () => {
   let transactionResult: ToolkitTransactionResult;
 
   // Deterministic seeds (hex) that work with the toolkit
-  const sourceSeed = '0000000000000000000000000000000000000000000000000000000000000001';
+  const sourceSeed = dataProvider.getFundingSeed();
   const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
 
   let sourceAddress: string;

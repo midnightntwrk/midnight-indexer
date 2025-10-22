@@ -13,12 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { TestContext } from 'vitest';
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
-import { TestContext } from 'vitest';
-
-import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import { retry } from '@utils/retry-helper';
+import dataProvider from '@utils/testdata-provider';
+import { getBlockByHashWithRetry } from './test-utils';
+import { waitForEventsStabilization } from './test-utils';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
+import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 import {
   Transaction,
   UnshieldedTransaction,
@@ -31,11 +34,7 @@ import {
   UnshieldedTransactionSubscriptionParams,
   UnshieldedTxSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
-import { getBlockByHashWithRetry } from './test-utils';
-import { waitForEventsStabilization } from './test-utils';
-import { retry } from '@utils/retry-helper';
 
-// To run: yarn test e2e
 describe('unshielded transactions', () => {
   let indexerWsClient: IndexerWsClient;
   let indexerHttpClient: IndexerHttpClient;
@@ -73,7 +72,7 @@ describe('unshielded transactions', () => {
     toolkit = new ToolkitWrapper({});
     await toolkit.start();
 
-    const sourceSeed = '0000000000000000000000000000000000000000000000000000000000000001';
+    const sourceSeed = dataProvider.getFundingSeed();
     const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
 
     // Getting the addresses from their seeds

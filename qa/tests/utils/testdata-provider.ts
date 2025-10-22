@@ -44,6 +44,23 @@ class TestDataProvider {
     return this;
   }
 
+  getFundingSeed() {
+    // Build the environment-specific variable name (e.g., FUNDING_SEED_PREVIEW)
+    const envName = env.getEnvName().toUpperCase();
+    const envVarName = `FUNDING_SEED_${envName}`;
+
+    // Try environment-specific variable first
+    const fundingSeed = process.env[envVarName];
+
+    if (fundingSeed) {
+      return fundingSeed;
+    }
+
+    // Default fallback
+    const undeployedFundingSeed = '0'.repeat(63) + '1';
+    return undeployedFundingSeed;
+  }
+
   getUnshieldedAddress(property: string) {
     if (
       !this.unshieldedAddresses.hasOwnProperty(property) ||
