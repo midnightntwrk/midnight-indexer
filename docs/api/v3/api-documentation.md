@@ -1,6 +1,11 @@
 # Midnight Indexer API Documentation v3
 
-The Midnight Indexer API exposes a GraphQL API that enables clients to query and subscribe to blockchain data—blocks, transactions, contracts, and shielded/unshielded transaction events—indexed from the Midnight blockchain. These capabilities facilitate both historical lookups and real-time monitoring.
+The Midnight Indexer API exposes a GraphQL API that enables clients to query and subscribe to blockchain data—blocks, transactions, contracts, DUST generation, and shielded/unshielded transaction events—indexed from the Midnight blockchain. These capabilities facilitate both historical lookups and real-time monitoring.
+
+**Version Information:**
+- Current API version: v3
+- Previous version v1 redirects to v3 automatically
+- Version v2 was skipped during migration
 
 **Disclaimer:**
 The examples provided here are illustrative and may need updating if the API changes. Always consider [`indexer-api/graphql/schema-v3.graphql`](../../../indexer-api/graphql/schema-v3.graphql) as the primary source of truth. Adjust queries as necessary to match the latest schema.
@@ -11,12 +16,13 @@ The GraphQL schema is defined in [`indexer-api/graphql/schema-v3.graphql`](../..
 
 ## Overview of Operations
 
-- **Queries**: Fetch blocks, transactions, and contract actions.
+- **Queries**: Fetch blocks, transactions, contract actions, and DUST generation status.
   Examples:
     - Retrieve the latest block or a specific block by hash or height.
     - Look up transactions by their hash or identifier.
     - Inspect the current state of a contract action at a given block or transaction offset.
     - Query unshielded token balances held by contracts.
+    - Query DUST generation status for Cardano stake keys.
 
 - **Mutations**: Manage wallet sessions.
     - `connect(viewingKey: ViewingKey!)`: Creates a session associated with a viewing key.
@@ -27,6 +33,8 @@ The GraphQL schema is defined in [`indexer-api/graphql/schema-v3.graphql`](../..
     - `contractActions(address, offset)`: Stream contract actions.
     - `shieldedTransactions(sessionId, ...)`: Stream shielded transaction updates, including relevant transactions and optional progress updates.
     - `unshieldedTransactions(address)`: Stream unshielded transaction events for a specific address.
+    - `dustLedgerEvents(id)`: Stream DUST ledger events.
+    - `zswapLedgerEvents(id)`: Stream Zswap ledger events.
 
 ## API Endpoints
 
@@ -130,7 +138,7 @@ query {
       ... on ContractDeploy {
         address
         state
-        chainState
+        zswapState
         unshieldedBalances {
           tokenType
           amount
@@ -140,7 +148,7 @@ query {
         address
         state
         entryPoint
-        chainState
+        zswapState
         unshieldedBalances {
           tokenType
           amount
@@ -149,7 +157,7 @@ query {
       ... on ContractUpdate {
         address
         state
-        chainState
+        zswapState
         unshieldedBalances {
           tokenType
           amount
@@ -219,7 +227,7 @@ query {
     ... on ContractDeploy {
       address
       state
-      chainState
+      zswapState
       unshieldedBalances {
         tokenType
         amount
@@ -228,7 +236,7 @@ query {
     ... on ContractCall {
       address
       state
-      chainState
+      zswapState
       entryPoint
       unshieldedBalances {
         tokenType
@@ -238,7 +246,7 @@ query {
     ... on ContractUpdate {
       address
       state
-      chainState
+      zswapState
       unshieldedBalances {
         tokenType
         amount
@@ -260,7 +268,7 @@ query {
     ... on ContractDeploy {
       address
       state
-      chainState
+      zswapState
       unshieldedBalances {
         tokenType
         amount
@@ -269,7 +277,7 @@ query {
     ... on ContractCall {
       address
       state
-      chainState
+      zswapState
       entryPoint
       unshieldedBalances {
         tokenType
@@ -279,7 +287,7 @@ query {
     ... on ContractUpdate {
       address
       state
-      chainState
+      zswapState
       unshieldedBalances {
         tokenType
         amount
@@ -289,12 +297,41 @@ query {
 }
 ```
 
+### dustGenerationStatus(cardanoStakeKeys: [HexEncoded!]!): [DustGenerationStatus!]!
+
+Query DUST generation status for one or more Cardano stake keys.
+
+**Example:**
+
+```graphql
+query {
+  dustGenerationStatus(
+    cardanoStakeKeys: [
+      "0xae78b8d48d620fdf78e30ddb79c442066bd93f1f4f1919efc4373e6fed6cc665"
+    ]
+  ) {
+    cardanoStakeKey
+    dustAddress
+    registered
+    nightBalance
+    generationRate
+    currentCapacity
+  }
+}
+```
+
+**DUST Generation Parameters:**
+- Generation rate: 8,267 Specks per Star per second
+- Maximum capacity: 5 DUST per NIGHT
+- The `registered` field indicates if stake key is registered via NativeTokenObservation pallet
+- Registration data comes from Cardano mainnet via bridge
+
 ## Contract Action Types
 
 All ContractAction types (ContractDeploy, ContractCall, ContractUpdate) implement the ContractAction interface with these common fields:
 - `address`: The contract address (HexEncoded)
 - `state`: The contract state (HexEncoded)
-- `chainState`: The chain state at this action (HexEncoded)
+- `zswapState`: The contract-specific zswap state at this action (HexEncoded)
 - `transaction`: The transaction that contains this action
 
 Contract actions can be one of three types:
@@ -372,6 +409,30 @@ Represents an unshielded UTXO (Unspent Transaction Output):
 - `createdAtTransaction`: Reference to the transaction that created this UTXO
 - `spentAtTransaction`: Reference to the transaction that spent this UTXO (null if unspent)
 
+## DUST Generation Types
+
+### DustGenerationStatus
+
+DUST generation status for a Cardano stake key:
+- `cardanoStakeKey`: The Cardano stake key (HexEncoded)
+- `dustAddress`: Associated DUST address if registered (HexEncoded, optional)
+- `registered`: Whether this stake key is registered (Boolean!)
+- `nightBalance`: NIGHT balance backing generation (String)
+- `generationRate`: Generation rate in Specks per second (String)
+- `currentCapacity`: Current DUST capacity (String)
+
+### DustLedgerEvent
+
+DUST ledger events include:
+- `DustInitialUtxo`: Initial DUST UTXO creation event
+- `DustGenerationDtimeUpdate`: DUST generation decay time update
+- `DustSpendProcessed`: DUST spend processing event
+- `ParamChange`: DUST parameter change event
+
+All DUST ledger event types share common fields:
+- `id`: Event ID (Int!)
+- `raw`: Raw event data (HexEncoded)
+- `maxId`: Maximum ID of all DUST events (Int!)
 
 ## Mutations
 
@@ -455,7 +516,7 @@ Subscribes to contract actions for a particular address. New contract actions (c
   "id": "2",
   "type": "start",
   "payload": {
-    "query": "subscription { contractActions(address:\"3031323...\", offset: { height: 1 }) { __typename ... on ContractDeploy { address state chainState unshieldedBalances { tokenType amount } } ... on ContractCall { address state chainState entryPoint unshieldedBalances { tokenType amount } } ... on ContractUpdate { address state chainState unshieldedBalances { tokenType amount } } } }"
+    "query": "subscription { contractActions(address:\"3031323...\", offset: { height: 1 }) { __typename ... on ContractDeploy { address state zswapState unshieldedBalances { tokenType amount } } ... on ContractCall { address state zswapState entryPoint unshieldedBalances { tokenType amount } } ... on ContractUpdate { address state zswapState unshieldedBalances { tokenType amount } } } }"
   }
 }
 ```
@@ -537,6 +598,42 @@ Event payload for the unshielded transaction subscription:
 - `UnshieldedTransactionsProgress`: Progress information
   - `highestTransactionId`: The highest transaction ID of all currently known transactions for the subscribed address
 
+### DUST Ledger Events Subscription
+
+`dustLedgerEvents(id: Int): DustLedgerEvent!`
+
+Subscribe to DUST ledger events. The `id` parameter allows resuming from a specific event.
+
+**Example:**
+
+```json
+{
+  "id": "5",
+  "type": "start",
+  "payload": {
+    "query": "subscription { dustLedgerEvents { id __typename ... on DustInitialUtxo { output { nonce } } raw maxId } }"
+  }
+}
+```
+
+### Zswap Ledger Events Subscription
+
+`zswapLedgerEvents(id: Int): ZswapLedgerEvent!`
+
+Subscribe to Zswap ledger events. The `id` parameter allows resuming from a specific event.
+
+**Example:**
+
+```json
+{
+  "id": "6",
+  "type": "start",
+  "payload": {
+    "query": "subscription { zswapLedgerEvents { id raw maxId } }"
+  }
+}
+```
+
 ## Query Limits Configuration
 
 The server may apply limitations to queries (e.g. `max-depth`, `max-fields`, `timeout`, and complexity cost). Requests that violate these limits return errors indicating the reason (too many fields, too deep, too costly, or timed out).
@@ -558,13 +655,25 @@ The server may apply limitations to queries (e.g. `max-depth`, `max-fields`, `ti
 
 - Shielded transactions subscription requires a `sessionId` from the `connect` mutation.
 
-### Regenerating the Schema
+## Regenerating the Schema
 
 If you modify the code defining the GraphQL schema, regenerate it:
 ```bash
 just generate-indexer-api-schema
 ```
 This ensures the schema file stays aligned with code changes.
+
+## Migration from v1
+
+If migrating from API v1:
+1. Update endpoint URLs from `/v1/graphql` to `/v3/graphql` (though v1 redirects automatically)
+2. Review field name changes (e.g., `chainState` → `zswapState` in contract actions)
+3. Test thoroughly as some response structures may have evolved
+
+## Related Documentation
+
+- [DUST Generation Status Details](../../interactions/dust-generation-status/dust-generation-status-api-documentation.md)
+- [QA Testing Guide](../../interactions/dust-generation-status/dust-generation-status-qa-testing-guide.md)
 
 ## Conclusion
 
