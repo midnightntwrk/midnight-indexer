@@ -375,7 +375,7 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
             format!("{}/indexer-standalone/config.yaml", &*WS_DIR),
         )
         .env("APP__INFRA__API__PORT", api_port.to_string())
-        .env("APP__INFRA__API__MAX_COMPLEXITY", "505")
+        .env("APP__INFRA__API__MAX_COMPLEXITY", "600")
         .env("APP__INFRA__NODE__URL", node_url)
         .env("APP__INFRA__STORAGE__CNN_URL", sqlite_file)
         .env("APP__TELEMETRY__TRACING__ENABLED", "true")
