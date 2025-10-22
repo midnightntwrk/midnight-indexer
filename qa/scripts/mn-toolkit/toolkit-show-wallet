@@ -1,0 +1,45 @@
+#!/bin/bash
+
+set -e
+
+CHAIN=$1
+if [ "$CHAIN" != "undeployed" ] && [ "$CHAIN" != "devnet" ] && [ "$CHAIN" != "testnet02" ] && [ "$CHAIN" != "nodedev01" ]; then
+    echo "Please provide a valid chain id (undeployed, devnet, testnet02, nodedev01)"
+    echo "Usage: $0 <chain_id> <seed>"
+    exit 1
+fi
+
+# Switch case for the chain id
+CHAIN_URL=""
+case $CHAIN in
+    "undeployed")
+        CHAIN_URL="ws://localhost:9944"
+        ;;
+    "devnet")
+        CHAIN_URL="wss://rpc.devnet.midnight.network"
+        ;;
+    "testnet02")
+        CHAIN_URL="wss://rpc.testnet02.midnight.network"
+        ;;
+    "qanet")
+        CHAIN_URL="wss://rpc.qanet.dev.midnight.network"
+        ;;
+    "nodedev01")
+        CHAIN_URL="wss://rpc.node-dev-01.dev.midnight.network"
+        ;;
+esac
+
+SEED=$2
+if [ -z "$SEED" ]; then
+    echo "Please provide a seed"
+    echo "Usage: $0 <chain_id> <seed>"
+    exit 1
+fi
+
+NODE_TAG=${3:-"0.17.1-47a8ea28"}
+
+docker run --rm --network host ghcr.io/midnight-ntwrk/midnight-node-toolkit:${NODE_TAG} \
+    show-wallet \
+    -s $CHAIN_URL \
+    --seed $SEED
+
