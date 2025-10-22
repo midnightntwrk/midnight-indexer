@@ -252,13 +252,14 @@ impl LedgerState {
     }
 
     /// Extract the zswap state for the given contract address.
+    #[trace(properties = { "address": "{address}" })]
     pub fn extract_contract_zswap_state(
         &self,
         address: &SerializedContractAddress,
     ) -> Result<SerializedZswapState, Error> {
         match self {
             Self::V6 { ledger_state, .. } => {
-                let address = tagged_deserialize_v6::<ContractAddressV6>(&mut address.as_ref())
+                let address = ContractAddressV6::deserialize(&mut address.as_ref(), 0)
                     .map_err(|error| Error::Io("cannot deserialize ContractAddressV6", error))?;
 
                 let mut contract_zswap_state = ZswapStateV6::new();

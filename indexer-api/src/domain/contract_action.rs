@@ -29,7 +29,7 @@ pub struct ContractAction {
     #[sqlx(json)]
     pub attributes: ContractAttributes,
 
-    pub chain_state: SerializedZswapState,
+    pub zswap_state: SerializedZswapState,
 
     #[sqlx(try_from = "i64")]
     pub transaction_id: u64,

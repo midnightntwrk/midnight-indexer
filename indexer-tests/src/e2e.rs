@@ -242,6 +242,13 @@ impl IndexerData {
         // Verify that there are contract actions.
         assert!(!contract_actions.is_empty());
 
+        // Verify that the contract action zswap state is non-empty.
+        assert!(
+            contract_actions
+                .iter()
+                .all(|contract_action| !contract_action.zswap_state.as_ref().is_empty())
+        );
+
         // Verify that contract calls and their deploy have the same address.
         assert!(
             contract_actions

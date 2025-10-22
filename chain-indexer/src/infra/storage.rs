@@ -438,7 +438,7 @@ async fn save_contract_actions(
             variant,
             address,
             state,
-            chain_state,
+            zswap_state,
             attributes
         )
     "};
@@ -449,7 +449,7 @@ async fn save_contract_actions(
                 .push_bind(ContractActionVariant::from(&action.attributes))
                 .push_bind(&action.address)
                 .push_bind(&action.state)
-                .push_bind(&action.chain_state)
+                .push_bind(&action.zswap_state)
                 .push_bind(Json(&action.attributes));
         })
         .push(" RETURNING id")
