@@ -48,13 +48,6 @@ jobs:
           version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
           echo "version=$version" | tee -a "$GITHUB_ENV"
 
-      - name: Add github.com credentials to netrc
-        uses: extractions/netrc@v2
-        with:
-          machine: github.com
-          username: MidnightCI
-          password: ${{ secrets.MIDNIGHTCI_REPO }}
-
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -103,7 +96,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          secret-files: netrc=/home/runner/.netrc
           cache-from: type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache
           cache-to: type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache,mode=max
 
@@ -141,13 +133,6 @@ jobs:
         run: |
           version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
           echo "version=$version" | tee -a "$GITHUB_ENV"
-
-      - name: Add github.com credentials to netrc
-        uses: extractions/netrc@v2
-        with:
-          machine: github.com
-          username: MidnightCI
-          password: ${{ secrets.MIDNIGHTCI_REPO }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3

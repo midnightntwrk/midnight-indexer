@@ -190,9 +190,9 @@ export APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD=nats
 export APP__INFRA__SECRET=303132333435363738393031323334353637383930313233343536373839303132
 ```
 
-### Required Configuration for Private Repositories
+### Required Configuration for private Repositories
 
-You may need access to private Midnight repositories and containers. To achieve this:
+You may need access to private Midnight repositories and container registries. To achieve this:
 
 #### GitHub Personal Access Token (PAT)
 
@@ -216,11 +216,11 @@ password <YOUR_GITHUB_PAT>
 echo $GITHUB_TOKEN | docker login ghcr.io -u <YOUR_GITHUB_ID> --password-stdin
 ```
 
-#### GPG Setup (Signed Git Commits)
+### GPG Setup (Signed Git Commits)
 
 All contributors are required to **cryptographically sign their Git commits** using GPG. This confirms the identity of each contributor and marks commits as verified.
 
-##### Step 0: Prerequisites (once)
+#### Step 0: Prerequisites (once)
 
 **macOS**
 ```bash
@@ -236,7 +236,7 @@ sudo apt-get update && sudo apt-get install -y gnupg pinentry-curses
 # pinentry-curses gives a passphrase prompt in the terminal
 # On desktops, you can install pinentry-gtk2 instead
 ```
-##### Step 1: Generate a GPG key (ed25519)
+#### Step 1: Generate a GPG key (ed25519)
 
 ```bash
 gpg --quick-generate-key "Your Name <you@example.com>" ed25519 sign 2y
@@ -253,7 +253,7 @@ gpg --list-secret-keys --keyid-format=long
 
 Copy the key ID (the long hex after sec) for the next step—looks like ABCDEF1234567890.
 
-##### Step 2: Tell Git to always sign
+#### Step 2: Tell Git to always sign
 
 Set this globally (applies to all repositories):
 
@@ -272,7 +272,7 @@ git config --global commit.gpgsign true
 git config --global tag.gpgsign true
 ```
 
-##### Step 3: Add the GPG_TTY line to your shell config (critical)
+#### Step 3: Add the GPG_TTY line to your shell config (critical)
 
 This ensures the pinentry prompt works in your terminal.
 
@@ -288,7 +288,7 @@ echo 'export GPG_TTY=$(tty)' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-##### Step 4: Upload your public key to your Git host (GitHub/GitLab)
+#### Step 4: Upload your public key to your Git host (GitHub/GitLab)
 
 Export your public key:
 ```bash
@@ -309,7 +309,7 @@ Then upload it to your Git host:
 
 > Make sure your Git email matches the email on the key and on the remote host account settings.
 
-##### Step 5: Test it
+#### Step 5: Test it
 
 In any repo:
 
@@ -318,9 +318,8 @@ git commit --allow-empty -m "test: signed commit"
 git log --show-signature -1
 ```
 
-You should see a “Good signature” line. 
+You should see a “Good signature” line.
 If it asks for a passphrase, that’s normal—the agent can cache it.
-
 
 ### LICENSE
 
