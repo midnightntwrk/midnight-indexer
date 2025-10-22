@@ -83,8 +83,8 @@ describe('block queries', () => {
      * @when we send a block query without parameters
      * @then Indexer should return the latest known block
      */
-    test('should return the latest known block', async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should return the latest known block', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'Latest'],
         testKey: 'PM-17677',
       };
@@ -106,8 +106,8 @@ describe('block queries', () => {
      * @when we send a block query without parameters
      * @then Indexer should respond with a block according to the requested schema
      */
-    test('should respond with a block according to the requested schema', async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should respond with a block according to the requested schema', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'Latest', 'SchemaValidation'],
         testKey: 'PM-17678',
       };
@@ -136,8 +136,8 @@ describe('block queries', () => {
      * @when we send a block query by hash using that hash
      * @then Indexer should respond with the block with that hash
      */
-    test('should return the block with that hash, given that block exists', async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should return the block with that hash, given that block exists', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHash'],
         testKey: 'PM-17679',
       };
@@ -153,8 +153,8 @@ describe('block queries', () => {
      * @when we send a block query by hash
      * @then Indexer should respond with a block according to the requested schema
      */
-    test('should return blocks according to the requested schema', async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should return blocks according to the requested schema', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHash', 'SchemaValidation'],
         testKey: 'PM-17680',
       };
@@ -176,8 +176,8 @@ describe('block queries', () => {
      * @when we send a block query by hash using that hash
      * @then Indexer should respond with a null block section
      */
-    test("should return a null block, given a block with that hash doesn't exist", async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test("should return a null block, given a block with that hash doesn't exist", async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHash', 'Negative'],
         testKey: 'PM-17681',
       };
@@ -199,8 +199,8 @@ describe('block queries', () => {
      * @when we send a block query by hash using them
      * @then Indexer should respond with an error
      */
-    test('should return an error, when the hash is invalid (malformed)', async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should return an error, when the hash is invalid (malformed)', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHash', 'Negative'],
         testKey: 'PM-17683',
       };
@@ -225,8 +225,8 @@ describe('block queries', () => {
      * @when we send a block query by height using that height
      * @then Indexer should respond with the block with that height
      */
-    test('should return the block with that height, given a valid height', async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should return the block with that height, given a valid height', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHeight'],
         testKey: 'PM-17339',
       };
@@ -242,8 +242,8 @@ describe('block queries', () => {
      * @when we send a block query by height
      * @then Indexer should respond with a block according to the requested schema
      */
-    test('should return a blocks according to the requested schema', async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should return a blocks according to the requested schema', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHeight', 'SchemaValidation'],
         testKey: 'PM-17684',
       };
@@ -267,8 +267,8 @@ describe('block queries', () => {
      * @when we send a block query by height using that height
      * @then Indexer should respond with the genesis block
      */
-    test('should return the genesis block, given height=0 is requested', async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should return the genesis block, given height=0 is requested', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHeight', 'Genesis'],
         testKey: 'PM-17685',
       };
@@ -288,14 +288,16 @@ describe('block queries', () => {
     });
 
     /**
-     * A block query by height with a height that doesn't exist returns a null block
+     * A block query by height with a height that doesn't exist (but it's within the reange of possible values)
+     * returns a null block. Note that this is different from a block query by height with an invalid
+     * height, which returns an error. We will use the maximum allowed height for this test.
      *
      * @given we use a height that doesn't exist
      * @when we send a block query by height using that height
-     * @then Indexer should respond with an empty block
+     * @then Indexer should respond with an empty (null)block
      */
-    test('should return an empty body answer, given that block height request is the maximum available height', async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should return an empty body answer, given that block height requested is the maximum available height', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHeight', 'Negative'],
         testKey: 'PM-17686',
       };
@@ -319,8 +321,8 @@ describe('block queries', () => {
      * @when we send a block query by height using them
      * @then Indexer should respond with an error
      */
-    test('should return an error, given an invalid height', async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should return an error, given an invalid height', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHeight', 'Negative'],
         testKey: 'PM-17687',
       };
@@ -348,8 +350,8 @@ describe('block queries', () => {
      * @when we send a block query with both parameters
      * @then Indexer should respond with an error
      */
-    test('should return an error, as only one parameter at a time can be used', async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should return an error, as only one parameter at a time can be used', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHeightAndHash', 'Negative'],
         testKey: 'PM-17688',
       };
@@ -404,9 +406,9 @@ describe(`genesis block`, () => {
      * @when we inspect its transactions
      * @then it should contain transactions with pre-fund wallet utxos
      */
-    test('should contain transactions with pre-fund wallet utxos', async (context: TestContext) => {
-      context.task!.meta.custom = {
-        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets'],
+    test('should contain transactions with pre-fund wallet utxos', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets', 'UnshieldedTokens'],
         testKey: 'PM-17689',
       };
 
@@ -435,9 +437,9 @@ describe(`genesis block`, () => {
      * @when we inspect the utxos in its transaction
      * @then there should be utxos related to exactly 4 pre-fund wallets
      */
-    test('should contain utxos related to exactly 4 pre-fund wallets', async (context: TestContext) => {
-      context.task!.meta.custom = {
-        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets'],
+    test('should contain utxos related to exactly 4 pre-fund wallets', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets', 'UnshieldedTokens'],
         testKey: 'PM-17690',
       };
 
@@ -470,9 +472,9 @@ describe(`genesis block`, () => {
      * @when we inspect the utxos in its transaction
      * @then there should be utxos with exactly 1 token type
      */
-    test('should contain utxos with exactly 1 token', async (context: TestContext) => {
-      context.task!.meta.custom = {
-        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets'],
+    test('should contain utxos with exactly 1 token type', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets', 'UnshieldedTokens'],
         testKey: 'PM-17691',
       };
 
@@ -506,9 +508,9 @@ describe(`genesis block`, () => {
      * @then the utxos should be sorted by outputIndex in ascending order
      */
     // https://shielded.atlassian.net/browse/PM-17665
-    test('should contain utxos sorted by outputIndex in ascending order', async (context: TestContext) => {
-      context.task!.meta.custom = {
-        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets'],
+    test('should contain utxos sorted by outputIndex in ascending order', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets', 'UnshieldedTokens'],
         testKey: 'PM-17692',
       };
 

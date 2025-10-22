@@ -199,7 +199,7 @@ describe('contract queries', () => {
       let contractUpdateHeight: number;
       try {
         existingContractAddress = dataProvider.getKnownContractAddress();
-        contractUpdateHeight = await dataProvider.getContractUpdateHeight();
+        contractUpdateHeight = await dataProvider.getContractUpdateBlockHeight();
       } catch (error) {
         log.warn(error);
         context.skip?.(true, (error as Error).message);
@@ -228,7 +228,7 @@ describe('contract queries', () => {
       try {
         existingContractAddress = dataProvider.getKnownContractAddress();
         contractDeployHeight = await dataProvider.getContractDeployBlockHeight();
-        contractCallHeight = await dataProvider.getContractCallHeight();
+        contractCallHeight = await dataProvider.getContractCallBlockHeight();
       } catch (error) {
         log.warn(error);
         context.skip?.(true, (error as Error).message);

@@ -407,13 +407,15 @@ async function main(): Promise<boolean> {
 
   // Checking indexer is up and running on http ready endpoint
   console.info(
-    `[INFO ] - Checking indexer is up and running on ${TARGET_ENV} (${INDEXER_HTTP_URL})`,
+    `[INFO ] - Checking indexer is up and running on ${TARGET_ENV} (${INDEXER_HTTP_URL}/ready)`,
   );
   try {
-    const httpReadyResponse = await fetch(`${INDEXER_HTTP_URL}/ready`);
+    const httpReadyResponse = await fetch(`${INDEXER_HTTP_URL}/ready`, {
+      signal: AbortSignal.timeout(10_000),
+    });
     if (!httpReadyResponse.ok) {
       console.error(
-        `[ERROR] - Indexer is not ready on ${TARGET_ENV} (${INDEXER_HTTP_URL})`,
+        `[ERROR] - Indexer is not ready on ${TARGET_ENV} (${INDEXER_HTTP_URL}/ready)`,
       );
       console.error(
         `[ERROR] - Replied with status ${httpReadyResponse.status}: ${httpReadyResponse.statusText}`,

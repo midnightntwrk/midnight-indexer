@@ -26,7 +26,10 @@ export default () => {
   const ts = new Date().toISOString().replace(/T/, '_').replace(/:/g, '-').replace(/\..+/, '');
 
   const sessionDir = join(BASE, ts);
-  mkdirSync(sessionDir);
+  // Handle parallel execution - directory may already exist from another project
+  if (!existsSync(sessionDir)) {
+    mkdirSync(sessionDir);
+  }
 
   // write the path your logger will read
   writeFileSync(join(BASE, 'sessionPath'), sessionDir, 'utf8');

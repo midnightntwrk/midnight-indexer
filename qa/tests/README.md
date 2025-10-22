@@ -5,7 +5,8 @@
 - [📦 Prerequisites](#-prerequisites)
 - [🧰 Install Dependencies](#-install-dependencies)
 - [🔐 Environmental Setup](#-environment-setup)
-  - [🏢 Organization Access](#-organization-access)
+- [🏢 Organization Access](#-organization-access)
+- [🧪 Test Framework Organization](#-test-framework-organization)
 - [🚀 Getting Started (Local Undeployed Environment)](#-getting-started-local-undeployed-environment)
 - [🌐 Running Against Deployed Environments](#-running-against-deployed-environments)
 - [✨ Features](#-features)
@@ -56,19 +57,45 @@ Before running the QA tests, make sure your local environment is configured acco
 > This is required to push signed commits to Midnight repositories
 
 ---
+
+## 🧪 Test Framework Organization
+
+The test suite is organized using **Vitest projects**, which allows running different test types independently:
+
+- **[Smoke Tests](tests/smoke/README.md)** - Quick health checks and API validation (~1 second runtime)
+- **[Integration Tests](tests/integration/README.md)** - Comprehensive GraphQL API testing with pre-seeded data
+- **[E2E Tests](tests/e2e/README.md)** - End-to-end validation using the Node Toolkit (includes cache warmup)
+
+Each project can be run independently or together. E2E tests include a cache warmup phase for the Node Toolkit, while smoke and integration tests start immediately.
+
+### Running Test Projects
+
+```bash
+# Run all test projects together
+TARGET_ENV=undeployed yarn test
+
+# Run individual projects
+TARGET_ENV=undeployed yarn test:smoke        # Smoke tests only
+TARGET_ENV=undeployed yarn test:integration  # Integration tests only
+TARGET_ENV=undeployed yarn test:e2e          # E2E tests only (with cache warmup)
+```
+
+See the individual project README files for detailed information about each test suite.
+
+---
 ## 🚀 Getting Started (Local Undeployed Environment)
 
 Indexer can be executed locally (this is known as `undeployed` environment). You can start it in two ways, depending on whether you want a clean or pre-seeded environment:
 
 #### **Option 1 — Using the compose file directly**
 
-Brings up all core services (Node, Indexer, NATS, Postgres) but starts the blockchain from genesis, meaning there will no pre-existing blocks or transactions until you create them. 
+Brings up all core services (Node, Indexer, NATS, Postgres) but starts the blockchain from genesis, meaning there will be no pre-existing blocks or transactions until you create them. 
 
 See **Step 5** below for how to start it.
 
 #### **Option 2 — Using the helper startup script (recommended for testing)**
 
-This method wraps the compose command and additionally seeds the environment with sample data (blocks and transactions).
+This method wraps the compose command and additionally seeds the environment with sample data (blocks with transactions).
 
 See **Step 5** below for how to use the script.
 
@@ -93,12 +120,8 @@ source .envrc
 
 ### 4) Set versions
 
-By default, the latest Node and Indexer tags are used:
-```bash
-export NODE_TAG=${NODE_TAG:-latest}
-export INDEXER_TAG=${INDEXER_TAG:-latest}
-```
-If you want to pin specific versions, you can override them:
+By default, the node and indexer version to use will be determined based on the value in `NODE_VERSION` file and the SHA-1 of the commit where that file was updated (which indicates when a working indexer/node pair has been identified)
+Alternavely, you can override indexer and node image, and pin them to specific tags:
 
 ```bash
 export NODE_TAG=0.17.0-rc.4
@@ -133,7 +156,13 @@ That script will:
 cd qa/tests
 TARGET_ENV=undeployed yarn test 
 ```
-> To run only the end-to-end test suite, use: `TARGET_ENV=undeployed yarn test e2e`
+
+Run individual test projects:
+```bash
+TARGET_ENV=undeployed yarn test:smoke        # Quick health checks
+TARGET_ENV=undeployed yarn test:integration  # GraphQL API tests
+TARGET_ENV=undeployed yarn test:e2e          # End-to-end with toolkit
+```
 
 ---
 
@@ -142,6 +171,7 @@ TARGET_ENV=undeployed yarn test
 There are a number of deployed environments that are used for testing components of the Midnight network. They are:
   - devnet
   - qanet
+  - preview
   - testnet02
 
 To execute the tests against these environments just change the TARGET_ENV variable accordingly (NOTE: use lower case for environment names)
@@ -155,21 +185,36 @@ This is because we are using the latest Indexer 3.x API which has incompatible c
 
 ## ✨ Features
 
-- **Based on Vitest**: Uses Vitest as a modern, Typescript based, test framework core
-- **Smoke Tests**: Health checks and schema validation for GraphQL endpoints.
-- **Basic Integration Tests**: Fine-grained GraphQL query and subscription tests for blocks, transactions, and contract actions.
-- **Custom Reporters**: JUnit-compatible output for CI integration.
+- **Based on Vitest**: Uses Vitest as a modern, TypeScript-based test framework with project organization
 
-- **Improved Logging**: Configurable logging for debugging and test traceability.
+- **Project-Based Organization**: Tests are organized into three independent projects (smoke, integration, e2e) that can run separately or together
+
+- **[Smoke Tests](tests/smoke/README.md)**: Health checks and schema validation for GraphQL endpoints
+
+- **[Integration Tests](tests/integration/README.md)**: Fine-grained GraphQL query and subscription tests for blocks, transactions, and contract actions
+
+- **[E2E Tests](tests/e2e/README.md)**: Tests that use the Node Toolkit to perform actions on the blockchain and validate indexer results
+
+- **Smart Cache Management**: E2E tests include toolkit cache warmup; integration and smoke tests start immediately
+
+- **Custom Reporters**: JUnit-compatible output for CI integration and XRay custom test reporting
+
+- **Improved Logging**: Configurable logging for debugging and test traceability
 
 ---
 
 ## 🛠️ Future Developments, Improvements & Test Ideas
 
 - **Contract actions**: Expand test coverage to include missing contract actions.
+
 - **Advanced Integration tests**: Expand test coverage with the usage of Node Toolkit.
+
 - **Test containers support**: Add support for Test Container to add better fine-grained control over the indexer sub-components
+
 - **Add Tooling for Test Data Scraping**: Tools for generating synthetic blocks, transactions, and keys.
+
 - **GraphQL Schema Fuzzing**: Randomized query/subscription request schema with corresponding validation 
+
 - **Dynamic Data Fetching**: Use the block scraper to fetch recent block data to execute the test against (potentially) different test data every run 
+
 - **Log file per test**: Right now the test execution is per test file, having log files per test will allow concurrent test execution.
