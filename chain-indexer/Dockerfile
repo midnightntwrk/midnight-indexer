@@ -9,7 +9,6 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 SHELL ["/bin/bash", "-c"]
 ARG PROFILE=release
-RUN git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
 COPY --from=planner /build/recipe.json recipe.json
 RUN cargo chef cook --profile $PROFILE --recipe-path recipe.json
 COPY . .
