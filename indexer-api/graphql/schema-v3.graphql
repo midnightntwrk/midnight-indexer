@@ -75,7 +75,7 @@ A contract action.
 interface ContractAction {
 	address: HexEncoded!
 	state: HexEncoded!
-	chainState: HexEncoded!
+	zswapState: HexEncoded!
 	transaction: Transaction!
 	unshieldedBalances: [ContractBalance!]!
 }
@@ -125,7 +125,7 @@ type ContractCall implements ContractAction {
 	"""
 	The hex-encoded serialized contract-specific zswap state.
 	"""
-	chainState: HexEncoded!
+	zswapState: HexEncoded!
 	"""
 	The entry point.
 	"""
@@ -159,7 +159,7 @@ type ContractDeploy implements ContractAction {
 	"""
 	The hex-encoded serialized contract-specific zswap state.
 	"""
-	chainState: HexEncoded!
+	zswapState: HexEncoded!
 	"""
 	Transaction for this contract deploy.
 	"""
@@ -185,7 +185,7 @@ type ContractUpdate implements ContractAction {
 	"""
 	The hex-encoded serialized contract-specific zswap state.
 	"""
-	chainState: HexEncoded!
+	zswapState: HexEncoded!
 	"""
 	Transaction for this contract update.
 	"""

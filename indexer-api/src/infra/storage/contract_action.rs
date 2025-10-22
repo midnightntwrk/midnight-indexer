@@ -41,7 +41,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                chain_state,
+                zswap_state,
                 transaction_id
             FROM contract_actions
             WHERE contract_actions.address = $1
@@ -72,7 +72,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                chain_state,
+                zswap_state,
                 transaction_id
             FROM contract_actions
             WHERE address = $1
@@ -98,7 +98,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                chain_state,
+                zswap_state,
                 transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
@@ -127,7 +127,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                chain_state,
+                zswap_state,
                 transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
@@ -157,7 +157,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                chain_state,
+                zswap_state,
                 transaction_id
             FROM contract_actions
             WHERE address = $1
@@ -191,7 +191,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                chain_state,
+                zswap_state,
                 contract_actions.transaction_id
             FROM contract_actions
             INNER JOIN regular_transactions ON regular_transactions.id = contract_actions.transaction_id
@@ -208,7 +208,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                chain_state,
+                zswap_state,
                 contract_actions.transaction_id
             FROM contract_actions
             INNER JOIN regular_transactions ON regular_transactions.id = contract_actions.transaction_id
@@ -237,7 +237,7 @@ impl ContractActionStorage for Storage {
                 address,
                 state,
                 attributes,
-                chain_state,
+                zswap_state,
                 transaction_id
             FROM contract_actions
             WHERE transaction_id = $1
@@ -333,7 +333,7 @@ impl Storage {
                 address,
                 state,
                 attributes,
-                chain_state,
+                zswap_state,
                 transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id

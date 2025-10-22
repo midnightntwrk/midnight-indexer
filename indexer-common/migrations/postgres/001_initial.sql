@@ -64,7 +64,7 @@ CREATE TABLE contract_actions (
   variant CONTRACT_ACTION_VARIANT NOT NULL,
   address BYTEA NOT NULL,
   state BYTEA NOT NULL,
-  chain_state BYTEA NOT NULL,
+  zswap_state BYTEA NOT NULL,
   attributes JSONB NOT NULL
 );
 CREATE INDEX ON contract_actions (transaction_id);
