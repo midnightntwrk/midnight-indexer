@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import fs from 'fs';
 import log from '@utils/logging/logger';
 
 export enum EnvironmentName {
@@ -76,6 +77,8 @@ export class Environment {
   private readonly networkId: string;
   private readonly nodeHost: string;
   private readonly nodeTag: string;
+  private readonly nodeToolkitTag: string;
+
   constructor() {
     // Setting up environment with error checking
     const rawEnv = process.env.TARGET_ENV;
@@ -104,8 +107,17 @@ export class Environment {
     this.networkId = networkIdByEnvName[this.envName];
     this.indexerHost = indexerHostByEnvName[this.envName];
     this.nodeHost = nodeHostByEnvName[this.envName];
-    this.nodeTag = process.env.NODE_TAG || '0.16.3-72d4ac2e';
+
+    // What we are actually doing here is the following:
+    // 1. If the NODE_TAG is specified as an environment variable, use it. otherwise
+    // we read the NODE_VERSION file and use the version from the file.
+    // 2. If the NODE_TOOLKIT_VERSION is specified as an environment variable, use it. otherwise
+    // we use the same version as the NODE_TAG.
+    const supportedNodeVersion = fs.readFileSync('../../NODE_VERSION', 'utf8').trim();
+    this.nodeTag = process.env.NODE_TAG || supportedNodeVersion;
+    this.nodeToolkitTag = process.env.NODE_TOOLKIT_TAG || supportedNodeVersion;
     log.debug(`Using NODE_TAG: ${this.nodeTag}`);
+    log.debug(`Using NODE_TOOLKIT_TAG: ${this.nodeTag}`);
   }
 
   isUndeployedEnv(): boolean {
@@ -142,6 +154,10 @@ export class Environment {
 
   getNodeVersion(): string {
     return this.nodeTag;
+  }
+
+  getNodeToolkitVersion(): string {
+    return this.nodeToolkitTag;
   }
 }
 

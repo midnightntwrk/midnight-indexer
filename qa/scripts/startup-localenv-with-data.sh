@@ -94,10 +94,16 @@ sleep 5
 
 docker compose --profile cloud logs |grep "Highest known block"
 
-# docker stop midnight-indexer-node-1
-# docker rm midnight-indexer-node-1
-
-# docker stop midnight-indexer-chain-indexer-1
-# docker rm midnight-indexer-chain-indexer-1
 
 docker ps --format "table {{.Image}}\t{{.Names}}\t{{.Status}}"
+
+
+echo "Plase make sure all the services are running and healthy"
+
+echo "Deleting toolkit cache..."
+rm -rf qa/tests/.tmp/toolkit/.sync_cache-undeployed/
+
+echo "Regenarating new test data... "
+pushd qa/tools/block-scanner
+bun run generate:data
+popd
