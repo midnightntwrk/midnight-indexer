@@ -2,6 +2,8 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 CHAIN=$1
 if [ -z "$CHAIN" ]; then
     # Find all toolkit-* containers
@@ -17,48 +19,57 @@ if [ -z "$CHAIN" ]; then
     else
         echo "Multiple toolkit containers found:"
         echo "$CONTAINERS"
-        echo "Please specify which chain to use: $0 <chain_id> <seed>"
+        echo "Please specify which chain to use: $0 <chain_id> <seed> [options]"
         exit 1
     fi
 fi
 
 if [ "$CHAIN" != "undeployed" ] && [ "$CHAIN" != "devnet" ] && [ "$CHAIN" != "testnet02" ] && [ "$CHAIN" != "nodedev01" ] && [ "$CHAIN" != "preview" ]; then
     echo "Please provide a valid chain id (undeployed, devnet, testnet02, nodedev01, preview)"
-    echo "Usage: $0 <chain_id> <seed>"
+    echo "Usage: $0 <chain_id> <seed> [--debug] [--dry-run] [--fetch-concurrency N]"
     exit 1
 fi
 
 SEED=$2
 if [ -z "$SEED" ]; then
     echo "Please provide a seed"
-    echo "Usage: $0 <chain_id> <seed>"
+    echo "Usage: $0 <chain_id> <seed> [--debug] [--dry-run] [--fetch-concurrency N]"
     exit 1
 fi
 
-# Switch case for the chain id
-NETWORK_ID=""
+# Start the container (NODE_TAG will be read from environment or NODE_VERSION file)
+"$SCRIPT_DIR/toolkit-start" $CHAIN
+
+# Determine the RPC URL based on chain
 case $CHAIN in
     "undeployed")
-        NETWORK_ID="undeployed"
+        RPC_URL="ws://localhost:9944"
         ;;
     "devnet")
-        NETWORK_ID="devnet"
+        RPC_URL="wss://rpc.devnet.midnight.network"
         ;;
     "preview")
-        NETWORK_ID="devnet"
+        RPC_URL="wss://rpc.preview.midnight.network"
         ;;
     "testnet02")
-        NETWORK_ID="testnet"
+        RPC_URL="wss://rpc.testnet02.midnight.network"
         ;;
     "qanet")
-        NETWORK_ID="devnet"
+        RPC_URL="wss://rpc.qanet.dev.midnight.network"
         ;;
     "nodedev01")
-        NETWORK_ID="devnet"
+        RPC_URL="wss://rpc.node-dev-01.dev.midnight.network"
         ;;
 esac
 
+# Collect any additional flags (e.g., --debug, --dry-run, etc.)
+shift 2
+EXTRA_FLAGS="$@"
+
+echo "Showing wallet state for seed..."
 docker exec toolkit-${CHAIN} \
-    /midnight-node-toolkit show-viewing-key \
-    --network $NETWORK_ID \
-    --seed $SEED
+    /midnight-node-toolkit show-wallet \
+    --src-url $RPC_URL \
+    --seed $SEED \
+    $EXTRA_FLAGS
+

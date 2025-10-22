@@ -1,0 +1,57 @@
+#!/bin/bash
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLKIT_DIR="$(dirname "$SCRIPT_DIR")"
+
+CHAIN="preview"
+
+# Use FUNDING_SEED from environment or fall back to default test seed
+if [ -z "$FUNDING_SEED" ]; then
+    SEED="0000000000000000000000000000000000000000000000000000000000000001"
+    echo "Using default test seed"
+else
+    SEED="$FUNDING_SEED"
+    echo "Using funding seed from environment"
+fi
+
+echo "=========================================="
+echo "Testing Toolkit Scripts for: $CHAIN"
+echo "=========================================="
+echo ""
+
+# Start container
+echo "Step 1: Starting toolkit container..."
+"$TOOLKIT_DIR/toolkit-start" $CHAIN
+echo "✓ Container started"
+echo ""
+
+# Show address
+echo "Step 2: Showing addresses..."
+"$TOOLKIT_DIR/toolkit-show-address" $CHAIN "$SEED"
+echo "✓ Addresses retrieved"
+echo ""
+
+# Show viewing key
+echo "Step 3: Showing viewing key..."
+"$TOOLKIT_DIR/toolkit-show-viewing-key" $CHAIN "$SEED"
+echo "✓ Viewing key retrieved"
+echo ""
+
+# Generate transaction
+echo "Step 4: Generating single transaction..."
+"$TOOLKIT_DIR/toolkit-generate-single-tx" $CHAIN "$SEED"
+echo "✓ Transaction generated"
+echo ""
+
+# Cleanup
+echo "Step 5: Cleaning up..."
+"$TOOLKIT_DIR/toolkit-cleanup" $CHAIN
+echo "✓ Cleanup complete"
+echo ""
+
+echo "=========================================="
+echo "All tests passed for: $CHAIN"
+echo "=========================================="
+

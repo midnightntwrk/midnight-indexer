@@ -3,11 +3,30 @@
 set -e
 
 CHAIN=$1
-if [ "$CHAIN" != "undeployed" ] && [ "$CHAIN" != "devnet" ] && [ "$CHAIN" != "testnet02" ] && [ "$CHAIN" != "nodedev01" ]; then
-    echo "Please provide a valid chain id (undeployed, devnet, testnet02, nodedev01)"
-    echo "Usage: $0 <chain_id>"
+if [ -z "$CHAIN" ]; then
+    # Find all toolkit-* containers
+    CONTAINERS=$(docker ps --format "{{.Names}}" | grep "^toolkit-" || true)
+    COUNT=$(echo "$CONTAINERS" | grep -c "^toolkit-" || true)
+    
+    if [ "$COUNT" -eq 0 ]; then
+        echo "No toolkit containers found. Please start one first."
+        exit 1
+    elif [ "$COUNT" -eq 1 ]; then
+        CHAIN=$(echo "$CONTAINERS" | sed 's/^toolkit-//')
+        echo "Using chain: $CHAIN"
+    else
+        echo "Multiple toolkit containers found:"
+        echo "$CONTAINERS"
+        echo "Please specify which chain to use: $0 [chain_id] [command] [subcommand]"
+        exit 1
+    fi
+fi
+
+if [ "$CHAIN" != "undeployed" ] && [ "$CHAIN" != "devnet" ] && [ "$CHAIN" != "testnet02" ] && [ "$CHAIN" != "nodedev01" ] && [ "$CHAIN" != "preview" ]; then
+    echo "Please provide a valid chain id (undeployed, devnet, testnet02, nodedev01, preview)"
+    echo "Usage: $0 [chain_id] [command] [subcommand]"
     exit 1
 fi
 
-docker exec -it toolkit-${CHAIN} \
+docker exec toolkit-${CHAIN} \
     /midnight-node-toolkit $2 $3 --help 

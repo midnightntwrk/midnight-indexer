@@ -2,6 +2,8 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 CHAIN=$1
 if [ -z "$CHAIN" ]; then
     # Find all toolkit-* containers
@@ -17,48 +19,41 @@ if [ -z "$CHAIN" ]; then
     else
         echo "Multiple toolkit containers found:"
         echo "$CONTAINERS"
-        echo "Please specify which chain to use: $0 <chain_id> <seed>"
+        echo "Please specify which chain to use: $0 <chain_id> <wallet_seed>"
         exit 1
     fi
 fi
 
 if [ "$CHAIN" != "undeployed" ] && [ "$CHAIN" != "devnet" ] && [ "$CHAIN" != "testnet02" ] && [ "$CHAIN" != "nodedev01" ] && [ "$CHAIN" != "preview" ]; then
     echo "Please provide a valid chain id (undeployed, devnet, testnet02, nodedev01, preview)"
-    echo "Usage: $0 <chain_id> <seed>"
+    echo "Usage: $0 <chain_id> <wallet_seed>"
     exit 1
 fi
 
-# Switch case for the chain id
-NETWORK_ID=""
-case $CHAIN in
-    "undeployed")
-        NETWORK_ID="undeployed"
-        ;;
-    "devnet")
-        NETWORK_ID="devnet"
-        ;;
-    "preview")
-        NETWORK_ID="devnet"
-        ;;
-    "testnet02")
-        NETWORK_ID="testnet"
-        ;;
-    "qanet")
-        NETWORK_ID="devnet"
-        ;;
-    "nodedev01")
-        NETWORK_ID="devnet"
-        ;;
-esac
-
-SEED=$2
-if [ -z "$SEED" ]; then
-    echo "Please provide a seed"
-    echo "Usage: $0 <chain_id> <seed>"
+WALLET_SEED=$2
+if [ -z "$WALLET_SEED" ]; then
+    echo "Please provide a wallet seed"
+    echo "Usage: $0 <chain_id> <wallet_seed>"
     exit 1
 fi
 
+# Start the container (NODE_TAG will be read from environment or NODE_VERSION file)
+"$SCRIPT_DIR/toolkit-start" $CHAIN
+
+# Build the command with required parameters
+CMD_ARGS="--wallet-seed $WALLET_SEED"
+
+# Add optional funding seed if provided
+if [ -n "$FUNDING_SEED" ]; then
+    CMD_ARGS="$CMD_ARGS --funding-seed $FUNDING_SEED"
+fi
+
+# Add optional RNG seed if provided
+if [ -n "$RNG_SEED" ]; then
+    CMD_ARGS="$CMD_ARGS --rng-seed $RNG_SEED"
+fi
+
+echo "Registering dust address for wallet seed..."
 docker exec toolkit-${CHAIN} \
-    /midnight-node-toolkit show-address \
-    --network $NETWORK_ID \
-    --seed $SEED | jq
+    /midnight-node-toolkit generate-txs register-dust-address $CMD_ARGS
+
