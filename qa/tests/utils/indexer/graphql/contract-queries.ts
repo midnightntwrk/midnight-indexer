@@ -17,6 +17,13 @@ export const CONTRACT_ACTION_LIGHT_BODY = `
     __typename
     address
     ... on ContractDeploy {
+        transaction {
+            hash
+            block {
+                hash
+                height
+            }
+        }
         unshieldedBalances {
             tokenType
             amount

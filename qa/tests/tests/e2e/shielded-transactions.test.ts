@@ -15,11 +15,11 @@
 
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
-import { IndexerHttpClient } from '@utils/indexer/http-client';
+import dataProvider from '@utils/testdata-provider';
 import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 
 import type { Transaction } from '@utils/indexer/indexer-types';
-import { getBlockByHashWithRetry } from './test-utils';
+import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
 import { TestContext } from 'vitest';
 
 describe('shielded transactions', () => {
@@ -27,7 +27,7 @@ describe('shielded transactions', () => {
   let transactionResult: ToolkitTransactionResult;
 
   // Deterministic seeds (hex) that work with the toolkit
-  const sourceSeed = '0000000000000000000000000000000000000000000000000000000000000001';
+  const sourceSeed = dataProvider.getFundingSeed();
   const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
 
   let sourceAddress: string;
@@ -43,7 +43,7 @@ describe('shielded transactions', () => {
     sourceAddress = (await toolkit.showAddress(sourceSeed)).shielded;
     destinationAddress = (await toolkit.showAddress(destinationSeed)).shielded;
 
-    // Submit one shielded->shielded transfer (1 NIGHT)
+    // Submit one shielded->shielded transfer (1 STAR)
     transactionResult = await toolkit.generateSingleTx(
       sourceSeed,
       'shielded',
@@ -64,7 +64,7 @@ describe('shielded transactions', () => {
     await Promise.all([toolkit.stop()]);
   });
 
-  describe('a successful shielded transaction transferring 1 Token between two wallets', async () => {
+  describe('a successful shielded transaction transferring 1 Shielded Token between two wallets', async () => {
     /**
      * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
      * that transaction in the block through a block query by hash, using the block hash reported by the toolkit.
@@ -73,13 +73,13 @@ describe('shielded transactions', () => {
      * @when we query the indexer with a block query by hash, using the block hash reported by the toolkit
      * @then the block should contain the expected transaction
      */
-    test('should be reported by the indexer through a block query by hash', async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should be reported by the indexer through a block query by hash', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHash', 'ShieldedTokens'],
         testKey: 'PM-17709',
       };
 
-      context.skip?.(
+      ctx.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",
       );
@@ -116,16 +116,60 @@ describe('shielded transactions', () => {
         `Verifying indexer reports a shielded transaction by hash: ${transactionResult.txHash}`,
       );
       // The expected transaction might take a bit more to show up by indexer, so we retry a few times
-      const transactionResponse = await new IndexerHttpClient().getShieldedTransaction({
-        hash: transactionResult.txHash,
-      });
+      const transactionResponse = await getTransactionByHashWithRetry(transactionResult.txHash!);
 
       expect(transactionResponse).toBeSuccess();
       expect(transactionResponse?.data?.transactions).toBeDefined();
       expect(transactionResponse?.data?.transactions?.length).toBeGreaterThan(0);
       expect(
-        transactionResponse?.data?.transactions?.map((tx: Transaction) => `0x${tx.hash}`),
+        transactionResponse?.data?.transactions?.map((tx: Transaction) => `${tx.hash}`),
       ).toContain(transactionResult.txHash);
     });
+
+    /**
+     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction through an shielded transaction event for the source viewing key.
+     *
+     * @given we subscribe to shielded transaction events for the source viewing key
+     * @when we submit an shielded transaction to node
+     * @then we should receive a transaction event that includes transaction details for the source viewing key
+     */
+    test.todo(
+      'should be reported by the indexer through an shielded transaction event for the source address',
+      async (context: TestContext) => {
+        // Implement me
+      },
+    );
+
+    /**
+     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
+     * that transaction through an shielded transaction event for the destination viewing key.
+     *
+     * @given we subscribe to shielded transaction events for the destination viewing key
+     * @when we submit an shielded transaction to node
+     * @then we should receive a transaction event that includes transaction details for the destination viewing key
+     */
+    test.todo(
+      'should be reported by the indexer through an shielded transaction event for the destination address',
+      async (context: TestContext) => {
+        // Implement me
+      },
+    );
+
+    /**
+     * Once an shielded transaction has been submitted to node and confirmed, we should see the transaction
+     * giving 1 shielded token to the destination address.
+     *
+     * @given a confirmed shielded transaction between two wallets
+     * @when we inspect the containing block for shielded transaction details
+     * @then there should be a balance change that reflects the transfer of 1 shielded token
+     */
+    test.todo(
+      'should have transferred 1 token from the source to the destination address',
+      async (context: TestContext) => {
+        // Implement me but... can we really implement this test? We need to be able to view the transaction details in
+        // the block and use the viewing key for that. Does the toolkit offer that level of support?
+      },
+    );
   });
 });

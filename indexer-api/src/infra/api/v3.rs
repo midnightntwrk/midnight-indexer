@@ -36,7 +36,7 @@ use async_graphql::{Schema, SchemaBuilder, scalar};
 use async_graphql_axum::{GraphQL, GraphQLSubscription};
 use axum::{Router, routing::post_service};
 use const_hex::FromHexError;
-use derive_more::{Debug, Display};
+use derive_more::{AsRef, Debug, Display};
 use indexer_common::domain::{
     ByteArrayLenError, ByteVec, LedgerStateStorage, NetworkId, NoopLedgerStateStorage,
     NoopSubscriber, SessionId, Subscriber,
@@ -50,8 +50,9 @@ use std::{
 use thiserror::Error;
 
 /// Wrapper around hex-encoded bytes.
-#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, AsRef)]
 #[debug("{_0}")]
+#[as_ref(str)]
 pub struct HexEncoded(String);
 
 scalar!(HexEncoded);

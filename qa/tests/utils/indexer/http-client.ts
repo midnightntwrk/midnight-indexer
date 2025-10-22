@@ -70,7 +70,9 @@ export class IndexerHttpClient {
 
   /**
    * Retrieves the latest block from the indexer
+   *
    * @param queryOverride - Optional custom GraphQL query to override the default latest block query
+   *
    * @returns Promise resolving to the block response containing the latest block data
    */
   async getLatestBlock(queryOverride?: string): Promise<BlockResponse> {
@@ -87,9 +89,11 @@ export class IndexerHttpClient {
   }
 
   /**
-   * Retrieves a specific block by its offset from the indexer
+   * Retrieves a specific block by its offset (hash or height) from the indexer
+   *
    * @param offset - The block offset to query for
    * @param queryOverride - Optional custom GraphQL query to override the default block query
+   *
    * @returns Promise resolving to the block response containing the requested block data
    */
   async getBlockByOffset(offset: BlockOffset, queryOverride?: string): Promise<BlockResponse> {
@@ -109,12 +113,14 @@ export class IndexerHttpClient {
   }
 
   /**
-   * Retrieves a shielded transaction by its offset from the indexer
+   * Retrieves a transaction by its offset (hash or identifier) from the indexer
+   *
    * @param offset - The transaction offset to query for
    * @param queryOverride - Optional custom GraphQL query to override the default transaction query
+   *
    * @returns Promise resolving to the transaction response containing the requested transaction data
    */
-  async getShieldedTransaction(
+  async getTransactionByOffset(
     offset: TransactionOffset,
     queryOverride?: string,
   ): Promise<TransactionResponse> {
@@ -138,10 +144,12 @@ export class IndexerHttpClient {
 
   /**
    * Retrieves a contract action by its address and optional offset from the indexer
+   *
    * @param contractAddress - The contract address to query for
    * @param offset - The contract action offset to query for (note this could be either a transaction
    *                 offset or a block offset)
    * @param queryOverride - Optional custom GraphQL query to override the default contract action query
+   *
    * @returns Promise resolving to the contract action response containing the requested contract action data
    */
   async getContractAction(

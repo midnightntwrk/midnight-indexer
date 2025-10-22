@@ -150,18 +150,18 @@ export default class XRayJsonReporter implements Reporter {
     const endTime = Date.now();
 
     if (!process.env.XRAY_COMPONENT) {
-      console.error(
-        'ERROR: XRay JSON Reporter Error: XRAY_COMPONENT environment variable must be defined',
+      console.warn(
+        'WARNING: XRay JSON Reporter Error: XRAY_COMPONENT environment variable must be defined',
       );
-      console.error(
+      console.warn(
         '       Please set the XRAY_COMPONENT environment variable to specify the component being tested',
       );
-      console.error('ERROR: Failed to create a Custom XRay JSON report');
+      console.warn('WARNING: Failed to create a Custom XRay JSON report');
       return;
     }
 
     if (!process.env.XRAY_PROJECT_KEY) {
-      console.debug('WARNING: XRAY_PROJECT_KEY env variable not set, PM will be used as default');
+      console.warn('WARNING: XRAY_PROJECT_KEY env variable not set, PM will be used as default');
     }
 
     const targetEnv = process.env.TARGET_ENV || 'undeployed';

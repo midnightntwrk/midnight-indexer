@@ -1,0 +1,15 @@
+{
+  // The hash of the latest block captured by the scanner
+  "latest": "e8de9355147554d65053f8efdb7c219b3c173412eb451ae91303d49d187e7bae",
+  // Array of up to 100 block hashes going backwards from the latest
+  "other-blocks": [
+    "5ffc7aa5c455e7c550d8b046e48c4c97f2e4ef9ab686f5cd3ccb575c25454a6d",
+    "99235e768224135f14b906a73c272ca5171a864bc7e3d14764671e7170508acb",
+    "7184f120902ca17d36c2b6729cbcb88a52152e72357398afb6300fcbe08d5ab0",
+    "a48c80850bbdb767d6644548768bd005262445a73dc1d256698d1b698bf8ac40",
+    "9333e353ab0eab07cd551515f03e336a8072bdef6c637547dee783479e602a25",
+    "e8de9355147554d65053f8efdb7c219b3c173412eb451ae91303d49d187e7bae"
+  ],
+  // The hash of the genesis block
+  "genesis": null
+}

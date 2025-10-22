@@ -34,7 +34,7 @@ use std::marker::PhantomData;
 #[graphql(
     field(name = "address", ty = "&HexEncoded"),
     field(name = "state", ty = "&HexEncoded"),
-    field(name = "chain_state", ty = "&HexEncoded"),
+    field(name = "zswap_state", ty = "&HexEncoded"),
     field(name = "transaction", ty = "ApiResult<Transaction<S>>"),
     field(name = "unshielded_balances", ty = "ApiResult<Vec<ContractBalance>>")
 )]
@@ -59,7 +59,7 @@ where
             address,
             state,
             attributes,
-            chain_state,
+            zswap_state,
             transaction_id,
             ..
         } = action;
@@ -68,7 +68,7 @@ where
             ContractAttributes::Deploy => ContractAction::Deploy(ContractDeploy {
                 address: address.hex_encode(),
                 state: state.hex_encode(),
-                chain_state: chain_state.hex_encode(),
+                zswap_state: zswap_state.hex_encode(),
                 transaction_id,
                 contract_action_id: id,
                 _s: PhantomData,
@@ -78,7 +78,7 @@ where
                 address: address.hex_encode(),
                 state: state.hex_encode(),
                 entry_point,
-                chain_state: chain_state.hex_encode(),
+                zswap_state: zswap_state.hex_encode(),
                 transaction_id,
                 contract_action_id: id,
                 raw_address: address,
@@ -88,7 +88,7 @@ where
             ContractAttributes::Update => ContractAction::Update(ContractUpdate {
                 address: address.hex_encode(),
                 state: state.hex_encode(),
-                chain_state: chain_state.hex_encode(),
+                zswap_state: zswap_state.hex_encode(),
                 transaction_id,
                 contract_action_id: id,
                 _s: PhantomData,
@@ -111,7 +111,7 @@ where
     state: HexEncoded,
 
     /// The hex-encoded serialized contract-specific zswap state.
-    chain_state: HexEncoded,
+    zswap_state: HexEncoded,
 
     #[graphql(skip)]
     transaction_id: u64,
@@ -164,7 +164,7 @@ where
     state: HexEncoded,
 
     /// The hex-encoded serialized contract-specific zswap state.
-    chain_state: HexEncoded,
+    zswap_state: HexEncoded,
 
     /// The entry point.
     entry_point: String,
@@ -242,7 +242,7 @@ where
     state: HexEncoded,
 
     /// The hex-encoded serialized contract-specific zswap state.
-    chain_state: HexEncoded,
+    zswap_state: HexEncoded,
 
     #[graphql(skip)]
     transaction_id: u64,

@@ -144,11 +144,9 @@ impl LedgerState {
         transaction.ledger_events = ledger_events;
 
         // Update contract actions.
-        if transaction.end_index > transaction.start_index {
-            for contract_action in transaction.contract_actions.iter_mut() {
-                let zswap_state = self.extract_contract_zswap_state(&contract_action.address)?;
-                contract_action.chain_state = zswap_state;
-            }
+        for contract_action in transaction.contract_actions.iter_mut() {
+            let zswap_state = self.extract_contract_zswap_state(&contract_action.address)?;
+            contract_action.zswap_state = zswap_state;
         }
 
         // Update extracted balances of contract actions.

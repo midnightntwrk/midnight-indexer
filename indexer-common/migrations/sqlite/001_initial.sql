@@ -58,7 +58,7 @@ CREATE TABLE contract_actions (
   variant TEXT CHECK (variant IN ('Deploy', 'Call', 'Update')) NOT NULL,
   address BLOB NOT NULL,
   state BLOB NOT NULL,
-  chain_state BLOB NOT NULL,
+  zswap_state BLOB NOT NULL,
   attributes TEXT NOT NULL
 );
 CREATE INDEX contract_actions_transaction_id_idx ON contract_actions (transaction_id);
