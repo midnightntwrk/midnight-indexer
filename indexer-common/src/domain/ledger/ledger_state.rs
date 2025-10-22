@@ -252,6 +252,7 @@ impl LedgerState {
     }
 
     /// Extract the zswap state for the given contract address.
+    #[trace(properties = { "address": "{address}" })]
     pub fn extract_contract_zswap_state(
         &self,
         address: &SerializedContractAddress,
