@@ -427,101 +427,52 @@ class ToolkitWrapper {
 
     const localData = JSON.parse(fs.readFileSync(localDataPath, 'utf8'));
     const contractAddressUntagged = localData['contract-address-untagged'];
-    const coinPublic = localData['coin-public'];
 
-    if (!contractAddressUntagged || !coinPublic) {
+    if (!contractAddressUntagged) {
       throw new Error('Missing required contract data in local.json');
     }
 
-    const intentFile = `/out/${callKey}_intent.bin`;
     const txFile = `/out/${callKey}_tx.mn`;
-    const stateFile = `/out/current_state.mn`;
-    const privateStateFile = `/out/${callKey}_private_state.json`;
 
-    log.info('Getting current contract state...');
-    const contractStateResult = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
-      'contract-state',
-      '--contract-address',
-      contractAddressUntagged,
-      '--dest-file',
-      stateFile,
-    ]);
-
-    if (contractStateResult.exitCode !== 0) {
-      const errorMessage =
-        contractStateResult.stderr || contractStateResult.output || 'Unknown error occurred';
-      throw new Error(`Failed to get contract state: ${errorMessage}`);
-    }
-
-    log.info(`Generating ${callKey} circuit intent...`);
-    const generateIntentResult = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
-      'generate-intent',
-      'circuit',
-      '-c',
-      '/toolkit-js/test/contract/contract.config.ts',
-      '--toolkit-js-path',
-      '/toolkit-js',
-      '--contract-address',
-      contractAddressUntagged,
-      '--coin-public',
-      coinPublic,
-      '--input-onchain-state',
-      stateFile,
-      '--input-private-state',
-      '/out/initial_state.json',
-      '--output-intent',
-      intentFile,
-      '--output-private-state',
-      privateStateFile,
-      '--output-zswap-state',
-      `/out/${callKey}_zswap.json`,
-      callKey,
-    ]);
-
-    if (generateIntentResult.exitCode !== 0) {
-      const errorMessage =
-        generateIntentResult.stderr || generateIntentResult.output || 'Unknown error occurred';
-      throw new Error(`Failed to generate circuit intent: ${errorMessage}`);
-    }
-
-    log.info('Converting intent to transaction...');
-    const sendIntentResult = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
-      'send-intent',
-      '--intent-file',
-      intentFile,
-      '--compiled-contract-dir',
-      '/toolkit-js/test/contract/managed/counter',
-      '--to-bytes',
-      '--dest-file',
-      txFile,
-    ]);
-
-    if (sendIntentResult.exitCode !== 0) {
-      const errorMessage =
-        sendIntentResult.stderr || sendIntentResult.output || 'Unknown error occurred';
-      throw new Error(`Failed to send intent: ${errorMessage}`);
-    }
-
-    log.info('Submitting transaction to network...');
+    log.info(`Generating ${callKey} contract call...`);
     const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'generate-txs',
-      '--src-file',
+      '--dest-file',
       txFile,
-      '-r',
-      '1',
-      'send',
+      '--to-bytes',
+      'contract-simple',
+      'call',
+      '--call-key',
+      callKey,
+      '--rng-seed',
+      rngSeed,
+      '--contract-address',
+      contractAddressUntagged,
     ]);
 
     if (result.exitCode !== 0) {
       const errorMessage = result.stderr || result.output || 'Unknown error occurred';
+      throw new Error(`Failed to generate contract call: ${errorMessage}`);
+    }
+
+    log.info('Submitting transaction to network...');
+    const sendResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'generate-txs',
+      '--src-file',
+      txFile,
+      '--dest-url',
+      env.getNodeWebsocketBaseURL(),
+      'send',
+    ]);
+
+    if (sendResult.exitCode !== 0) {
+      const errorMessage = sendResult.stderr || sendResult.output || 'Unknown error occurred';
       throw new Error(`Failed to submit transaction: ${errorMessage}`);
     }
 
-    const rawOutput = result.output.trim();
+    const rawOutput = sendResult.output.trim();
     return this.parseTransactionOutput(rawOutput);
   }
 
@@ -539,8 +490,6 @@ class ToolkitWrapper {
    * @throws Error if the container is not started or if any step in the deployment process fails.
    */
   async deployContract(opts?: {
-    contractConfigPath?: string;
-    compiledContractDir?: string;
     writeTestData?: boolean;
     dataDir?: string;
   }): Promise<DeployContractResult> {
@@ -553,19 +502,9 @@ class ToolkitWrapper {
 
     const outDir = this.config.targetDir!;
 
-    const contractConfigPath =
-      opts?.contractConfigPath ?? '/toolkit-js/test/contract/contract.config.ts';
-    const compiledContractDir =
-      opts?.compiledContractDir ?? '/toolkit-js/test/contract/managed/counter';
-
-    const zswapFile = 'temp.json';
     const deployTx = 'deploy_tx.mn';
-    const deployIntent = 'deploy.bin';
-    const initialPrivateState = 'initial_state.json';
 
-    const outDeployIntent = join(outDir, deployIntent);
     const outDeployTx = join(outDir, deployTx);
-    const outInitialState = join(outDir, initialPrivateState);
     const coinPublicSeed = '0000000000000000000000000000000000000000000000000000000000000001';
     const addressInfo = await this.showAddress(coinPublicSeed);
     const coinPublic = addressInfo.coinPublic;
@@ -573,46 +512,30 @@ class ToolkitWrapper {
     {
       const result = await this.startedContainer.exec([
         '/midnight-node-toolkit',
-        'generate-intent',
-        'deploy',
-        '-c',
-        contractConfigPath,
-        '--output-intent',
-        `/out/${deployIntent}`,
-        '--output-private-state',
-        `/out/${initialPrivateState}`,
-        '--coin-public',
-        coinPublic,
-        '--output-zswap-state',
-        `/out/${zswapFile}`,
-      ]);
-      if (result.exitCode !== 0) {
-        const e = result.stderr || result.output || 'Unknown error';
-        throw new Error(`generate-intent deploy failed: ${e}`);
-      }
-      if (!fs.existsSync(outDeployIntent) || !fs.existsSync(outInitialState)) {
-        throw new Error('generate-intent deploy did not produce expected outputs');
-      }
-    }
-
-    {
-      const result = await this.startedContainer.exec([
-        '/midnight-node-toolkit',
-        'send-intent',
-        '--intent-file',
-        `/out/${deployIntent}`,
-        '--compiled-contract-dir',
-        compiledContractDir,
-        '--to-bytes',
+        'generate-txs',
         '--dest-file',
         `/out/${deployTx}`,
+        '--to-bytes',
+        'contract-simple',
+        'deploy',
+        '--rng-seed',
+        '0000000000000000000000000000000000000000000000000000000000000037',
       ]);
+
+      log.debug(`contract-simple deploy command output:\n${result.output}`);
+      log.debug(`contract-simple deploy command stderr:\n${result.stderr}`);
+      log.debug(`contract-simple deploy exit code: ${result.exitCode}`);
+
       if (result.exitCode !== 0) {
         const e = result.stderr || result.output || 'Unknown error';
-        throw new Error(`send-intent failed: ${e}`);
+        throw new Error(`contract-simple deploy failed: ${e}`);
       }
+
+      log.debug(`Checking for output files:`);
+      log.debug(`  ${outDeployTx} exists: ${fs.existsSync(outDeployTx)}`);
+
       if (!fs.existsSync(outDeployTx)) {
-        throw new Error(`send-intent did not produce /out/${deployTx}`);
+        throw new Error('contract-simple deploy did not produce expected output file');
       }
     }
 
@@ -622,8 +545,8 @@ class ToolkitWrapper {
         'generate-txs',
         '--src-file',
         `/out/${deployTx}`,
-        '-r',
-        '1',
+        '--dest-url',
+        env.getNodeWebsocketBaseURL(),
         'send',
       ]);
       if (result.exitCode !== 0) {
