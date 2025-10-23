@@ -22,6 +22,8 @@ import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import type { DustGenerationStatusResponse } from '@utils/indexer/indexer-types';
 import { DustGenerationStatusSchema } from '@utils/indexer/graphql/schema';
 
+import dbClient, { CnightRegistration } from '@utils/db/postgres-client';
+
 const indexerHttpClient = new IndexerHttpClient();
 
 describe('dust generation status queries', () => {
@@ -375,6 +377,34 @@ describe('dust generation status queries', () => {
       expect(response.data?.dustGenerationStatus[1].cardanoStakeKey.toLocaleLowerCase()).toBe(
         registeredStakeKey!.toLowerCase(),
       );
+    });
+  });
+});
+
+
+describe('a dust generation status query with a registered stake key', () => {
+  /**
+   * ...
+   *
+   * @given ...
+   * @when ...
+   * @then ...
+   */
+  test('should return the expected dust generation status', async (ctx: TestContext) => {
+    ctx.task!.meta.custom = {
+      labels: ['Query', 'Dust', 'Tokenomics', 'cNgD']
+    };
+
+    await dbClient.init();
+    const registrations: CnightRegistration[] = await dbClient.getCnightRegistrations();
+
+    registrations.forEach(async registration => {
+      console.log(registration);
+      const response: DustGenerationStatusResponse =
+        await indexerHttpClient.getDustGenerationStatus([registration.cardanoAddress]);
+      expect(response).toBeSuccess();
+      console.log(response.data?.dustGenerationStatus);
+      
     });
   });
 });
