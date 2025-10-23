@@ -152,6 +152,7 @@ impl domain::storage::Storage for Storage {
                 raw
             FROM transactions
             WHERE block_id = $1
+            ORDER BY id
         "};
 
         let transactions = sqlx::query_as::<_, (TransactionVariant, ByteVec)>(query)
