@@ -168,7 +168,7 @@ describe.sequential('contract actions', () => {
 
     beforeAll(async () => {
       contractCallResult = await toolkit.callContract(
-        'increment',
+        'store',
         undefined,
         `data/static/${env.getEnvName()}`,
       );
