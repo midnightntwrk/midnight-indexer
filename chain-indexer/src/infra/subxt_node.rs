@@ -147,6 +147,9 @@ impl SubxtNode {
     }
 
     /// Subscribe to finalizded blocks, filtering duplicates and disconnection errors.
+    /// Subxt with its reconnecting-rpc-client feature exposes the error case, i.e. yields one `Err`
+    /// item, then reconnects and continues with `Ok` items. Therefore we filter out the respective
+    /// `Err` item; all other errors need to be propagated as is.
     async fn subscribe_finalized_blocks(
         &self,
     ) -> Result<impl Stream<Item = Result<SubxtBlock, SubxtNodeError>> + use<>, SubxtNodeError>
@@ -177,6 +180,7 @@ impl SubxtNode {
                         }
                     }
 
+                    // Filter out reconnect errors; see method comment above.
                     Err(subxt::Error::Rpc(subxt::error::RpcError::ClientError(
                         subxt_rpcs::Error::DisconnectedWillReconnect(_),
                     ))) => {
@@ -340,7 +344,8 @@ impl Node for SubxtNode {
                 // If we have not already stored the first finalized block, we fetch all blocks
                 // walking backwards from the one with the parent hash of the first finalized block
                 // until we arrive at the highest stored block (excluded) or at genesis (included).
-                // For these we store the hashes; one hash is 32 bytes, i.e. one year is ~ 156MB.
+                // For these we store the hashes; one hash is 32 bytes, i.e. one year is ~ 160MB.
+                // (one year ~ 5,256,000 blocks).
                 let genesis_parent_hash = self
                     .fetch_block(self.default_online_client.genesis_hash())
                     .await
@@ -349,11 +354,13 @@ impl Node for SubxtNode {
                     .parent_hash;
 
                 let capacity = match after_height {
-                    Some(highest_height) if highest_height < first_block.number() => {
-                        (first_block.number() - highest_height) as usize + 1
+                    Some(after_height) if after_height < first_block.number() => {
+                        (first_block.number() - after_height) as usize + 1
                     }
                     _ => first_block.number() as usize + 1,
                 };
+                // Cap at one year, see comment above.
+                let capacity = capacity.min(5_256_000);
                 info!(
                     highest_stored_height:? = after_height,
                     first_finalized_height = first_block.number();
