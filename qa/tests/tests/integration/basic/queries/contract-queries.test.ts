@@ -201,9 +201,11 @@ describe('contract queries', () => {
       const parsed = schema.safeParse(contractAction);
 
       if (!parsed.success) {
-        console.log('Schema validation failed:', JSON.stringify(parsed.error, null, 2));
+        log.debug('Schema validation failed');
+        log.debug(JSON.stringify(parsed.error, null, 2));
+      } else {
+        log.debug(`Schema validation succeeded for ${typename}`);
       }
-
       expect(
         parsed.success,
         `Contract action schema validation failed: ${JSON.stringify(parsed.error, null, 2)}`,
