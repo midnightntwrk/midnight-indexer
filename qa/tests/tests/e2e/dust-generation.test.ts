@@ -87,7 +87,9 @@ describe.sequential('DUST generation workflow', () => {
     beforeAll(async () => {
       log.info(`Step 2: Checking wallet state for seed: ${destinationSeed.substring(0, 8)}...`);
       walletStateAfterFunding = await toolkit.showWallet(destinationSeed);
-      log.info(`Wallet state after funding: ${walletStateAfterFunding.utxos.length} Night UTXOs, ${walletStateAfterFunding.dust_utxos.length} DUST UTXOs`);
+      log.info(
+        `Wallet state after funding: ${walletStateAfterFunding.utxos.length} Night UTXOs, ${walletStateAfterFunding.dust_utxos.length} DUST UTXOs`,
+      );
     }, TEST_TIMEOUT);
 
     test(
@@ -118,7 +120,9 @@ describe.sequential('DUST generation workflow', () => {
     beforeAll(async () => {
       log.info(`Step 3: Executing complete DUST generation workflow...`);
       dustGenerationResult = await toolkit.generateDust(destinationSeed, amount, sourceSeed);
-      log.info(`DUST generation result: ${dustGenerationResult.hasDustGeneration ? 'Active' : 'Inactive'}`);
+      log.info(
+        `DUST generation result: ${dustGenerationResult.hasDustGeneration ? 'Active' : 'Inactive'}`,
+      );
     }, DUST_GENERATION_TIMEOUT);
 
     test(
@@ -149,7 +153,9 @@ describe.sequential('DUST generation workflow', () => {
     beforeAll(async () => {
       log.info(`Step 4: Verifying final wallet state structure...`);
       finalWalletState = await toolkit.showWallet(destinationSeed);
-      log.info(`Final wallet state: ${finalWalletState.utxos.length} Night UTXOs, ${finalWalletState.dust_utxos.length} DUST UTXOs`);
+      log.info(
+        `Final wallet state: ${finalWalletState.utxos.length} Night UTXOs, ${finalWalletState.dust_utxos.length} DUST UTXOs`,
+      );
     }, TEST_TIMEOUT);
 
     test(
@@ -168,8 +174,12 @@ describe.sequential('DUST generation workflow', () => {
         expect(Array.isArray(finalWalletState.dust_utxos)).toBe(true);
 
         // Cross-reference with previous steps
-        expect(finalWalletState.utxos.length).toBeGreaterThanOrEqual(walletStateAfterFunding.utxos.length);
-        expect(finalWalletState.dust_utxos.length).toBeGreaterThanOrEqual(walletStateAfterFunding.dust_utxos.length);
+        expect(finalWalletState.utxos.length).toBeGreaterThanOrEqual(
+          walletStateAfterFunding.utxos.length,
+        );
+        expect(finalWalletState.dust_utxos.length).toBeGreaterThanOrEqual(
+          walletStateAfterFunding.dust_utxos.length,
+        );
 
         log.info(`Final wallet state verification:`);
         log.info(`- Coins: ${Object.keys(finalWalletState.coins).length} types`);
@@ -180,9 +190,15 @@ describe.sequential('DUST generation workflow', () => {
         // Summary of the complete workflow
         log.info(`\n=== DUST Generation Workflow Summary ===`);
         log.info(`1. Funding: ${fundingResult.txHash} (${fundingResult.amount} tokens)`);
-        log.info(`2. Initial state: ${walletStateAfterFunding.utxos.length} Night UTXOs, ${walletStateAfterFunding.dust_utxos.length} DUST UTXOs`);
-        log.info(`3. DUST generation: ${dustGenerationResult.hasDustGeneration ? 'Active' : 'Inactive'}`);
-        log.info(`4. Final state: ${finalWalletState.utxos.length} Night UTXOs, ${finalWalletState.dust_utxos.length} DUST UTXOs`);
+        log.info(
+          `2. Initial state: ${walletStateAfterFunding.utxos.length} Night UTXOs, ${walletStateAfterFunding.dust_utxos.length} DUST UTXOs`,
+        );
+        log.info(
+          `3. DUST generation: ${dustGenerationResult.hasDustGeneration ? 'Active' : 'Inactive'}`,
+        );
+        log.info(
+          `4. Final state: ${finalWalletState.utxos.length} Night UTXOs, ${finalWalletState.dust_utxos.length} DUST UTXOs`,
+        );
       },
       TEST_TIMEOUT,
     );
