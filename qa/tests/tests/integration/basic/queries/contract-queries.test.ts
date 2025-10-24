@@ -159,6 +159,13 @@ describe('contract queries', () => {
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).not.toBeNull();
       expect(response.data?.contractAction?.address).toBe(existingContractAddress!);
+
+      const zswapState = response.data?.contractAction?.zswapState;
+      log.debug(`ZSwap state value: ${zswapState ? 'present' : 'absent'}`);
+
+      expect.soft(zswapState).toBeDefined();
+      expect.soft(typeof zswapState).toBe('string');
+      expect.soft(zswapState!.length).toBeGreaterThan(100);
     });
 
     /**

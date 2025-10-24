@@ -43,7 +43,7 @@ export const BASE_TRANSACTION_FRAGMENT = `   id
     contractActions {
       address
       state
-      chainState
+      zswapState
     }
     unshieldedCreatedOutputs {
       ${UNSHIELDED_UTXO_BODY_FRAGMENT}

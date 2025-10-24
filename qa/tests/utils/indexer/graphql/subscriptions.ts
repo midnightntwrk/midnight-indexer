@@ -122,7 +122,7 @@ const CONTRACT_ACTION_SUBSCRIPTION_FRAGMENT = `
     address
     ... on ContractDeploy {
         state
-        chainState
+        zswapState
         transaction {
             hash
         }
@@ -133,7 +133,7 @@ const CONTRACT_ACTION_SUBSCRIPTION_FRAGMENT = `
     }
     ... on ContractCall {
         state
-        chainState
+        zswapState
         transaction {
             hash
         }
@@ -152,7 +152,7 @@ const CONTRACT_ACTION_SUBSCRIPTION_FRAGMENT = `
     }
     ... on ContractUpdate {
         state
-        chainState
+        zswapState
         transaction {
             hash
         }

@@ -148,7 +148,7 @@ export const ContractDeployActionSchema = z.object({
   __typename: z.literal('ContractDeploy'),
   address: z.string(),
   state: z.string(),
-  chainState: z.string(),
+  zswapState: z.string(),
   transaction: z.any(), // Reference to transaction
   unshieldedBalances: z.array(ContractBalanceSchema),
 });
@@ -157,7 +157,7 @@ export const ContractCallActionSchema = z.object({
   __typename: z.literal('ContractCall'),
   address: z.string(),
   state: z.string(),
-  chainState: z.string(),
+  zswapState: z.string(),
   entryPoint: z.string(),
   transaction: z.any(), // Reference to transaction
   deploy: z.any(), // Reference to deploy
@@ -168,7 +168,7 @@ export const ContractUpdateActionSchema = z.object({
   __typename: z.literal('ContractUpdate'),
   address: z.string(),
   state: z.string(),
-  chainState: z.string(),
+  zswapState: z.string(),
   transaction: z.any(), // Reference to transaction
   unshieldedBalances: z.array(ContractBalanceSchema),
 });

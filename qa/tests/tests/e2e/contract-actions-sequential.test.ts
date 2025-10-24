@@ -156,6 +156,12 @@ describe.sequential('contract actions', () => {
         if (contractAction?.__typename === 'ContractDeploy') {
           expect(contractAction.address).toBeDefined();
           expect(contractAction.address).toBe(contractDeployResult['contract-address-untagged']);
+          
+          const zswapState = contractAction.zswapState;
+          log.debug(`zswapState (Deploy): length ${zswapState?.length ?? 0}`);
+          expect.soft(zswapState).toBeDefined();
+          expect.soft(typeof zswapState).toBe('string');
+          expect.soft(zswapState!.length).toBeGreaterThan(100);
         }
       },
       TEST_TIMEOUT,
@@ -295,7 +301,7 @@ describe.sequential('contract actions', () => {
      */
     test.todo(
       'should be reported by the indexer through a transaction query by hash',
-      async (context: TestContext) => {},
+      async (context: TestContext) => { },
       TEST_TIMEOUT,
     );
 
@@ -309,7 +315,7 @@ describe.sequential('contract actions', () => {
      */
     test.todo(
       'should be reported by the indexer through a block query by hash',
-      async (context: TestContext) => {},
+      async (context: TestContext) => { },
       TEST_TIMEOUT,
     );
 
@@ -323,7 +329,7 @@ describe.sequential('contract actions', () => {
      */
     test.todo(
       'should be reported by the indexer through a contract action query by address',
-      async (context: TestContext) => {},
+      async (context: TestContext) => { },
       TEST_TIMEOUT,
     );
   });
