@@ -17,22 +17,37 @@ import fs from 'fs';
 import { parse } from 'jsonc-parser';
 import { env } from '../environment/model';
 
+/**
+ * Imports and parses JSONC data from a file.
+ * @param filePath - The path to the JSONC file.
+ * @returns The parsed JSON data.
+ */
 function importJsoncData(filePath: string): any {
   const fileContent = fs.readFileSync(filePath, 'utf-8');
   return parse(fileContent);
 }
 
+/**
+ * Provides test data for various test scenarios across different environments.
+ * The data is loaded from environment-specific JSON files during initialization.
+ */
 class TestDataProvider {
-  private unshieldedAddresses: Record<string, string>;
-  private blocks: Record<string, string>;
   private contracts: any[];
+  private blocks: Record<string, string>;
+  private cardanoStakeKeys: Record<string, string>;
+  private unshieldedAddresses: Record<string, string>;
 
   constructor() {
-    this.unshieldedAddresses = {};
     this.blocks = {};
     this.contracts = [];
+    this.cardanoStakeKeys = {};
+    this.unshieldedAddresses = {};
   }
 
+  /**
+   * Initializes the test data provider by loading environment-specific data files.
+   * @returns A promise that resolves to the initialized TestDataProvider instance.
+   */
   async init(): Promise<this> {
     const envName = env.getEnvName();
     const baseDir = `data/static/${envName}`;
@@ -40,10 +55,17 @@ class TestDataProvider {
     this.blocks = importJsoncData(`${baseDir}/blocks.jsonc`);
     this.contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`);
     this.unshieldedAddresses = importJsoncData(`${baseDir}/unshielded-addresses.json`);
+    this.cardanoStakeKeys = importJsoncData(`${baseDir}/cardano-stake-keys.jsonc`);
 
     return this;
   }
 
+  /**
+   * Gets the funding seed for the current environment.
+   * First checks for an environment-specific variable (e.g., FUNDING_SEED_PREVIEW),
+   * then falls back to a default seed for undeployed environments.
+   * @returns The funding seed as a string.
+   */
   getFundingSeed() {
     // Build the environment-specific variable name (e.g., FUNDING_SEED_PREVIEW)
     const envName = env.getEnvName().toUpperCase();
@@ -61,6 +83,12 @@ class TestDataProvider {
     return undeployedFundingSeed;
   }
 
+  /**
+   * Retrieves an unshielded address from the test data by property name.
+   * @param property - The property name of the unshielded address to retrieve.
+   * @returns The unshielded address as a string.
+   * @throws Error if the property is not found or undefined for the current environment.
+   */
   getUnshieldedAddress(property: string) {
     if (
       !this.unshieldedAddresses.hasOwnProperty(property) ||
@@ -73,6 +101,11 @@ class TestDataProvider {
     return this.unshieldedAddresses[property];
   }
 
+  /**
+   * Searches through contracts to find a specific contract action by type.
+   * @param actionType - The type of contract action to find (e.g., 'ContractDeploy', 'ContractCall').
+   * @returns The contract action object if found, null otherwise.
+   */
   private findContractAction(actionType: string): any {
     // Contracts is an array of contract objects with a contract-actions array
     // NOTE: it could be empty if there are no contracts with all the actions types
@@ -89,6 +122,12 @@ class TestDataProvider {
     return null;
   }
 
+  /**
+   * Retrieves the block hash associated with a specific contract action type.
+   * @param actionType - The type of contract action.
+   * @returns A promise that resolves to the block hash.
+   * @throws Error if the action type is not found or has no block hash.
+   */
   private getBlockData(actionType: string): Promise<string> {
     const action = this.findContractAction(actionType);
     if (action && action['block-hash'] !== undefined) {
@@ -101,6 +140,12 @@ class TestDataProvider {
     );
   }
 
+  /**
+   * Retrieves the block height associated with a specific contract action type.
+   * @param actionType - The type of contract action.
+   * @returns A promise that resolves to the block height as a number.
+   * @throws Error if the action type is not found or has no block height.
+   */
   private getBlockHeightOfContractAction(actionType: string): Promise<number> {
     const action = this.findContractAction(actionType);
     if (action && action['block-height'] !== undefined) {
@@ -113,34 +158,59 @@ class TestDataProvider {
     );
   }
 
+  /**
+   * Gets a known block hash from contract deployment action.
+   * @returns A promise that resolves to the block hash.
+   */
   getKnownBlockHash() {
     return this.getBlockData('ContractDeploy');
   }
 
+  /**
+   * Gets the block hash where a contract was deployed.
+   * @returns A promise that resolves to the deployment block hash.
+   */
   getContractDeployBlockHash() {
     return this.getBlockData('ContractDeploy');
   }
 
+  /**
+   * Gets the block hash where a contract was updated.
+   * @returns A promise that resolves to the update block hash.
+   */
   getContractUpdateBlockHash() {
     return this.getBlockData('ContractUpdate');
   }
 
+  /**
+   * Gets the block height where a contract was deployed.
+   * @returns A promise that resolves to the deployment block height.
+   */
   getContractDeployBlockHeight() {
     return this.getBlockHeightOfContractAction('ContractDeploy');
   }
 
+  /**
+   * Gets the block height where a contract was called.
+   * @returns A promise that resolves to the contract call block height.
+   */
   getContractCallBlockHeight() {
     return this.getBlockHeightOfContractAction('ContractCall');
   }
 
+  /**
+   * Gets the block height where a contract was updated.
+   * @returns A promise that resolves to the update block height.
+   */
   getContractUpdateBlockHeight() {
     return this.getBlockHeightOfContractAction('ContractUpdate');
   }
 
-  getViewingKey() {
-    return 'mn_shield-esk_undeployed1d45kgmnfva58gwn9de3hy7tsw35k7m3dwdjkxun9wskkketetdmrzhf6wdwg0q0t85zu4sgm8ldgf66hkxmupkjn3spfncne2gtykttjjhjq2mjpxh8';
-  }
-
+  /**
+   * Returns an array of fabricated malformed hash values for negative testing.
+   * These include invalid hex strings, incorrect lengths, and other malformed formats.
+   * @returns An array of malformed hash strings.
+   */
   getFabricatedMalformedHashes() {
     return [
       '0', // half byte
@@ -151,6 +221,11 @@ class TestDataProvider {
     ];
   }
 
+  /**
+   * Returns an array of fabricated malformed identifier values for negative testing.
+   * These include invalid hex strings and incorrect formats.
+   * @returns An array of malformed identifier strings.
+   */
   getFabricatedMalformedIdentifiers() {
     return [
       '000000000000000000000000000000000000000000000000000000000000000G', // Not a valid hex string
@@ -159,6 +234,11 @@ class TestDataProvider {
     ];
   }
 
+  /**
+   * Returns an array of fabricated malformed height values for negative testing.
+   * These include negative numbers, non-integers, and overflow values.
+   * @returns An array of malformed height numbers.
+   */
   getFabricatedMalformedHeights() {
     return [
       -1, // negative height
@@ -167,6 +247,11 @@ class TestDataProvider {
     ];
   }
 
+  /**
+   * Gets a known contract address from the test data.
+   * @returns The contract address as a string.
+   * @throws Error if no contract address is found in the test data.
+   */
   getKnownContractAddress() {
     if (this.contracts.length === 0 || !this.contracts[0]['contract-address']) {
       throw new Error(
@@ -176,11 +261,21 @@ class TestDataProvider {
     return this.contracts[0]['contract-address'];
   }
 
+  /**
+   * Returns a valid format contract address that doesn't exist in the blockchain.
+   * Used for testing non-existent address scenarios.
+   * @returns A non-existing contract address string.
+   */
   getNonExistingContractAddress() {
     // Return a valid format address that doesn't exist
     return '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e79';
   }
 
+  /**
+   * Returns an array of fabricated malformed contract addresses for negative testing.
+   * These include spaces, invalid characters, incorrect lengths, and type mismatches.
+   * @returns An array of malformed contract address values.
+   */
   getFabricatedMalformedContractAddresses() {
     return [
       ' ', // space
@@ -202,6 +297,11 @@ class TestDataProvider {
     ];
   }
 
+  /**
+   * Returns boundary value contract addresses for edge case testing.
+   * These include all zeros, all ones, and maximum hex values.
+   * @returns An array of boundary contract addresses.
+   */
   getBoundaryContractAddresses() {
     return [
       '0000000000000000000000000000000000000000000000000000000000000000000000000000', // all zeros
@@ -211,18 +311,32 @@ class TestDataProvider {
     ];
   }
 
+  /**
+   * Returns a valid format hash that doesn't exist in the blockchain.
+   * Used for testing non-existent hash scenarios.
+   * @returns A non-existing hash string (all zeros).
+   */
   getNonExistingHash() {
     // Return a valid format hash that doesn't exist (all zeros)
     return '0000000000000000000000000000000000000000000000000000000000000000';
   }
 
-  // Lazy load local data (read from file each time, as it's generated at runtime)
+  /**
+   * Lazily loads local test data from file.
+   * This data is read each time as it's generated at runtime.
+   * @returns The parsed local test data object.
+   */
   private loadLocalData() {
     const envName = env.getEnvName();
     const baseDir = `data/static/${envName}`;
     return importJsoncData(`${baseDir}/local.json`);
   }
 
+  /**
+   * Gets the deployment transaction hash from local test data.
+   * @returns The deployment transaction hash as a string.
+   * @throws Error if the deploy-tx-hash is not found in local data.
+   */
   getLocalDeployTxHash() {
     const local = this.loadLocalData();
     if (!local.hasOwnProperty('deploy-tx-hash') || local['deploy-tx-hash'] === undefined) {
@@ -233,6 +347,11 @@ class TestDataProvider {
     return local['deploy-tx-hash'];
   }
 
+  /**
+   * Gets the deployment block hash from local test data.
+   * @returns The deployment block hash as a string.
+   * @throws Error if the deploy-block-hash is not found in local data.
+   */
   getLocalDeployBlockHash() {
     const local = this.loadLocalData();
     if (!local.hasOwnProperty('deploy-block-hash') || local['deploy-block-hash'] === undefined) {
@@ -241,6 +360,37 @@ class TestDataProvider {
       );
     }
     return local['deploy-block-hash'];
+  }
+
+  /**
+   * Retrieves a Cardano stake key from the test data by property name.
+   * @param property - The property name of the Cardano stake key to retrieve.
+   * @returns The Cardano stake key as a string.
+   * @throws Error if the property is not found or undefined for the current environment.
+   */
+  getCardanoStakeKey(property: string) {
+    if (
+      !this.cardanoStakeKeys.hasOwnProperty(property) ||
+      this.cardanoStakeKeys[property] === undefined
+    ) {
+      throw new Error(
+        `Test data provider is missing the cardano stake key data for ${property} for ${env.getEnvName()} environment`,
+      );
+    }
+    return this.cardanoStakeKeys[property];
+  }
+
+  /**
+   * Returns an array of fabricated malformed Cardano stake keys for negative testing.
+   * These include empty strings, invalid hex characters, and special characters.
+   * @returns An array of malformed Cardano stake key strings.
+   */
+  getFabricatedMalformedCardanoStakeKeys() {
+    return [
+      '', // empty string
+      'G'.repeat(64), // invalid hex characters
+      '0123456789abcdef@', // special character
+    ];
   }
 }
 
