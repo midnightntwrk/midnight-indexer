@@ -19,17 +19,27 @@ node_version="$1"
 
 # Function to run all toolkit commands.
 run_toolkit_commands() {
-    # Generate batches.
-    # Note: Reduced from -n 3 -b 2 to -n 1 -b 1 to minimize DUST requirements
-    # after fees were enabled in node 0.16.0-da0b6c69. Larger batch sizes fail with:
-    # "Balancing TX failed: Insufficient DUST (trying to spend X, need Y more)"
-    # This matches the approach used in midnight-node's toolkit-e2e.sh CI tests.
     docker run \
         --rm \
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-        generate-txs batches -n 1 -b 1
+        generate-txs \
+        batches -n 3 -b 2
+
+    # Send shielded and unshielded tokens from wallet 01 to ff.
+    docker run \
+        --rm \
+        --network host \
+        -v /tmp:/out \
+        ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
+        generate-txs \
+        single-tx \
+        --shielded-amount 42 \
+        --unshielded-amount 42 \
+        --source-seed "0000000000000000000000000000000000000000000000000000000000000001" \
+        --destination-address mn_shield-addr_undeployed14lthhq9xj62zdyeekyc3r6gfght8q8q6xp0h8npmq045fljhss8qxqxvjjwd74sl6272ezec5tfuhxqh99qyunx889yx3euy9m6k2r74qvd60zx5 \
+        --destination-address mn_addr_undeployed1792ny9snf3hkzglcfs07agsela6v9dkkqs2m9xyvk4ryl3k99d2s8ea4ga
 
     docker run \
         --rm \
@@ -37,7 +47,8 @@ run_toolkit_commands() {
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
         generate-txs --dest-file /out/contract_tx_1_deploy.mn --to-bytes \
-        contract-simple deploy \
+        contract-simple \
+        deploy \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037'
 
     docker run \
@@ -45,8 +56,7 @@ run_toolkit_commands() {
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-        contract-address  \
-        --src-file /out/contract_tx_1_deploy.mn > /tmp/contract_address.mn
+        contract-address --src-file /out/contract_tx_1_deploy.mn > /tmp/contract_address.mn
 
     docker run \
         --rm \
@@ -65,7 +75,8 @@ run_toolkit_commands() {
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-        generate-txs contract-simple call \
+        generate-txs \
+        contract-simple call \
         --call-key store \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
         --contract-address $(cat /tmp/contract_address.mn)
@@ -78,7 +89,8 @@ run_toolkit_commands() {
         --network host \
         -v /tmp:/out \
         ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-        generate-txs contract-simple maintenance \
+        generate-txs \
+        contract-simple maintenance \
         --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
         --contract-address $(cat /tmp/contract_address.mn)
 }
