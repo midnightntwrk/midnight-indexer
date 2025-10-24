@@ -91,7 +91,7 @@ export interface ContractDeploy {
   __typename: "ContractDeploy";
   address: string;
   state: string;
-  chainState: string;
+  zswapState: string;
   transaction: Transaction;
   unshieldedBalances: ContractBalance[];
 }
@@ -100,7 +100,7 @@ export interface ContractCall {
   __typename: "ContractCall";
   address: string;
   state: string;
-  chainState: string;
+  zswapState: string;
   transaction: Transaction;
   entryPoint: string;
   deploy: ContractDeploy;
@@ -111,7 +111,7 @@ export interface ContractUpdate {
   __typename: "ContractUpdate";
   address: string;
   state: string;
-  chainState: string;
+  zswapState: string;
   transaction: Transaction;
   unshieldedBalances: ContractBalance[];
 }

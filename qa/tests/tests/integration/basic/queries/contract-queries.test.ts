@@ -16,6 +16,11 @@
 import log from '@utils/logging/logger';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
+import {
+  ContractDeployActionSchema,
+  ContractCallActionSchema,
+  ContractUpdateActionSchema,
+} from '@utils/indexer/graphql/schema';
 import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 
@@ -159,6 +164,52 @@ describe('contract queries', () => {
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).not.toBeNull();
       expect(response.data?.contractAction?.address).toBe(existingContractAddress!);
+    });
+
+    /**
+     * A contract query by address returns a contract action that conforms to the correct schema
+     *
+     * @given we have an existing contract address
+     * @when we send a contract query using that address
+     * @then Indexer should respond with successful response and contractAction that conforms to the correct schema
+     */
+    test('should respond with a contract action according to the expected schema', async (context: TestContext) => {
+      const contractAddress = dataProvider.getKnownContractAddress();
+      const response = await indexerHttpClient.getContractAction(contractAddress);
+      expect(response).toBeSuccess();
+      expect(response.data?.contractAction).toBeDefined();
+
+      const contractAction = response.data!.contractAction!;
+      const typename = contractAction.__typename;
+
+      log.debug(`Validating contract action schema for type: ${typename}`);
+
+      const schemaMap = {
+        ContractDeploy: ContractDeployActionSchema,
+        ContractCall: ContractCallActionSchema,
+        ContractUpdate: ContractUpdateActionSchema,
+      } as const;
+
+      expect(
+        Object.keys(schemaMap).includes(typename),
+        `Unexpected contract action type: ${typename}`,
+      ).toBe(true);
+
+      const schema = schemaMap[typename as keyof typeof schemaMap];
+      log.debug(`Validating with schema: ${typename}`);
+
+      const parsed = schema.safeParse(contractAction);
+
+      if (!parsed.success) {
+        log.debug('Schema validation failed');
+        log.debug(JSON.stringify(parsed.error, null, 2));
+      } else {
+        log.debug(`Schema validation succeeded for ${typename}`);
+      }
+      expect(
+        parsed.success,
+        `Contract action schema validation failed: ${JSON.stringify(parsed.error, null, 2)}`,
+      ).toBe(true);
     });
 
     /**

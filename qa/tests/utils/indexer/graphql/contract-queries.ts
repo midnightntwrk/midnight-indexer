@@ -16,6 +16,8 @@
 export const CONTRACT_ACTION_LIGHT_BODY = `
     __typename
     address
+    state
+    zswapState
     ... on ContractDeploy {
         transaction {
             hash

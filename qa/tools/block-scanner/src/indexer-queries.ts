@@ -59,7 +59,7 @@ export const REGULAR_TRANSACTION_FRAGMENT = `   ... on RegularTransaction {
         contractActions {
             address
             state
-            chainState
+            zswapState
         }
         unshieldedCreatedOutputs {
             ${UNSHIELDED_UTXO_BODY_FRAGMENT}

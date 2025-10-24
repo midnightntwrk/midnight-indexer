@@ -156,6 +156,12 @@ describe.sequential('contract actions', () => {
         if (contractAction?.__typename === 'ContractDeploy') {
           expect(contractAction.address).toBeDefined();
           expect(contractAction.address).toBe(contractDeployResult['contract-address-untagged']);
+
+          const zswapState = contractAction.zswapState;
+          log.debug(`zswapState (Deploy): length ${zswapState?.length ?? 0}`);
+          expect.soft(zswapState).toBeDefined();
+          expect.soft(typeof zswapState).toBe('string');
+          expect.soft(zswapState?.length ?? 0).toBeGreaterThan(0);
         }
       },
       TEST_TIMEOUT,
