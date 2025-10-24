@@ -72,6 +72,44 @@ export interface DeployContractResult {
   'deploy-block-hash': string;
 }
 
+export interface DustUtxo {
+  utxo: {
+    initial_value: number;
+    owner: string;
+    nonce: string;
+    seq: number;
+    ctime: number;
+    backing_night: string;
+    mt_index: number;
+  };
+  pending_until: number | null;
+}
+
+export interface WalletState {
+  coins: Record<string, any>;
+  utxos: Array<{
+    id: string;
+    value: number;
+    user_address: string;
+    token_type: string;
+    intent_hash: string;
+    output_number: number;
+  }>;
+  dust_utxos: DustUtxo[];
+}
+
+export interface FundWalletResult extends ToolkitTransactionResult {
+  walletAddress: string;
+  amount: number;
+}
+
+export interface DustGenerationResult {
+  walletState: WalletState;
+  dustUtxoCount: number;
+  hasDustGeneration: boolean;
+  rawOutput: string;
+}
+
 class ToolkitWrapper {
   private container: GenericContainer;
   private startedContainer?: StartedTestContainer;
@@ -568,6 +606,152 @@ class ToolkitWrapper {
     log.debug(`Contract address info:\n${JSON.stringify(deploymentResult, null, 2)}`);
 
     return deploymentResult;
+  }
+
+  /**
+   * Fund a wallet with Night tokens to enable DUST generation
+   *
+   * @param destinationSeed - The seed of the wallet to fund
+   * @param amount - The amount of Night tokens to send
+   * @param sourceSeed - The seed of the funding wallet (default: genesis seed)
+   * @returns A promise that resolves to the funding result
+   */
+  async fundWallet(
+    destinationSeed: string,
+    amount: number,
+    sourceSeed: string = '0000000000000000000000000000000000000000000000000000000000000001',
+  ): Promise<FundWalletResult> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    // Get the destination wallet address
+    const addressInfo = await this.showAddress(destinationSeed);
+    const destinationAddress = addressInfo.unshielded;
+
+    log.info(`Funding wallet with ${amount} Night tokens...`);
+    const result = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'generate-txs',
+      '--src-url',
+      env.getNodeWebsocketBaseURL(),
+      '--dest-url',
+      env.getNodeWebsocketBaseURL(),
+      'single-tx',
+      '--source-seed',
+      sourceSeed,
+      '--unshielded-amount',
+      amount.toString(),
+      '--destination-address',
+      destinationAddress,
+    ]);
+
+    log.debug(`Fund wallet output:\n${result.output}`);
+
+    if (result.exitCode !== 0) {
+      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
+      throw new Error(
+        `Fund wallet command failed with exit code ${result.exitCode}: ${errorMessage}`,
+      );
+    }
+
+    const rawOutput = result.output.trim();
+    const transactionResult = this.parseTransactionOutput(rawOutput);
+
+    return {
+      ...transactionResult,
+      walletAddress: destinationAddress,
+      amount,
+    };
+  }
+
+  /**
+   * Show wallet state including DUST generation data
+   *
+   * @param seed - The seed of the wallet to check
+   * @returns A promise that resolves to the wallet state
+   */
+  async showWallet(seed: string): Promise<WalletState> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    log.info(`Checking wallet state for seed: ${seed.substring(0, 8)}...`);
+    const result = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'show-wallet',
+      '-s',
+      env.getNodeWebsocketBaseURL(),
+      '--seed',
+      seed,
+    ]);
+
+    log.debug(`Show wallet output:\n${result.output}`);
+
+    if (result.exitCode !== 0) {
+      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
+      throw new Error(
+        `Show wallet command failed with exit code ${result.exitCode}: ${errorMessage}`,
+      );
+    }
+
+    // Parse the wallet state from the output
+    // The output contains both ledger state and wallet state JSON
+    const output = result.output.trim();
+
+    // Look for the wallet state JSON by finding the JSON object that contains "coins", "utxos", and "dust_utxos"
+    // We need to be more specific to avoid matching Rust struct syntax
+    const jsonMatch = output.match(
+      /\{\s*"coins":\s*\{[\s\S]*"utxos":\s*\[[\s\S]*"dust_utxos":\s*\[[\s\S]*\]\s*\}/,
+    );
+
+    if (!jsonMatch) {
+      throw new Error(`No valid wallet state JSON found in output. Output: ${result.output}`);
+    }
+
+    const walletStateJson = jsonMatch[0];
+    return JSON.parse(walletStateJson);
+  }
+
+  /**
+   * Complete DUST generation workflow: fund wallet and check DUST generation status
+   *
+   * @param destinationSeed - The seed of the wallet to fund
+   * @param amount - The amount of Night tokens to send
+   * @param sourceSeed - The seed of the funding wallet (default: genesis seed)
+   * @returns A promise that resolves to the DUST generation result
+   */
+  async generateDust(
+    destinationSeed: string,
+    amount: number,
+    sourceSeed: string = '0000000000000000000000000000000000000000000000000000000000000001',
+  ): Promise<DustGenerationResult> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    log.info(`Starting DUST generation workflow for wallet: ${destinationSeed.substring(0, 8)}...`);
+
+    // Step 1: Fund the wallet
+    const fundResult = await this.fundWallet(destinationSeed, amount, sourceSeed);
+    log.info(`Wallet funded successfully. Transaction: ${fundResult.txHash}`);
+
+    // Step 2: Check wallet state for DUST generation
+    const walletState = await this.showWallet(destinationSeed);
+
+    const dustUtxoCount = walletState.dust_utxos.length;
+    const hasDustGeneration = dustUtxoCount > 0;
+
+    log.info(`DUST generation status: ${hasDustGeneration ? 'Active' : 'Not yet generated'}`);
+    log.info(`DUST UTXOs found: ${dustUtxoCount}`);
+    log.info(`Night UTXOs: ${walletState.utxos.length}`);
+
+    return {
+      walletState,
+      dustUtxoCount,
+      hasDustGeneration,
+      rawOutput: `Funded wallet with ${amount} Night tokens. DUST generation: ${hasDustGeneration ? 'Active' : 'Pending'}`,
+    };
   }
 }
 
