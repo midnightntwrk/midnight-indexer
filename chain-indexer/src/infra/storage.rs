@@ -386,20 +386,9 @@ async fn save_regular_transaction(
 
     save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
 
-    save_unshielded_utxos(
-        &transaction.created_unshielded_utxos,
-        transaction_id,
-        false,
-        tx,
-    )
-    .await?;
-    save_unshielded_utxos(
-        &transaction.spent_unshielded_utxos,
-        transaction_id,
-        true,
-        tx,
-    )
-    .await?;
+    save_created_unshielded_utxos(&transaction.created_unshielded_utxos, transaction_id, tx)
+        .await?;
+    save_spent_unshielded_utxos(&transaction.spent_unshielded_utxos, transaction_id, tx).await?;
 
     save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
 
@@ -412,13 +401,8 @@ async fn save_system_transaction(
     transaction_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    save_unshielded_utxos(
-        &transaction.created_unshielded_utxos,
-        transaction_id,
-        false,
-        tx,
-    )
-    .await?;
+    save_created_unshielded_utxos(&transaction.created_unshielded_utxos, transaction_id, tx)
+        .await?;
 
     save_ledger_events(&transaction.ledger_events, transaction_id, tx).await
 }
@@ -476,37 +460,31 @@ async fn save_contract_actions(
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn save_unshielded_utxos(
+async fn save_created_unshielded_utxos(
     utxos: &[UnshieldedUtxo],
     transaction_id: i64,
-    spent: bool,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     if utxos.is_empty() {
         return Ok(());
     }
 
-    if spent {
-        for &utxo in utxos {
-            let query = indoc! {"
-                INSERT INTO unshielded_utxos (
-                    creating_transaction_id,
-                    spending_transaction_id,
-                    owner,
-                    token_type,
-                    value,
-                    intent_hash,
-                    output_index,
-                    ctime,
-                    initial_nonce,
-                    registered_for_dust_generation
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                ON CONFLICT (intent_hash, output_index)
-                DO UPDATE SET spending_transaction_id = $2
-                WHERE unshielded_utxos.spending_transaction_id IS NULL
-            "};
+    let query_base = indoc! {"
+        INSERT INTO unshielded_utxos (
+            creating_transaction_id,
+            owner,
+            token_type,
+            value,
+            intent_hash,
+            output_index,
+            ctime,
+            initial_nonce,
+            registered_for_dust_generation
+        )
+    "};
 
+    QueryBuilder::new(query_base)
+        .push_values(utxos.iter(), |mut q, utxo| {
             let UnshieldedUtxo {
                 owner,
                 token_type,
@@ -518,59 +496,45 @@ async fn save_unshielded_utxos(
                 registered_for_dust_generation,
             } = utxo;
 
-            sqlx::query(query)
-                .bind(transaction_id)
-                .bind(transaction_id)
-                .bind(owner.as_ref())
-                .bind(token_type.as_ref())
-                .bind(U128BeBytes::from(value))
-                .bind(intent_hash.as_ref())
-                .bind(output_index as i64)
-                .bind(ctime.map(|n| n as i64))
-                .bind(initial_nonce.as_ref())
-                .bind(registered_for_dust_generation)
-                .execute(&mut **tx)
-                .await?;
-        }
-    } else {
-        let query_base = indoc! {"
-            INSERT INTO unshielded_utxos (
-                creating_transaction_id,
-                owner,
-                token_type,
-                value,
-                intent_hash,
-                output_index,
-                ctime,
-                initial_nonce,
-                registered_for_dust_generation
-            )
+            q.push_bind(transaction_id)
+                .push_bind(owner.as_ref())
+                .push_bind(token_type.as_ref())
+                .push_bind(U128BeBytes::from(value))
+                .push_bind(intent_hash.as_ref())
+                .push_bind(*output_index as i64)
+                .push_bind(ctime.map(|n| n as i64))
+                .push_bind(initial_nonce.as_ref())
+                .push_bind(registered_for_dust_generation);
+        })
+        .build()
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn save_spent_unshielded_utxos(
+    utxos: &[UnshieldedUtxo],
+    transaction_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    if utxos.is_empty() {
+        return Ok(());
+    }
+
+    for &utxo in utxos {
+        let query = indoc! {"
+            UPDATE unshielded_utxos
+            SET spending_transaction_id = $1
+            WHERE intent_hash = $2
+            AND output_index = $3
         "};
 
-        QueryBuilder::new(query_base)
-            .push_values(utxos.iter(), |mut q, utxo| {
-                let UnshieldedUtxo {
-                    owner,
-                    token_type,
-                    value,
-                    intent_hash,
-                    output_index,
-                    ctime,
-                    initial_nonce,
-                    registered_for_dust_generation,
-                } = utxo;
-
-                q.push_bind(transaction_id)
-                    .push_bind(owner.as_ref())
-                    .push_bind(token_type.as_ref())
-                    .push_bind(U128BeBytes::from(value))
-                    .push_bind(intent_hash.as_ref())
-                    .push_bind(*output_index as i64)
-                    .push_bind(ctime.map(|n| n as i64))
-                    .push_bind(initial_nonce.as_ref())
-                    .push_bind(registered_for_dust_generation);
-            })
-            .build()
+        sqlx::query(query)
+            .bind(transaction_id)
+            .bind(utxo.intent_hash.as_ref())
+            .bind(utxo.output_index as i64)
             .execute(&mut **tx)
             .await?;
     }

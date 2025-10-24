@@ -602,7 +602,7 @@ fn make_unshielded_utxos_for_system_transaction_v6(
                         owner: output.target_address,
                         type_: token_type,
                         intent_hash: ledger_intent_hash,
-                        output_no: OUTPUT_INDEX_ZERO,
+                        output_no: index as u32,
                     };
 
                     UnshieldedUtxo {
@@ -685,7 +685,7 @@ fn extend_unshielded_utxos_v6(
             value: spend.value,
             owner: UserAddressV6::from(spend.owner.clone()),
             type_: spend.type_,
-            intent_hash: ledger_intent_hash,
+            intent_hash: spend.intent_hash,
             output_no: spend.output_no,
         };
 
