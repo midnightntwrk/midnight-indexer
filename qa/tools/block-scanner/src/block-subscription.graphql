@@ -46,7 +46,7 @@ subscription BlocksSubscription($OFFSET: BlockOffset) {
           __typename
           address
           state
-          chainState
+          zswapState
         }
         unshieldedCreatedOutputs {
           owner
