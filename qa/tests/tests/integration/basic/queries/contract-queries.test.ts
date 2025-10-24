@@ -179,12 +179,11 @@ describe('contract queries', () => {
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).toBeDefined();
 
-      const contractAction = response.data?.contractAction!;
+      const contractAction = response.data!.contractAction!;
       const typename = contractAction.__typename;
 
       log.debug(`Validating contract action schema for type: ${typename}`);
 
-      // Map typename to schema
       const schemaMap = {
         ContractDeploy: ContractDeployActionSchema,
         ContractCall: ContractCallActionSchema,
@@ -195,10 +194,16 @@ describe('contract queries', () => {
         context.skip?.(true, `Unexpected contract action type: ${typename}`);
         return;
       }
-      const schema = schemaMap[typename as keyof typeof schemaMap];
 
+      const schema = schemaMap[typename as keyof typeof schemaMap];
       log.debug(`Validating with schema: ${typename}`);
-    const parsed = schemaMap[typename as keyof typeof schemaMap].safeParse(contractAction);
+
+      const parsed = schema.safeParse(contractAction);
+
+      if (!parsed.success) {
+        console.log('Schema validation failed:', JSON.stringify(parsed.error, null, 2));
+      }
+
       expect(
         parsed.success,
         `Contract action schema validation failed: ${JSON.stringify(parsed.error, null, 2)}`,
