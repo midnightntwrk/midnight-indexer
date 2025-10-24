@@ -99,7 +99,6 @@ describe.sequential('DUST generation workflow', () => {
           labels: ['DUST', 'WalletState', 'Step2'],
         };
 
-        // Verify wallet state structure
         expect(walletStateAfterFunding).toBeDefined();
         expect(walletStateAfterFunding.utxos).toBeDefined();
         expect(walletStateAfterFunding.utxos.length).toBeGreaterThan(0);
@@ -132,7 +131,6 @@ describe.sequential('DUST generation workflow', () => {
           labels: ['DUST', 'Generation', 'Step3'],
         };
 
-        // Verify DUST generation was successful
         expect(dustGenerationResult.walletState).toBeDefined();
         expect(dustGenerationResult.walletState.utxos.length).toBeGreaterThan(0);
         expect(dustGenerationResult.dustUtxoCount).toBeGreaterThanOrEqual(0);
@@ -147,7 +145,7 @@ describe.sequential('DUST generation workflow', () => {
     );
 
     /**
-     * Step 4: Verify final wallet state with DUST data
+     * Step 4: Verify final wallet state contains DUST 
      * Uses all previous results to verify the complete workflow
      */
     beforeAll(async () => {
