@@ -16,7 +16,12 @@
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
-import { ToolkitWrapper, DustGenerationResult } from '@utils/toolkit/toolkit-wrapper';
+import {
+  ToolkitWrapper,
+  FundWalletResult,
+  DustGenerationResult,
+  WalletState,
+} from '@utils/toolkit/toolkit-wrapper';
 
 const TOOLKIT_WRAPPER_TIMEOUT = 60_000; // 1 minute
 const DUST_GENERATION_TIMEOUT = 150_000; // 2.5 minutes
@@ -35,35 +40,101 @@ describe.sequential('DUST generation workflow', () => {
   });
 
   describe('DUST generation with funded wallet', () => {
+    // Test data variables
+    const destinationSeed = '0000000000000000000000000000000000000000000000000000000000000009';
+    const amount = 10000000; // 10 million Night tokens
+    const sourceSeed = '0000000000000000000000000000000000000000000000000000000000000001';
+
+    // Variables to pass between test steps
+    let fundingResult: FundWalletResult;
+    let walletStateAfterFunding: WalletState;
     let dustGenerationResult: DustGenerationResult;
-
-    beforeAll(async () => {
-      const destinationSeed = '0000000000000000000000000000000000000000000000000000000000000009';
-      const amount = 10000000;
-
-      dustGenerationResult = await toolkit.generateDust(destinationSeed, amount);
-    }, DUST_GENERATION_TIMEOUT);
+    let finalWalletState: WalletState;
 
     /**
-     * Once the complete DUST generation workflow has been executed, the result should
-     * show that the wallet has been funded and DUST generation is active.
-     *
-     * @given a complete DUST generation workflow execution
-     * @when we check the DUST generation result
-     * @then the wallet should have Night tokens and DUST generation should be active
+     * Step 1: Fund the wallet with Night tokens
+     * This creates the initial funding transaction
      */
+    beforeAll(async () => {
+      log.info(`Step 1: Funding wallet with ${amount} Night tokens...`);
+      fundingResult = await toolkit.fundWallet(destinationSeed, amount, sourceSeed);
+      log.info(`Funding successful: ${fundingResult.txHash}`);
+    }, DUST_GENERATION_TIMEOUT);
+
     test(
-      'should successfully fund wallet and enable DUST generation',
+      'should fund wallet with Night tokens',
       async (context: TestContext) => {
         context.task!.meta.custom = {
-          labels: ['DUST', 'Generation', 'Workflow'],
+          labels: ['DUST', 'Funding', 'Step1'],
         };
 
+        // Verify funding was successful
+        expect(fundingResult.txHash).toBeDefined();
+        expect(fundingResult.walletAddress).toBeDefined();
+        expect(fundingResult.amount).toBe(amount);
+        expect(fundingResult.status).toBe('confirmed');
+
+        log.info(`Funding verification: ${fundingResult.txHash}`);
+        log.info(`Wallet address: ${fundingResult.walletAddress}`);
+      },
+      TEST_TIMEOUT,
+    );
+
+    /**
+     * Step 2: Check wallet state after funding
+     * Uses the funding result from Step 1
+     */
+    beforeAll(async () => {
+      log.info(`Step 2: Checking wallet state for seed: ${destinationSeed.substring(0, 8)}...`);
+      walletStateAfterFunding = await toolkit.showWallet(destinationSeed);
+      log.info(`Wallet state after funding: ${walletStateAfterFunding.utxos.length} Night UTXOs, ${walletStateAfterFunding.dust_utxos.length} DUST UTXOs`);
+    }, TEST_TIMEOUT);
+
+    test(
+      'should show Night UTXOs in wallet state after funding',
+      async (context: TestContext) => {
+        context.task!.meta.custom = {
+          labels: ['DUST', 'WalletState', 'Step2'],
+        };
+
+        // Verify wallet state structure
+        expect(walletStateAfterFunding).toBeDefined();
+        expect(walletStateAfterFunding.utxos).toBeDefined();
+        expect(walletStateAfterFunding.utxos.length).toBeGreaterThan(0);
+        expect(walletStateAfterFunding.dust_utxos).toBeDefined();
+
+        log.info(`Wallet state verification:`);
+        log.info(`- Night UTXOs: ${walletStateAfterFunding.utxos.length}`);
+        log.info(`- DUST UTXOs: ${walletStateAfterFunding.dust_utxos.length}`);
+        log.info(`- DUST generation active: ${walletStateAfterFunding.dust_utxos.length > 0}`);
+      },
+      TEST_TIMEOUT,
+    );
+
+    /**
+     * Step 3: Execute complete DUST generation workflow
+     * Uses the funding result and wallet state from previous steps
+     */
+    beforeAll(async () => {
+      log.info(`Step 3: Executing complete DUST generation workflow...`);
+      dustGenerationResult = await toolkit.generateDust(destinationSeed, amount, sourceSeed);
+      log.info(`DUST generation result: ${dustGenerationResult.hasDustGeneration ? 'Active' : 'Inactive'}`);
+    }, DUST_GENERATION_TIMEOUT);
+
+    test(
+      'should complete DUST generation workflow',
+      async (context: TestContext) => {
+        context.task!.meta.custom = {
+          labels: ['DUST', 'Generation', 'Step3'],
+        };
+
+        // Verify DUST generation was successful
+        expect(dustGenerationResult.walletState).toBeDefined();
         expect(dustGenerationResult.walletState.utxos.length).toBeGreaterThan(0);
         expect(dustGenerationResult.dustUtxoCount).toBeGreaterThanOrEqual(0);
         expect(dustGenerationResult.hasDustGeneration).toBeDefined();
 
-        log.info(`DUST generation result:`);
+        log.info(`DUST generation verification:`);
         log.info(`- Night UTXOs: ${dustGenerationResult.walletState.utxos.length}`);
         log.info(`- DUST UTXOs: ${dustGenerationResult.dustUtxoCount}`);
         log.info(`- DUST generation active: ${dustGenerationResult.hasDustGeneration}`);
@@ -72,33 +143,46 @@ describe.sequential('DUST generation workflow', () => {
     );
 
     /**
-     * Once DUST generation is active, the wallet state should contain
-     * detailed information about DUST UTXOs and their properties.
-     *
-     * @given an active DUST generation
-     * @when we examine the wallet state
-     * @then the wallet state should contain DUST UTXO information
+     * Step 4: Verify final wallet state with DUST data
+     * Uses all previous results to verify the complete workflow
      */
+    beforeAll(async () => {
+      log.info(`Step 4: Verifying final wallet state structure...`);
+      finalWalletState = await toolkit.showWallet(destinationSeed);
+      log.info(`Final wallet state: ${finalWalletState.utxos.length} Night UTXOs, ${finalWalletState.dust_utxos.length} DUST UTXOs`);
+    }, TEST_TIMEOUT);
+
     test(
       'should have proper wallet state structure with DUST data',
       async (context: TestContext) => {
         context.task!.meta.custom = {
-          labels: ['DUST', 'WalletState', 'Structure'],
+          labels: ['DUST', 'Verification', 'Step4'],
         };
 
-        const walletState = dustGenerationResult.walletState;
+        // Verify final wallet state structure
+        expect(finalWalletState).toBeDefined();
+        expect(finalWalletState.coins).toBeDefined();
+        expect(finalWalletState.utxos).toBeDefined();
+        expect(finalWalletState.dust_utxos).toBeDefined();
+        expect(Array.isArray(finalWalletState.utxos)).toBe(true);
+        expect(Array.isArray(finalWalletState.dust_utxos)).toBe(true);
 
-        expect(walletState).toBeDefined();
-        expect(walletState.coins).toBeDefined();
-        expect(walletState.utxos).toBeDefined();
-        expect(walletState.dust_utxos).toBeDefined();
-        expect(Array.isArray(walletState.utxos)).toBe(true);
-        expect(Array.isArray(walletState.dust_utxos)).toBe(true);
+        // Cross-reference with previous steps
+        expect(finalWalletState.utxos.length).toBeGreaterThanOrEqual(walletStateAfterFunding.utxos.length);
+        expect(finalWalletState.dust_utxos.length).toBeGreaterThanOrEqual(walletStateAfterFunding.dust_utxos.length);
 
-        log.info(`Wallet state structure verified:`);
-        log.info(`- Coins: ${Object.keys(walletState.coins).length} types`);
-        log.info(`- Night UTXOs: ${walletState.utxos.length}`);
-        log.info(`- DUST UTXOs: ${walletState.dust_utxos.length}`);
+        log.info(`Final wallet state verification:`);
+        log.info(`- Coins: ${Object.keys(finalWalletState.coins).length} types`);
+        log.info(`- Night UTXOs: ${finalWalletState.utxos.length}`);
+        log.info(`- DUST UTXOs: ${finalWalletState.dust_utxos.length}`);
+        log.info(`- DUST generation active: ${finalWalletState.dust_utxos.length > 0}`);
+
+        // Summary of the complete workflow
+        log.info(`\n=== DUST Generation Workflow Summary ===`);
+        log.info(`1. Funding: ${fundingResult.txHash} (${fundingResult.amount} tokens)`);
+        log.info(`2. Initial state: ${walletStateAfterFunding.utxos.length} Night UTXOs, ${walletStateAfterFunding.dust_utxos.length} DUST UTXOs`);
+        log.info(`3. DUST generation: ${dustGenerationResult.hasDustGeneration ? 'Active' : 'Inactive'}`);
+        log.info(`4. Final state: ${finalWalletState.utxos.length} Night UTXOs, ${finalWalletState.dust_utxos.length} DUST UTXOs`);
       },
       TEST_TIMEOUT,
     );
