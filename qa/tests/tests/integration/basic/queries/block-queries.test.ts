@@ -189,7 +189,9 @@ describe('block queries', () => {
 
       expect(blockByHashResponse).toBeSuccess();
       expect(blockByHashResponse.data?.block).toBeNull();
-      // TODO: Soft assert the error returned in terms of error message
+      (blockByHashResponse as any).errors?.length
+        ? log.debug(`Error: ${(blockByHashResponse as any).errors[0].message}`)
+        : log.debug('No GraphQL errors returned');
     });
 
     /**
@@ -357,7 +359,7 @@ describe('block queries', () => {
       };
 
       // Here we cover the 4 combinations of valid and invalid parameters (hash and height)
-      const hashes = [dataProvider.getKnownBlockHash(), 'invalid-hash'];
+      const hashes = [await dataProvider.getKnownBlockHash(), 'invalid-hash'];
       const heights = [1, 2 ** 32];
 
       // Generate cartesian product of hashes and heights

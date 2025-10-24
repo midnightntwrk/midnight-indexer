@@ -178,3 +178,42 @@ export const ContractActionUnionSchema = z.discriminatedUnion('__typename', [
   ContractCallActionSchema,
   ContractUpdateActionSchema,
 ]);
+
+// Simplified version used in subscription responses
+export const UnshieldedTxEventTransactionSchema = z.object({
+  id: z.number(),
+  hash: z.string().regex(/^[a-f0-9]+$/),
+  identifiers: z.array(z.string()),
+});
+
+export const UnshieldedTxEventTransactionRefSchema = z.object({
+  hash: z.string().regex(/^[a-f0-9]+$/),
+  identifiers: z.array(z.string()),
+});
+
+export const UnshieldedUtxoSchema = z.object({
+  owner: z.string().regex(/^mn_addr_/),
+  intentHash: z.string().regex(/^[a-f0-9]+$/),
+  value: z.string(),
+  tokenType: z.string(),
+  outputIndex: z.number(),
+  createdAtTransaction: UnshieldedTxEventTransactionRefSchema,
+  spentAtTransaction: z.nullable(UnshieldedTxEventTransactionRefSchema),
+});
+
+export const UnshieldedTransactionEventSchema = z.object({
+  __typename: z.literal('UnshieldedTransaction'),
+  transaction: UnshieldedTxEventTransactionSchema,
+  createdUtxos: z.array(UnshieldedUtxoSchema),
+  spentUtxos: z.array(UnshieldedUtxoSchema),
+});
+
+export const UnshieldedTransactionsProgressSchema = z.object({
+  __typename: z.literal('UnshieldedTransactionsProgress'),
+  highestTransactionId: z.number(),
+});
+
+export const UnshieldedTxSubscriptionResponseSchema = z.union([
+  UnshieldedTransactionEventSchema,
+  UnshieldedTransactionsProgressSchema,
+]);
