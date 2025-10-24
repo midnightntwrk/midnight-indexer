@@ -190,10 +190,10 @@ describe('contract queries', () => {
         ContractUpdate: ContractUpdateActionSchema,
       } as const;
 
-      if (!Object.keys(schemaMap).includes(typename)) {
-        context.skip?.(true, `Unexpected contract action type: ${typename}`);
-        return;
-      }
+      expect(
+        Object.keys(schemaMap).includes(typename),
+        `Unexpected contract action type: ${typename}`,
+      ).toBe(true);
 
       const schema = schemaMap[typename as keyof typeof schemaMap];
       log.debug(`Validating with schema: ${typename}`);
