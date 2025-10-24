@@ -198,13 +198,7 @@ describe('contract queries', () => {
       const schema = schemaMap[typename as keyof typeof schemaMap];
 
       log.debug(`Validating with schema: ${typename}`);
-      const parsed = schema.safeParse(contractAction);
-
-      if (!parsed.success) {
-        console.log('Schema validation failed:', JSON.stringify(parsed.error, null, 2));
-      } else {
-        console.log('Schema validation succeeded for', typename);
-      }
+    const parsed = schemaMap[typename as keyof typeof schemaMap].safeParse(contractAction);
       expect(
         parsed.success,
         `Contract action schema validation failed: ${JSON.stringify(parsed.error, null, 2)}`,
