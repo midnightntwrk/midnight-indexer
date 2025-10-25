@@ -30,14 +30,18 @@ use indexer_common::domain::{
     BlockIndexed, LedgerStateStorage, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxoIndexed,
     ledger,
 };
-use log::{info, warn};
+use log::{error, info, warn};
 use parking_lot::RwLock;
 use serde::Deserialize;
-use std::{collections::HashSet, error::Error as StdError, future::ready, pin::pin, sync::Arc};
+use std::{
+    collections::HashSet, error::Error as StdError, future::ready, pin::pin, sync::Arc,
+    time::Duration,
+};
 use tokio::{
     select,
     signal::unix::Signal,
     task::{self},
+    time::sleep,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -176,6 +180,8 @@ pub async fn run(
                 .await
                 .context("get next block of highest_blocks")?;
 
+            error!("highest_block_on_node_task completed unexpectedly");
+
             Ok::<_, anyhow::Error>(())
         }
     });
@@ -207,10 +213,13 @@ pub async fn run(
             ledger_state = next_ledger_state
         }
 
+        error!("index_blocks_task completed unexpectedly");
+
         Ok::<_, anyhow::Error>(())
     });
 
-    // Handle termination.
+    // Handle task completion or SIGTERM termination. "Successful" completion of the tasks is
+    // unexpected, hence the above `error!` invocations.
     select! {
         result = highest_block_on_node_task => result
             .context("highest_block_on_node_task panicked")
@@ -261,16 +270,14 @@ where
                         break;
                     }
 
-                    assert_eq!(
-                        block.height,
-                        highest_height.map(|h| h + 1).unwrap_or_default()
-                    );
-
                     highest_block = Some(block.into());
                 }
 
                 yield block;
             }
+
+            // Sleep to avoid busy-spin.
+            sleep(Duration::from_millis(100)).await;
         }
     }
 }
