@@ -15,44 +15,57 @@ if [ -z "$1" ]; then
     echo "Usage: $0 <node_version>" >&2
     exit 1
 fi
-node_version="$1"
+readonly node_version="$1"
+readonly toolkit_image="ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version"
+readonly rng_seed="0000000000000000000000000000000000000000000000000000000000000037"
+readonly node_dir="$(pwd)/.node/$node_version"
 
 # Function to run all toolkit commands.
 run_toolkit_commands() {
-    # Generate batches.
-    # Note: Reduced from -n 3 -b 2 to -n 1 -b 1 to minimize DUST requirements
-    # after fees were enabled in node 0.16.0-da0b6c69. Larger batch sizes fail with:
-    # "Balancing TX failed: Insufficient DUST (trying to spend X, need Y more)"
-    # This matches the approach used in midnight-node's toolkit-e2e.sh CI tests.
     docker run \
         --rm \
         --network host \
-        -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-        generate-txs batches -n 1 -b 1
+        -v toolkit_out:/out \
+        $toolkit_image \
+        generate-txs \
+        batches -n 1 -b 1
+
+    # Send shielded and unshielded tokens from wallet 01 to ff.
+    docker run \
+        --rm \
+        --network host \
+        -v toolkit_out:/out \
+        $toolkit_image \
+        generate-txs \
+        single-tx \
+        --shielded-amount 42 \
+        --unshielded-amount 42 \
+        --source-seed "0000000000000000000000000000000000000000000000000000000000000001" \
+        --destination-address mn_shield-addr_undeployed14lthhq9xj62zdyeekyc3r6gfght8q8q6xp0h8npmq045fljhss8qxqxvjjwd74sl6272ezec5tfuhxqh99qyunx889yx3euy9m6k2r74qvd60zx5 \
+        --destination-address mn_addr_undeployed1792ny9snf3hkzglcfs07agsela6v9dkkqs2m9xyvk4ryl3k99d2s8ea4ga
 
     docker run \
         --rm \
         --network host \
-        -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
+        -v toolkit_out:/out \
+        $toolkit_image \
         generate-txs --dest-file /out/contract_tx_1_deploy.mn --to-bytes \
-        contract-simple deploy \
-        --rng-seed '0000000000000000000000000000000000000000000000000000000000000037'
+        contract-simple \
+        deploy \
+        --rng-seed $rng_seed
 
     docker run \
         --rm \
         --network host \
-        -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-        contract-address  \
-        --src-file /out/contract_tx_1_deploy.mn > /tmp/contract_address.mn
+        -v toolkit_out:/out \
+        $toolkit_image \
+        contract-address --src-file /out/contract_tx_1_deploy.mn > /tmp/contract_address.mn
 
     docker run \
         --rm \
         --network host \
-        -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
+        -v toolkit_out:/out \
+        $toolkit_image \
         generate-txs --src-file /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 \
         send
 
@@ -63,11 +76,12 @@ run_toolkit_commands() {
     docker run \
         --rm \
         --network host \
-        -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-        generate-txs contract-simple call \
+        -v toolkit_out:/out \
+        $toolkit_image \
+        generate-txs \
+        contract-simple call \
         --call-key store \
-        --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
+        --rng-seed $rng_seed \
         --contract-address $(cat /tmp/contract_address.mn)
 
     # Wait for the contract call to be finalized before running maintenance.
@@ -76,19 +90,20 @@ run_toolkit_commands() {
     docker run \
         --rm \
         --network host \
-        -v /tmp:/out \
-        ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
-        generate-txs contract-simple maintenance \
-        --rng-seed '0000000000000000000000000000000000000000000000000000000000000037' \
+        -v toolkit_out:/out \
+        $toolkit_image \
+        generate-txs \
+        contract-simple maintenance \
+        --rng-seed $rng_seed \
         --contract-address $(cat /tmp/contract_address.mn)
 }
 
 # Clean up any existing data.
-if [ -d ./.node/$node_version ]; then
-    rm -r ./.node/$node_version;
+if [ -d $node_dir ]; then
+    rm -r $node_dir;
 fi
 
-mkdir -p ./.node/$node_version
+mkdir -p $node_dir
 
 # Start the node container.
 docker run \
@@ -98,7 +113,7 @@ docker run \
     -e SHOW_CONFIG=false \
     -e CFG_PRESET=dev \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
-    -v ./.node/$node_version:/node \
+    -v $node_dir:/node \
     ghcr.io/midnight-ntwrk/midnight-node:$node_version
 
 # Wait for node to be ready (max 30 seconds).
@@ -135,7 +150,7 @@ while [ $attempt -le $max_attempts ]; do
     # If this wasn't the last attempt, clean up and retry.
     if [ $attempt -lt $max_attempts ]; then
         echo "Cleaning up node data folder for retry..." >&2
-        rm -rf ./.node/$node_version/*
+        rm -rf $node_dir/*
         echo "Waiting before retry..." >&2
         sleep $((attempt * 5))
     fi
@@ -145,5 +160,5 @@ done
 
 echo "Failed to generate node data after $max_attempts attempts" >&2
 # Clean up the folder on final failure.
-rm -rf ./.node/$node_version
+rm -rf $node_dir
 exit 1
