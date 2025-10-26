@@ -22,8 +22,8 @@ RUN cargo build -p wallet-indexer --locked --features cloud --profile $PROFILE &
 FROM debian:trixie-slim@sha256:66b37a5078a77098bfc80175fb5eb881a3196809242fd295b25502854e12cbec AS runtime
 RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
-    mkdir /var/run/chain-indexer && \
-    chown appuser:appuser /var/run/chain-indexer
+    mkdir /var/run/wallet-indexer && \
+    chown appuser:appuser /var/run/wallet-indexer
 COPY --from=builder --chown=appuser:appuser /runtime /
 USER appuser
 WORKDIR /opt/wallet-indexer

@@ -25,8 +25,8 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
-    mkdir /var/run/chain-indexer && \
-    chown appuser:appuser /var/run/chain-indexer && \
+    mkdir /var/run/indexer-standalone && \
+    chown appuser:appuser /var/run/indexer-standalone && \
     mkdir /data && \
     chown appuser:appuser /data
 COPY --from=builder --chown=appuser:appuser /runtime /
