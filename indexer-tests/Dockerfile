@@ -19,8 +19,8 @@ RUN cargo build -p indexer-tests --locked --profile $PROFILE && \
 FROM debian:trixie-slim@sha256:66b37a5078a77098bfc80175fb5eb881a3196809242fd295b25502854e12cbec AS runtime
 RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
-    mkdir /var/run/indexer-test && \
-    chown appuser:appuser /var/run/indexer-test
+    mkdir /var/run/indexer-tests && \
+    chown appuser:appuser /var/run/indexer-tests
 COPY --from=builder --chown=appuser:appuser /runtime /
 USER appuser
 WORKDIR /opt/indexer-tests
