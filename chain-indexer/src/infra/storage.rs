@@ -523,20 +523,79 @@ async fn save_spent_unshielded_utxos(
         return Ok(());
     }
 
-    for &utxo in utxos {
+    let rows_affected;
+
+    #[cfg(feature = "cloud")]
+    {
         let query = indoc! {"
             UPDATE unshielded_utxos
             SET spending_transaction_id = $1
-            WHERE intent_hash = $2
-            AND output_index = $3
+            WHERE (intent_hash, output_index) IN (
+                SELECT * FROM UNNEST($2::BYTEA[], $3::BIGINT[])
+            )
+            AND spending_transaction_id IS NULL
         "};
 
-        sqlx::query(query)
+        let (intent_hashes, output_indices) = utxos
+            .iter()
+            .map(|utxo| (utxo.intent_hash.as_ref(), utxo.output_index as i64))
+            .unzip::<_, _, Vec<_>, Vec<_>>();
+
+        rows_affected = sqlx::query(query)
             .bind(transaction_id)
-            .bind(utxo.intent_hash.as_ref())
-            .bind(utxo.output_index as i64)
+            .bind(&intent_hashes)
+            .bind(&output_indices)
             .execute(&mut **tx)
-            .await?;
+            .await?
+            .rows_affected();
+    }
+
+    #[cfg(feature = "standalone")]
+    {
+        let mut query = QueryBuilder::new(indoc! {"
+            WITH pairs(intent_hash, output_index) AS (
+        "});
+
+        let (first, rest) = utxos.split_first().unwrap(); // utxos is non-empty!
+        query
+            .push("SELECT ")
+            .push_bind(first.intent_hash.as_ref())
+            .push(", ")
+            .push_bind(first.output_index as i64);
+        for utxo in rest {
+            query
+                .push(" UNION ALL SELECT ")
+                .push_bind(utxo.intent_hash.as_ref())
+                .push(", ")
+                .push_bind(utxo.output_index as i64);
+        }
+
+        rows_affected = query
+            .push(indoc! {"
+                )
+                UPDATE unshielded_utxos
+                SET spending_transaction_id =
+            "})
+            .push_bind(transaction_id)
+            .push(indoc! {"
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM pairs
+                    WHERE intent_hash = unshielded_utxos.intent_hash
+                    AND output_index = unshielded_utxos.output_index
+                )
+                AND spending_transaction_id IS NULL
+            "})
+            .build()
+            .execute(&mut **tx)
+            .await?
+            .rows_affected();
+    }
+
+    if rows_affected == 0 {
+        return Err(sqlx::Error::Protocol(format!(
+            "invalid spent UTXOs: {utxos:?}"
+        )));
     }
 
     Ok(())
