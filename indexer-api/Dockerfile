@@ -19,8 +19,9 @@ RUN cargo build -p indexer-api --locked --features cloud --profile $PROFILE && \
     mkdir -p /runtime/opt/indexer-api && \
     mv /build/indexer-api/config.yaml /runtime/opt/indexer-api
 
-FROM debian:bookworm-slim@sha256:b1a741487078b369e78119849663d7f1a5341ef2768798f7b7406c4240f86aef AS runtime
-RUN adduser --disabled-password --gecos "" --home "/nonexistent" --shell "/sbin/nologin" --no-create-home --uid "10001" appuser && \
+FROM debian:trixie-slim@sha256:66b37a5078a77098bfc80175fb5eb881a3196809242fd295b25502854e12cbec AS runtime
+RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
+    passwd -l appuser && \
     mkdir /var/run/indexer-api && \
     chown appuser:appuser /var/run/indexer-api
 COPY --from=builder --chown=appuser:appuser /runtime /

@@ -19,11 +19,12 @@ RUN cargo build -p indexer-standalone --locked --features standalone --profile $
     mkdir -p /runtime/opt/indexer-standalone && \
     mv /build/indexer-standalone/config.yaml /runtime/opt/indexer-standalone
 
-FROM debian:bookworm-slim@sha256:b1a741487078b369e78119849663d7f1a5341ef2768798f7b7406c4240f86aef AS runtime
+FROM debian:trixie-slim@sha256:66b37a5078a77098bfc80175fb5eb881a3196809242fd295b25502854e12cbec AS runtime
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates=20230311+deb12u1 && \
+    apt-get install -y --no-install-recommends ca-certificates=20250419 && \
     rm -rf /var/lib/apt/lists/*
-RUN adduser --disabled-password --gecos "" --home "/nonexistent" --shell "/sbin/nologin" --no-create-home --uid "10001" appuser && \
+RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
+    passwd -l appuser && \
     mkdir /var/run/indexer-standalone && \
     chown appuser:appuser /var/run/indexer-standalone && \
     mkdir /data && \
