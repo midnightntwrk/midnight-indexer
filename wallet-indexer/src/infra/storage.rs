@@ -206,10 +206,10 @@ impl domain::storage::Storage for Storage {
             .await?;
 
         // Mark inactive wallets.
-        let now = OffsetDateTime::now_utc();
+        let cutoff = OffsetDateTime::now_utc() - ttl;
         let outdated_ids = wallets
             .iter()
-            .filter_map(|&(id, last_active)| (now - last_active > ttl).then_some(id))
+            .filter_map(|&(id, last_active)| (last_active < cutoff).then_some(id))
             .collect::<Vec<_>>();
         if !outdated_ids.is_empty() {
             #[cfg(feature = "cloud")]
@@ -220,6 +220,7 @@ impl domain::storage::Storage for Storage {
                     UPDATE wallets
                     SET active = FALSE
                     WHERE id = ANY($1)
+                    AND last_active < $2
                 "};
 
                 // This could cause a "deadlock_detected" error when the indexer-api sets a wallet
@@ -227,6 +228,7 @@ impl domain::storage::Storage for Storage {
                 // be executed "very soon" again.
                 sqlx::query(query)
                     .bind(outdated_ids)
+                    .bind(cutoff)
                     .execute(&*self.pool)
                     .await
                     .map(|_| ())
@@ -240,17 +242,22 @@ impl domain::storage::Storage for Storage {
                 let query = indoc! {"
                     UPDATE wallets
                     SET active = FALSE
-                    WHERE id = ?
+                    WHERE id = $1
+                    last_active < $2
                 "};
 
-                sqlx::query(query).bind(id).execute(&*self.pool).await?;
+                sqlx::query(query)
+                    .bind(id)
+                    .bind(cutoff)
+                    .execute(&*self.pool)
+                    .await?;
             }
         }
 
         // Return active wallet IDs.
         let ids = wallets
             .into_iter()
-            .filter_map(|(id, last_active)| (now - last_active <= ttl).then_some(id))
+            .filter_map(|(id, last_active)| (last_active >= cutoff).then_some(id))
             .collect::<Vec<_>>();
         Ok(ids)
     }
