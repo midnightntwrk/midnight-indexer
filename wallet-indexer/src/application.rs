@@ -17,7 +17,7 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, future::ok, stream};
 use indexer_common::domain::{BlockIndexed, Publisher, Subscriber, WalletIndexed};
 use itertools::Itertools;
-use log::warn;
+use log::{error, warn};
 use serde::Deserialize;
 use std::{
     num::NonZeroUsize,
@@ -72,15 +72,17 @@ pub async fn run(
 
             block_indexed_stream
                 .try_for_each(|block_indexed| {
-                    if let Some(id) = block_indexed.max_transaction_id {
-                        if id > max_transaction_id.load(Ordering::Acquire) {
-                            max_transaction_id.store(id, Ordering::Release);
-                        }
+                    if let Some(id) = block_indexed.max_transaction_id
+                        && id > max_transaction_id.load(Ordering::Acquire)
+                    {
+                        max_transaction_id.store(id, Ordering::Release);
                     }
                     ok(())
                 })
                 .await
                 .context("cannot get next BlockIndexed event")?;
+
+            error!("block_indexed_task completed unexpectedly");
 
             Ok::<(), anyhow::Error>(())
         }
@@ -106,7 +108,11 @@ pub async fn run(
                         .await
                     }
                 })
-                .await
+                .await?;
+
+            error!("index_wallets_task completed unexpectedly");
+
+            Ok::<(), anyhow::Error>(())
         })
     };
 
@@ -133,7 +139,7 @@ fn active_wallets(
 ) -> impl Stream<Item = Result<Uuid, sqlx::Error>> + '_ {
     tokio_stream::StreamExt::throttle(stream::repeat(()), active_wallets_repeat_delay)
         .map(|_| Ok::<_, sqlx::Error>(()))
-        .and_then(move |_| storage.active_wallets(active_wallets_ttl))
+        .and_then(move |_| storage.active_wallet_ids(active_wallets_ttl))
         .map_ok(|wallets| stream::iter(wallets).map(Ok))
         .try_flatten()
 }

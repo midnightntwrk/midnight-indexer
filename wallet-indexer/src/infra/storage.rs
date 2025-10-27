@@ -190,7 +190,7 @@ impl domain::storage::Storage for Storage {
     }
 
     #[trace]
-    async fn active_wallets(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error> {
+    async fn active_wallet_ids(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error> {
         // Query wallets.
         let query = indoc! {"
             SELECT

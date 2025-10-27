@@ -56,7 +56,7 @@ where
     ) -> Result<(), sqlx::Error>;
 
     /// Get the IDs of active walltes, thereby marking "old" ones inactive.
-    async fn active_wallets(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error>;
+    async fn active_wallet_ids(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error>;
 
     /// Get the wallet with the given session ID.
     async fn get_wallet_by_id(
