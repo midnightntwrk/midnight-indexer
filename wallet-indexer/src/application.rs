@@ -73,7 +73,9 @@ pub async fn run(
             block_indexed_stream
                 .try_for_each(|block_indexed| {
                     if let Some(id) = block_indexed.max_transaction_id {
-                        max_transaction_id.store(id, Ordering::Release);
+                        if id > max_transaction_id.load(Ordering::Acquire) {
+                            max_transaction_id.store(id, Ordering::Release);
+                        }
                     }
                     ok(())
                 })
