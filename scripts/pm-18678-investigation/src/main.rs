@@ -281,7 +281,7 @@ impl MonitoringState {
         let ws_endpoint = endpoint
             .replace("http://", "ws://")
             .replace("https://", "wss://");
-        let ws_url = format!("{}/graphql", ws_endpoint);
+        let ws_url = format!("{}/api/v1/graphql/ws", ws_endpoint);
         
         let mut consecutive_failures = 0;
         const MAX_FAILURES: u32 = 10;
@@ -474,8 +474,16 @@ impl MonitoringState {
     }
 
     async fn run_subscription(&self, session_id: &str, ws_url: &str) -> Result<()> {
-        // Connect to WebSocket
-        let (ws_stream, _) = connect_async(ws_url)
+        // Connect to WebSocket with graphql-ws protocol
+        use tokio_tungstenite::tungstenite::http::Request;
+
+        let request = Request::builder()
+            .uri(ws_url)
+            .header("Sec-WebSocket-Protocol", "graphql-ws")
+            .header("Sec-WebSocket-Version", "13")
+            .body(())?;
+
+        let (ws_stream, _) = connect_async(request)
             .await
             .context("Failed to connect to WebSocket")?;
         
