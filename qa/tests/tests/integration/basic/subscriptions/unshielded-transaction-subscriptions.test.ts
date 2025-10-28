@@ -32,6 +32,9 @@ import type {
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
 import { TestContext } from 'vitest';
+import {
+  UnshieldedTxSubscriptionResponseSchema,
+} from '@utils/indexer/graphql/schema';
 
 let indexerWsClient: IndexerWsClient;
 
@@ -67,19 +70,19 @@ async function subscribeToUnshieldedTransactionEvents(
   });
 
   const unshieldedTransactionSubscriptionHandler: SubscriptionHandlers<UnshieldedTxSubscriptionResponse> =
-    {
-      next: (payload) => {
-        log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
-        receivedUnshieldedTransactions.push(payload);
-        if (stopCondition(receivedUnshieldedTransactions)) {
-          stopListening();
-        }
-      },
-      complete: () => {
-        log.debug('Complete message sent from Indexer');
-        completePromiseResolver();
-      },
-    };
+  {
+    next: (payload) => {
+      log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
+      receivedUnshieldedTransactions.push(payload);
+      if (stopCondition(receivedUnshieldedTransactions)) {
+        stopListening();
+      }
+    },
+    complete: () => {
+      log.debug('Complete message sent from Indexer');
+      completePromiseResolver();
+    },
+  };
 
   const unsubscribe = indexerWsClient.subscribeToUnshieldedTransactionEvents(
     unshieldedTransactionSubscriptionHandler,
@@ -197,12 +200,37 @@ describe('unshielded transaction subscriptions', async () => {
       expect(highestFoundTransactionId).toBe(highestTransactionId);
     });
 
-    test.todo(
-      'IMPLEMENT ME: should stream unshielded transaction events that adheres to the expected schema',
-      async () => {
-        // TODO: implement the following test that checks the schema of the unshielded transaction events
-      },
-    );
+    /**
+         * Subscribing to unshielded transaction events should stream messages that fully
+         * adhere to the expected GraphQL schema for both UnshieldedTransaction and
+         * UnshieldedTransactionsProgress types.
+         *
+         * @given an existing unshielded address that has transactions
+         * @when we subscribe to unshielded transaction events for that address
+         * @then every message should match the expected schema fields and types
+         */
+    test('should stream unshielded transaction events that adhere to the expected schema', async () => {
+      const unshieldedAddress = dataProvider.getUnshieldedAddress('existing');
+      const messages = await subscribeToUnshieldedTransactionEvents(
+        { address: unshieldedAddress },
+        (messages) => messages.length >= 5,
+        500,
+      );
+      expect(messages.length).toBeGreaterThanOrEqual(1);
+
+      for (const [, msg] of messages.entries()) {
+        expect(msg.errors).toBeUndefined();
+        expect(msg.data).toBeDefined();
+        expect(msg.data?.unshieldedTransactions).toBeDefined();
+        const txEvent = msg.data!.unshieldedTransactions;
+        UnshieldedTxSubscriptionResponseSchema.parse(txEvent);
+        if (txEvent.__typename === 'UnshieldedTransaction') {
+          txEvent.createdUtxos.forEach((utxo) => {
+            expect(utxo.owner).toMatch(/^mn_addr_/);
+          });
+        }
+      }
+    });
 
     /**
      * Subscribing to unshielded transaction events for an address without transactions
@@ -262,8 +290,8 @@ describe('unshielded transaction subscriptions', async () => {
       expect(msg.data).toBeDefined();
       expect(msg.data).toBeNull();
       expect(msg.errors).toBeDefined();
-      // TODO: soft assert on the error message
-      expect((msg.errors as GraphQLError[])[0].message).toMatch(/^invalid address/);
+      const errorMessage = (msg.errors as GraphQLError[])[0].message;
+      expect.soft(errorMessage).toMatch(/^invalid address/i);
     });
 
     /**

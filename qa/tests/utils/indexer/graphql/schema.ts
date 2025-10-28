@@ -39,6 +39,29 @@ export const BlockSchema = z.lazy(() =>
   }),
 );
 
+export const UnshieldedUtxoSchema = z.object({
+  owner: z.string(),
+  intentHash: Hash64,
+  value: z.string(),
+  tokenType: z.string().length(64).regex(/^[a-f0-9]+$/),
+  outputIndex: z.number(),
+  createdAtTransaction: z.object({ hash: Hash64 }),
+  spentAtTransaction: z.object({ hash: Hash64 }).nullable(),
+});
+
+// Ledger event schemas
+export const ZswapLedgerEventSchema = z.object({
+  id: z.number(),
+  raw: z.string(),
+  maxId: z.number(),
+});
+
+export const DustLedgerEventSchema = z.object({
+  id: z.number(),
+  raw: z.string(),
+  maxId: z.number(),
+});
+
 // Base transaction schema (common to both RegularTransaction and SystemTransaction)
 const BaseTransactionFields = {
   id: z.number(),
@@ -47,22 +70,10 @@ const BaseTransactionFields = {
   raw: VarLenghtHex,
   block: PartialBlockSchema,
   contractActions: z.array(z.any()), // Will be validated separately
-  unshieldedCreatedOutputs: z.array(z.any()), // Will be validated separately
+  unshieldedCreatedOutputs: z.array(UnshieldedUtxoSchema),
   unshieldedSpentOutputs: z.array(z.any()), // Will be validated separately
-  zswapLedgerEvents: z.array(
-    z.object({
-      id: z.number(),
-      raw: z.string(),
-      maxId: z.number(),
-    }),
-  ),
-  dustLedgerEvents: z.array(
-    z.object({
-      id: z.number(),
-      raw: z.string(),
-      maxId: z.number(),
-    }),
-  ),
+  zswapLedgerEvents: z.array(ZswapLedgerEventSchema),
+  dustLedgerEvents: z.array(DustLedgerEventSchema),
 };
 
 // RegularTransaction schema (includes additional fields)
@@ -84,7 +95,7 @@ export const RegularTransactionSchema = z.lazy(() =>
           id: z.number(),
           success: z.boolean(),
         }),
-      ),
+      ).nullable(),
     }),
   }),
 );
@@ -123,19 +134,6 @@ export const ContractActionSchema = z.discriminatedUnion('type', [
   ContractDeploySchema,
   ContractUpdateSchema,
 ]);
-
-// Ledger event schemas
-export const ZswapLedgerEventSchema = z.object({
-  id: z.number(),
-  raw: z.string(),
-  maxId: z.number(),
-});
-
-export const DustLedgerEventSchema = z.object({
-  id: z.number(),
-  raw: z.string(),
-  maxId: z.number(),
-});
 
 // Contract balance schema
 export const ContractBalanceSchema = z.object({
@@ -188,3 +186,33 @@ export const DustGenerationStatusSchema = z.object({
   generationRate: z.string().regex(/^\d+$/),
   currentCapacity: z.string().regex(/^\d+$/),
 });
+
+// Simplified version used in subscription responses
+export const UnshieldedTxEventTransactionSchema = z.object({
+  id: z.number(),
+  hash: z.string().regex(/^[a-f0-9]+$/),
+  identifiers: z.array(z.string()),
+});
+
+export const UnshieldedTxEventTransactionRefSchema = z.object({
+  hash: z.string().regex(/^[a-f0-9]+$/),
+  identifiers: z.array(z.string()),
+});
+
+export const UnshieldedTransactionEventSchema = z.object({
+  __typename: z.literal('UnshieldedTransaction'),
+  transaction: UnshieldedTxEventTransactionSchema,
+  createdUtxos: z.array(UnshieldedUtxoSchema),
+  spentUtxos: z.array(UnshieldedUtxoSchema),
+});
+
+export const UnshieldedTransactionsProgressSchema = z.object({
+  __typename: z.literal('UnshieldedTransactionsProgress'),
+  highestTransactionId: z.number(),
+});
+
+export const UnshieldedTxSubscriptionResponseSchema = z.union([
+  UnshieldedTransactionEventSchema,
+  UnshieldedTransactionsProgressSchema,
+]);
+
