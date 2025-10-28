@@ -64,7 +64,7 @@ pub enum ViewingKeyFormatError {
 #[cfg(test)]
 mod tests {
     use crate::infra::api::v3::viewing_key::ViewingKey;
-    use indexer_common::domain::PROTOCOL_VERSION_000_017_000;
+    use indexer_common::domain::PROTOCOL_VERSION_000_018_000;
 
     #[test]
     fn test_try_into_domain() {
@@ -73,7 +73,7 @@ mod tests {
         );
         let domain_viewing_key = viewing_key.try_into_domain(
             &"undeployed".try_into().unwrap(),
-            PROTOCOL_VERSION_000_017_000,
+            PROTOCOL_VERSION_000_018_000,
         );
         println!("{domain_viewing_key:?}");
         assert!(domain_viewing_key.is_ok());

@@ -249,7 +249,7 @@ async fn create_ledger_state_store(
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{ByteVec, LedgerStateStorage, PROTOCOL_VERSION_000_017_000},
+        domain::{ByteVec, LedgerStateStorage, PROTOCOL_VERSION_000_018_000},
         infra::ledger_state_storage::nats::{Config, NatsLedgerStateStorage},
     };
     use anyhow::Context;
@@ -313,7 +313,7 @@ mod tests {
 
         let default_state = ByteVec::default();
         ledger_state_storage
-            .save(&default_state, 0, None, PROTOCOL_VERSION_000_017_000)
+            .save(&default_state, 0, None, PROTOCOL_VERSION_000_018_000)
             .await
             .context("save ledger state")?;
 
@@ -329,7 +329,7 @@ mod tests {
             .context("load ledger state")?;
         assert_matches!(
             ledger_state,
-            Some((state, 0, PROTOCOL_VERSION_000_017_000)) if state == default_state
+            Some((state, 0, PROTOCOL_VERSION_000_018_000)) if state == default_state
         );
 
         ledger_state_storage
@@ -337,7 +337,7 @@ mod tests {
                 &ByteVec::default(),
                 42,
                 Some(42),
-                PROTOCOL_VERSION_000_017_000,
+                PROTOCOL_VERSION_000_018_000,
             )
             .await
             .context("save ledger state")?;
