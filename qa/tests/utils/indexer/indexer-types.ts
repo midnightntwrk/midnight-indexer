@@ -26,6 +26,10 @@ export type TransactionResponse = GraphQLResponse<{ transactions: Transaction[] 
 
 export type ContractActionResponse = GraphQLResponse<{ contractAction: ContractAction }>;
 
+export type DustGenerationStatusResponse = GraphQLResponse<{
+  dustGenerationStatus: DustGenerationStatus[];
+}>;
+
 export type BlockOffset = {
   hash?: string;
   height?: number;
@@ -196,6 +200,15 @@ export interface ContractUpdate {
 export interface ContractBalance {
   tokenType: string;
   amount: string;
+}
+
+export interface DustGenerationStatus {
+  cardanoStakeKey: string;
+  dustAddress?: string;
+  registered: boolean;
+  nightBalance: string;
+  generationRate: string;
+  currentCapacity: string;
 }
 
 export interface ZswapLedgerEvent {
