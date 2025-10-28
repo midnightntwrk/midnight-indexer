@@ -5,7 +5,7 @@ use chain_indexer::{
 };
 use clap::Parser;
 use futures::{Stream, StreamExt, TryStreamExt};
-use indexer_common::domain::PROTOCOL_VERSION_000_017_000;
+use indexer_common::domain::PROTOCOL_VERSION_000_018_000;
 use std::{pin::Pin, time::Duration};
 
 #[tokio::main]
@@ -34,7 +34,7 @@ impl Cli {
     async fn run(self) -> anyhow::Result<()> {
         let config = Config {
             url: self.node,
-            genesis_protocol_version: PROTOCOL_VERSION_000_017_000,
+            genesis_protocol_version: PROTOCOL_VERSION_000_018_000,
             reconnect_max_delay: Duration::from_secs(1),
             reconnect_max_attempts: 1,
         };
