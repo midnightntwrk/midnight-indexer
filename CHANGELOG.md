@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0-alpha.5] - 2025-10-10
+## [3.0.0-alpha.6] - 2025-10-28
 
 ### 🚀 Features
 
@@ -42,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - *(indexer-api)* Change API version from v1 to v3 (#418)
 - *(api)* Add dustGenerationStatus query for cNIGHT tracking (#419)
 - Add ctime to unshielded UTXO (#425)
+- Change network ID from enum to string (#426)
 
 ### 🐛 Bug Fixes
 
@@ -72,6 +73,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Use correct intent hash for spent UTXOs (#402)
 - Skip UTXO creation for failed transactions (#401)
 - *(chain-indexer)* Create unshielded UTXOs from system transactions (#408)
+- *(indexer-api)* Correct index update order in shieldedTransactions subscription (#455)
+- Always populate zswap_state for contract actions (#471)
 
 ### 💼 Other
 
@@ -102,6 +105,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Update GraphQL API documentation to match current schema (#176)
 - Add missing requirements to README (#253)
 - Add comprehensive guide for updating node versions (#281)
+- *(indexer-api)* Enhance v3 api documentation with DUST features and field updates (#473)
 
 ### ⚙️ Miscellaneous Tasks
 
