@@ -27,6 +27,11 @@ import {
 import { generateSyntheticViewingKey } from '@utils/bech32-codec';
 import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 
+// This is longer because it might take some time when
+// a new verion of the toolkit image is available and
+// it needs to be pulled the first time
+const TOOLKIT_STARTUP_TIMEOUT = 60_000;
+
 describe('shielded transaction subscriptions', () => {
   let randomSeed: string;
   let toolkit: ToolkitWrapper;
@@ -34,12 +39,9 @@ describe('shielded transaction subscriptions', () => {
 
   beforeAll(async () => {
     // Initialise the toolkit wrapper
-    log.debug('Creating the wrapper');
     toolkit = new ToolkitWrapper({});
-    log.debug('Starting the wrapper');
     await toolkit.start();
-    log.debug('Wrapper started');
-  });
+  }, TOOLKIT_STARTUP_TIMEOUT);
 
   afterAll(async () => {
     await toolkit.stop();

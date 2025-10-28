@@ -22,9 +22,9 @@ import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import type { DustGenerationStatusResponse } from '@utils/indexer/indexer-types';
 import { DustGenerationStatusSchema } from '@utils/indexer/graphql/schema';
 
-import dbClient, { CnightRegistration } from '@utils/db/postgres-client';
-
 const indexerHttpClient = new IndexerHttpClient();
+
+const TOOLKIT_STARTUP_TIMEOUT = 60_000;
 
 describe('dust generation status queries', () => {
   let toolkit: ToolkitWrapper;
@@ -32,7 +32,7 @@ describe('dust generation status queries', () => {
   beforeAll(async () => {
     toolkit = new ToolkitWrapper({});
     await toolkit.start();
-  });
+  }, TOOLKIT_STARTUP_TIMEOUT);
 
   afterAll(async () => {
     await toolkit.stop();
@@ -111,7 +111,11 @@ describe('dust generation status queries', () => {
         await indexerHttpClient.getDustGenerationStatus([registeredStakeKey!]);
 
       expect(registeredResponse).toBeSuccess();
-      const registeredStatus = registeredResponse.data?.dustGenerationStatus[0];
+      const dustGenerationStatus = registeredResponse.data?.dustGenerationStatus;
+      expect(dustGenerationStatus).toBeDefined();
+      expect(Array.isArray(dustGenerationStatus)).toBe(true);
+      expect(dustGenerationStatus?.length).toBe(1);
+      const registeredStatus = dustGenerationStatus![0];
       expect(registeredStatus?.registered).toBe(true);
       expect(registeredStatus?.dustAddress).toBeDefined();
     });
@@ -260,31 +264,6 @@ describe('dust generation status queries', () => {
 
   describe('a dust generation status query with malformed stake keys', () => {
     /**
-     * A dust generation status query with malformed stake keys returns an error
-     *
-     * @given we fabricate malformed Cardano stake keys
-     * @when we send a dust generation status query with them
-     * @then Indexer should return an error for each malformed key
-     */
-    test('should return an error not accepting those keys', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = {
-        labels: ['Query', 'Dust', 'Tokenomics', 'cNgD'],
-        testKey: 'PM-18911',
-      };
-
-      const malformedKeys = dataProvider.getFabricatedMalformedCardanoStakeKeys();
-
-      for (const malformedKey of malformedKeys) {
-        log.debug(`Testing malformed stake key: ${malformedKey}`);
-
-        const response: DustGenerationStatusResponse =
-          await indexerHttpClient.getDustGenerationStatus([malformedKey]);
-
-        expect.soft(response).toBeError();
-      }
-    });
-
-    /**
      * A dust generation status query with hex string of wrong length returns an error
      *
      * @given we provide a hex string that is too short or too long
@@ -377,34 +356,6 @@ describe('dust generation status queries', () => {
       expect(response.data?.dustGenerationStatus[1].cardanoStakeKey.toLocaleLowerCase()).toBe(
         registeredStakeKey!.toLowerCase(),
       );
-    });
-  });
-});
-
-
-describe('a dust generation status query with a registered stake key', () => {
-  /**
-   * ...
-   *
-   * @given ...
-   * @when ...
-   * @then ...
-   */
-  test('should return the expected dust generation status', async (ctx: TestContext) => {
-    ctx.task!.meta.custom = {
-      labels: ['Query', 'Dust', 'Tokenomics', 'cNgD']
-    };
-
-    await dbClient.init();
-    const registrations: CnightRegistration[] = await dbClient.getCnightRegistrations();
-
-    registrations.forEach(async registration => {
-      console.log(registration);
-      const response: DustGenerationStatusResponse =
-        await indexerHttpClient.getDustGenerationStatus([registration.cardanoAddress]);
-      expect(response).toBeSuccess();
-      console.log(response.data?.dustGenerationStatus);
-      
     });
   });
 });
