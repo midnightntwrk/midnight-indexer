@@ -31,7 +31,7 @@ import {
   SystemTransactionSchema,
   ZswapLedgerEventSchema,
   DustLedgerEventSchema,
-  UnshieldedUtxoSchema
+  UnshieldedUtxoSchema,
 } from '@utils/indexer/graphql/schema';
 
 const indexerHttpClient = new IndexerHttpClient();
@@ -68,7 +68,7 @@ async function getGenesisTransactionsByHash(): Promise<Transaction[]> {
 
 function getRegularTransactions(transactions: Transaction[]): RegularTransaction[] {
   return transactions.filter(
-    (tx) => tx.__typename === 'RegularTransaction'
+    (tx) => tx.__typename === 'RegularTransaction',
   ) as RegularTransaction[];
 }
 
@@ -137,7 +137,6 @@ describe('transaction queries', () => {
 
         expect.soft(response).toBeError();
         const messages = response.errors?.map((e) => e.message) ?? [];
-        expect.soft(messages.length).toBeGreaterThan(0);
         expect.soft(messages[0]).toContain('invalid transaction hash: cannot');
       }
     });
@@ -153,12 +152,13 @@ describe('transaction queries', () => {
       const offset: TransactionOffset = {};
       const response = await indexerHttpClient.getTransactionByOffset(offset);
 
-
       expect.soft(response).toBeError();
-      expect.soft(response.data).toBeNull();
       const errorMessages = response.errors?.map((e: any) => e.message) ?? [];
-      expect.soft(errorMessages.length).toBeGreaterThan(0);
-      expect.soft(errorMessages[0]).toContain('Invalid value for argument \"offset\", Oneof input objects requires have exactly one field');
+      expect
+        .soft(errorMessages[0])
+        .toContain(
+          'Invalid value for argument \"offset\", Oneof input objects requires have exactly one field',
+        );
     });
   });
 
@@ -183,7 +183,9 @@ describe('transaction queries', () => {
       expect.soft(identifiers.length).toBeGreaterThanOrEqual(1);
 
       for (const identifier of identifiers) {
-        const transactionQueryResponse = await indexerHttpClient.getTransactionByOffset({ identifier });
+        const transactionQueryResponse = await indexerHttpClient.getTransactionByOffset({
+          identifier,
+        });
 
         expect.soft(transactionQueryResponse).toBeSuccess();
         expect.soft(transactionQueryResponse.data?.transactions).toHaveLength(1);
@@ -237,7 +239,6 @@ describe('transaction queries', () => {
 
         expect.soft(response).toBeError();
         const messages = response.errors?.map((e) => e.message) ?? [];
-        expect.soft(messages.length).toBeGreaterThan(0);
         expect.soft(messages[0]).toContain('invalid transaction identifier: cannot');
       }
     });
@@ -266,14 +267,15 @@ describe('transaction queries', () => {
       let response: TransactionResponse = await indexerHttpClient.getTransactionByOffset(offset);
 
       expect(response).toBeError();
-
-      expect.soft(response.data).toBeNull();
       const errorMessages = response.errors?.map((e: any) => e.message) ?? [];
-      expect.soft(errorMessages.length).toBeGreaterThan(0);
-      expect.soft(errorMessages[0]).toContain('Invalid value for argument \"offset\", Oneof input objects requires have exactly one field');
+      expect
+        .soft(errorMessages[0])
+        .toContain(
+          'Invalid value for argument "offset", Oneof input objects requires have exactly one field',
+        );
     });
   });
-})
+});
 
 describe(`genesis transactions`, () => {
   describe(`transaction queries to the genesis block transactions`, async () => {
@@ -341,104 +343,119 @@ describe(`genesis transactions`, () => {
       }
     });
   });
-});
 
-describe('schema validation for genesis transactions', () => {
-  let genesisTransactions: Transaction[];
+  describe('schema validation', () => {
+    let genesisTransactions: Transaction[];
 
-  beforeAll(async () => {
-    genesisTransactions = await getGenesisTransactionsByHash();
-  });
+    beforeAll(async () => {
+      genesisTransactions = await getGenesisTransactionsByHash();
+    });
 
-  /**
-   * Validate that all genesis transactions conform to FullTransactionSchema
-   */
-  test('should conform to FullTransactionSchema', async () => {
-    expect(genesisTransactions.length).toBeGreaterThan(0);
+    /**
+     * Validates that all genesis transactions comply with the expected structure.
+     *
+     * @given the genesis transactions are fetched from the indexer
+     * @when each transaction is validated against the FullTransactionSchema
+     * @then all transactions should successfully pass schema validation
+     */
+    test('should conform to FullTransactionSchema', async () => {
+      expect(genesisTransactions.length).toBeGreaterThan(0);
 
-    for (const tx of genesisTransactions) {
-      const result = FullTransactionSchema.safeParse(tx);
+      for (const tx of genesisTransactions) {
+        const result = FullTransactionSchema.safeParse(tx);
 
-      if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
+        if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
 
-      expect(result.success).toBe(true);
-    }
-  });
-
-  /**
- * Ensure SystemTransactions conform to SystemTransactionSchema
- */
-  test('should validate SystemTransaction-specific fields', async () => {
-    const systemTxs = genesisTransactions.filter(
-      (tx) => tx.__typename === 'SystemTransaction',
-    );
-
-    for (const tx of systemTxs) {
-      const result = SystemTransactionSchema.safeParse(tx);
-      if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
-
-      expect(result.success).toBe(true);
-    }
-  });
-
-  /**
-   * Ensure RegularTransactions conform to RegularTransactionSchema
-   */
-  test('should validate RegularTransaction-specific fields', async () => {
-    const regularTxs = getRegularTransactions(genesisTransactions);
-
-    for (const tx of regularTxs) {
-      const result = RegularTransactionSchema.safeParse(tx);
-      if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
-
-      expect(result.success).toBe(true);
-    }
-  });
-
-  /**
-  * Validate that nested ledger events and unshielded outputs conform to their schemas
-  */
-  test('should validate nested ledger events and unshielded outputs', async () => {
-    const regularTxs = getRegularTransactions(genesisTransactions);
-
-    for (const tx of regularTxs) {
-      // zswapLedgerEvents
-      if (tx.zswapLedgerEvents && tx.zswapLedgerEvents.length > 0) {
-        log.debug(`Validating ${tx.zswapLedgerEvents.length} zswapLedgerEvents for tx ${tx.hash}`);
-
-        for (const event of tx.zswapLedgerEvents) {
-          const result = ZswapLedgerEventSchema.safeParse(event);
-          if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
-
-          expect(result.success).toBe(true);
-        }
+        expect(result.success).toBe(true);
       }
+    });
+
+    /**
+     * Ensures that all SystemTransactions contain the required system-specific fields.
+     *
+     * @given the genesis transactions are fetched from the indexer
+     * @when transactions with __typename = 'SystemTransaction' are validated
+     * @then each SystemTransaction should match the SystemTransactionSchema
+     */
+    test('should conform to SystemTransactionSchema', async () => {
+      const systemTxs = genesisTransactions.filter((tx) => tx.__typename === 'SystemTransaction');
+
+      for (const tx of systemTxs) {
+        const result = SystemTransactionSchema.safeParse(tx);
+        if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
+
+        expect(result.success).toBe(true);
+      }
+    });
+
+    /**
+     * Ensures that all RegularTransactions contain the expected fields.
+     *
+     * @given the genesis transactions are fetched from the indexer
+     * @when transactions with __typename = 'RegularTransaction' are validated
+     * @then each RegularTransaction should match the RegularTransactionSchema
+     */
+    test('should conform to RegularTransactionSchema', async () => {
+      const regularTxs = getRegularTransactions(genesisTransactions);
+
+      for (const tx of regularTxs) {
+        const result = RegularTransactionSchema.safeParse(tx);
+        if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
+
+        expect(result.success).toBe(true);
+      }
+    });
+
+    /**
+     * Ensures that all nested structures within RegularTransactions
+     * conform to their respective schemas.
+     *
+     * @given the RegularTransactions are fetched from the genesis block
+     * @when validating zswapLedgerEvents, dustLedgerEvents, and unshieldedCreatedOutputs
+     * @then each nested entity should conform to its expected schema
+     */
+    test('should conform to nested ledger event and unshielded output schemas', async () => {
+      const regularTxs = getRegularTransactions(genesisTransactions);
+
+      // zswapLedgerEvents
+      regularTxs
+        .filter((tx) => tx.zswapLedgerEvents?.length)
+        .forEach((tx) => {
+          log.debug(
+            `Validating ${tx.zswapLedgerEvents!.length} zswapLedgerEvents for tx ${tx.hash}`,
+          );
+          tx.zswapLedgerEvents!.forEach((event) => {
+            const result = ZswapLedgerEventSchema.safeParse(event);
+            if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
+            expect(result.success).toBe(true);
+          });
+        });
 
       // dustLedgerEvents
-      if (tx.dustLedgerEvents && tx.dustLedgerEvents.length > 0) {
-        log.debug(`Validating ${tx.dustLedgerEvents.length} dustLedgerEvents for tx ${tx.hash}`);
-
-        for (const event of tx.dustLedgerEvents) {
-          const result = DustLedgerEventSchema.safeParse(event);
-          if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
-
-          expect(result.success).toBe(true);
-        }
-      }
+      regularTxs
+        .filter((tx) => tx.dustLedgerEvents?.length)
+        .forEach((tx) => {
+          log.debug(`Validating ${tx.dustLedgerEvents!.length} dustLedgerEvents for tx ${tx.hash}`);
+          tx.dustLedgerEvents!.forEach((event) => {
+            const result = DustLedgerEventSchema.safeParse(event);
+            if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
+            expect(result.success).toBe(true);
+          });
+        });
 
       // unshieldedCreatedOutputs
-      if (tx.unshieldedCreatedOutputs && tx.unshieldedCreatedOutputs.length > 0) {
-        log.debug(`Validating ${tx.unshieldedCreatedOutputs.length} unshieldedCreatedOutputs for tx ${tx.hash}`);
-
-        for (const output of tx.unshieldedCreatedOutputs) {
-          const result = UnshieldedUtxoSchema.safeParse(output);
-          if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
-          expect(result.success).toBe(true);
-        }
-      }
-    }
+      regularTxs
+        .filter((tx) => tx.unshieldedCreatedOutputs?.length)
+        .forEach((tx) => {
+          log.debug(
+            `Validating ${tx.unshieldedCreatedOutputs!.length} unshieldedCreatedOutputs for tx ${tx.hash}`,
+          );
+          tx.unshieldedCreatedOutputs!.forEach((output) => {
+            const result = UnshieldedUtxoSchema.safeParse(output);
+            if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
+            expect(result.success).toBe(true);
+          });
+        });
+    });
   });
 });
-
-
-

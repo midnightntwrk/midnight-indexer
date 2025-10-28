@@ -32,9 +32,7 @@ import type {
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
 import { TestContext } from 'vitest';
-import {
-  UnshieldedTxSubscriptionResponseSchema,
-} from '@utils/indexer/graphql/schema';
+import { UnshieldedTxSubscriptionResponseSchema } from '@utils/indexer/graphql/schema';
 
 let indexerWsClient: IndexerWsClient;
 
@@ -70,19 +68,19 @@ async function subscribeToUnshieldedTransactionEvents(
   });
 
   const unshieldedTransactionSubscriptionHandler: SubscriptionHandlers<UnshieldedTxSubscriptionResponse> =
-  {
-    next: (payload) => {
-      log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
-      receivedUnshieldedTransactions.push(payload);
-      if (stopCondition(receivedUnshieldedTransactions)) {
-        stopListening();
-      }
-    },
-    complete: () => {
-      log.debug('Complete message sent from Indexer');
-      completePromiseResolver();
-    },
-  };
+    {
+      next: (payload) => {
+        log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
+        receivedUnshieldedTransactions.push(payload);
+        if (stopCondition(receivedUnshieldedTransactions)) {
+          stopListening();
+        }
+      },
+      complete: () => {
+        log.debug('Complete message sent from Indexer');
+        completePromiseResolver();
+      },
+    };
 
   const unsubscribe = indexerWsClient.subscribeToUnshieldedTransactionEvents(
     unshieldedTransactionSubscriptionHandler,
@@ -201,14 +199,14 @@ describe('unshielded transaction subscriptions', async () => {
     });
 
     /**
-         * Subscribing to unshielded transaction events should stream messages that fully
-         * adhere to the expected GraphQL schema for both UnshieldedTransaction and
-         * UnshieldedTransactionsProgress types.
-         *
-         * @given an existing unshielded address that has transactions
-         * @when we subscribe to unshielded transaction events for that address
-         * @then every message should match the expected schema fields and types
-         */
+     * Subscribing to unshielded transaction events should stream messages that fully
+     * adhere to the expected GraphQL schema for both UnshieldedTransaction and
+     * UnshieldedTransactionsProgress types.
+     *
+     * @given an existing unshielded address that has transactions
+     * @when we subscribe to unshielded transaction events for that address
+     * @then every message should match the expected schema fields and types
+     */
     test('should stream unshielded transaction events that adhere to the expected schema', async () => {
       const unshieldedAddress = dataProvider.getUnshieldedAddress('existing');
       const messages = await subscribeToUnshieldedTransactionEvents(

@@ -43,7 +43,10 @@ export const UnshieldedUtxoSchema = z.object({
   owner: z.string(),
   intentHash: Hash64,
   value: z.string(),
-  tokenType: z.string().length(64).regex(/^[a-f0-9]+$/),
+  tokenType: z
+    .string()
+    .length(64)
+    .regex(/^[a-f0-9]+$/),
   outputIndex: z.number(),
   createdAtTransaction: z.object({ hash: Hash64 }),
   spentAtTransaction: z.object({ hash: Hash64 }).nullable(),
@@ -90,12 +93,14 @@ export const RegularTransactionSchema = z.lazy(() =>
     }),
     transactionResult: z.object({
       status: z.enum(['SUCCESS', 'PARTIAL_SUCCESS', 'FAILURE']),
-      segments: z.array(
-        z.object({
-          id: z.number(),
-          success: z.boolean(),
-        }),
-      ).nullable(),
+      segments: z
+        .array(
+          z.object({
+            id: z.number(),
+            success: z.boolean(),
+          }),
+        )
+        .nullable(),
     }),
   }),
 );
@@ -215,4 +220,3 @@ export const UnshieldedTxSubscriptionResponseSchema = z.union([
   UnshieldedTransactionEventSchema,
   UnshieldedTransactionsProgressSchema,
 ]);
-
