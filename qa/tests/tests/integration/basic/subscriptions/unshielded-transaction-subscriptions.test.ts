@@ -388,13 +388,7 @@ describe('unshielded transaction subscriptions', async () => {
      * @and we should receive a progress message with the highest transaction ID
      * @and the highest transaction ID in events should match the progress message
      */
-    test('should return a stream of transactions containing that address, starting from transaction id = 0', async ({
-      task: _task,
-    }: TestContext) => {
-      // task!.meta.custom = {
-      //   labels: ['UnshieldedTokens', 'Subscription', 'Transaction'],
-      // };
-
+    test('should return a stream of transactions containing that address, starting from transaction id = 0', async () => {
       const targetTransactionId = 0;
       const targetAddress = dataProvider.getUnshieldedAddress('existing');
 

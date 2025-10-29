@@ -104,7 +104,6 @@ function flattenTests(
       // Extract timing information
       const startTime = result?.startTime || Date.now();
       const duration = result?.duration || 0;
-      // const endTime = startTime + duration;
 
       // You can use the following information but note that not everything
       // might be available, especially the "describe()" strings

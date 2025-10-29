@@ -99,13 +99,13 @@ describe('shielded transactions', () => {
      * @when we query transactions by the transaction hash
      * @then the indexer should return the expected transaction
      */
-    test('should be reported by the indexer through a transaction query by hash', async (_context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should be reported by the indexer through a transaction query by hash', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Transaction', 'ByHash', 'ShieldedTokens'],
         testKey: 'PM-17710',
       };
 
-      context.skip?.(
+      ctx.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",
       );

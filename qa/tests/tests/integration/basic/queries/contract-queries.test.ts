@@ -52,13 +52,13 @@ describe('contract queries', () => {
      * @when we send a contract query using that address without offset
      * @then Indexer should respond with successful response and return the most recent action (ContractUpdate)
      */
-    test('should return the most recent action for a contract with multiple actions', async (_context: TestContext) => {
+    test('should return the most recent action for a contract with multiple actions', async (ctx: TestContext) => {
       let existingContractAddress: string;
       try {
         existingContractAddress = dataProvider.getKnownContractAddress();
       } catch (error) {
         log.warn(error);
-        context.skip?.(true, (error as Error).message);
+        ctx.skip?.(true, (error as Error).message);
       }
 
       const response = await indexerHttpClient.getContractAction(existingContractAddress!);
@@ -78,13 +78,13 @@ describe('contract queries', () => {
      * @when we send a contract query using that address
      * @then Indexer should respond with null contract action
      */
-    test('should return null when contract with that address does not exist', async (_context: TestContext) => {
+    test('should return null when contract with that address does not exist', async (ctx: TestContext) => {
       let nonExistentContractAddress: string;
       try {
         nonExistentContractAddress = dataProvider.getNonExistingContractAddress();
       } catch (error) {
         log.warn(error);
-        context.skip?.(true, (error as Error).message);
+        ctx.skip?.(true, (error as Error).message);
       }
 
       const response = await indexerHttpClient.getContractAction(nonExistentContractAddress!);
@@ -120,7 +120,7 @@ describe('contract queries', () => {
      * @when we send a contract query using that address and block hash
      * @then Indexer should respond with successful response and non-null contractAction with correct data
      */
-    test('should return the correct action using exact block hash where it was included', async (_context: TestContext) => {
+    test('should return the correct action using exact block hash where it was included', async (ctx: TestContext) => {
       let existingContractAddress: string;
       let contractDeployBlockHash: string;
       try {
@@ -128,7 +128,7 @@ describe('contract queries', () => {
         contractDeployBlockHash = await dataProvider.getContractDeployBlockHash();
       } catch (error) {
         log.warn(error);
-        context.skip?.(true, (error as Error).message);
+        ctx.skip?.(true, (error as Error).message);
       }
       const response = await indexerHttpClient.getContractAction(existingContractAddress!, {
         blockOffset: { hash: contractDeployBlockHash! },
@@ -146,7 +146,7 @@ describe('contract queries', () => {
      * @when we send a contract query using that address and future block hash
      * @then Indexer should respond with successful response and non-null contractAction reflecting latest state
      */
-    test('should return the latest state using a future block hash', async (_context: TestContext) => {
+    test('should return the latest state using a future block hash', async (ctx: TestContext) => {
       let existingContractAddress: string;
       let contractUpdateBlockHash: string;
       try {
@@ -154,7 +154,7 @@ describe('contract queries', () => {
         contractUpdateBlockHash = await dataProvider.getContractUpdateBlockHash();
       } catch (error) {
         log.warn(error);
-        context.skip?.(true, (error as Error).message);
+        ctx.skip?.(true, (error as Error).message);
       }
 
       const response = await indexerHttpClient.getContractAction(existingContractAddress!, {
@@ -219,7 +219,7 @@ describe('contract queries', () => {
      * @when we send a contract query using that address and block height
      * @then Indexer should respond with successful response and non-null contractAction with correct data
      */
-    test('should return the correct action using exact block height where it was included', async (_context: TestContext) => {
+    test('should return the correct action using exact block height where it was included', async (ctx: TestContext) => {
       let existingContractAddress: string;
       let contractDeployHeight: number;
       try {
@@ -227,7 +227,7 @@ describe('contract queries', () => {
         contractDeployHeight = await dataProvider.getContractDeployBlockHeight();
       } catch (error) {
         log.warn(error);
-        context.skip?.(true, (error as Error).message);
+        ctx.skip?.(true, (error as Error).message);
       }
       const response = await indexerHttpClient.getContractAction(existingContractAddress!, {
         blockOffset: { height: contractDeployHeight! },
@@ -245,7 +245,7 @@ describe('contract queries', () => {
      * @when we send a contract query using that address and future block height
      * @then Indexer should respond with successful response and non-null contractAction reflecting latest state
      */
-    test('should return the latest state using a future block height', async (_context: TestContext) => {
+    test('should return the latest state using a future block height', async (ctx: TestContext) => {
       let existingContractAddress: string;
       let contractUpdateHeight: number;
       try {
@@ -253,7 +253,7 @@ describe('contract queries', () => {
         contractUpdateHeight = await dataProvider.getContractUpdateBlockHeight();
       } catch (error) {
         log.warn(error);
-        context.skip?.(true, (error as Error).message);
+        ctx.skip?.(true, (error as Error).message);
       }
       const response = await indexerHttpClient.getContractAction(existingContractAddress!, {
         blockOffset: { height: contractUpdateHeight! },
@@ -271,7 +271,7 @@ describe('contract queries', () => {
      * @when we send a contract query using that address and a past block height (example: block 49)
      * @then Indexer should return the most recent action for the address before the specified block height (so ContractDeploy block 49)
      */
-    test('should return the most recent contract action for that address before the specified block', async (_context: TestContext) => {
+    test('should return the most recent contract action for that address before the specified block', async (ctx: TestContext) => {
       let existingContractAddress: string;
       let contractDeployHeight: number;
       let contractCallHeight: number;
@@ -282,7 +282,7 @@ describe('contract queries', () => {
         contractCallHeight = await dataProvider.getContractCallBlockHeight();
       } catch (error) {
         log.warn(error);
-        context.skip?.(true, (error as Error).message);
+        ctx.skip?.(true, (error as Error).message);
       }
       let response = await indexerHttpClient.getContractAction(existingContractAddress!, {
         blockOffset: { height: contractDeployHeight! },
@@ -310,13 +310,13 @@ describe('contract queries', () => {
      * @when we send a contract query using that address and offset
      * @then Indexer should respond with null contract action
      */
-    test('should return null when contract with valid address and valid offset does not exist', async (_context: TestContext) => {
+    test('should return null when contract with valid address and valid offset does not exist', async (ctx: TestContext) => {
       let knownBlockHash: string;
       try {
         knownBlockHash = await dataProvider.getKnownBlockHash();
       } catch (error) {
         log.warn(error);
-        context.skip?.(true, (error as Error).message);
+        ctx.skip?.(true, (error as Error).message);
       }
       const response = await indexerHttpClient.getContractAction(validAddress, {
         blockOffset: { hash: knownBlockHash! },
@@ -348,13 +348,13 @@ describe('contract queries', () => {
      * @when we send a contract query using that address and hash
      * @then Indexer should respond with an error
      */
-    test('should return error when contract with invalid address and valid hash', async (_context: TestContext) => {
+    test('should return error when contract with invalid address and valid hash', async (ctx: TestContext) => {
       let knownBlockHash: string;
       try {
         knownBlockHash = await dataProvider.getKnownBlockHash();
       } catch (error) {
         log.warn(error);
-        context.skip?.(true, (error as Error).message);
+        ctx.skip?.(true, (error as Error).message);
       }
       const invalidAddress = dataProvider.getFabricatedMalformedContractAddresses()[10];
       const response = await indexerHttpClient.getContractAction(invalidAddress, {
@@ -386,7 +386,14 @@ describe('contract queries', () => {
      * @when we send a contract query using that address and hash
      * @then Indexer should respond with an error
      */
-    test('should return error when contract with valid address and invalid hash', async (_context: TestContext) => {
+    test('should return error when contract with valid address and invalid hash', async (ctx: TestContext) => {
+      let knownBlockHash: string;
+      try {
+        knownBlockHash = await dataProvider.getKnownBlockHash();
+      } catch (error) {
+        log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
+      }
       const malformedHashes = dataProvider.getFabricatedMalformedHashes();
       const response = await indexerHttpClient.getContractAction(validAddress, {
         blockOffset: { hash: malformedHashes[0] },
@@ -524,7 +531,7 @@ describe('contract queries', () => {
      * @when we send a contract query using that address and past block hash
      * @then Indexer should respond with successful response and null contractAction
      */
-    test('should return null when using a block hash from before the action existed', async (_context: TestContext) => {
+    test('should return null when using a block hash from before the action existed', async (ctx: TestContext) => {
       let existingContractAddress: string;
       const genesisBlockHash = (await indexerHttpClient.getBlockByOffset({ height: 0 })).data?.block
         .hash;
@@ -532,7 +539,7 @@ describe('contract queries', () => {
         existingContractAddress = dataProvider.getKnownContractAddress();
       } catch (error) {
         log.warn(error);
-        context.skip?.(true, (error as Error).message);
+        ctx.skip?.(true, (error as Error).message);
       }
       const response = await indexerHttpClient.getContractAction(existingContractAddress!, {
         blockOffset: { hash: genesisBlockHash! },
