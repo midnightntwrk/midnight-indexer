@@ -6,3 +6,7 @@
 .vscode
 .zed
 target
+
+# Nix
+result
+result-*

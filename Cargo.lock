@@ -3738,7 +3738,7 @@ dependencies = [
 [[package]]
 name = "midnight-base-crypto"
 version = "1.0.0-alpha.4"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.1.0-alpha.4#5ff23902cda440781ac3c8cac55c2ff69866e1b8"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
 dependencies = [
  "anyhow",
  "atomic-write-file",
@@ -3768,7 +3768,7 @@ dependencies = [
 [[package]]
 name = "midnight-base-crypto-derive"
 version = "1.0.0-alpha.4"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.1.0-alpha.4#5ff23902cda440781ac3c8cac55c2ff69866e1b8"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
 dependencies = [
  "proc-macro2",
  "quote 1.0.41",
@@ -3804,7 +3804,7 @@ dependencies = [
 [[package]]
 name = "midnight-coin-structure"
 version = "1.0.0-alpha.4"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.1.0-alpha.4#5ff23902cda440781ac3c8cac55c2ff69866e1b8"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
 dependencies = [
  "fake",
  "lazy_static",
@@ -3839,7 +3839,7 @@ dependencies = [
 [[package]]
 name = "midnight-ledger"
 version = "6.1.0-alpha.4"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.1.0-alpha.4#5ff23902cda440781ac3c8cac55c2ff69866e1b8"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
 dependencies = [
  "anyhow",
  "derive-where",
@@ -3854,6 +3854,7 @@ dependencies = [
  "midnight-coin-structure",
  "midnight-onchain-runtime",
  "midnight-serialize",
+ "midnight-static",
  "midnight-storage",
  "midnight-transient-crypto",
  "midnight-zswap",
@@ -3870,7 +3871,7 @@ dependencies = [
 [[package]]
 name = "midnight-onchain-runtime"
 version = "1.0.0-alpha.4"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.1.0-alpha.4#5ff23902cda440781ac3c8cac55c2ff69866e1b8"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
 dependencies = [
  "derive-where",
  "enum_index",
@@ -3895,7 +3896,7 @@ dependencies = [
 [[package]]
 name = "midnight-onchain-state"
 version = "1.0.0-alpha.4"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.1.0-alpha.4#5ff23902cda440781ac3c8cac55c2ff69866e1b8"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
 dependencies = [
  "derive-where",
  "fake",
@@ -3913,7 +3914,7 @@ dependencies = [
 [[package]]
 name = "midnight-onchain-vm"
 version = "1.0.0-alpha.4"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.1.0-alpha.4#5ff23902cda440781ac3c8cac55c2ff69866e1b8"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
 dependencies = [
  "derive-where",
  "fake",
@@ -3955,7 +3956,7 @@ dependencies = [
 [[package]]
 name = "midnight-serialize"
 version = "1.0.0-alpha.4"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.1.0-alpha.4#5ff23902cda440781ac3c8cac55c2ff69866e1b8"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
 dependencies = [
  "crypto",
  "konst",
@@ -3968,7 +3969,7 @@ dependencies = [
 [[package]]
 name = "midnight-serialize-macros"
 version = "1.0.0-alpha.4"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.1.0-alpha.4#5ff23902cda440781ac3c8cac55c2ff69866e1b8"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
 dependencies = [
  "proc-macro2",
  "quote 1.0.41",
@@ -3976,9 +3977,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-static"
+version = "1.0.0-alpha.4"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.41",
+]
+
+[[package]]
 name = "midnight-storage"
 version = "1.0.0-alpha.4"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.1.0-alpha.4#5ff23902cda440781ac3c8cac55c2ff69866e1b8"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
 dependencies = [
  "archery",
  "crypto",
@@ -4002,7 +4012,7 @@ dependencies = [
 [[package]]
 name = "midnight-storage-macros"
 version = "1.0.0-alpha.4"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.1.0-alpha.4#5ff23902cda440781ac3c8cac55c2ff69866e1b8"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
 dependencies = [
  "midnight-serialize-macros",
  "proc-macro2",
@@ -4013,7 +4023,7 @@ dependencies = [
 [[package]]
 name = "midnight-transient-crypto"
 version = "1.0.0-alpha.4"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.1.0-alpha.4#5ff23902cda440781ac3c8cac55c2ff69866e1b8"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
 dependencies = [
  "anyhow",
  "blake2b_simd",
@@ -4048,7 +4058,7 @@ dependencies = [
 [[package]]
 name = "midnight-zswap"
 version = "6.1.0-alpha.4"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.1.0-alpha.4#5ff23902cda440781ac3c8cac55c2ff69866e1b8"
+source = "git+https://github.com/blockfrost/midnight-ledger?branch=fix%2Fcargo-vendor--ledger-6.1.0-alpha.4#9a3c0218405d137f098348e2a79c4cfcfa54fe48"
 dependencies = [
  "derive-where",
  "fake",
@@ -4060,6 +4070,7 @@ dependencies = [
  "midnight-coin-structure",
  "midnight-onchain-runtime",
  "midnight-serialize",
+ "midnight-static",
  "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
