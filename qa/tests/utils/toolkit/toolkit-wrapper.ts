@@ -145,7 +145,8 @@ class ToolkitWrapper {
       const goldenCacheDir = `${this.config.targetDir}/.sync_cache-${envName}`;
 
       if (!fs.existsSync(goldenCacheDir)) {
-        throw new Error(
+        fs.mkdirSync(goldenCacheDir);
+        log.warn(
           `Golden cache directory not found at: ${goldenCacheDir}\n` +
             `Please ensure the global setup has run to warm up the cache, or run with warmupCache: true first.`,
         );
