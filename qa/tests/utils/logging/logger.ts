@@ -30,12 +30,6 @@ if (!existsSync(SESSION_PATH_FILE)) {
 }
 const SESSION_DIR = readFileSync(SESSION_PATH_FILE, 'utf8').trim();
 
-const SESSION_TS = new Date()
-  .toISOString()
-  .replace(/T/, '_')
-  .replace(/:/g, '-')
-  .replace(/\..+/, '');
-
 // Can we do this differently, lookout for a library that can help with this
 // I mean this works but it's quite horrible
 function formatTime(): string {
@@ -61,7 +55,7 @@ const prettyOpts = {
 type LogLevel = 'TRACE' | 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL';
 const LEVEL = (process.env.LOG_LEVEL ?? 'WARN').toUpperCase() as LogLevel;
 const consoleLogger = pino(
-  { level: LEVEL, timestamp: () => `,\"time\":\"${new Date().toISOString()}\"` },
+  { level: LEVEL, timestamp: () => `,"time":"${new Date().toISOString()}"` },
   pino.multistream([{ level: LEVEL, stream: pretty({ ...prettyOpts, colorize: true }) }]),
 );
 

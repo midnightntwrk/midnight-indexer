@@ -92,7 +92,7 @@ export async function waitForEventsStabilization<T>(
 ): Promise<T[]> {
   let previousCount = -1;
   const start = Date.now();
-  // eslint-disable-next-line no-constant-condition
+
   while (true) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
     const currentCount = events.length;

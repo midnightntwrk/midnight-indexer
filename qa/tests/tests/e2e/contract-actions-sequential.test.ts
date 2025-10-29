@@ -292,7 +292,7 @@ describe.sequential('contract actions', () => {
      */
     test.todo(
       'should be reported by the indexer through a transaction query by hash',
-      async (context: TestContext) => {},
+      async (_context: TestContext) => {},
       TEST_TIMEOUT,
     );
 
@@ -306,7 +306,7 @@ describe.sequential('contract actions', () => {
      */
     test.todo(
       'should be reported by the indexer through a block query by hash',
-      async (context: TestContext) => {},
+      async (_context: TestContext) => {},
       TEST_TIMEOUT,
     );
 
@@ -320,7 +320,7 @@ describe.sequential('contract actions', () => {
      */
     test.todo(
       'should be reported by the indexer through a contract action query by address',
-      async (context: TestContext) => {},
+      async (_context: TestContext) => {},
       TEST_TIMEOUT,
     );
   });

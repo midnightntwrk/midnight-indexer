@@ -21,7 +21,7 @@ beforeEach(async () => {
   log.info(`STARTED TEST: ${testName}`);
 });
 
-afterEach(async (context) => {
+afterEach(async (_context) => {
   const testName = expect.getState().currentTestName;
   log.info(`TEST COMPLETED: ${testName}\n\n`);
 });

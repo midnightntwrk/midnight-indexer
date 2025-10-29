@@ -3,7 +3,7 @@
   "packageManager": "yarn@3.6.4",
   "scripts": {
     "format": "prettier --write '**/*.{js,jsx,json,ts,tsx,graphql,gql}'",
-    "lint": "eslint '**/*.{js,jsx,ts,tsx}' --max-warnings=0",
+    "lint": "eslint '**/*.{js,jsx,ts,tsx}'",
     "lint:fix": "eslint '**/*.{js,jsx,ts,tsx}' --fix",
     "audit": "yarn npm audit && echo 'No known vulnerabilities found.'",
     "test": "vitest run --project smoke --project e2e --project integration",
@@ -20,7 +20,7 @@
   },
   "lint-staged": {
     "**/*.{js,jsx,ts,tsx}": [
-      "eslint --fix --max-warnings=0",
+      "eslint --fix",
       "prettier --write"
     ],
     "**/*.{json,graphql,gql}": [

@@ -101,7 +101,7 @@ describe('shielded transactions', () => {
      * @when we query transactions by the transaction hash
      * @then the indexer should return the expected transaction
      */
-    test('should be reported by the indexer through a transaction query by hash', async (context: TestContext) => {
+    test('should be reported by the indexer through a transaction query by hash', async (_context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['Query', 'Transaction', 'ByHash', 'ShieldedTokens'],
         testKey: 'PM-17710',
@@ -136,7 +136,7 @@ describe('shielded transactions', () => {
      */
     test.todo(
       'should be reported by the indexer through an shielded transaction event for the source address',
-      async (context: TestContext) => {
+      async (_context: TestContext) => {
         // Implement me
       },
     );
@@ -151,7 +151,7 @@ describe('shielded transactions', () => {
      */
     test.todo(
       'should be reported by the indexer through an shielded transaction event for the destination address',
-      async (context: TestContext) => {
+      async (_context: TestContext) => {
         // Implement me
       },
     );
@@ -166,7 +166,7 @@ describe('shielded transactions', () => {
      */
     test.todo(
       'should have transferred 1 token from the source to the destination address',
-      async (context: TestContext) => {
+      async (_context: TestContext) => {
         // Implement me but... can we really implement this test? We need to be able to view the transaction details in
         // the block and use the viewing key for that. Does the toolkit offer that level of support?
       },

@@ -183,7 +183,7 @@ describe('unshielded transactions', () => {
      * @when we query the indexer with a block query by hash, using the block hash reported by the toolkit
      * @then the block should contain the transaction with outputs for both addresses
      */
-    test('should be reported by the indexer through a block query by hash', async (context: TestContext) => {
+    test('should be reported by the indexer through a block query by hash', async (_context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHash', 'UnshieldedTokens'],
         testKey: 'PM-17711',
@@ -222,7 +222,7 @@ describe('unshielded transactions', () => {
      * @when we query transactions by the transaction hash
      * @then the returned transactions should include outputs for both addresses involved
      */
-    test('should be reported by the indexer through a transaction query by hash', async (context: TestContext) => {
+    test('should be reported by the indexer through a transaction query by hash', async (_context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['Query', 'Transaction', 'ByHash', 'UnshieldedTokens'],
         testKey: 'PM-17712',
@@ -266,7 +266,7 @@ describe('unshielded transactions', () => {
      * @when we submit an unshielded transaction to node
      * @then we should receive a transaction event that includes created and spent UTXOs for the source address
      */
-    test('should be reported by the indexer through an unshielded transaction event for the source address', async (context: TestContext) => {
+    test('should be reported by the indexer through an unshielded transaction event for the source address', async (_context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['Subscription', 'Transaction', 'UnshieldedTokens'],
         testKey: 'PM-17713',
@@ -312,7 +312,7 @@ describe('unshielded transactions', () => {
      * @when we submit an unshielded transaction to node
      * @then we should receive a transaction event that includes a created UTXO for the destination
      */
-    test('should be reported by the indexer through an unshielded transaction event for the destination address', async (context: TestContext) => {
+    test('should be reported by the indexer through an unshielded transaction event for the destination address', async (_context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['Subscription', 'Transaction', 'UnshieldedTokens'],
         testKey: 'PM-17714',
@@ -359,7 +359,7 @@ describe('unshielded transactions', () => {
      * @when we inspect the containing block for unshielded outputs
      * @then there should be two created outputs and one spent output reflecting the transfer of 1 STAR
      */
-    test('should have transferred 1 STAR from the source to the destination address', async (context: TestContext) => {
+    test('should have transferred 1 STAR from the source to the destination address', async (_context: TestContext) => {
       context.task!.meta.custom = {
         labels: ['UnshieldedTokens'],
         testKey: 'PM-17715',
@@ -410,7 +410,7 @@ describe('unshielded transactions', () => {
      * @then we should receive a progress update event from indexer
      * @and the progress count should be incremented by 1
      */
-    test('should be reported by the indexer through a progress update event for the source address', async (context: TestContext) => {
+    test('should be reported by the indexer through a progress update event for the source address', async (_context: TestContext) => {
       const progressUpdatesBeforeTransaction = historicalSourceEvents.filter((event) => {
         return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
       });
@@ -473,7 +473,7 @@ describe('unshielded transactions', () => {
      * @then we should receive a progress update event from indexer
      * @and the progress count should be incremented by 1
      */
-    test('should be reported by the indexer through a progress update event for the destination address', async (context: TestContext) => {
+    test('should be reported by the indexer through a progress update event for the destination address', async (_context: TestContext) => {
       const progressUpdatesBeforeTransaction = historicalDestinationEvents.filter((event) => {
         return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
       });
