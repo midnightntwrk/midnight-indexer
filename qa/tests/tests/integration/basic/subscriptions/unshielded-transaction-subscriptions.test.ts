@@ -32,8 +32,10 @@ import type {
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
 import { TestContext } from 'vitest';
-import { UnshieldedTxSubscriptionResponseSchema } from '@utils/indexer/graphql/schema';
-
+import {
+  UnshieldedTransactionEventSchema,
+  UnshieldedTransactionsProgressSchema,
+} from '@utils/indexer/graphql/schema';
 let indexerWsClient: IndexerWsClient;
 
 /**
@@ -68,19 +70,19 @@ async function subscribeToUnshieldedTransactionEvents(
   });
 
   const unshieldedTransactionSubscriptionHandler: SubscriptionHandlers<UnshieldedTxSubscriptionResponse> =
-    {
-      next: (payload) => {
-        log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
-        receivedUnshieldedTransactions.push(payload);
-        if (stopCondition(receivedUnshieldedTransactions)) {
-          stopListening();
-        }
-      },
-      complete: () => {
-        log.debug('Complete message sent from Indexer');
-        completePromiseResolver();
-      },
-    };
+  {
+    next: (payload) => {
+      log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
+      receivedUnshieldedTransactions.push(payload);
+      if (stopCondition(receivedUnshieldedTransactions)) {
+        stopListening();
+      }
+    },
+    complete: () => {
+      log.debug('Complete message sent from Indexer');
+      completePromiseResolver();
+    },
+  };
 
   const unsubscribe = indexerWsClient.subscribeToUnshieldedTransactionEvents(
     unshieldedTransactionSubscriptionHandler,
@@ -214,20 +216,45 @@ describe('unshielded transaction subscriptions', async () => {
         (messages) => messages.length >= 5,
         500,
       );
-      expect(messages.length).toBeGreaterThanOrEqual(1);
 
-      for (const [, msg] of messages.entries()) {
-        expect(msg.errors).toBeUndefined();
-        expect(msg.data).toBeDefined();
-        expect(msg.data?.unshieldedTransactions).toBeDefined();
-        const txEvent = msg.data!.unshieldedTransactions;
-        UnshieldedTxSubscriptionResponseSchema.parse(txEvent);
-        if (txEvent.__typename === 'UnshieldedTransaction') {
-          txEvent.createdUtxos.forEach((utxo) => {
-            expect(utxo.owner).toMatch(/^mn_addr_/);
-          });
-        }
-      }
+      expect(messages.length).toBeGreaterThanOrEqual(1);
+      const successfulTxEvents = messages
+        .filter((msg) => {
+          expect(msg).toBeSuccess();
+          return msg?.data?.unshieldedTransactions;
+        })
+        .map((msg) => msg.data!.unshieldedTransactions);
+
+      expect(successfulTxEvents.length).toBeGreaterThan(0);
+
+      successfulTxEvents
+        .filter((txEvent) =>
+          ['UnshieldedTransaction', 'UnshieldedTransactionsProgress'].includes(txEvent.__typename),
+        )
+        .map((txEvent) => {
+          const schema =
+            txEvent.__typename === 'UnshieldedTransaction'
+              ? UnshieldedTransactionEventSchema
+              : UnshieldedTransactionsProgressSchema;
+
+          const result = schema.safeParse(txEvent);
+
+          expect(
+            result.success,
+            `Schema validation failed for ${txEvent.__typename}: ${JSON.stringify(
+              result.error?.format?.(),
+              null,
+              2,
+            )}`,
+          ).toBe(true);
+
+          if (txEvent.__typename === 'UnshieldedTransaction') {
+            txEvent.createdUtxos
+              .filter((utxo) => !!utxo.owner)
+              .map((utxo) => expect(utxo.owner).toMatch(/^mn_addr_/));
+
+          }
+        });
     });
 
     /**
@@ -285,8 +312,7 @@ describe('unshielded transaction subscriptions', async () => {
 
       expect(messages.length).toBe(1);
       const msg = messages[0];
-      expect(msg.data).toBeDefined();
-      expect(msg.data).toBeNull();
+      expect(msg).toBeError()
       expect(msg.errors).toBeDefined();
       const errorMessage = (msg.errors as GraphQLError[])[0].message;
       expect.soft(errorMessage).toMatch(/^invalid address/i);

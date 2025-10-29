@@ -358,15 +358,13 @@ describe(`genesis transactions`, () => {
      * @when each transaction is validated against the FullTransactionSchema
      * @then all transactions should successfully pass schema validation
      */
-    test('should conform to FullTransactionSchema', async () => {
+    test('should respond with full transaction data according to the expected schema', async () => {
       expect(genesisTransactions.length).toBeGreaterThan(0);
 
       for (const tx of genesisTransactions) {
         const result = FullTransactionSchema.safeParse(tx);
 
-        if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
-
-        expect(result.success).toBe(true);
+        expect(result.success,`FulTransaction Schema validation failed: ${JSON.stringify(result.error?.format?.(), null, 2)}`,).toBe(true);
       }
     });
 
@@ -377,14 +375,13 @@ describe(`genesis transactions`, () => {
      * @when transactions with __typename = 'SystemTransaction' are validated
      * @then each SystemTransaction should match the SystemTransactionSchema
      */
-    test('should conform to SystemTransactionSchema', async () => {
+    test('should respond with system transactions according to the expected schema', async () => {
       const systemTxs = genesisTransactions.filter((tx) => tx.__typename === 'SystemTransaction');
 
       for (const tx of systemTxs) {
         const result = SystemTransactionSchema.safeParse(tx);
-        if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
-
-        expect(result.success).toBe(true);
+        expect(result.success,`SystemTransaction schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+        ).toBe(true);
       }
     });
 
@@ -395,14 +392,13 @@ describe(`genesis transactions`, () => {
      * @when transactions with __typename = 'RegularTransaction' are validated
      * @then each RegularTransaction should match the RegularTransactionSchema
      */
-    test('should conform to RegularTransactionSchema', async () => {
+    test('should respond with regular transactions according to the expected schema', async () => {
       const regularTxs = getRegularTransactions(genesisTransactions);
 
       for (const tx of regularTxs) {
         const result = RegularTransactionSchema.safeParse(tx);
-        if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
-
-        expect(result.success).toBe(true);
+        expect(result.success,`RegularTransaction schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+        ).toBe(true);
       }
     });
 
@@ -414,46 +410,36 @@ describe(`genesis transactions`, () => {
      * @when validating zswapLedgerEvents, dustLedgerEvents, and unshieldedCreatedOutputs
      * @then each nested entity should conform to its expected schema
      */
-    test('should conform to nested ledger event and unshielded output schemas', async () => {
+    test('should respond with nested ledger events and unshielded outputs according to the expected schema', async () => {
       const regularTxs = getRegularTransactions(genesisTransactions);
 
       // zswapLedgerEvents
-      regularTxs
-        .filter((tx) => tx.zswapLedgerEvents?.length)
-        .forEach((tx) => {
-          log.debug(
-            `Validating ${tx.zswapLedgerEvents!.length} zswapLedgerEvents for tx ${tx.hash}`,
-          );
+      regularTxs.filter((tx) => tx.zswapLedgerEvents?.length).forEach((tx) => {
+          log.debug(`Validating ${tx.zswapLedgerEvents!.length} zswapLedgerEvents for tx ${tx.hash}`,);
           tx.zswapLedgerEvents!.forEach((event) => {
             const result = ZswapLedgerEventSchema.safeParse(event);
-            if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
-            expect(result.success).toBe(true);
+            expect(result.success,`ZswapLedgerEvent schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(),null,2,)}`,).toBe(true);
+         
           });
         });
 
       // dustLedgerEvents
-      regularTxs
-        .filter((tx) => tx.dustLedgerEvents?.length)
-        .forEach((tx) => {
+      regularTxs.filter((tx) => tx.dustLedgerEvents?.length).forEach((tx) => {
           log.debug(`Validating ${tx.dustLedgerEvents!.length} dustLedgerEvents for tx ${tx.hash}`);
           tx.dustLedgerEvents!.forEach((event) => {
             const result = DustLedgerEventSchema.safeParse(event);
-            if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
-            expect(result.success).toBe(true);
+            expect(result.success,`DustLedgerEvent schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(),null,2,)}`,).toBe(true);
+         
           });
         });
 
       // unshieldedCreatedOutputs
-      regularTxs
-        .filter((tx) => tx.unshieldedCreatedOutputs?.length)
+      regularTxs.filter((tx) => tx.unshieldedCreatedOutputs?.length)
         .forEach((tx) => {
-          log.debug(
-            `Validating ${tx.unshieldedCreatedOutputs!.length} unshieldedCreatedOutputs for tx ${tx.hash}`,
-          );
+          log.debug(`Validating ${tx.unshieldedCreatedOutputs!.length} unshieldedCreatedOutputs for tx ${tx.hash}`,);
           tx.unshieldedCreatedOutputs!.forEach((output) => {
             const result = UnshieldedUtxoSchema.safeParse(output);
-            if (!result.success) log.debug(JSON.stringify(result.error.format(), null, 2));
-            expect(result.success).toBe(true);
+            expect(result.success,`UnshieldedUtxo schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(),null,2,)}`,).toBe(true);
           });
         });
     });

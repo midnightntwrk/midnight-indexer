@@ -48,8 +48,16 @@ export const UnshieldedUtxoSchema = z.object({
     .length(64)
     .regex(/^[a-f0-9]+$/),
   outputIndex: z.number(),
-  createdAtTransaction: z.object({ hash: Hash64 }),
-  spentAtTransaction: z.object({ hash: Hash64 }).nullable(),
+  createdAtTransaction: z.object({
+    hash: Hash64,
+    identifiers: z.array(z.string()).optional(),
+  }),
+  spentAtTransaction: z
+    .object({
+      hash: Hash64,
+      identifiers: z.array(z.string()).optional(),
+    })
+    .nullable(),
 });
 
 // Ledger event schemas
