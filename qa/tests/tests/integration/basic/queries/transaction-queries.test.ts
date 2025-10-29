@@ -77,7 +77,6 @@ function extractUtxos(transactions: Transaction[]): UnshieldedUtxo[] {
   return regularTxs.flatMap((tx) => tx.unshieldedCreatedOutputs || []);
 }
 
-
 describe('transaction queries', () => {
   describe('a transaction query by hash', () => {
     /**
@@ -364,7 +363,10 @@ describe(`genesis transactions`, () => {
       for (const tx of genesisTransactions) {
         const result = FullTransactionSchema.safeParse(tx);
 
-        expect(result.success,`FulTransaction Schema validation failed: ${JSON.stringify(result.error?.format?.(), null, 2)}`,).toBe(true);
+        expect(
+          result.success,
+          `FulTransaction Schema validation failed: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+        ).toBe(true);
       }
     });
 
@@ -380,7 +382,9 @@ describe(`genesis transactions`, () => {
 
       for (const tx of systemTxs) {
         const result = SystemTransactionSchema.safeParse(tx);
-        expect(result.success,`SystemTransaction schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+        expect(
+          result.success,
+          `SystemTransaction schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
         ).toBe(true);
       }
     });
@@ -397,7 +401,9 @@ describe(`genesis transactions`, () => {
 
       for (const tx of regularTxs) {
         const result = RegularTransactionSchema.safeParse(tx);
-        expect(result.success,`RegularTransaction schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+        expect(
+          result.success,
+          `RegularTransaction schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
         ).toBe(true);
       }
     });
@@ -414,32 +420,48 @@ describe(`genesis transactions`, () => {
       const regularTxs = getRegularTransactions(genesisTransactions);
 
       // zswapLedgerEvents
-      regularTxs.filter((tx) => tx.zswapLedgerEvents?.length).forEach((tx) => {
-          log.debug(`Validating ${tx.zswapLedgerEvents!.length} zswapLedgerEvents for tx ${tx.hash}`,);
+      regularTxs
+        .filter((tx) => tx.zswapLedgerEvents?.length)
+        .forEach((tx) => {
+          log.debug(
+            `Validating ${tx.zswapLedgerEvents!.length} zswapLedgerEvents for tx ${tx.hash}`,
+          );
           tx.zswapLedgerEvents!.forEach((event) => {
             const result = ZswapLedgerEventSchema.safeParse(event);
-            expect(result.success,`ZswapLedgerEvent schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(),null,2,)}`,).toBe(true);
-         
+            expect(
+              result.success,
+              `ZswapLedgerEvent schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+            ).toBe(true);
           });
         });
 
       // dustLedgerEvents
-      regularTxs.filter((tx) => tx.dustLedgerEvents?.length).forEach((tx) => {
+      regularTxs
+        .filter((tx) => tx.dustLedgerEvents?.length)
+        .forEach((tx) => {
           log.debug(`Validating ${tx.dustLedgerEvents!.length} dustLedgerEvents for tx ${tx.hash}`);
           tx.dustLedgerEvents!.forEach((event) => {
             const result = DustLedgerEventSchema.safeParse(event);
-            expect(result.success,`DustLedgerEvent schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(),null,2,)}`,).toBe(true);
-         
+            expect(
+              result.success,
+              `DustLedgerEvent schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+            ).toBe(true);
           });
         });
 
       // unshieldedCreatedOutputs
-      regularTxs.filter((tx) => tx.unshieldedCreatedOutputs?.length)
+      regularTxs
+        .filter((tx) => tx.unshieldedCreatedOutputs?.length)
         .forEach((tx) => {
-          log.debug(`Validating ${tx.unshieldedCreatedOutputs!.length} unshieldedCreatedOutputs for tx ${tx.hash}`,);
+          log.debug(
+            `Validating ${tx.unshieldedCreatedOutputs!.length} unshieldedCreatedOutputs for tx ${tx.hash}`,
+          );
           tx.unshieldedCreatedOutputs!.forEach((output) => {
             const result = UnshieldedUtxoSchema.safeParse(output);
-            expect(result.success,`UnshieldedUtxo schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(),null,2,)}`,).toBe(true);
+            expect(
+              result.success,
+              `UnshieldedUtxo schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+            ).toBe(true);
           });
         });
     });

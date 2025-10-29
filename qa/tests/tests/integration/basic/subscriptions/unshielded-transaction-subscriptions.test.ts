@@ -70,19 +70,19 @@ async function subscribeToUnshieldedTransactionEvents(
   });
 
   const unshieldedTransactionSubscriptionHandler: SubscriptionHandlers<UnshieldedTxSubscriptionResponse> =
-  {
-    next: (payload) => {
-      log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
-      receivedUnshieldedTransactions.push(payload);
-      if (stopCondition(receivedUnshieldedTransactions)) {
-        stopListening();
-      }
-    },
-    complete: () => {
-      log.debug('Complete message sent from Indexer');
-      completePromiseResolver();
-    },
-  };
+    {
+      next: (payload) => {
+        log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
+        receivedUnshieldedTransactions.push(payload);
+        if (stopCondition(receivedUnshieldedTransactions)) {
+          stopListening();
+        }
+      },
+      complete: () => {
+        log.debug('Complete message sent from Indexer');
+        completePromiseResolver();
+      },
+    };
 
   const unsubscribe = indexerWsClient.subscribeToUnshieldedTransactionEvents(
     unshieldedTransactionSubscriptionHandler,
@@ -252,7 +252,6 @@ describe('unshielded transaction subscriptions', async () => {
             txEvent.createdUtxos
               .filter((utxo) => !!utxo.owner)
               .map((utxo) => expect(utxo.owner).toMatch(/^mn_addr_/));
-
           }
         });
     });
@@ -312,7 +311,7 @@ describe('unshielded transaction subscriptions', async () => {
 
       expect(messages.length).toBe(1);
       const msg = messages[0];
-      expect(msg).toBeError()
+      expect(msg).toBeError();
       expect(msg.errors).toBeDefined();
       const errorMessage = (msg.errors as GraphQLError[])[0].message;
       expect.soft(errorMessage).toMatch(/^invalid address/i);
