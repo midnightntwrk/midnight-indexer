@@ -30,13 +30,16 @@ if [ -d "target/data/postgres" ] || [ -d "target/data/nats" ]; then
     echo "Cleaning postgres and nats data directories..."
     docker run --rm \
         -v "$(pwd):/project" \
-        alpine sh -c "rm -rf /project/target/data /project/target/postgres /project/target/nats"
+        alpine sh -c "rm -rf /project/target"
     echo "Data directories cleaned"
 fi
 
-docker run --rm \
-    -v "$(pwd):/project" \
-    alpine sh -c "mkdir -p /project/target/data /project/target/postgres /project/target/nats"
+mkdir -p target/data
+mkdir -p target/data/postgres
+mkdir -p target/data/nats
+mkdir -p target/debug
+
+tree target/data
 
 export NODE_TAG=${NODE_TAG:-`cat NODE_VERSION`}
 export NODE_TOOLKIT_TAG=${NODE_TOOLKIT_TAG:-`echo $NODE_TAG`}
@@ -44,23 +47,16 @@ export NODE_TOOLKIT_TAG=${NODE_TOOLKIT_TAG:-`echo $NODE_TAG`}
 # Use the derived Docker Compose project name to create volume name
 DOCKER_VOLUME_NAME="${DOCKER_PROJECT_NAME}_node_data"
 
-# Create the named volume and populate it with fresh node data BEFORE starting containers
-echo "Creating and populating node data volume..."
+# Create the named volume (empty) for Docker Compose to use BEFORE starting containers
+echo "Creating empty node data volume..."
 echo "Using Docker Compose project name: $DOCKER_PROJECT_NAME"
 echo "Volume name: $DOCKER_VOLUME_NAME"
 docker volume rm $DOCKER_VOLUME_NAME 2>/dev/null || true
 docker volume create $DOCKER_VOLUME_NAME
 
-# Use a temporary container to copy data into the volume
-echo "Copying fresh node data from .node/$NODE_TAG/ into volume..."
-docker run --rm \
-  -v "$(pwd)/.node/$NODE_TAG:/source:ro" \
-  -v $DOCKER_VOLUME_NAME:/node \
-  alpine sh -c "cp -r /source/. /node/ && chmod -R 777 /node/chain"
-
-echo "Node data volume populated successfully"
+echo "Empty node data volume created successfully"
 echo "NOTE: Any docker-compose warning about 'volume already exists' is harmless and expected"
-echo "      We explicitly manage the node volume externally to inject fresh test data"
+echo "      We explicitly manage the node volume externally to ensure it exists before docker compose"
 
 # To workout the default indexer tag, find the latest 8-digit sha1 of the commit where
 # NODE_VERSION file was updated with the $NODE_TAG value

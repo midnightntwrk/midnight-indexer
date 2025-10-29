@@ -30,6 +30,7 @@ Integration tests should be executed:
 
 ```bash
 # Run only integration tests
+bash qa/scripts/startup-localenv-with-data.sh
 TARGET_ENV=undeployed yarn test:integration
 ```
 
