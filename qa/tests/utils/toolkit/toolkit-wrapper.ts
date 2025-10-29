@@ -145,8 +145,7 @@ class ToolkitWrapper {
       const goldenCacheDir = `${this.config.targetDir}/.sync_cache-${envName}`;
 
       if (!fs.existsSync(goldenCacheDir)) {
-        fs.mkdirSync(goldenCacheDir);
-        log.warn(
+        throw new Error(
           `Golden cache directory not found at: ${goldenCacheDir}\n` +
             `Please ensure the global setup has run to warm up the cache, or run with warmupCache: true first.`,
         );
@@ -407,29 +406,38 @@ class ToolkitWrapper {
    * contract call, converts it to a transaction, and submits it to the network.
    *
    * @param callKey - The contract function to call (e.g., 'increment'). Defaults to 'increment'.
+   * @param deploymentResult - The deployment result object from deployContract. The contract-address-untagged will be extracted.
    * @param rngSeed - The random number generator seed for the transaction. Defaults to a fixed seed.
-   * @param dataDir - Directory where test data (local.json) is located. Defaults to 'data/static/{envName}'.
    * @returns A promise that resolves to the transaction result containing the transaction hash,
    *          optional block hash, and submission status.
    * @throws Error if the container is not started or if any step in the contract call process fails.
    */
   async callContract(
     callKey: string = 'increment',
+    deploymentResult: DeployContractResult,
     rngSeed: string = '0000000000000000000000000000000000000000000000000000000000000037',
-    dataDir?: string,
   ): Promise<ToolkitTransactionResult> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
 
-    const dataDirPath = dataDir ?? `data/static/${env.getEnvName()}`;
-    const localDataPath = join(dataDirPath, 'local.json');
+    // Validate deployment result
+    if (!deploymentResult) {
+      log.error('No deployment result provided. Cannot call contract without a valid deployment.');
+      throw new Error(
+        'Deployment result is required but was not provided. Ensure deployContract() succeeded before calling callContract().',
+      );
+    }
 
-    const localData = JSON.parse(fs.readFileSync(localDataPath, 'utf8'));
-    const contractAddressUntagged = localData['contract-address-untagged'];
+    const contractAddressUntagged = deploymentResult['contract-address-untagged'];
 
     if (!contractAddressUntagged) {
-      throw new Error('Missing required contract data in local.json');
+      log.error('Deployment result is missing contract address. Deployment may have failed.');
+      log.debug(`Deployment result received: ${JSON.stringify(deploymentResult, null, 2)}`);
+      throw new Error(
+        'Contract address is missing in deployment result. The contract deployment may have failed. ' +
+          'Please check deployment logs and ensure deployContract() completed successfully.',
+      );
     }
 
     const txFile = `/out/${callKey}_tx.mn`;
@@ -479,26 +487,15 @@ class ToolkitWrapper {
   /**
    * Deploy a smart contract to the network.
    * This method generates a deployment intent, converts it to a transaction, submits it to the network,
-   * and retrieves both tagged and untagged contract addresses. Optionally writes deployment data to a file.
+   * and retrieves both tagged and untagged contract addresses.
    *
-   * @param opts - Optional configuration for the deployment
-   * @param opts.contractConfigPath - Path to the contract configuration file. Defaults to '/toolkit-js/test/contract/contract.config.ts'.
-   * @param opts.compiledContractDir - Path to the compiled contract directory. Defaults to '/toolkit-js/test/contract/managed/counter'.
-   * @param opts.writeTestData - Whether to write deployment data (addresses, hashes) to a local.json file. Defaults to false.
-   * @param opts.dataDir - Directory where test data should be written if writeTestData is true. Defaults to 'data/static/{envName}'.
    * @returns A promise that resolves to the deployment result containing untagged address, tagged address, and coin public key.
    * @throws Error if the container is not started or if any step in the deployment process fails.
    */
-  async deployContract(opts?: {
-    writeTestData?: boolean;
-    dataDir?: string;
-  }): Promise<DeployContractResult> {
+  async deployContract(): Promise<DeployContractResult> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
-
-    const writeTestData = opts?.writeTestData ?? false;
-    const dataDir = opts?.dataDir ?? `data/static/${env.getEnvName()}`;
 
     const outDir = this.config.targetDir!;
 
@@ -568,11 +565,6 @@ class ToolkitWrapper {
     };
 
     log.debug(`Contract address info:\n${JSON.stringify(deploymentResult, null, 2)}`);
-
-    if (writeTestData) {
-      const localJsonPath = join(dataDir, 'local.json');
-      fs.writeFileSync(localJsonPath, JSON.stringify(deploymentResult, null, 2) + '\n', 'utf-8');
-    }
 
     return deploymentResult;
   }

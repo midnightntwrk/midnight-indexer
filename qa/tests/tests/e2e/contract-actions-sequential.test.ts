@@ -17,7 +17,6 @@ import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import { env } from '../../environment/model';
 import log from '@utils/logging/logger';
-import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
 import {
@@ -49,10 +48,7 @@ describe.sequential('contract actions', () => {
 
   describe('a transaction to deploy a smart contract', () => {
     beforeAll(async () => {
-      contractDeployResult = await toolkit.deployContract({
-        writeTestData: true,
-        dataDir: `data/static/${env.getEnvName()}`,
-      });
+      contractDeployResult = await toolkit.deployContract();
     }, CONTRACT_ACTION_TIMEOUT);
 
     /**
@@ -70,8 +66,7 @@ describe.sequential('contract actions', () => {
           labels: ['Query', 'Transaction', 'ByHash', 'ContractDeploy'],
         };
 
-        // The expected transaction might take a bit more to show up by indexer, so we retry a few times
-        const deployTxHash = dataProvider.getLocalDeployTxHash();
+        const deployTxHash = contractDeployResult['deploy-tx-hash'];
         const transactionResponse = await getTransactionByHashWithRetry(deployTxHash);
 
         // Verify the transaction appears in the response
@@ -105,8 +100,8 @@ describe.sequential('contract actions', () => {
           labels: ['Query', 'Block', 'ByHash', 'ContractDeploy'],
         };
 
-        const deployTxHash = dataProvider.getLocalDeployTxHash();
-        const deployBlockHash = dataProvider.getLocalDeployBlockHash();
+        const deployTxHash = contractDeployResult['deploy-tx-hash'];
+        const deployBlockHash = contractDeployResult['deploy-block-hash'];
         const blockResponse = await getBlockByHashWithRetry(deployBlockHash);
 
         // Verify the block appears in the response
@@ -173,11 +168,7 @@ describe.sequential('contract actions', () => {
     let contractCallTransactionHash: string;
 
     beforeAll(async () => {
-      contractCallResult = await toolkit.callContract(
-        'store',
-        undefined,
-        `data/static/${env.getEnvName()}`,
-      );
+      contractCallResult = await toolkit.callContract('store', contractDeployResult);
 
       expect(contractCallResult.status).toBe('confirmed');
       log.debug(`Raw output: ${JSON.stringify(contractCallResult.rawOutput, null, 2)}`);
