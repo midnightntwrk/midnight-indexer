@@ -2,16 +2,19 @@
   // ESLint configuration
   "eslint.enable": true,
   "eslint.validate": ["javascript", "javascriptreact", "typescript", "typescriptreact"],
-  "eslint.workingDirectories": [
-    {
-      "mode": "auto"
-    }
-  ],
+  "eslint.workingDirectories": ["${workspaceFolder}/qa/tests"],
+
   // Use the flat config format (eslint.config.mjs)
-  "eslint.experimental.useFlatConfig": true,
+  "eslint.useFlatConfig": true,
+
+  // Point to the local ESLint installation
+  "eslint.nodePath": "${workspaceFolder}/qa/tests/node_modules",
 
   // Show ESLint status in the status bar
   "eslint.alwaysShowStatus": true,
+
+  // Lint on type, save, and focus change
+  "eslint.run": "onType",
 
   // Auto-fix on save (optional - remove if you don't want this)
   "editor.codeActionsOnSave": {
