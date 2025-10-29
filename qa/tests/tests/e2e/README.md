@@ -5,7 +5,7 @@
 End-to-end tests provide comprehensive validation of the Midnight Indexer by actively interacting with the blockchain through the Midnight Node Toolkit. These tests create real blockchain transactions and contract interactions, then verify that the indexer correctly captures and reports these events through its GraphQL API.
 
 ## Be aware of
-These tests are slower than the other tests as submitting transactions to a Midnight node can take time. Also these test use the Midnight Node Toolkit, which needs the full view of the blockchain to be able to operate with transactions. These test will be slow the first time because the Toolkit needs to pull all the blocks from the chain and this can take a lot of time and depends on the number of blocks. Hoewever, the good news is that after the first pull, everything should be cached and future execution should take much less time.
+These tests are slower than the other tests as submitting transactions to a Midnight node can take time. Also these test use the Midnight Node Toolkit, which needs the full view of the blockchain to be able to operate with transactions. These test will be slow the first time because the Toolkit needs to pull all the blocks from the chain and this can take a lot of time and depends on the number of blocks. However, the good news is that after the first pull, everything should be cached and future execution should take much less time.
 
 ## Test Scope
 
@@ -41,6 +41,7 @@ E2E tests should be executed:
 
 ```bash
 # Run only e2e tests (includes cache warmup)
+bash qa/scripts/startup-localenv-from-genesis.sh
 TARGET_ENV=undeployed yarn test:e2e
 ```
 

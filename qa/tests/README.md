@@ -23,7 +23,7 @@ This project provides a structured environment for running  smoke and integratio
 - **Node.js**: v22 or higher
 - **Yarn**: v3.6.x (already included in .yarn/releases)
 - **Midnight Indexer**: 3.x and above
-- **Docker**: latest stable (required for local/udeployed runs)
+- **Docker**: latest stable (required for local/undeployed runs)
 
 ---
 
@@ -70,14 +70,60 @@ Each project can be run independently or together. E2E tests include a cache war
 
 ### Running Test Projects
 
-```bash
-# Run all test projects together
-TARGET_ENV=undeployed yarn test
+## Integration tests on undeployed/local environment (with pre-existing data)
 
-# Run individual projects
-TARGET_ENV=undeployed yarn test:smoke        # Smoke tests only
-TARGET_ENV=undeployed yarn test:integration  # Integration tests only
-TARGET_ENV=undeployed yarn test:e2e          # E2E tests only (with cache warmup)
+Running the tests on your local/undeployed environment has some prerequisites, depending on the type of tests you want to run. The integration tests require test data to be available for the tests to run, to do so you can use one of the scripts available in the QA folder that will help spin up a local environment with a Midnight chain with some pre-existing data:
+
+```bash
+# Startup a local environment with test data (transactions + contract actions)
+bash qa/scripts/startup-localenv-with-data.sh
+TARGET_ENV=undeployed yarn test:integration
+```
+
+Note: the script will find the best/latest indexer + node versions to use, but
+you can override that by explicitly setting the following env variables before running
+the script
+
+```bash
+# Startup a local environment with test data (transactions + contract actions)
+# with desired node + node toolkit + indexer versions
+export NODE_TAG=0.18.0-rc.1
+export NODE_TOOLKIT=0.18.0-rc.1
+export INDEXER_TAG=3.0.0-alpha.6
+bash qa/scripts/startup-localenv-with-data.sh
+TARGET_ENV=undeployed yarn test:integration
+```
+
+## E2E tests on undeployed/local environment (from genesis without pre-existing data)
+
+The e2e tests don't require any pre-existing data to be executed, in fact they perform some
+actions themselves so that they can assert on the outcome of those actions.
+
+```bash
+# Startup a local environment from genesis block, without test data
+bash qa/scripts/startup-localenv-from-genesis.sh
+TARGET_ENV=undeployed yarn test:e2e
+```
+
+The same applies for e2e tests in case you want to enforce specific component versions, just
+explicitly set them with env vars like in the example below.
+
+```bash
+# Startup a local environment from genesis block, without test data
+# with desired node + node toolkit + indexer versions
+export NODE_TAG=0.18.0-rc.1
+export NODE_TOOLKIT=0.18.0-rc.1
+export INDEXER_TAG=3.0.0-alpha.6
+bash qa/scripts/startup-localenv-from-genesis.sh
+TARGET_ENV=undeployed yarn test:e2e
+```
+
+## Smoke tests on undeployed/local environment
+
+Smoke tests don't require any pre-existing data so just use the following
+```bash
+bash qa/scripts/startup-localenv-from-genesis.sh
+TARGET_ENV=undeployed yarn test:smoke
 ```
 
 See the individual project README files for detailed information about each test suite.
@@ -121,7 +167,7 @@ source .envrc
 ### 4) Set versions
 
 By default, the node and indexer version to use will be determined based on the value in `NODE_VERSION` file and the SHA-1 of the commit where that file was updated (which indicates when a working indexer/node pair has been identified)
-Alternavely, you can override indexer and node image, and pin them to specific tags:
+Alternatively, you can override indexer and node image, and pin them to specific tags:
 
 ```bash
 export NODE_TAG=0.17.0-rc.4

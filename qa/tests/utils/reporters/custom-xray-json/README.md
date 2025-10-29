@@ -99,6 +99,6 @@ As we already said, if you don't provide a test key, XRay will try to match an e
 
 - __summary__: This is the title of the XRay test case that appears on top of the Jira issue. This is created using [test suite name], [test case name] format (comma-separated) 
 
-- __labels__: When providing the labels remember that they will be added to the exsising ones. If labels already exist, the ones you are providing will be added. Because of this behavirou, the labels you provide might not be the ones that you actually see, just because of what we said. 
+- __labels__: When providing the labels remember that they will be added to the existing ones. If labels already exist, the ones you are providing will be added. Because of this behaviour, the labels you provide might not be the ones that you actually see, just because of what we said. 
 
 - __definition__: The definition field of a test case will be set based the [test suite name].[test case name]. So basically test suite and test case names joined together by a dot

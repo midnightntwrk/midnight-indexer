@@ -322,47 +322,6 @@ class TestDataProvider {
   }
 
   /**
-   * Lazily loads local test data from file.
-   * This data is read each time as it's generated at runtime.
-   * @returns The parsed local test data object.
-   */
-  private loadLocalData() {
-    const envName = env.getEnvName();
-    const baseDir = `data/static/${envName}`;
-    return importJsoncData(`${baseDir}/local.json`);
-  }
-
-  /**
-   * Gets the deployment transaction hash from local test data.
-   * @returns The deployment transaction hash as a string.
-   * @throws Error if the deploy-tx-hash is not found in local data.
-   */
-  getLocalDeployTxHash() {
-    const local = this.loadLocalData();
-    if (!local.hasOwnProperty('deploy-tx-hash') || local['deploy-tx-hash'] === undefined) {
-      throw new Error(
-        `Test data provider is missing the deploy-tx-hash data for ${env.getEnvName()} environment`,
-      );
-    }
-    return local['deploy-tx-hash'];
-  }
-
-  /**
-   * Gets the deployment block hash from local test data.
-   * @returns The deployment block hash as a string.
-   * @throws Error if the deploy-block-hash is not found in local data.
-   */
-  getLocalDeployBlockHash() {
-    const local = this.loadLocalData();
-    if (!local.hasOwnProperty('deploy-block-hash') || local['deploy-block-hash'] === undefined) {
-      throw new Error(
-        `Test data provider is missing the deploy-block-hash data for ${env.getEnvName()} environment`,
-      );
-    }
-    return local['deploy-block-hash'];
-  }
-
-  /**
    * Retrieves a Cardano stake key from the test data by property name.
    * @param property - The property name of the Cardano stake key to retrieve.
    * @returns The Cardano stake key as a string.
