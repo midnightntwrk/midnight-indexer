@@ -1,0 +1,24 @@
+{
+  // ESLint configuration
+  "eslint.enable": true,
+  "eslint.validate": ["javascript", "javascriptreact", "typescript", "typescriptreact"],
+  "eslint.workingDirectories": [
+    {
+      "mode": "auto"
+    }
+  ],
+  // Use the flat config format (eslint.config.mjs)
+  "eslint.experimental.useFlatConfig": true,
+
+  // Show ESLint status in the status bar
+  "eslint.alwaysShowStatus": true,
+
+  // Auto-fix on save (optional - remove if you don't want this)
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+
+  // TypeScript configuration
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true
+}
