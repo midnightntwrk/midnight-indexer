@@ -188,9 +188,6 @@ describe('block queries', () => {
 
       expect(blockByHashResponse).toBeSuccess();
       expect(blockByHashResponse.data?.block).toBeNull();
-      (blockByHashResponse as any).errors?.length
-        ? log.debug(`Error: ${(blockByHashResponse as any).errors[0].message}`)
-        : log.debug('No GraphQL errors returned');
     });
 
     /**
@@ -234,7 +231,7 @@ describe('block queries', () => {
 
       // Everything is already checked in getLatestBlockByHeight function
       // If the promise resolves, we know that the block exists and the test passes
-      const blockByHeight = await getLatestBlockByHeight();
+      await getLatestBlockByHeight();
     });
 
     /**

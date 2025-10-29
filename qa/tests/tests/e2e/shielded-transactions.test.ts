@@ -134,7 +134,7 @@ describe('shielded transactions', () => {
      */
     test.todo(
       'should be reported by the indexer through an shielded transaction event for the source address',
-      async (_context: TestContext) => {
+      async () => {
         // Implement me
       },
     );
@@ -149,7 +149,7 @@ describe('shielded transactions', () => {
      */
     test.todo(
       'should be reported by the indexer through an shielded transaction event for the destination address',
-      async (_context: TestContext) => {
+      async () => {
         // Implement me
       },
     );
@@ -164,7 +164,7 @@ describe('shielded transactions', () => {
      */
     test.todo(
       'should have transferred 1 token from the source to the destination address',
-      async (_context: TestContext) => {
+      async () => {
         // Implement me but... can we really implement this test? We need to be able to view the transaction details in
         // the block and use the viewing key for that. Does the toolkit offer that level of support?
       },

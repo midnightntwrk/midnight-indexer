@@ -68,7 +68,7 @@ export interface UnshieldedUtxo {
 
 export type TransactionResult = {
   status: TransactionResultStatus;
-  segments: Segment;
+  segments?: Segment[];
 };
 
 export enum TransactionResultStatus {
@@ -95,9 +95,6 @@ export interface Transaction {
   protocolVersion?: number;
   raw?: string;
   block?: Block;
-  transactionResult?: TransactionResult;
-  fees?: TransactionFees;
-  merkleTreeRoot?: string;
   contractActions?: ContractAction[];
   unshieldedCreatedOutputs?: UnshieldedUtxo[];
   unshieldedSpentOutputs?: UnshieldedUtxo[];
@@ -107,8 +104,8 @@ export interface Transaction {
 
 // RegularTransaction interface (includes additional fields)
 export interface RegularTransaction extends Transaction {
-  merkleTreeRoot?: string;
   identifiers?: string[];
+  merkleTreeRoot?: string;
   startIndex?: number;
   endIndex?: number;
   fees?: TransactionFees;
@@ -138,11 +135,17 @@ export interface MerkleTreeCollapsedUpdate {
   protocolVersion: number;
 }
 
+export interface CollapsedMerkleTree {
+  startIndex: number;
+  endIndex: number;
+  update: string;
+  protocolVersion: number;
+}
+
 export interface RelevantTransaction {
   __typename: 'RelevantTransaction';
   transaction: RegularTransaction;
-  start: number;
-  end: number;
+  collapsedMerkleTree?: CollapsedMerkleTree;
 }
 
 export interface ShieldedTransactionsProgress {

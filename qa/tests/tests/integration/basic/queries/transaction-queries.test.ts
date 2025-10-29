@@ -16,6 +16,7 @@
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
+import { GraphQLError } from 'graphql/error/GraphQLError';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import type {
   BlockResponse,
@@ -23,6 +24,7 @@ import type {
   Transaction,
   TransactionOffset,
   TransactionResponse,
+  UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
 import {
   FullTransactionSchema,
@@ -153,11 +155,11 @@ describe('transaction queries', () => {
       const response = await indexerHttpClient.getTransactionByOffset(offset);
 
       expect.soft(response).toBeError();
-      const errorMessages = response.errors?.map((e: any) => e.message) ?? [];
+      const errorMessages = response.errors?.map((e: GraphQLError) => e.message) ?? [];
       expect
         .soft(errorMessages[0])
         .toContain(
-          'Invalid value for argument \"offset\", Oneof input objects requires have exactly one field',
+          'Invalid value for argument "offset", Oneof input objects requires have exactly one field',
         );
     });
   });
@@ -267,7 +269,7 @@ describe('transaction queries', () => {
       let response: TransactionResponse = await indexerHttpClient.getTransactionByOffset(offset);
 
       expect(response).toBeError();
-      const errorMessages = response.errors?.map((e: any) => e.message) ?? [];
+      const errorMessages = response.errors?.map((e: GraphQLError) => e.message) ?? [];
       expect
         .soft(errorMessages[0])
         .toContain(

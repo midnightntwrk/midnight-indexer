@@ -55,7 +55,7 @@ describe('contract queries', () => {
     test('should return the most recent action for a contract with multiple actions', async (ctx: TestContext) => {
       let existingContractAddress: string;
       try {
-        existingContractAddress = dataProvider.getKnownContractAddress();
+        existingContractAddress = dataProvider.getKnownContractAddress() as string;
       } catch (error) {
         log.warn(error);
         ctx.skip?.(true, (error as Error).message);
@@ -124,7 +124,7 @@ describe('contract queries', () => {
       let existingContractAddress: string;
       let contractDeployBlockHash: string;
       try {
-        existingContractAddress = dataProvider.getKnownContractAddress();
+        existingContractAddress = dataProvider.getKnownContractAddress() as string;
         contractDeployBlockHash = await dataProvider.getContractDeployBlockHash();
       } catch (error) {
         log.warn(error);
@@ -150,7 +150,7 @@ describe('contract queries', () => {
       let existingContractAddress: string;
       let contractUpdateBlockHash: string;
       try {
-        existingContractAddress = dataProvider.getKnownContractAddress();
+        existingContractAddress = dataProvider.getKnownContractAddress() as string;
         contractUpdateBlockHash = await dataProvider.getContractUpdateBlockHash();
       } catch (error) {
         log.warn(error);
@@ -173,8 +173,8 @@ describe('contract queries', () => {
      * @when we send a contract query using that address
      * @then Indexer should respond with successful response and contractAction that conforms to the correct schema
      */
-    test('should respond with a contract action according to the expected schema', async (_context: TestContext) => {
-      const contractAddress = dataProvider.getKnownContractAddress();
+    test('should respond with a contract action according to the expected schema', async () => {
+      const contractAddress = dataProvider.getKnownContractAddress() as string;
       const response = await indexerHttpClient.getContractAction(contractAddress);
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).toBeDefined();
@@ -223,7 +223,7 @@ describe('contract queries', () => {
       let existingContractAddress: string;
       let contractDeployHeight: number;
       try {
-        existingContractAddress = dataProvider.getKnownContractAddress();
+        existingContractAddress = dataProvider.getKnownContractAddress() as string;
         contractDeployHeight = await dataProvider.getContractDeployBlockHeight();
       } catch (error) {
         log.warn(error);
@@ -249,7 +249,7 @@ describe('contract queries', () => {
       let existingContractAddress: string;
       let contractUpdateHeight: number;
       try {
-        existingContractAddress = dataProvider.getKnownContractAddress();
+        existingContractAddress = dataProvider.getKnownContractAddress() as string;
         contractUpdateHeight = await dataProvider.getContractUpdateBlockHeight();
       } catch (error) {
         log.warn(error);
@@ -277,7 +277,7 @@ describe('contract queries', () => {
       let contractCallHeight: number;
 
       try {
-        existingContractAddress = dataProvider.getKnownContractAddress();
+        existingContractAddress = dataProvider.getKnownContractAddress() as string;
         contractDeployHeight = await dataProvider.getContractDeployBlockHeight();
         contractCallHeight = await dataProvider.getContractCallBlockHeight();
       } catch (error) {
@@ -386,14 +386,7 @@ describe('contract queries', () => {
      * @when we send a contract query using that address and hash
      * @then Indexer should respond with an error
      */
-    test('should return error when contract with valid address and invalid hash', async (ctx: TestContext) => {
-      let knownBlockHash: string;
-      try {
-        knownBlockHash = await dataProvider.getKnownBlockHash();
-      } catch (error) {
-        log.warn(error);
-        ctx.skip?.(true, (error as Error).message);
-      }
+    test('should return error when contract with valid address and invalid hash', async () => {
       const malformedHashes = dataProvider.getFabricatedMalformedHashes();
       const response = await indexerHttpClient.getContractAction(validAddress, {
         blockOffset: { hash: malformedHashes[0] },
@@ -536,7 +529,7 @@ describe('contract queries', () => {
       const genesisBlockHash = (await indexerHttpClient.getBlockByOffset({ height: 0 })).data?.block
         .hash;
       try {
-        existingContractAddress = dataProvider.getKnownContractAddress();
+        existingContractAddress = dataProvider.getKnownContractAddress() as string;
       } catch (error) {
         log.warn(error);
         ctx.skip?.(true, (error as Error).message);

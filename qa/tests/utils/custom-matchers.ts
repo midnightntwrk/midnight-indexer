@@ -17,7 +17,7 @@ import { expect } from 'vitest';
 import { GraphQLResponse } from './indexer/indexer-types';
 
 declare module 'vitest' {
-  interface Assertion<T> {
+  interface Assertion {
     toBeSuccess(): void;
     toBeError(): void;
   }
@@ -29,19 +29,19 @@ expect.extend({
 
     if (pass) {
       return {
-        message: () => `expected response not to contain valid GraphQL data`,
+        message: () => `expected response not to contain successful response with GraphQL data`,
         pass: true,
       };
     } else {
       return {
         message: () =>
-          `expected response to contain valid GraphQL data, but got ${JSON.stringify(received, null, 2)}`,
+          `expected response successful response with GraphQL data, but got ${JSON.stringify(received, null, 2)}`,
         pass: false,
       };
     }
   },
 
-  toBeError(received: GraphQLResponse<any>) {
+  toBeError(received: GraphQLResponse<unknown>) {
     const pass =
       received.errors != null &&
       received.errors.length === 1 &&

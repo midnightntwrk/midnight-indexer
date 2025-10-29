@@ -16,24 +16,20 @@
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
-import { IndexerHttpClient } from '@utils/indexer/http-client';
 import {
   IndexerWsClient,
   SubscriptionHandlers,
   ContractActionSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
-import type { TestContext } from 'vitest';
 
 // ContractActionSubscriptionResponse is now imported from websocket-client
 
 describe('contract action subscriptions', () => {
   let indexerWsClient: IndexerWsClient;
-  let indexerHttpClient: IndexerHttpClient;
   let eventCoordinator: EventCoordinator;
 
   beforeEach(async () => {
-    indexerHttpClient = new IndexerHttpClient();
     indexerWsClient = new IndexerWsClient();
     eventCoordinator = new EventCoordinator();
     await indexerWsClient.connectionInit();

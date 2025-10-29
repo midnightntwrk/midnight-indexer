@@ -17,12 +17,27 @@ import fs from 'fs';
 import { parse } from 'jsonc-parser';
 import { env } from '../environment/model';
 
+type JsonValue = string | number | boolean | null | JsonObject | JsonArray;
+type JsonObject = { [key: string]: JsonValue };
+type JsonArray = JsonValue[];
+
+export interface ContractActionInfo {
+  'action-type': string;
+  'block-height': number;
+  'block-hash': string;
+}
+
+export interface ContractInfo {
+  'contract-address': string;
+  'contract-actions': ContractActionInfo[];
+}
+
 /**
  * Imports and parses JSONC data from a file.
  * @param filePath - The path to the JSONC file.
  * @returns The parsed JSON data.
  */
-function importJsoncData(filePath: string): any {
+function importJsoncData(filePath: string): JsonValue {
   const fileContent = fs.readFileSync(filePath, 'utf-8');
   return parse(fileContent);
 }
@@ -32,13 +47,11 @@ function importJsoncData(filePath: string): any {
  * The data is loaded from environment-specific JSON files during initialization.
  */
 class TestDataProvider {
-  private contracts: any[];
-  private blocks: Record<string, string>;
+  private contracts: ContractInfo[];
   private cardanoStakeKeys: Record<string, string>;
   private unshieldedAddresses: Record<string, string>;
 
   constructor() {
-    this.blocks = {};
     this.contracts = [];
     this.cardanoStakeKeys = {};
     this.unshieldedAddresses = {};
@@ -52,10 +65,17 @@ class TestDataProvider {
     const envName = env.getEnvName();
     const baseDir = `data/static/${envName}`;
 
-    this.blocks = importJsoncData(`${baseDir}/blocks.jsonc`);
-    this.contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`);
-    this.unshieldedAddresses = importJsoncData(`${baseDir}/unshielded-addresses.json`);
-    this.cardanoStakeKeys = importJsoncData(`${baseDir}/cardano-stake-keys.jsonc`);
+    this.contracts = importJsoncData(
+      `${baseDir}/contract-actions.jsonc`,
+    ) as unknown as ContractInfo[];
+    this.unshieldedAddresses = importJsoncData(`${baseDir}/unshielded-addresses.json`) as Record<
+      string,
+      string
+    >;
+    this.cardanoStakeKeys = importJsoncData(`${baseDir}/cardano-stake-keys.jsonc`) as Record<
+      string,
+      string
+    >;
 
     return this;
   }
@@ -106,17 +126,13 @@ class TestDataProvider {
    * @param actionType - The type of contract action to find (e.g., 'ContractDeploy', 'ContractCall').
    * @returns The contract action object if found, null otherwise.
    */
-  private findContractAction(actionType: string): any {
+  private findContractAction(actionType: string): ContractActionInfo | null {
     // Contracts is an array of contract objects with a contract-actions array
     // NOTE: it could be empty if there are no contracts with all the actions types
-    for (const contract of this.contracts as any[]) {
-      if (contract['contract-actions']) {
-        const action = contract['contract-actions'].find(
-          (a: any) => a['action-type'] === actionType,
-        );
-        if (action) {
-          return action;
-        }
+    for (const contract of this.contracts) {
+      const action = contract['contract-actions'].find((a) => a['action-type'] === actionType);
+      if (action) {
+        return action;
       }
     }
     return null;
@@ -149,7 +165,7 @@ class TestDataProvider {
   private getBlockHeightOfContractAction(actionType: string): Promise<number> {
     const action = this.findContractAction(actionType);
     if (action && action['block-height'] !== undefined) {
-      return Promise.resolve(parseInt(action['block-height']));
+      return Promise.resolve(action['block-height']);
     }
     return Promise.reject(
       new Error(
@@ -252,7 +268,7 @@ class TestDataProvider {
    * @returns The contract address as a string.
    * @throws Error if no contract address is found in the test data.
    */
-  getKnownContractAddress() {
+  getKnownContractAddress(): string {
     if (this.contracts.length === 0 || !this.contracts[0]['contract-address']) {
       throw new Error(
         `Test data provider is missing the known contract address data for ${env.getEnvName()} environment`,
@@ -280,13 +296,13 @@ class TestDataProvider {
     return [
       ' ', // space
       '0', // too short
-      null as any, // null
-      undefined as any, // undefined
-      NaN as any, // NaN
-      Infinity as any, // Infinity
-      -Infinity as any, // -Infinity
-      false as any, // false
-      true as any, // true
+      null as unknown as string, // null
+      undefined as unknown as string, // undefined
+      NaN as unknown as string, // NaN
+      Infinity as unknown as string, // Infinity
+      -Infinity as unknown as string, // -Infinity
+      false as unknown as string, // false
+      true as unknown as string, // true
       '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e7', // too short (63 chars)
       '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e78a', // too long (65 chars)
       '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e7g', // invalid hex character

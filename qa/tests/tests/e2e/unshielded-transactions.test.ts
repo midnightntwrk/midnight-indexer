@@ -183,13 +183,13 @@ describe('unshielded transactions', () => {
      * @when we query the indexer with a block query by hash, using the block hash reported by the toolkit
      * @then the block should contain the transaction with outputs for both addresses
      */
-    test('should be reported by the indexer through a block query by hash', async (_context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should be reported by the indexer through a block query by hash', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHash', 'UnshieldedTokens'],
         testKey: 'PM-17711',
       };
 
-      context.skip?.(
+      ctx.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",
       );
@@ -203,11 +203,15 @@ describe('unshielded transactions', () => {
 
       // Find our specific transaction by hash
       const sourceAddresInTx = blockResponse.data?.block?.transactions?.find((tx: Transaction) =>
-        tx.unshieldedCreatedOutputs?.find((output: any) => output.owner === sourceAddress),
+        tx.unshieldedCreatedOutputs?.find(
+          (output: UnshieldedUtxo) => output.owner === sourceAddress,
+        ),
       );
 
       const destAddresInTx = blockResponse.data?.block?.transactions?.find((tx: Transaction) =>
-        tx.unshieldedCreatedOutputs?.find((output: any) => output.owner === destinationAddress),
+        tx.unshieldedCreatedOutputs?.find(
+          (output: UnshieldedUtxo) => output.owner === destinationAddress,
+        ),
       );
 
       expect(sourceAddresInTx).toBeDefined();
@@ -222,13 +226,13 @@ describe('unshielded transactions', () => {
      * @when we query transactions by the transaction hash
      * @then the returned transactions should include outputs for both addresses involved
      */
-    test('should be reported by the indexer through a transaction query by hash', async (_context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should be reported by the indexer through a transaction query by hash', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Transaction', 'ByHash', 'UnshieldedTokens'],
         testKey: 'PM-17712',
       };
 
-      context.skip?.(
+      ctx.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",
       );
@@ -247,13 +251,17 @@ describe('unshielded transactions', () => {
 
       // Find our specific transaction that contains unshielded created outputs for the source address
       const sourceAddresInTx = transactionResponse.data?.transactions?.find((tx: Transaction) =>
-        tx.unshieldedCreatedOutputs?.find((output: any) => output.owner === sourceAddress),
+        tx.unshieldedCreatedOutputs?.find(
+          (output: UnshieldedUtxo) => output.owner === sourceAddress,
+        ),
       );
       expect(sourceAddresInTx).toBeDefined();
 
       // Find our specific transaction that contains unshielded created outputs for the destination address
       const destAddresInTx = transactionResponse.data?.transactions?.find((tx: Transaction) =>
-        tx.unshieldedCreatedOutputs?.find((output: any) => output.owner === destinationAddress),
+        tx.unshieldedCreatedOutputs?.find(
+          (output: UnshieldedUtxo) => output.owner === destinationAddress,
+        ),
       );
       expect(destAddresInTx).toBeDefined();
     });
@@ -266,13 +274,13 @@ describe('unshielded transactions', () => {
      * @when we submit an unshielded transaction to node
      * @then we should receive a transaction event that includes created and spent UTXOs for the source address
      */
-    test('should be reported by the indexer through an unshielded transaction event for the source address', async (_context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should be reported by the indexer through an unshielded transaction event for the source address', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Subscription', 'Transaction', 'UnshieldedTokens'],
         testKey: 'PM-17713',
       };
 
-      context.skip?.(
+      ctx.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",
       );
@@ -312,13 +320,13 @@ describe('unshielded transactions', () => {
      * @when we submit an unshielded transaction to node
      * @then we should receive a transaction event that includes a created UTXO for the destination
      */
-    test('should be reported by the indexer through an unshielded transaction event for the destination address', async (_context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should be reported by the indexer through an unshielded transaction event for the destination address', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Subscription', 'Transaction', 'UnshieldedTokens'],
         testKey: 'PM-17714',
       };
 
-      context.skip?.(
+      ctx.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",
       );
@@ -359,13 +367,13 @@ describe('unshielded transactions', () => {
      * @when we inspect the containing block for unshielded outputs
      * @then there should be two created outputs and one spent output reflecting the transfer of 1 STAR
      */
-    test('should have transferred 1 STAR from the source to the destination address', async (_context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should have transferred 1 STAR from the source to the destination address', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['UnshieldedTokens'],
         testKey: 'PM-17715',
       };
 
-      context.skip?.(
+      ctx.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",
       );
@@ -374,7 +382,7 @@ describe('unshielded transactions', () => {
       const blockResponse = await getBlockByHashWithRetry(transactionResult.blockHash!);
 
       // Find the transaction with unshielded outputs
-      const unshieldedTx = blockResponse.data?.block?.transactions?.find((tx: any) => {
+      const unshieldedTx = blockResponse.data?.block?.transactions?.find((tx: Transaction) => {
         const hasCreated = tx.unshieldedCreatedOutputs && tx.unshieldedCreatedOutputs.length > 0;
         const hasSpent = tx.unshieldedSpentOutputs && tx.unshieldedSpentOutputs.length > 0;
         log.info(`Transaction ${tx.hash}: hasCreated=${hasCreated}, hasSpent=${hasSpent}`);
@@ -387,8 +395,12 @@ describe('unshielded transactions', () => {
       expect(unshieldedTx?.unshieldedCreatedOutputs).toHaveLength(2);
 
       const createdOutputs = unshieldedTx?.unshieldedCreatedOutputs;
-      const sourceOutput = createdOutputs?.find((output: any) => output.owner === sourceAddress);
-      const destOutput = createdOutputs?.find((output: any) => output.owner === destinationAddress);
+      const sourceOutput = createdOutputs?.find(
+        (output: UnshieldedUtxo) => output.owner === sourceAddress,
+      );
+      const destOutput = createdOutputs?.find(
+        (output: UnshieldedUtxo) => output.owner === destinationAddress,
+      );
 
       expect(sourceOutput).toBeDefined();
       expect(destOutput).toBeDefined();
@@ -410,7 +422,7 @@ describe('unshielded transactions', () => {
      * @then we should receive a progress update event from indexer
      * @and the progress count should be incremented by 1
      */
-    test('should be reported by the indexer through a progress update event for the source address', async (_context: TestContext) => {
+    test('should be reported by the indexer through a progress update event for the source address', async () => {
       const progressUpdatesBeforeTransaction = historicalSourceEvents.filter((event) => {
         return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
       });
@@ -473,7 +485,7 @@ describe('unshielded transactions', () => {
      * @then we should receive a progress update event from indexer
      * @and the progress count should be incremented by 1
      */
-    test('should be reported by the indexer through a progress update event for the destination address', async (_context: TestContext) => {
+    test('should be reported by the indexer through a progress update event for the destination address', async () => {
       const progressUpdatesBeforeTransaction = historicalDestinationEvents.filter((event) => {
         return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
       });
