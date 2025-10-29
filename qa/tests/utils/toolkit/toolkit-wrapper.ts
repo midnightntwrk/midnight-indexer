@@ -98,7 +98,7 @@ class ToolkitWrapper {
           blockHash = logEntry.block_hash;
           status = 'confirmed';
         }
-      } catch (error) {
+      } catch (_error) {
         continue;
       }
     }
@@ -229,8 +229,8 @@ class ToolkitWrapper {
       try {
         fs.rmSync(this.config.syncCacheDir, { recursive: true, force: true });
         log.debug(`Cleaned up instance-specific sync cache: ${this.config.syncCacheDir}`);
-      } catch (error) {
-        log.warn(`Failed to cleanup sync cache: ${error}`);
+      } catch (_error) {
+        log.warn(`Failed to cleanup sync cache: ${_error}`);
       }
     }
   }
@@ -255,7 +255,7 @@ class ToolkitWrapper {
         (await this.showAddress('0'.repeat(63) + '9')).unshielded,
         1,
       );
-    } catch (error) {
+    } catch (_error) {
       // Do nothing as we are actually expecting an error
     }
   }

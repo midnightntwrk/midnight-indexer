@@ -22,7 +22,6 @@ import type {
   BlockResponse,
   RegularTransaction,
   Transaction,
-  UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
 import dataProvider from '@utils/testdata-provider';
 import { TestContext } from 'vitest';
@@ -144,7 +143,7 @@ describe('block queries', () => {
 
       // Everything is already checked in getLatestBlockByHash function
       // If the promise resolves, we know that the block exists and the test passes
-      const blockByHash = await getLatestBlockByHash();
+      await getLatestBlockByHash();
     });
 
     /**

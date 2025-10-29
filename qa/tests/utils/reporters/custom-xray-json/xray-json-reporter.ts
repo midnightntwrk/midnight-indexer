@@ -104,7 +104,7 @@ function flattenTests(
       // Extract timing information
       const startTime = result?.startTime || Date.now();
       const duration = result?.duration || 0;
-      const endTime = startTime + duration;
+      // const endTime = startTime + duration;
 
       // You can use the following information but note that not everything
       // might be available, especially the "describe()" strings
@@ -180,14 +180,14 @@ export default class XRayJsonReporter implements Reporter {
     console.debug(` XRAY_PROJECT_KEY: ${xrayProjectKey}`);
 
     // Group tests by suite for better organization
-    const grouped = testcases.reduce(
-      (acc, tc) => {
-        if (!acc[tc.suiteName]) acc[tc.suiteName] = [];
-        acc[tc.suiteName].push(tc);
-        return acc;
-      },
-      {} as Record<string, typeof testcases>,
-    );
+    // const grouped = testcases.reduce(
+    //   (acc, tc) => {
+    //     if (!acc[tc.suiteName]) acc[tc.suiteName] = [];
+    //     acc[tc.suiteName].push(tc);
+    //     return acc;
+    //   },
+    //   {} as Record<string, typeof testcases>,
+    // );
 
     // Convert test cases to XRay format
     const xrayTests: XRayTest[] = testcases.flatMap((test) => {

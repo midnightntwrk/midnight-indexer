@@ -387,13 +387,6 @@ describe('contract queries', () => {
      * @then Indexer should respond with an error
      */
     test('should return error when contract with valid address and invalid hash', async (_context: TestContext) => {
-      let knownBlockHash: string;
-      try {
-        knownBlockHash = await dataProvider.getKnownBlockHash();
-      } catch (error) {
-        log.warn(error);
-        context.skip?.(true, (error as Error).message);
-      }
       const malformedHashes = dataProvider.getFabricatedMalformedHashes();
       const response = await indexerHttpClient.getContractAction(validAddress, {
         blockOffset: { hash: malformedHashes[0] },

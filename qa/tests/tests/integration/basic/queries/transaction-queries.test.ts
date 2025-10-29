@@ -23,7 +23,6 @@ import type {
   Transaction,
   TransactionOffset,
   TransactionResponse,
-  UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
 import {
   FullTransactionSchema,
@@ -55,6 +54,7 @@ async function getGenesisTransactionsByHash(): Promise<Transaction[]> {
   for (const hash of transactionHashes) {
     const response = await indexerHttpClient.getTransactionByOffset({ hash });
     expect(response).toBeSuccess();
+    expect(Array.isArray(response.data?.transactions)).toBe(true);
     expect(response.data?.transactions).toHaveLength(1);
 
     if (response.data?.transactions[0]) {
@@ -88,6 +88,7 @@ describe('transaction queries', () => {
      */
     test(`should return the transaction with that hash, given that transaction exists`, async () => {
       const genesisTransactions = await getGenesisTransactionsByHash();
+      expect(Array.isArray(genesisTransactions)).toBe(true);
       expect(genesisTransactions.length).toBeGreaterThanOrEqual(1);
 
       for (const tx of genesisTransactions) {

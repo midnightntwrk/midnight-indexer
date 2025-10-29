@@ -30,7 +30,6 @@ describe('shielded transactions', () => {
   const sourceSeed = dataProvider.getFundingSeed();
   const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
 
-  let sourceAddress: string;
   let destinationAddress: string;
 
   beforeAll(async () => {
@@ -40,7 +39,6 @@ describe('shielded transactions', () => {
     await toolkit.start();
 
     // Derive shielded addresses from seeds
-    sourceAddress = (await toolkit.showAddress(sourceSeed)).shielded;
     destinationAddress = (await toolkit.showAddress(destinationSeed)).shielded;
 
     // Submit one shielded->shielded transfer (1 STAR)
