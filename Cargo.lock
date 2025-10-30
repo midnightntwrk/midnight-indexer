@@ -7887,7 +7887,6 @@ dependencies = [
  "serde",
  "sqlx",
  "tokio",
- "tokio-stream",
  "trait-variant",
  "uuid",
 ]
