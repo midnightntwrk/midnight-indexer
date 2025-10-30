@@ -152,6 +152,7 @@ impl domain::storage::Storage for Storage {
                 raw
             FROM transactions
             WHERE block_id = $1
+            ORDER BY id
         "};
 
         let transactions = sqlx::query_as::<_, (TransactionVariant, ByteVec)>(query)
@@ -385,20 +386,9 @@ async fn save_regular_transaction(
 
     save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
 
-    save_unshielded_utxos(
-        &transaction.created_unshielded_utxos,
-        transaction_id,
-        false,
-        tx,
-    )
-    .await?;
-    save_unshielded_utxos(
-        &transaction.spent_unshielded_utxos,
-        transaction_id,
-        true,
-        tx,
-    )
-    .await?;
+    save_created_unshielded_utxos(&transaction.created_unshielded_utxos, transaction_id, tx)
+        .await?;
+    save_spent_unshielded_utxos(&transaction.spent_unshielded_utxos, transaction_id, tx).await?;
 
     save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
 
@@ -411,13 +401,8 @@ async fn save_system_transaction(
     transaction_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    save_unshielded_utxos(
-        &transaction.created_unshielded_utxos,
-        transaction_id,
-        false,
-        tx,
-    )
-    .await?;
+    save_created_unshielded_utxos(&transaction.created_unshielded_utxos, transaction_id, tx)
+        .await?;
 
     save_ledger_events(&transaction.ledger_events, transaction_id, tx).await
 }
@@ -475,37 +460,31 @@ async fn save_contract_actions(
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
-async fn save_unshielded_utxos(
+async fn save_created_unshielded_utxos(
     utxos: &[UnshieldedUtxo],
     transaction_id: i64,
-    spent: bool,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     if utxos.is_empty() {
         return Ok(());
     }
 
-    if spent {
-        for &utxo in utxos {
-            let query = indoc! {"
-                INSERT INTO unshielded_utxos (
-                    creating_transaction_id,
-                    spending_transaction_id,
-                    owner,
-                    token_type,
-                    value,
-                    intent_hash,
-                    output_index,
-                    ctime,
-                    initial_nonce,
-                    registered_for_dust_generation
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                ON CONFLICT (intent_hash, output_index)
-                DO UPDATE SET spending_transaction_id = $2
-                WHERE unshielded_utxos.spending_transaction_id IS NULL
-            "};
+    let query_base = indoc! {"
+        INSERT INTO unshielded_utxos (
+            creating_transaction_id,
+            owner,
+            token_type,
+            value,
+            intent_hash,
+            output_index,
+            ctime,
+            initial_nonce,
+            registered_for_dust_generation
+        )
+    "};
 
+    QueryBuilder::new(query_base)
+        .push_values(utxos.iter(), |mut q, utxo| {
             let UnshieldedUtxo {
                 owner,
                 token_type,
@@ -517,61 +496,106 @@ async fn save_unshielded_utxos(
                 registered_for_dust_generation,
             } = utxo;
 
-            sqlx::query(query)
-                .bind(transaction_id)
-                .bind(transaction_id)
-                .bind(owner.as_ref())
-                .bind(token_type.as_ref())
-                .bind(U128BeBytes::from(value))
-                .bind(intent_hash.as_ref())
-                .bind(output_index as i64)
-                .bind(ctime.map(|n| n as i64))
-                .bind(initial_nonce.as_ref())
-                .bind(registered_for_dust_generation)
-                .execute(&mut **tx)
-                .await?;
-        }
-    } else {
-        let query_base = indoc! {"
-            INSERT INTO unshielded_utxos (
-                creating_transaction_id,
-                owner,
-                token_type,
-                value,
-                intent_hash,
-                output_index,
-                ctime,
-                initial_nonce,
-                registered_for_dust_generation
+            q.push_bind(transaction_id)
+                .push_bind(owner.as_ref())
+                .push_bind(token_type.as_ref())
+                .push_bind(U128BeBytes::from(value))
+                .push_bind(intent_hash.as_ref())
+                .push_bind(*output_index as i64)
+                .push_bind(ctime.map(|n| n as i64))
+                .push_bind(initial_nonce.as_ref())
+                .push_bind(registered_for_dust_generation);
+        })
+        .build()
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn save_spent_unshielded_utxos(
+    utxos: &[UnshieldedUtxo],
+    transaction_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    if utxos.is_empty() {
+        return Ok(());
+    }
+
+    let rows_affected;
+
+    #[cfg(feature = "cloud")]
+    {
+        let query = indoc! {"
+            UPDATE unshielded_utxos
+            SET spending_transaction_id = $1
+            WHERE (intent_hash, output_index) IN (
+                SELECT * FROM UNNEST($2::BYTEA[], $3::BIGINT[])
             )
+            AND spending_transaction_id IS NULL
         "};
 
-        QueryBuilder::new(query_base)
-            .push_values(utxos.iter(), |mut q, utxo| {
-                let UnshieldedUtxo {
-                    owner,
-                    token_type,
-                    value,
-                    intent_hash,
-                    output_index,
-                    ctime,
-                    initial_nonce,
-                    registered_for_dust_generation,
-                } = utxo;
+        let (intent_hashes, output_indices) = utxos
+            .iter()
+            .map(|utxo| (utxo.intent_hash.as_ref(), utxo.output_index as i64))
+            .unzip::<_, _, Vec<_>, Vec<_>>();
 
-                q.push_bind(transaction_id)
-                    .push_bind(owner.as_ref())
-                    .push_bind(token_type.as_ref())
-                    .push_bind(U128BeBytes::from(value))
-                    .push_bind(intent_hash.as_ref())
-                    .push_bind(*output_index as i64)
-                    .push_bind(ctime.map(|n| n as i64))
-                    .push_bind(initial_nonce.as_ref())
-                    .push_bind(registered_for_dust_generation);
-            })
+        rows_affected = sqlx::query(query)
+            .bind(transaction_id)
+            .bind(&intent_hashes)
+            .bind(&output_indices)
+            .execute(&mut **tx)
+            .await?
+            .rows_affected();
+    }
+
+    #[cfg(feature = "standalone")]
+    {
+        let mut query = QueryBuilder::new(indoc! {"
+            WITH pairs(intent_hash, output_index) AS (
+        "});
+
+        let (first, rest) = utxos.split_first().unwrap(); // utxos is non-empty!
+        query
+            .push("SELECT ")
+            .push_bind(first.intent_hash.as_ref())
+            .push(", ")
+            .push_bind(first.output_index as i64);
+        for utxo in rest {
+            query
+                .push(" UNION ALL SELECT ")
+                .push_bind(utxo.intent_hash.as_ref())
+                .push(", ")
+                .push_bind(utxo.output_index as i64);
+        }
+
+        rows_affected = query
+            .push(indoc! {"
+                )
+                UPDATE unshielded_utxos
+                SET spending_transaction_id =
+            "})
+            .push_bind(transaction_id)
+            .push(indoc! {"
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM pairs
+                    WHERE intent_hash = unshielded_utxos.intent_hash
+                    AND output_index = unshielded_utxos.output_index
+                )
+                AND spending_transaction_id IS NULL
+            "})
             .build()
             .execute(&mut **tx)
-            .await?;
+            .await?
+            .rows_affected();
+    }
+
+    if rows_affected == 0 {
+        return Err(sqlx::Error::Protocol(format!(
+            "invalid spent UTXOs: {utxos:?}"
+        )));
     }
 
     Ok(())

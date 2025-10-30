@@ -6,9 +6,11 @@ application:
   save_ledger_state_after: 1000
   caught_up_max_distance: 10
   caught_up_leeway: 5
-  active_wallets_repeat_delay: "100ms"
+  active_wallets_query_delay: "500ms"
   active_wallets_ttl: "30m"
-  transaction_batch_size: 10
+  transaction_batch_size: 50
+  # 1 by default
+  # concurrency_limit:
 
 infra:
   storage:
