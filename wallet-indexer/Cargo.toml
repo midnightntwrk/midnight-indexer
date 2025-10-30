@@ -31,7 +31,6 @@ secrecy          = { workspace = true }
 serde            = { workspace = true, features = [ "derive" ] }
 sqlx             = { workspace = true, features = [ "time" ] }
 tokio            = { workspace = true, features = [ "macros", "rt-multi-thread", "time", "signal" ] }
-tokio-stream     = { workspace = true }
 trait-variant    = { workspace = true }
 uuid             = { workspace = true, features = [ "v7" ] }
 
