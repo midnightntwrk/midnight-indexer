@@ -30,7 +30,7 @@ use indexer_common::domain::{
     BlockIndexed, LedgerStateStorage, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxoIndexed,
     ledger,
 };
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use parking_lot::RwLock;
 use serde::Deserialize;
 use std::{
@@ -114,7 +114,7 @@ pub async fn run(
         let ledger_state_block_height = ledger_state_block_height.unwrap_or_default();
 
         if ledger_state_block_height < highest_height {
-            info!(ledger_state_block_height, highest_height; "updating ledger state");
+            debug!(ledger_state_block_height, highest_height; "updating ledger state");
 
             let mut protocol_version = ProtocolVersion::default();
 

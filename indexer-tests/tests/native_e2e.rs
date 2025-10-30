@@ -322,7 +322,7 @@ async fn start_wallet_indexer(postgres_port: u16, nats_url: &str) -> anyhow::Res
     Command::new(format!("{}/debug/wallet-indexer", &*TARGET_DIR))
         .env(
             "RUST_LOG",
-            "wallet_indexer=info,fastrace_opentelemetry=off,error",
+            "wallet_indexer=debug,fastrace_opentelemetry=off,error",
         )
         .env(
             "CONFIG_FILE",
@@ -368,7 +368,7 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
     Command::new(format!("{}/debug/indexer-standalone", &*TARGET_DIR))
         .env(
             "RUST_LOG",
-            "indexer_standalone=info,chain_indexer=warn,indexer_api=warn,wallet_indexer=info,fastrace_opentelemetry=off,error",
+            "indexer_standalone=info,chain_indexer=info,indexer_api=info,wallet_indexer=debug,fastrace_opentelemetry=off,error",
         )
         .env(
             "CONFIG_FILE",

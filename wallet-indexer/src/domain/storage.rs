@@ -29,8 +29,9 @@ where
     /// Sqlx transaction.
     type Database: sqlx::Database;
 
-    /// Try to acquire an application level lock for the given session ID. Return a transaction if
-    /// and only if possible.
+    /// Try to acquire an application level lock for the given session ID to prevent multiple
+    /// replicas from concurrent wallet processing. Return a transaction if and only if
+    /// possible.
     async fn acquire_lock(
         &mut self,
         wallet_id: Uuid,

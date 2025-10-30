@@ -19,7 +19,7 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{BlockIndexed, Publisher, Subscriber, WalletIndexed};
 use itertools::Itertools;
-use log::{error, warn};
+use log::{debug, error, warn};
 use serde::Deserialize;
 use std::{
     num::NonZeroUsize,
@@ -251,6 +251,7 @@ async fn index_wallet(
 
         if !relevant_transactions.is_empty() {
             let session_id = wallet.viewing_key.to_session_id();
+
             publisher
                 .publish(&WalletIndexed { session_id })
                 .await
@@ -258,6 +259,13 @@ async fn index_wallet(
                     format!("publish WalletIndexed event for wallet ID {wallet_id}")
                 })?;
         }
+
+        debug!(
+            wallet_id:%,
+            last_indexed_transaction_id,
+            relevant_transactions_len = relevant_transactions.len();
+            "wallet indexed"
+        );
     }
 
     Ok(())

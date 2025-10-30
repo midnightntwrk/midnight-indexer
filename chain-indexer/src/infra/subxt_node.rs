@@ -211,7 +211,7 @@ impl SubxtNode {
             .protocol_version()?
             .unwrap_or(self.genesis_protocol_version);
 
-        info!(
+        debug!(
             hash:%,
             height,
             parent_hash:%,
@@ -361,13 +361,8 @@ impl Node for SubxtNode {
                 };
                 // Cap at one year, see comment above.
                 let capacity = capacity.min(5_256_000);
-                info!(
-                    highest_stored_height:? = after_height,
-                    first_finalized_height = first_block.number();
-                    "traversing back via parent hashes, this may take some time"
-                );
-
                 let mut hashes = Vec::with_capacity(capacity);
+
                 let mut parent_hash = first_block.header().parent_hash;
                 while parent_hash.0 != after_hash.0 && parent_hash != genesis_parent_hash {
                     let block = self.fetch_block(parent_hash).await?;

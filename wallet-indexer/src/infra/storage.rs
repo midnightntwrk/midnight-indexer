@@ -100,7 +100,7 @@ impl domain::storage::Storage for Storage {
         _wallet_id: Uuid,
     ) -> Result<Option<SqlxTransaction<Self::Database>>, sqlx::Error> {
         // SQLite doesn't support advisory locks like PostgreSQL. But in standalone mode (single
-        // instance) we need not exclude other, i.e. "locking" is always successful.
+        // instance) we need not exclude other replicas, i.e. "locking" is always successful.
         let tx = self.pool.begin().await?;
         Ok(Some(tx))
     }
@@ -191,7 +191,6 @@ impl domain::storage::Storage for Storage {
 
     #[trace]
     async fn active_wallet_ids(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error> {
-        // Query wallets.
         let query = indoc! {"
             SELECT
                 id,
@@ -205,12 +204,13 @@ impl domain::storage::Storage for Storage {
             .try_collect::<Vec<_>>()
             .await?;
 
-        // Mark inactive wallets.
-        let cutoff = OffsetDateTime::now_utc() - ttl;
+        let min_last_active = OffsetDateTime::now_utc() - ttl;
+
         let outdated_ids = wallets
             .iter()
-            .filter_map(|&(id, last_active)| (last_active < cutoff).then_some(id))
+            .filter_map(|&(id, last_active)| (last_active < min_last_active).then_some(id))
             .collect::<Vec<_>>();
+
         if !outdated_ids.is_empty() {
             #[cfg(feature = "cloud")]
             {
@@ -228,7 +228,7 @@ impl domain::storage::Storage for Storage {
                 // be executed "very soon" again.
                 sqlx::query(query)
                     .bind(outdated_ids)
-                    .bind(cutoff)
+                    .bind(min_last_active)
                     .execute(&*self.pool)
                     .await
                     .map(|_| ())
@@ -248,7 +248,7 @@ impl domain::storage::Storage for Storage {
 
                 sqlx::query(query)
                     .bind(id)
-                    .bind(cutoff)
+                    .bind(min_last_active)
                     .execute(&*self.pool)
                     .await?;
             }
@@ -257,7 +257,7 @@ impl domain::storage::Storage for Storage {
         // Return active wallet IDs.
         let ids = wallets
             .into_iter()
-            .filter_map(|(id, last_active)| (last_active >= cutoff).then_some(id))
+            .filter_map(|(id, last_active)| (last_active >= min_last_active).then_some(id))
             .collect::<Vec<_>>();
         Ok(ids)
     }
