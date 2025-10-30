@@ -41,8 +41,8 @@ pub struct ApplicationConfig {
     #[serde(with = "humantime_serde")]
     pub active_wallets_ttl: Duration,
     pub transaction_batch_size: NonZeroUsize,
-    #[serde(default = "parallelism_default")]
-    pub parallelism: NonZeroUsize,
+    #[serde(default = "concurrency_limit_default")]
+    pub concurrency_limit: NonZeroUsize,
 }
 
 impl From<ApplicationConfig> for chain_indexer::application::Config {
@@ -80,7 +80,7 @@ impl From<ApplicationConfig> for wallet_indexer::application::Config {
             active_wallets_query_delay,
             active_wallets_ttl,
             transaction_batch_size,
-            parallelism,
+            concurrency_limit,
             ..
         } = config;
 
@@ -88,7 +88,7 @@ impl From<ApplicationConfig> for wallet_indexer::application::Config {
             active_wallets_query_delay,
             active_wallets_ttl,
             transaction_batch_size,
-            parallelism,
+            concurrency_limit,
         }
     }
 }
@@ -107,6 +107,6 @@ pub struct InfraConfig {
     pub secret: secrecy::SecretString,
 }
 
-fn parallelism_default() -> NonZeroUsize {
+fn concurrency_limit_default() -> NonZeroUsize {
     std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN)
 }

@@ -243,7 +243,7 @@ impl domain::storage::Storage for Storage {
                     UPDATE wallets
                     SET active = FALSE
                     WHERE id = $1
-                    last_active < $2
+                    AND last_active < $2
                 "};
 
                 sqlx::query(query)

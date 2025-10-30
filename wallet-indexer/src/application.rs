@@ -42,8 +42,8 @@ pub struct Config {
 
     pub transaction_batch_size: NonZeroUsize,
 
-    #[serde(default = "parallelism_default")]
-    pub parallelism: NonZeroUsize,
+    #[serde(default = "concurrency_limit_default")]
+    pub concurrency_limit: NonZeroUsize,
 }
 
 pub async fn run(
@@ -57,7 +57,7 @@ pub async fn run(
         active_wallets_query_delay,
         active_wallets_ttl,
         transaction_batch_size,
-        parallelism,
+        concurrency_limit,
     } = config;
 
     // Shared counter for the maximum transaction ID observed in BlockIndexed events. This allows
@@ -98,7 +98,7 @@ pub async fn run(
 
             active_wallet_ids(active_wallets_query_delay, active_wallets_ttl, &storage)
                 .map(|result| result.context("get next active wallet ID"))
-                .try_for_each_concurrent(Some(parallelism.get()), |wallet_id| {
+                .try_for_each_concurrent(Some(concurrency_limit.get()), |wallet_id| {
                     let worker_by_wallet_id = worker_by_wallet_id.clone();
                     let max_transaction_id = max_transaction_id.clone();
                     let mut publisher = publisher.clone();
@@ -196,20 +196,14 @@ async fn index_wallet(
     publisher: &mut impl Publisher,
     storage: &mut impl Storage,
 ) -> anyhow::Result<()> {
-    log::debug!(wallet_id:%; "index_wallet 1");
-
     let tx = storage
         .acquire_lock(wallet_id)
         .await
         .with_context(|| format!("acquire lock for wallet ID {wallet_id}"))?;
 
-    log::debug!(wallet_id:%; "index_wallet 2");
-
     let Some(mut tx) = tx else {
         return Ok(());
     };
-
-    log::debug!(wallet_id:%; "index_wallet 3");
 
     let wallet = storage
         .get_wallet_by_id(wallet_id, &mut tx)
@@ -269,6 +263,6 @@ async fn index_wallet(
     Ok(())
 }
 
-fn parallelism_default() -> NonZeroUsize {
+fn concurrency_limit_default() -> NonZeroUsize {
     std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN)
 }

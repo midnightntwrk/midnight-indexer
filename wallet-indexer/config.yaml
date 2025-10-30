@@ -5,7 +5,7 @@ application:
   active_wallets_ttl: "30m"
   transaction_batch_size: 50
   # Number of cores by default.
-  # parallelism:
+  # concurrency_limit:
 
 infra:
   storage:
