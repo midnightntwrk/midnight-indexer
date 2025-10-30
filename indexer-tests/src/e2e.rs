@@ -45,6 +45,7 @@ use reqwest::Client;
 use serde::Serialize;
 use shielded_transactions_subscription::ShieldedTransactionsSubscriptionShieldedTransactions as ShieldedTransactions;
 use std::{future::ready, time::Duration};
+use tokio::time::sleep;
 use unshielded_transactions_subscription::UnshieldedTransactionsSubscriptionUnshieldedTransactions as UnshieldedTransactions;
 
 const MAX_HEIGHT: usize = 30;
@@ -70,6 +71,15 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
 
     let api_client = Client::new();
 
+    // Test mutations. This must come first to make the wallet indexer index the wallet that is
+    // later used for the shielded transactions subscription.
+    test_connect_mutation(&api_client, &api_url, &network_id)
+        .await
+        .context("test connect mutation query")?;
+    test_disconnect_mutation(&api_client, &api_url)
+        .await
+        .context("test disconnect mutation query")?;
+
     // Collect Indexer data using the block subscription.
     let indexer_data = IndexerData::collect(&ws_api_url)
         .await
@@ -88,14 +98,6 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_dust_generation_status_query(&api_client, &api_url)
         .await
         .context("test dust generation status query")?;
-
-    // Test mutations.
-    test_connect_mutation(&api_client, &api_url, &network_id)
-        .await
-        .context("test connect mutation query")?;
-    test_disconnect_mutation(&api_client, &api_url)
-        .await
-        .context("test disconnect mutation query")?;
 
     // Test subscriptions (the block subscription has already been tested above).
     test_contract_actions_subscription(&indexer_data, &ws_api_url)
@@ -296,6 +298,48 @@ impl IndexerData {
             dust_ledger_events,
         })
     }
+}
+
+/// Test the connect mutation.
+async fn test_connect_mutation(
+    api_client: &Client,
+    api_url: &str,
+    network_id: &NetworkId,
+) -> anyhow::Result<()> {
+    // Valid viewing key.
+    let viewing_key = ViewingKey::from(viewing_key(network_id));
+    let variables = connect_mutation::Variables { viewing_key };
+    let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
+    assert!(response.is_ok());
+
+    // Invalid viewing key.
+    let variables = connect_mutation::Variables {
+        viewing_key: ViewingKey("invalid".to_string()),
+    };
+    let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
+    assert!(response.is_err());
+
+    Ok(())
+}
+
+/// Test the disconnect mutation.
+async fn test_disconnect_mutation(api_client: &Client, api_url: &str) -> anyhow::Result<()> {
+    // Valid session ID.
+    let session_id = indexer_common::domain::ViewingKey::from([0; 32])
+        .to_session_id()
+        .hex_encode();
+    let variables = disconnect_mutation::Variables { session_id };
+    let response = send_query::<DisconnectMutation>(api_client, api_url, variables).await;
+    assert!(response.is_ok());
+
+    // Invalid viewing key.
+    let variables = disconnect_mutation::Variables {
+        session_id: [42; 1].hex_encode(),
+    };
+    let response = send_query::<DisconnectMutation>(api_client, api_url, variables).await;
+    assert!(response.is_err());
+
+    Ok(())
 }
 
 /// Test the block query.
@@ -613,48 +657,6 @@ async fn test_dust_generation_status_query(
     Ok(())
 }
 
-/// Test the connect mutation.
-async fn test_connect_mutation(
-    api_client: &Client,
-    api_url: &str,
-    network_id: &NetworkId,
-) -> anyhow::Result<()> {
-    // Valid viewing key.
-    let viewing_key = ViewingKey::from(viewing_key(network_id));
-    let variables = connect_mutation::Variables { viewing_key };
-    let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
-    assert!(response.is_ok());
-
-    // Invalid viewing key.
-    let variables = connect_mutation::Variables {
-        viewing_key: ViewingKey("invalid".to_string()),
-    };
-    let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
-    assert!(response.is_err());
-
-    Ok(())
-}
-
-/// Test the disconnect mutation.
-async fn test_disconnect_mutation(api_client: &Client, api_url: &str) -> anyhow::Result<()> {
-    // Valid session ID.
-    let session_id = indexer_common::domain::ViewingKey::from([0; 32])
-        .to_session_id()
-        .hex_encode();
-    let variables = disconnect_mutation::Variables { session_id };
-    let response = send_query::<DisconnectMutation>(api_client, api_url, variables).await;
-    assert!(response.is_ok());
-
-    // Invalid viewing key.
-    let variables = disconnect_mutation::Variables {
-        session_id: [42; 1].hex_encode(),
-    };
-    let response = send_query::<DisconnectMutation>(api_client, api_url, variables).await;
-    assert!(response.is_err());
-
-    Ok(())
-}
-
 /// Test the contract action subscription.
 async fn test_contract_actions_subscription(
     indexer_data: &IndexerData,
@@ -739,7 +741,12 @@ async fn test_shielded_transactions_subscription(
         .to_session_id()
         .hex_encode();
 
-    // Collect shielded transactions events until there are no more relevant transactions.
+    // Collect relevant transactions.
+    // We know that our test Node is set up with two relevant transactions for this session ID.
+    // Therefore we `take(2)` below, which should happen almost immediately because the respecive
+    // wallet has connected way earlier so the Wallet Indexer should have already indexed the
+    // transatcions. Just in case we limit the time to some seconds to avoid the test hanging
+    // forever. The below assert would then show the failure.
     let variables = shielded_transactions_subscription::Variables { session_id };
     let relevant_transactions =
         graphql_ws_client::subscribe::<ShieldedTransactionsSubscription>(ws_api_url, variables)
@@ -749,16 +756,13 @@ async fn test_shielded_transactions_subscription(
             .try_filter_map(|event| match event {
                 ShieldedTransactions::RelevantTransaction(t) => ok(Some(t)),
                 ShieldedTransactions::ShieldedTransactionsProgress(_) => ok(None),
-            });
-    let relevant_transactions =
-        tokio_stream::StreamExt::timeout(relevant_transactions, Duration::from_secs(10))
-            .take_while(|timeout_result| ready(timeout_result.is_ok()))
-            .filter_map(|timeout_result| ready(timeout_result.map(Some).unwrap_or(None)))
+            })
+            .take(2)
+            .take_until(sleep(Duration::from_secs(10)))
             .try_collect::<Vec<_>>()
             .await
             .context("collect relevant transactions from shielded transactions events")?;
-
-    assert!(!relevant_transactions.is_empty());
+    assert_eq!(relevant_transactions.len(), 2);
 
     // Verify that there are no index gaps.
     let mut expected_start_index = 0;

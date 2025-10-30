@@ -108,5 +108,5 @@ pub struct InfraConfig {
 }
 
 fn concurrency_limit_default() -> NonZeroUsize {
-    std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN)
+    NonZeroUsize::MIN
 }
