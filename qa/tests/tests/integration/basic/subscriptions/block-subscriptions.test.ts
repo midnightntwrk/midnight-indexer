@@ -26,6 +26,7 @@ import {
 } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
 import type { TestContext } from 'vitest';
+import { BlockSchema } from '@utils/indexer/graphql/schema';
 
 describe('block subscriptions', () => {
   let indexerWsClient: IndexerWsClient;
@@ -91,6 +92,34 @@ describe('block subscriptions', () => {
       // In 6 seconds window we should have received at
       // least 1 block, maybe 2 but no more than that
       expect(receivedBlocks.length).toBe(2);
+    });
+
+    test('should stream blocks adhering to the expected schema', async () => {
+      const receivedBlocks: BlockSubscriptionResponse[] = [];
+      const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
+        next: (payload: BlockSubscriptionResponse) => {
+          receivedBlocks.push(payload);
+          if (receivedBlocks.length === 2) {
+            eventCoordinator.notify('twoBlocksReceived');
+          }
+        },
+      };
+
+      const unsubscribe = indexerWsClient.subscribeToBlockEvents(blockSubscriptionHandler);
+      await eventCoordinator.waitFor('twoBlocksReceived');
+      unsubscribe();
+
+      for (const msg of receivedBlocks) {
+        expect.soft(msg).toBeSuccess();
+        const blockData = msg.data?.blocks;
+        expect(blockData).toBeDefined();
+
+        const parsed = BlockSchema.safeParse(blockData);
+        expect(
+          parsed.success,
+          `Block subscription schema validation failed: ${JSON.stringify(parsed.error?.format(), null, 2)}`,
+        ).toBe(true);
+      }
     });
   });
 
