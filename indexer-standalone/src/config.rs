@@ -37,7 +37,7 @@ pub struct ApplicationConfig {
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
     #[serde(with = "humantime_serde")]
-    pub active_wallets_repeat_delay: Duration,
+    pub active_wallets_query_delay: Duration,
     #[serde(with = "humantime_serde")]
     pub active_wallets_ttl: Duration,
     pub transaction_batch_size: NonZeroUsize,
@@ -77,7 +77,7 @@ impl From<ApplicationConfig> for indexer_api::application::Config {
 impl From<ApplicationConfig> for wallet_indexer::application::Config {
     fn from(config: ApplicationConfig) -> Self {
         let ApplicationConfig {
-            active_wallets_repeat_delay,
+            active_wallets_query_delay,
             active_wallets_ttl,
             transaction_batch_size,
             parallelism,
@@ -85,7 +85,7 @@ impl From<ApplicationConfig> for wallet_indexer::application::Config {
         } = config;
 
         Self {
-            active_wallets_repeat_delay,
+            active_wallets_query_delay,
             active_wallets_ttl,
             transaction_batch_size,
             parallelism,

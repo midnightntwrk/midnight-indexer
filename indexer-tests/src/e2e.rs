@@ -758,6 +758,8 @@ async fn test_shielded_transactions_subscription(
             .await
             .context("collect relevant transactions from shielded transactions events")?;
 
+    assert!(!relevant_transactions.is_empty());
+
     // Verify that there are no index gaps.
     let mut expected_start_index = 0;
     for relevant_transaction in relevant_transactions {

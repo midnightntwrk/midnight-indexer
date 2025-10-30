@@ -16,7 +16,9 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 
 [dependencies]
 anyhow           = { workspace = true }
+async-stream     = { workspace = true }
 chacha20poly1305 = { workspace = true }
+dashmap          = { workspace = true }
 derive_more      = { workspace = true, features = [ "debug" ] }
 fastrace         = { workspace = true }
 futures          = { workspace = true }
