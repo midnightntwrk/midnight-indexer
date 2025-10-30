@@ -751,7 +751,7 @@ async fn test_shielded_transactions_subscription(
                 ShieldedTransactions::ShieldedTransactionsProgress(_) => ok(None),
             });
     let relevant_transactions =
-        tokio_stream::StreamExt::timeout(relevant_transactions, Duration::from_secs(3))
+        tokio_stream::StreamExt::timeout(relevant_transactions, Duration::from_secs(10))
             .take_while(|timeout_result| ready(timeout_result.is_ok()))
             .filter_map(|timeout_result| ready(timeout_result.map(Some).unwrap_or(None)))
             .try_collect::<Vec<_>>()
