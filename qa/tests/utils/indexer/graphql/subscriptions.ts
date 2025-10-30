@@ -102,11 +102,31 @@ export const UNSHIELDED_TX_SUBSCRIPTION_BY_ADDRESS = `subscription UnshieldedTxS
 }`;
 
 export const BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription BlocksSubscriptionFromLatestBlock {
-    blocks{
-        hash
-        height
-        timestamp
+   blocks {
+    hash
+    height
+    timestamp
+    parent {
+      hash
+      height
     }
+    transactions {
+      id
+      hash
+      __typename
+      protocolVersion
+      raw
+      identifiers
+      unshieldedCreatedOutputs {
+        owner
+        intentHash
+        value
+        tokenType
+        outputIndex
+      }
+    }
+  }
+}
 }`;
 
 export const BLOCKS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription BlocksSubscriptionFromBlockByOffset($OFFSET: BlockOffset) {
