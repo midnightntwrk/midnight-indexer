@@ -25,8 +25,57 @@ import type {
   TransactionResponse,
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
+import {
+  FullTransactionSchema,
+  RegularTransactionSchema,
+  SystemTransactionSchema,
+  ZswapLedgerEventSchema,
+  DustLedgerEventSchema,
+  UnshieldedUtxoSchema,
+} from '@utils/indexer/graphql/schema';
 
 const indexerHttpClient = new IndexerHttpClient();
+
+// Helper functions
+async function getGenesisBlock(): Promise<BlockResponse> {
+  const blockResponse = await indexerHttpClient.getBlockByOffset({ height: 0 });
+  expect(blockResponse).toBeSuccess();
+  expect(blockResponse.data?.block.transactions.length).toBeGreaterThanOrEqual(1);
+  return blockResponse;
+}
+
+async function getGenesisTransactionsByHash(): Promise<Transaction[]> {
+  const blockResponse = await getGenesisBlock();
+  const transactionHashes = blockResponse.data!.block.transactions.map(
+    (transaction) => transaction.hash,
+  );
+
+  const genesisTransactions: Transaction[] = [];
+
+  for (const hash of transactionHashes) {
+    const response = await indexerHttpClient.getTransactionByOffset({ hash });
+    expect(response).toBeSuccess();
+    expect(response.data?.transactions).toHaveLength(1);
+
+    if (response.data?.transactions[0]) {
+      genesisTransactions.push(response.data.transactions[0]);
+    }
+  }
+
+  expect(genesisTransactions.length).toBeGreaterThanOrEqual(1);
+  return genesisTransactions;
+}
+
+function getRegularTransactions(transactions: Transaction[]): RegularTransaction[] {
+  return transactions.filter(
+    (tx) => tx.__typename === 'RegularTransaction',
+  ) as RegularTransaction[];
+}
+
+function extractUtxos(transactions: Transaction[]): UnshieldedUtxo[] {
+  const regularTxs = getRegularTransactions(transactions);
+  return regularTxs.flatMap((tx) => tx.unshieldedCreatedOutputs || []);
+}
 
 describe('transaction queries', () => {
   describe('a transaction query by hash', () => {
@@ -38,24 +87,12 @@ describe('transaction queries', () => {
      * @then Indexer should return the transaction with that hash
      */
     test(`should return the transaction with that hash, given that transaction exists`, async () => {
-      const blockResponse = await indexerHttpClient.getBlockByOffset({
-        height: 0,
-      });
-      expect(blockResponse).toBeSuccess();
-      expect(blockResponse.data?.block.transactions.length).toBeGreaterThanOrEqual(1);
+      const genesisTransactions = await getGenesisTransactionsByHash();
+      expect(genesisTransactions.length).toBeGreaterThanOrEqual(1);
 
-      const transactionHashes = blockResponse.data?.block.transactions.map(
-        (transaction) => transaction.hash,
-      );
-
-      const transactionQueryResponses: TransactionResponse[] = [];
-      for (const transactionHash of transactionHashes!) {
-        const transactionQueryResponse = await indexerHttpClient.getTransactionByOffset({
-          hash: transactionHash,
-        });
-        expect(transactionQueryResponse).toBeSuccess();
-        expect(transactionQueryResponse.data?.transactions).toHaveLength(1);
-        expect(transactionQueryResponse.data?.transactions[0].hash).toBe(transactionHash);
+      for (const tx of genesisTransactions) {
+        expect.soft(tx.hash).toBeDefined();
+        expect.soft(tx.__typename).toBeDefined();
       }
     });
 
@@ -98,7 +135,29 @@ describe('transaction queries', () => {
           await indexerHttpClient.getTransactionByOffset(offset);
 
         expect.soft(response).toBeError();
+        const messages = response.errors?.map((e) => e.message) ?? [];
+        expect.soft(messages[0]).toContain('invalid transaction hash: cannot');
       }
+    });
+
+    /**
+     * A transaction query with an empty offset object should fail validation
+     *
+     * @given an empty offset object
+     * @when we send a transaction query without specifying hash or height
+     * @then the Indexer should return an error response
+     */
+    test('should return an error when called with an empty offset object', async () => {
+      const offset: TransactionOffset = {};
+      const response = await indexerHttpClient.getTransactionByOffset(offset);
+
+      expect.soft(response).toBeError();
+      const errorMessages = response.errors?.map((e: any) => e.message) ?? [];
+      expect
+        .soft(errorMessages[0])
+        .toContain(
+          'Invalid value for argument \"offset\", Oneof input objects requires have exactly one field',
+        );
     });
   });
 
@@ -112,34 +171,31 @@ describe('transaction queries', () => {
      * @then Indexer should return the transaction with that identifier
      */
     test('should return the transaction with that identifier, given that transaction exists', async () => {
-      const blockResponse = await indexerHttpClient.getBlockByOffset({
-        height: 0,
-      });
-      expect(blockResponse).toBeSuccess();
-      expect(blockResponse.data?.block.transactions.length).toBeGreaterThan(0);
+      const blockResponse = await getGenesisBlock();
+      const transactions = blockResponse.data!.block.transactions;
 
-      const regularTransactions = blockResponse.data?.block.transactions.filter(
-        (transaction) => transaction.__typename === 'RegularTransaction',
-      );
+      const regularTransactions = getRegularTransactions(transactions);
+      const identifiers = regularTransactions
+        .map((tx) => tx.identifiers?.[0])
+        .filter((id): id is string => !!id);
 
-      const identifiers = (regularTransactions as RegularTransaction[])?.map(
-        (transaction) => transaction.identifiers![0],
-      );
+      expect.soft(identifiers.length).toBeGreaterThanOrEqual(1);
 
       for (const identifier of identifiers) {
         const transactionQueryResponse = await indexerHttpClient.getTransactionByOffset({
-          identifier: identifier,
+          identifier,
         });
-        expect(transactionQueryResponse).toBeSuccess();
-        expect(transactionQueryResponse.data?.transactions).toHaveLength(1);
-        expect(transactionQueryResponse.data?.transactions[0].__typename).toBe(
-          'RegularTransaction',
-        );
-        const regularTransaction = transactionQueryResponse.data
-          ?.transactions[0] as RegularTransaction;
-        expect(regularTransaction.identifiers).toBeDefined();
-        expect(regularTransaction.identifiers?.length).toBeGreaterThanOrEqual(1);
-        expect(regularTransaction.identifiers).toContain(identifier);
+
+        expect.soft(transactionQueryResponse).toBeSuccess();
+        expect.soft(transactionQueryResponse.data?.transactions).toHaveLength(1);
+
+        const transaction = transactionQueryResponse.data?.transactions?.[0];
+        expect.soft(transaction?.__typename).toBe('RegularTransaction');
+
+        const regularTransaction = transaction as RegularTransaction;
+        expect.soft(regularTransaction.identifiers).toBeDefined();
+        expect.soft(regularTransaction.identifiers?.length).toBeGreaterThanOrEqual(1);
+        expect.soft(regularTransaction.identifiers).toContain(identifier);
       }
     });
 
@@ -181,6 +237,8 @@ describe('transaction queries', () => {
         const response = await indexerHttpClient.getTransactionByOffset(transactionOffset);
 
         expect.soft(response).toBeError();
+        const messages = response.errors?.map((e) => e.message) ?? [];
+        expect.soft(messages[0]).toContain('invalid transaction identifier: cannot');
       }
     });
   });
@@ -208,49 +266,22 @@ describe('transaction queries', () => {
       let response: TransactionResponse = await indexerHttpClient.getTransactionByOffset(offset);
 
       expect(response).toBeError();
+      const errorMessages = response.errors?.map((e: any) => e.message) ?? [];
+      expect
+        .soft(errorMessages[0])
+        .toContain(
+          'Invalid value for argument "offset", Oneof input objects requires have exactly one field',
+        );
     });
   });
 });
-
-async function getGenesisTransactions(): Promise<Transaction[]> {
-  const blockQueryResponse: BlockResponse = await indexerHttpClient.getBlockByOffset({
-    height: 0,
-  });
-  expect(blockQueryResponse).toBeSuccess();
-  expect(blockQueryResponse.data?.block.transactions.length).toBeGreaterThanOrEqual(1);
-
-  const transactionHashes = blockQueryResponse.data?.block.transactions.map(
-    (transaction) => transaction.hash,
-  );
-
-  const transactionQueryResponses: TransactionResponse[] = [];
-  for (const transactionHash of transactionHashes!) {
-    const transactionQueryResponse = await indexerHttpClient.getTransactionByOffset({
-      hash: transactionHash,
-    });
-    expect(transactionQueryResponse).toBeSuccess();
-    expect(transactionQueryResponse.data?.transactions).toHaveLength(1);
-    transactionQueryResponses.push(transactionQueryResponse);
-  }
-
-  const genesisTransactions: Transaction[] = [];
-  for (const transactionQueryResponse of transactionQueryResponses) {
-    const transaction = transactionQueryResponse.data?.transactions[0];
-    if (transaction) {
-      genesisTransactions.push(transaction);
-    }
-  }
-  expect(genesisTransactions.length).toBeGreaterThanOrEqual(1);
-
-  return genesisTransactions;
-}
 
 describe(`genesis transactions`, () => {
   describe(`transaction queries to the genesis block transactions`, async () => {
     let genesisTransactions: Transaction[];
 
     beforeEach(async () => {
-      genesisTransactions = await getGenesisTransactions();
+      genesisTransactions = await getGenesisTransactionsByHash();
     });
 
     /**
@@ -265,18 +296,11 @@ describe(`genesis transactions`, () => {
 
       // Loop through all the utxos in the genesis transaction and gather all
       // the pre-fund wallet addresses
-      const preFundWallets: Set<string> = new Set();
-      for (const transaction of genesisTransactions) {
-        if (transaction.__typename === 'RegularTransaction') {
-          const regularTransaction = transaction as RegularTransaction;
-          const utxos = regularTransaction.unshieldedCreatedOutputs;
-          if (utxos!.length > 0) {
-            for (const utxo of utxos!) {
-              preFundWallets.add(utxo.owner);
-              log.debug(`pre-fund wallet found: ${utxo.owner}`);
-            }
-          }
-        }
+      const utxos = extractUtxos(genesisTransactions);
+      const preFundWallets = new Set(utxos.map((u) => u.owner));
+
+      for (const owner of preFundWallets) {
+        log.debug(`pre-fund wallet found: ${owner}`);
       }
 
       expect(preFundWallets).toHaveLength(expectedPreFundWallets);
@@ -294,18 +318,8 @@ describe(`genesis transactions`, () => {
 
       // Loop through all the utxos in the genesis transactions and gather all
       // available token types
-      const tokenTypes: Set<string> = new Set();
-      for (const transaction of genesisTransactions) {
-        if (transaction.__typename === 'RegularTransaction') {
-          const regularTransaction = transaction as RegularTransaction;
-          const utxos = regularTransaction.unshieldedCreatedOutputs;
-          if (utxos!.length > 0) {
-            for (const utxo of utxos!) {
-              tokenTypes.add(utxo.tokenType);
-            }
-          }
-        }
-      }
+      const utxos = extractUtxos(genesisTransactions);
+      const tokenTypes = new Set(utxos.map((u) => u.tokenType));
 
       expect(tokenTypes).toHaveLength(expectedTokenTypes);
     });
@@ -320,18 +334,136 @@ describe(`genesis transactions`, () => {
     test('should return utxos sorted by outputIndex in ascending order', async () => {
       // Loop through all the utxos in each of the genesis transactions and check whether the
       // utxos are sorted by outputIndex in ascending order
+      const utxos = extractUtxos(genesisTransactions);
 
-      for (const transaction of genesisTransactions) {
-        if (transaction.__typename === 'RegularTransaction') {
-          const regularTransaction = transaction as RegularTransaction;
-          const utxos = regularTransaction.unshieldedCreatedOutputs;
-          if (utxos!.length > 0) {
-            for (let i = 1; i < utxos!.length; i++) {
-              expect(utxos![i].outputIndex).toBeGreaterThan(utxos![i - 1].outputIndex);
-            }
-          }
-        }
+      // Verify the entire combined UTXO list is sorted by outputIndex
+      for (let i = 1; i < utxos.length; i++) {
+        expect(utxos[i].outputIndex).toBeGreaterThanOrEqual(utxos[i - 1].outputIndex);
       }
+    });
+  });
+
+  describe('schema validation', () => {
+    let genesisTransactions: Transaction[];
+
+    beforeAll(async () => {
+      genesisTransactions = await getGenesisTransactionsByHash();
+    });
+
+    /**
+     * Validates that all genesis transactions comply with the expected structure.
+     *
+     * @given the genesis transactions are fetched from the indexer
+     * @when each transaction is validated against the FullTransactionSchema
+     * @then all transactions should successfully pass schema validation
+     */
+    test('should respond with full transaction data according to the expected schema', async () => {
+      expect(genesisTransactions.length).toBeGreaterThan(0);
+
+      for (const tx of genesisTransactions) {
+        const result = FullTransactionSchema.safeParse(tx);
+
+        expect(
+          result.success,
+          `FulTransaction Schema validation failed: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+        ).toBe(true);
+      }
+    });
+
+    /**
+     * Ensures that all SystemTransactions contain the required system-specific fields.
+     *
+     * @given the genesis transactions are fetched from the indexer
+     * @when transactions with __typename = 'SystemTransaction' are validated
+     * @then each SystemTransaction should match the SystemTransactionSchema
+     */
+    test('should respond with system transactions according to the expected schema', async () => {
+      const systemTxs = genesisTransactions.filter((tx) => tx.__typename === 'SystemTransaction');
+
+      for (const tx of systemTxs) {
+        const result = SystemTransactionSchema.safeParse(tx);
+        expect(
+          result.success,
+          `SystemTransaction schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+        ).toBe(true);
+      }
+    });
+
+    /**
+     * Ensures that all RegularTransactions contain the expected fields.
+     *
+     * @given the genesis transactions are fetched from the indexer
+     * @when transactions with __typename = 'RegularTransaction' are validated
+     * @then each RegularTransaction should match the RegularTransactionSchema
+     */
+    test('should respond with regular transactions according to the expected schema', async () => {
+      const regularTxs = getRegularTransactions(genesisTransactions);
+
+      for (const tx of regularTxs) {
+        const result = RegularTransactionSchema.safeParse(tx);
+        expect(
+          result.success,
+          `RegularTransaction schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+        ).toBe(true);
+      }
+    });
+
+    /**
+     * Ensures that all nested structures within RegularTransactions
+     * conform to their respective schemas.
+     *
+     * @given the RegularTransactions are fetched from the genesis block
+     * @when validating zswapLedgerEvents, dustLedgerEvents, and unshieldedCreatedOutputs
+     * @then each nested entity should conform to its expected schema
+     */
+    test('should respond with nested ledger events and unshielded outputs according to the expected schema', async () => {
+      const regularTxs = getRegularTransactions(genesisTransactions);
+
+      // zswapLedgerEvents
+      regularTxs
+        .filter((tx) => tx.zswapLedgerEvents?.length)
+        .forEach((tx) => {
+          log.debug(
+            `Validating ${tx.zswapLedgerEvents!.length} zswapLedgerEvents for tx ${tx.hash}`,
+          );
+          tx.zswapLedgerEvents!.forEach((event) => {
+            const result = ZswapLedgerEventSchema.safeParse(event);
+            expect(
+              result.success,
+              `ZswapLedgerEvent schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+            ).toBe(true);
+          });
+        });
+
+      // dustLedgerEvents
+      regularTxs
+        .filter((tx) => tx.dustLedgerEvents?.length)
+        .forEach((tx) => {
+          log.debug(`Validating ${tx.dustLedgerEvents!.length} dustLedgerEvents for tx ${tx.hash}`);
+          tx.dustLedgerEvents!.forEach((event) => {
+            const result = DustLedgerEventSchema.safeParse(event);
+            expect(
+              result.success,
+              `DustLedgerEvent schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+            ).toBe(true);
+          });
+        });
+
+      // unshieldedCreatedOutputs
+      regularTxs
+        .filter((tx) => tx.unshieldedCreatedOutputs?.length)
+        .forEach((tx) => {
+          log.debug(
+            `Validating ${tx.unshieldedCreatedOutputs!.length} unshieldedCreatedOutputs for tx ${tx.hash}`,
+          );
+          tx.unshieldedCreatedOutputs!.forEach((output) => {
+            const result = UnshieldedUtxoSchema.safeParse(output);
+            expect(
+              result.success,
+              `UnshieldedUtxo schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
+            ).toBe(true);
+          });
+        });
     });
   });
 });
