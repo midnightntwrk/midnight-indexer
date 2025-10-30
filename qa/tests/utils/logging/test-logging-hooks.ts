@@ -14,14 +14,13 @@
 // limitations under the License.
 
 import log from './logger';
-import { beforeEach, afterEach } from 'vitest';
 
 beforeEach(async () => {
   const testName = expect.getState().currentTestName;
   log.info(`STARTED TEST: ${testName}`);
 });
 
-afterEach(async (context) => {
+afterEach(async () => {
   const testName = expect.getState().currentTestName;
   log.info(`TEST COMPLETED: ${testName}\n\n`);
 });

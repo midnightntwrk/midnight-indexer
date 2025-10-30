@@ -30,7 +30,6 @@ describe('shielded transactions', () => {
   const sourceSeed = dataProvider.getFundingSeed();
   const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
 
-  let sourceAddress: string;
   let destinationAddress: string;
 
   beforeAll(async () => {
@@ -40,7 +39,6 @@ describe('shielded transactions', () => {
     await toolkit.start();
 
     // Derive shielded addresses from seeds
-    sourceAddress = (await toolkit.showAddress(sourceSeed)).shielded;
     destinationAddress = (await toolkit.showAddress(destinationSeed)).shielded;
 
     // Submit one shielded->shielded transfer (1 STAR)
@@ -101,13 +99,13 @@ describe('shielded transactions', () => {
      * @when we query transactions by the transaction hash
      * @then the indexer should return the expected transaction
      */
-    test('should be reported by the indexer through a transaction query by hash', async (context: TestContext) => {
-      context.task!.meta.custom = {
+    test('should be reported by the indexer through a transaction query by hash', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
         labels: ['Query', 'Transaction', 'ByHash', 'ShieldedTokens'],
         testKey: 'PM-17710',
       };
 
-      context.skip?.(
+      ctx.skip?.(
         transactionResult.status !== 'confirmed',
         "Toolkit transaction hasn't been confirmed",
       );
@@ -136,7 +134,7 @@ describe('shielded transactions', () => {
      */
     test.todo(
       'should be reported by the indexer through an shielded transaction event for the source address',
-      async (context: TestContext) => {
+      async () => {
         // Implement me
       },
     );
@@ -151,7 +149,7 @@ describe('shielded transactions', () => {
      */
     test.todo(
       'should be reported by the indexer through an shielded transaction event for the destination address',
-      async (context: TestContext) => {
+      async () => {
         // Implement me
       },
     );
@@ -166,7 +164,7 @@ describe('shielded transactions', () => {
      */
     test.todo(
       'should have transferred 1 token from the source to the destination address',
-      async (context: TestContext) => {
+      async () => {
         // Implement me but... can we really implement this test? We need to be able to view the transaction details in
         // the block and use the viewing key for that. Does the toolkit offer that level of support?
       },

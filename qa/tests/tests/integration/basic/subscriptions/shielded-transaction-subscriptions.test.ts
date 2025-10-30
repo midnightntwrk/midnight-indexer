@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { TestContext } from 'vitest';
 import { randomBytes } from 'crypto';
 import log from '@utils/logging/logger';
 import { LedgerNetworkId, env } from 'environment/model';
 import '@utils/logging/test-logging-hooks';
+import { TestContext } from 'vitest';
 import {
   IndexerWsClient,
   SubscriptionHandlers,
@@ -130,7 +130,7 @@ describe('shielded transaction subscriptions', () => {
      * @when we open a session with that viewing key
      * @then Indexer should return an error
      */
-    test('should return an error, given a valid viewing key meant for a different network', async (ctx: TestContext) => {
+    test('should return an error, given a valid viewing key meant for a different network', async (_ctx: TestContext) => {
       log.info(`Seed for viewing key = ${randomSeed}`);
 
       // Get all the ledger network ids

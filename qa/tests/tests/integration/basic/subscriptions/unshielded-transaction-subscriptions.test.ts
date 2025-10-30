@@ -31,7 +31,6 @@ import type {
   UnshieldedTransactionsProgress,
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
-import { TestContext } from 'vitest';
 import {
   UnshieldedTransactionEventSchema,
   UnshieldedTransactionsProgressSchema,
@@ -388,13 +387,7 @@ describe('unshielded transaction subscriptions', async () => {
      * @and we should receive a progress message with the highest transaction ID
      * @and the highest transaction ID in events should match the progress message
      */
-    test('should return a stream of transactions containing that address, starting from transaction id = 0', async ({
-      task,
-    }: TestContext) => {
-      // task!.meta.custom = {
-      //   labels: ['UnshieldedTokens', 'Subscription', 'Transaction'],
-      // };
-
+    test('should return a stream of transactions containing that address, starting from transaction id = 0', async () => {
       const targetTransactionId = 0;
       const targetAddress = dataProvider.getUnshieldedAddress('existing');
 
@@ -483,15 +476,11 @@ describe('unshielded transaction subscriptions', async () => {
       );
 
       // We expect exactly one (non-error) message ...
+      expect(Array.isArray(messages)).toBe(true);
       expect(messages.length).toBe(1);
-      expect(
-        messages[0].errors,
-        `Received unexpected error message: ${JSON.stringify(messages[0].errors)}`,
-      ).toBeUndefined();
-      expect(messages[0].data).toBeDefined();
-      expect(messages[0].data).not.toBeNull();
-      expect(messages[0].data?.unshieldedTransactions).toBeDefined();
-      expect(messages[0].data?.unshieldedTransactions).not.toBeNull();
+      expect(messages[0]).toBeSuccess();
+      expect(messages[0].data!.unshieldedTransactions).toBeDefined();
+      expect(messages[0].data!.unshieldedTransactions).not.toBeNull();
 
       // ... to be of UnshieldedTransactionsProgress type ...
       const transactionEvent: UnshieldedTransactionEvent = messages[0].data
@@ -508,7 +497,6 @@ describe('unshielded transaction subscriptions', async () => {
      * @then we should receive transaction events that start from the specified transaction ID
      */
     test('should start a transaction stream from the given transaction id', async () => {
-      const targetTransactionId = 4294967296; // 2^32
       const targetAddress = dataProvider.getUnshieldedAddress('existing');
 
       let messages = await subscribeToUnshieldedTransactionEvents(
@@ -517,7 +505,6 @@ describe('unshielded transaction subscriptions', async () => {
         500,
       );
 
-      let highestTransactionId = -1;
       let foundTransactionIds: number[] = [];
 
       // For each message, if it's a progress message, we update the highest transaction id
@@ -527,18 +514,14 @@ describe('unshielded transaction subscriptions', async () => {
           msg.errors,
           `Received unexpected error message: ${JSON.stringify(msg.errors)}`,
         ).toBeUndefined();
-        expect(msg.data).toBeDefined();
-        expect(msg.data).not.toBeNull();
-        expect(msg.data?.unshieldedTransactions).toBeDefined();
-        expect(msg.data?.unshieldedTransactions).not.toBeNull();
+        expect(msg).toBeSuccess();
+        expect(msg.data!.unshieldedTransactions).toBeDefined();
+        expect(msg.data!.unshieldedTransactions).not.toBeNull();
 
         const transactionEvent: UnshieldedTransactionEvent = msg.data
           ?.unshieldedTransactions as UnshieldedTransactionEvent;
 
-        if (transactionEvent.__typename === 'UnshieldedTransactionsProgress') {
-          const transactionProgressEvent = transactionEvent as UnshieldedTransactionsProgress;
-          highestTransactionId = transactionProgressEvent.highestTransactionId;
-        } else if (transactionEvent.__typename === 'UnshieldedTransaction') {
+        if (transactionEvent.__typename === 'UnshieldedTransaction') {
           const unshieldedTransaction = transactionEvent as UnshieldedTransaction;
           foundTransactionIds.push(unshieldedTransaction.transaction.id!);
         }
@@ -553,17 +536,15 @@ describe('unshielded transaction subscriptions', async () => {
       log.debug(`Random transaction id: ${randomTransactionId}`);
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: randomTransactionId },
-        (messages) => false,
+        (_messages: UnshieldedTxSubscriptionResponse[]) => false,
         1000,
       );
 
       expect(messages.length).toBeGreaterThanOrEqual(1);
       messages.forEach((msg) => {
-        expect(msg.errors).toBeUndefined();
-        expect(msg.data).toBeDefined();
-        expect(msg.data).not.toBeNull();
-        expect(msg.data?.unshieldedTransactions).toBeDefined();
-        expect(msg.data?.unshieldedTransactions).not.toBeNull();
+        expect(msg).toBeSuccess();
+        expect(msg.data!.unshieldedTransactions).toBeDefined();
+        expect(msg.data!.unshieldedTransactions).not.toBeNull();
 
         const transactionEvent: UnshieldedTransactionEvent = msg.data
           ?.unshieldedTransactions as UnshieldedTransactionEvent;
@@ -588,12 +569,13 @@ describe('unshielded transaction subscriptions', async () => {
 
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress, transactionId: 0 },
-        (messages) => false,
+        (_messages: UnshieldedTxSubscriptionResponse[]) => false,
         1000,
       );
 
+      expect(Array.isArray(messages)).toBe(true);
       expect(messages.length).toBe(1);
-      expect(messages[0].errors).toBeDefined();
+      expect(messages[0]).toBeError();
       expect((messages[0].errors as GraphQLError[])[0].message).toMatch(/^invalid address/);
     });
   });

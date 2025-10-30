@@ -122,7 +122,9 @@ describe('graphql health checks', () => {
     test('should return the supported graphql schema', async () => {
       const query = INTROSPECTION_QUERY;
       const response: GraphQLResponse<IntrospectionQuery> = await (
-        httpClient as any
+        httpClient as unknown as {
+          client: { rawRequest: (query: string) => Promise<GraphQLResponse<IntrospectionQuery>> };
+        }
       ).client.rawRequest(query);
 
       expect(response).toBeSuccess();
@@ -143,7 +145,9 @@ describe('graphql health checks', () => {
     test('should return an error, given the depth of the query is > 15', async () => {
       const query = BIG_INTROSPECTION_QUERY;
       const response: GraphQLResponse<IntrospectionQuery> = await (
-        httpClient as any
+        httpClient as unknown as {
+          client: { rawRequest: (query: string) => Promise<GraphQLResponse<IntrospectionQuery>> };
+        }
       ).client.rawRequest(query);
 
       expect(response).toBeError();

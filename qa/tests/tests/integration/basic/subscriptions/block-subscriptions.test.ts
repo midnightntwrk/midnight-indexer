@@ -27,23 +27,6 @@ import {
 import { EventCoordinator } from '@utils/event-coordinator';
 import type { TestContext } from 'vitest';
 
-/**
- * Utility function that waits for all events to be received or timeout after a given number of milliseconds
- * (default 3 seconds)
- *
- * @param events - The events to wait for
- * @param timeout - The timeout in milliseconds
- * @returns A promise that resolves to the result of the events or rejects with an error if the timeout is reached
- */
-function waitForEventsOrTimeout(events: Promise<void>[], timeout: number = 3000): Promise<unknown> {
-  return Promise.race([
-    Promise.all(events),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Timeout waiting for events')), timeout),
-    ),
-  ]);
-}
-
 describe('block subscriptions', () => {
   let indexerWsClient: IndexerWsClient;
   let indexerHttpClient: IndexerHttpClient;

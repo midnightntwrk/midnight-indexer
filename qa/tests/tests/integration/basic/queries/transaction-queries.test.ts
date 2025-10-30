@@ -16,6 +16,7 @@
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
+import { GraphQLError } from 'graphql/error/GraphQLError';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import type {
   BlockResponse,
@@ -55,6 +56,7 @@ async function getGenesisTransactionsByHash(): Promise<Transaction[]> {
   for (const hash of transactionHashes) {
     const response = await indexerHttpClient.getTransactionByOffset({ hash });
     expect(response).toBeSuccess();
+    expect(Array.isArray(response.data?.transactions)).toBe(true);
     expect(response.data?.transactions).toHaveLength(1);
 
     if (response.data?.transactions[0]) {
@@ -88,6 +90,7 @@ describe('transaction queries', () => {
      */
     test(`should return the transaction with that hash, given that transaction exists`, async () => {
       const genesisTransactions = await getGenesisTransactionsByHash();
+      expect(Array.isArray(genesisTransactions)).toBe(true);
       expect(genesisTransactions.length).toBeGreaterThanOrEqual(1);
 
       for (const tx of genesisTransactions) {
@@ -152,11 +155,11 @@ describe('transaction queries', () => {
       const response = await indexerHttpClient.getTransactionByOffset(offset);
 
       expect.soft(response).toBeError();
-      const errorMessages = response.errors?.map((e: any) => e.message) ?? [];
+      const errorMessages = response.errors?.map((e: GraphQLError) => e.message) ?? [];
       expect
         .soft(errorMessages[0])
         .toContain(
-          'Invalid value for argument \"offset\", Oneof input objects requires have exactly one field',
+          'Invalid value for argument "offset", Oneof input objects requires have exactly one field',
         );
     });
   });
@@ -266,7 +269,7 @@ describe('transaction queries', () => {
       let response: TransactionResponse = await indexerHttpClient.getTransactionByOffset(offset);
 
       expect(response).toBeError();
-      const errorMessages = response.errors?.map((e: any) => e.message) ?? [];
+      const errorMessages = response.errors?.map((e: GraphQLError) => e.message) ?? [];
       expect
         .soft(errorMessages[0])
         .toContain(

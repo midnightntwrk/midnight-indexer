@@ -30,12 +30,6 @@ if (!existsSync(SESSION_PATH_FILE)) {
 }
 const SESSION_DIR = readFileSync(SESSION_PATH_FILE, 'utf8').trim();
 
-const SESSION_TS = new Date()
-  .toISOString()
-  .replace(/T/, '_')
-  .replace(/:/g, '-')
-  .replace(/\..+/, '');
-
 // Can we do this differently, lookout for a library that can help with this
 // I mean this works but it's quite horrible
 function formatTime(): string {
@@ -52,16 +46,16 @@ function formatTime(): string {
 const prettyOpts = {
   translateTime: 'SYS:dd-mm-yy HH:MM:ss',
   ignore: 'pid,hostname',
-  messageFormat: (log: any, messageKey: string, levelLabel: string) => {
+  messageFormat: (log: unknown, messageKey: string, levelLabel: string) => {
     const lvl = levelLabel.toUpperCase().padEnd(5);
-    return `[${log.time}] ${lvl}: ${log[messageKey]}`;
+    return `[${(log as { time: string }).time}] ${lvl}: ${(log as Record<string, unknown>)[messageKey]}`;
   },
 };
 
 type LogLevel = 'TRACE' | 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL';
 const LEVEL = (process.env.LOG_LEVEL ?? 'WARN').toUpperCase() as LogLevel;
 const consoleLogger = pino(
-  { level: LEVEL, timestamp: () => `,\"time\":\"${new Date().toISOString()}\"` },
+  { level: LEVEL, timestamp: () => `,"time":"${new Date().toISOString()}"` },
   pino.multistream([{ level: LEVEL, stream: pretty({ ...prettyOpts, colorize: true }) }]),
 );
 
@@ -82,17 +76,20 @@ function getFileStream(testPath: string): WriteStream {
 // the cli logging requires some revising)
 const log: Logger = new Proxy(consoleLogger, {
   get(target, prop: string) {
-    const orig = (target as any)[prop];
+    const orig = (target as unknown as Record<string, unknown>)[prop];
     if (typeof orig !== 'function') {
       return orig;
     }
-    return (...args: any[]) => {
+    return (...args: unknown[]) => {
       orig.apply(target, args);
 
       let testPath: string | undefined;
       try {
-        testPath = (expect as any).getState().testPath;
-      } catch {}
+        testPath = (expect as unknown as { getState: () => { testPath: string } }).getState()
+          .testPath;
+      } catch {
+        // Intentionally ignore - testPath will remain undefined if not in test context
+      }
 
       if (testPath) {
         const stream = getFileStream(testPath);
