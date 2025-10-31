@@ -56,7 +56,7 @@ describe('block subscriptions', () => {
       next: (payload: BlockSubscriptionResponse) => {
         log.debug(`Received data:\n${JSON.stringify(payload)}`);
         receivedBlocks.push(payload);
-        if (receivedBlocks.length === 2) {
+        if (receivedBlocks.length === expectedCount) {
           eventCoordinator.notify('twoBlocksReceived');
           log.debug('Two blocks received');
           indexerWsClient.send<GraphQLCompleteMessage>({
