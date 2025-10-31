@@ -61,14 +61,19 @@ where
         try_stream! {
             debug!(id; "streaming existing events");
 
-            let ledger_events = storage.get_ledger_events(LedgerEventGrouping::Dust, id, BATCH_SIZE).await;
+            let ledger_events = storage
+                .get_ledger_events(LedgerEventGrouping::Dust, id, BATCH_SIZE)
+                .await;
             let mut ledger_events = pin!(ledger_events);
             while let Some(ledger_event) = get_next_ledger_event(&mut ledger_events)
                 .await
                 .map_err_into_server_error(|| format!("get next ledger event at id {id}"))?
             {
-                id = ledger_event.id + 1;
-                yield ledger_event.into();
+                let ledger_event_id = ledger_event.id;
+                id = ledger_event_id + 1;
+                yield ledger_event.try_into().map_err_into_server_error(|| {
+                    format!("unexpected dust ledger event with ID {ledger_event_id}")
+                })?;
             }
 
             debug!(id; "streaming live events");
@@ -81,14 +86,19 @@ where
             {
                 debug!(id; "streaming next events");
 
-                let ledger_events = storage.get_ledger_events(LedgerEventGrouping::Dust, id, BATCH_SIZE).await;
+                let ledger_events = storage
+                    .get_ledger_events(LedgerEventGrouping::Dust, id, BATCH_SIZE)
+                    .await;
                 let mut ledger_events = pin!(ledger_events);
                 while let Some(ledger_event) = get_next_ledger_event(&mut ledger_events)
                     .await
                     .map_err_into_server_error(|| format!("get next ledger event at id {id}"))?
                 {
-                    id = ledger_event.id + 1;
-                    yield ledger_event.into();
+                    let ledger_event_id = ledger_event.id;
+                    id = ledger_event_id + 1;
+                    yield ledger_event.try_into().map_err_into_server_error(|| {
+                        format!("unexpected dust ledger event with ID {ledger_event_id}")
+                    })?;
                 }
             }
 
