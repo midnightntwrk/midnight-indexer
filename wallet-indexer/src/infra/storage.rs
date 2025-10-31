@@ -100,7 +100,7 @@ impl domain::storage::Storage for Storage {
         _wallet_id: Uuid,
     ) -> Result<Option<SqlxTransaction<Self::Database>>, sqlx::Error> {
         // SQLite doesn't support advisory locks like PostgreSQL. But in standalone mode (single
-        // instance) we need not exclude other, i.e. "locking" is always successful.
+        // instance) we need not exclude other replicas, i.e. "locking" is always successful.
         let tx = self.pool.begin().await?;
         Ok(Some(tx))
     }
@@ -190,8 +190,7 @@ impl domain::storage::Storage for Storage {
     }
 
     #[trace]
-    async fn active_wallets(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error> {
-        // Query wallets.
+    async fn active_wallet_ids(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error> {
         let query = indoc! {"
             SELECT
                 id,
@@ -205,12 +204,13 @@ impl domain::storage::Storage for Storage {
             .try_collect::<Vec<_>>()
             .await?;
 
-        // Mark inactive wallets.
-        let now = OffsetDateTime::now_utc();
+        let min_last_active = OffsetDateTime::now_utc() - ttl;
+
         let outdated_ids = wallets
             .iter()
-            .filter_map(|&(id, last_active)| (now - last_active > ttl).then_some(id))
+            .filter_map(|&(id, last_active)| (last_active < min_last_active).then_some(id))
             .collect::<Vec<_>>();
+
         if !outdated_ids.is_empty() {
             #[cfg(feature = "cloud")]
             {
@@ -220,6 +220,7 @@ impl domain::storage::Storage for Storage {
                     UPDATE wallets
                     SET active = FALSE
                     WHERE id = ANY($1)
+                    AND last_active < $2
                 "};
 
                 // This could cause a "deadlock_detected" error when the indexer-api sets a wallet
@@ -227,6 +228,7 @@ impl domain::storage::Storage for Storage {
                 // be executed "very soon" again.
                 sqlx::query(query)
                     .bind(outdated_ids)
+                    .bind(min_last_active)
                     .execute(&*self.pool)
                     .await
                     .map(|_| ())
@@ -240,17 +242,22 @@ impl domain::storage::Storage for Storage {
                 let query = indoc! {"
                     UPDATE wallets
                     SET active = FALSE
-                    WHERE id = ?
+                    WHERE id = $1
+                    AND last_active < $2
                 "};
 
-                sqlx::query(query).bind(id).execute(&*self.pool).await?;
+                sqlx::query(query)
+                    .bind(id)
+                    .bind(min_last_active)
+                    .execute(&*self.pool)
+                    .await?;
             }
         }
 
         // Return active wallet IDs.
         let ids = wallets
             .into_iter()
-            .filter_map(|(id, last_active)| (now - last_active <= ttl).then_some(id))
+            .filter_map(|(id, last_active)| (last_active >= min_last_active).then_some(id))
             .collect::<Vec<_>>();
         Ok(ids)
     }

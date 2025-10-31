@@ -15,7 +15,6 @@
 
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
-import { env } from '../../environment/model';
 import log from '@utils/logging/logger';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
@@ -24,6 +23,7 @@ import {
   DeployContractResult,
   ToolkitTransactionResult,
 } from '@utils/toolkit/toolkit-wrapper';
+import { Transaction } from '@utils/indexer/indexer-types';
 
 const TOOLKIT_WRAPPER_TIMEOUT = 60_000; // 1 minute
 const CONTRACT_ACTION_TIMEOUT = 150_000; // 2.5 minutes
@@ -76,7 +76,7 @@ describe.sequential('contract actions', () => {
 
         // Find our specific transaction by hash
         const foundTransaction = transactionResponse.data?.transactions?.find(
-          (tx: any) => tx.hash === deployTxHash,
+          (tx: Transaction) => tx.hash === deployTxHash,
         );
 
         expect(foundTransaction).toBeDefined();
@@ -112,7 +112,7 @@ describe.sequential('contract actions', () => {
 
         // Find our specific transaction in the block
         const foundTransaction = blockResponse.data?.block?.transactions?.find(
-          (tx: any) => tx.hash === deployTxHash,
+          (tx: Transaction) => tx.hash === deployTxHash,
         );
 
         expect(foundTransaction?.hash).toBe(deployTxHash);
@@ -204,7 +204,7 @@ describe.sequential('contract actions', () => {
 
         // Find our specific transaction by hash
         const foundTransaction = transactionResponse.data?.transactions?.find(
-          (tx: any) => tx.hash === contractCallTransactionHash,
+          (tx: Transaction) => tx.hash === contractCallTransactionHash,
         );
 
         expect(foundTransaction).toBeDefined();
@@ -292,7 +292,7 @@ describe.sequential('contract actions', () => {
      */
     test.todo(
       'should be reported by the indexer through a transaction query by hash',
-      async (context: TestContext) => {},
+      async () => {},
       TEST_TIMEOUT,
     );
 
@@ -306,7 +306,7 @@ describe.sequential('contract actions', () => {
      */
     test.todo(
       'should be reported by the indexer through a block query by hash',
-      async (context: TestContext) => {},
+      async () => {},
       TEST_TIMEOUT,
     );
 
@@ -320,7 +320,7 @@ describe.sequential('contract actions', () => {
      */
     test.todo(
       'should be reported by the indexer through a contract action query by address',
-      async (context: TestContext) => {},
+      async () => {},
       TEST_TIMEOUT,
     );
   });

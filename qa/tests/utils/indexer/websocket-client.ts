@@ -212,7 +212,7 @@ export class IndexerWsClient {
    * Terminates the underlying WebSocket connection to the indexer.
    */
   async connectionClose(): Promise<void> {
-    const closePromise = new Promise<void>((resolve, reject) => {
+    const closePromise = new Promise<void>((resolve, _reject) => {
       const onClose = () => {
         this.ws.removeEventListener('close', onClose);
         resolve();

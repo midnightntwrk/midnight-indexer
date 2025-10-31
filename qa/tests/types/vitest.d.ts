@@ -14,7 +14,7 @@
 // limitations under the License.
 
 declare module 'vitest' {
-  interface Assertion<T> {
+  interface Assertion {
     toBeError(): void;
     toBeSuccess(): void;
   }
@@ -24,7 +24,7 @@ declare module 'vitest' {
     task?: {
       meta: {
         done?: boolean;
-        custom?: Record<string, any>;
+        custom?: Record<string, unknown>;
       };
     };
   }

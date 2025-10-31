@@ -35,6 +35,7 @@ export default defineConfig({
     alias: {
       graphql: path.resolve(__dirname, 'node_modules/graphql'),
       '@utils': path.resolve(__dirname, './utils'),
+      environment: path.resolve(__dirname, './environment'),
     },
     conditions: ['node'],
     mainFields: ['module', 'main'],

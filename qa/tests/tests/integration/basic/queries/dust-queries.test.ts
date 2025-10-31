@@ -222,11 +222,12 @@ describe('dust generation status queries', () => {
         await indexerHttpClient.getDustGenerationStatus(stakeKeys);
 
       expect(response).toBeSuccess();
-      expect(response.data?.dustGenerationStatus).toBeDefined();
-      expect(response.data?.dustGenerationStatus).toHaveLength(2);
+      expect(response.data!.dustGenerationStatus).toBeDefined();
+      expect(Array.isArray(response.data!.dustGenerationStatus)).toBe(true);
+      expect(response.data!.dustGenerationStatus).toHaveLength(2);
 
       // Validate each status against the schema
-      for (const status of response.data?.dustGenerationStatus!) {
+      for (const status of response.data!.dustGenerationStatus) {
         log.debug(`Validating schema for stake key: ${status.cardanoStakeKey}`);
         const validationResult = DustGenerationStatusSchema.safeParse(status);
         expect(

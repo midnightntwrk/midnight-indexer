@@ -81,7 +81,7 @@ function flattenTests(
   time: number;
   failureMessage?: string;
   startTime?: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }[] {
   const results: {
     suiteName: string;
@@ -90,7 +90,7 @@ function flattenTests(
     time: number;
     failureMessage?: string;
     startTime?: number;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   }[] = [];
 
   const currentNames = [...parentNames, suite.name];
@@ -104,7 +104,6 @@ function flattenTests(
       // Extract timing information
       const startTime = result?.startTime || Date.now();
       const duration = result?.duration || 0;
-      const endTime = startTime + duration;
 
       // You can use the following information but note that not everything
       // might be available, especially the "describe()" strings
@@ -130,7 +129,7 @@ function flattenTests(
         time: duration / 1000, // Convert to seconds
         failureMessage: result?.errors?.[0]?.message,
         startTime: startTime,
-        metadata: (task as any).meta, // Extract task metadata
+        metadata: (task as unknown as { meta: Record<string, unknown> }).meta, // Extract task metadata
       });
 
       // console.debug('results.at(-1).suiteName: ', results.at(-1)?.suiteName);
@@ -180,14 +179,14 @@ export default class XRayJsonReporter implements Reporter {
     console.debug(` XRAY_PROJECT_KEY: ${xrayProjectKey}`);
 
     // Group tests by suite for better organization
-    const grouped = testcases.reduce(
-      (acc, tc) => {
-        if (!acc[tc.suiteName]) acc[tc.suiteName] = [];
-        acc[tc.suiteName].push(tc);
-        return acc;
-      },
-      {} as Record<string, typeof testcases>,
-    );
+    // const grouped = testcases.reduce(
+    //   (acc, tc) => {
+    //     if (!acc[tc.suiteName]) acc[tc.suiteName] = [];
+    //     acc[tc.suiteName].push(tc);
+    //     return acc;
+    //   },
+    //   {} as Record<string, typeof testcases>,
+    // );
 
     // Convert test cases to XRay format
     const xrayTests: XRayTest[] = testcases.flatMap((test) => {
@@ -215,14 +214,18 @@ export default class XRayJsonReporter implements Reporter {
 
       // Managing labels as metadata
       testData.testInfo.labels = ['Xray']; // Default label
-      if (test.metadata?.custom?.labels) {
-        testData.testInfo.labels.push(...test.metadata.custom?.labels);
+      if (test.metadata?.custom) {
+        const custom = test.metadata.custom as { labels?: string[] };
+        if (custom.labels) {
+          testData.testInfo.labels.push(...custom.labels);
+        }
       }
 
       // Managing the test key if available
-      if (test.testName) {
-        if (test.metadata?.custom?.testKey) {
-          testData.testKey = test.metadata.custom.testKey;
+      if (test.testName && test.metadata?.custom) {
+        const custom = test.metadata.custom as { testKey?: string };
+        if (custom.testKey) {
+          testData.testKey = custom.testKey;
         }
       }
 

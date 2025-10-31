@@ -13,11 +13,13 @@
 
 use crate::domain::storage::Storage;
 use anyhow::Context;
+use async_stream::try_stream;
+use dashmap::DashMap;
 use fastrace::trace;
-use futures::{Stream, StreamExt, TryStreamExt, future::ok, stream};
+use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{BlockIndexed, Publisher, Subscriber, WalletIndexed};
 use itertools::Itertools;
-use log::warn;
+use log::{debug, error, warn};
 use serde::Deserialize;
 use std::{
     num::NonZeroUsize,
@@ -25,23 +27,23 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
-use tokio::{select, signal::unix::Signal, task};
+use tokio::{select, signal::unix::Signal, sync::Semaphore, task, time::sleep};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     #[serde(with = "humantime_serde")]
-    pub active_wallets_repeat_delay: Duration,
+    pub active_wallets_query_delay: Duration,
 
     #[serde(with = "humantime_serde")]
     pub active_wallets_ttl: Duration,
 
     pub transaction_batch_size: NonZeroUsize,
 
-    #[serde(default = "parallelism_default")]
-    pub parallelism: NonZeroUsize,
+    #[serde(default = "concurrency_limit_default")]
+    pub concurrency_limit: NonZeroUsize,
 }
 
 pub async fn run(
@@ -52,10 +54,10 @@ pub async fn run(
     mut sigterm: Signal,
 ) -> anyhow::Result<()> {
     let Config {
-        active_wallets_repeat_delay,
+        active_wallets_query_delay,
         active_wallets_ttl,
         transaction_batch_size,
-        parallelism,
+        concurrency_limit,
     } = config;
 
     // Shared counter for the maximum transaction ID observed in BlockIndexed events. This allows
@@ -72,7 +74,9 @@ pub async fn run(
 
             block_indexed_stream
                 .try_for_each(|block_indexed| {
-                    if let Some(id) = block_indexed.max_transaction_id {
+                    if let Some(id) = block_indexed.max_transaction_id
+                        && id > max_transaction_id.load(Ordering::Acquire)
+                    {
                         max_transaction_id.store(id, Ordering::Release);
                     }
                     ok(())
@@ -80,31 +84,52 @@ pub async fn run(
                 .await
                 .context("cannot get next BlockIndexed event")?;
 
+            error!("block_indexed_task completed unexpectedly");
+
             Ok::<(), anyhow::Error>(())
         }
     });
 
     let index_wallets_task = {
         task::spawn(async move {
-            active_wallets(active_wallets_repeat_delay, active_wallets_ttl, &storage)
-                .map(|result| result.context("get next active wallet"))
-                .try_for_each_concurrent(Some(parallelism.get()), |wallet_id| {
+            // As wallet IDs are cycled (see comment of `active_wallet_ids`), we prevent concurrent
+            // processing of the same wallet by using a semaphore of one (see below) per wallet ID.
+            let worker_by_wallet_id = Arc::new(DashMap::new());
+
+            active_wallet_ids(active_wallets_query_delay, active_wallets_ttl, &storage)
+                .map(|result| result.context("get next active wallet ID"))
+                .try_for_each_concurrent(Some(concurrency_limit.get()), |wallet_id| {
+                    let worker_by_wallet_id = worker_by_wallet_id.clone();
                     let max_transaction_id = max_transaction_id.clone();
                     let mut publisher = publisher.clone();
                     let mut storage = storage.clone();
 
                     async move {
-                        index_wallet(
-                            wallet_id,
-                            transaction_batch_size,
-                            max_transaction_id,
-                            &mut publisher,
-                            &mut storage,
-                        )
-                        .await
+                        let permit = worker_by_wallet_id
+                            .entry(wallet_id)
+                            .or_insert_with(|| Arc::new(Semaphore::new(1)))
+                            .clone()
+                            .try_acquire_owned();
+
+                        if permit.is_ok() {
+                            index_wallet(
+                                wallet_id,
+                                transaction_batch_size,
+                                max_transaction_id,
+                                &mut publisher,
+                                &mut storage,
+                            )
+                            .await?;
+                        }
+
+                        Ok(())
                     }
                 })
-                .await
+                .await?;
+
+            error!("index_wallets_task completed unexpectedly");
+
+            Ok::<(), anyhow::Error>(())
         })
     };
 
@@ -124,16 +149,43 @@ pub async fn run(
     }
 }
 
-fn active_wallets(
-    active_wallets_repeat_delay: Duration,
+/// Repeatedly query the active wallet IDs with the given delay between repetitions and continuously
+/// stream the ones of the current repetition in a cycle. This only hits the database once per
+/// repetition but keeps the stream "hot" (fast producer), yet means that newly connected wallets
+/// are only indexed once the current repetition ends. Therefore a balance between database load and
+/// wallet latency needs to be found; reasonable values for the delay seem to be between 100ms and
+/// 1000ms.
+fn active_wallet_ids(
+    active_wallets_query_delay: Duration,
     active_wallets_ttl: Duration,
     storage: &impl Storage,
 ) -> impl Stream<Item = Result<Uuid, sqlx::Error>> + '_ {
-    tokio_stream::StreamExt::throttle(stream::repeat(()), active_wallets_repeat_delay)
-        .map(|_| Ok::<_, sqlx::Error>(()))
-        .and_then(move |_| storage.active_wallets(active_wallets_ttl))
-        .map_ok(|wallets| stream::iter(wallets).map(Ok))
-        .try_flatten()
+    try_stream! {
+        loop {
+            // Query the current active wallet IDs.
+            let wallet_ids = storage.active_wallet_ids(active_wallets_ttl).await?;
+
+            if wallet_ids.is_empty() {
+                sleep(active_wallets_query_delay).await;
+                continue;
+            }
+
+            let deadline = Instant::now() + active_wallets_query_delay;
+
+            // First we stream all current wallet IDs exactly once, regardless of the deadline.
+            for &wallet_id in &wallet_ids {
+                yield wallet_id
+            }
+
+            // Then we cycle the current wallet IDs until the deadline is reached.
+            for wallet_id in wallet_ids.into_iter().cycle() {
+                if Instant::now() > deadline {
+                    break;
+                }
+                yield wallet_id
+            }
+        }
+    }
 }
 
 #[trace(properties = { "wallet_id": "{wallet_id}" })]
@@ -199,6 +251,7 @@ async fn index_wallet(
 
         if !relevant_transactions.is_empty() {
             let session_id = wallet.viewing_key.to_session_id();
+
             publisher
                 .publish(&WalletIndexed { session_id })
                 .await
@@ -206,11 +259,18 @@ async fn index_wallet(
                     format!("publish WalletIndexed event for wallet ID {wallet_id}")
                 })?;
         }
+
+        debug!(
+            wallet_id:%,
+            last_indexed_transaction_id,
+            relevant_transactions_len = relevant_transactions.len();
+            "wallet indexed"
+        );
     }
 
     Ok(())
 }
 
-fn parallelism_default() -> NonZeroUsize {
+fn concurrency_limit_default() -> NonZeroUsize {
     std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN)
 }

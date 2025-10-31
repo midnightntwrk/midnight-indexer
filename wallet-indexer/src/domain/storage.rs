@@ -29,8 +29,9 @@ where
     /// Sqlx transaction.
     type Database: sqlx::Database;
 
-    /// Try to acquire an application level lock for the given session ID. Return a transaction if
-    /// and only if possible.
+    /// Try to acquire an application level lock for the given session ID to prevent multiple
+    /// replicas from concurrent wallet processing. Return a transaction if and only if
+    /// possible.
     async fn acquire_lock(
         &mut self,
         wallet_id: Uuid,
@@ -56,7 +57,7 @@ where
     ) -> Result<(), sqlx::Error>;
 
     /// Get the IDs of active walltes, thereby marking "old" ones inactive.
-    async fn active_wallets(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error>;
+    async fn active_wallet_ids(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error>;
 
     /// Get the wallet with the given session ID.
     async fn get_wallet_by_id(

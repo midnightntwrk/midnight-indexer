@@ -15,7 +15,7 @@ use crate::domain::Api;
 use anyhow::Context as AnyhowContext;
 use futures::{TryStreamExt, future::ok};
 use indexer_common::domain::{BlockIndexed, NetworkId, Subscriber};
-use log::{debug, warn};
+use log::{debug, error, warn};
 use serde::Deserialize;
 use std::sync::{
     Arc,
@@ -54,6 +54,8 @@ pub async fn run(
                 .await
                 .context("cannot get next BlockIndexed event")?;
 
+            error!("block_indexed_task completed unexpectedly");
+
             Ok::<(), anyhow::Error>(())
         }
     });
@@ -62,7 +64,11 @@ pub async fn run(
         task::spawn(async move {
             api.serve(network_id, caught_up)
                 .await
-                .context("serving API")
+                .context("serving API")?;
+
+            error!("serve_api_task completed unexpectedly");
+
+            Ok::<(), anyhow::Error>(())
         })
     };
 
