@@ -22,10 +22,8 @@ import {
   ContractActionSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
-import type { TestContext } from 'vitest';
-import {
-  ContractActionUnionSchema
-} from '@utils/indexer/graphql/schema';
+import { ContractActionUnionSchema } from '@utils/indexer/graphql/schema';
+import { BlockOffset } from '@utils/indexer/indexer-types';
 
 // ContractActionSubscriptionResponse is now imported from websocket-client
 
@@ -124,7 +122,6 @@ describe('contract action subscriptions', () => {
      * @then each received contract action should match its corresponding Zod schema
      */
     test('should stream contract actions adhering to the expected schema', async () => {
-      const contractAddress = dataProvider.getKnownContractAddress();
       const receivedContractActions = await collectContractActions(2);
 
       receivedContractActions

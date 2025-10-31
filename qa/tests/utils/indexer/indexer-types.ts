@@ -113,6 +113,7 @@ export interface RegularTransaction extends Transaction {
 }
 
 // SystemTransaction interface (only base fields)
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface SystemTransaction extends Transaction {
   // No additional fields beyond the base Transaction interface
 }
