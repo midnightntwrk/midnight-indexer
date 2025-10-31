@@ -108,11 +108,11 @@ describe('contract action subscriptions', () => {
       receivedContractActions
         .filter((msg) => msg.data?.contractActions)
         .forEach((msg) => {
-          const action = msg.data?.contractActions;
+          const contractAction = msg.data?.contractActions;
           expect(['ContractDeploy', 'ContractCall', 'ContractUpdate']).toContain(
-            action?.__typename,
+            contractAction?.__typename,
           );
-          expect(action?.address).toBe(contractAddress);
+          expect(contractAction?.address).toBe(contractAddress);
         });
     });
 
