@@ -22,6 +22,10 @@ import {
   ContractActionSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
+import type { TestContext } from 'vitest';
+import {
+  ContractActionUnionSchema
+} from '@utils/indexer/graphql/schema';
 
 // ContractActionSubscriptionResponse is now imported from websocket-client
 
@@ -40,6 +44,43 @@ describe('contract action subscriptions', () => {
     eventCoordinator.clear();
   });
 
+  /**
+   * Helper to subscribe to contract actions and collect a specified number of them.
+   */
+  async function collectContractActions(
+    expectedCount = 2,
+    offset?: BlockOffset,
+    eventName = 'contractActionReceived',
+  ): Promise<ContractActionSubscriptionResponse[]> {
+    // We get a known contract address from test data provider
+    const contractAddress = dataProvider.getKnownContractAddress();
+    // We wait for at least one contract action to be received
+    const receivedContractActions: ContractActionSubscriptionResponse[] = [];
+
+    const contractActionSubscriptionHandler: SubscriptionHandlers<ContractActionSubscriptionResponse> =
+      {
+        next: (payload: ContractActionSubscriptionResponse) => {
+          log.debug(`Received contract action:\n${JSON.stringify(payload)}`);
+          receivedContractActions.push(payload);
+          if (receivedContractActions.length === expectedCount) eventCoordinator.notify(eventName);
+          log.debug(`Event triggered: ${eventName}`);
+        },
+      };
+
+    // We subscribe to contract actions for a specific address without block offset
+    // This will start streaming contract actions from the latest block
+    const unsubscribe = indexerWsClient.subscribeToContractActionEvents(
+      contractActionSubscriptionHandler,
+      contractAddress,
+      offset,
+    );
+    // Maximum wait time for contract action (similar to block timeout)
+    const maxTimeForContractAction = 8_000;
+    await eventCoordinator.waitForAll([eventName], maxTimeForContractAction);
+    unsubscribe();
+    return receivedContractActions;
+  }
+
   describe('a subscription to contract action updates without parameters', () => {
     /**
      * Subscribing to contract action updates without any offset parameters should stream
@@ -52,53 +93,56 @@ describe('contract action subscriptions', () => {
      * @and we should receive new contract actions as they are produced
      */
     test('should stream contract actions from the latest available block', async () => {
-      // We get a known contract address from test data provider
       const contractAddress = dataProvider.getKnownContractAddress();
-
-      // We wait for at least one contract action to be received
-      const receivedContractActions: ContractActionSubscriptionResponse[] = [];
-      const contractActionSubscriptionHandler: SubscriptionHandlers<ContractActionSubscriptionResponse> =
-        {
-          next: (payload: ContractActionSubscriptionResponse) => {
-            log.debug(`Received contract action:\n${JSON.stringify(payload)}`);
-            receivedContractActions.push(payload);
-
-            if (receivedContractActions.length === 1) {
-              eventCoordinator.notify('contractActionReceived');
-              log.debug('Contract action received');
-            }
-          },
-        };
-
-      // We subscribe to contract actions for a specific address without block offset
-      // This will start streaming contract actions from the latest block
-      const unsubscribe = indexerWsClient.subscribeToContractActionEvents(
-        contractActionSubscriptionHandler,
-        contractAddress,
+      const receivedContractActions = await collectContractActions(
+        2,
+        undefined,
+        'contractActionReceived',
       );
-
-      // Maximum wait time for contract action (similar to block timeout)
-      const maxTimeForContractAction = 8_000;
-      await eventCoordinator.waitForAll(['contractActionReceived'], maxTimeForContractAction);
-
-      unsubscribe();
 
       // We should receive at least one contract action message
       expect(receivedContractActions.length).toBeGreaterThanOrEqual(1);
       expect(receivedContractActions[0]).toBeSuccess();
 
       // Validate the received contract action
-      for (const action of receivedContractActions) {
-        if (action.data?.contractActions) {
-          const contractAction = action.data.contractActions;
-          expect(contractAction).toBeDefined();
-          expect(contractAction.__typename).toBeDefined();
+      receivedContractActions
+        .filter((msg) => msg.data?.contractActions)
+        .forEach((msg) => {
+          const action = msg.data?.contractActions;
           expect(['ContractDeploy', 'ContractCall', 'ContractUpdate']).toContain(
-            contractAction.__typename,
+            action?.__typename,
           );
-          expect(contractAction.address).toBe(contractAddress);
-        }
-      }
+          expect(action?.address).toBe(contractAddress);
+        });
+    });
+
+    /**
+     * Validates that all streamed contract actions conform to their expected schema.
+     *
+     * @given a contract action subscription for a known contract address
+     * @when contract actions are streamed from the indexer
+     * @then each received contract action should match its corresponding Zod schema
+     */
+    test('should stream contract actions adhering to the expected schema', async () => {
+      const contractAddress = dataProvider.getKnownContractAddress();
+      const receivedContractActions = await collectContractActions(2);
+
+      receivedContractActions
+        .filter((msg) => msg?.data?.contractActions)
+        .forEach((msg) => {
+          expect.soft(msg).toBeSuccess();
+          const contractAction = msg.data?.contractActions;
+
+          const parsed = ContractActionUnionSchema.safeParse(contractAction);
+          expect(
+            parsed.success,
+            `Contract action schema validation failed: ${JSON.stringify(
+              parsed.error?.format(),
+              null,
+              2,
+            )}`,
+          ).toBe(true);
+        });
     });
   });
 
@@ -123,34 +167,11 @@ describe('contract action subscriptions', () => {
       const historicalBlockHash = await dataProvider.getContractDeployBlockHash();
 
       // We collect all received contract actions
-      const receivedContractActions: ContractActionSubscriptionResponse[] = [];
-      const contractActionSubscriptionHandler: SubscriptionHandlers<ContractActionSubscriptionResponse> =
-        {
-          next: (payload: ContractActionSubscriptionResponse) => {
-            log.debug(`Received contract action:\n${JSON.stringify(payload)}`);
-            receivedContractActions.push(payload);
-
-            // Notify when we receive the first historical action
-            if (receivedContractActions.length === 1) {
-              eventCoordinator.notify('firstHistoricalActionReceived');
-              log.debug('First historical contract action received');
-            }
-          },
-        };
-
-      // We subscribe to contract actions for a specific address with block hash offset
-      // This will start streaming contract actions from the specified block hash
-      const unsubscribe = indexerWsClient.subscribeToContractActionEvents(
-        contractActionSubscriptionHandler,
-        contractAddress,
+      const receivedContractActions = await collectContractActions(
+        1,
         { hash: historicalBlockHash },
+        'firstHistoricalActionReceived',
       );
-
-      // Wait for the first historical action to be received
-      const maxTimeForFirstAction = 8_000;
-      await eventCoordinator.waitForAll(['firstHistoricalActionReceived'], maxTimeForFirstAction);
-
-      unsubscribe();
 
       // We should receive at least one contract action message
       expect(receivedContractActions.length).toBeGreaterThanOrEqual(1);
