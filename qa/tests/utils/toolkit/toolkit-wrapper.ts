@@ -370,6 +370,39 @@ class ToolkitWrapper {
   }
 
   /**
+   * Generate batches of transactions using the toolkit.
+   * This method initializes the chain with dust generation.
+   *
+   * @param n - Number of batches. Defaults to 1.
+   * @param b - Batch size. Defaults to 1.
+   * @returns A promise that resolves to the transaction result.
+   * @throws Error if the container is not started or if the batches command fails.
+   */
+  async generateBatches(n: number = 1, b: number = 1): Promise<void> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    log.info(`Generating batches: n=${n}, b=${b}...`);
+    const result = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'generate-txs',
+      'batches',
+      '-n',
+      n.toString(),
+      '-b',
+      b.toString(),
+    ]);
+
+    if (result.exitCode !== 0) {
+      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
+      throw new Error(`Failed to generate batches: ${errorMessage}`);
+    }
+
+    log.debug(`Batches generation output:\n${result.output}`);
+  }
+
+  /**
    * Extract the contract address from a deployed transaction file.
    * This method uses the toolkit's contract-address command to retrieve either a tagged
    * or untagged contract address.
@@ -486,6 +519,73 @@ class ToolkitWrapper {
   }
 
   /**
+   * Update (maintenance) a smart contract on the network.
+   * This method retrieves the current contract state, generates a circuit intent for contract maintenance,
+   * converts it to a transaction, and submits it to the network.
+   *
+   * @param deploymentResult - The deployment result object from deployContract. The contract-address-untagged will be extracted.
+   * @param rngSeed - The random number generator seed for the transaction. Defaults to a fixed seed.
+   * @returns A promise that resolves to the transaction result containing the transaction hash,
+   *          optional block hash, and submission status.
+   * @throws Error if the container is not started or if any step in the contract update process fails.
+   */
+  async updateContract(
+    deploymentResult: DeployContractResult,
+    rngSeed: string = '0000000000000000000000000000000000000000000000000000000000000037',
+  ): Promise<ToolkitTransactionResult> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    // Validate deployment result
+    if (!deploymentResult) {
+      log.error('No deployment result provided. Cannot update contract without a valid deployment.');
+      throw new Error(
+        'Deployment result is required but was not provided. Ensure deployContract() succeeded before calling updateContract().',
+      );
+    }
+
+    const contractAddressUntagged = deploymentResult['contract-address-untagged'];
+
+    if (!contractAddressUntagged) {
+      log.error('Deployment result is missing contract address. Deployment may have failed.');
+      log.debug(`Deployment result received: ${JSON.stringify(deploymentResult, null, 2)}`);
+      throw new Error(
+        'Contract address is missing in deployment result. The contract deployment may have failed. ' +
+          'Please check deployment logs and ensure deployContract() completed successfully.',
+      );
+    }
+
+    log.info('Generating and submitting contract maintenance/update...');
+    // Note: Maintenance command runs directly without --to-bytes or --dest-file,
+    // similar to how generate_node_data.sh does it (line 90-98).
+    // Maintenance needs both --src-url to query current contract state and
+    // --dest-url to submit the transaction.
+    const result = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'generate-txs',
+      '--src-url',
+      env.getNodeWebsocketBaseURL(),
+      '--dest-url',
+      env.getNodeWebsocketBaseURL(),
+      'contract-simple',
+      'maintenance',
+      '--rng-seed',
+      rngSeed,
+      '--contract-address',
+      contractAddressUntagged,
+    ]);
+
+    if (result.exitCode !== 0) {
+      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
+      throw new Error(`Failed to generate contract maintenance: ${errorMessage}`);
+    }
+
+    const rawOutput = result.output.trim();
+    return this.parseTransactionOutput(rawOutput);
+  }
+
+  /**
    * Deploy a smart contract to the network.
    * This method generates a deployment intent, converts it to a transaction, submits it to the network,
    * and retrieves both tagged and untagged contract addresses.
@@ -565,6 +665,7 @@ class ToolkitWrapper {
       'deploy-block-hash': blockHash,
     };
 
+    console.log(`[DEPLOY] Contract address (untagged): ${contractAddressUntagged}`);
     log.debug(`Contract address info:\n${JSON.stringify(deploymentResult, null, 2)}`);
 
     return deploymentResult;
