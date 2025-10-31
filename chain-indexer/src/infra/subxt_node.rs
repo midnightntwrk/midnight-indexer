@@ -32,7 +32,7 @@ use indexer_common::{
     },
     error::BoxError,
 };
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use serde::Deserialize;
 use std::{future::ready, time::Duration};
 use subxt::{
