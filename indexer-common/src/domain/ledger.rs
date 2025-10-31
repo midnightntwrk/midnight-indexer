@@ -61,7 +61,7 @@ pub enum Error {
     #[error("invalid protocol version {0}")]
     InvalidProtocolVersion(ProtocolVersion),
 
-    #[error("cannot get contract state from node for contract {0}")]
+    #[error("cannot get contract state from node for address {0}")]
     GetContractState(SerializedContractAddress, #[source] BoxError),
 
     #[error("serialized TokenType should have 32 bytes, but had {0}")]

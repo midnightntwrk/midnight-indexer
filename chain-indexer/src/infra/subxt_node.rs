@@ -482,7 +482,7 @@ pub enum SubxtNodeError {
     #[error(transparent)]
     Ledger(#[from] ledger::Error),
 
-    #[error("cannot get contract state for contract {0} at block {1}")]
+    #[error("cannot get contract state for address {0} at block {1}")]
     GetContractState(SerializedContractAddress, BlockHash, #[source] BoxError),
 
     #[error("cannot get zswap state root")]

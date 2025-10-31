@@ -296,7 +296,7 @@ async fn get_contract_state_runtime_0_18(
     // This returns the serialized contract state.
     let get_state = runtime_0_18::apis()
         .midnight_runtime_api()
-        .get_contract_state(address.clone().into());
+        .get_contract_state(address.as_slice().into());
 
     let state = online_client
         .runtime_api()
