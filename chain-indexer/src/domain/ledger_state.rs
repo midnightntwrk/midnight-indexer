@@ -16,7 +16,7 @@ use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, NetworkId,
-    SerializedTransaction, TransactionVariant,
+    SerializedTransaction, TransactionHash, TransactionVariant,
     ledger::{self, LedgerParameters},
 };
 use std::ops::DerefMut;
@@ -49,15 +49,13 @@ impl LedgerState {
         for (variant, transaction) in transactions {
             match variant {
                 TransactionVariant::Regular => {
-                    self.apply_regular_transaction(
-                        transaction,
-                        block_parent_hash,
-                        block_timestamp,
-                    )?;
+                    self.apply_regular_transaction(transaction, block_parent_hash, block_timestamp)
+                        .map_err(|error| Error::ApplyRegularTransaction(None, error))?;
                 }
 
                 TransactionVariant::System => {
-                    self.apply_system_transaction(transaction, block_timestamp)?;
+                    self.apply_system_transaction(transaction, block_timestamp)
+                        .map_err(|error| Error::ApplySystemTransaction(None, error))?;
                 }
             }
         }
@@ -132,7 +130,9 @@ impl LedgerState {
             created_unshielded_utxos,
             spent_unshielded_utxos,
             ledger_events,
-        } = self.apply_regular_transaction(&transaction.raw, block_parent_hash, block_timestamp)?;
+        } = self
+            .apply_regular_transaction(&transaction.raw, block_parent_hash, block_timestamp)
+            .map_err(|error| Error::ApplyRegularTransaction(Some(transaction.hash), error))?;
 
         // Update transaction.
         transaction.transaction_result = transaction_result;
@@ -178,7 +178,9 @@ impl LedgerState {
         let ApplySystemTransactionOutcome {
             created_unshielded_utxos,
             ledger_events,
-        } = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
+        } = self
+            .apply_system_transaction(&transaction.raw, block_timestamp)
+            .map_err(|error| Error::ApplySystemTransaction(Some(transaction.hash), error))?;
 
         // Update transaction.
         transaction.created_unshielded_utxos = created_unshielded_utxos;
@@ -190,6 +192,23 @@ impl LedgerState {
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("cannot apply transaction")]
-    ApplyTransaction(#[from] indexer_common::domain::ledger::Error),
+    #[error("cannot apply regular transaction {hash}", hash = stringify_hash(.0))]
+    ApplyRegularTransaction(
+        Option<TransactionHash>,
+        #[source] indexer_common::domain::ledger::Error,
+    ),
+
+    #[error("cannot apply system transaction {hash}", hash = stringify_hash(.0))]
+    ApplySystemTransaction(
+        Option<TransactionHash>,
+        #[source] indexer_common::domain::ledger::Error,
+    ),
+
+    #[error(transparent)]
+    Ledger(#[from] indexer_common::domain::ledger::Error),
+}
+
+fn stringify_hash(hash: &Option<TransactionHash>) -> String {
+    hash.map(|hash| hash.to_string())
+        .unwrap_or_else(|| "<hash unavailable>".to_string())
 }

@@ -27,6 +27,7 @@ use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{
         BlockAuthor, BlockHash, ByteVec, ProtocolVersion, ScaleDecodeProtocolVersionError,
+        SerializedContractAddress,
         ledger::{self, ZswapStateRoot},
     },
     error::BoxError,
@@ -286,7 +287,7 @@ impl SubxtNode {
             .blocks()
             .at(hash)
             .await
-            .map_err(|error| SubxtNodeError::FetchBlock(error.into()))
+            .map_err(|error| SubxtNodeError::FetchBlock(hash, error.into()))
     }
 }
 
@@ -442,8 +443,8 @@ pub enum SubxtNodeError {
     #[error("cannot receive finalized block")]
     ReceiveBlock(#[source] Box<subxt::Error>),
 
-    #[error("cannot fetch block")]
-    FetchBlock(#[source] Box<subxt::Error>),
+    #[error("cannot fetch block at hash {0}")]
+    FetchBlock(H256, #[source] Box<subxt::Error>),
 
     #[error("cannot get extrinsics")]
     GetExtrinsics(#[source] Box<subxt::Error>),
@@ -481,14 +482,14 @@ pub enum SubxtNodeError {
     #[error(transparent)]
     Ledger(#[from] ledger::Error),
 
-    #[error("cannot get contract state")]
-    GetContractState(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("cannot get contract state for address {0} at block {1}")]
+    GetContractState(SerializedContractAddress, BlockHash, #[source] BoxError),
 
     #[error("cannot get zswap state root")]
-    GetZswapStateRoot(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    GetZswapStateRoot(#[source] BoxError),
 
     #[error("cannot get transaction cost")]
-    GetTransactionCost(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    GetTransactionCost(#[source] BoxError),
 
     #[error("block with hash {0} not found")]
     BlockNotFound(BlockHash),
@@ -496,8 +497,8 @@ pub enum SubxtNodeError {
     #[error("invalid protocol version {0}")]
     InvalidProtocolVersion(ProtocolVersion),
 
-    #[error("invalid DUST address length")]
-    InvalidDustAddress,
+    #[error("invalid DUST address length: expected 32 bytes, was {0}")]
+    InvalidDustAddress(usize),
 }
 
 #[trace]

@@ -96,9 +96,11 @@ impl Transaction {
                             match contract_action {
                                 ContractActionV6::Deploy(deploy) => {
                                     let address = serialize_contract_address(deploy.address())?;
-                                    let state = get_contract_state(address.clone())
-                                        .await
-                                        .map_err(|error| Error::GetContractState(error.into()))?;
+                                    let state = get_contract_state(address.clone()).await.map_err(
+                                        |error| {
+                                            Error::GetContractState(address.clone(), error.into())
+                                        },
+                                    )?;
 
                                     Ok::<_, Error>(ContractAction {
                                         address,
@@ -109,9 +111,11 @@ impl Transaction {
 
                                 ContractActionV6::Call(call) => {
                                     let address = serialize_contract_address(call.address)?;
-                                    let state = get_contract_state(address.clone())
-                                        .await
-                                        .map_err(|error| Error::GetContractState(error.into()))?;
+                                    let state = get_contract_state(address.clone()).await.map_err(
+                                        |error| {
+                                            Error::GetContractState(address.clone(), error.into())
+                                        },
+                                    )?;
                                     let entry_point =
                                         String::from_utf8(call.entry_point.as_ref().to_owned())
                                             .map_err(|error| {
@@ -127,9 +131,11 @@ impl Transaction {
 
                                 ContractActionV6::Maintain(update) => {
                                     let address = serialize_contract_address(update.address)?;
-                                    let state = get_contract_state(address.clone())
-                                        .await
-                                        .map_err(|error| Error::GetContractState(error.into()))?;
+                                    let state = get_contract_state(address.clone()).await.map_err(
+                                        |error| {
+                                            Error::GetContractState(address.clone(), error.into())
+                                        },
+                                    )?;
 
                                     Ok(ContractAction {
                                         address,
