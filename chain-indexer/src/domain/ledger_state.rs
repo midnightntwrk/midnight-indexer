@@ -49,20 +49,32 @@ impl LedgerState {
         for (variant, transaction) in transactions {
             match variant {
                 TransactionVariant::Regular => {
-                    self.apply_regular_transaction(
-                        transaction,
-                        block_parent_hash,
-                        block_timestamp,
-                    )?;
+                    self.apply_regular_transaction(transaction, block_parent_hash, block_timestamp)
+                        .map_err(|source| Error::ApplyTransaction {
+                            variant: "regular".to_string(),
+                            hash: "unknown (stored transaction)".to_string(),
+                            source,
+                        })?;
                 }
 
                 TransactionVariant::System => {
-                    self.apply_system_transaction(transaction, block_timestamp)?;
+                    self.apply_system_transaction(transaction, block_timestamp)
+                        .map_err(|source| Error::ApplyTransaction {
+                            variant: "system".to_string(),
+                            hash: "unknown (stored transaction)".to_string(),
+                            source,
+                        })?;
                 }
             }
         }
 
-        let ledger_parameters = self.post_apply_transactions(block_timestamp)?;
+        let ledger_parameters =
+            self.post_apply_transactions(block_timestamp)
+                .map_err(|source| Error::ApplyTransaction {
+                    variant: "post_apply".to_string(),
+                    hash: "N/A".to_string(),
+                    source,
+                })?;
 
         Ok(ledger_parameters)
     }
@@ -82,7 +94,13 @@ impl LedgerState {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let ledger_parameters = self.post_apply_transactions(block_timestamp)?;
+        let ledger_parameters =
+            self.post_apply_transactions(block_timestamp)
+                .map_err(|source| Error::ApplyTransaction {
+                    variant: "post_apply".to_string(),
+                    hash: "N/A".to_string(),
+                    source,
+                })?;
 
         Ok((transactions, ledger_parameters))
     }
@@ -132,7 +150,13 @@ impl LedgerState {
             created_unshielded_utxos,
             spent_unshielded_utxos,
             ledger_events,
-        } = self.apply_regular_transaction(&transaction.raw, block_parent_hash, block_timestamp)?;
+        } = self
+            .apply_regular_transaction(&transaction.raw, block_parent_hash, block_timestamp)
+            .map_err(|source| Error::ApplyTransaction {
+                variant: "regular".to_string(),
+                hash: format!("{:?}", transaction.hash),
+                source,
+            })?;
 
         // Update transaction.
         transaction.transaction_result = transaction_result;
@@ -178,7 +202,13 @@ impl LedgerState {
         let ApplySystemTransactionOutcome {
             created_unshielded_utxos,
             ledger_events,
-        } = self.apply_system_transaction(&transaction.raw, block_timestamp)?;
+        } = self
+            .apply_system_transaction(&transaction.raw, block_timestamp)
+            .map_err(|source| Error::ApplyTransaction {
+                variant: "system".to_string(),
+                hash: format!("{:?}", transaction.hash),
+                source,
+            })?;
 
         // Update transaction.
         transaction.created_unshielded_utxos = created_unshielded_utxos;
@@ -190,6 +220,21 @@ impl LedgerState {
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("cannot apply transaction")]
-    ApplyTransaction(#[from] indexer_common::domain::ledger::Error),
+    #[error("cannot apply {variant} transaction {hash}")]
+    ApplyTransaction {
+        variant: String,
+        hash: String,
+        #[source]
+        source: indexer_common::domain::ledger::Error,
+    },
+}
+
+impl From<indexer_common::domain::ledger::Error> for Error {
+    fn from(source: indexer_common::domain::ledger::Error) -> Self {
+        Error::ApplyTransaction {
+            variant: "unknown".to_string(),
+            hash: "unknown".to_string(),
+            source,
+        }
+    }
 }

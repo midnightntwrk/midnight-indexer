@@ -286,7 +286,10 @@ impl SubxtNode {
             .blocks()
             .at(hash)
             .await
-            .map_err(|error| SubxtNodeError::FetchBlock(error.into()))
+            .map_err(|error| SubxtNodeError::FetchBlock {
+                hash: format!("{:?}", hash),
+                source: error.into(),
+            })
     }
 }
 
@@ -442,8 +445,12 @@ pub enum SubxtNodeError {
     #[error("cannot receive finalized block")]
     ReceiveBlock(#[source] Box<subxt::Error>),
 
-    #[error("cannot fetch block")]
-    FetchBlock(#[source] Box<subxt::Error>),
+    #[error("cannot fetch block at hash {hash}")]
+    FetchBlock {
+        hash: String,
+        #[source]
+        source: Box<subxt::Error>,
+    },
 
     #[error("cannot get extrinsics")]
     GetExtrinsics(#[source] Box<subxt::Error>),
@@ -481,8 +488,13 @@ pub enum SubxtNodeError {
     #[error(transparent)]
     Ledger(#[from] ledger::Error),
 
-    #[error("cannot get contract state")]
-    GetContractState(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("cannot get contract state for contract {contract_address} at block {block_hash}")]
+    GetContractState {
+        contract_address: String,
+        block_hash: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
 
     #[error("cannot get zswap state root")]
     GetZswapStateRoot(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
@@ -490,14 +502,14 @@ pub enum SubxtNodeError {
     #[error("cannot get transaction cost")]
     GetTransactionCost(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
 
-    #[error("block with hash {0} not found")]
+    #[error("block with hash {0} not found. check if node is synced")]
     BlockNotFound(BlockHash),
 
     #[error("invalid protocol version {0}")]
     InvalidProtocolVersion(ProtocolVersion),
 
-    #[error("invalid DUST address length")]
-    InvalidDustAddress,
+    #[error("invalid DUST address length: expected 32 bytes, found {actual_length}")]
+    InvalidDustAddress { actual_length: usize },
 }
 
 #[trace]

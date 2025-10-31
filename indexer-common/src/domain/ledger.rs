@@ -61,8 +61,12 @@ pub enum Error {
     #[error("invalid protocol version {0}")]
     InvalidProtocolVersion(ProtocolVersion),
 
-    #[error("cannot get contract state from node")]
-    GetContractState(#[source] BoxError),
+    #[error("cannot get contract state from node for contract {address}")]
+    GetContractState {
+        address: String,
+        #[source]
+        source: BoxError,
+    },
 
     #[error("serialized TokenType should have 32 bytes, but had {0}")]
     TokenTypeLen(usize),
@@ -76,7 +80,7 @@ pub enum Error {
     #[error("invalid system transaction")]
     SystemTransaction(#[source] BoxError),
 
-    #[error("block limit exceeded")]
+    #[error("block limit exceeded during post_block_update")]
     BlockLimitExceeded(#[source] BoxError),
 
     #[error("cannot calculate transaction cost")]
