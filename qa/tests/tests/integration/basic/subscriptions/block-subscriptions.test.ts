@@ -96,7 +96,6 @@ describe('block subscriptions', () => {
     await eventCoordinator.waitForAll(['twoBlocksReceived'], maxTimeBetweenBlocks);
 
     unsubscribe();
-
     return receivedBlocks;
   }
 
