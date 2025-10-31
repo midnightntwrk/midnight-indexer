@@ -51,6 +51,9 @@ const UNSHIELDED_TX_SUBSCRIPTION_FRAGMENT = `    ... on UnshieldedTransaction {
           value
           tokenType
           outputIndex
+          ctime
+          initialNonce
+          registeredForDustGeneration
           createdAtTransaction{
               hash
               ... on RegularTransaction {
@@ -106,6 +109,8 @@ export const BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription BlocksSubscri
     hash
     height
     timestamp
+    protocolVersion
+    ledgerParameters
     parent {
       hash
       height
@@ -116,7 +121,9 @@ export const BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription BlocksSubscri
       __typename
       protocolVersion
       raw
-      identifiers
+      ... on RegularTransaction {
+    identifiers
+  }
       unshieldedCreatedOutputs {
         owner
         intentHash
@@ -125,7 +132,6 @@ export const BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription BlocksSubscri
         outputIndex
       }
     }
-  }
 }
 }`;
 

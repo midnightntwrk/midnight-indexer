@@ -23,6 +23,7 @@ query GetLatestBlock{
     height
     timestamp
     author
+    ledgerParameters
     parent {
         hash
         height
@@ -41,6 +42,7 @@ query GetBlock($OFFSET: BlockOffset!){
     height
     timestamp
     author
+    ledgerParameters
     parent {
       hash
       height
