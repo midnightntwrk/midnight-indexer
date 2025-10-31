@@ -97,9 +97,8 @@ impl Transaction {
                                 ContractActionV6::Deploy(deploy) => {
                                     let address = serialize_contract_address(deploy.address())?;
                                     let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| Error::GetContractState {
-                                            address: format!("{:?}", address),
-                                            source: error.into(),
+                                        |error| {
+                                            Error::GetContractState(address.clone(), error.into())
                                         },
                                     )?;
 
@@ -113,9 +112,8 @@ impl Transaction {
                                 ContractActionV6::Call(call) => {
                                     let address = serialize_contract_address(call.address)?;
                                     let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| Error::GetContractState {
-                                            address: format!("{:?}", address),
-                                            source: error.into(),
+                                        |error| {
+                                            Error::GetContractState(address.clone(), error.into())
                                         },
                                     )?;
                                     let entry_point =
@@ -134,9 +132,8 @@ impl Transaction {
                                 ContractActionV6::Maintain(update) => {
                                     let address = serialize_contract_address(update.address)?;
                                     let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| Error::GetContractState {
-                                            address: format!("{:?}", address),
-                                            source: error.into(),
+                                        |error| {
+                                            Error::GetContractState(address.clone(), error.into())
                                         },
                                     )?;
 

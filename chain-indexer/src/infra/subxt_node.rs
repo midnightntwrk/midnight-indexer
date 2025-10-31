@@ -27,6 +27,7 @@ use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{
         BlockAuthor, BlockHash, ByteVec, ProtocolVersion, ScaleDecodeProtocolVersionError,
+        SerializedContractAddress,
         ledger::{self, ZswapStateRoot},
     },
     error::BoxError,
@@ -286,10 +287,7 @@ impl SubxtNode {
             .blocks()
             .at(hash)
             .await
-            .map_err(|error| SubxtNodeError::FetchBlock {
-                hash: format!("{:?}", hash),
-                source: error.into(),
-            })
+            .map_err(|error| SubxtNodeError::FetchBlock(hash, error.into()))
     }
 }
 
@@ -445,12 +443,8 @@ pub enum SubxtNodeError {
     #[error("cannot receive finalized block")]
     ReceiveBlock(#[source] Box<subxt::Error>),
 
-    #[error("cannot fetch block at hash {hash}")]
-    FetchBlock {
-        hash: String,
-        #[source]
-        source: Box<subxt::Error>,
-    },
+    #[error("cannot fetch block at hash {0}")]
+    FetchBlock(H256, #[source] Box<subxt::Error>),
 
     #[error("cannot get extrinsics")]
     GetExtrinsics(#[source] Box<subxt::Error>),
@@ -488,28 +482,23 @@ pub enum SubxtNodeError {
     #[error(transparent)]
     Ledger(#[from] ledger::Error),
 
-    #[error("cannot get contract state for contract {contract_address} at block {block_hash}")]
-    GetContractState {
-        contract_address: String,
-        block_hash: String,
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync + 'static>,
-    },
+    #[error("cannot get contract state for contract {0} at block {1}")]
+    GetContractState(SerializedContractAddress, BlockHash, #[source] BoxError),
 
     #[error("cannot get zswap state root")]
-    GetZswapStateRoot(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    GetZswapStateRoot(#[source] BoxError),
 
     #[error("cannot get transaction cost")]
-    GetTransactionCost(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    GetTransactionCost(#[source] BoxError),
 
-    #[error("block with hash {0} not found. check if node is synced")]
+    #[error("block with hash {0} not found")]
     BlockNotFound(BlockHash),
 
     #[error("invalid protocol version {0}")]
     InvalidProtocolVersion(ProtocolVersion),
 
-    #[error("invalid DUST address length: expected 32 bytes, found {actual_length}")]
-    InvalidDustAddress { actual_length: usize },
+    #[error("invalid DUST address length: expected 32 bytes, was {0}")]
+    InvalidDustAddress(usize),
 }
 
 #[trace]

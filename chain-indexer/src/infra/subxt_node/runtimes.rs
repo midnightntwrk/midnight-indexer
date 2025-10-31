@@ -193,13 +193,9 @@ async fn make_block_details_runtime_0_18(
             Event::CNightObservation(native_token_event) => match native_token_event {
                 CnightObservationEvent::Registration(event) => {
                     let cardano_address = CardanoStakeKey::from(event.cardano_address.0);
-                    let dust_address_vec = event.dust_address;
-                    let dust_address_len = dust_address_vec.len();
                     let dust_address_array: [u8; 32] =
-                        dust_address_vec.try_into().map_err(|_| {
-                            SubxtNodeError::InvalidDustAddress {
-                                actual_length: dust_address_len,
-                            }
+                        event.dust_address.as_slice().try_into().map_err(|_| {
+                            SubxtNodeError::InvalidDustAddress(event.dust_address.len())
                         })?;
 
                     dust_registration_events.push(DustRegistrationEvent::Registration {
@@ -210,13 +206,9 @@ async fn make_block_details_runtime_0_18(
 
                 CnightObservationEvent::Deregistration(event) => {
                     let cardano_address = CardanoStakeKey::from(event.cardano_address.0);
-                    let dust_address_vec = event.dust_address;
-                    let dust_address_len = dust_address_vec.len();
                     let dust_address_array: [u8; 32] =
-                        dust_address_vec.try_into().map_err(|_| {
-                            SubxtNodeError::InvalidDustAddress {
-                                actual_length: dust_address_len,
-                            }
+                        event.dust_address.as_slice().try_into().map_err(|_| {
+                            SubxtNodeError::InvalidDustAddress(event.dust_address.len())
                         })?;
 
                     dust_registration_events.push(DustRegistrationEvent::Deregistration {
@@ -228,15 +220,12 @@ async fn make_block_details_runtime_0_18(
                 CnightObservationEvent::MappingAdded(event) => {
                     let cardano_address = CardanoStakeKey::from(event.cardano_address.0);
                     let dust_address_bytes = const_hex::decode(&event.dust_address)
-                        .map_err(|_| SubxtNodeError::InvalidDustAddress { actual_length: 0 })?;
+                        .map_err(|_| SubxtNodeError::InvalidDustAddress(0))?;
                     let utxo_id_bytes = const_hex::decode(&event.utxo_id)
-                        .map_err(|_| SubxtNodeError::InvalidDustAddress { actual_length: 0 })?;
-                    let dust_address_len = dust_address_bytes.len();
+                        .map_err(|_| SubxtNodeError::InvalidDustAddress(0))?;
                     let dust_address_array: [u8; 32] =
-                        dust_address_bytes.try_into().map_err(|_| {
-                            SubxtNodeError::InvalidDustAddress {
-                                actual_length: dust_address_len,
-                            }
+                        dust_address_bytes.as_slice().try_into().map_err(|_| {
+                            SubxtNodeError::InvalidDustAddress(dust_address_bytes.len())
                         })?;
 
                     dust_registration_events.push(DustRegistrationEvent::MappingAdded {
@@ -249,15 +238,12 @@ async fn make_block_details_runtime_0_18(
                 CnightObservationEvent::MappingRemoved(event) => {
                     let cardano_address = CardanoStakeKey::from(event.cardano_address.0);
                     let dust_address_bytes = const_hex::decode(&event.dust_address)
-                        .map_err(|_| SubxtNodeError::InvalidDustAddress { actual_length: 0 })?;
+                        .map_err(|_| SubxtNodeError::InvalidDustAddress(0))?;
                     let utxo_id_bytes = const_hex::decode(&event.utxo_id)
-                        .map_err(|_| SubxtNodeError::InvalidDustAddress { actual_length: 0 })?;
-                    let dust_address_len = dust_address_bytes.len();
+                        .map_err(|_| SubxtNodeError::InvalidDustAddress(0))?;
                     let dust_address_array: [u8; 32] =
-                        dust_address_bytes.try_into().map_err(|_| {
-                            SubxtNodeError::InvalidDustAddress {
-                                actual_length: dust_address_len,
-                            }
+                        dust_address_bytes.as_slice().try_into().map_err(|_| {
+                            SubxtNodeError::InvalidDustAddress(dust_address_bytes.len())
                         })?;
 
                     dust_registration_events.push(DustRegistrationEvent::MappingRemoved {
@@ -307,29 +293,21 @@ async fn get_contract_state_runtime_0_18(
     block_hash: BlockHash,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<SerializedContractState, SubxtNodeError> {
-    // Format these before address is moved
-    let contract_address = format!("{:?}", address);
-    let block_hash_str = format!("{:?}", block_hash);
-
     // This returns the serialized contract state.
     let get_state = runtime_0_18::apis()
         .midnight_runtime_api()
-        .get_contract_state(address.into());
+        .get_contract_state(address.clone().into());
 
     let state = online_client
         .runtime_api()
         .at(H256(block_hash.0))
         .call(get_state)
         .await
-        .map_err(|error| SubxtNodeError::GetContractState {
-            contract_address: contract_address.clone(),
-            block_hash: block_hash_str.clone(),
-            source: error.into(),
+        .map_err(|error| {
+            SubxtNodeError::GetContractState(address.clone(), block_hash, error.into())
         })?
-        .map_err(|error| SubxtNodeError::GetContractState {
-            contract_address,
-            block_hash: block_hash_str,
-            source: format!("{error:?}").into(),
+        .map_err(|error| {
+            SubxtNodeError::GetContractState(address, block_hash, format!("{error:?}").into())
         })?
         .into();
 

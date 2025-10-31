@@ -22,7 +22,7 @@ pub use secret_key::*;
 pub use transaction::*;
 
 use crate::{
-    domain::{ByteVec, ProtocolVersion},
+    domain::{ByteVec, ProtocolVersion, SerializedContractAddress},
     error::BoxError,
 };
 use fastrace::trace;
@@ -61,12 +61,8 @@ pub enum Error {
     #[error("invalid protocol version {0}")]
     InvalidProtocolVersion(ProtocolVersion),
 
-    #[error("cannot get contract state from node for contract {address}")]
-    GetContractState {
-        address: String,
-        #[source]
-        source: BoxError,
-    },
+    #[error("cannot get contract state from node for contract {0}")]
+    GetContractState(SerializedContractAddress, #[source] BoxError),
 
     #[error("serialized TokenType should have 32 bytes, but had {0}")]
     TokenTypeLen(usize),
