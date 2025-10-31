@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0-alpha.6] - 2025-10-28
+## [3.0.0-alpha.7] - 2025-10-31
 
 ### 🚀 Features
 
@@ -105,7 +105,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Update GraphQL API documentation to match current schema (#176)
 - Add missing requirements to README (#253)
 - Add comprehensive guide for updating node versions (#281)
-- *(indexer-api)* Enhance v3 api documentation with DUST features and field updates (#473)
+- *(api)* Enhance v3 api documentation with DUST features and field updates (#473)
 
 ### ⚙️ Miscellaneous Tasks
 
@@ -125,6 +125,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - *(indexer-api)* Cleanup storage implementation (#406)
 - Remove unnecessary clone in ledger event storage (#420)
 - Enable TLS for PostgreSQL (#422)
+- Update Checkmarx action to latest version (#452)
+- *(docker-compose)* Use named volume for node data (#463)
+- *(test)* Increased API_MAX_COMPLEXITY of standalone in native_e2e.rs, matching the cloud config. (#474)
+- Address various audit findings (#477)
+- Further address audit (#495)
+- Richer error messages (#494)
+
+## [2.1.4] - 2025-06-30
+
+### 🐛 Bug Fixes
+
+- *(indexer-api)* Correctly determine highest relevant index (#94)
+- *(indexer-api)* Correctly determine highest relevant index for standalone (#95)
+- *(wallet-indexer)* Avoid race condition saving relevant transactions (#107) (#110)
+- Database migration (#111)
+
+## [2.1.3] - 2025-06-10
+
+### 🚀 Features
+
+- Extend PostgreSQL pool configuration (#50)
+
+### 🚜 Refactor
+
+- *(wallet-indexer)* Minimize storage access (#42)
 
 ## [2.1.2] - 2025-05-27
 
