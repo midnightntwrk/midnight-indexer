@@ -68,7 +68,7 @@ where
                 .map_err_into_server_error(|| format!("get next ledger event at id {id}"))?
             {
                 id = ledger_event.id + 1;
-                yield ledger_event.into();
+                yield ledger_event.try_into().map_err_into_server_error(|| "unexpected dust ledger event")?;
             }
 
             debug!(id; "streaming live events");
@@ -88,7 +88,7 @@ where
                     .map_err_into_server_error(|| format!("get next ledger event at id {id}"))?
                 {
                     id = ledger_event.id + 1;
-                    yield ledger_event.into();
+                    yield ledger_event.try_into().map_err_into_server_error(|| "unexpected dust ledger event")?
                 }
             }
 

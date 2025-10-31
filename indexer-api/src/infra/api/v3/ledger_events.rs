@@ -17,6 +17,7 @@ use crate::{
 };
 use async_graphql::{Interface, SimpleObject};
 use indexer_common::domain::LedgerEventAttributes;
+use thiserror::Error;
 
 /// A zswap related ledger event.
 #[derive(Debug, SimpleObject)]
@@ -31,12 +32,24 @@ pub struct ZswapLedgerEvent {
     max_id: u64,
 }
 
-impl From<LedgerEvent> for ZswapLedgerEvent {
-    fn from(ledger_event: LedgerEvent) -> Self {
-        Self {
-            id: ledger_event.id,
-            raw: ledger_event.raw.hex_encode(),
-            max_id: ledger_event.max_id,
+impl TryFrom<LedgerEvent> for ZswapLedgerEvent {
+    type Error = UnexpectedLedgerEvent;
+
+    fn try_from(ledger_event: LedgerEvent) -> Result<Self, Self::Error> {
+        match ledger_event.attributes {
+            LedgerEventAttributes::ZswapInput => Ok(Self {
+                id: ledger_event.id,
+                raw: ledger_event.raw.hex_encode(),
+                max_id: ledger_event.max_id,
+            }),
+
+            LedgerEventAttributes::ZswapOutput => Ok(Self {
+                id: ledger_event.id,
+                raw: ledger_event.raw.hex_encode(),
+                max_id: ledger_event.max_id,
+            }),
+
+            other => Err(UnexpectedLedgerEvent(other)),
         }
     }
 }
@@ -64,46 +77,52 @@ pub enum DustLedgerEvent {
     DustSpendProcessed(DustSpendProcessed),
 }
 
-impl From<LedgerEvent> for DustLedgerEvent {
-    fn from(ledger_event: LedgerEvent) -> Self {
+impl TryFrom<LedgerEvent> for DustLedgerEvent {
+    type Error = UnexpectedLedgerEvent;
+
+    fn try_from(ledger_event: LedgerEvent) -> Result<Self, Self::Error> {
         match ledger_event.attributes {
-            LedgerEventAttributes::ParamChange => DustLedgerEvent::ParamChange(ParamChange {
+            LedgerEventAttributes::ParamChange => Ok(DustLedgerEvent::ParamChange(ParamChange {
                 id: ledger_event.id,
                 raw: ledger_event.raw.hex_encode(),
                 max_id: ledger_event.max_id,
-            }),
+            })),
 
             LedgerEventAttributes::DustInitialUtxo { output, .. } => {
-                DustLedgerEvent::DustInitialUtxo(DustInitialUtxo {
+                Ok(DustLedgerEvent::DustInitialUtxo(DustInitialUtxo {
                     id: ledger_event.id,
                     raw: ledger_event.raw.hex_encode(),
                     max_id: ledger_event.max_id,
                     output: DustOutput {
                         nonce: output.nonce.hex_encode(),
                     },
-                })
+                }))
             }
 
-            LedgerEventAttributes::DustGenerationDtimeUpdate { .. } => {
+            LedgerEventAttributes::DustGenerationDtimeUpdate { .. } => Ok(
                 DustLedgerEvent::DustGenerationDtimeUpdate(DustGenerationDtimeUpdate {
                     id: ledger_event.id,
                     raw: ledger_event.raw.hex_encode(),
                     max_id: ledger_event.max_id,
-                })
-            }
+                }),
+            ),
 
             LedgerEventAttributes::DustSpendProcessed => {
-                DustLedgerEvent::DustSpendProcessed(DustSpendProcessed {
+                Ok(DustLedgerEvent::DustSpendProcessed(DustSpendProcessed {
                     id: ledger_event.id,
                     raw: ledger_event.raw.hex_encode(),
                     max_id: ledger_event.max_id,
-                })
+                }))
             }
 
-            other => panic!("unexpected Dust ledger event: {other:?}"),
+            other => Err(UnexpectedLedgerEvent(other)),
         }
     }
 }
+
+#[derive(Debug, Error)]
+#[error("unexpected ledger event {0:?}")]
+pub struct UnexpectedLedgerEvent(LedgerEventAttributes);
 
 #[derive(Debug, SimpleObject)]
 // A general parameter change; possibly conveys modified dust related parameters like
