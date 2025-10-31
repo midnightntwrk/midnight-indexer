@@ -37,13 +37,7 @@ impl TryFrom<LedgerEvent> for ZswapLedgerEvent {
 
     fn try_from(ledger_event: LedgerEvent) -> Result<Self, Self::Error> {
         match ledger_event.attributes {
-            LedgerEventAttributes::ZswapInput => Ok(Self {
-                id: ledger_event.id,
-                raw: ledger_event.raw.hex_encode(),
-                max_id: ledger_event.max_id,
-            }),
-
-            LedgerEventAttributes::ZswapOutput => Ok(Self {
+            LedgerEventAttributes::ZswapInput | LedgerEventAttributes::ZswapOutput => Ok(Self {
                 id: ledger_event.id,
                 raw: ledger_event.raw.hex_encode(),
                 max_id: ledger_event.max_id,
