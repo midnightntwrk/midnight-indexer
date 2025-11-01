@@ -41,7 +41,6 @@ use indexer_common::domain::{
     ByteArrayLenError, ByteVec, LedgerStateStorage, NetworkId, NoopLedgerStateStorage,
     NoopSubscriber, SessionId, Subscriber,
 };
-use log::error;
 use serde::{Deserialize, Serialize};
 use std::{
     any::type_name,

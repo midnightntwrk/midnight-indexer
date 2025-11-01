@@ -24,7 +24,7 @@ use async_nats::{
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt, stream};
-use log::{debug, error, info};
+use log::{debug, info};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use std::{

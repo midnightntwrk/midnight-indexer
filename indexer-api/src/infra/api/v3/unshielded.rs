@@ -28,7 +28,6 @@ use derive_more::{Debug, From};
 use indexer_common::domain::{
     AddressType, ByteArrayLenError, DecodeAddressError, NetworkId, decode_address, encode_address,
 };
-use log::error;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use thiserror::Error;
