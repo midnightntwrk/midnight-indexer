@@ -1783,7 +1783,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3535,9 +3535,9 @@ dependencies = [
 
 [[package]]
 name = "logforth"
-version = "0.28.1"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd048889d633cac5c189eca703f5c5ed65210d358eb5910a478e233d42528d6e"
+checksum = "40c105c59828d07aeb95b06f9a345b12869ddc249d44a7302697a66da439076f"
 dependencies = [
  "logforth-append-fastrace",
  "logforth-append-file",
@@ -3550,9 +3550,9 @@ dependencies = [
 
 [[package]]
 name = "logforth-append-fastrace"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cfe0309685585e09dea16373e66f259fb5e54d5c4e6d5b47f52c2a94deec440"
+checksum = "9166d398b5c892ac63ef3437ae67b7d1fe63f67c2a0ecc0f77849a3420ee33c3"
 dependencies = [
  "fastrace",
  "jiff",
@@ -3561,9 +3561,9 @@ dependencies = [
 
 [[package]]
 name = "logforth-append-file"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aeb66a16ac0f5cdd6a0e7005c6e1fa2744e915244941ac6cd01bd56de2995f48"
+checksum = "7d2ccb8b7e501c114e80069eb2b83c02a48039c23a7037e717b5b09a4ed306fb"
 dependencies = [
  "jiff",
  "logforth-core",
@@ -3571,9 +3571,9 @@ dependencies = [
 
 [[package]]
 name = "logforth-bridge-log"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "392ff9723d68a943ccffabe03b5272f7c93104f0008a6c7357ef888c21ab6297"
+checksum = "a4aa6ca548389fd166a995b5940e15b0dacbdd5a30f2f24eac9aa4bf664bda5c"
 dependencies = [
  "log",
  "logforth-core",
@@ -3581,9 +3581,9 @@ dependencies = [
 
 [[package]]
 name = "logforth-core"
-version = "0.2.1"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7666819ed32e38aabb45959a632b0f9c25fc77e60c824b02a5fcd87ab626f6ed"
+checksum = "a77869b8dba38c67ed19e1753e59d9faefdcc60557bc4e84db0348606a304ac5"
 dependencies = [
  "anyhow",
  "value-bag",
@@ -3591,9 +3591,9 @@ dependencies = [
 
 [[package]]
 name = "logforth-diagnostic-fastrace"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70cef4f74be63362c9e654d4b74b59a019be088d87d453f39e32fc23764f3e87"
+checksum = "4cc0c9b1b2bd07138616f9b27ee08ccff01a6e64115280851d76fd74466e92e0"
 dependencies = [
  "fastrace",
  "logforth-core",
@@ -3601,9 +3601,9 @@ dependencies = [
 
 [[package]]
 name = "logforth-layout-json"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49e1db5d0f5b1bc57134ff9d1ed3889910d230545f3d249bde44bac0e8a8724f"
+checksum = "01b80d310e0670560404a825f64dbd78a8761c5bb7da952513e90ba9dd525bd2"
 dependencies = [
  "jiff",
  "logforth-core",
@@ -3613,9 +3613,9 @@ dependencies = [
 
 [[package]]
 name = "logforth-layout-text"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c00c67d92539b26edbba5e43ce8f5b97d62412c1cfc9463400f50cfad2f1f1bf"
+checksum = "e2a4674e549a59eeac8e301584143186c433181bdc5460046a130becedef6a3d"
 dependencies = [
  "colored",
  "jiff",
@@ -5005,7 +5005,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.0",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5445,7 +5445,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
