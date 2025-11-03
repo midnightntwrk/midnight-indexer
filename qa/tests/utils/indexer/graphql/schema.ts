@@ -43,7 +43,7 @@ export const BlockSchema = z.lazy(() =>
 );
 
 export const UnshieldedUtxoSchema = z.object({
-  owner: z.string(),
+  owner: z.string().regex(/^mn_addr_/),
   intentHash: Hash64,
   value: z.string(),
   tokenType: z

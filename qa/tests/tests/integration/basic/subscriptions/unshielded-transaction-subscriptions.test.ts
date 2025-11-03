@@ -246,12 +246,6 @@ describe('unshielded transaction subscriptions', async () => {
               2,
             )}`,
           ).toBe(true);
-
-          if (txEvent.__typename === 'UnshieldedTransaction') {
-            txEvent.createdUtxos
-              .filter((utxo) => !!utxo.owner)
-              .map((utxo) => expect(utxo.owner).toMatch(/^mn_addr_/));
-          }
         });
     });
 
