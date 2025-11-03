@@ -74,19 +74,9 @@ jobs:
           sarif_file: scan.sarif
 
       # Skip Checkmarx BYOR upload for fork PRs (no secrets available)
-      # TODO: Remove this checkout step once upload-sarif-github-action repo is made public
-      - name: Checkout Upload action repository
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          repository: midnightntwrk/upload-sarif-github-action
-          ref: a0cd00c4e936a5c2fc10d73ef5f3371992350c05
-          path: upload-sarif-github-action
-          token: ${{ secrets.MIDNIGHTCI_REPO }}
-
       - name: Upload SARIF to Checkmarx
         if: github.event.pull_request.head.repo.full_name == github.repository
-        uses: ./upload-sarif-github-action
+        uses: midnightntwrk/upload-sarif-github-action@32b96caabd2472b3d142ed0a278d619d6bd82bf8
         with:
           sarif-file: scan.sarif
           project-name: midnightntwrk/midnight-indexer
