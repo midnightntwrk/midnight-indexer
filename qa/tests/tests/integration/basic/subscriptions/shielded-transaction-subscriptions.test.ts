@@ -244,7 +244,7 @@ describe('shielded transaction subscriptions', () => {
      * @when shielded transaction events are streamed from the indexer
      * @then each received event should match the ShieldedTransactionEventSchema definition
      */
-    test.only('should stream shielded transaction events adhering to the expected schema', async () => {
+    test('should stream shielded transaction events adhering to the expected schema', async () => {
       const seedWithTransactions = '0'.repeat(63) + '1';
       const viewingKey = await toolkit.showViewingKey(seedWithTransactions);
       log.debug(`viewingKey = ${viewingKey}`);
