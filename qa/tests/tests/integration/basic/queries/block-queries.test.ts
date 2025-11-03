@@ -93,10 +93,17 @@ describe('block queries', () => {
 
       expect(response).toBeSuccess();
       expect(response.data?.block).toBeDefined();
-      // TODO: How do we actually test that the block is the latest known block?
-      // Should we try and request a block with a height that is greater than the
-      // latest block height +1 and that will give an empty response? Will that be enough?
-      // The ideal solution would be to query node as well and check that the block is the latest known block.
+
+      const latestBlock = response.data!.block;
+      const latestHeight = latestBlock.height;
+      const nextBlockResponse = await indexerHttpClient.getBlockByOffset({
+        height: latestHeight + 1,
+      });
+
+      expect(nextBlockResponse).toBeSuccess();
+      expect(nextBlockResponse.data?.block).toBeNull();
+
+      log.debug(`Verified that no block exists after height ${latestHeight}`)
     });
 
     /**
