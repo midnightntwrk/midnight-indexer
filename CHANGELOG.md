@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0-alpha.7] - 2025-10-31
+## [3.0.0-alpha.8] - 2025-11-03
 
 ### 🚀 Features
 
@@ -131,6 +131,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Address various audit findings (#477)
 - Further address audit (#495)
 - Richer error messages (#494)
+- Bump Rust to 1.91.0 (#497)
+- Update upload-sarif-github-action to latest version with security fixes (#498)
 
 ## [2.1.4] - 2025-06-30
 
