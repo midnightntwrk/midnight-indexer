@@ -103,7 +103,7 @@ describe('block queries', () => {
       expect(nextBlockResponse).toBeSuccess();
       expect(nextBlockResponse.data?.block).toBeNull();
 
-      log.debug(`Verified that no block exists after height ${latestHeight}`)
+      log.debug(`Verified that no block exists after height ${latestHeight}`);
     });
 
     /**
