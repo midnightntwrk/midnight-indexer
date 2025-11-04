@@ -24,6 +24,9 @@ export const UNSHIELDED_UTXO_BODY_FRAGMENT = `     owner
       value
       tokenType
       outputIndex
+      ctime
+      initialNonce
+      registeredForDustGeneration
       createdAtTransaction {
         hash
       }

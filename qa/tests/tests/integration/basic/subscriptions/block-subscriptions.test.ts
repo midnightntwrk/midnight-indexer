@@ -26,6 +26,7 @@ import {
 } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
 import type { TestContext } from 'vitest';
+import { BlockSchema } from '@utils/indexer/graphql/schema';
 
 describe('block subscriptions', () => {
   let indexerWsClient: IndexerWsClient;
@@ -44,6 +45,52 @@ describe('block subscriptions', () => {
     eventCoordinator.clear();
   });
 
+  /**
+   * Helper to subscribe to block events and wait for a specific number of blocks.
+   */
+  async function collectBlocks(
+    expectedCount: number,
+    fromHeight?: number,
+  ): Promise<BlockSubscriptionResponse[]> {
+    // We wait until expected number of blocks has been recieved, as we want to make sure that
+    // the subscription is working and we are receiving blocks
+    const receivedBlocks: BlockSubscriptionResponse[] = [];
+    const eventName = `${expectedCount}BlocksReceived`;
+    const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
+      next: (payload: BlockSubscriptionResponse) => {
+        log.debug(`Received data:\n${JSON.stringify(payload)}`);
+        receivedBlocks.push(payload);
+        if (receivedBlocks.length === expectedCount) {
+          eventCoordinator.notify(eventName);
+          log.debug(`${expectedCount} blocks received`);
+          indexerWsClient.send<GraphQLCompleteMessage>({
+            id: '1',
+            type: 'complete',
+          });
+        }
+      },
+    };
+    // If a starting height is provided, build a BlockOffset object using that height.
+    // This will fetch the latest block and stream the new blocks as they are produced
+    const blockOffset = fromHeight ? { height: fromHeight } : undefined;
+
+    const unsubscribe = indexerWsClient.subscribeToBlockEvents(
+      blockSubscriptionHandler,
+      blockOffset,
+    );
+
+    // Blocks on MN are produced 6 secs apart. Taking into account the time indexer
+    // takes to process blocks when they are produced, we should expect a similar
+    // interval. Just to be on the safe side (a block full of unshielded transaction
+    // might take up to a sec) we give it a couple of seconds more, so 8 secs in total.
+    // For historical subscriptions, blocks are replayed instantly, so only a short grace period (~2s) is applied.
+    const maxTimeBetweenBlocks = fromHeight ? 2_000 : 8_000;
+    await eventCoordinator.waitForAll([eventName], maxTimeBetweenBlocks);
+
+    unsubscribe();
+    return receivedBlocks;
+  }
+
   describe('a subscription to block updates without parameters', () => {
     /**
      * Subscribing to block updates without any offset parameters should stream
@@ -56,41 +103,44 @@ describe('block subscriptions', () => {
      * @and we should receive new blocks as they are produced
      */
     test('should stream blocks starting from the latest block', async () => {
-      // We wait for two blocks to be received, as we want to make sure that
-      // the subscription is working and we are receiving blocks
-      const receivedBlocks: BlockSubscriptionResponse[] = [];
-      const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
-        next: (payload: BlockSubscriptionResponse) => {
-          log.debug(`Received data:\n${JSON.stringify(payload)}`);
-          receivedBlocks.push(payload);
-          if (receivedBlocks.length === 2) {
-            eventCoordinator.notify('twoBlocksReceived');
-            log.debug('Two blocks received');
-            indexerWsClient.send<GraphQLCompleteMessage>({
-              id: '1',
-              type: 'complete',
-            });
-          }
-        },
-      };
-
-      // Here block offset is undefined, which will result in building
-      // a query without blockoffset parameter. This will fetch the latest
-      // block and stream the new blocks as they are produced
-      const unsubscribe = indexerWsClient.subscribeToBlockEvents(blockSubscriptionHandler);
-
-      // Blocks on MN are produced 6 secs apart. Taking into account the time indexer
-      // takes to process blocks when they are produced, we should expect a similar
-      // interval. Just to be on the safe side (a block full of unshielded transaction
-      // might take up to a sec) we give it a couple of seconds more, so 8 secs in total.
-      const maxTimeBetweenBlocks = 8_000;
-      await eventCoordinator.waitForAll(['twoBlocksReceived'], maxTimeBetweenBlocks);
-
-      unsubscribe();
+      const receivedBlocks = await collectBlocks(2);
 
       // In 6 seconds window we should have received at
       // least 1 block, maybe 2 but no more than that
       expect(receivedBlocks.length).toBe(2);
+    });
+
+    /**
+     * Validates that all streamed blocks conform to the expected schema.
+     *
+     * @given a block subscription without any offset parameters
+     * @when blocks are streamed from the indexer in real time
+     * @then each received block should match the BlockSchema definition
+     */
+    test('should stream blocks adhering to the expected schema', async () => {
+      const latestResponse = await indexerHttpClient.getLatestBlock();
+      expect(latestResponse).toBeSuccess();
+
+      const latestHeight = latestResponse.data?.block?.height;
+      expect(latestHeight).toBeDefined();
+
+      if (!latestHeight) {
+        throw new Error('latestHeight is undefined');
+      }
+
+      const startHeight = latestHeight - 10;
+      //Stream a set of historical blocks from that height
+      const receivedBlocks = await collectBlocks(5, startHeight);
+      receivedBlocks
+        .filter((msg) => msg?.data?.blocks)
+        .forEach((msg) => {
+          expect.soft(msg).toBeSuccess();
+          const parsed = BlockSchema.safeParse(msg.data?.blocks);
+          expect(
+            parsed.success,
+            `Block subscription schema validation failed: ${JSON.stringify(parsed.error?.format(), null, 2)}`,
+          ).toBe(true);
+        });
     });
   });
 

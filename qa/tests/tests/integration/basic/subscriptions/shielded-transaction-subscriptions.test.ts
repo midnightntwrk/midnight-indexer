@@ -26,6 +26,8 @@ import {
 } from '@utils/indexer/websocket-client';
 import { generateSyntheticViewingKey } from '@utils/bech32-codec';
 import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
+import { ShieldedTransactionEventSchema } from '@utils/indexer/graphql/schema';
+import dataProvider from '@utils/testdata-provider';
 
 // This is longer because it might take some time when
 // a new verion of the toolkit image is available and
@@ -204,7 +206,7 @@ describe('shielded transaction subscriptions', () => {
      */
     test('should stream wallet events starting from the beginning, given there are relevant transactions', async () => {
       // Seed with transaction from which we get viewing key
-      const seedWithTransactions = '0'.repeat(63) + '1';
+      const seedWithTransactions = dataProvider.getFundingSeed();
       const viewingKey = await toolkit.showViewingKey(seedWithTransactions);
       log.debug(`viewingKey = ${viewingKey}`);
 
@@ -234,6 +236,58 @@ describe('shielded transaction subscriptions', () => {
       receivedEvents.forEach((event) => {
         expect(event).toBeSuccess();
       });
+    });
+
+    /**
+     * Validates that all streamed shielded transaction events conform to the expected schema.
+     *
+     * @given a valid viewing key and an open wallet session
+     * @when shielded transaction events are streamed from the indexer
+     * @then each received event should match the ShieldedTransactionEventSchema definition
+     */
+    test('should stream shielded transaction events adhering to the expected schema', async () => {
+      // Seed with transaction from which we get viewing key
+      const seedWithTransactions = dataProvider.getFundingSeed();
+      const viewingKey = await toolkit.showViewingKey(seedWithTransactions);
+      log.debug(`viewingKey = ${viewingKey}`);
+
+      const sessionId: string = await indexerWsClient.openWalletSession(viewingKey);
+
+      const receivedEvents: ShieldedTxSubscriptionResponse[] = [];
+      const shieldedTxSubscriptionHandler: SubscriptionHandlers<ShieldedTxSubscriptionResponse> = {
+        next: (payload) => {
+          log.debug(`Received data:\n${JSON.stringify(payload)}`);
+          receivedEvents.push(payload);
+        },
+        complete: () => {
+          log.debug('Completed sent from Indexer');
+        },
+      };
+
+      const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
+        shieldedTxSubscriptionHandler,
+        sessionId,
+      );
+      await new Promise((res) => setTimeout(res, 3000));
+      unsubscribe();
+
+      // Filter out successful events
+      receivedEvents
+        .filter((msg) => msg?.data?.shieldedTransactions)
+        .forEach((msg) => {
+          expect.soft(msg).toBeSuccess();
+          const eventData = msg.data?.shieldedTransactions;
+          const parsed = ShieldedTransactionEventSchema.safeParse(eventData);
+
+          expect(
+            parsed.success,
+            `Shielded transaction event schema validation failed: ${JSON.stringify(
+              parsed.error?.format(),
+              null,
+              2,
+            )}`,
+          ).toBe(true);
+        });
     });
   });
 });

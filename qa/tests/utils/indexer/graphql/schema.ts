@@ -34,13 +34,16 @@ export const BlockSchema = z.lazy(() =>
     hash: Hash64,
     height: BlockHeight,
     timestamp: z.number(),
+    protocolVersion: z.number(),
+    author: z.string().optional(),
+    ledgerParameters: z.string(),
     parent: PartialBlockSchema,
     transactions: z.array(FullTransactionSchema).min(0),
   }),
 );
 
 export const UnshieldedUtxoSchema = z.object({
-  owner: z.string(),
+  owner: z.string().regex(/^mn_addr_/),
   intentHash: Hash64,
   value: z.string(),
   tokenType: z
@@ -48,6 +51,9 @@ export const UnshieldedUtxoSchema = z.object({
     .length(64)
     .regex(/^[a-f0-9]+$/),
   outputIndex: z.number(),
+  ctime: z.number().nullable(),
+  initialNonce: z.string(),
+  registeredForDustGeneration: z.boolean(),
   createdAtTransaction: z.object({
     hash: Hash64,
     identifiers: z.array(z.string()).optional(),
@@ -157,9 +163,9 @@ export const ContractBalanceSchema = z.object({
 // Updated contract action schemas to match current API
 export const ContractDeployActionSchema = z.object({
   __typename: z.literal('ContractDeploy'),
-  address: z.string(),
-  state: z.string(),
-  zswapState: z.string(),
+  address: Hash64,
+  state: VarLenghtHex,
+  zswapState: VarLenghtHex,
   transaction: z.any(), // Reference to transaction
   unshieldedBalances: z.array(ContractBalanceSchema),
 });
@@ -227,4 +233,31 @@ export const UnshieldedTransactionsProgressSchema = z.object({
 export const UnshieldedTxSubscriptionResponseSchema = z.union([
   UnshieldedTransactionEventSchema,
   UnshieldedTransactionsProgressSchema,
+]);
+
+export const RelevantTransactionSchema = z.object({
+  __typename: z.literal('RelevantTransaction'),
+  transaction: z.object({
+    hash: Hash64,
+  }),
+  collapsedMerkleTree: z
+    .object({
+      startIndex: z.number(),
+      endIndex: z.number(),
+      update: VarLenghtHex,
+      protocolVersion: z.number(),
+    })
+    .nullable(),
+});
+
+export const ShieldedTransactionsProgressSchema = z.object({
+  __typename: z.literal('ShieldedTransactionsProgress'),
+  highestEndIndex: z.number(),
+  highestCheckedEndIndex: z.number(),
+  highestRelevantEndIndex: z.number(),
+});
+
+export const ShieldedTransactionEventSchema = z.union([
+  RelevantTransactionSchema,
+  ShieldedTransactionsProgressSchema,
 ]);

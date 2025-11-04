@@ -51,6 +51,9 @@ const UNSHIELDED_TX_SUBSCRIPTION_FRAGMENT = `    ... on UnshieldedTransaction {
           value
           tokenType
           outputIndex
+          ctime
+          initialNonce
+          registeredForDustGeneration
           createdAtTransaction{
               hash
               ... on RegularTransaction {
@@ -102,19 +105,115 @@ export const UNSHIELDED_TX_SUBSCRIPTION_BY_ADDRESS = `subscription UnshieldedTxS
 }`;
 
 export const BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription BlocksSubscriptionFromLatestBlock {
-    blocks{
-        hash
-        height
-        timestamp
+   blocks {
+    hash
+    height
+    timestamp
+    protocolVersion
+    ledgerParameters
+    parent {
+      hash
+      height
     }
+    transactions {
+      id
+      hash
+      __typename
+      protocolVersion
+      raw
+      ... on RegularTransaction {
+    identifiers
+  }
+      unshieldedCreatedOutputs {
+        owner
+        intentHash
+        value
+        tokenType
+        outputIndex
+      }
+    }
+}
 }`;
 
 export const BLOCKS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription BlocksSubscriptionFromBlockByOffset($OFFSET: BlockOffset) {
-    blocks(offset: $OFFSET) {
+      blocks(offset: $OFFSET) {
+    hash
+    height
+    timestamp
+    protocolVersion
+    ledgerParameters
+    parent {
+      hash
+      height
+    }
+    transactions {
+      id
+      hash
+      __typename
+      protocolVersion
+      raw
+      block {
         hash
         height
-        timestamp
+      }
+      contractActions {
+        address
+        state
+        zswapState
+      }
+      unshieldedCreatedOutputs {
+        owner
+        intentHash
+        value
+        tokenType
+        outputIndex
+        ctime
+        initialNonce
+        registeredForDustGeneration
+        createdAtTransaction { hash }
+        spentAtTransaction { hash }
+      }
+      unshieldedSpentOutputs {
+        owner
+        intentHash
+        value
+        tokenType
+        outputIndex
+        ctime
+        initialNonce
+        registeredForDustGeneration
+        createdAtTransaction { hash }
+        spentAtTransaction { hash }
+      }
+      zswapLedgerEvents {
+        id
+        raw
+        maxId
+      }
+      dustLedgerEvents {
+        id
+        raw
+        maxId
+      }
+      ... on RegularTransaction {
+        merkleTreeRoot
+        identifiers
+        startIndex
+        endIndex
+        fees {
+          paidFees
+          estimatedFees
+        }
+        transactionResult {
+          status
+          segments {
+            id
+            success
+          }
+        }
+      }
     }
+  }
 }`;
 
 const CONTRACT_ACTION_SUBSCRIPTION_FRAGMENT = `
