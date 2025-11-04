@@ -121,8 +121,12 @@ describe('block subscriptions', () => {
       const latestResponse = await indexerHttpClient.getLatestBlock();
       expect(latestResponse).toBeSuccess();
 
-      const latestHeight = latestResponse.data?.block?.height!;
+      const latestHeight = latestResponse.data?.block?.height;
       expect(latestHeight).toBeDefined();
+
+      if (!latestHeight) {
+        throw new Error('latestHeight is undefined');
+      }
 
       const startHeight = latestHeight - 10;
       //Stream a set of historical blocks from that height
