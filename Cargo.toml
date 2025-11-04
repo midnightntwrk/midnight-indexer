@@ -24,7 +24,7 @@ anyhow                       = { version = "1.0" }
 assert_matches               = { version = "1.5" }
 async-graphql                = { version = "7.0" }
 async-graphql-axum           = { version = "7.0" }
-async-nats                   = { version = "0.44" }
+async-nats                   = { version = "0.45" }
 async-stream                 = { version = "0.3" }
 axum                         = { version = "0.8" }
 bech32                       = { version = "0.11" }
