@@ -326,6 +326,14 @@ query {
 - The `registered` field indicates if stake key is registered via NativeTokenObservation pallet
 - Registration data comes from Cardano mainnet via bridge
 
+**Important Note on `currentCapacity`:**
+The `currentCapacity` field represents the maximum DUST generation capacity based on the Night UTXO balance and elapsed time. This value:
+- Is accurate until the first DUST fee payment
+- May be higher than actual balance after fee payments
+- Cannot track spent DUST (fee payments are shielded transactions)
+
+For accurate DUST balance after fee payments, query the connected wallet directly via wallet SDK or DApp Connector API. Use `currentCapacity` as an approximation when wallet connection is unavailable
+
 ## Contract Action Types
 
 All ContractAction types (ContractDeploy, ContractCall, ContractUpdate) implement the ContractAction interface with these common fields:
@@ -419,7 +427,7 @@ DUST generation status for a Cardano stake key:
 - `registered`: Whether this stake key is registered (Boolean!)
 - `nightBalance`: NIGHT balance backing generation (String)
 - `generationRate`: Generation rate in Specks per second (String)
-- `currentCapacity`: Current DUST capacity (String)
+- `currentCapacity`: Current DUST generation capacity in Specks - represents maximum possible balance, may be higher than actual balance after fee payments (String)
 
 ### DustLedgerEvent
 
