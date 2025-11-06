@@ -362,7 +362,7 @@ describe('block queries', () => {
       };
 
       // Here we cover the 4 combinations of valid and invalid parameters (hash and height)
-      const hashes = [await dataProvider.getKnownBlockHash(), 'invalid-hash'];
+      const hashes = ['0'.repeat(64), 'invalid-hash'];
       const heights = [1, 2 ** 32];
 
       // Generate cartesian product of hashes and heights

@@ -35,6 +35,9 @@ import {
   UnshieldedTransactionEventSchema,
   UnshieldedTransactionsProgressSchema,
 } from '@utils/indexer/graphql/schema';
+import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
+
+let toolkit: ToolkitWrapper;
 let indexerWsClient: IndexerWsClient;
 
 /**
@@ -102,10 +105,18 @@ describe('unshielded transaction subscriptions', async () => {
   beforeAll(async () => {
     indexerWsClient = new IndexerWsClient();
     await indexerWsClient.connectionInit();
+
+    toolkit = new ToolkitWrapper({});
+    if (toolkit) {
+      await toolkit.start();
+    }
   });
 
   afterAll(async () => {
     await indexerWsClient.connectionClose();
+    if (toolkit) {
+      await toolkit.stop();
+    }
   });
 
   describe('a subscription to unshielded transaction events by address', async () => {
@@ -121,7 +132,8 @@ describe('unshielded transaction subscriptions', async () => {
      * @and each transaction should involve the specified address
      */
     test('should stream unshielded transaction events related to that address, given that address has transactions', async () => {
-      const unshieldedAddress = dataProvider.getUnshieldedAddress('existing');
+      const unshieldedAddress = (await toolkit.showAddress(dataProvider.getFundingSeed())).unshielded;
+
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 10,
@@ -156,7 +168,7 @@ describe('unshielded transaction subscriptions', async () => {
      * @and we should receive at least 2 messages (transactions + progress)
      */
     test('should stream unshielded transaction events up to highest transaction id', async () => {
-      const unshieldedAddress = dataProvider.getUnshieldedAddress('existing');
+      const unshieldedAddress = (await toolkit.showAddress(dataProvider.getFundingSeed())).unshielded;
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 10,
@@ -209,7 +221,7 @@ describe('unshielded transaction subscriptions', async () => {
      * @then every message should match the expected schema fields and types
      */
     test('should stream unshielded transaction events that adhere to the expected schema', async () => {
-      const unshieldedAddress = dataProvider.getUnshieldedAddress('existing');
+      const unshieldedAddress = (await toolkit.showAddress(dataProvider.getFundingSeed())).unshielded;
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 5,
@@ -321,26 +333,11 @@ describe('unshielded transaction subscriptions', async () => {
     test('should return an error message, given the address provided is for another network', async () => {
       // A random address in hex format that should be rejected
       const unshieldedAddressMapByNetwork: Record<string, string> = {
-        Undeployed: 'mn_addr_undeployed1g9nr3mvjcey7ca8shcs5d4yjndcnmczf90rhv4nju7qqqlfg4ygs0t4ngm',
-        Devnet: 'mn_addr_dev1g9nr3mvjcey7ca8shcs5d4yjndcnmczf90rhv4nju7qqqlfg4ygsv7kard',
-        Testnet: 'mn_addr_test1g9nr3mvjcey7ca8shcs5d4yjndcnmczf90rhv4nju7qqqlfg4ygs72dqyf',
+        undeployed: (await toolkit.showAddress(dataProvider.getFundingSeed(), "undeployed")).unshielded,
+        devnet: (await toolkit.showAddress(dataProvider.getFundingSeed(), "devnet")).unshielded,
+        "node-dev-01": (await toolkit.showAddress(dataProvider.getFundingSeed(), "node-dev-01")).unshielded,
+        preview: (await toolkit.showAddress(dataProvider.getFundingSeed(), "preview")).unshielded,
       };
-
-      let encodedAddress = encodeBech32mWithPrefix(
-        unshieldedAddressMapByNetwork.Undeployed,
-        'mn_addr_dev',
-      );
-      log.info(`Encoded address for devnet: ${encodedAddress}`);
-      let decodedAddress = decodeBech32m(encodedAddress);
-      log.info(`Decoded address for devnet: ${decodedAddress}`);
-
-      encodedAddress = encodeBech32mWithPrefix(
-        unshieldedAddressMapByNetwork.Undeployed,
-        'mn_addr_test',
-      );
-      log.info(`Encoded address for testnet: ${encodedAddress}`);
-      decodedAddress = decodeBech32m(encodedAddress);
-      log.info(`Decoded address for testnet: ${decodedAddress}`);
 
       const currentNetworkId = env.getNetworkId();
       const targetNetworks = { ...unshieldedAddressMapByNetwork };
@@ -383,7 +380,7 @@ describe('unshielded transaction subscriptions', async () => {
      */
     test('should return a stream of transactions containing that address, starting from transaction id = 0', async () => {
       const targetTransactionId = 0;
-      const targetAddress = dataProvider.getUnshieldedAddress('existing');
+      const targetAddress = (await toolkit.showAddress(dataProvider.getFundingSeed())).unshielded;
 
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
@@ -436,7 +433,7 @@ describe('unshielded transaction subscriptions', async () => {
     test('should return an error message, given the transaction id provided is negative', async () => {
       // A random address in hex format that should be rejected
       const targetTransactionId = -1;
-      const targetAddress = dataProvider.getUnshieldedAddress('existing');
+      const targetAddress = (await toolkit.showAddress(dataProvider.getFundingSeed())).unshielded;
 
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
@@ -461,7 +458,7 @@ describe('unshielded transaction subscriptions', async () => {
      */
     test('should only return a transaction progress message without streaming transactions, given that the transaction id provided is bigger number', async () => {
       const targetTransactionId = 4294967296; // 2^32
-      const targetAddress = dataProvider.getUnshieldedAddress('existing');
+      const targetAddress = (await toolkit.showAddress(dataProvider.getFundingSeed())).unshielded;
 
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
@@ -491,7 +488,8 @@ describe('unshielded transaction subscriptions', async () => {
      * @then we should receive transaction events that start from the specified transaction ID
      */
     test('should start a transaction stream from the given transaction id', async () => {
-      const targetAddress = dataProvider.getUnshieldedAddress('existing');
+      
+      const targetAddress = (await toolkit.showAddress(dataProvider.getFundingSeed())).unshielded;
 
       let messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress },

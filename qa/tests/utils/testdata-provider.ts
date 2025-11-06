@@ -88,7 +88,7 @@ class TestDataProvider {
    */
   getFundingSeed() {
     // Build the environment-specific variable name (e.g., FUNDING_SEED_PREVIEW)
-    const envName = env.getEnvName().toUpperCase();
+    const envName = env.getEnvName().toUpperCase().replace(/-/g, '_');
     const envVarName = `FUNDING_SEED_${envName}`;
 
     // Try environment-specific variable first
@@ -175,7 +175,7 @@ class TestDataProvider {
   }
 
   /**
-   * Gets a known block hash from contract deployment action.
+   * Gets a known block hash
    * @returns A promise that resolves to the block hash.
    */
   getKnownBlockHash() {

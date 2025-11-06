@@ -19,7 +19,7 @@ import log from '@utils/logging/logger';
 export enum EnvironmentName {
   UNDEPLOYED = 'undeployed',
   QANET = 'qanet',
-  NODEDEV01 = 'nodedev01',
+  NODEDEV01 = 'node-dev-01',
   DEVNET = 'devnet',
   PREVIEW = 'preview',
   TESTNET = 'testnet',
@@ -34,8 +34,8 @@ export enum LedgerNetworkId {
 
 export const networkIdByEnvName: Record<string, string> = {
   undeployed: 'Undeployed',
-  qanet: 'Devnet',
-  nodedev01: 'Devnet',
+  qanet: 'qanet',
+  "node-dev-01": "node-dev-01",
   devnet: 'Devnet',
   preview: 'Devnet',
   testnet: 'Testnet',
@@ -51,7 +51,7 @@ export const bech32mTagsByLedgerNetworkId: Record<string, string> = {
 const indexerHostByEnvName: Record<string, string> = {
   undeployed: 'localhost:8088',
   qanet: 'indexer.qanet.dev.midnight.network',
-  nodedev01: 'indexer.node-dev-01.dev.midnight.network',
+  "node-dev-01": 'indexer.node-dev-01.dev.midnight.network',
   devnet: 'indexer.devnet.midnight.network',
   preview: 'indexer.preview.midnight.network',
   testnet: 'indexer.testnet.midnight.network',
@@ -61,7 +61,7 @@ const indexerHostByEnvName: Record<string, string> = {
 const nodeHostByEnvName: Record<string, string> = {
   undeployed: 'localhost:9944',
   qanet: 'rpc.qanet.dev.midnight.network',
-  nodedev01: 'rpc.node-dev-01.dev.midnight.network',
+  "node-dev-01": 'rpc.node-dev-01.dev.midnight.network',
   devnet: 'rpc.devnet.midnight.network',
   preview: 'rpc.preview.midnight.network',
   testnet: 'rpc.testnet.midnight.network',

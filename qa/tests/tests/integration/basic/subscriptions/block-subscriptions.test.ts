@@ -476,14 +476,16 @@ describe('block subscriptions', () => {
   describe('a subscription to block updates by height and hash', () => {
     /**
      * Subscribing to block updates with a valid block height and hash should
-     * return an error message, as only only one parameter at a time can be used
+     * return an error message, as only one parameter at a time can be used
      *
      * @given a valid block height and hash
      * @when we subscribe to block events with that height and hash as offset
      * @then we should receive an error message indicating that only one parameter at a time can be used
      */
-    test('should return an error message, as only only one parameter at a time can be used', async () => {
-      const blockOffset: BlockOffset = { height: 1, hash: await dataProvider.getKnownBlockHash() };
+    test('should return an error message, as only one parameter at a time can be used', async () => {
+      const blockOffset: BlockOffset = { 
+        height: 1, 
+        hash: '0'.repeat(64) };
 
       const blockMessagesReceived: BlockSubscriptionResponse[] = [];
 
