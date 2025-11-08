@@ -297,7 +297,7 @@ query {
 }
 ```
 
-### dustGenerationStatus(cardanoStakeKeys: [HexEncoded!]!): [DustGenerationStatus!]!
+### dustGenerationStatus(cardanoRewardAddresses: [CardanoRewardAddress!]!): [DustGenerationStatus!]!
 
 Query DUST generation status for one or more Cardano stake keys.
 
@@ -306,11 +306,11 @@ Query DUST generation status for one or more Cardano stake keys.
 ```graphql
 query {
   dustGenerationStatus(
-    cardanoStakeKeys: [
-      "0xae78b8d48d620fdf78e30ddb79c442066bd93f1f4f1919efc4373e6fed6cc665"
+    cardanoRewardAddresses: [
+      "stake_test1uqtgpdz0chm6jnxx7erfd7rhqfud7t4ajazx8es8xk8x3ts06psdv"
     ]
   ) {
-    cardanoStakeKey
+    cardanoRewardAddress
     dustAddress
     registered
     nightBalance
@@ -422,7 +422,7 @@ Represents an unshielded UTXO (Unspent Transaction Output):
 ### DustGenerationStatus
 
 DUST generation status for a Cardano stake key:
-- `cardanoStakeKey`: The Cardano stake key (HexEncoded)
+- `cardanoRewardAddress`: The Bech32-encoded Cardano stake address (e.g., stake_test1... or stake1...)
 - `dustAddress`: Associated DUST address if registered (HexEncoded, optional)
 - `registered`: Whether this stake key is registered (Boolean!)
 - `nightBalance`: NIGHT balance backing generation (String)

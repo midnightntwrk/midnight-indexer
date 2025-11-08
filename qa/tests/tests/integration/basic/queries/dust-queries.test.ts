@@ -100,7 +100,7 @@ describe('dust generation status queries', () => {
 
       let registeredStakeKey: string;
       try {
-        registeredStakeKey = dataProvider.getCardanoStakeKey('registered-with-dust');
+        registeredStakeKey = dataProvider.getCardanoRewardAddress('registered-with-dust');
       } catch (error) {
         log.warn(error);
         ctx.skip?.(true, (error as Error).message);
@@ -135,7 +135,7 @@ describe('dust generation status queries', () => {
 
       let nonRegisteredStakeKey: string;
       try {
-        nonRegisteredStakeKey = dataProvider.getCardanoStakeKey('non-registered');
+        nonRegisteredStakeKey = dataProvider.getCardanoRewardAddress('non-registered');
       } catch (error) {
         log.warn(error);
         ctx.skip?.(true, (error as Error).message);
@@ -170,8 +170,8 @@ describe('dust generation status queries', () => {
       let registeredStakeKey: string;
       let nonRegisteredStakeKey: string;
       try {
-        registeredStakeKey = dataProvider.getCardanoStakeKey('registered-with-dust');
-        nonRegisteredStakeKey = dataProvider.getCardanoStakeKey('non-registered');
+        registeredStakeKey = dataProvider.getCardanoRewardAddress('registered-with-dust');
+        nonRegisteredStakeKey = dataProvider.getCardanoRewardAddress('non-registered');
       } catch (error) {
         log.warn(error);
         ctx.skip?.(true, (error as Error).message);
@@ -186,10 +186,10 @@ describe('dust generation status queries', () => {
       expect(response.data?.dustGenerationStatus).toHaveLength(2);
 
       // Verify order is preserved (normalize case for hex comparison)
-      expect(response.data?.dustGenerationStatus[0].cardanoStakeKey.toLowerCase()).toBe(
+      expect(response.data?.dustGenerationStatus[0].cardanoRewardAddress.toLowerCase()).toBe(
         registeredStakeKey!.toLowerCase(),
       );
-      expect(response.data?.dustGenerationStatus[1].cardanoStakeKey.toLowerCase()).toBe(
+      expect(response.data?.dustGenerationStatus[1].cardanoRewardAddress.toLowerCase()).toBe(
         nonRegisteredStakeKey!.toLowerCase(),
       );
     });
@@ -210,8 +210,8 @@ describe('dust generation status queries', () => {
       let registeredStakeKey: string;
       let nonRegisteredStakeKey: string;
       try {
-        registeredStakeKey = dataProvider.getCardanoStakeKey('registered-with-dust');
-        nonRegisteredStakeKey = dataProvider.getCardanoStakeKey('non-registered');
+        registeredStakeKey = dataProvider.getCardanoRewardAddress('registered-with-dust');
+        nonRegisteredStakeKey = dataProvider.getCardanoRewardAddress('non-registered');
       } catch (error) {
         log.warn(error);
         ctx.skip?.(true, (error as Error).message);
@@ -228,11 +228,11 @@ describe('dust generation status queries', () => {
 
       // Validate each status against the schema
       for (const status of response.data!.dustGenerationStatus) {
-        log.debug(`Validating schema for stake key: ${status.cardanoStakeKey}`);
+        log.debug(`Validating schema for stake key: ${status.cardanoRewardAddress}`);
         const validationResult = DustGenerationStatusSchema.safeParse(status);
         expect(
           validationResult.success,
-          `DUST generation status schema validation failed for ${status.cardanoStakeKey}: ${JSON.stringify(validationResult.error, null, 2)}`,
+          `DUST generation status schema validation failed for ${status.cardanoRewardAddress}: ${JSON.stringify(validationResult.error, null, 2)}`,
         ).toBe(true);
       }
     });
@@ -335,7 +335,7 @@ describe('dust generation status queries', () => {
 
       let registeredStakeKey: string;
       try {
-        registeredStakeKey = dataProvider.getCardanoStakeKey('registered-with-dust');
+        registeredStakeKey = dataProvider.getCardanoRewardAddress('registered-with-dust');
       } catch (error) {
         log.warn(error);
         ctx.skip?.(true, (error as Error).message);
@@ -351,10 +351,10 @@ describe('dust generation status queries', () => {
       expect(response.data?.dustGenerationStatus).toHaveLength(2);
 
       // Both results should have the same stake key
-      expect(response.data?.dustGenerationStatus[0].cardanoStakeKey.toLocaleLowerCase()).toBe(
+      expect(response.data?.dustGenerationStatus[0].cardanoRewardAddress.toLocaleLowerCase()).toBe(
         registeredStakeKey!.toLowerCase(),
       );
-      expect(response.data?.dustGenerationStatus[1].cardanoStakeKey.toLocaleLowerCase()).toBe(
+      expect(response.data?.dustGenerationStatus[1].cardanoRewardAddress.toLocaleLowerCase()).toBe(
         registeredStakeKey!.toLowerCase(),
       );
     });

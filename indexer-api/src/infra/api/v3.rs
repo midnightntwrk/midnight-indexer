@@ -38,8 +38,10 @@ use axum::{Router, routing::post_service};
 use const_hex::FromHexError;
 use derive_more::{AsRef, Debug, Display};
 use indexer_common::domain::{
-    ByteArrayLenError, ByteVec, LedgerStateStorage, NetworkId, NoopLedgerStateStorage,
-    NoopSubscriber, SessionId, Subscriber,
+    ByteArrayLenError, ByteVec, CardanoNetwork, CardanoRewardAddress as DomainCardanoRewardAddress,
+    DecodeCardanoRewardAddressError, LedgerStateStorage, NetworkId, NoopLedgerStateStorage,
+    NoopSubscriber, SessionId, Subscriber, decode_cardano_reward_address,
+    encode_cardano_reward_address,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -108,6 +110,65 @@ where
 }
 
 impl<T> AsBytesExt for T where T: AsRef<[u8]> {}
+
+/// Wrapper around a Bech32-encoded Cardano reward address.
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, AsRef)]
+#[debug("{_0}")]
+#[as_ref(str)]
+pub struct CardanoRewardAddress(String);
+
+scalar!(CardanoRewardAddress);
+
+impl CardanoRewardAddress {
+    /// Decode this Bech32 Cardano reward address into a CardanoRewardAddress.
+    pub fn decode(&self) -> Result<DomainCardanoRewardAddress, Bech32DecodeError> {
+        decode_cardano_reward_address(&self.0).map_err(Bech32DecodeError::Decode)
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum Bech32DecodeError {
+    #[error("cannot bech32-decode Cardano reward address")]
+    Decode(#[from] DecodeCardanoRewardAddressError),
+}
+
+impl TryFrom<String> for CardanoRewardAddress {
+    type Error = DecodeCardanoRewardAddressError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        // Validate by attempting to decode.
+        decode_cardano_reward_address(&s)?;
+        Ok(Self(s))
+    }
+}
+
+impl TryFrom<&str> for CardanoRewardAddress {
+    type Error = DecodeCardanoRewardAddressError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        // Validate by attempting to decode.
+        decode_cardano_reward_address(s)?;
+        Ok(Self(s.to_owned()))
+    }
+}
+
+/// Extension trait for encoding CardanoRewardAddress to Bech32 format.
+pub trait CardanoRewardAddressExt {
+    /// Bech32-encode this CardanoRewardAddress.
+    /// Uses testnet format (stake_test) by default since most deployments use testnet.
+    fn bech32_encode(&self) -> CardanoRewardAddress {
+        self.bech32_encode_with_network(CardanoNetwork::Testnet)
+    }
+
+    /// Bech32-encode this CardanoRewardAddress with a specific network.
+    fn bech32_encode_with_network(&self, network: CardanoNetwork) -> CardanoRewardAddress;
+}
+
+impl CardanoRewardAddressExt for DomainCardanoRewardAddress {
+    fn bech32_encode_with_network(&self, network: CardanoNetwork) -> CardanoRewardAddress {
+        CardanoRewardAddress(encode_cardano_reward_address(self, network))
+    }
+}
 
 /// Export the GraphQL schema in SDL format.
 pub fn export_schema() -> String {

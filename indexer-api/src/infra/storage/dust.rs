@@ -16,7 +16,7 @@ use crate::{
     infra::storage::Storage,
 };
 use fastrace::trace;
-use indexer_common::{domain::CardanoStakeKey, infra::sqlx::U128BeBytes};
+use indexer_common::{domain::CardanoRewardAddress, infra::sqlx::U128BeBytes};
 use indoc::indoc;
 
 /// DUST generation rate in Specks per Star per second.
@@ -32,11 +32,11 @@ impl DustStorage for Storage {
     #[trace]
     async fn get_dust_generation_status(
         &self,
-        cardano_stake_keys: &[CardanoStakeKey],
+        cardano_reward_addresses: &[CardanoRewardAddress],
     ) -> Result<Vec<DustGenerationStatus>, sqlx::Error> {
         let mut statuses = vec![];
 
-        for stake_key in cardano_stake_keys {
+        for reward_address in cardano_reward_addresses {
             // Query registration info.
             let registration_query = indoc! {"
                 SELECT dust_address, valid
@@ -47,13 +47,13 @@ impl DustStorage for Storage {
             "};
 
             let result = sqlx::query_as::<_, (Vec<u8>, bool)>(registration_query)
-                .bind(stake_key.as_ref())
+                .bind(reward_address.as_ref())
                 .fetch_optional(&*self.pool)
                 .await?;
 
             let (dust_address, registered) = match result {
                 Some((addr, valid)) => {
-                    let address_array: [u8; 32] = addr
+                    let address_array: [u8; 33] = addr
                         .try_into()
                         .map_err(|_| sqlx::Error::Decode("invalid DUST address length".into()))?;
                     (
@@ -125,7 +125,7 @@ impl DustStorage for Storage {
             }
 
             statuses.push(DustGenerationStatus {
-                cardano_stake_key: stake_key.to_owned(),
+                cardano_reward_address: reward_address.to_owned(),
                 dust_address: registered.then_some(dust_address),
                 registered,
                 night_balance,

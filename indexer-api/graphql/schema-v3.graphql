@@ -50,6 +50,8 @@ input BlockOffset @oneOf {
 	height: Int
 }
 
+scalar CardanoRewardAddress
+
 type CollapsedMerkleTree {
 	"""
 	The zswap state start index.
@@ -212,19 +214,19 @@ type DustGenerationDtimeUpdate implements DustLedgerEvent {
 }
 
 """
-DUST generation status for a specific Cardano stake key.
+DUST generation status for a specific Cardano reward address.
 """
 type DustGenerationStatus {
 	"""
-	The hex-encoded Cardano stake key.
+	The Bech32-encoded Cardano reward address (e.g., stake_test1... or stake1...).
 	"""
-	cardanoStakeKey: HexEncoded!
+	cardanoRewardAddress: CardanoRewardAddress!
 	"""
 	The hex-encoded associated DUST address if registered.
 	"""
 	dustAddress: HexEncoded
 	"""
-	Whether this stake key is registered.
+	Whether this reward address is registered.
 	"""
 	registered: Boolean!
 	"""
@@ -336,9 +338,9 @@ type Query {
 	"""
 	contractAction(address: HexEncoded!, offset: ContractActionOffset): ContractAction
 	"""
-	Get DUST generation status for specific Cardano stake keys.
+	Get DUST generation status for specific Cardano reward addresses.
 	"""
-	dustGenerationStatus(cardanoStakeKeys: [HexEncoded!]!): [DustGenerationStatus!]!
+	dustGenerationStatus(cardanoRewardAddresses: [CardanoRewardAddress!]!): [DustGenerationStatus!]!
 }
 
 """

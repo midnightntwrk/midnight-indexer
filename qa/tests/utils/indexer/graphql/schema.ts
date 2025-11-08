@@ -198,7 +198,7 @@ export const ContractActionUnionSchema = z.discriminatedUnion('__typename', [
 
 // DUST Generation Status schema
 export const DustGenerationStatusSchema = z.object({
-  cardanoStakeKey: z.string().regex(/^[a-f0-9]{64}$/),
+  cardanoRewardAddress: z.string().regex(/^[a-f0-9]{64}$/),
   dustAddress: z.string().nullable(),
   registered: z.boolean(),
   nightBalance: z.string().regex(/^\d+$/),

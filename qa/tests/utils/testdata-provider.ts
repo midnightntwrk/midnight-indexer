@@ -48,12 +48,12 @@ function importJsoncData(filePath: string): JsonValue {
  */
 class TestDataProvider {
   private contracts: ContractInfo[];
-  private cardanoStakeKeys: Record<string, string>;
+  private cardanoRewardAddresses: Record<string, string>;
   private unshieldedAddresses: Record<string, string>;
 
   constructor() {
     this.contracts = [];
-    this.cardanoStakeKeys = {};
+    this.cardanoRewardAddresses = {};
     this.unshieldedAddresses = {};
   }
 
@@ -72,7 +72,7 @@ class TestDataProvider {
       string,
       string
     >;
-    this.cardanoStakeKeys = importJsoncData(`${baseDir}/cardano-stake-keys.jsonc`) as Record<
+    this.cardanoRewardAddresses = importJsoncData(`${baseDir}/cardano-stake-keys.jsonc`) as Record<
       string,
       string
     >;
@@ -343,16 +343,16 @@ class TestDataProvider {
    * @returns The Cardano stake key as a string.
    * @throws Error if the property is not found or undefined for the current environment.
    */
-  getCardanoStakeKey(property: string) {
+  getCardanoRewardAddress(property: string) {
     if (
-      !this.cardanoStakeKeys.hasOwnProperty(property) ||
-      this.cardanoStakeKeys[property] === undefined
+      !this.cardanoRewardAddresses.hasOwnProperty(property) ||
+      this.cardanoRewardAddresses[property] === undefined
     ) {
       throw new Error(
         `Test data provider is missing the cardano stake key data for ${property} for ${env.getEnvName()} environment`,
       );
     }
-    return this.cardanoStakeKeys[property];
+    return this.cardanoRewardAddresses[property];
   }
 
   /**
@@ -360,7 +360,7 @@ class TestDataProvider {
    * These include empty strings, invalid hex characters, and special characters.
    * @returns An array of malformed Cardano stake key strings.
    */
-  getFabricatedMalformedCardanoStakeKeys() {
+  getFabricatedMalformedCardanoRewardAddresss() {
     return [
       '', // empty string
       'G'.repeat(64), // invalid hex characters
