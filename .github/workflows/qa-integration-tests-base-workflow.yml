@@ -131,7 +131,10 @@ jobs:
 
       - name: Install dependencies
         working-directory: qa/tests
-        run: yarn install --immutable
+        run: |
+          npm install -g yarn@1
+          yarn set version 3.6.4
+          yarn install --immutable
 
       - name: Run smoke tests
         working-directory: qa/tests

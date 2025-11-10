@@ -116,5 +116,6 @@ rm -rf qa/tests/.tmp/toolkit/.sync_cache-undeployed/
 
 echo "Regenarating new test data... "
 pushd qa/tools/block-scanner
+bun install
 bun run generate:data
 popd
