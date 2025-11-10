@@ -3,6 +3,9 @@ name: Indexer QA Integration Tests Base workflow
 # Note this is the base workflow used by the other
 # qa-integration-tests-<environment>.yml workflows
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
