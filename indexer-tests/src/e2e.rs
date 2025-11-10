@@ -38,7 +38,7 @@ use crate::{
 use anyhow::{Context, bail};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
-use indexer_api::infra::api::v3::{AsBytesExt, viewing_key::ViewingKey};
+use indexer_api::infra::api::v3::{HexEncodable, viewing_key::ViewingKey};
 use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_018_000};
 use itertools::Itertools;
 use reqwest::Client;
@@ -623,20 +623,21 @@ async fn test_dust_generation_status_query(
     api_client: &Client,
     api_url: &str,
 ) -> anyhow::Result<()> {
-    // Test with empty stake keys list.
+    // Test with empty reward addresses list.
     let variables = dust_generation_status_query::Variables {
-        cardano_stake_keys: vec![],
+        cardano_reward_addresses: vec![],
     };
     let response = send_query::<DustGenerationStatusQuery>(api_client, api_url, variables).await?;
     assert!(response.dust_generation_status.is_empty());
 
-    // Test with non-existent stake keys - should return unregistered status.
+    // Test with non-existent reward addresses - should return unregistered status.
+    // Using Bech32-encoded testnet reward addresses.
     let variables = dust_generation_status_query::Variables {
-        cardano_stake_keys: vec![
-            "0x0000000000000000000000000000000000000000000000000000000000000001"
+        cardano_reward_addresses: vec![
+            "stake_test1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgcpttsx"
                 .try_into()
                 .unwrap(),
-            "0x0000000000000000000000000000000000000000000000000000000000000002"
+            "stake_test1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqstsw9hr"
                 .try_into()
                 .unwrap(),
         ],
@@ -940,7 +941,8 @@ fn viewing_key(network_id: &NetworkId) -> &'static str {
 mod graphql {
     use graphql_client::GraphQLQuery;
     use indexer_api::infra::api::v3::{
-        HexEncoded, mutation::Unit, unshielded::UnshieldedAddress, viewing_key::ViewingKey,
+        CardanoRewardAddress, HexEncoded, mutation::Unit, unshielded::UnshieldedAddress,
+        viewing_key::ViewingKey,
     };
 
     #[derive(GraphQLQuery)]

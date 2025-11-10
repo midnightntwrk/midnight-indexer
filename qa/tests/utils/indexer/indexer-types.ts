@@ -207,7 +207,7 @@ export interface ContractBalance {
 }
 
 export interface DustGenerationStatus {
-  cardanoStakeKey: string;
+  cardanoRewardAddress: string;
   dustAddress?: string;
   registered: boolean;
   nightBalance: string;

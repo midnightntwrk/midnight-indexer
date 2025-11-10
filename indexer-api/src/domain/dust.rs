@@ -11,19 +11,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{CardanoStakeKey, DustAddress};
+use indexer_common::domain::{CardanoRewardAddress, DustAddress};
 use serde::{Deserialize, Serialize};
 
-/// DUST generation status for a specific Cardano stake key.
+/// DUST generation status for a specific Cardano reward address.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DustGenerationStatus {
-    /// Cardano stake key.
-    pub cardano_stake_key: CardanoStakeKey,
+    /// Cardano reward address.
+    pub cardano_reward_address: CardanoRewardAddress,
 
     /// Associated DUST address if registered.
     pub dust_address: Option<DustAddress>,
 
-    /// Whether this stake key is registered.
+    /// Whether this reward address is registered.
     pub registered: bool,
 
     /// NIGHT balance backing generation.

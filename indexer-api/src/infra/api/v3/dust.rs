@@ -18,20 +18,23 @@
 
 use crate::{
     domain,
-    infra::api::v3::{AsBytesExt, HexEncoded},
+    infra::api::v3::{
+        CardanoNetwork, CardanoRewardAddress, HexEncodable, HexEncoded,
+        encode_cardano_reward_address,
+    },
 };
 use async_graphql::SimpleObject;
 
-/// DUST generation status for a specific Cardano stake key.
+/// DUST generation status for a specific Cardano reward address.
 #[derive(Debug, Clone, SimpleObject)]
 pub struct DustGenerationStatus {
-    /// The hex-encoded Cardano stake key.
-    pub cardano_stake_key: HexEncoded,
+    /// The Bech32-encoded Cardano reward address (e.g., stake_test1... or stake1...).
+    pub cardano_reward_address: CardanoRewardAddress,
 
     /// The hex-encoded associated DUST address if registered.
     pub dust_address: Option<HexEncoded>,
 
-    /// Whether this stake key is registered.
+    /// Whether this reward address is registered.
     pub registered: bool,
 
     /// NIGHT balance backing generation.
@@ -46,8 +49,14 @@ pub struct DustGenerationStatus {
 
 impl From<domain::DustGenerationStatus> for DustGenerationStatus {
     fn from(status: domain::DustGenerationStatus) -> Self {
+        // TODO: Make the cardano network configurable!
+        let cardano_reward_address = CardanoRewardAddress(encode_cardano_reward_address(
+            status.cardano_reward_address,
+            CardanoNetwork::Testnet,
+        ));
+
         Self {
-            cardano_stake_key: status.cardano_stake_key.hex_encode(),
+            cardano_reward_address,
             dust_address: status.dust_address.map(|addr| addr.hex_encode()),
             registered: status.registered,
             night_balance: status.night_balance.to_string(),

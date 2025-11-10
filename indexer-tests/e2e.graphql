@@ -801,9 +801,9 @@ subscription DustLedgerEventsSubscription($id: Int) {
     }
 }
 
-query DustGenerationStatusQuery($cardanoStakeKeys: [HexEncoded!]!) {
-    dustGenerationStatus(cardanoStakeKeys: $cardanoStakeKeys) {
-        cardanoStakeKey
+query DustGenerationStatusQuery($cardanoRewardAddresses: [CardanoRewardAddress!]!) {
+    dustGenerationStatus(cardanoRewardAddresses: $cardanoRewardAddresses) {
+        cardanoRewardAddress
         dustAddress
         registered
         nightBalance

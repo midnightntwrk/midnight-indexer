@@ -14,7 +14,7 @@
 // limitations under the License.
 
 export const DUST_GENERATION_STATUS_BODY_FRAGMENT = `
-  cardanoStakeKey
+  cardanoRewardAddress
   dustAddress
   registered
   nightBalance
@@ -23,8 +23,8 @@ export const DUST_GENERATION_STATUS_BODY_FRAGMENT = `
 `;
 
 export const GET_DUST_GENERATION_STATUS = `
-query GetDustGenerationStatus($CARDANO_STAKE_KEYS: [HexEncoded!]!) {
-  dustGenerationStatus(cardanoStakeKeys: $CARDANO_STAKE_KEYS) {
+query GetDustGenerationStatus($CARDANO_REWARD_ADDRESSES: [CardanoRewardAddress!]!) {
+  dustGenerationStatus(cardanoRewardAddresses: $CARDANO_REWARD_ADDRESSES) {
     ${DUST_GENERATION_STATUS_BODY_FRAGMENT}
   }
 }`;

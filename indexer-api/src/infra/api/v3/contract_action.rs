@@ -16,7 +16,7 @@ use crate::{
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
         v3::{
-            AsBytesExt, HexEncoded,
+            HexEncodable, HexEncoded,
             block::BlockOffset,
             transaction::{Transaction, TransactionOffset},
             unshielded::ContractBalance,

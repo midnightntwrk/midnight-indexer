@@ -16,7 +16,7 @@ use crate::{
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
         v3::{
-            HexEncoded,
+            CardanoRewardAddress, HexEncoded,
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
             dust::DustGenerationStatus,
@@ -202,29 +202,29 @@ where
         Ok(contract_action.map(Into::into))
     }
 
-    /// Get DUST generation status for specific Cardano stake keys.
+    /// Get DUST generation status for specific Cardano reward addresses.
     #[trace]
     async fn dust_generation_status(
         &self,
         cx: &Context<'_>,
-        cardano_stake_keys: Vec<HexEncoded>,
+        cardano_reward_addresses: Vec<CardanoRewardAddress>,
     ) -> ApiResult<Vec<DustGenerationStatus>> {
-        // DOS protection: limit to 10 keys.
-        (cardano_stake_keys.len() <= 10)
+        // DOS protection: limit to 10 reward addresses.
+        (cardano_reward_addresses.len() <= 10)
             .then_some(())
-            .some_or_client_error(|| "maximum of ten stake keys allowed")?;
+            .some_or_client_error(|| "maximum of ten reward addresses allowed")?;
 
         let storage = cx.get_storage::<S>();
 
-        // Convert HexEncoded to binary.
-        let binary_keys = cardano_stake_keys
+        // Convert Bech32 CardanoRewardAddress to binary.
+        let address = cardano_reward_addresses
             .into_iter()
-            .map(|key| key.hex_decode::<indexer_common::domain::CardanoStakeKey>())
+            .map(|key| key.decode())
             .collect::<Result<Vec<_>, _>>()
-            .map_err_into_client_error(|| "invalid stake key")?;
+            .map_err_into_client_error(|| "invalid Cardano reward address")?;
 
         let status_list = storage
-            .get_dust_generation_status(&binary_keys)
+            .get_dust_generation_status(&address)
             .await
             .map_err_into_server_error(|| "get DUST generation status")?;
 

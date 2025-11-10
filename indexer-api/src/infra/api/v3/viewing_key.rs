@@ -14,11 +14,11 @@
 use async_graphql::scalar;
 use derive_more::{Display, derive::From};
 use fastrace::trace;
-use indexer_common::domain::{
-    AddressType, DecodeAddressError, NetworkId, ProtocolVersion, decode_address, ledger,
-};
+use indexer_common::domain::{NetworkId, ProtocolVersion, ledger};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::infra::api::v3::{AddressType, DecodeAddressError, decode_address};
 
 /// Bech32m-encoded viewing key.
 #[derive(Debug, Display, Clone, PartialEq, Eq, Serialize, Deserialize, From)]
