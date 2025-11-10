@@ -217,14 +217,14 @@ where
         let storage = cx.get_storage::<S>();
 
         // Convert Bech32 CardanoRewardAddress to binary.
-        let binary_keys = cardano_reward_addresses
+        let address = cardano_reward_addresses
             .into_iter()
             .map(|key| key.decode())
             .collect::<Result<Vec<_>, _>>()
             .map_err_into_client_error(|| "invalid Cardano reward address")?;
 
         let status_list = storage
-            .get_dust_generation_status(&binary_keys)
+            .get_dust_generation_status(&address)
             .await
             .map_err_into_server_error(|| "get DUST generation status")?;
 

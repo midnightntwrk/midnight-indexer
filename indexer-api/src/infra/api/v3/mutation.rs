@@ -15,7 +15,7 @@ use crate::{
     domain::{PROTOCOL_VERSION, storage::Storage},
     infra::api::{
         ApiResult, ContextExt, ResultExt,
-        v3::{AsBytesExt, HexEncoded, decode_session_id, viewing_key::ViewingKey},
+        v3::{HexEncodable, HexEncoded, decode_session_id, viewing_key::ViewingKey},
     },
 };
 use async_graphql::{Context, Object, scalar};

@@ -14,26 +14,23 @@
 pub mod dust;
 pub mod ledger;
 
-mod address;
 mod bytes;
 mod ledger_state_storage;
 mod protocol_version;
 mod pub_sub;
 mod viewing_key;
 
-use std::str::FromStr;
-
-pub use address::*;
 pub use bytes::*;
-use derive_more::{Deref, Display, Into};
 pub use ledger_state_storage::*;
 pub use protocol_version::*;
 pub use pub_sub::*;
-use thiserror::Error;
 pub use viewing_key::*;
 
+use derive_more::{Deref, Display, Into};
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
+use std::str::FromStr;
+use thiserror::Error;
 
 // Plain bytes: very simple hashes/identifiers used without serialization.
 pub type BlockAuthor = ByteArray<32>;

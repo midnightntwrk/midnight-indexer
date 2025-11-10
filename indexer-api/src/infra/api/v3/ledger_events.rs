@@ -13,7 +13,7 @@
 
 use crate::{
     domain::LedgerEvent,
-    infra::api::v3::{AsBytesExt, HexEncoded},
+    infra::api::v3::{HexEncodable, HexEncoded},
 };
 use async_graphql::{Interface, SimpleObject};
 use indexer_common::domain::LedgerEventAttributes;

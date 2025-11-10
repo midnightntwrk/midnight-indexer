@@ -38,7 +38,7 @@ use crate::{
 use anyhow::{Context, bail};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
-use indexer_api::infra::api::v3::{AsBytesExt, viewing_key::ViewingKey};
+use indexer_api::infra::api::v3::{HexEncodable, viewing_key::ViewingKey};
 use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_018_000};
 use itertools::Itertools;
 use reqwest::Client;

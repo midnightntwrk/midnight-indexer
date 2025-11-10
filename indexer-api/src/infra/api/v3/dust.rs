@@ -18,7 +18,10 @@
 
 use crate::{
     domain,
-    infra::api::v3::{AsBytesExt, CardanoRewardAddress, CardanoRewardAddressExt, HexEncoded},
+    infra::api::v3::{
+        CardanoNetwork, CardanoRewardAddress, HexEncodable, HexEncoded,
+        encode_cardano_reward_address,
+    },
 };
 use async_graphql::SimpleObject;
 
@@ -46,8 +49,14 @@ pub struct DustGenerationStatus {
 
 impl From<domain::DustGenerationStatus> for DustGenerationStatus {
     fn from(status: domain::DustGenerationStatus) -> Self {
+        // TODO: Make the cardano network configurable!
+        let cardano_reward_address = CardanoRewardAddress(encode_cardano_reward_address(
+            status.cardano_reward_address,
+            CardanoNetwork::Testnet,
+        ));
+
         Self {
-            cardano_reward_address: status.cardano_reward_address.bech32_encode(),
+            cardano_reward_address,
             dust_address: status.dust_address.map(|addr| addr.hex_encode()),
             registered: status.registered,
             night_balance: status.night_balance.to_string(),

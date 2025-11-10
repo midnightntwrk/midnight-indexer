@@ -17,17 +17,16 @@ use crate::{
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
         v3::{
-            AsBytesExt, HexEncoded,
+            AddressType, DecodeAddressError, HexEncodable, HexEncoded,
             block::BlockOffset,
+            decode_address, encode_address,
             transaction::{Transaction, TransactionOffset},
         },
     },
 };
 use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject, scalar};
 use derive_more::{Debug, From};
-use indexer_common::domain::{
-    AddressType, ByteArrayLenError, DecodeAddressError, NetworkId, decode_address, encode_address,
-};
+use indexer_common::domain::{ByteArrayLenError, NetworkId};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use thiserror::Error;
