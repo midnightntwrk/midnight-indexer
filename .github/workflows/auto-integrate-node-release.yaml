@@ -1,0 +1,238 @@
+name: Auto-Integrate Node Release
+
+on:
+  repository_dispatch:
+    types: [node-release-published]
+  workflow_dispatch:
+    inputs:
+      node_version:
+        description: "Node version (e.g., 0.18.0-rc.5)"
+        required: true
+        type: string
+      metadata_url:
+        description: "URL to metadata.scale file (optional - will try to download from release if not provided)"
+        required: false
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+
+jobs:
+  integrate:
+    name: Integrate Node ${{ github.event.client_payload.version || inputs.node_version }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout indexer repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set version variable
+        id: version
+        run: |
+          VERSION="${{ github.event.client_payload.version || inputs.node_version }}"
+          echo "node_version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Node version: $VERSION"
+
+      - name: Check if branch already exists
+        id: check_branch
+        run: |
+          BRANCH="feat/integrate-node-${{ steps.version.outputs.node_version }}"
+          if git ls-remote --heads origin "$BRANCH" | grep -q "$BRANCH"; then
+            echo "branch_exists=true" >> "$GITHUB_OUTPUT"
+            echo "Branch $BRANCH already exists"
+          else
+            echo "branch_exists=false" >> "$GITHUB_OUTPUT"
+            echo "Branch $BRANCH does not exist"
+          fi
+
+      - name: Skip if branch exists
+        if: steps.check_branch.outputs.branch_exists == 'true'
+        run: |
+          echo "::notice::Branch for node version ${{ steps.version.outputs.node_version }} already exists. Skipping."
+          exit 0
+
+      - name: Update NODE_VERSION file
+        if: steps.check_branch.outputs.branch_exists == 'false'
+        run: |
+          echo "${{ steps.version.outputs.node_version }}" > NODE_VERSION
+          echo "Updated NODE_VERSION to ${{ steps.version.outputs.node_version }}"
+
+      - name: Create metadata directory
+        if: steps.check_branch.outputs.branch_exists == 'false'
+        run: |
+          mkdir -p .node/${{ steps.version.outputs.node_version }}
+
+      - name: Download metadata from URL
+        if: steps.check_branch.outputs.branch_exists == 'false' && (github.event.client_payload.metadata_url || inputs.metadata_url)
+        run: |
+          METADATA_URL="${{ github.event.client_payload.metadata_url || inputs.metadata_url }}"
+          echo "Downloading metadata from: $METADATA_URL"
+          curl -L -o .node/${{ steps.version.outputs.node_version }}/metadata.scale "$METADATA_URL"
+
+      - name: Download metadata from GitHub release
+        if: steps.check_branch.outputs.branch_exists == 'false' && !(github.event.client_payload.metadata_url || inputs.metadata_url)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.node_version }}"
+          echo "Attempting to download metadata.scale from GitHub release $VERSION"
+
+          # Try to download from midnight-node release assets
+          gh release download "$VERSION" \
+            --repo midnightntwrk/midnight-node \
+            --pattern "metadata.scale" \
+            --dir .node/$VERSION \
+            || echo "::warning::Could not download metadata.scale from release assets"
+
+      - name: Verify metadata file exists
+        if: steps.check_branch.outputs.branch_exists == 'false'
+        id: verify_metadata
+        run: |
+          METADATA_PATH=".node/${{ steps.version.outputs.node_version }}/metadata.scale"
+          if [ -f "$METADATA_PATH" ]; then
+            SIZE=$(stat -f%z "$METADATA_PATH" 2>/dev/null || stat -c%s "$METADATA_PATH")
+            echo "metadata_exists=true" >> "$GITHUB_OUTPUT"
+            echo "Metadata file found: $METADATA_PATH ($SIZE bytes)"
+          else
+            echo "metadata_exists=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Metadata file not found at $METADATA_PATH"
+            echo "::error::Please provide metadata_url input or ensure metadata.scale is attached to the GitHub release"
+          fi
+
+      - name: Get Rust toolchain
+        if: steps.check_branch.outputs.branch_exists == 'false' && steps.verify_metadata.outputs.metadata_exists == 'true'
+        uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        if: steps.check_branch.outputs.branch_exists == 'false' && steps.verify_metadata.outputs.metadata_exists == 'true'
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+
+      - name: Run cargo check
+        if: steps.check_branch.outputs.branch_exists == 'false' && steps.verify_metadata.outputs.metadata_exists == 'true'
+        id: cargo_check
+        continue-on-error: true
+        run: |
+          cargo check --all-features 2>&1 | tee /tmp/cargo-check.log
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Run cargo test
+        if: steps.check_branch.outputs.branch_exists == 'false' && steps.verify_metadata.outputs.metadata_exists == 'true'
+        id: cargo_test
+        continue-on-error: true
+        run: |
+          cargo test --all-features 2>&1 | tee /tmp/cargo-test.log
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Analyze cargo check output
+        if: steps.check_branch.outputs.branch_exists == 'false' && steps.verify_metadata.outputs.metadata_exists == 'true'
+        id: analyze
+        run: |
+          if [ -f /tmp/cargo-check.log ]; then
+            ERROR_COUNT=$(grep -c "^error" /tmp/cargo-check.log || true)
+            WARNING_COUNT=$(grep -c "^warning" /tmp/cargo-check.log || true)
+            echo "error_count=$ERROR_COUNT" >> "$GITHUB_OUTPUT"
+            echo "warning_count=$WARNING_COUNT" >> "$GITHUB_OUTPUT"
+            echo "Errors: $ERROR_COUNT, Warnings: $WARNING_COUNT"
+          fi
+
+      - name: Create PR body
+        if: steps.check_branch.outputs.branch_exists == 'false' && steps.verify_metadata.outputs.metadata_exists == 'true'
+        id: pr_body
+        run: |
+          cat > /tmp/pr-body.md << 'EOF'
+          ## Automated Node Integration
+
+          This PR was automatically created to integrate midnight-node **${{ steps.version.outputs.node_version }}**.
+
+          ### Status
+
+          - [x] NODE_VERSION updated to `${{ steps.version.outputs.node_version }}`
+          - [x] Metadata downloaded to `.node/${{ steps.version.outputs.node_version }}/metadata.scale`
+          - [${{ steps.cargo_check.outputs.exit_code == '0' && 'x' || ' ' }}] Cargo check: ${{ steps.cargo_check.outputs.exit_code == '0' && 'Passed' || 'Failed' }}
+          - [${{ steps.cargo_test.outputs.exit_code == '0' && 'x' || ' ' }}] Cargo test: ${{ steps.cargo_test.outputs.exit_code == '0' && 'Passed' || 'Failed' }}
+
+          ### Build Results
+
+          ${{ steps.cargo_check.outputs.exit_code != '0' && format('**Compilation errors detected: {0} errors, {1} warnings**', steps.analyze.outputs.error_count, steps.analyze.outputs.warning_count) || '**No compilation errors**' }}
+
+          ### Next Steps
+
+          ${{ steps.cargo_check.outputs.exit_code == '0' && steps.cargo_test.outputs.exit_code == '0' && '
+          **Ready for review!** The integration appears to be compatible.
+
+          Please:
+          1. Review the changes
+          2. Run full test suite locally
+          3. Update CHANGELOG.md
+          4. Mark as ready for review when complete
+          ' || '
+          **Manual intervention required**
+
+          This integration has compatibility issues that need to be resolved:
+
+          1. Check the workflow logs for compilation errors
+          2. Review metadata changes in `.node/' }}${{ steps.version.outputs.node_version }}{{ '/metadata.scale`
+          3. Update code to handle any breaking changes:
+             - Field renames in events
+             - Type changes in node types
+             - New/removed event types
+          4. Update event handlers in `chain-indexer/src/infra/subxt_node/runtimes.rs`
+          5. Update domain types in `indexer-common/src/domain.rs` if needed
+          6. Run tests locally and fix any failures
+          7. Update CHANGELOG.md with breaking changes
+          8. Mark as ready for review when complete
+          ' }}
+
+          ### Related
+
+          - Node release: https://github.com/midnightntwrk/midnight-node/releases/tag/${{ steps.version.outputs.node_version }}
+          - Jira ticket: TPM-774
+
+          ---
+
+          *This PR was automatically generated by the [auto-integrate-node-release](.github/workflows/auto-integrate-node-release.yaml) workflow*
+          EOF
+
+          echo "PR body created"
+
+      - name: Create Pull Request
+        if: steps.check_branch.outputs.branch_exists == 'false' && steps.verify_metadata.outputs.metadata_exists == 'true'
+        uses: peter-evans/create-pull-request@5e914681df9dc83aa4e4905692ca88beb2f9e91f # v7.0.5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: |
+            feat: integrate midnight-node ${{ steps.version.outputs.node_version }}
+
+            - Update NODE_VERSION to ${{ steps.version.outputs.node_version }}
+            - Add metadata for node ${{ steps.version.outputs.node_version }}
+          branch: feat/integrate-node-${{ steps.version.outputs.node_version }}
+          delete-branch: false
+          draft: ${{ steps.cargo_check.outputs.exit_code != '0' || steps.cargo_test.outputs.exit_code != '0' }}
+          title: "feat: integrate midnight-node ${{ steps.version.outputs.node_version }}"
+          body-path: /tmp/pr-body.md
+          labels: |
+            automation
+            node-integration
+          assignees: |
+            @midnight-indexer-team
+
+      - name: Summary
+        if: steps.check_branch.outputs.branch_exists == 'false'
+        run: |
+          {
+            echo "### Integration Summary"
+            echo ""
+            echo "- **Node Version**: ${{ steps.version.outputs.node_version }}"
+            echo "- **Metadata**: ${{ steps.verify_metadata.outputs.metadata_exists == 'true' && 'Downloaded' || 'Missing' }}"
+            echo "- **Cargo Check**: ${{ steps.cargo_check.outputs.exit_code == '0' && 'Passed' || 'Failed' }}"
+            echo "- **Cargo Test**: ${{ steps.cargo_test.outputs.exit_code == '0' && 'Passed' || 'Failed' }}"
+            echo "- **PR Status**: ${{ steps.cargo_check.outputs.exit_code == '0' && steps.cargo_test.outputs.exit_code == '0' && 'Ready for Review' || 'Draft (Manual Fixes Needed)' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
