@@ -73,6 +73,34 @@ export interface DeployContractResult {
   'deploy-block-hash': string;
 }
 
+export interface DustOutput {
+  initial_value: number;
+  dust_public: string;
+  nonce: string;
+  seq: number;
+  ctime: number;
+  backing_night: string;
+  mt_index: number;
+}
+
+export interface GenerationInfo {
+  value: number;
+  owner_dust_public_key: string;
+  nonce: string;
+  dtime: string;
+}
+
+export interface DustGenerationInfo {
+  dust_output: DustOutput;
+  generation_info: GenerationInfo;
+}
+
+export interface DustBalance {
+  generation_infos: DustGenerationInfo[];
+  source: Record<string, number>;
+  total: number;
+}
+
 class ToolkitWrapper {
   private container: GenericContainer;
   private startedContainer?: StartedTestContainer;
@@ -117,6 +145,53 @@ class ToolkitWrapper {
       status,
       rawOutput: output,
     };
+  }
+
+  /**
+   * Extract all JSON objects from a string that may contain text and multiple JSON objects.
+   * This helper method finds complete JSON objects by matching braces.
+   *
+   * @param output - The output string that may contain JSON objects
+   * @returns An array of JSON strings, each representing a complete JSON object
+   */
+  private extractJsonObjects(output: string): string[] {
+    const jsonObjects: string[] = [];
+    let startIndex = 0;
+
+    while (startIndex < output.length) {
+      const braceIndex = output.indexOf('{', startIndex);
+      if (braceIndex === -1) break;
+
+      // Extract from this '{' and find the matching closing brace
+      let braceCount = 0;
+      let endIndex = -1;
+      for (let i = braceIndex; i < output.length; i++) {
+        if (output[i] === '{') {
+          braceCount++;
+        } else if (output[i] === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            endIndex = i + 1;
+            break;
+          }
+        }
+      }
+
+      if (endIndex > 0) {
+        const jsonString = output.substring(braceIndex, endIndex);
+        try {
+          JSON.parse(jsonString); // Validate it's valid JSON
+          jsonObjects.push(jsonString);
+        } catch {
+          // Invalid JSON, skip it
+        }
+        startIndex = endIndex;
+      } else {
+        break;
+      }
+    }
+
+    return jsonObjects;
   }
 
   constructor(config: ToolkitConfig) {
@@ -339,6 +414,109 @@ class ToolkitWrapper {
     }
 
     return result.output.trim();
+  }
+
+  /**
+   * Get DUST balance for a wallet seed.
+   * This method queries the current DUST balance and generation information for the specified wallet.
+   * The toolkit output may contain a full structure with generation_infos, source, and total,
+   * or only a source object (map of nonces to values). In the latter case, the method constructs
+   * a DustBalance object with empty generation_infos and calculates the total from source values.
+   *
+   * @param walletSeed - The wallet seed to query DUST balance for (required)
+   *
+   * @returns A promise that resolves to the dust balance object containing generation_infos, source, and total.
+   *          The total field can be accessed directly: `const balance = await toolkit.getDustBalance(seed); const total = balance.total;`
+   * @throws Error if the container is not started or if the dust-balance command fails.
+   */
+  async getDustBalance(walletSeed: string): Promise<DustBalance> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    log.debug(`Querying dust balance for wallet seed: ${walletSeed.substring(0, 8)}...`);
+
+    const result = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'dust-balance',
+      '--seed',
+      walletSeed,
+    ]);
+
+    if (result.exitCode !== 0) {
+      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
+      throw new Error(
+        `Toolkit dust-balance command failed with exit code ${result.exitCode}: ${errorMessage}`,
+      );
+    }
+
+    // Parse the output to extract the JSON object(s)
+    // The output may contain text before the JSON, and may have multiple JSON objects
+    const output = result.output.trim();
+    const jsonObjects = this.extractJsonObjects(output);
+
+    if (jsonObjects.length === 0) {
+      throw new Error(
+        `Could not find any JSON objects in dust-balance output. Output: ${output.substring(0, 500)}...`,
+      );
+    }
+
+    // Try to find the JSON object with the expected structure (has generation_infos, source, total)
+    for (const jsonString of jsonObjects) {
+      try {
+        const parsed: any = JSON.parse(jsonString);
+
+        // Check if this is the full structure we're looking for
+        if ('generation_infos' in parsed && 'source' in parsed && 'total' in parsed) {
+          const dustBalance: DustBalance = parsed;
+          log.debug(`Found complete dust balance structure with total=${dustBalance.total}`);
+          return dustBalance;
+        }
+      } catch (error) {
+        log.debug(`Failed to parse JSON object: ${error instanceof Error ? error.message : error}`);
+      }
+    }
+
+    // If we didn't find the full structure, check if we have just the source object
+    // The toolkit may output only the source object, in which case we construct the response
+    const lastJsonString = jsonObjects[jsonObjects.length - 1];
+    try {
+      const parsed = JSON.parse(lastJsonString);
+
+      // Check if it looks like a source object (all keys are hex strings, all values are numbers)
+      const keys = Object.keys(parsed);
+      const looksLikeSource =
+        keys.length > 0 &&
+        keys.every((k) => typeof k === 'string' && k.length > 20) &&
+        Object.values(parsed).every((v) => typeof v === 'number');
+
+      if (looksLikeSource) {
+        // Calculate total from source values
+        const total = Object.values(parsed as Record<string, number>).reduce(
+          (sum, val) => sum + val,
+          0,
+        );
+
+        // Return a DustBalance with empty generation_infos and the source/total we found
+        const dustBalance: DustBalance = {
+          generation_infos: [],
+          source: parsed as Record<string, number>,
+          total: total,
+        };
+
+        log.debug(`Constructed dust balance from source object: total=${total}`);
+        return dustBalance;
+      }
+    } catch (error) {
+      log.debug(`Failed to parse last JSON object: ${error instanceof Error ? error.message : error}`);
+    }
+
+    // If we still don't have what we need, throw an error with the actual output
+    log.error(`Could not parse dust balance from output. Found ${jsonObjects.length} JSON object(s).`);
+    log.error(`Output: ${output.substring(0, 1000)}...`);
+    throw new Error(
+      `Could not find expected dust balance structure in output. Found ${jsonObjects.length} JSON object(s).`,
+    );
   }
 
   /**
