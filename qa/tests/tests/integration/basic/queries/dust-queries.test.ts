@@ -20,7 +20,7 @@ import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
 import { bech32 } from 'bech32';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
+import { ToolkitWrapper, type DustBalance } from '@utils/toolkit/toolkit-wrapper';
 import type { DustGenerationStatusResponse } from '@utils/indexer/indexer-types';
 import { DustGenerationStatusSchema } from '@utils/indexer/graphql/schema';
 
@@ -358,6 +358,72 @@ describe('dust generation status queries', () => {
       expect(response.data?.dustGenerationStatus[1].cardanoRewardAddress.toLocaleLowerCase()).toBe(
         registeredRewardAddress!.toLowerCase(),
       );
+    });
+  });
+
+  describe('dust balance query using toolkit', () => {
+    /**
+     * A dust balance query using the toolkit's getDustBalance method should return
+     * a valid dust balance object with generation_infos, source, and total fields.
+     *
+     * @given we have a toolkit instance and a wallet seed
+     * @when we call getDustBalance with the seed
+     * @then we should receive a valid DustBalance object with the expected structure
+     */
+    test('should return a valid dust balance object with total accessible', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Dust', 'Toolkit', 'Balance'],
+      };
+
+      // Use a common seed for testing
+      const walletSeed = '0000000000000000000000000000000000000000000000000000000000000001';
+
+      log.debug(`Querying dust balance for seed: ${walletSeed}`);
+
+      const dustBalance: DustBalance = await toolkit.getDustBalance(walletSeed);
+
+      // Verify the response structure
+      expect(dustBalance).toBeDefined();
+      expect(dustBalance).toHaveProperty('generation_infos');
+      expect(dustBalance).toHaveProperty('source');
+      expect(dustBalance).toHaveProperty('total');
+
+      // Verify types
+      expect(Array.isArray(dustBalance.generation_infos)).toBe(true);
+      expect(typeof dustBalance.source).toBe('object');
+      expect(typeof dustBalance.total).toBe('number');
+
+      // Verify we can access total directly as requested
+      expect(dustBalance.total).toBeGreaterThanOrEqual(0);
+
+      log.debug(`Dust balance total: ${dustBalance.total}`);
+
+      // Verify generation_infos structure if present
+      if (dustBalance.generation_infos.length > 0) {
+        const firstInfo = dustBalance.generation_infos[0];
+        expect(firstInfo).toHaveProperty('dust_output');
+        expect(firstInfo).toHaveProperty('generation_info');
+
+        expect(firstInfo.dust_output).toHaveProperty('initial_value');
+        expect(firstInfo.dust_output).toHaveProperty('dust_public');
+        expect(firstInfo.dust_output).toHaveProperty('nonce');
+        expect(firstInfo.dust_output).toHaveProperty('seq');
+        expect(firstInfo.dust_output).toHaveProperty('ctime');
+        expect(firstInfo.dust_output).toHaveProperty('backing_night');
+        expect(firstInfo.dust_output).toHaveProperty('mt_index');
+
+        expect(firstInfo.generation_info).toHaveProperty('value');
+        expect(firstInfo.generation_info).toHaveProperty('owner_dust_public_key');
+        expect(firstInfo.generation_info).toHaveProperty('nonce');
+        expect(firstInfo.generation_info).toHaveProperty('dtime');
+      }
+
+      // Verify source is a record of string to number
+      expect(Object.keys(dustBalance.source).length).toBeGreaterThanOrEqual(0);
+      for (const [key, value] of Object.entries(dustBalance.source)) {
+        expect(typeof key).toBe('string');
+        expect(typeof value).toBe('number');
+      }
     });
   });
 });
