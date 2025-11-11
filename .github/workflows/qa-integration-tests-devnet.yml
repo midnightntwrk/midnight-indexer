@@ -1,5 +1,8 @@
 name: Indexer QA Integration Tests - devnet
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
