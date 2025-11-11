@@ -21,9 +21,26 @@ This project provides a structured environment for running  smoke and integratio
 ## 📦 Prerequisites
 
 - **Node.js**: v22 or higher
-- **Yarn**: v3.6.x (already included in .yarn/releases)
+- **Yarn**: v3.6.x (see setup below)
 - **Midnight Indexer**: 3.x and above
 - **Docker**: latest stable (required for local/undeployed runs)
+
+---
+
+### 🔄 Prepare Yarn (one-time per machine)
+
+The repository no longer ships the Yarn runtime in `.yarn/releases/` (to keep secrets out of git).  
+Install the classic Yarn CLI globally and let it download the required runtime for this workspace:
+
+```bash
+npm install -g yarn@1
+cd qa/tests
+yarn set version 3.6.4
+```
+
+- `npm install -g yarn@1` installs the lightweight launcher (`yarn set version` is part of Yarn 1).
+- `yarn set version ...` downloads the requested runtime into `.yarn/releases/` (ignored by git).
+- Repeat these steps only when the required Yarn version changes.
 
 ---
 
