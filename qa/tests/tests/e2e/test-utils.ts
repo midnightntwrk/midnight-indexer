@@ -3,7 +3,7 @@ import { IndexerHttpClient } from '@utils/indexer/http-client';
 import log from '@utils/logging/logger';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
 import dataProvider from '@utils/testdata-provider';
-import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 
 export function retry<T>(
   fn: () => Promise<T>,
@@ -210,4 +210,29 @@ export function getEventsOfType<T extends string>(
   return events
     .map((e) => e.data?.unshieldedTransactions)
     .filter((tx): tx is Extract<typeof tx, { __typename: T }> => tx?.__typename === type);
+}
+
+/**
+ * Waits until a specific GraphQL event type appears in a wallet’s event stream.
+ *
+ * Uses the `retry` helper to poll the events array until at least one event of the given typename
+ * is found (via `getEventsOfType`).
+ */
+export async function waitForEventType(
+  events: UnshieldedTxSubscriptionResponse[],
+  type: string,
+  label: string,
+  maxAttempts = 10,
+  delayMs = 2000,
+) {
+  await retry(
+    async () => {
+      const found = getEventsOfType(events, type).length > 0;
+      log.debug(`${label}: ${found ? 'found' : 'waiting for'} ${type}`);
+      return found || null;
+    },
+    Boolean,
+    maxAttempts,
+    delayMs,
+  );
 }

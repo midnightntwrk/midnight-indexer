@@ -42,24 +42,9 @@ describe('unshielded transactions', () => {
   let walletFixture: Awaited<ReturnType<typeof setupWalletSubscriptions>>;
 
   let sourceSeed: string;
-  let destinationSeed: string;
 
   // Addresses for the source and destination wallets, derived from their seeds
-  let sourceAddress: string;
   let destinationAddress: string;
-
-  // Events from the indexer websocket for both the source and destination addresses
-  let sourceAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
-  let destinationAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
-
-  // Historical events from the indexer websocket for both the source and destination addresses
-  // We use these two arrays to capture events before submitting the transaction
-  let historicalSourceEvents: UnshieldedTxSubscriptionResponse[] = [];
-  let historicalDestinationEvents: UnshieldedTxSubscriptionResponse[] = [];
-
-  // Functions to unsubscribe from the indexer websocket for both the source and destination addresses
-  let sourceAddrUnscribeFromEvents: () => void;
-  let destAddrUnscribeFromEvents: () => void;
 
   beforeAll(async () => {
     indexerHttpClient = new IndexerHttpClient();
@@ -73,18 +58,7 @@ describe('unshielded transactions', () => {
 
     walletFixture = await setupWalletSubscriptions(toolkit, indexerWsClient);
 
-    ({
-      sourceSeed,
-      destinationSeed,
-      sourceAddress,
-      destinationAddress,
-      sourceAddressEvents,
-      destinationAddressEvents,
-      sourceAddrUnscribeFromEvents,
-      destAddrUnscribeFromEvents,
-      historicalSourceEvents,
-      historicalDestinationEvents,
-    } = walletFixture);
+    ({ sourceSeed, destinationAddress } = walletFixture);
     // Submit a single unshielded transaction (1 STAR) from source → destination
     transactionResult = await toolkit.generateSingleTx(
       sourceSeed,

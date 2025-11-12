@@ -60,6 +60,8 @@ export interface UnshieldedUtxo {
   owner: string;
   intentHash: string;
   value: string;
+  ctime: number | null;
+  registeredForDustGeneration: boolean;
   tokenType: string;
   outputIndex: number;
   createdAtTransaction: Transaction;
@@ -95,6 +97,7 @@ export interface Transaction {
   protocolVersion?: number;
   raw?: string;
   block?: Block;
+  identifiers?: string[];
   contractActions?: ContractAction[];
   unshieldedCreatedOutputs?: UnshieldedUtxo[];
   unshieldedSpentOutputs?: UnshieldedUtxo[];
@@ -168,6 +171,12 @@ export interface UnshieldedTransaction {
   transaction: Transaction;
   createdUtxos: UnshieldedUtxo[];
   spentUtxos: UnshieldedUtxo[];
+}
+
+export function isUnshieldedTransaction(
+  event: UnshieldedTransactionEvent,
+): event is UnshieldedTransaction {
+  return event.__typename === 'UnshieldedTransaction';
 }
 
 export type ContractAction = ContractDeploy | ContractCall | ContractUpdate;
