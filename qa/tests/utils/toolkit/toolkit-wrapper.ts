@@ -87,7 +87,7 @@ export interface GenerationInfo {
   value: number;
   owner_dust_public_key: string;
   nonce: string;
-  dtime: string;
+  dtime: number;
 }
 
 export interface DustGenerationInfo {
@@ -508,11 +508,15 @@ class ToolkitWrapper {
         return dustBalance;
       }
     } catch (error) {
-      log.debug(`Failed to parse last JSON object: ${error instanceof Error ? error.message : error}`);
+      log.debug(
+        `Failed to parse last JSON object: ${error instanceof Error ? error.message : error}`,
+      );
     }
 
     // If we still don't have what we need, throw an error with the actual output
-    log.error(`Could not parse dust balance from output. Found ${jsonObjects.length} JSON object(s).`);
+    log.error(
+      `Could not parse dust balance from output. Found ${jsonObjects.length} JSON object(s).`,
+    );
     log.error(`Output: ${output.substring(0, 1000)}...`);
     throw new Error(
       `Could not find expected dust balance structure in output. Found ${jsonObjects.length} JSON object(s).`,
