@@ -73,6 +73,45 @@ export interface DeployContractResult {
   'deploy-block-hash': string;
 }
 
+export interface Coin {
+  nonce: string;
+  token_type: string;
+  value: number;
+  mt_index: number;
+}
+
+export interface Utxo {
+  id: string;
+  initial_nonce: string;
+  value: number;
+  user_address: string;
+  token_type: string;
+  intent_hash: string;
+  output_number: number;
+}
+
+export interface DustOutput {
+  initial_value: number;
+  dust_public: string;
+  nonce: string;
+  seq: number;
+  ctime: number;
+  backing_night: string;
+  mt_index: number;
+}
+
+export interface PrivateWalletState {
+  coins: Record<string, Coin>;
+  utxos: Utxo[];
+  dust_utxos: DustOutput[];
+}
+
+export interface PublicWalletState {
+  coins: Record<string, Coin>;
+  utxos: Utxo[];
+  dust_utxos: DustOutput[];
+}
+
 export interface DustOutput {
   initial_value: number;
   dust_public: string;
@@ -145,6 +184,101 @@ class ToolkitWrapper {
       status,
       rawOutput: output,
     };
+  }
+
+  /**
+   * Parse wallet state from toolkit output.
+   * This helper method extracts JSON objects and validates the wallet state structure.
+   *
+   * @param output - The raw output from the toolkit command
+   * @param stateType - The type of wallet state being parsed ('private' or 'public')
+   * @returns The parsed wallet state object
+   * @throws Error if no valid wallet state structure is found
+   */
+  private parseWalletState(
+    output: string,
+    stateType: 'private' | 'public',
+  ): PrivateWalletState | PublicWalletState {
+    const jsonObjects = this.extractJsonObjects(output);
+
+    if (jsonObjects.length === 0) {
+      throw new Error(
+        `Could not find any JSON objects in show-wallet output. Output: ${output.substring(0, 500)}...`,
+      );
+    }
+
+    // Try to find the JSON object with the expected wallet state structure
+    for (const jsonString of jsonObjects) {
+      try {
+        const parsed: any = JSON.parse(jsonString);
+
+        // Validate that it has the expected wallet state structure
+        if ('coins' in parsed && 'utxos' in parsed && 'dust_utxos' in parsed) {
+          const walletState = parsed as PrivateWalletState | PublicWalletState;
+          log.debug(
+            `Successfully parsed ${stateType} wallet state with ${Object.keys(walletState.coins).length} coins, ${walletState.utxos.length} UTXOs, ${walletState.dust_utxos.length} dust UTXOs`,
+          );
+          return walletState;
+        }
+      } catch (error) {
+        log.debug(`Failed to parse JSON object: ${error instanceof Error ? error.message : error}`);
+      }
+    }
+
+    // If we didn't find the expected structure, throw an error
+    log.error(
+      `Could not find expected ${stateType} wallet state structure in output. Found ${jsonObjects.length} JSON object(s).`,
+    );
+    log.error(`Output: ${output.substring(0, 1000)}...`);
+    throw new Error(
+      `Could not find expected ${stateType} wallet state structure in output. Found ${jsonObjects.length} JSON object(s).`,
+    );
+  }
+
+  /**
+   * Extract all JSON objects from a string that may contain text and multiple JSON objects.
+   * This helper method finds complete JSON objects by matching braces.
+   *
+   * @param output - The output string that may contain JSON objects
+   * @returns An array of JSON strings, each representing a complete JSON object
+   */
+  private extractJsonObjects(output: string): string[] {
+    const jsonObjects: string[] = [];
+    let startIndex = 0;
+
+    while (startIndex < output.length) {
+      const braceIndex = output.indexOf('{', startIndex);
+      if (braceIndex === -1) break;
+
+      // Extract from this '{' and find the matching closing brace
+      let braceCount = 0;
+      let endIndex = -1;
+      for (let i = braceIndex; i < output.length; i++) {
+        if (output[i] === '{') {
+          braceCount++;
+        } else if (output[i] === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            endIndex = i + 1;
+            break;
+          }
+        }
+      }
+
+      if (endIndex > 0) {
+        const jsonString = output.substring(braceIndex, endIndex);
+        try {
+          JSON.parse(jsonString); 
+          jsonObjects.push(jsonString);
+        } catch {
+        }
+        startIndex = endIndex;
+      } else {
+        break;
+      }
+    }
+
+    return jsonObjects;
   }
 
   /**
@@ -414,6 +548,85 @@ class ToolkitWrapper {
     }
 
     return result.output.trim();
+  }
+
+  /**
+   * Execute show-wallet command and parse the result.
+   * This helper method handles the common logic for both private and public wallet state queries.
+   *
+   * @param flag - The flag to use ('--seed' or '--address')
+   * @param value - The value for the flag (seed or address)
+   * @param stateType - The type of wallet state ('private' or 'public')
+   * @param logPrefix - Prefix for log messages
+   * @returns The parsed wallet state object
+   * @throws Error if the container is not started or if the command fails
+   */
+  private async executeShowWallet(
+    flag: '--seed' | '--address',
+    value: string,
+    stateType: 'private' | 'public',
+    logPrefix: string,
+  ): Promise<PrivateWalletState | PublicWalletState> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    log.debug(`${logPrefix}: ${value.substring(0, flag === '--seed' ? 8 : 20)}...`);
+
+    const result = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'show-wallet',
+      flag,
+      value,
+    ]);
+
+    if (result.exitCode !== 0) {
+      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
+      throw new Error(
+        `Toolkit show-wallet command failed with exit code ${result.exitCode}: ${errorMessage}`,
+      );
+    }
+
+    // Parse the output to extract the JSON object(s)
+    // The output may contain text before the JSON (e.g., "fetching 0x...", "sync cache...")
+    const output = result.output.trim();
+    return this.parseWalletState(output, stateType);
+  }
+
+  /**
+   * Show private wallet state from a wallet seed.
+   * This method queries the private wallet state including coins, UTXOs, and dust UTXOs.
+   *
+   * @param walletSeed - The wallet seed to query private wallet state for (required)
+   *
+   * @returns A promise that resolves to the private wallet state object containing coins, utxos, and dust_utxos.
+   * @throws Error if the container is not started or if the show-wallet command fails.
+   */
+  async showPrivateWalletState(walletSeed: string): Promise<PrivateWalletState> {
+    return (await this.executeShowWallet(
+      '--seed',
+      walletSeed,
+      'private',
+      'Querying private wallet state for wallet seed',
+    )) as PrivateWalletState;
+  }
+
+  /**
+   * Show public wallet state from a wallet address.
+   * This method queries the public wallet state for the specified address.
+   *
+   * @param walletAddress - The wallet address to query public wallet state for (required)
+   *
+   * @returns A promise that resolves to the public wallet state object.
+   * @throws Error if the container is not started or if the show-wallet command fails.
+   */
+  async showPublicWalletState(walletAddress: string): Promise<PublicWalletState> {
+    return (await this.executeShowWallet(
+      '--address',
+      walletAddress,
+      'public',
+      'Querying public wallet state for wallet address',
+    )) as PublicWalletState;
   }
 
   /**
