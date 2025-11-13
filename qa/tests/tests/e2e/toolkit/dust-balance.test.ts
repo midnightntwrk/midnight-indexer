@@ -18,6 +18,7 @@ import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import { ToolkitWrapper, type DustBalance } from '@utils/toolkit/toolkit-wrapper';
 import { DustBalanceSchema } from '@utils/indexer/graphql/schema';
+import { validateSchema } from '../test-utils';
 
 const TOOLKIT_STARTUP_TIMEOUT = 60_000;
 
@@ -56,12 +57,9 @@ describe('dust balance query using toolkit', () => {
       log.debug('Checking if we actually received a dust balance');
       expect(dustBalance).toBeDefined();
 
-      log.debug('Validating dust balance schema');
-      const validationResult = DustBalanceSchema.safeParse(dustBalance);
-      expect(
-        validationResult.success,
-        `DUST balance schema validation failed: ${JSON.stringify(validationResult.error, null, 2)}`,
-      ).toBe(true);
+      expect(() => {
+        validateSchema(dustBalance, DustBalanceSchema, 'dust balance');
+      }).not.toThrow();
 
       expect(dustBalance.total).toBeGreaterThanOrEqual(0);
       log.debug(`Dust balance total: ${dustBalance.total}`);

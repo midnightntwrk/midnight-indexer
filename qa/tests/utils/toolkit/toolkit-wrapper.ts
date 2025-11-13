@@ -112,16 +112,6 @@ export interface PublicWalletState {
   dust_utxos: DustOutput[];
 }
 
-export interface DustOutput {
-  initial_value: number;
-  dust_public: string;
-  nonce: string;
-  seq: number;
-  ctime: number;
-  backing_night: string;
-  mt_index: number;
-}
-
 export interface GenerationInfo {
   value: number;
   owner_dust_public_key: string;
@@ -268,57 +258,9 @@ class ToolkitWrapper {
       if (endIndex > 0) {
         const jsonString = output.substring(braceIndex, endIndex);
         try {
-          JSON.parse(jsonString); 
+          JSON.parse(jsonString);
           jsonObjects.push(jsonString);
-        } catch {
-        }
-        startIndex = endIndex;
-      } else {
-        break;
-      }
-    }
-
-    return jsonObjects;
-  }
-
-  /**
-   * Extract all JSON objects from a string that may contain text and multiple JSON objects.
-   * This helper method finds complete JSON objects by matching braces.
-   *
-   * @param output - The output string that may contain JSON objects
-   * @returns An array of JSON strings, each representing a complete JSON object
-   */
-  private extractJsonObjects(output: string): string[] {
-    const jsonObjects: string[] = [];
-    let startIndex = 0;
-
-    while (startIndex < output.length) {
-      const braceIndex = output.indexOf('{', startIndex);
-      if (braceIndex === -1) break;
-
-      // Extract from this '{' and find the matching closing brace
-      let braceCount = 0;
-      let endIndex = -1;
-      for (let i = braceIndex; i < output.length; i++) {
-        if (output[i] === '{') {
-          braceCount++;
-        } else if (output[i] === '}') {
-          braceCount--;
-          if (braceCount === 0) {
-            endIndex = i + 1;
-            break;
-          }
-        }
-      }
-
-      if (endIndex > 0) {
-        const jsonString = output.substring(braceIndex, endIndex);
-        try {
-          JSON.parse(jsonString); // Validate it's valid JSON
-          jsonObjects.push(jsonString);
-        } catch {
-          // Invalid JSON, skip it
-        }
+        } catch {}
         startIndex = endIndex;
       } else {
         break;
