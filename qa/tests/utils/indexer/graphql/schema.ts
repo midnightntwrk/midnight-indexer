@@ -218,6 +218,34 @@ export const DustGenerationStatusSchema = z.object({
   currentCapacity: z.string().regex(/^\d+$/),
 });
 
+export const DustOutputSchema = z.object({
+  initial_value: z.number(),
+  dust_public: z.string(),
+  nonce: z.string(),
+  seq: z.number(),
+  ctime: z.number(),
+  backing_night: z.string(),
+  mt_index: z.number(),
+});
+
+export const GenerationInfoSchema = z.object({
+  value: z.number(),
+  owner_dust_public_key: z.string(),
+  nonce: z.string(),
+  dtime: z.number(),
+});
+
+export const DustGenerationInfoSchema = z.object({
+  dust_output: DustOutputSchema,
+  generation_info: GenerationInfoSchema,
+});
+
+export const DustBalanceSchema = z.object({
+  generation_infos: z.array(DustGenerationInfoSchema),
+  source: z.record(z.string(), z.number()),
+  total: z.number(),
+});
+
 // Simplified version used in subscription responses
 export const UnshieldedTxEventTransactionSchema = z.object({
   id: z.number(),
