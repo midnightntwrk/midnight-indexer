@@ -1,5 +1,7 @@
 import { BlockResponse, TransactionResponse } from '@utils/indexer/indexer-types';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
+import { z } from 'zod';
+import log from '@utils/logging/logger';
 
 function retry<T>(
   fn: () => Promise<T>,
@@ -103,5 +105,24 @@ export async function waitForEventsStabilization<T>(
     if (Date.now() - start > maxWaitMs) {
       return events.splice(0, events.length);
     }
+  }
+}
+
+/**
+ * Helper function to validate data against a Zod schema.
+ * This is a common pattern used across e2e tests for schema validation.
+ *
+ * @param data - The data to validate
+ * @param schema - The Zod schema to validate against
+ * @param dataType - A descriptive name for the data type (used in error messages)
+ * @throws Error if validation fails
+ */
+export function validateSchema<T>(data: T, schema: z.ZodSchema<T>, dataType: string): void {
+  log.debug(`Validating ${dataType} schema`);
+  const validationResult = schema.safeParse(data);
+  if (!validationResult.success) {
+    throw new Error(
+      `${dataType} schema validation failed: ${JSON.stringify(validationResult.error, null, 2)}`,
+    );
   }
 }
