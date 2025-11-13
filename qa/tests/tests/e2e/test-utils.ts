@@ -119,11 +119,10 @@ export async function waitForEventsStabilization<T>(
 }
 
 /**
- * Utility to prepare a two-wallet (A → B) subscription setup for unshielded transaction tests.
+ * Prepares a two-wallet (A > B) subscription setup for unshielded transaction tests.
  *
- * Subscribes both source and destination wallets to unshielded transaction events,
- * waits for their initial event streams to stabilize, performs a single unshielded
- * transfer (1 STAR), and returns all relevant context for assertions.
+ * Subscribes both the source and destination wallets to unshielded transaction events, waits for their initial event streams to stabilize,
+ * performs a single unshielded transfer of a configurable amount, and returns all relevant context for downstream assertions.
  */
 export async function setupWalletSubscriptions(
   toolkit: ToolkitWrapper,
@@ -209,7 +208,8 @@ export async function setupWalletSubscriptions(
 }
 
 /**
- * Helper: Extracts all events of a given GraphQL typename from a wallet’s event stream.
+ * Extracts all unshielded transaction events of a specific GraphQL `__typename`
+ * from a wallet’s subscription event stream.
  */
 export function getEventsOfType<T extends string>(
   events: UnshieldedTxSubscriptionResponse[],
