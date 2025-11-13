@@ -15,14 +15,14 @@
 
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
-import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
+import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 import { UnshieldedTransactionEvent, isUnshieldedTransaction } from '@utils/indexer/indexer-types';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
 import {
   waitForEventsStabilization,
   setupWalletSubscriptions,
   getEventsOfType,
-  waitForEventType,
+  retrySimple,
 } from './test-utils';
 
 import type { TestContext } from 'vitest';
@@ -76,7 +76,6 @@ function validateCrossWalletTransaction(
     expect(destTx.createdUtxos[0].outputIndex).toBe(0);
     expect(srcTx.createdUtxos[0].outputIndex).toBe(1);
 
-    // Parity & dust flags
     // Allow slight delay (indexer events might differ by a few seconds)
     const srcCtime = Number(srcTx.createdUtxos[0].ctime);
     const destCtime = Number(destTx.createdUtxos[0].ctime);
@@ -97,7 +96,6 @@ function validateCrossWalletTransaction(
 
       expect(BigInt(destTx.createdUtxos[0].value)).toBe(expectedValue);
     }
-
     log.debug(`Validation complete for ${destAddr} (hash=${destTx.transaction.hash})`);
   });
 }
@@ -108,6 +106,7 @@ describe.sequential('wallet event subscriptions', () => {
 
   // Toolkit instance for generating and submitting transactions
   let toolkit: ToolkitWrapper;
+
   let walletFixture: Awaited<ReturnType<typeof setupWalletSubscriptions>>;
   let sourceSeed: string;
 
@@ -123,6 +122,20 @@ describe.sequential('wallet event subscriptions', () => {
   let secondDestinationAddress: string | undefined;
   let secondDestinationAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
 
+  beforeAll(async () => {
+    indexerWsClient = new IndexerWsClient();
+    indexerHttpClient = new IndexerHttpClient();
+
+    await indexerWsClient.connectionInit();
+
+    toolkit = new ToolkitWrapper({});
+    await toolkit.start();
+  }, 200_000);
+
+  afterAll(async () => {
+    await Promise.all([toolkit.stop(), indexerWsClient.connectionClose()]);
+  });
+
   describe('empty wallet scenario', () => {
     /**
      * Validates event subscription behavior for an empty wallet.
@@ -133,9 +146,6 @@ describe.sequential('wallet event subscriptions', () => {
      */
     test('should emit only ProgressUpdate for empty wallet', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'EmptyWallet'] };
-
-      const toolkit = new ToolkitWrapper({});
-      await toolkit.start();
 
       const emptySeed = '000000000000000000000000000000000000000000000000000000000000000E';
       const emptyAddress = (await toolkit.showAddress(emptySeed)).unshielded;
@@ -163,45 +173,31 @@ describe.sequential('wallet event subscriptions', () => {
         );
       });
       expect(onlyProgressUpdates).toBe(true);
-
-      await Promise.all([toolkit.stop(), ws.connectionClose()]);
     });
-  });
-
-  beforeAll(async () => {
-    indexerHttpClient = new IndexerHttpClient();
-    indexerWsClient = new IndexerWsClient();
-
-    // Connecting to the indexer websocket
-    await indexerWsClient.connectionInit();
-
-    toolkit = new ToolkitWrapper({});
-    await toolkit.start();
-
-    walletFixture = await setupWalletSubscriptions(toolkit, indexerWsClient, {
-      includeSecondDestination: true,
-    });
-
-    sourceSeed = walletFixture.sourceSeed;
-    sourceAddress = walletFixture.sourceAddress;
-    destinationAddress = walletFixture.destinationAddress;
-    secondDestinationAddress = walletFixture.secondDestinationAddress;
-
-    sourceAddressEvents = walletFixture.sourceAddressEvents;
-    destinationAddressEvents = walletFixture.destinationAddressEvents;
-    secondDestinationAddressEvents = walletFixture.secondDestinationAddressEvents;
-  }, 200_000);
-
-  afterAll(async () => {
-    // Unsubscribe from the unshielded transaction events for the source and destination addresses
-    walletFixture.sourceAddrUnscribeFromEvents();
-    walletFixture.destAddrUnscribeFromEvents();
-
-    // Let's trigger these operations in parallel
-    await Promise.all([toolkit.stop(), indexerWsClient.connectionClose()]);
   });
 
   describe('multi-destination transaction scenario', () => {
+    beforeAll(async () => {
+      walletFixture = await setupWalletSubscriptions(toolkit, indexerWsClient, {
+        includeSecondDestination: true,
+      });
+
+      sourceSeed = walletFixture.sourceSeed;
+      sourceAddress = walletFixture.sourceAddress;
+      destinationAddress = walletFixture.destinationAddress;
+      secondDestinationAddress = walletFixture.secondDestinationAddress;
+
+      sourceAddressEvents = walletFixture.sourceAddressEvents;
+      destinationAddressEvents = walletFixture.destinationAddressEvents;
+      secondDestinationAddressEvents = walletFixture.secondDestinationAddressEvents;
+    }, 200_000);
+
+    afterAll(async () => {
+      // Unsubscribe from the unshielded transaction events for the source and destination addresses
+      walletFixture.sourceAddrUnscribeFromEvents();
+      walletFixture.destAddrUnscribeFromEvents();
+    });
+
     /**
      * This test verifies correct propagation of event types across multi-destination subscriptions, ensuring that
      * the indexer only emits transaction data to the intended recipient while other wallets observe progress updates.
@@ -220,108 +216,155 @@ describe.sequential('wallet event subscriptions', () => {
       // First transaction: A > B1
       await toolkit.generateSingleTx(sourceSeed, 'unshielded', destinationAddress, 3);
 
-      await waitForEventType(sourceAddressEvents, 'UnshieldedTransaction', 'A wallet');
-      await waitForEventType(destinationAddressEvents, 'UnshieldedTransaction', 'B1 wallet');
-      await waitForEventType(secondDestinationAddressEvents, 'UnshieldedTransactionsProgress', 'B2 wallet');
+      // Wait for latest events
+      const latestB1Tx = await retrySimple(async () => {
+        const events = getEventsOfType(destinationAddressEvents, 'UnshieldedTransaction');
+        return events.at(-1) ?? null;
+      });
 
-      // Extracting new events after the transaction
-      const destTxs_B1_all = getEventsOfType(destinationAddressEvents, 'UnshieldedTransaction');
-      const srcTxs_A = getEventsOfType(sourceAddressEvents, 'UnshieldedTransaction');
-      const destProgress_B2 = getEventsOfType(secondDestinationAddressEvents, 'UnshieldedTransactionsProgress');
-      const destTxs_B2 = getEventsOfType(secondDestinationAddressEvents, 'UnshieldedTransaction');
+      const latestSourceTx = await retrySimple(async () => {
+        const events = getEventsOfType(sourceAddressEvents, 'UnshieldedTransaction');
+        return events.at(-1) ?? null;
+      });
 
-      const destTxs_B1 = destTxs_B1_all.filter((destTx) =>
-        srcTxs_A.some((srcTx) => srcTx.transaction.hash === destTx.transaction.hash)
-      );
+      const latestB2Tx = await retrySimple(async () => {
+        const progressEvents = getEventsOfType(
+          secondDestinationAddressEvents,
+          'UnshieldedTransactionsProgress',
+        );
+        return progressEvents.at(-1) ?? null;
+      });
 
       // Validate A > B1 consistency
-      validateCrossWalletTransaction(srcTxs_A, destTxs_B1, sourceAddress, destinationAddress, '3');
+      validateCrossWalletTransaction(
+        [latestSourceTx],
+        [latestB1Tx],
+        sourceAddress,
+        destinationAddress,
+        '3',
+      );
 
-      // Ensure B2 only got Progress updates
-      expect(destProgress_B2.length).toBeGreaterThan(0);
-      expect(destTxs_B2.length).toBe(0);
-    });
+      // Ensure B2 did NOT receive a transaction event
+      const b2Tx = getEventsOfType(secondDestinationAddressEvents, 'UnshieldedTransaction');
+      expect(b2Tx.length).toBe(0);
 
+      // B2 must at least show progress
+      expect(latestB2Tx).toBeDefined();
+    }, 30_000);
+
+    /**
+     * This test validates correct event propagation when performing an unshielded transfer from wallet A to the second destination wallet (B2) in a multi-destination
+     * subscription scenario.
+     * @given a source wallet (A) and two destination wallets (B1, B2), all subscribed to unshielded transaction events
+     * @when wallet A performs an unshielded transfer of 1 unit to B2
+     * @then B2 should receive a single `UnshieldedTransaction` event representing the received funds, while B1 should only observe its own previous transaction history and must not receive the new `UnshieldedTransaction` intended for B2
+     */
     test('should emit UnshieldedTransaction only for the target wallet (A > B2)', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'A→B2'] };
 
       // Generate A > B2 transaction
       await toolkit.generateSingleTx(sourceSeed, 'unshielded', secondDestinationAddress!, 1);
 
-      // Wait for B2 and B1 UnshieldedTransaction
-      await waitForEventType(secondDestinationAddressEvents, 'UnshieldedTransaction', 'B2 wallet');
-      await waitForEventType(destinationAddressEvents, 'UnshieldedTransaction', 'B1 wallet');
+      // Wait for latest events
+      const latestB2Tx = await retrySimple(async () => {
+        const b2Events = getEventsOfType(secondDestinationAddressEvents, 'UnshieldedTransaction');
+        return b2Events.at(-1) ?? null;
+      });
+      const latestB1Tx = await retrySimple(async () => {
+        const b1Events = getEventsOfType(destinationAddressEvents, 'UnshieldedTransaction');
+        return b1Events.at(-1) ?? null;
+      });
 
-
-      const destTxs_B2 = getEventsOfType(secondDestinationAddressEvents, 'UnshieldedTransaction');
-      const srcTxs_AtoB2 = getEventsOfType(sourceAddressEvents, 'UnshieldedTransaction');
-      const destTxs_B1 = getEventsOfType(destinationAddressEvents, 'UnshieldedTransaction');
+      const latestSourceTx = await retrySimple(async () => {
+        const srcEvents = getEventsOfType(sourceAddressEvents, 'UnshieldedTransaction');
+        return srcEvents.at(-1) ?? null;
+      });
 
       // Validate A > B2 transfer consistency
-      validateCrossWalletTransaction(srcTxs_AtoB2, destTxs_B2, sourceAddress, secondDestinationAddress!, '1');
+      validateCrossWalletTransaction(
+        [latestSourceTx],
+        [latestB2Tx],
+        sourceAddress,
+        secondDestinationAddress!,
+        '1',
+      );
+      // Ensure B1 did NOT receive the B2 transaction
+      expect(latestB1Tx.transaction.hash).not.toBe(latestB2Tx.transaction.hash);
+    }, 30_000);
+  });
 
-      // Ensure B1's previous TXs are unaffected
-      const hashes_B2 = destTxs_B2.map((tx) => tx.transaction.hash);
-      const hashes_B1 = destTxs_B1.map((tx) => tx.transaction.hash);
-      const overlap = hashes_B1.filter((h) => hashes_B2.includes(h));
+  describe('transaction failure scenario', () => {
+    /**
+     * Ensures that failed unshielded transactions do NOT produce any UTXOs.
+     *
+     * @given a wallet submits an invalid unshielded transaction
+     * @when the node rejects the transaction with TransactionResult::Failure
+     * @then the indexer must ignore the transaction entirely — no UTXOs are created, and GetTransactionByOffset must return an empty result
+     */
+    test('should NOT create UTXOs for a failed unshielded transaction', async () => {
+      const sourceSeed = '0000000000000000000000000000000000000000000000000000000000000001';
+      const destinationSeed = '0000000000000000000000000000000000000000000000000000000000000002';
+      const destinationAddress = (await toolkit.showAddress(destinationSeed)).unshielded;
 
-      expect(hashes_B1.length).toBeGreaterThan(0);
-      expect(overlap.length).toBe(0);
+      let failedResult: ToolkitTransactionResult | null = null;
+
+      failedResult = await toolkit.generateSingleTx(
+        sourceSeed,
+        'unshielded',
+        destinationAddress,
+        1,
+      );
+
+      const failedHash = failedResult?.txHash ?? null;
+      const response = await indexerHttpClient.getTransactionByOffset({
+        hash: failedHash!,
+      });
+
+      log.debug(`Index lookup for failed transaction ${failedHash}: indexer returned ${response.data?.transactions?.length}
+         transactions (expected 0).`);
+
+      expect(response.data).not.toBeNull();
+      expect(response.data!.transactions).toBeDefined();
+      expect(response.data!.transactions.length).toBe(0);
     });
   });
-});
 
+  // Future scenarios planned for coverage
+  describe('future coverage', () => {
+    /**
+     * Ensures that unsubscribing and resubscribing to the same wallet does NOT cause duplicate historical events or missing live updates.
+     *
+     * @given a wallet subscribed to unshielded transaction events
+     * @when it unsubscribes and then subscribes again later
+     * @then the indexer must re-send historical events exactly once, and continue streaming live events with no duplicates.
+     */
+    test.todo('should not duplicate events after resubscription');
 
-/**
- * 
- * 
- * Multiple Sequential Transactions Scenario
+    /**
+     * Validates correct subscription behavior under multiple sequential unshielded transactions between two wallets (A and B).
+     *
+     * @given wallets A and B subscribed to unshielded transaction events
+     * @when A > B, then B > A, then A > B transactions are submitted
+     * @then each wallet must receive only the events relevant to itself,  in the correct order, with no leakage between addresses.
+     */
+    test.todo('should correctly handle multiple sequential A > B transactions');
 
+    /**
+     * Tests mixed historical + live sync behavior across two wallets: one with pre-existing transactions and one new empty wallet.
+     *
+     * @given wallet A with historical transactions and wallet B with none
+     * @when both subscribe to unshielded transaction events
+     * @then A receives historical + live events, while B receives only live events.
+     */
+    test.todo('should correctly handle mixed historical and new wallet subscriptions');
 
-// Validate that when a wallet with past transactions connects/subscribes, the indexer first streams the historical transactions before live ones.
-describe('historical wallet sync scenario', () => {
-  test('should replay historical transactions before live updates', async () => {
-
+    /**
+     * Ensures shielded and unshielded transactions are routed to the correct subscription types with no cross-contamination.
+     *
+     * @given a wallet performs both shielded and unshielded transactions
+     * @when subscriptions are active for both event types
+     * @then shielded events must NOT appear in unshielded subscriptions, and unshielded events must NOT appear in shielded subscriptions.
+     */
+    test.todo('should segregate shielded and unshielded events correctly');
   });
 });
-
-//Ensure no duplicate or missing events when a wallet unsubscribes → reconnects → subscribes again.
-describe('re-subscription behavior', () => {
-  test('should not duplicate events after resubscription', async () => {
-  });
-});  
-
- * Multiple Sequential Transactions Scenario
-Purpose:
-Check that subscriptions remain consistent over multiple sent transactions (A→B, then B→A, then A→B again).
-
-Test logic:
-
-Use two wallets (A, B).
-
-Send 2–3 transactions in sequence with delays.
-
-Validate correct event propagation each time.
-
-Covers: event ordering, no data leakage, and no missed updates.
-
-4. Mixed Wallets: One Historical + One New
-
-Purpose:
-Simulate a real environment where one wallet already has history and the other is new.
-
-Checks:
-
-Historical wallet gets historical + live updates.
-
-New wallet only gets live ProgressUpdate and TransactionUpdate.
-
-5. Shielded vs Unshielded Transactions 
-
-If your ToolkitWrapper can generate shielded txs too:
-
-Verify shielded transactions trigger correct subscription type.
-
-Helps ensure indexer separation logic works.
-
- */

@@ -37,6 +37,14 @@ export function retry<T>(
   });
 }
 
+export function retrySimple<T>(
+  fn: () => Promise<T | null>,
+  maxAttempts = 5,
+  delayMs = 1500,
+): Promise<T> {
+  return retry(fn, (result) => result !== null, maxAttempts, delayMs) as Promise<T>;
+}
+
 export function getBlockByHashWithRetry(hash: string): Promise<BlockResponse> {
   return retry(
     () => new IndexerHttpClient().getBlockByOffset({ hash: hash }),
@@ -210,29 +218,4 @@ export function getEventsOfType<T extends string>(
   return events
     .map((e) => e.data?.unshieldedTransactions)
     .filter((tx): tx is Extract<typeof tx, { __typename: T }> => tx?.__typename === type);
-}
-
-/**
- * Waits until a specific GraphQL event type appears in a wallet’s event stream.
- *
- * Uses the `retry` helper to poll the events array until at least one event of the given typename
- * is found (via `getEventsOfType`).
- */
-export async function waitForEventType(
-  events: UnshieldedTxSubscriptionResponse[],
-  type: string,
-  label: string,
-  maxAttempts = 10,
-  delayMs = 2000,
-) {
-  await retry(
-    async () => {
-      const found = getEventsOfType(events, type).length > 0;
-      log.debug(`${label}: ${found ? 'found' : 'waiting for'} ${type}`);
-      return found || null;
-    },
-    Boolean,
-    maxAttempts,
-    delayMs,
-  );
 }
