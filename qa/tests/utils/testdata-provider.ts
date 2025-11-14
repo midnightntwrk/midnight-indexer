@@ -47,12 +47,10 @@ function importJsoncData(filePath: string): JsonValue {
  * The data is loaded from environment-specific JSON files during initialization.
  */
 class TestDataProvider {
-  private contracts: ContractInfo[];
   private cardanoRewardAddresses: Record<string, string>;
   private unshieldedAddresses: Record<string, string>;
 
   constructor() {
-    this.contracts = [];
     this.cardanoRewardAddresses = {};
     this.unshieldedAddresses = {};
   }
@@ -64,10 +62,6 @@ class TestDataProvider {
   async init(): Promise<this> {
     const envName = env.getCurrentEnvironmentName();
     const baseDir = `data/static/${envName}`;
-
-    this.contracts = importJsoncData(
-      `${baseDir}/contract-actions.jsonc`,
-    ) as unknown as ContractInfo[];
 
     return this;
   }
@@ -83,14 +77,19 @@ class TestDataProvider {
    */
   getFundingSeed() {
     // Build the environment-specific variable name (e.g., FUNDING_SEED_PREVIEW)
-    const envName = env.getCurrentEnvironmentName().toUpperCase().replace(/-/g, '_');
-    const envVarName = `FUNDING_SEED_${envName}`;
+    const envName = env.getCurrentEnvironmentName();
+    const envNameUppercase = envName.toUpperCase().replace(/-/g, '_');
+    const envVarName = `FUNDING_SEED_${envNameUppercase}`;
 
     // Try environment-specific variable first
     const fundingSeed = process.env[envVarName];
 
     if (fundingSeed) {
       return fundingSeed;
+    }
+
+    if (envName !== 'undeployed') {
+      return undefined;
     }
 
     // Default fallback
@@ -132,7 +131,13 @@ class TestDataProvider {
   private findContractAction(actionType: string): ContractActionInfo | null {
     // Contracts is an array of contract objects with a contract-actions array
     // NOTE: it could be empty if there are no contracts with all the actions types
-    for (const contract of this.contracts) {
+    const envName = env.getCurrentEnvironmentName();
+    const baseDir = `data/static/${envName}`;
+    const contracts = importJsoncData(
+      `${baseDir}/contract-actions.jsonc`,
+    ) as unknown as ContractInfo[];
+
+    for (const contract of contracts) {
       const action = contract['contract-actions'].find((a) => a['action-type'] === actionType);
       if (action) {
         return action;
@@ -275,12 +280,16 @@ class TestDataProvider {
    */
   getKnownContractAddress(): string {
     const envName = env.getCurrentEnvironmentName();
-    if (this.contracts.length === 0 || !this.contracts[0]['contract-address']) {
+    const baseDir = `data/static/${envName}`;
+    const contracts = importJsoncData(
+      `${baseDir}/contract-actions.jsonc`,
+    ) as unknown as ContractInfo[];
+    if (contracts.length === 0 || !contracts[0]['contract-address']) {
       throw new Error(
         `Test data provider is missing the known contract address data for ${envName} environment`,
       );
     }
-    return this.contracts[0]['contract-address'];
+    return contracts[0]['contract-address'];
   }
 
   /**

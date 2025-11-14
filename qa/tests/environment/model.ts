@@ -18,36 +18,66 @@ import log from '@utils/logging/logger';
 
 export enum EnvironmentName {
   UNDEPLOYED = 'undeployed',
-  QANET = 'qanet',
   NODEDEV01 = 'node-dev-01',
   DEVNET = 'devnet',
+  QANET = 'qanet',
   PREVIEW = 'preview',
+  PREPROD = 'preprod',
   TESTNET = 'testnet',
   TESTNET02 = 'testnet02',
 }
 
-const indexerHostByEnvName: Record<string, string> = {
-  undeployed: 'localhost:8088',
-  qanet: 'indexer.qanet.dev.midnight.network',
-  'node-dev-01': 'indexer.node-dev-01.dev.midnight.network',
-  devnet: 'indexer.devnet.midnight.network',
-  preview: 'indexer.preview.midnight.network',
-  testnet: 'indexer.testnet.midnight.network',
-  testnet02: 'indexer.testnet-02.midnight.network',
+type HostConfig = {
+  indexerHost: string;
+  nodeHost: string;
 };
 
-const nodeHostByEnvName: Record<string, string> = {
-  undeployed: 'localhost:9944',
-  qanet: 'rpc.qanet.dev.midnight.network',
-  'node-dev-01': 'rpc.node-dev-01.dev.midnight.network',
-  devnet: 'rpc.devnet.midnight.network',
-  preview: 'rpc.preview.midnight.network',
-  testnet: 'rpc.testnet.midnight.network',
-  testnet02: 'rpc.testnet-02.midnight.network',
-};
+type HostEntry =
+  | {
+      env: EnvironmentName;
+      indexerHost: string;
+      nodeHost: string;
+    }
+  | {
+      env: EnvironmentName;
+      domain: string;
+    };
+
+const hostEntries: HostEntry[] = [
+  {
+    env: EnvironmentName.UNDEPLOYED,
+    indexerHost: 'localhost:8088',
+    nodeHost: 'localhost:9944',
+  },
+  { env: EnvironmentName.QANET, domain: 'qanet.dev.midnight.network' },
+  { env: EnvironmentName.NODEDEV01, domain: 'node-dev-01.dev.midnight.network' },
+  { env: EnvironmentName.DEVNET, domain: 'devnet.midnight.network' },
+  { env: EnvironmentName.PREVIEW, domain: 'preview.midnight.network' },
+  { env: EnvironmentName.PREPROD, domain: 'preprod.midnight.network' },
+  { env: EnvironmentName.TESTNET, domain: 'testnet.midnight.network' },
+  { env: EnvironmentName.TESTNET02, domain: 'testnet-02.midnight.network' },
+];
+
+const hostConfigByEnvName: Record<EnvironmentName, HostConfig> = hostEntries.reduce(
+  (config, entry) => {
+    if ('domain' in entry) {
+      config[entry.env] = {
+        indexerHost: `indexer.${entry.domain}`,
+        nodeHost: `rpc.${entry.domain}`,
+      };
+    } else {
+      config[entry.env] = {
+        indexerHost: entry.indexerHost,
+        nodeHost: entry.nodeHost,
+      };
+    }
+    return config;
+  },
+  {} as Record<EnvironmentName, HostConfig>,
+);
 
 export class Environment {
-  private readonly envName: string;
+  private readonly envName: EnvironmentName;
   private readonly isUndeployed: boolean;
   private readonly wsProtocol: string;
   private readonly httpProtocol: string;
@@ -83,8 +113,8 @@ export class Environment {
     // These should be now safe to assign as we already
     // checked envName
     this.networkId = this.envName;
-    this.indexerHost = indexerHostByEnvName[this.envName];
-    this.nodeHost = nodeHostByEnvName[this.envName];
+    this.indexerHost = hostConfigByEnvName[this.envName].indexerHost;
+    this.nodeHost = hostConfigByEnvName[this.envName].nodeHost;
 
     // What we are actually doing here is the following:
     // 1. If the NODE_TAG is specified as an environment variable, use it. otherwise
@@ -102,7 +132,7 @@ export class Environment {
     return this.isUndeployed;
   }
 
-  getCurrentEnvironmentName(): string {
+  getCurrentEnvironmentName(): EnvironmentName {
     return this.envName;
   }
 
