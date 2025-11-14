@@ -132,7 +132,8 @@ describe('unshielded transaction subscriptions', async () => {
      * @and each transaction should involve the specified address
      */
     test('should stream unshielded transaction events related to that address, given that address has transactions', async () => {
-      const unshieldedAddress = (await toolkit.showAddress(dataProvider.getFundingSeed())).unshielded;
+      const unshieldedAddress = (await toolkit.showAddress(dataProvider.getFundingSeed()))
+        .unshielded;
 
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
@@ -168,7 +169,8 @@ describe('unshielded transaction subscriptions', async () => {
      * @and we should receive at least 2 messages (transactions + progress)
      */
     test('should stream unshielded transaction events up to highest transaction id', async () => {
-      const unshieldedAddress = (await toolkit.showAddress(dataProvider.getFundingSeed())).unshielded;
+      const unshieldedAddress = (await toolkit.showAddress(dataProvider.getFundingSeed()))
+        .unshielded;
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 10,
@@ -221,7 +223,8 @@ describe('unshielded transaction subscriptions', async () => {
      * @then every message should match the expected schema fields and types
      */
     test('should stream unshielded transaction events that adhere to the expected schema', async () => {
-      const unshieldedAddress = (await toolkit.showAddress(dataProvider.getFundingSeed())).unshielded;
+      const unshieldedAddress = (await toolkit.showAddress(dataProvider.getFundingSeed()))
+        .unshielded;
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 5,
@@ -333,10 +336,12 @@ describe('unshielded transaction subscriptions', async () => {
     test('should return an error message, given the address provided is for another network', async () => {
       // A random address in hex format that should be rejected
       const unshieldedAddressMapByNetwork: Record<string, string> = {
-        undeployed: (await toolkit.showAddress(dataProvider.getFundingSeed(), "undeployed")).unshielded,
-        devnet: (await toolkit.showAddress(dataProvider.getFundingSeed(), "devnet")).unshielded,
-        "node-dev-01": (await toolkit.showAddress(dataProvider.getFundingSeed(), "node-dev-01")).unshielded,
-        preview: (await toolkit.showAddress(dataProvider.getFundingSeed(), "preview")).unshielded,
+        undeployed: (await toolkit.showAddress(dataProvider.getFundingSeed(), 'undeployed'))
+          .unshielded,
+        devnet: (await toolkit.showAddress(dataProvider.getFundingSeed(), 'devnet')).unshielded,
+        'node-dev-01': (await toolkit.showAddress(dataProvider.getFundingSeed(), 'node-dev-01'))
+          .unshielded,
+        preview: (await toolkit.showAddress(dataProvider.getFundingSeed(), 'preview')).unshielded,
       };
 
       const currentNetworkId = env.getNetworkId();
@@ -488,7 +493,6 @@ describe('unshielded transaction subscriptions', async () => {
      * @then we should receive transaction events that start from the specified transaction ID
      */
     test('should start a transaction stream from the given transaction id', async () => {
-      
       const targetAddress = (await toolkit.showAddress(dataProvider.getFundingSeed())).unshielded;
 
       let messages = await subscribeToUnshieldedTransactionEvents(

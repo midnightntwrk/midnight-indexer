@@ -62,20 +62,12 @@ class TestDataProvider {
    * @returns A promise that resolves to the initialized TestDataProvider instance.
    */
   async init(): Promise<this> {
-    const envName = env.getEnvName();
+    const envName = env.getCurrentEnvironmentName();
     const baseDir = `data/static/${envName}`;
 
     this.contracts = importJsoncData(
       `${baseDir}/contract-actions.jsonc`,
     ) as unknown as ContractInfo[];
-    this.unshieldedAddresses = importJsoncData(`${baseDir}/unshielded-addresses.json`) as Record<
-      string,
-      string
-    >;
-    this.cardanoRewardAddresses = importJsoncData(`${baseDir}/cardano-stake-keys.jsonc`) as Record<
-      string,
-      string
-    >;
 
     return this;
   }
@@ -84,11 +76,14 @@ class TestDataProvider {
    * Gets the funding seed for the current environment.
    * First checks for an environment-specific variable (e.g., FUNDING_SEED_PREVIEW),
    * then falls back to a default seed for undeployed environments.
+   *
+   * Note that for node-dev-01 the variable will have to be FUNDING_SEED_NODE_DEV_01
+   * as "-" is not allowed in environment variable names.
    * @returns The funding seed as a string.
    */
   getFundingSeed() {
     // Build the environment-specific variable name (e.g., FUNDING_SEED_PREVIEW)
-    const envName = env.getEnvName().toUpperCase().replace(/-/g, '_');
+    const envName = env.getCurrentEnvironmentName().toUpperCase().replace(/-/g, '_');
     const envVarName = `FUNDING_SEED_${envName}`;
 
     // Try environment-specific variable first
@@ -110,12 +105,20 @@ class TestDataProvider {
    * @throws Error if the property is not found or undefined for the current environment.
    */
   getUnshieldedAddress(property: string) {
+    const envName = env.getCurrentEnvironmentName();
+    if (Object.keys(this.unshieldedAddresses).length === 0) {
+      const baseDir = `data/static/${envName}`;
+      this.unshieldedAddresses = importJsoncData(`${baseDir}/unshielded-addresses.json`) as Record<
+        string,
+        string
+      >;
+    }
     if (
       !this.unshieldedAddresses.hasOwnProperty(property) ||
       this.unshieldedAddresses[property] === undefined
     ) {
       throw new Error(
-        `Test data provider is missing the unshielded address data for ${property} for ${env.getEnvName()} environment`,
+        `Test data provider is missing the unshielded address data for ${property} for ${envName} environment`,
       );
     }
     return this.unshieldedAddresses[property];
@@ -146,12 +149,13 @@ class TestDataProvider {
    */
   private getBlockData(actionType: string): Promise<string> {
     const action = this.findContractAction(actionType);
+    const envName = env.getCurrentEnvironmentName();
     if (action && action['block-hash'] !== undefined) {
       return Promise.resolve(action['block-hash']);
     }
     return Promise.reject(
       new Error(
-        `Test data provider missing the block hash for action type ${actionType} in ${env.getEnvName()} environment`,
+        `Test data provider missing the block hash for action type ${actionType} in ${envName} environment`,
       ),
     );
   }
@@ -164,12 +168,13 @@ class TestDataProvider {
    */
   private getBlockHeightOfContractAction(actionType: string): Promise<number> {
     const action = this.findContractAction(actionType);
+    const envName = env.getCurrentEnvironmentName();
     if (action && action['block-height'] !== undefined) {
       return Promise.resolve(action['block-height']);
     }
     return Promise.reject(
       new Error(
-        `Test data provider is missing the block height for action type ${actionType} in ${env.getEnvName()} environment`,
+        `Test data provider is missing the block height for action type ${actionType} in ${envName} environment`,
       ),
     );
   }
@@ -269,9 +274,10 @@ class TestDataProvider {
    * @throws Error if no contract address is found in the test data.
    */
   getKnownContractAddress(): string {
+    const envName = env.getCurrentEnvironmentName();
     if (this.contracts.length === 0 || !this.contracts[0]['contract-address']) {
       throw new Error(
-        `Test data provider is missing the known contract address data for ${env.getEnvName()} environment`,
+        `Test data provider is missing the known contract address data for ${envName} environment`,
       );
     }
     return this.contracts[0]['contract-address'];
@@ -338,18 +344,31 @@ class TestDataProvider {
   }
 
   /**
-   * Retrieves a Cardano stake key from the test data by property name.
-   * @param property - The property name of the Cardano stake key to retrieve.
-   * @returns The Cardano stake key as a string.
-   * @throws Error if the property is not found or undefined for the current environment.
+   * Retrieves a Cardano reward address for a given property.
+   * Currently shares the same backing data as stake keys until dedicated reward address fixtures are provided.
+   * @param property - The property name to look up.
+   * @returns The Cardano reward address as a string.
    */
   getCardanoRewardAddress(property: string) {
+    const envName = env.getCurrentEnvironmentName();
+    if (Object.keys(this.cardanoRewardAddresses).length === 0) {
+      const baseDir = `data/static/${envName}`;
+      try {
+        this.cardanoRewardAddresses = importJsoncData(
+          `${baseDir}/cardano-stake-keys.jsonc`,
+        ) as Record<string, string>;
+      } catch (_) {
+        throw new Error(
+          `Test data provider is missing the cardano stake key file for ${envName} environment`,
+        );
+      }
+    }
     if (
       !this.cardanoRewardAddresses.hasOwnProperty(property) ||
       this.cardanoRewardAddresses[property] === undefined
     ) {
       throw new Error(
-        `Test data provider is missing the cardano stake key data for ${property} for ${env.getEnvName()} environment`,
+        `Test data provider is missing the cardano stake key data for ${property} for ${envName} environment`,
       );
     }
     return this.cardanoRewardAddresses[property];

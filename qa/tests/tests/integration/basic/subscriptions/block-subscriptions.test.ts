@@ -483,9 +483,10 @@ describe('block subscriptions', () => {
      * @then we should receive an error message indicating that only one parameter at a time can be used
      */
     test('should return an error message, as only one parameter at a time can be used', async () => {
-      const blockOffset: BlockOffset = { 
-        height: 1, 
-        hash: '0'.repeat(64) };
+      const blockOffset: BlockOffset = {
+        height: 1,
+        hash: '0'.repeat(64),
+      };
 
       const blockMessagesReceived: BlockSubscriptionResponse[] = [];
 

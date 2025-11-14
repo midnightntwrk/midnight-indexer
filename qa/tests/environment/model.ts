@@ -26,32 +26,10 @@ export enum EnvironmentName {
   TESTNET02 = 'testnet02',
 }
 
-export enum LedgerNetworkId {
-  UNDEPLOYED = 'undeployed',
-  DEVNET = 'devnet',
-  TESTNET = 'testnet',
-}
-
-export const networkIdByEnvName: Record<string, string> = {
-  undeployed: 'Undeployed',
-  qanet: 'qanet',
-  "node-dev-01": "node-dev-01",
-  devnet: 'Devnet',
-  preview: 'Devnet',
-  testnet: 'Testnet',
-  testnet02: 'Testnet',
-};
-
-export const bech32mTagsByLedgerNetworkId: Record<string, string> = {
-  undeployed: 'undeployed',
-  devnet: 'dev',
-  testnet: 'test',
-};
-
 const indexerHostByEnvName: Record<string, string> = {
   undeployed: 'localhost:8088',
   qanet: 'indexer.qanet.dev.midnight.network',
-  "node-dev-01": 'indexer.node-dev-01.dev.midnight.network',
+  'node-dev-01': 'indexer.node-dev-01.dev.midnight.network',
   devnet: 'indexer.devnet.midnight.network',
   preview: 'indexer.preview.midnight.network',
   testnet: 'indexer.testnet.midnight.network',
@@ -61,7 +39,7 @@ const indexerHostByEnvName: Record<string, string> = {
 const nodeHostByEnvName: Record<string, string> = {
   undeployed: 'localhost:9944',
   qanet: 'rpc.qanet.dev.midnight.network',
-  "node-dev-01": 'rpc.node-dev-01.dev.midnight.network',
+  'node-dev-01': 'rpc.node-dev-01.dev.midnight.network',
   devnet: 'rpc.devnet.midnight.network',
   preview: 'rpc.preview.midnight.network',
   testnet: 'rpc.testnet.midnight.network',
@@ -104,7 +82,7 @@ export class Environment {
 
     // These should be now safe to assign as we already
     // checked envName
-    this.networkId = networkIdByEnvName[this.envName];
+    this.networkId = this.envName;
     this.indexerHost = indexerHostByEnvName[this.envName];
     this.nodeHost = nodeHostByEnvName[this.envName];
 
@@ -117,15 +95,19 @@ export class Environment {
     this.nodeTag = process.env.NODE_TAG || supportedNodeVersion;
     this.nodeToolkitTag = process.env.NODE_TOOLKIT_TAG || supportedNodeVersion;
     log.debug(`Using NODE_TAG: ${this.nodeTag}`);
-    log.debug(`Using NODE_TOOLKIT_TAG: ${this.nodeTag}`);
+    log.debug(`Using NODE_TOOLKIT_TAG: ${this.nodeToolkitTag}`);
   }
 
   isUndeployedEnv(): boolean {
     return this.isUndeployed;
   }
 
-  getEnvName(): string {
+  getCurrentEnvironmentName(): string {
     return this.envName;
+  }
+
+  getAllEnvironmentNames(): string[] {
+    return Object.values(EnvironmentName);
   }
 
   getNetworkId(): string {
@@ -146,10 +128,6 @@ export class Environment {
 
   getNodeWebsocketBaseURL(): string {
     return `${this.wsProtocol}://${this.nodeHost}`;
-  }
-
-  getBech32mTagByLedgerNetworkId(networkId: string): string {
-    return bech32mTagsByLedgerNetworkId[networkId];
   }
 
   getNodeVersion(): string {

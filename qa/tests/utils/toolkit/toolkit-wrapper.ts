@@ -43,6 +43,7 @@ interface ToolkitConfig {
   targetDir?: string;
   chain?: string;
   nodeTag?: string;
+  nodeToolkitTag?: string;
   syncCacheDir?: string;
   coinSeed?: string;
   warmupCache?: boolean;
@@ -123,22 +124,34 @@ class ToolkitWrapper {
 
     const randomId = Math.random().toString(36).slice(2, 12);
 
-    const envName = env.getEnvName();
+    const envName = env.getCurrentEnvironmentName();
 
     this.config.containerName = config.containerName || `mn-toolkit-${envName}-${randomId}`;
     this.config.targetDir = config.targetDir || resolve('./.tmp/toolkit');
     this.config.nodeTag = config.nodeTag || env.getNodeVersion();
+    this.config.nodeToolkitTag = config.nodeToolkitTag || env.getNodeToolkitVersion();
     this.config.warmupCache = config.warmupCache || false;
 
     // Ensure the target directory exists
     if (!fs.existsSync(this.config.targetDir)) {
       fs.mkdirSync(this.config.targetDir, { recursive: true });
-      log.debug(`Created target directory: ${this.config.targetDir}`);
+      console.debug(`[SETUP]Created target directory: ${this.config.targetDir}`);
     }
 
-    // This block is making sure that if we explicitly provide a target dir
+    // This block is making sure that if a golden cache directory is available, we use it.
     if (this.config.warmupCache) {
+      log.debug('Warmup cache is enabled, using the golden cache directory');
       this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${envName}`;
+
+      // Check if there is any .bin file in the golden cache directory
+      if (
+        fs.existsSync(this.config.syncCacheDir) &&
+        fs.readdirSync(this.config.syncCacheDir).some((file) => file.endsWith('.bin'))
+      ) {
+        console.debug(`[SETUP] Golden cache file found at: ${this.config.syncCacheDir}, using it`);
+      } else {
+        console.debug(`[SETUP] Golden cache directory not found at: ${this.config.syncCacheDir}`);
+      }
     } else {
       this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${envName}-${randomId}`;
       // copy the golden sync cache directory to the instance-specific cache
@@ -158,10 +171,11 @@ class ToolkitWrapper {
       );
     }
 
-    log.debug(`Toolkit container name   : ${this.config.containerName}`);
-    log.debug(`Toolkit target dir       : ${this.config.targetDir}`);
-    log.debug(`Toolkit node/toolkit tag : ${this.config.nodeTag}`);
-    log.debug(`Toolkit sync cache dir   : ${this.config.syncCacheDir}`);
+    log.debug(`NODE_TAG         : ${this.config.nodeTag}`);
+    log.debug(`NODE_TOOLKIT_TAG : ${this.config.nodeToolkitTag}`);
+    log.debug(`Toolkit target dir     : ${this.config.targetDir}`);
+    log.debug(`Toolkit container name : ${this.config.containerName}`);
+    log.debug(`Toolkit sync cache dir : ${this.config.syncCacheDir}`);
 
     this.container = new GenericContainer(
       `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeTag}`,
@@ -176,7 +190,7 @@ class ToolkitWrapper {
         },
         {
           source: this.config.syncCacheDir,
-          target: `/.sync_cache`,
+          target: `/.cache/sync`,
         },
       ])
       .withCommand(['sleep', 'infinity']); // equivalent to sleep infinity
@@ -247,16 +261,21 @@ class ToolkitWrapper {
     }
 
     // We use generate single tx to warm up the cache because it will try to sync the cache
-    // before it gets to validate the arguments that are explicitly wrong.
+    // before it gets to validate the arguments that are wrong on purpose.
+    let output: ToolkitTransactionResult;
     try {
-      await this.generateSingleTx(
+      output = await this.generateSingleTx(
         '0'.repeat(64), // Invalid seed
         'unshielded',
         (await this.showAddress('0'.repeat(63) + '9')).unshielded,
         1,
       );
+      console.debug(`[SETUP] Warmup cache output:\n${JSON.stringify(output, null, 2)}`);
     } catch (_error) {
-      // Do nothing as we are actually expecting an error
+      log.debug(
+        'Heads up, we are expecting an error here, the following log message is only reported for debugging purposes',
+      );
+      console.debug(`${_error}`);
     }
   }
 

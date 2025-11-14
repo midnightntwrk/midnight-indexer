@@ -15,8 +15,8 @@
 
 declare module 'vitest' {
   interface Assertion {
-    toBeError(): void;
-    toBeSuccess(): void;
+    toBeError(message?: string): void;
+    toBeSuccess(message?: string): void;
   }
 
   interface TestContext {
