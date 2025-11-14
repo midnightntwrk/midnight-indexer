@@ -242,8 +242,37 @@ export const DustGenerationInfoSchema = z.object({
 
 export const DustBalanceSchema = z.object({
   generation_infos: z.array(DustGenerationInfoSchema),
-  source: z.record(z.string(), z.number()),
+  source: z.record(z.string().length(66), z.number()),
   total: z.number(),
+});
+
+export const CoinSchema = z.object({
+  nonce: z.string(),
+  token_type: z.string(),
+  value: z.number(),
+  mt_index: z.number(),
+});
+
+export const UtxoSchema = z.object({
+  id: z.string(),
+  initial_nonce: z.string(),
+  value: z.number(),
+  user_address: z.string(),
+  token_type: z.string(),
+  intent_hash: z.string(),
+  output_number: z.number(),
+});
+
+export const PrivateWalletStateSchema = z.object({
+  coins: z.record(z.string(), CoinSchema),
+  utxos: z.array(UtxoSchema),
+  dust_utxos: z.array(DustOutputSchema),
+});
+
+export const PublicWalletStateSchema = z.object({
+  coins: z.record(z.string(), CoinSchema),
+  utxos: z.array(UtxoSchema),
+  dust_utxos: z.array(DustOutputSchema),
 });
 
 // Simplified version used in subscription responses
