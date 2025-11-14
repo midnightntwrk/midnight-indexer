@@ -20,6 +20,7 @@ import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
 import { getContractDeploymentHashes } from '../../tests/e2e/test-utils';
+import { DustBalanceSchema } from '../indexer/graphql/schema';
 
 export type AddressType = 'shielded' | 'unshielded';
 
@@ -461,20 +462,22 @@ class ToolkitWrapper {
       );
     }
 
-    // Try to find the JSON object with the expected structure (has generation_infos, source, total)
-    for (const jsonString of jsonObjects) {
-      try {
-        const parsed: any = JSON.parse(jsonString);
-
-        // Check if this is the full structure we're looking for
-        if ('generation_infos' in parsed && 'source' in parsed && 'total' in parsed) {
-          const dustBalance: DustBalance = parsed;
-          log.debug(`Found complete dust balance structure with total=${dustBalance.total}`);
-          return dustBalance;
+    // Try to find the JSON object with the expected structure using schema validation
+    const fullObject = jsonObjects
+      .map((str) => {
+        try {
+          const parsed = JSON.parse(str);
+          const res = DustBalanceSchema.safeParse(parsed);
+          return res.success ? res.data : null;
+        } catch {
+          return null;
         }
-      } catch (error) {
-        log.debug(`Failed to parse JSON object: ${error instanceof Error ? error.message : error}`);
-      }
+      })
+      .find((obj) => obj !== null);
+
+    if (fullObject) {
+      log.debug(`Found complete dust balance structure with total=${fullObject.total}`);
+      return fullObject;
     }
 
     // If we didn't find the full structure, check if we have just the source object
@@ -483,24 +486,17 @@ class ToolkitWrapper {
     try {
       const parsed = JSON.parse(lastJsonString);
 
-      // Check if it looks like a source object (all keys are hex strings, all values are numbers)
-      const keys = Object.keys(parsed);
-      const looksLikeSource =
-        keys.length > 0 &&
-        keys.every((k) => typeof k === 'string' && k.length > 20) &&
-        Object.values(parsed).every((v) => typeof v === 'number');
+      // Validate using the source schema from DustBalanceSchema
+      const sourceValidation = DustBalanceSchema.shape.source.safeParse(parsed);
 
-      if (looksLikeSource) {
+      if (sourceValidation.success) {
         // Calculate total from source values
-        const total = Object.values(parsed as Record<string, number>).reduce(
-          (sum, val) => sum + val,
-          0,
-        );
+        const total = Object.values(sourceValidation.data).reduce((sum, val) => sum + val, 0);
 
         // Return a DustBalance with empty generation_infos and the source/total we found
         const dustBalance: DustBalance = {
           generation_infos: [],
-          source: parsed as Record<string, number>,
+          source: sourceValidation.data,
           total: total,
         };
 
