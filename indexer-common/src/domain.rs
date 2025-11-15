@@ -74,6 +74,8 @@ impl TryFrom<String> for NetworkId {
     fn try_from(s: String) -> Result<Self, Self::Error> {
         if s.is_empty() {
             Err(InvalidNetworkIdError::Empty)
+        } else if s.chars().any(|c| c.is_uppercase()) {
+            Err(InvalidNetworkIdError::NotLowercase(s))
         } else {
             Ok(Self(s))
         }
@@ -100,6 +102,27 @@ impl FromStr for NetworkId {
 pub enum InvalidNetworkIdError {
     #[error("network ID must not be empty")]
     Empty,
+    #[error("network ID must be all lowercase (was: {0})")]
+    NotLowercase(String),
+}
+
+#[cfg(test)]
+mod network_id_tests {
+    use crate::domain::{InvalidNetworkIdError, NetworkId};
+
+    #[test]
+    fn test_valid_lowercase_network_id() {
+        assert!(NetworkId::try_from("qanet".to_string()).is_ok());
+    }
+
+    #[test]
+    fn test_reject_mixed_case_network_id() {
+        let result = NetworkId::try_from("DevNet".to_string());
+        assert!(matches!(
+            result,
+            Err(InvalidNetworkIdError::NotLowercase(_))
+        ));
+    }
 }
 
 /// The outcome of applying a regular transaction to the ledger state along with extracted data.
