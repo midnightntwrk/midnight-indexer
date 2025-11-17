@@ -18,7 +18,6 @@ import '@utils/logging/test-logging-hooks';
 import { env } from 'environment/model';
 import dataProvider from 'utils/testdata-provider';
 import { GraphQLError } from 'graphql/error/GraphQLError';
-import { encodeBech32mWithPrefix, decodeBech32m } from 'utils/bech32-codec';
 import {
   IndexerWsClient,
   SubscriptionHandlers,

@@ -56,17 +56,6 @@ class TestDataProvider {
   }
 
   /**
-   * Initializes the test data provider by loading environment-specific data files.
-   * @returns A promise that resolves to the initialized TestDataProvider instance.
-   */
-  async init(): Promise<this> {
-    const envName = env.getCurrentEnvironmentName();
-    const baseDir = `data/static/${envName}`;
-
-    return this;
-  }
-
-  /**
    * Gets the funding seed for the current environment.
    * First checks for an environment-specific variable (e.g., FUNDING_SEED_PREVIEW),
    * then falls back to a default seed for undeployed environments.
@@ -397,5 +386,5 @@ class TestDataProvider {
   }
 }
 
-const dataProvider = await new TestDataProvider().init();
+const dataProvider = new TestDataProvider();
 export default dataProvider;

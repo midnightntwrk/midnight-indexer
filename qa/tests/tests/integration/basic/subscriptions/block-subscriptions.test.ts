@@ -15,7 +15,6 @@
 
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
-import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import type { Block, BlockOffset } from '@utils/indexer/indexer-types';
 import {
