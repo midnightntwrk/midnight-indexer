@@ -31,7 +31,8 @@ async fn main() {
     if let Err(error) = run().await {
         let backtrace = error.backtrace();
         let error = format!("{error:#}");
-        error!(error, backtrace:%; "process exited with ERROR")
+        error!(error, backtrace:%; "process exited with ERROR");
+        std::process::exit(1);
     }
 }
 
@@ -154,7 +155,7 @@ async fn run() -> anyhow::Result<()> {
 
     info!("indexer shutting down");
 
-    Ok(())
+    std::process::exit(1);
 }
 
 #[cfg(feature = "standalone")]
@@ -165,12 +166,16 @@ fn handle_exit(task_name: &str, result: Result<anyhow::Result<()>, tokio::task::
         Ok(Err(error)) => {
             let backtrace = error.backtrace();
             let error = format!("{error:#}");
-            error!(error, backtrace:%; "{task_name} exited with ERROR")
+            error!(error, backtrace:%; "{task_name} exited with ERROR");
         }
 
-        Err(error) => error!(error:% = format!("{error:#}"); "{task_name} panicked"),
+        Err(error) => {
+            error!(error:% = format!("{error:#}"); "{task_name} panicked");
+        }
 
-        _ => error!("{task_name} terminated"),
+        _ => {
+            error!("{task_name} terminated");
+        }
     }
 }
 
