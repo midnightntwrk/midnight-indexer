@@ -404,7 +404,9 @@ async fn save_system_transaction(
     save_created_unshielded_utxos(&transaction.created_unshielded_utxos, transaction_id, tx)
         .await?;
 
-    save_ledger_events(&transaction.ledger_events, transaction_id, tx).await
+    save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
+
+    save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
@@ -632,6 +634,88 @@ async fn save_ledger_events(
         .build()
         .execute(&mut **tx)
         .await?;
+
+    Ok(())
+}
+
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn save_dust_generation_info(
+    ledger_events: &[LedgerEvent],
+    transaction_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    if ledger_events.is_empty() {
+        return Ok(());
+    }
+
+    for ledger_event in ledger_events {
+        match &ledger_event.attributes {
+            LedgerEventAttributes::DustInitialUtxo {
+                output,
+                generation_info,
+                ..
+            } => {
+                let query = indoc! {"
+                    INSERT INTO dust_generation_info (
+                        night_utxo_hash,
+                        value,
+                        owner,
+                        nonce,
+                        ctime,
+                        merkle_index,
+                        dtime
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                "};
+
+                let dtime = if generation_info.dtime == u64::MAX {
+                    None
+                } else {
+                    Some(generation_info.dtime as i64)
+                };
+
+                sqlx::query(query)
+                    .bind(generation_info.night_utxo_hash.as_ref())
+                    .bind(U128BeBytes::from(&generation_info.value))
+                    .bind(generation_info.owner.as_ref())
+                    .bind(generation_info.nonce.as_ref())
+                    .bind(generation_info.ctime as i64)
+                    .bind(output.mt_index as i64)
+                    .bind(dtime)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+
+            LedgerEventAttributes::DustGenerationDtimeUpdate {
+                generation_info, ..
+            } => {
+                let query = indoc! {"
+                    UPDATE dust_generation_info
+                    SET dtime = $1
+                    WHERE night_utxo_hash = $2
+                    AND dtime IS NULL
+                "};
+
+                let rows_affected = sqlx::query(query)
+                    .bind(generation_info.dtime as i64)
+                    .bind(generation_info.night_utxo_hash.as_ref())
+                    .execute(&mut **tx)
+                    .await?
+                    .rows_affected();
+
+                if rows_affected == 0 {
+                    return Err(sqlx::Error::Protocol(format!(
+                        "dust generation info already has dtime set: night_utxo_hash={:?}",
+                        generation_info.night_utxo_hash
+                    )));
+                }
+            }
+
+            // Other event types (ZswapInput, ZswapOutput, ParamChange, DustSpendProcessed)
+            // are not relevant to dust_generation_info table.
+            _ => {}
+        }
+    }
 
     Ok(())
 }
