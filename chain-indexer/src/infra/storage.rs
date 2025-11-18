@@ -692,14 +692,23 @@ async fn save_dust_generation_info(
                 let query = indoc! {"
                     UPDATE dust_generation_info
                     SET dtime = $1
-                    WHERE night_utxo_hash = $2 AND dtime IS NULL
+                    WHERE night_utxo_hash = $2
+                      AND dtime IS NULL
                 "};
 
-                sqlx::query(query)
+                let rows_affected = sqlx::query(query)
                     .bind(generation_info.dtime as i64)
                     .bind(generation_info.night_utxo_hash.as_ref())
                     .execute(&mut **tx)
-                    .await?;
+                    .await?
+                    .rows_affected();
+
+                if rows_affected == 0 {
+                    return Err(sqlx::Error::Protocol(format!(
+                        "dust generation info already has dtime set: night_utxo_hash={:?}",
+                        generation_info.night_utxo_hash
+                    )));
+                }
             }
 
             // Other event types (ZswapInput, ZswapOutput, ParamChange, DustSpendProcessed)
