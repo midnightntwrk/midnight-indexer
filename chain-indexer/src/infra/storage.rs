@@ -693,7 +693,7 @@ async fn save_dust_generation_info(
                     UPDATE dust_generation_info
                     SET dtime = $1
                     WHERE night_utxo_hash = $2
-                      AND dtime IS NULL
+                    AND dtime IS NULL
                 "};
 
                 let rows_affected = sqlx::query(query)
