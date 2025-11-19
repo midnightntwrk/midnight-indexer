@@ -78,7 +78,9 @@ class TestDataProvider {
     }
 
     if (envName !== 'undeployed') {
-      return undefined;
+      throw new Error(
+        `Please provide a funding seed for ${envName} environment by setting up a varialbe named FUNDING_SEED_${envNameUppercase}`,
+      );
     }
 
     // Default fallback

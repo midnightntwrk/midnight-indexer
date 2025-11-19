@@ -178,7 +178,7 @@ class ToolkitWrapper {
     log.debug(`Toolkit sync cache dir : ${this.config.syncCacheDir}`);
 
     this.container = new GenericContainer(
-      `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeTag}`,
+      `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`,
     )
       .withName(this.config.containerName)
       .withNetworkMode('host') // equivalent to --network host
