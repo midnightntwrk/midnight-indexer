@@ -36,7 +36,7 @@ impl ContractState {
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_018_000) {
             let contract_state = tagged_deserialize_v6(&mut contract_state.as_ref())
-                .map_err(|error| Error::Io("cannot deserialize ContractStateV6", error))?;
+                .map_err(|error| Error::Deserialize("ContractStateV6", error))?;
             Ok(Self::V6(contract_state))
         } else {
             Err(Error::InvalidProtocolVersion(protocol_version))
@@ -67,10 +67,9 @@ impl ContractState {
 
                             // For other tokens we serialize the type.
                             _ => {
-                                let token_type =
-                                    token_type.tagged_serialize_v6().map_err(|error| {
-                                        Error::Io("cannot serialize TokenTypeV6", error)
-                                    })?;
+                                let token_type = token_type
+                                    .tagged_serialize_v6()
+                                    .map_err(|error| Error::Serialize("TokenTypeV6", error))?;
 
                                 let len = token_type.len();
                                 let token_type = TokenType::try_from(token_type.as_ref())

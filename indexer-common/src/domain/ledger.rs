@@ -52,8 +52,11 @@ type IntentV6 = midnight_ledger_v6::structure::Intent<
 /// Ledger related errors.
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("{0}")]
-    Io(&'static str, #[source] io::Error),
+    #[error("cannot serialize {0}")]
+    Serialize(&'static str, #[source] io::Error),
+
+    #[error("cannot deserialize {0}")]
+    Deserialize(&'static str, #[source] io::Error),
 
     #[error("cannot convert {0} to UTF-8 string")]
     FromUtf8(&'static str, #[source] FromUtf8Error),

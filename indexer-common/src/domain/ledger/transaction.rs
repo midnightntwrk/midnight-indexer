@@ -49,7 +49,7 @@ impl Transaction {
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_018_000) {
             let transaction = tagged_deserialize_v6(&mut transaction.as_ref())
-                .map_err(|error| Error::Io("cannot deserialize LedgerTransactionV6", error))?;
+                .map_err(|error| Error::Deserialize("LedgerTransactionV6", error))?;
             Ok(Self::V6(transaction))
         } else {
             Err(Error::InvalidProtocolVersion(protocol_version))
@@ -69,9 +69,9 @@ impl Transaction {
             Self::V6(transaction) => transaction
                 .identifiers()
                 .map(|identifier| {
-                    let identifier = identifier.serialize_v6().map_err(|error| {
-                        Error::Io("cannot serialize TransactionIdentifierV6", error)
-                    })?;
+                    let identifier = identifier
+                        .serialize_v6()
+                        .map_err(|error| Error::Serialize("TransactionIdentifierV6", error))?;
                     Ok(identifier)
                 })
                 .collect(),
@@ -239,10 +239,8 @@ impl SystemTransaction {
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_018_000) {
-            let transaction =
-                tagged_deserialize_v6(&mut transaction.as_ref()).map_err(|error| {
-                    Error::Io("cannot deserialize LedgerSystemTransactionV6", error)
-                })?;
+            let transaction = tagged_deserialize_v6(&mut transaction.as_ref())
+                .map_err(|error| Error::Deserialize("LedgerSystemTransactionV6", error))?;
             Ok(Self::V6(transaction))
         } else {
             Err(Error::InvalidProtocolVersion(protocol_version))
@@ -262,7 +260,7 @@ fn serialize_contract_address(
 ) -> Result<SerializedContractAddress, Error> {
     address
         .serialize_v6()
-        .map_err(|error| Error::Io("cannot serialize ContractAddressV6", error))
+        .map_err(|error| Error::Serialize("ContractAddressV6", error))
 }
 
 fn can_decrypt_v6(key: &SecretKeyV6, offer: &OfferV6<ProofV6, DefaultDBV6>) -> bool {
