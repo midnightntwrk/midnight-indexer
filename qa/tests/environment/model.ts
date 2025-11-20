@@ -18,58 +18,66 @@ import log from '@utils/logging/logger';
 
 export enum EnvironmentName {
   UNDEPLOYED = 'undeployed',
-  QANET = 'qanet',
-  NODEDEV01 = 'nodedev01',
+  NODEDEV01 = 'node-dev-01',
   DEVNET = 'devnet',
+  QANET = 'qanet',
   PREVIEW = 'preview',
+  PREPROD = 'preprod',
   TESTNET = 'testnet',
   TESTNET02 = 'testnet02',
 }
 
-export enum LedgerNetworkId {
-  UNDEPLOYED = 'undeployed',
-  DEVNET = 'devnet',
-  TESTNET = 'testnet',
-}
-
-export const networkIdByEnvName: Record<string, string> = {
-  undeployed: 'Undeployed',
-  qanet: 'Devnet',
-  nodedev01: 'Devnet',
-  devnet: 'Devnet',
-  preview: 'Devnet',
-  testnet: 'Testnet',
-  testnet02: 'Testnet',
+type HostConfig = {
+  indexerHost: string;
+  nodeHost: string;
 };
 
-export const bech32mTagsByLedgerNetworkId: Record<string, string> = {
-  undeployed: 'undeployed',
-  devnet: 'dev',
-  testnet: 'test',
-};
+type HostEntry =
+  | {
+      env: EnvironmentName;
+      indexerHost: string;
+      nodeHost: string;
+    }
+  | {
+      env: EnvironmentName;
+      domain: string;
+    };
 
-const indexerHostByEnvName: Record<string, string> = {
-  undeployed: 'localhost:8088',
-  qanet: 'indexer.qanet.dev.midnight.network',
-  nodedev01: 'indexer.node-dev-01.dev.midnight.network',
-  devnet: 'indexer.devnet.midnight.network',
-  preview: 'indexer.preview.midnight.network',
-  testnet: 'indexer.testnet.midnight.network',
-  testnet02: 'indexer.testnet-02.midnight.network',
-};
+const hostEntries: HostEntry[] = [
+  {
+    env: EnvironmentName.UNDEPLOYED,
+    indexerHost: 'localhost:8088',
+    nodeHost: 'localhost:9944',
+  },
+  { env: EnvironmentName.QANET, domain: 'qanet.dev.midnight.network' },
+  { env: EnvironmentName.NODEDEV01, domain: 'node-dev-01.dev.midnight.network' },
+  { env: EnvironmentName.DEVNET, domain: 'devnet.midnight.network' },
+  { env: EnvironmentName.PREVIEW, domain: 'preview.midnight.network' },
+  { env: EnvironmentName.PREPROD, domain: 'preprod.midnight.network' },
+  { env: EnvironmentName.TESTNET, domain: 'testnet.midnight.network' },
+  { env: EnvironmentName.TESTNET02, domain: 'testnet-02.midnight.network' },
+];
 
-const nodeHostByEnvName: Record<string, string> = {
-  undeployed: 'localhost:9944',
-  qanet: 'rpc.qanet.dev.midnight.network',
-  nodedev01: 'rpc.node-dev-01.dev.midnight.network',
-  devnet: 'rpc.devnet.midnight.network',
-  preview: 'rpc.preview.midnight.network',
-  testnet: 'rpc.testnet.midnight.network',
-  testnet02: 'rpc.testnet-02.midnight.network',
-};
+const hostConfigByEnvName: Record<EnvironmentName, HostConfig> = hostEntries.reduce(
+  (config, entry) => {
+    if ('domain' in entry) {
+      config[entry.env] = {
+        indexerHost: `indexer.${entry.domain}`,
+        nodeHost: `rpc.${entry.domain}`,
+      };
+    } else {
+      config[entry.env] = {
+        indexerHost: entry.indexerHost,
+        nodeHost: entry.nodeHost,
+      };
+    }
+    return config;
+  },
+  {} as Record<EnvironmentName, HostConfig>,
+);
 
 export class Environment {
-  private readonly envName: string;
+  private readonly envName: EnvironmentName;
   private readonly isUndeployed: boolean;
   private readonly wsProtocol: string;
   private readonly httpProtocol: string;
@@ -104,9 +112,9 @@ export class Environment {
 
     // These should be now safe to assign as we already
     // checked envName
-    this.networkId = networkIdByEnvName[this.envName];
-    this.indexerHost = indexerHostByEnvName[this.envName];
-    this.nodeHost = nodeHostByEnvName[this.envName];
+    this.networkId = this.envName;
+    this.indexerHost = hostConfigByEnvName[this.envName].indexerHost;
+    this.nodeHost = hostConfigByEnvName[this.envName].nodeHost;
 
     // What we are actually doing here is the following:
     // 1. If the NODE_TAG is specified as an environment variable, use it. otherwise
@@ -117,15 +125,19 @@ export class Environment {
     this.nodeTag = process.env.NODE_TAG || supportedNodeVersion;
     this.nodeToolkitTag = process.env.NODE_TOOLKIT_TAG || supportedNodeVersion;
     log.debug(`Using NODE_TAG: ${this.nodeTag}`);
-    log.debug(`Using NODE_TOOLKIT_TAG: ${this.nodeTag}`);
+    log.debug(`Using NODE_TOOLKIT_TAG: ${this.nodeToolkitTag}`);
   }
 
   isUndeployedEnv(): boolean {
     return this.isUndeployed;
   }
 
-  getEnvName(): string {
+  getCurrentEnvironmentName(): EnvironmentName {
     return this.envName;
+  }
+
+  getAllEnvironmentNames(): string[] {
+    return Object.values(EnvironmentName);
   }
 
   getNetworkId(): string {
@@ -146,10 +158,6 @@ export class Environment {
 
   getNodeWebsocketBaseURL(): string {
     return `${this.wsProtocol}://${this.nodeHost}`;
-  }
-
-  getBech32mTagByLedgerNetworkId(networkId: string): string {
-    return bech32mTagsByLedgerNetworkId[networkId];
   }
 
   getNodeVersion(): string {

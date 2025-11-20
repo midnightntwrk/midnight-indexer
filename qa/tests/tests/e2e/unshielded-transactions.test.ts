@@ -134,8 +134,8 @@ describe('unshielded transactions', () => {
 
   afterAll(async () => {
     // Unsubscribe from the unshielded transaction events for the source and destination addresses
-    sourceAddrUnscribeFromEvents();
-    destAddrUnscribeFromEvents();
+    if (sourceAddrUnscribeFromEvents) sourceAddrUnscribeFromEvents();
+    if (destAddrUnscribeFromEvents) destAddrUnscribeFromEvents();
 
     // Let's trigger these operations in parallel
     await Promise.all([toolkit.stop(), indexerWsClient.connectionClose()]);

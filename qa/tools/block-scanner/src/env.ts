@@ -15,7 +15,7 @@
 
 const INDEXER_BASE_URL: Record<string, string> = {
   undeployed: "localhost:8088",
-  nodedev01: "indexer.node-dev-01.dev.midnight.network",
+  "node-dev-01": "indexer.node-dev-01.dev.midnight.network",
   devnet: "indexer.devnet.midnight.network",
   preview: "indexer.preview.midnight.network",
   qanet: "indexer.qanet.dev.midnight.network",

@@ -47,55 +47,40 @@ function importJsoncData(filePath: string): JsonValue {
  * The data is loaded from environment-specific JSON files during initialization.
  */
 class TestDataProvider {
-  private contracts: ContractInfo[];
   private cardanoRewardAddresses: Record<string, string>;
   private unshieldedAddresses: Record<string, string>;
 
   constructor() {
-    this.contracts = [];
     this.cardanoRewardAddresses = {};
     this.unshieldedAddresses = {};
-  }
-
-  /**
-   * Initializes the test data provider by loading environment-specific data files.
-   * @returns A promise that resolves to the initialized TestDataProvider instance.
-   */
-  async init(): Promise<this> {
-    const envName = env.getEnvName();
-    const baseDir = `data/static/${envName}`;
-
-    this.contracts = importJsoncData(
-      `${baseDir}/contract-actions.jsonc`,
-    ) as unknown as ContractInfo[];
-    this.unshieldedAddresses = importJsoncData(`${baseDir}/unshielded-addresses.json`) as Record<
-      string,
-      string
-    >;
-    this.cardanoRewardAddresses = importJsoncData(`${baseDir}/cardano-stake-keys.jsonc`) as Record<
-      string,
-      string
-    >;
-
-    return this;
   }
 
   /**
    * Gets the funding seed for the current environment.
    * First checks for an environment-specific variable (e.g., FUNDING_SEED_PREVIEW),
    * then falls back to a default seed for undeployed environments.
+   *
+   * Note that for node-dev-01 the variable will have to be FUNDING_SEED_NODE_DEV_01
+   * as "-" is not allowed in environment variable names.
    * @returns The funding seed as a string.
    */
   getFundingSeed() {
     // Build the environment-specific variable name (e.g., FUNDING_SEED_PREVIEW)
-    const envName = env.getEnvName().toUpperCase();
-    const envVarName = `FUNDING_SEED_${envName}`;
+    const envName = env.getCurrentEnvironmentName();
+    const envNameUppercase = envName.toUpperCase().replace(/-/g, '_');
+    const envVarName = `FUNDING_SEED_${envNameUppercase}`;
 
     // Try environment-specific variable first
     const fundingSeed = process.env[envVarName];
 
     if (fundingSeed) {
       return fundingSeed;
+    }
+
+    if (envName !== 'undeployed') {
+      throw new Error(
+        `Please provide a funding seed for ${envName} environment by setting up a varialbe named FUNDING_SEED_${envNameUppercase}`,
+      );
     }
 
     // Default fallback
@@ -110,12 +95,20 @@ class TestDataProvider {
    * @throws Error if the property is not found or undefined for the current environment.
    */
   getUnshieldedAddress(property: string) {
+    const envName = env.getCurrentEnvironmentName();
+    if (Object.keys(this.unshieldedAddresses).length === 0) {
+      const baseDir = `data/static/${envName}`;
+      this.unshieldedAddresses = importJsoncData(`${baseDir}/unshielded-addresses.json`) as Record<
+        string,
+        string
+      >;
+    }
     if (
       !this.unshieldedAddresses.hasOwnProperty(property) ||
       this.unshieldedAddresses[property] === undefined
     ) {
       throw new Error(
-        `Test data provider is missing the unshielded address data for ${property} for ${env.getEnvName()} environment`,
+        `Test data provider is missing the unshielded address data for ${property} for ${envName} environment`,
       );
     }
     return this.unshieldedAddresses[property];
@@ -129,7 +122,13 @@ class TestDataProvider {
   private findContractAction(actionType: string): ContractActionInfo | null {
     // Contracts is an array of contract objects with a contract-actions array
     // NOTE: it could be empty if there are no contracts with all the actions types
-    for (const contract of this.contracts) {
+    const envName = env.getCurrentEnvironmentName();
+    const baseDir = `data/static/${envName}`;
+    const contracts = importJsoncData(
+      `${baseDir}/contract-actions.jsonc`,
+    ) as unknown as ContractInfo[];
+
+    for (const contract of contracts) {
       const action = contract['contract-actions'].find((a) => a['action-type'] === actionType);
       if (action) {
         return action;
@@ -146,12 +145,13 @@ class TestDataProvider {
    */
   private getBlockData(actionType: string): Promise<string> {
     const action = this.findContractAction(actionType);
+    const envName = env.getCurrentEnvironmentName();
     if (action && action['block-hash'] !== undefined) {
       return Promise.resolve(action['block-hash']);
     }
     return Promise.reject(
       new Error(
-        `Test data provider missing the block hash for action type ${actionType} in ${env.getEnvName()} environment`,
+        `Test data provider missing the block hash for action type ${actionType} in ${envName} environment`,
       ),
     );
   }
@@ -164,18 +164,19 @@ class TestDataProvider {
    */
   private getBlockHeightOfContractAction(actionType: string): Promise<number> {
     const action = this.findContractAction(actionType);
+    const envName = env.getCurrentEnvironmentName();
     if (action && action['block-height'] !== undefined) {
       return Promise.resolve(action['block-height']);
     }
     return Promise.reject(
       new Error(
-        `Test data provider is missing the block height for action type ${actionType} in ${env.getEnvName()} environment`,
+        `Test data provider is missing the block height for action type ${actionType} in ${envName} environment`,
       ),
     );
   }
 
   /**
-   * Gets a known block hash from contract deployment action.
+   * Gets a known block hash
    * @returns A promise that resolves to the block hash.
    */
   getKnownBlockHash() {
@@ -269,12 +270,17 @@ class TestDataProvider {
    * @throws Error if no contract address is found in the test data.
    */
   getKnownContractAddress(): string {
-    if (this.contracts.length === 0 || !this.contracts[0]['contract-address']) {
+    const envName = env.getCurrentEnvironmentName();
+    const baseDir = `data/static/${envName}`;
+    const contracts = importJsoncData(
+      `${baseDir}/contract-actions.jsonc`,
+    ) as unknown as ContractInfo[];
+    if (contracts.length === 0 || !contracts[0]['contract-address']) {
       throw new Error(
-        `Test data provider is missing the known contract address data for ${env.getEnvName()} environment`,
+        `Test data provider is missing the known contract address data for ${envName} environment`,
       );
     }
-    return this.contracts[0]['contract-address'];
+    return contracts[0]['contract-address'];
   }
 
   /**
@@ -338,18 +344,31 @@ class TestDataProvider {
   }
 
   /**
-   * Retrieves a Cardano stake key from the test data by property name.
-   * @param property - The property name of the Cardano stake key to retrieve.
-   * @returns The Cardano stake key as a string.
-   * @throws Error if the property is not found or undefined for the current environment.
+   * Retrieves a Cardano reward address for a given property.
+   * Currently shares the same backing data as stake keys until dedicated reward address fixtures are provided.
+   * @param property - The property name to look up.
+   * @returns The Cardano reward address as a string.
    */
   getCardanoRewardAddress(property: string) {
+    const envName = env.getCurrentEnvironmentName();
+    if (Object.keys(this.cardanoRewardAddresses).length === 0) {
+      const baseDir = `data/static/${envName}`;
+      try {
+        this.cardanoRewardAddresses = importJsoncData(
+          `${baseDir}/cardano-stake-keys.jsonc`,
+        ) as Record<string, string>;
+      } catch (_) {
+        throw new Error(
+          `Test data provider is missing the cardano stake key file for ${envName} environment`,
+        );
+      }
+    }
     if (
       !this.cardanoRewardAddresses.hasOwnProperty(property) ||
       this.cardanoRewardAddresses[property] === undefined
     ) {
       throw new Error(
-        `Test data provider is missing the cardano stake key data for ${property} for ${env.getEnvName()} environment`,
+        `Test data provider is missing the cardano stake key data for ${property} for ${envName} environment`,
       );
     }
     return this.cardanoRewardAddresses[property];
@@ -369,5 +388,5 @@ class TestDataProvider {
   }
 }
 
-const dataProvider = await new TestDataProvider().init();
+const dataProvider = new TestDataProvider();
 export default dataProvider;

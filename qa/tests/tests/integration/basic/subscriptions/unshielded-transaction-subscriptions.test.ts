@@ -18,7 +18,6 @@ import '@utils/logging/test-logging-hooks';
 import { env } from 'environment/model';
 import dataProvider from 'utils/testdata-provider';
 import { GraphQLError } from 'graphql/error/GraphQLError';
-import { encodeBech32mWithPrefix, decodeBech32m } from 'utils/bech32-codec';
 import {
   IndexerWsClient,
   SubscriptionHandlers,
@@ -35,6 +34,9 @@ import {
   UnshieldedTransactionEventSchema,
   UnshieldedTransactionsProgressSchema,
 } from '@utils/indexer/graphql/schema';
+import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
+
+let toolkit: ToolkitWrapper;
 let indexerWsClient: IndexerWsClient;
 
 /**
@@ -102,10 +104,18 @@ describe('unshielded transaction subscriptions', async () => {
   beforeAll(async () => {
     indexerWsClient = new IndexerWsClient();
     await indexerWsClient.connectionInit();
+
+    toolkit = new ToolkitWrapper({});
+    if (toolkit) {
+      await toolkit.start();
+    }
   });
 
   afterAll(async () => {
     await indexerWsClient.connectionClose();
+    if (toolkit) {
+      await toolkit.stop();
+    }
   });
 
   describe('a subscription to unshielded transaction events by address', async () => {
@@ -121,7 +131,10 @@ describe('unshielded transaction subscriptions', async () => {
      * @and each transaction should involve the specified address
      */
     test('should stream unshielded transaction events related to that address, given that address has transactions', async () => {
-      const unshieldedAddress = dataProvider.getUnshieldedAddress('existing');
+      const fundingSeed = dataProvider.getFundingSeed();
+      expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
+      const unshieldedAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
+
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 10,
@@ -156,11 +169,18 @@ describe('unshielded transaction subscriptions', async () => {
      * @and we should receive at least 2 messages (transactions + progress)
      */
     test('should stream unshielded transaction events up to highest transaction id', async () => {
-      const unshieldedAddress = dataProvider.getUnshieldedAddress('existing');
+      const fundingSeed = dataProvider.getFundingSeed();
+      expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
+      const unshieldedAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
+
+      // Here when subscribing we need to take into accounta that we are using a funding seed
+      // so the number of transactions can be massive. So we need to wait for the indexer
+      // to stream all the events and make sure it receives a progress message and they
+      // match in numbers. This is the same mechanism used by the wallet to sync transactions
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
-        (messages) => messages.length >= 10,
-        500,
+        () => false,
+        3000,
       );
 
       messages.forEach((message) => {
@@ -186,6 +206,7 @@ describe('unshielded transaction subscriptions', async () => {
         } else if (transactionEvent.__typename === 'UnshieldedTransactionsProgress') {
           highestTransactionId = transactionEvent.highestTransactionId;
           foundTransactionProgressMessage = true;
+          log.debug(`transactionEvent = ${JSON.stringify(transactionEvent, null, 2)}`);
         }
       });
 
@@ -209,7 +230,9 @@ describe('unshielded transaction subscriptions', async () => {
      * @then every message should match the expected schema fields and types
      */
     test('should stream unshielded transaction events that adhere to the expected schema', async () => {
-      const unshieldedAddress = dataProvider.getUnshieldedAddress('existing');
+      const fundingSeed = dataProvider.getFundingSeed();
+      expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
+      const unshieldedAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 5,
@@ -259,7 +282,7 @@ describe('unshielded transaction subscriptions', async () => {
      * @and the highestTransactionId should be 0
      */
     test('should only return a transaction progress message with highest transaction = 0, given that address does not have transactions', async () => {
-      const unshieldedAddress = dataProvider.getUnshieldedAddress('non-existing');
+      const unshieldedAddress = (await toolkit.showAddress('0'.repeat(64))).unshielded;
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 10,
@@ -319,36 +342,21 @@ describe('unshielded transaction subscriptions', async () => {
      * @then we should receive exactly one error message that indicates invalid address
      */
     test('should return an error message, given the address provided is for another network', async () => {
-      // A random address in hex format that should be rejected
-      const unshieldedAddressMapByNetwork: Record<string, string> = {
-        Undeployed: 'mn_addr_undeployed1g9nr3mvjcey7ca8shcs5d4yjndcnmczf90rhv4nju7qqqlfg4ygs0t4ngm',
-        Devnet: 'mn_addr_dev1g9nr3mvjcey7ca8shcs5d4yjndcnmczf90rhv4nju7qqqlfg4ygsv7kard',
-        Testnet: 'mn_addr_test1g9nr3mvjcey7ca8shcs5d4yjndcnmczf90rhv4nju7qqqlfg4ygs72dqyf',
-      };
+      const currentEnvironment = env.getCurrentEnvironmentName();
+      for (const environment of env.getAllEnvironmentNames()) {
+        if (environment == currentEnvironment) {
+          // We don't want to test the current environment because the address HRP
+          // should be accepted in this case
+          log.info(
+            `Skipping test for environment ${environment} because it is the current environment`,
+          );
+          continue;
+        }
 
-      let encodedAddress = encodeBech32mWithPrefix(
-        unshieldedAddressMapByNetwork.Undeployed,
-        'mn_addr_dev',
-      );
-      log.info(`Encoded address for devnet: ${encodedAddress}`);
-      let decodedAddress = decodeBech32m(encodedAddress);
-      log.info(`Decoded address for devnet: ${decodedAddress}`);
-
-      encodedAddress = encodeBech32mWithPrefix(
-        unshieldedAddressMapByNetwork.Undeployed,
-        'mn_addr_test',
-      );
-      log.info(`Encoded address for testnet: ${encodedAddress}`);
-      decodedAddress = decodeBech32m(encodedAddress);
-      log.info(`Decoded address for testnet: ${decodedAddress}`);
-
-      const currentNetworkId = env.getNetworkId();
-      const targetNetworks = { ...unshieldedAddressMapByNetwork };
-      delete targetNetworks[currentNetworkId];
-
-      for (const [targetNetwork, targetAddress] of Object.entries(targetNetworks)) {
+        const randomSeed = '0'.repeat(64);
+        const targetAddress = (await toolkit.showAddress(randomSeed, environment)).unshielded;
         log.info(
-          `Address ${targetAddress} targets network ${targetNetwork} is rejected on ${currentNetworkId}`,
+          `Address ${targetAddress} targets network ${environment} is rejected on ${currentEnvironment}`,
         );
 
         messages = await subscribeToUnshieldedTransactionEvents(
@@ -359,8 +367,7 @@ describe('unshielded transaction subscriptions', async () => {
 
         expect(messages.length).toBe(1);
         const msg = messages[0];
-        expect(msg.data).toBeNull();
-        expect(msg.errors).toBeDefined();
+        expect(msg).toBeError();
         expect(msg.errors?.[0].message).toMatch(/invalid address/);
         expect(msg.errors?.[0].message).toMatch(/cannot bech32m-decode unshielded address/);
       }
@@ -383,10 +390,12 @@ describe('unshielded transaction subscriptions', async () => {
      */
     test('should return a stream of transactions containing that address, starting from transaction id = 0', async () => {
       const targetTransactionId = 0;
-      const targetAddress = dataProvider.getUnshieldedAddress('existing');
+      const fundingSeed = dataProvider.getFundingSeed();
+      expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
+      const targetAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
 
       const messages = await subscribeToUnshieldedTransactionEvents(
-        { address: targetAddress, transactionId: targetTransactionId },
+        { address: targetAddress!, transactionId: targetTransactionId },
         (messages) => messages[0].errors !== undefined,
         200,
       );
@@ -436,7 +445,9 @@ describe('unshielded transaction subscriptions', async () => {
     test('should return an error message, given the transaction id provided is negative', async () => {
       // A random address in hex format that should be rejected
       const targetTransactionId = -1;
-      const targetAddress = dataProvider.getUnshieldedAddress('existing');
+      const fundingSeed = dataProvider.getFundingSeed();
+      expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
+      const targetAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
 
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
@@ -461,7 +472,9 @@ describe('unshielded transaction subscriptions', async () => {
      */
     test('should only return a transaction progress message without streaming transactions, given that the transaction id provided is bigger number', async () => {
       const targetTransactionId = 4294967296; // 2^32
-      const targetAddress = dataProvider.getUnshieldedAddress('existing');
+      const fundingSeed = dataProvider.getFundingSeed();
+      expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
+      const targetAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
 
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
@@ -491,7 +504,9 @@ describe('unshielded transaction subscriptions', async () => {
      * @then we should receive transaction events that start from the specified transaction ID
      */
     test('should start a transaction stream from the given transaction id', async () => {
-      const targetAddress = dataProvider.getUnshieldedAddress('existing');
+      const fundingSeed = dataProvider.getFundingSeed();
+      expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
+      const targetAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
 
       let messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress },

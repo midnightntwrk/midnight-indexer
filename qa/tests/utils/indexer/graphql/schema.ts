@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { bech32 } from 'bech32';
 import { z } from 'zod';
 
 export const Hash64 = z
@@ -197,8 +198,19 @@ export const ContractActionUnionSchema = z.discriminatedUnion('__typename', [
 ]);
 
 // DUST Generation Status schema
+const isCardanoRewardAddress = (value: string) => {
+  try {
+    const decoded = bech32.decode(value.toLowerCase());
+    return decoded.prefix.length > 0;
+  } catch {
+    return false;
+  }
+};
+
 export const DustGenerationStatusSchema = z.object({
-  cardanoRewardAddress: z.string().regex(/^[a-f0-9]{64}$/),
+  cardanoRewardAddress: z
+    .string()
+    .refine(isCardanoRewardAddress, { message: 'Invalid Cardano reward address format' }),
   dustAddress: z.string().nullable(),
   registered: z.boolean(),
   nightBalance: z.string().regex(/^\d+$/),
