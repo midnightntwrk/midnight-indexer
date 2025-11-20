@@ -392,6 +392,8 @@ async fn save_regular_transaction(
 
     save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
 
+    save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await?;
+
     Ok(transaction_id as u64)
 }
 

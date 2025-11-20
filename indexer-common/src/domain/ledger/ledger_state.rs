@@ -48,7 +48,8 @@ use midnight_ledger_v6::{
 };
 use midnight_onchain_runtime_v6::context::BlockContext as BlockContextV6;
 use midnight_serialize_v6::{
-    Deserializable as DeserializableV6, tagged_deserialize as tagged_deserialize_v6,
+    Deserializable as DeserializableV6, Serializable as SerializableV6,
+    tagged_deserialize as tagged_deserialize_v6,
 };
 use midnight_storage_v6::DefaultDB as DefaultDBV6;
 use midnight_transient_crypto_v6::merkle_tree::{
@@ -393,9 +394,16 @@ fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<Ledger
                 generation_index,
                 ..
             } => {
+                // Serialize DustPublicKey for output owner to get full 33-byte representation.
+                let mut output_owner_bytes = Vec::new();
+                SerializableV6::serialize(&output.owner, &mut output_owner_bytes)
+                    .expect("DustPublicKey serialization should not fail");
+
                 let qualified_output = dust::QualifiedDustOutput {
                     initial_value: output.initial_value,
-                    owner: output.owner.0.0.to_bytes_le().into(),
+                    owner: output_owner_bytes
+                        .try_into()
+                        .expect("DustPublicKey should serialize to 33 bytes"),
                     nonce: output.nonce.0.to_bytes_le().into(),
                     seq: output.seq,
                     ctime: output.ctime.to_secs(),
@@ -403,10 +411,17 @@ fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<Ledger
                     mt_index: output.mt_index,
                 };
 
+                // Serialize DustPublicKey to get full 33-byte representation (prefix + Fr).
+                let mut owner_bytes = Vec::new();
+                SerializableV6::serialize(&generation.owner, &mut owner_bytes)
+                    .expect("DustPublicKey serialization should not fail");
+
                 let generation_info = dust::DustGenerationInfo {
                     night_utxo_hash: output.backing_night.0.0.into(),
                     value: generation.value,
-                    owner: generation.owner.0.0.to_bytes_le().into(),
+                    owner: owner_bytes
+                        .try_into()
+                        .expect("DustPublicKey should serialize to 33 bytes"),
                     nonce: generation.nonce.0.0.into(),
                     ctime: output.ctime.to_secs(),
                     dtime: generation.dtime.to_secs(),
@@ -439,10 +454,17 @@ fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<Ledger
                             }
                         });
 
+                // Serialize DustPublicKey to get full 33-byte representation (prefix + Fr).
+                let mut owner_bytes = Vec::new();
+                SerializableV6::serialize(&generation.owner, &mut owner_bytes)
+                    .expect("DustPublicKey serialization should not fail");
+
                 let generation_info = dust::DustGenerationInfo {
                     night_utxo_hash: update.leaf.0.0.into(),
                     value: generation.value,
-                    owner: generation.owner.0.0.to_bytes_le().into(),
+                    owner: owner_bytes
+                        .try_into()
+                        .expect("DustPublicKey should serialize to 33 bytes"),
                     nonce: generation.nonce.0.0.into(),
                     ctime: 0, // DustGenerationInfo from ledger doesn't have ctime, only dtime
                     dtime: generation.dtime.to_secs(),
