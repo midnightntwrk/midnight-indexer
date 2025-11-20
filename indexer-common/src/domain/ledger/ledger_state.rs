@@ -92,7 +92,7 @@ impl LedgerState {
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_018_000) {
             let ledger_state = tagged_deserialize_v6(&mut ledger_state.as_ref())
-                .map_err(|error| Error::Io("cannot deserialize LedgerStateV6", error))?;
+                .map_err(|error| Error::Deserialize("LedgerStateV6", error))?;
             Ok(Self::V6 {
                 ledger_state,
                 block_fullness: Default::default(),
@@ -108,7 +108,7 @@ impl LedgerState {
         match self {
             Self::V6 { ledger_state, .. } => ledger_state
                 .tagged_serialize_v6()
-                .map_err(|error| Error::Io("cannot serialize LedgerStateV6", error)),
+                .map_err(|error| Error::Serialize("LedgerStateV6", error)),
         }
     }
 
@@ -127,7 +127,7 @@ impl LedgerState {
                 block_fullness,
             } => {
                 let transaction = tagged_deserialize_v6::<TransactionV6>(&mut transaction.as_ref())
-                    .map_err(|error| Error::Io("cannot deserialize LedgerTransactionV6", error))?;
+                    .map_err(|error| Error::Deserialize("LedgerTransactionV6", error))?;
 
                 let cx = TransactionContextV6 {
                     ref_state: ledger_state.clone(),
@@ -201,9 +201,7 @@ impl LedgerState {
             } => {
                 let transaction =
                     tagged_deserialize_v6::<SystemTransactionV6>(&mut transaction.as_ref())
-                        .map_err(|error| {
-                            Error::Io("cannot deserialize SystemTransactionV6", error)
-                        })?;
+                        .map_err(|error| Error::Deserialize("SystemTransactionV6", error))?;
 
                 let cost = transaction.cost(&ledger_state.parameters);
                 let (ledger_state, events) = ledger_state
@@ -260,14 +258,14 @@ impl LedgerState {
         match self {
             Self::V6 { ledger_state, .. } => {
                 let address = ContractAddressV6::deserialize(&mut address.as_ref(), 0)
-                    .map_err(|error| Error::Io("cannot deserialize ContractAddressV6", error))?;
+                    .map_err(|error| Error::Deserialize("ContractAddressV6", error))?;
 
                 let mut contract_zswap_state = ZswapStateV6::new();
                 contract_zswap_state.coin_coms = ledger_state.zswap.filter(&[address]);
 
                 contract_zswap_state
                     .tagged_serialize_v6()
-                    .map_err(|error| Error::Io("cannot serialize ZswapStateV6", error))
+                    .map_err(|error| Error::Serialize("ZswapStateV6", error))
             }
         }
     }
@@ -282,12 +280,12 @@ impl LedgerState {
             )
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize_v6()
-            .map_err(|error| Error::Io("cannot serialize MerkleTreeCollapsedUpdateV6", error)),
+            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdateV6", error)),
         }
     }
 
     /// To be called after applying transactions.
-    pub fn post_apply_transactions(
+    pub fn finalize_apply_transactions(
         &mut self,
         block_timestamp: u64,
     ) -> Result<LedgerParameters, Error> {
@@ -327,7 +325,7 @@ impl LedgerParameters {
         match self {
             Self::V6(parameters) => parameters
                 .tagged_serialize_v6()
-                .map_err(|error| Error::Io("cannot serialize SerializedLedgerParametersV6", error)),
+                .map_err(|error| Error::Serialize("SerializedLedgerParametersV6", error)),
         }
     }
 }
@@ -347,7 +345,7 @@ impl ZswapStateRoot {
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_018_000) {
             let digest = MerkleTreeDigestV6::deserialize(&mut zswap_state_root.as_ref(), 0)
-                .map_err(|error| Error::Io("cannot deserialize MerkleTreeDigestV6", error))?;
+                .map_err(|error| Error::Deserialize("MerkleTreeDigestV6", error))?;
             Ok(Self::V6(digest))
         } else {
             Err(Error::InvalidProtocolVersion(protocol_version))
@@ -360,7 +358,7 @@ impl ZswapStateRoot {
         match self {
             Self::V6(digest) => digest
                 .serialize_v6()
-                .map_err(|error| Error::Io("cannot serialize zswap merkle tree root", error)),
+                .map_err(|error| Error::Serialize("MerkleTreeDigestV6", error)),
         }
     }
 }
@@ -375,7 +373,7 @@ fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<Ledger
         .map(|event| {
             let raw = event
                 .tagged_serialize_v6()
-                .map_err(|error| Error::Io("cannot serialize EventV6", error))?;
+                .map_err(|error| Error::Serialize("EventV6", error))?;
             Ok((event, raw))
         })
         .filter_map_ok(|(event, raw)| match event.content {

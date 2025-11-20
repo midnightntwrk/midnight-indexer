@@ -33,7 +33,7 @@ impl SecretKey {
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_018_000) {
             let secret_key = SecretKeyV6::deserialize(&mut secret_key.as_ref(), 0)
-                .map_err(|error| Error::Io("cannot deserialize SecretKeyV6", error))?;
+                .map_err(|error| Error::Deserialize("SecretKeyV6", error))?;
             Ok(Self::V6(secret_key))
         } else {
             Err(Error::InvalidProtocolVersion(protocol_version))
