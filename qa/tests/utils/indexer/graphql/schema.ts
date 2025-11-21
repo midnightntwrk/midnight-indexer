@@ -218,63 +218,6 @@ export const DustGenerationStatusSchema = z.object({
   currentCapacity: z.string().regex(/^\d+$/),
 });
 
-export const DustOutputSchema = z.object({
-  initial_value: z.number(),
-  dust_public: z.string(),
-  nonce: z.string(),
-  seq: z.number(),
-  ctime: z.number(),
-  backing_night: z.string(),
-  mt_index: z.number(),
-});
-
-export const GenerationInfoSchema = z.object({
-  value: z.number(),
-  owner_dust_public_key: z.string(),
-  nonce: z.string(),
-  dtime: z.number(),
-});
-
-export const DustGenerationInfoSchema = z.object({
-  dust_output: DustOutputSchema,
-  generation_info: GenerationInfoSchema,
-});
-
-export const DustBalanceSchema = z.object({
-  generation_infos: z.array(DustGenerationInfoSchema),
-  source: z.record(z.string().length(66), z.number()),
-  total: z.number(),
-});
-
-export const CoinSchema = z.object({
-  nonce: z.string(),
-  token_type: z.string(),
-  value: z.number(),
-  mt_index: z.number(),
-});
-
-export const UtxoSchema = z.object({
-  id: z.string(),
-  initial_nonce: z.string(),
-  value: z.number(),
-  user_address: z.string(),
-  token_type: z.string(),
-  intent_hash: z.string(),
-  output_number: z.number(),
-});
-
-export const PrivateWalletStateSchema = z.object({
-  coins: z.record(z.string(), CoinSchema),
-  utxos: z.array(UtxoSchema),
-  dust_utxos: z.array(DustOutputSchema),
-});
-
-export const PublicWalletStateSchema = z.object({
-  coins: z.record(z.string(), CoinSchema),
-  utxos: z.array(UtxoSchema),
-  dust_utxos: z.array(DustOutputSchema),
-});
-
 // Simplified version used in subscription responses
 export const UnshieldedTxEventTransactionSchema = z.object({
   id: z.number(),
