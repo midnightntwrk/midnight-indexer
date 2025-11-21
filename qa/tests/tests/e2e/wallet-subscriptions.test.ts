@@ -62,39 +62,38 @@ function validateCrossWalletTransaction(
       throw new Error(`No matching source transaction found for hash ${destTx.transaction.hash}`);
     }
 
+    const srcUtxo = srcTx.createdUtxos[0];
+    const destUtxo = destTx.createdUtxos[0];
+
     // Value & identity
-    expect(destTx.createdUtxos[0].value).toBe(expectedValue);
-    expect(BigInt(srcTx.createdUtxos[0].value)).toBeGreaterThan(
-      BigInt(destTx.createdUtxos[0].value),
-    );
+    expect(destUtxo.value).toBe(expectedValue);
+    expect(BigInt(srcUtxo.value)).toBeGreaterThan(BigInt(destUtxo.value));
     expect(destTx.transaction.hash).toBe(srcTx.transaction.hash);
     expect(destTx.transaction.id).toBe(srcTx.transaction.id);
 
     // Ownership & indices
-    expect(srcTx.createdUtxos[0].owner).toBe(srcAddr);
-    expect(destTx.createdUtxos[0].owner).toBe(destAddr);
-    expect(destTx.createdUtxos[0].outputIndex).toBe(0);
-    expect(srcTx.createdUtxos[0].outputIndex).toBe(1);
+    expect(srcUtxo.owner).toBe(srcAddr);
+    expect(destUtxo.owner).toBe(destAddr);
+    expect(destUtxo.outputIndex).toBe(0);
+    expect(srcUtxo.outputIndex).toBe(1);
 
-    // Allow slight delay (indexer events might differ by a few seconds)
-    const srcCtime = Number(srcTx.createdUtxos[0].ctime);
-    const destCtime = Number(destTx.createdUtxos[0].ctime);
-    const delta = Math.abs(srcCtime - destCtime);
-    expect(delta).toBeLessThanOrEqual(5);
+    // Creation time alignment
+    expect(srcUtxo.ctime).toBe(destUtxo.ctime);
 
-    expect(destTx.createdUtxos[0].registeredForDustGeneration).toBe(false);
-    expect(srcTx.createdUtxos[0].registeredForDustGeneration).toBe(true);
+    // Dust Registration Flags
+    expect(destUtxo.registeredForDustGeneration).toBe(false);
+    expect(srcUtxo.registeredForDustGeneration).toBe(true);
 
     // Cross-link consistency
-    expect(srcTx.createdUtxos[0].createdAtTransaction.hash).toBe(destTx.transaction.hash);
+    expect(srcUtxo.createdAtTransaction.hash).toBe(destTx.transaction.hash);
     const spent = srcTx.spentUtxos?.[0];
     if (spent) {
       expect(spent.spentAtTransaction.hash).toBe(destTx.transaction.hash);
       const spentTx = spent.spentAtTransaction as { hash: string; identifiers?: string[] };
       expect(spentTx.identifiers?.[0]).toBe(destTx.transaction.identifiers?.[0]);
-      const expectedValue = BigInt(spent.value) - BigInt(srcTx.createdUtxos[0].value);
 
-      expect(BigInt(destTx.createdUtxos[0].value)).toBe(expectedValue);
+      const calculatedDestValue = BigInt(spent.value) - BigInt(srcUtxo.value);
+      expect(BigInt(destUtxo.value)).toBe(calculatedDestValue);
     }
     log.debug(`Validation complete for ${destAddr} (hash=${destTx.transaction.hash})`);
   });
@@ -125,9 +124,7 @@ describe.sequential('wallet event subscriptions', () => {
   beforeAll(async () => {
     indexerWsClient = new IndexerWsClient();
     indexerHttpClient = new IndexerHttpClient();
-
     await indexerWsClient.connectionInit();
-
     toolkit = new ToolkitWrapper({});
     await toolkit.start();
   }, 200_000);
@@ -155,7 +152,7 @@ describe.sequential('wallet event subscriptions', () => {
       await ws.connectionInit();
       const emptyEvents: UnshieldedTxSubscriptionResponse[] = [];
 
-      ws.subscribeToUnshieldedTransactionEvents(
+      const unsubscribe = ws.subscribeToUnshieldedTransactionEvents(
         {
           next: (e) => {
             emptyEvents.push(e);
@@ -164,15 +161,22 @@ describe.sequential('wallet event subscriptions', () => {
         { address: emptyAddress },
       );
 
-      const stabilized = await waitForEventsStabilization(emptyEvents, 1000);
-      log.debug(`Received ${stabilized.length} events for empty wallet.`);
-      const onlyProgressUpdates = stabilized.every((e) => {
-        const data = e.data?.unshieldedTransactions;
-        return (
-          data?.__typename === 'UnshieldedTransactionsProgress' && data.highestTransactionId === 0
-        );
-      });
-      expect(onlyProgressUpdates).toBe(true);
+      try {
+        const stabilized = await waitForEventsStabilization(emptyEvents, 1000);
+        log.debug(`Received ${stabilized.length} events for empty wallet.`);
+
+        const onlyProgressUpdates = stabilized.every((e) => {
+          const data = e.data?.unshieldedTransactions;
+          return (
+            data?.__typename === 'UnshieldedTransactionsProgress' && data.highestTransactionId === 0
+          );
+        });
+
+        expect(onlyProgressUpdates).toBe(true);
+      } finally {
+        unsubscribe();
+        await ws.connectionClose();
+      }
     });
   });
 
@@ -194,8 +198,9 @@ describe.sequential('wallet event subscriptions', () => {
 
     afterAll(async () => {
       // Unsubscribe from the unshielded transaction events for the source and destination addresses
-      walletFixture.sourceAddrUnscribeFromEvents();
-      walletFixture.destAddrUnscribeFromEvents();
+      walletFixture.sourceAddrUnscribeFromEvents?.();
+      walletFixture.destAddrUnscribeFromEvents?.();
+      walletFixture.secondDestAddrUnscribeFromEvents?.();
     });
 
     /**
@@ -204,7 +209,8 @@ describe.sequential('wallet event subscriptions', () => {
      *
      * @given a source wallet (A) and two destination wallets (B1, B2) all subscribed to unshielded transaction events
      * @when wallet A performs an unshielded transfer of 3 units to B1
-     * @then B1 should receive a single `UnshieldedTransaction` event representing the received funds, while B2 should only receive `UnshieldedTransactionsProgress` events and no actual `UnshieldedTransaction` payloads.
+     * @then B1 should receive a single `UnshieldedTransaction` event representing the received funds, while B2 should only
+     * receive `UnshieldedTransactionsProgress` events and no actual `UnshieldedTransaction` payloads.
      */
     test('should emit UnshieldedTransaction only for the target wallet (A > B1)', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'MultiDestination'] };
@@ -216,17 +222,19 @@ describe.sequential('wallet event subscriptions', () => {
       // First transaction: A > B1
       await toolkit.generateSingleTx(sourceSeed, 'unshielded', destinationAddress, 3);
 
-      // Wait for latest events
+      // Wait for B1's UnshieldedTransaction
       const latestB1Tx = await retrySimple(async () => {
         const events = getEventsOfType(destinationAddressEvents, 'UnshieldedTransaction');
         return events.at(-1) ?? null;
       });
 
+      // Wait for source event
       const latestSourceTx = await retrySimple(async () => {
         const events = getEventsOfType(sourceAddressEvents, 'UnshieldedTransaction');
         return events.at(-1) ?? null;
       });
 
+      // Wait for B2 progress
       const latestB2Tx = await retrySimple(async () => {
         const progressEvents = getEventsOfType(
           secondDestinationAddressEvents,
@@ -244,7 +252,7 @@ describe.sequential('wallet event subscriptions', () => {
         '3',
       );
 
-      // Ensure B2 did NOT receive a transaction event
+      // Ensure B2 did not receive a UnshieldedTransaction event
       const b2Tx = getEventsOfType(secondDestinationAddressEvents, 'UnshieldedTransaction');
       expect(b2Tx.length).toBe(0);
 
@@ -265,22 +273,25 @@ describe.sequential('wallet event subscriptions', () => {
       // Generate A > B2 transaction
       await toolkit.generateSingleTx(sourceSeed, 'unshielded', secondDestinationAddress!, 1);
 
-      // Wait for latest events
+      // B2 UnshieldedTransaction
       const latestB2Tx = await retrySimple(async () => {
         const b2Events = getEventsOfType(secondDestinationAddressEvents, 'UnshieldedTransaction');
         return b2Events.at(-1) ?? null;
       });
+
+      // B1 UnshieldedTransaction (should NOT match B2)
       const latestB1Tx = await retrySimple(async () => {
         const b1Events = getEventsOfType(destinationAddressEvents, 'UnshieldedTransaction');
         return b1Events.at(-1) ?? null;
       });
 
+      // Source event
       const latestSourceTx = await retrySimple(async () => {
         const srcEvents = getEventsOfType(sourceAddressEvents, 'UnshieldedTransaction');
         return srcEvents.at(-1) ?? null;
       });
 
-      // Validate A > B2 transfer consistency
+      // Validate cross-wallet consistency for A > B2
       validateCrossWalletTransaction(
         [latestSourceTx],
         [latestB2Tx],
@@ -288,6 +299,7 @@ describe.sequential('wallet event subscriptions', () => {
         secondDestinationAddress!,
         '1',
       );
+
       // Ensure B1 did NOT receive the B2 transaction
       expect(latestB1Tx.transaction.hash).not.toBe(latestB2Tx.transaction.hash);
     }, 30_000);
