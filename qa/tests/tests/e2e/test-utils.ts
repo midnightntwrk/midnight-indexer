@@ -1,7 +1,11 @@
 import { BlockResponse, TransactionResponse } from '@utils/indexer/indexer-types';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
+import log from '@utils/logging/logger';
+import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
+import dataProvider from '@utils/testdata-provider';
+import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 
-function retry<T>(
+export function retry<T>(
   fn: () => Promise<T>,
   condition: (result: T) => boolean,
   maxAttempts: number,
@@ -31,6 +35,14 @@ function retry<T>(
     };
     execute();
   });
+}
+
+export function retrySimple<T>(
+  fn: () => Promise<T | null>,
+  maxAttempts = 5,
+  delayMs = 1500,
+): Promise<T> {
+  return retry(fn, (result) => result !== null, maxAttempts, delayMs) as Promise<T>;
 }
 
 export function getBlockByHashWithRetry(hash: string): Promise<BlockResponse> {
@@ -104,4 +116,106 @@ export async function waitForEventsStabilization<T>(
       return events.splice(0, events.length);
     }
   }
+}
+
+/**
+ * Prepares a two-wallet (A > B) subscription setup for unshielded transaction tests.
+ *
+ * Subscribes both the source and destination wallets to unshielded transaction events, waits for their initial event streams to stabilize,
+ * performs a single unshielded transfer of a configurable amount, and returns all relevant context for downstream assertions.
+ */
+export async function setupWalletSubscriptions(
+  toolkit: ToolkitWrapper,
+  indexerWsClient: IndexerWsClient,
+  options?: { includeSecondDestination?: boolean },
+) {
+  const sourceSeed = dataProvider.getFundingSeed();
+  const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
+  const secondDestinationSeed = '0000000000000000000000000000000000000000000000000000000123456789';
+
+  // Getting the addresses from their seeds
+  const sourceAddress = (await toolkit.showAddress(sourceSeed)).unshielded;
+  const destinationAddress = (await toolkit.showAddress(destinationSeed)).unshielded;
+
+  // Events from the indexer websocket for both the source and destination addresses
+  const sourceAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
+  const destinationAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
+
+  // Historical events from the indexer websocket for both the source and destination addresses
+  // We use these two arrays to capture events before submitting the transaction
+  let historicalSourceEvents: UnshieldedTxSubscriptionResponse[] = [];
+  let historicalDestinationEvents: UnshieldedTxSubscriptionResponse[] = [];
+
+  // Subscribe the source wallet to unshielded transaction events
+  const sourceAddrUnscribeFromEvents = indexerWsClient.subscribeToUnshieldedTransactionEvents(
+    { next: (event) => sourceAddressEvents.push(event) },
+    { address: sourceAddress },
+  );
+
+  // Subscribe the destination wallet to unshielded transaction events
+  const destAddrUnscribeFromEvents = indexerWsClient.subscribeToUnshieldedTransactionEvents(
+    { next: (event) => destinationAddressEvents.push(event) },
+    { address: destinationAddress },
+  );
+  // Wait until source events count stabilizes, then snapshot to historical array
+  historicalSourceEvents = await waitForEventsStabilization(sourceAddressEvents, 1000);
+  log.info(`Source events stabilized: ${historicalSourceEvents.length}`);
+
+  // Wait until destination events count stabilizes, then snapshot to historical array
+  historicalDestinationEvents = await waitForEventsStabilization(destinationAddressEvents, 1000);
+
+  // Optional second destination
+
+  let secondHistoricalDestinationEvents: UnshieldedTxSubscriptionResponse[] = [];
+  const secondDestinationAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
+
+  let secondDestinationAddress: string | undefined;
+  let secondDestAddrUnscribeFromEvents: (() => void) | undefined;
+
+  if (options?.includeSecondDestination) {
+    secondDestinationAddress = (await toolkit.showAddress(secondDestinationSeed)).unshielded;
+
+    // Subscribe to second destination wallet events
+    secondDestAddrUnscribeFromEvents = indexerWsClient.subscribeToUnshieldedTransactionEvents(
+      { next: (event) => secondDestinationAddressEvents.push(event) },
+      { address: secondDestinationAddress },
+    );
+    // Wait until second destination events stabilize
+    secondHistoricalDestinationEvents = await waitForEventsStabilization(
+      secondDestinationAddressEvents,
+      1000,
+    );
+    log.info(`Second destination events stabilized: ${secondHistoricalDestinationEvents.length}`);
+  }
+
+  return {
+    sourceSeed,
+    destinationSeed,
+    secondDestinationSeed,
+    sourceAddress,
+    destinationAddress,
+    secondDestinationAddress,
+    sourceAddressEvents,
+    destinationAddressEvents,
+    secondDestinationAddressEvents,
+    sourceAddrUnscribeFromEvents,
+    destAddrUnscribeFromEvents,
+    secondDestAddrUnscribeFromEvents,
+    historicalSourceEvents,
+    historicalDestinationEvents,
+    secondHistoricalDestinationEvents,
+  };
+}
+
+/**
+ * Extracts all unshielded transaction events of a specific GraphQL `__typename`
+ * from a wallet’s subscription event stream.
+ */
+export function getEventsOfType<T extends string>(
+  events: UnshieldedTxSubscriptionResponse[],
+  type: T,
+) {
+  return events
+    .map((e) => e.data?.unshieldedTransactions)
+    .filter((tx): tx is Extract<typeof tx, { __typename: T }> => tx?.__typename === type);
 }
