@@ -16,7 +16,8 @@ use crate::domain::{
     LedgerEvent, NetworkId, Nonce, PROTOCOL_VERSION_000_018_000, ProtocolVersion,
     SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerState,
     SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot, TokenType,
-    TransactionResult, UnshieldedUtxo, dust,
+    TransactionResult, UnshieldedUtxo,
+    dust::{self},
     ledger::{Error, IntentV6, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
 use fastrace::trace;
@@ -34,7 +35,10 @@ use midnight_coin_structure_v6::{
     contract::ContractAddress as ContractAddressV6,
 };
 use midnight_ledger_v6::{
-    dust::InitialNonce as InitialNonceV6,
+    dust::{
+        DustGenerationInfo as DustGenerationInfoV6, InitialNonce as InitialNonceV6,
+        QualifiedDustOutput as QualifiedDustOutputV6,
+    },
     events::{Event as EventV6, EventDetails as EventDetailsV6},
     semantics::{
         TransactionContext as TransactionContextV6, TransactionResult as TransactionResultV6,
@@ -48,13 +52,12 @@ use midnight_ledger_v6::{
 };
 use midnight_onchain_runtime_v6::context::BlockContext as BlockContextV6;
 use midnight_serialize_v6::{
-    Deserializable as DeserializableV6, Serializable as SerializableV6,
-    tagged_deserialize as tagged_deserialize_v6,
+    Deserializable as DeserializableV6, tagged_deserialize as tagged_deserialize_v6,
 };
 use midnight_storage_v6::DefaultDB as DefaultDBV6;
 use midnight_transient_crypto_v6::merkle_tree::{
     MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV6,
-    MerkleTreeDigest as MerkleTreeDigestV6,
+    MerkleTreeDigest as MerkleTreeDigestV6, TreeInsertionPath as TreeInsertionPathV6,
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
@@ -375,125 +378,142 @@ fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<Ledger
             let raw = event
                 .tagged_serialize_v6()
                 .map_err(|error| Error::Serialize("EventV6", error))?;
-            Ok((event, raw))
+            Ok::<_, Error>((event, raw))
         })
         .filter_map_ok(|(event, raw)| match event.content {
-            EventDetailsV6::ZswapInput { .. } => Some(LedgerEvent::zswap_input(raw)),
+            EventDetailsV6::ZswapInput { .. } => Some(Ok(LedgerEvent::zswap_input(raw))),
 
-            EventDetailsV6::ZswapOutput { .. } => Some(LedgerEvent::zswap_output(raw)),
+            EventDetailsV6::ZswapOutput { .. } => Some(Ok(LedgerEvent::zswap_output(raw))),
 
             EventDetailsV6::ContractDeploy { .. } => None,
 
             EventDetailsV6::ContractLog { .. } => None,
 
-            EventDetailsV6::ParamChange(..) => Some(LedgerEvent::param_change(raw)),
+            EventDetailsV6::ParamChange(..) => Some(Ok(LedgerEvent::param_change(raw))),
 
             EventDetailsV6::DustInitialUtxo {
                 output,
                 generation,
                 generation_index,
                 ..
-            } => {
-                // Serialize DustPublicKey for output owner to get full 33-byte representation.
-                let mut output_owner_bytes = Vec::new();
-                SerializableV6::serialize(&output.owner, &mut output_owner_bytes)
-                    .expect("DustPublicKey serialization should not fail");
-
-                let qualified_output = dust::QualifiedDustOutput {
-                    initial_value: output.initial_value,
-                    owner: output_owner_bytes
-                        .try_into()
-                        .expect("DustPublicKey should serialize to 33 bytes"),
-                    nonce: output.nonce.0.to_bytes_le().into(),
-                    seq: output.seq,
-                    ctime: output.ctime.to_secs(),
-                    backing_night: output.backing_night.0.0.into(),
-                    mt_index: output.mt_index,
-                };
-
-                // Serialize DustPublicKey to get full 33-byte representation (prefix + Fr).
-                let mut owner_bytes = Vec::new();
-                SerializableV6::serialize(&generation.owner, &mut owner_bytes)
-                    .expect("DustPublicKey serialization should not fail");
-
-                let generation_info = dust::DustGenerationInfo {
-                    night_utxo_hash: output.backing_night.0.0.into(),
-                    value: generation.value,
-                    owner: owner_bytes
-                        .try_into()
-                        .expect("DustPublicKey should serialize to 33 bytes"),
-                    nonce: generation.nonce.0.0.into(),
-                    ctime: output.ctime.to_secs(),
-                    dtime: generation.dtime.to_secs(),
-                };
-
-                Some(LedgerEvent::dust_initial_utxo(
-                    raw,
-                    qualified_output,
-                    generation_info,
-                    generation_index,
-                ))
-            }
+            } => Some(make_dust_initial_utxo_v6(
+                output,
+                generation,
+                generation_index,
+                raw,
+            )),
 
             EventDetailsV6::DustGenerationDtimeUpdate { update, .. } => {
-                // TreeInsertionPath has leaf: (HashOutput, DustGenerationInfo).
-                let generation = &update.leaf.1;
-
-                // Calculate mt_index from the path (from leaf up).
-                let mt_index =
-                    update
-                        .path
-                        .iter()
-                        .rev()
-                        .enumerate()
-                        .fold(0u64, |mt_index, (depth, entry)| {
-                            if !entry.goes_left {
-                                mt_index | (1u64 << depth)
-                            } else {
-                                mt_index
-                            }
-                        });
-
-                // Serialize DustPublicKey to get full 33-byte representation (prefix + Fr).
-                let mut owner_bytes = Vec::new();
-                SerializableV6::serialize(&generation.owner, &mut owner_bytes)
-                    .expect("DustPublicKey serialization should not fail");
-
-                let generation_info = dust::DustGenerationInfo {
-                    night_utxo_hash: update.leaf.0.0.into(),
-                    value: generation.value,
-                    owner: owner_bytes
-                        .try_into()
-                        .expect("DustPublicKey should serialize to 33 bytes"),
-                    nonce: generation.nonce.0.0.into(),
-                    ctime: 0, // DustGenerationInfo from ledger doesn't have ctime, only dtime
-                    dtime: generation.dtime.to_secs(),
-                };
-
-                let merkle_path = update
-                    .path
-                    .iter()
-                    .map(|entry| dust::DustMerklePathEntry {
-                        sibling_hash: entry.hash.as_ref().map(|h| h.0.0.to_bytes_le().to_vec()),
-                        goes_left: entry.goes_left,
-                    })
-                    .collect();
-
-                Some(LedgerEvent::dust_generation_dtime_update(
-                    raw,
-                    generation_info,
-                    mt_index,
-                    merkle_path,
-                ))
+                Some(make_dust_generation_dtime_update_v6(update, raw))
             }
 
             EventDetailsV6::DustSpendProcessed { .. } => {
-                Some(LedgerEvent::dust_spend_processed(raw))
+                Some(Ok(LedgerEvent::dust_spend_processed(raw)))
             }
 
             other => panic!("unexpected EventDetailsV6 variant {other:?}"),
         })
+        .flatten()
         .collect::<Result<_, _>>()
+}
+
+fn make_dust_initial_utxo_v6(
+    output: QualifiedDustOutputV6,
+    generation: DustGenerationInfoV6,
+    generation_index: u64,
+    raw: ByteVec,
+) -> Result<LedgerEvent, Error> {
+    let owner = output
+        .owner
+        .serialize_v6()
+        .map_err(|error| Error::Serialize("DustPublicKeyV6", error))?
+        .try_into()
+        .map_err(Error::ByteArrayLen)?;
+
+    let qualified_output = dust::QualifiedDustOutput {
+        initial_value: output.initial_value,
+        owner,
+        nonce: output.nonce.0.to_bytes_le().into(),
+        seq: output.seq,
+        ctime: output.ctime.to_secs(),
+        backing_night: output.backing_night.0.0.into(),
+        mt_index: output.mt_index,
+    };
+
+    let owner = generation
+        .owner
+        .serialize_v6()
+        .map_err(|error| Error::Serialize("DustPublicKeyV6", error))?
+        .try_into()
+        .map_err(Error::ByteArrayLen)?;
+
+    let generation_info = dust::DustGenerationInfo {
+        night_utxo_hash: output.backing_night.0.0.into(),
+        value: generation.value,
+        owner,
+        nonce: generation.nonce.0.0.into(),
+        ctime: output.ctime.to_secs(),
+        dtime: generation.dtime.to_secs(),
+    };
+
+    Ok(LedgerEvent::dust_initial_utxo(
+        raw,
+        qualified_output,
+        generation_info,
+        generation_index,
+    ))
+}
+
+fn make_dust_generation_dtime_update_v6(
+    update: TreeInsertionPathV6<DustGenerationInfoV6>,
+    raw: ByteVec,
+) -> Result<LedgerEvent, Error> {
+    let generation = &update.leaf.1;
+
+    let owner = generation
+        .owner
+        .serialize_v6()
+        .map_err(|error| Error::Serialize("DustPublicKeyV6", error))?
+        .try_into()
+        .map_err(Error::ByteArrayLen)?;
+
+    let generation_info = dust::DustGenerationInfo {
+        night_utxo_hash: update.leaf.0.0.into(),
+        value: generation.value,
+        owner,
+        nonce: generation.nonce.0.0.into(),
+        ctime: 0, // DustGenerationInfo from ledger doesn't have ctime, only dtime
+        dtime: generation.dtime.to_secs(),
+    };
+
+    let mt_index = update
+        .path
+        .iter()
+        .rev()
+        .enumerate()
+        .fold(0u64, |mt_index, (depth, entry)| {
+            if !entry.goes_left {
+                mt_index | (1u64 << depth)
+            } else {
+                mt_index
+            }
+        });
+
+    let merkle_path = update
+        .path
+        .iter()
+        .map(|entry| dust::DustMerklePathEntry {
+            sibling_hash: entry.hash.as_ref().map(|h| h.0.0.to_bytes_le().to_vec()),
+            goes_left: entry.goes_left,
+        })
+        .collect();
+
+    Ok(LedgerEvent::dust_generation_dtime_update(
+        raw,
+        generation_info,
+        mt_index,
+        merkle_path,
+    ))
 }
 
 fn make_unshielded_utxos_for_regular_transaction_v6(

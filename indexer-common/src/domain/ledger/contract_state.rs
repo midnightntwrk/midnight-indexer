@@ -71,9 +71,8 @@ impl ContractState {
                                     .tagged_serialize_v6()
                                     .map_err(|error| Error::Serialize("TokenTypeV6", error))?;
 
-                                let len = token_type.len();
                                 let token_type = TokenType::try_from(token_type.as_ref())
-                                    .map_err(|_| Error::TokenTypeLen(len))?;
+                                    .map_err(Error::ByteArrayLen)?;
 
                                 Ok(ContractBalance { token_type, amount })
                             }
