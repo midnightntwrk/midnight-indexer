@@ -392,6 +392,8 @@ async fn save_regular_transaction(
 
     save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
 
+    save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await?;
+
     Ok(transaction_id as u64)
 }
 
@@ -693,22 +695,13 @@ async fn save_dust_generation_info(
                     UPDATE dust_generation_info
                     SET dtime = $1
                     WHERE night_utxo_hash = $2
-                    AND dtime IS NULL
                 "};
 
-                let rows_affected = sqlx::query(query)
+                sqlx::query(query)
                     .bind(generation_info.dtime as i64)
                     .bind(generation_info.night_utxo_hash.as_ref())
                     .execute(&mut **tx)
-                    .await?
-                    .rows_affected();
-
-                if rows_affected == 0 {
-                    return Err(sqlx::Error::Protocol(format!(
-                        "dust generation info already has dtime set: night_utxo_hash={:?}",
-                        generation_info.night_utxo_hash
-                    )));
-                }
+                    .await?;
             }
 
             // Other event types (ZswapInput, ZswapOutput, ParamChange, DustSpendProcessed)

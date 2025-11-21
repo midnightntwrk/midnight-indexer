@@ -22,7 +22,7 @@ pub use secret_key::*;
 pub use transaction::*;
 
 use crate::{
-    domain::{ByteVec, ProtocolVersion, SerializedContractAddress},
+    domain::{ByteArrayLenError, ByteVec, ProtocolVersion, SerializedContractAddress},
     error::BoxError,
 };
 use fastrace::trace;
@@ -67,8 +67,8 @@ pub enum Error {
     #[error("cannot get contract state from node for address {0}")]
     GetContractState(SerializedContractAddress, #[source] BoxError),
 
-    #[error("serialized TokenType should have 32 bytes, but had {0}")]
-    TokenTypeLen(usize),
+    #[error(transparent)]
+    ByteArrayLen(ByteArrayLenError),
 
     #[error("invalid merkle-tree collapsed update")]
     InvalidUpdate(#[source] BoxError),

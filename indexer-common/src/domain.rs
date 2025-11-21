@@ -43,7 +43,7 @@ pub type TransactionHash = ByteArray<32>;
 pub type UnshieldedAddress = ByteArray<32>;
 
 // DUST-specific types for dustGenerationStatus query.
-pub type DustOwner = ByteArray<32>;
+pub type DustOwner = ByteArray<33>;
 pub type DustAddress = ByteArray<33>;
 pub type CardanoRewardAddress = ByteArray<29>;
 pub type NightUtxoHash = ByteArray<32>;
