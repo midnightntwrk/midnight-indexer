@@ -22,9 +22,10 @@ fn main() {
         .join("../.node")
         .join(&node_version)
         .join("metadata.scale");
-    if !metadata_path.exists() {
-        panic!("metadata file not found at {}", metadata_path.display());
-    }
+    let metadata_path = metadata_path.canonicalize().expect(&format!(
+        "metadata file not found at {}",
+        metadata_path.display()
+    ));
 
     // Extract version for module name (replace dots and hyphens with underscores).
     // E.g. "0.16.0-da0b6c69" becomes "0_16".
@@ -68,25 +69,32 @@ fn main() {
 }
 
 fn read_node_version() -> String {
-    let node_version_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(NODE_VERSION_PATH)
-        .canonicalize()
-        .expect("{NODE_VERSION_PATH} not found");
+    let node_version_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(NODE_VERSION_PATH);
+    let node_version_path = node_version_path.canonicalize().expect(&format!(
+        "node version file not found at {}",
+        node_version_path.display()
+    ));
 
     // Read and validate/sanitize the version string.
-    match fs::read_to_string(node_version_path) {
+    match fs::read_to_string(&node_version_path) {
         Ok(version) => {
             let version = version.trim().to_string();
 
             if version.is_empty() {
-                panic!("{NODE_VERSION_PATH} is empty");
+                panic!(
+                    "node version file at {} is empty",
+                    node_version_path.display()
+                );
             }
 
             validate_and_sanitize_version(&version)
         }
 
         Err(error) => {
-            panic!("cannot read {NODE_VERSION_PATH}: {error}");
+            panic!(
+                "cannot read node version file at {}: {error}",
+                node_version_path.display()
+            );
         }
     }
 }
