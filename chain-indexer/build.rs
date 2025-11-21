@@ -13,13 +13,13 @@
 
 use std::{env, fs, path::Path};
 
-const NODE_VERSION_FILE: &str = "../NODE_VERSION";
+const NODE_VERSION_PATH: &str = "../NODE_VERSION";
 
 fn main() {
     let node_version = read_node_version();
 
-    let metadata_path = Path::new("..")
-        .join(".node")
+    let metadata_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../.node")
         .join(&node_version)
         .join("metadata.scale");
     if !metadata_path.exists() {
@@ -57,7 +57,7 @@ fn main() {
 
     // Tell cargo to rerun build script if:
     // 1. The NODE_VERSION file changes.
-    println!("cargo:rerun-if-changed={}", NODE_VERSION_FILE);
+    println!("cargo:rerun-if-changed={}", NODE_VERSION_PATH);
     // 2. The metadata file itself changes.
     println!("cargo:rerun-if-changed={}", metadata_path.display());
     // 3. The .node directory structure changes.
@@ -68,24 +68,25 @@ fn main() {
 }
 
 fn read_node_version() -> String {
-    if !Path::new(NODE_VERSION_FILE).exists() {
-        panic!("{NODE_VERSION_FILE} file not found");
-    }
+    let node_version_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(NODE_VERSION_PATH)
+        .canonicalize()
+        .expect("{NODE_VERSION_PATH} not found");
 
     // Read and validate/sanitize the version string.
-    match fs::read_to_string(NODE_VERSION_FILE) {
+    match fs::read_to_string(node_version_path) {
         Ok(version) => {
             let version = version.trim().to_string();
 
             if version.is_empty() {
-                panic!("{NODE_VERSION_FILE} file is empty");
+                panic!("{NODE_VERSION_PATH} is empty");
             }
 
             validate_and_sanitize_version(&version)
         }
 
         Err(error) => {
-            panic!("cannot read {NODE_VERSION_FILE} file: {error}");
+            panic!("cannot read {NODE_VERSION_PATH}: {error}");
         }
     }
 }
