@@ -21,8 +21,7 @@ import {
   type PrivateWalletState,
   type PublicWalletState,
 } from '@utils/toolkit/toolkit-wrapper';
-import { PrivateWalletStateSchema, PublicWalletStateSchema } from '@utils/indexer/graphql/schema';
-import { validateSchema } from '../test-utils';
+import { PrivateWalletStateSchema, PublicWalletStateSchema } from '@utils/toolkit/schemas';
 
 const TOOLKIT_STARTUP_TIMEOUT = 60_000;
 
@@ -59,23 +58,13 @@ describe('show wallet queries using toolkit', () => {
       const walletState: PrivateWalletState =
         await toolkit.showPrivateWalletState(TEST_WALLET_SEED);
 
-      log.debug('Checking if we actually received a private wallet state');
       expect(walletState).toBeDefined();
 
-      expect(() => {
-        validateSchema(walletState, PrivateWalletStateSchema, 'private wallet state');
-      }).not.toThrow();
-
-      // Log summary for debugging
-      log.debug(
-        `Wallet state: ${Object.keys(walletState.coins).length} coins, ${walletState.utxos.length} UTXOs, ${walletState.dust_utxos.length} dust UTXOs`,
-      );
-      const totalCoinsValue = Object.values(walletState.coins).reduce(
-        (sum, coin) => sum + coin.value,
-        0,
-      );
-      const totalUtxosValue = walletState.utxos.reduce((sum, utxo) => sum + utxo.value, 0);
-      log.debug(`Total coins value: ${totalCoinsValue}, Total UTXOs value: ${totalUtxosValue}`);
+      const result = PrivateWalletStateSchema.safeParse(walletState);
+      expect(
+        result.success,
+        `PrivateWalletState validation failed: ${JSON.stringify(result.error, null, 2)}`,
+      ).toBe(true);
     });
   });
 
@@ -101,17 +90,13 @@ describe('show wallet queries using toolkit', () => {
       const publicWalletState: PublicWalletState =
         await toolkit.showPublicWalletState(walletAddress);
 
-      log.debug('Checking if we actually received a public wallet state');
       expect(publicWalletState).toBeDefined();
 
-      expect(() => {
-        validateSchema(publicWalletState, PublicWalletStateSchema, 'public wallet state');
-      }).not.toThrow();
-
-      // Log summary for debugging
-      log.debug(
-        `Public wallet state: ${Object.keys(publicWalletState.coins).length} coins, ${publicWalletState.utxos.length} UTXOs, ${publicWalletState.dust_utxos.length} dust UTXOs`,
-      );
+      const result = PublicWalletStateSchema.safeParse(publicWalletState);
+      expect(
+        result.success,
+        `PublicWalletState validation failed: ${JSON.stringify(result.error, null, 2)}`,
+      ).toBe(true);
     });
   });
 });
