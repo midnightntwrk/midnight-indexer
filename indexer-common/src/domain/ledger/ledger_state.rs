@@ -427,8 +427,7 @@ fn make_dust_initial_utxo_v6(
         .owner
         .serialize_v6()
         .map_err(|error| Error::Serialize("DustPublicKeyV6", error))?
-        .try_into()
-        .map_err(Error::ByteArrayLen)?;
+        .into();
 
     let qualified_output = dust::QualifiedDustOutput {
         initial_value: output.initial_value,
@@ -444,8 +443,7 @@ fn make_dust_initial_utxo_v6(
         .owner
         .serialize_v6()
         .map_err(|error| Error::Serialize("DustPublicKeyV6", error))?
-        .try_into()
-        .map_err(Error::ByteArrayLen)?;
+        .into();
 
     let generation_info = dust::DustGenerationInfo {
         night_utxo_hash: output.backing_night.0.0.into(),
@@ -474,8 +472,7 @@ fn make_dust_generation_dtime_update_v6(
         .owner
         .serialize_v6()
         .map_err(|error| Error::Serialize("DustPublicKeyV6", error))?
-        .try_into()
-        .map_err(Error::ByteArrayLen)?;
+        .into();
 
     let generation_info = dust::DustGenerationInfo {
         night_utxo_hash: update.leaf.0.0.into(),
