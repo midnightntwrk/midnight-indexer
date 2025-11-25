@@ -45,7 +45,7 @@ jobs:
           toolchain: ${{needs.toolchain.outputs.toolchain}}
 
       - name: Install just
-        uses: taiki-e/install-action@8cd2ac21dc357ca7dd807fe294d11e9ef84f60ec # v2.62.53
+        uses: taiki-e/install-action@763e3324d4fd026c9bd284c504378585777a87d5 # v2.62.57
         with:
           tool: just
 
@@ -74,7 +74,7 @@ jobs:
           toolchain: nightly-2025-10-29
 
       - name: Install just
-        uses: taiki-e/install-action@8cd2ac21dc357ca7dd807fe294d11e9ef84f60ec # v2.62.53
+        uses: taiki-e/install-action@763e3324d4fd026c9bd284c504378585777a87d5 # v2.62.57
         with:
           tool: just
 
@@ -99,7 +99,7 @@ jobs:
           components: clippy
 
       - name: Install just
-        uses: taiki-e/install-action@8cd2ac21dc357ca7dd807fe294d11e9ef84f60ec # v2.62.53
+        uses: taiki-e/install-action@763e3324d4fd026c9bd284c504378585777a87d5 # v2.62.57
         with:
           tool: just
 
@@ -143,12 +143,12 @@ jobs:
           toolchain: ${{needs.toolchain.outputs.toolchain}}
 
       - name: Install nextest
-        uses: taiki-e/install-action@8cd2ac21dc357ca7dd807fe294d11e9ef84f60ec # v2.62.53
+        uses: taiki-e/install-action@763e3324d4fd026c9bd284c504378585777a87d5 # v2.62.57
         with:
           tool: nextest
 
       - name: Install just
-        uses: taiki-e/install-action@8cd2ac21dc357ca7dd807fe294d11e9ef84f60ec # v2.62.53
+        uses: taiki-e/install-action@763e3324d4fd026c9bd284c504378585777a87d5 # v2.62.57
         with:
           tool: just
 
@@ -177,7 +177,7 @@ jobs:
           toolchain: nightly-2025-10-29
 
       - name: Install just
-        uses: taiki-e/install-action@8cd2ac21dc357ca7dd807fe294d11e9ef84f60ec # v2.62.53
+        uses: taiki-e/install-action@763e3324d4fd026c9bd284c504378585777a87d5 # v2.62.57
         with:
           tool: just
 
