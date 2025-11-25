@@ -20,11 +20,11 @@ import { UnshieldedTransactionEvent, isUnshieldedTransaction } from '@utils/inde
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
 import {
   waitForEventsStabilization,
-  setupWalletSubscriptions,
+  setupWalletEventSubscriptions,
   getEventsOfType,
   retrySimple,
 } from './test-utils';
-
+import dataProvider from '@utils/testdata-provider';
 import type { TestContext } from 'vitest';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 
@@ -106,7 +106,7 @@ describe.sequential('wallet event subscriptions', () => {
   // Toolkit instance for generating and submitting transactions
   let toolkit: ToolkitWrapper;
 
-  let walletFixture: Awaited<ReturnType<typeof setupWalletSubscriptions>>;
+  let walletFixture: Awaited<ReturnType<typeof setupWalletEventSubscriptions>>;
   let sourceSeed: string;
 
   // Addresses for the source and destination wallets, derived from their seeds
@@ -182,25 +182,35 @@ describe.sequential('wallet event subscriptions', () => {
 
   describe('multi-destination transaction scenario', () => {
     beforeAll(async () => {
-      walletFixture = await setupWalletSubscriptions(toolkit, indexerWsClient, {
-        includeSecondDestination: true,
-      });
+      const sourceSeedLocal = dataProvider.getFundingSeed();
+      const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
+      const secondDestinationSeed =
+        '0000000000000000000000000000000000000000000000000000000123456789';
 
-      sourceSeed = walletFixture.sourceSeed;
-      sourceAddress = walletFixture.sourceAddress;
-      destinationAddress = walletFixture.destinationAddress;
-      secondDestinationAddress = walletFixture.secondDestinationAddress;
+      walletFixture = await setupWalletEventSubscriptions(
+        toolkit,
+        indexerWsClient,
+        sourceSeedLocal,
+        [destinationSeed, secondDestinationSeed],
+      );
 
-      sourceAddressEvents = walletFixture.sourceAddressEvents;
-      destinationAddressEvents = walletFixture.destinationAddressEvents;
-      secondDestinationAddressEvents = walletFixture.secondDestinationAddressEvents;
+      // Source
+      sourceSeed = walletFixture.source.seed;
+      sourceAddress = walletFixture.source.address;
+      sourceAddressEvents = walletFixture.source.events;
+
+      // Destinatons
+      destinationAddress = walletFixture.destinations[0].destinationAddress;
+      secondDestinationAddress = walletFixture.destinations[1].destinationAddress;
+
+      destinationAddressEvents = walletFixture.destinations[0].events;
+      secondDestinationAddressEvents = walletFixture.destinations[1].events;
     }, 200_000);
 
     afterAll(async () => {
       // Unsubscribe from the unshielded transaction events for the source and destination addresses
-      walletFixture.sourceAddrUnscribeFromEvents?.();
-      walletFixture.destAddrUnscribeFromEvents?.();
-      walletFixture.secondDestAddrUnscribeFromEvents?.();
+      walletFixture.source.unsubscribe();
+      walletFixture.destinations.forEach((d) => d.unsubscribe());
     });
 
     /**
@@ -225,13 +235,15 @@ describe.sequential('wallet event subscriptions', () => {
       // Wait for B1's UnshieldedTransaction
       const latestB1Tx = await retrySimple(async () => {
         const events = getEventsOfType(destinationAddressEvents, 'UnshieldedTransaction');
-        return events.at(-1) ?? null;
+        return events.find((e) => e.createdUtxos[0]?.value === '3') ?? null;
       });
+
+      const expectedHash = latestB1Tx.transaction.hash;
 
       // Wait for source event
       const latestSourceTx = await retrySimple(async () => {
         const events = getEventsOfType(sourceAddressEvents, 'UnshieldedTransaction');
-        return events.at(-1) ?? null;
+        return events.find((e) => e.transaction.hash === expectedHash) ?? null;
       });
 
       // Wait for B2 progress
@@ -276,8 +288,10 @@ describe.sequential('wallet event subscriptions', () => {
       // B2 UnshieldedTransaction
       const latestB2Tx = await retrySimple(async () => {
         const b2Events = getEventsOfType(secondDestinationAddressEvents, 'UnshieldedTransaction');
-        return b2Events.at(-1) ?? null;
+        return b2Events.find((e) => e.createdUtxos[0]?.value === '1') ?? null;
       });
+
+      const expectedHash = latestB2Tx.transaction.hash;
 
       // B1 UnshieldedTransaction (should NOT match B2)
       const latestB1Tx = await retrySimple(async () => {
@@ -288,7 +302,7 @@ describe.sequential('wallet event subscriptions', () => {
       // Source event
       const latestSourceTx = await retrySimple(async () => {
         const srcEvents = getEventsOfType(sourceAddressEvents, 'UnshieldedTransaction');
-        return srcEvents.at(-1) ?? null;
+        return srcEvents.find((e) => e.transaction.hash === expectedHash) ?? null;
       });
 
       // Validate cross-wallet consistency for A > B2
