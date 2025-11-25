@@ -16,6 +16,7 @@
 import log from '@utils/logging/logger';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
+import dataProvider from '@utils/testdata-provider';
 import { ToolkitWrapper, type DustBalance } from '@utils/toolkit/toolkit-wrapper';
 import { DustBalanceSchema } from '@utils/toolkit/schemas';
 
@@ -47,21 +48,23 @@ describe('dust balance query using toolkit', () => {
         labels: ['Query', 'Dust', 'Toolkit', 'Balance', 'SchemaValidation'],
       };
 
-      const walletSeed = '0000000000000000000000000000000000000000000000000000000000000001';
+      const walletSeed = dataProvider.getFundingSeed();
 
       log.debug(`Querying dust balance for seed: ${walletSeed}`);
 
       const dustBalance: DustBalance = await toolkit.getDustBalance(walletSeed);
 
+      log.debug('Checking if we actually received a dust balance');
       expect(dustBalance).toBeDefined();
 
-      const result = DustBalanceSchema.safeParse(dustBalance);
+      const validationResult = DustBalanceSchema.safeParse(dustBalance);
       expect(
-        result.success,
-        `DustBalance validation failed: ${JSON.stringify(result.error, null, 2)}`,
+        validationResult.success,
+        `DUST balance schema validation failed: ${JSON.stringify(validationResult.error, null, 2)}`,
       ).toBe(true);
 
-      expect(dustBalance.total).toBeGreaterThanOrEqual(0);
+      expect(dustBalance.total).toBeGreaterThan(0);
+      log.debug(`Dust balance total: ${dustBalance.total}`);
     });
   });
 });

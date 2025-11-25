@@ -79,3 +79,13 @@ export const PublicWalletStateSchema = z.object({
   utxos: z.array(UtxoSchema),
   dust_utxos: z.array(DustOutputSchema),
 });
+
+// Export type aliases inferred from schemas
+export type Coin = z.infer<typeof CoinSchema>;
+export type Utxo = z.infer<typeof UtxoSchema>;
+export type DustOutput = z.infer<typeof DustOutputSchema>;
+export type GenerationInfo = z.infer<typeof GenerationInfoSchema>;
+export type DustGenerationInfo = z.infer<typeof DustGenerationInfoSchema>;
+export type DustBalance = z.infer<typeof DustBalanceSchema>;
+export type PrivateWalletState = z.infer<typeof PrivateWalletStateSchema>;
+export type PublicWalletState = z.infer<typeof PublicWalletStateSchema>;

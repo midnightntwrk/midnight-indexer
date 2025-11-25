@@ -21,7 +21,17 @@ import { env } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
 import { getContractDeploymentHashes } from '../../tests/e2e/test-utils';
 import { z } from 'zod';
-import { DustBalanceSchema, PrivateWalletStateSchema, PublicWalletStateSchema } from './schemas';
+import {
+  Coin,
+  DustBalance,
+  DustBalanceSchema,
+  DustOutput,
+  PrivateWalletState,
+  PrivateWalletStateSchema,
+  PublicWalletState,
+  PublicWalletStateSchema,
+  Utxo,
+} from './schemas';
 
 export type AddressType = 'shielded' | 'unshielded';
 
@@ -73,63 +83,6 @@ export interface DeployContractResult {
   'coin-public': string;
   'deploy-tx-hash': string;
   'deploy-block-hash': string;
-}
-
-export interface Coin {
-  nonce: string;
-  token_type: string;
-  value: number;
-  mt_index: number;
-}
-
-export interface Utxo {
-  id: string;
-  initial_nonce: string;
-  value: number;
-  user_address: string;
-  token_type: string;
-  intent_hash: string;
-  output_number: number;
-}
-
-export interface DustOutput {
-  initial_value: number;
-  dust_public: string;
-  nonce: string;
-  seq: number;
-  ctime: number;
-  backing_night: string;
-  mt_index: number;
-}
-
-export interface PrivateWalletState {
-  coins: Record<string, Coin>;
-  utxos: Utxo[];
-  dust_utxos: DustOutput[];
-}
-
-export interface PublicWalletState {
-  coins: Record<string, Coin>;
-  utxos: Utxo[];
-  dust_utxos: DustOutput[];
-}
-
-export interface GenerationInfo {
-  value: number;
-  owner_dust_public_key: string;
-  nonce: string;
-  dtime: number;
-}
-
-export interface DustGenerationInfo {
-  dust_output: DustOutput;
-  generation_info: GenerationInfo;
-}
-
-export interface DustBalance {
-  generation_infos: DustGenerationInfo[];
-  source: Record<string, number>;
-  total: number;
 }
 
 class ToolkitWrapper {
@@ -900,3 +853,4 @@ class ToolkitWrapper {
 }
 
 export { ToolkitWrapper, ToolkitConfig };
+export type { Coin, DustBalance, DustOutput, PrivateWalletState, PublicWalletState, Utxo };

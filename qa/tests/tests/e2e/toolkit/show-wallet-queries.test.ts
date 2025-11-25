@@ -16,17 +16,16 @@
 import log from '@utils/logging/logger';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
+import dataProvider from '@utils/testdata-provider';
+import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import {
-  ToolkitWrapper,
   type PrivateWalletState,
   type PublicWalletState,
-} from '@utils/toolkit/toolkit-wrapper';
-import { PrivateWalletStateSchema, PublicWalletStateSchema } from '@utils/toolkit/schemas';
+  PrivateWalletStateSchema,
+  PublicWalletStateSchema,
+} from '@utils/toolkit/schemas';
 
 const TOOLKIT_STARTUP_TIMEOUT = 60_000;
-
-// Common test seed used across tests
-const TEST_WALLET_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
 
 describe('show wallet queries using toolkit', () => {
   let toolkit: ToolkitWrapper;
@@ -54,16 +53,17 @@ describe('show wallet queries using toolkit', () => {
         labels: ['Query', 'Wallet', 'Toolkit', 'PrivateState', 'SchemaValidation'],
       };
 
-      log.debug(`Querying private wallet state for seed: ${TEST_WALLET_SEED}`);
-      const walletState: PrivateWalletState =
-        await toolkit.showPrivateWalletState(TEST_WALLET_SEED);
+      const walletSeed = dataProvider.getFundingSeed();
+
+      log.debug(`Querying private wallet state for seed: ${walletSeed}`);
+      const walletState: PrivateWalletState = await toolkit.showPrivateWalletState(walletSeed);
 
       expect(walletState).toBeDefined();
 
-      const result = PrivateWalletStateSchema.safeParse(walletState);
+      const validationResult = PrivateWalletStateSchema.safeParse(walletState);
       expect(
-        result.success,
-        `PrivateWalletState validation failed: ${JSON.stringify(result.error, null, 2)}`,
+        validationResult.success,
+        `PrivateWalletState validation failed: ${JSON.stringify(validationResult.error, null, 2)}`,
       ).toBe(true);
     });
   });
@@ -82,8 +82,10 @@ describe('show wallet queries using toolkit', () => {
         labels: ['Query', 'Wallet', 'Toolkit', 'PublicState', 'SchemaValidation'],
       };
 
+      const walletSeed = dataProvider.getFundingSeed();
+
       // Get the unshielded address from the seed
-      const addressInfo = await toolkit.showAddress(TEST_WALLET_SEED);
+      const addressInfo = await toolkit.showAddress(walletSeed);
       const walletAddress = addressInfo.unshielded;
 
       log.debug(`Querying public wallet state for address: ${walletAddress}`);
@@ -92,10 +94,10 @@ describe('show wallet queries using toolkit', () => {
 
       expect(publicWalletState).toBeDefined();
 
-      const result = PublicWalletStateSchema.safeParse(publicWalletState);
+      const validationResult = PublicWalletStateSchema.safeParse(publicWalletState);
       expect(
-        result.success,
-        `PublicWalletState validation failed: ${JSON.stringify(result.error, null, 2)}`,
+        validationResult.success,
+        `PublicWalletState validation failed: ${JSON.stringify(validationResult.error, null, 2)}`,
       ).toBe(true);
     });
   });
