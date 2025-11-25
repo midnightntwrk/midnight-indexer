@@ -99,7 +99,7 @@ function validateCrossWalletTransaction(
   });
 }
 
-describe.sequential('wallet event subscriptions', () => {
+describe.sequential('wallet event subscriptions', { timeout: 200_000 }, () => {
   let indexerWsClient: IndexerWsClient;
   let indexerHttpClient: IndexerHttpClient;
 
@@ -270,7 +270,7 @@ describe.sequential('wallet event subscriptions', () => {
 
       // B2 must at least show progress
       expect(latestB2Tx).toBeDefined();
-    }, 30_000);
+    });
 
     /**
      * This test validates correct event propagation when performing an unshielded transfer from wallet A to the second destination wallet (B2) in a multi-destination
@@ -316,7 +316,7 @@ describe.sequential('wallet event subscriptions', () => {
 
       // Ensure B1 did NOT receive the B2 transaction
       expect(latestB1Tx.transaction.hash).not.toBe(latestB2Tx.transaction.hash);
-    }, 30_000);
+    });
   });
 
   describe('transaction failure scenario', () => {

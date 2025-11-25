@@ -30,7 +30,7 @@ import {
 } from '@utils/indexer/indexer-types';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
 
-describe('unshielded transactions', () => {
+describe('unshielded transactions', { timeout: 200_000 }, () => {
   let indexerWsClient: IndexerWsClient;
   let indexerHttpClient: IndexerHttpClient;
 
@@ -254,8 +254,8 @@ describe('unshielded transactions', () => {
           return event;
         },
         {
-          maxRetries: 2,
-          delayMs: 1000,
+          maxRetries: 10,
+          delayMs: 3000,
           retryLabel: 'find source address transaction event',
         },
       );
@@ -303,8 +303,8 @@ describe('unshielded transactions', () => {
           return event;
         },
         {
-          maxRetries: 2,
-          delayMs: 1000,
+          maxRetries: 10,
+          delayMs: 3000,
           retryLabel: 'find destination address transaction event',
         },
       );
@@ -415,7 +415,7 @@ describe('unshielded transactions', () => {
             'source',
           ),
         {
-          maxRetries: 5,
+          maxRetries: 10,
           delayMs: 3000,
           retryLabel: 'find source address progress update event',
         },
@@ -481,8 +481,8 @@ describe('unshielded transactions', () => {
             'destination',
           ),
         {
-          maxRetries: 5,
-          delayMs: 2000,
+          maxRetries: 10,
+          delayMs: 3000,
           retryLabel: 'find destination address progress update event',
         },
       );

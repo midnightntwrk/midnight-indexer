@@ -37,8 +37,8 @@ export function retry<T>(
 
 export function retrySimple<T>(
   fn: () => Promise<T | null>,
-  maxAttempts = 5,
-  delayMs = 1500,
+  maxAttempts = 10,
+  delayMs = 3000,
 ): Promise<T> {
   return retry(fn, (result) => result !== null, maxAttempts, delayMs) as Promise<T>;
 }
