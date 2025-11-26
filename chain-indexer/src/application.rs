@@ -355,6 +355,8 @@ async fn index_block(
     let (transactions, ledger_parameters) = ledger_state
         .apply_node_transactions(transactions, block.parent_hash, block.timestamp)
         .context("apply node transactions to ledger state")?;
+    debug!(transactions:?; "transactions applied to ledger state");
+
     if ledger_state.zswap_merkle_tree_root() != block.zswap_state_root {
         bail!(
             "zswap state root mismatch for block {} at height {}",
