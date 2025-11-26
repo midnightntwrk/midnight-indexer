@@ -16,8 +16,7 @@ include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
 
 use crate::{domain::DustRegistrationEvent, infra::subxt_node::SubxtNodeError};
 use indexer_common::domain::{
-    BlockHash, ByteVec, CardanoRewardAddress, DustAddress, DustUtxoId,
-    PROTOCOL_VERSION_000_018_000, ProtocolVersion, SerializedContractAddress,
+    BlockHash, ByteVec, PROTOCOL_VERSION_000_018_000, ProtocolVersion, SerializedContractAddress,
     SerializedContractState,
 };
 use itertools::Itertools;
@@ -193,48 +192,32 @@ async fn make_block_details_runtime_0_18(
             // DUST registration events from NativeTokenObservation pallet.
             Event::CNightObservation(native_token_event) => match native_token_event {
                 CnightObservationEvent::Registration(event) => {
-                    let cardano_address =
-                        CardanoRewardAddress::from(event.cardano_reward_address.0);
-                    let dust_address_array: [u8; 33] = event.dust_public_key.0;
-
                     dust_registration_events.push(DustRegistrationEvent::Registration {
-                        cardano_address,
-                        dust_address: DustAddress::from(dust_address_array),
+                        cardano_address: event.cardano_reward_address.0.into(),
+                        dust_address: event.dust_public_key.0.0.into(),
                     });
                 }
 
                 CnightObservationEvent::Deregistration(event) => {
-                    let cardano_address =
-                        CardanoRewardAddress::from(event.cardano_reward_address.0);
-                    let dust_address_array: [u8; 33] = event.dust_public_key.0;
-
                     dust_registration_events.push(DustRegistrationEvent::Deregistration {
-                        cardano_address,
-                        dust_address: DustAddress::from(dust_address_array),
+                        cardano_address: event.cardano_reward_address.0.into(),
+                        dust_address: event.dust_public_key.0.0.into(),
                     });
                 }
 
                 CnightObservationEvent::MappingAdded(event) => {
-                    let cardano_address =
-                        CardanoRewardAddress::from(event.cardano_reward_address.0);
-                    let dust_address_array: [u8; 33] = event.dust_public_key.0;
-
                     dust_registration_events.push(DustRegistrationEvent::MappingAdded {
-                        cardano_address,
-                        dust_address: DustAddress::from(dust_address_array),
-                        utxo_id: DustUtxoId::from(event.utxo_tx_hash.0.as_ref()),
+                        cardano_address: event.cardano_reward_address.0.into(),
+                        dust_address: event.dust_public_key.0.0.into(),
+                        utxo_id: event.utxo_tx_hash.0.as_ref().into(),
                     });
                 }
 
                 CnightObservationEvent::MappingRemoved(event) => {
-                    let cardano_address =
-                        CardanoRewardAddress::from(event.cardano_reward_address.0);
-                    let dust_address_array: [u8; 33] = event.dust_public_key.0;
-
                     dust_registration_events.push(DustRegistrationEvent::MappingRemoved {
-                        cardano_address,
-                        dust_address: DustAddress::from(dust_address_array),
-                        utxo_id: DustUtxoId::from(event.utxo_tx_hash.0.as_ref()),
+                        cardano_address: event.cardano_reward_address.0.into(),
+                        dust_address: event.dust_public_key.0.0.into(),
+                        utxo_id: event.utxo_tx_hash.0.as_ref().into(),
                     });
                 }
 

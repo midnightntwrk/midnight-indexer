@@ -16,7 +16,10 @@ use crate::{
     infra::storage::Storage,
 };
 use fastrace::trace;
-use indexer_common::{domain::CardanoRewardAddress, infra::sqlx::U128BeBytes};
+use indexer_common::{
+    domain::{ByteVec, CardanoRewardAddress},
+    infra::sqlx::U128BeBytes,
+};
 use indoc::indoc;
 
 /// DUST generation rate in Specks per Star per second.
@@ -46,24 +49,13 @@ impl DustStorage for Storage {
                 LIMIT 1
             "};
 
-            let result = sqlx::query_as::<_, (Vec<u8>, bool)>(registration_query)
-                .bind(reward_address.as_ref())
-                .fetch_optional(&*self.pool)
-                .await?;
-
-            let (dust_address, registered) = match result {
-                Some((addr, valid)) => {
-                    let address_array: [u8; 33] = addr
-                        .try_into()
-                        .map_err(|_| sqlx::Error::Decode("invalid DUST address length".into()))?;
-                    (
-                        indexer_common::domain::DustAddress::from(address_array),
-                        valid,
-                    )
-                }
-
-                None => (Default::default(), false),
-            };
+            let (dust_address, registered) =
+                sqlx::query_as::<_, (Vec<u8>, bool)>(registration_query)
+                    .bind(reward_address.as_ref())
+                    .fetch_optional(&*self.pool)
+                    .await?
+                    .unwrap_or_default();
+            let dust_address = ByteVec::from(dust_address);
 
             let mut generation_rate = 0u128;
             let mut current_capacity = 0u128;

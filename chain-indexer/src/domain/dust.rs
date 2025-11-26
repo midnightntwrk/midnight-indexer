@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{CardanoRewardAddress, DustAddress, DustUtxoId};
+use indexer_common::domain::{CardanoRewardAddress, DustPublicKey, DustUtxoId};
 
 /// Domain representation of DUST registration events from the NativeTokenObservation pallet.
 #[derive(Debug, Clone, PartialEq)]
@@ -19,26 +19,26 @@ pub enum DustRegistrationEvent {
     /// Cardano address registered with DUST address.
     Registration {
         cardano_address: CardanoRewardAddress,
-        dust_address: DustAddress,
+        dust_address: DustPublicKey,
     },
 
     /// Cardano address deregistered from DUST address.
     Deregistration {
         cardano_address: CardanoRewardAddress,
-        dust_address: DustAddress,
+        dust_address: DustPublicKey,
     },
 
     /// UTXO mapping added for registration.
     MappingAdded {
         cardano_address: CardanoRewardAddress,
-        dust_address: DustAddress,
+        dust_address: DustPublicKey,
         utxo_id: DustUtxoId,
     },
 
     /// UTXO mapping removed from registration.
     MappingRemoved {
         cardano_address: CardanoRewardAddress,
-        dust_address: DustAddress,
+        dust_address: DustPublicKey,
         utxo_id: DustUtxoId,
     },
 }
