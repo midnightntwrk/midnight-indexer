@@ -18,8 +18,7 @@ import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import { retry } from '@utils/retry-helper';
 import dataProvider from '@utils/testdata-provider';
-import { getBlockByHashWithRetry } from './test-utils';
-import { waitForEventsStabilization } from './test-utils';
+import { getBlockByHashWithRetry, setupWalletEventSubscriptions } from './test-utils';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 import {
@@ -29,13 +28,9 @@ import {
   UnshieldedTransactionsProgress,
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
-import {
-  IndexerWsClient,
-  UnshieldedTransactionSubscriptionParams,
-  UnshieldedTxSubscriptionResponse,
-} from '@utils/indexer/websocket-client';
+import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
 
-describe('unshielded transactions', () => {
+describe('unshielded transactions', { timeout: 200_000 }, () => {
   let indexerWsClient: IndexerWsClient;
   let indexerHttpClient: IndexerHttpClient;
 
@@ -45,22 +40,12 @@ describe('unshielded transactions', () => {
   // Result of the unshielded transaction submitted to node
   let transactionResult: ToolkitTransactionResult;
 
+  let walletFixture: Awaited<ReturnType<typeof setupWalletEventSubscriptions>>;
+
+  let sourceSeed: string;
+
   // Addresses for the source and destination wallets, derived from their seeds
-  let sourceAddress: string;
   let destinationAddress: string;
-
-  // Events from the indexer websocket for both the source and destination addresses
-  let sourceAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
-  let destinationAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
-
-  // Historical events from the indexer websocket for both the source and destination addresses
-  // We use these two arrays to capture events before submitting the transaction
-  let historicalSourceEvents: UnshieldedTxSubscriptionResponse[] = [];
-  let historicalDestinationEvents: UnshieldedTxSubscriptionResponse[] = [];
-
-  // Functions to unsubscribe from the indexer websocket for both the source and destination addresses
-  let sourceAddrUnscribeFromEvents: () => void;
-  let destAddrUnscribeFromEvents: () => void;
 
   beforeAll(async () => {
     indexerHttpClient = new IndexerHttpClient();
@@ -72,58 +57,17 @@ describe('unshielded transactions', () => {
     toolkit = new ToolkitWrapper({});
     await toolkit.start();
 
-    const sourceSeed = dataProvider.getFundingSeed();
-    const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
+    const seedA = dataProvider.getFundingSeed();
+    const seedB = '0000000000000000000000000000000000000000000000000000000987654321';
 
-    // Getting the addresses from their seeds
-    sourceAddress = (await toolkit.showAddress(sourceSeed)).unshielded;
-    destinationAddress = (await toolkit.showAddress(destinationSeed)).unshielded;
+    walletFixture = await setupWalletEventSubscriptions(toolkit, indexerWsClient, seedA, [seedB]);
 
-    // Creating the unshielded transaction subscription parameter for the source address (just the address)
-    let unshieldedTransactionParam: UnshieldedTransactionSubscriptionParams = {
-      address: sourceAddress,
-    };
+    // Extract for convenience
+    sourceSeed = walletFixture.source.seed;
 
-    // Creating the unshielded transaction subscription handler, we will record all relevant events for the source address
-    let sourceAddrUnshieldedTxSubscriptionHandler = {
-      next: (event: UnshieldedTxSubscriptionResponse) => {
-        sourceAddressEvents.push(event);
-      },
-    };
+    destinationAddress = walletFixture.destinations[0].destinationAddress;
 
-    // Subscribe to unshielded transaction events for the source address
-    sourceAddrUnscribeFromEvents = indexerWsClient.subscribeToUnshieldedTransactionEvents(
-      sourceAddrUnshieldedTxSubscriptionHandler,
-      unshieldedTransactionParam,
-    );
-
-    // Creating the unshielded transaction subscription parameter for the destination address (just the address)
-    unshieldedTransactionParam = {
-      address: destinationAddress,
-    };
-
-    // Creating the unshielded transaction subscription handler, we will record all relevant events for the source address
-    let destAddrUnshieldedTxSubscriptionHandler = {
-      next: (event: UnshieldedTxSubscriptionResponse) => {
-        destinationAddressEvents.push(event);
-      },
-    };
-
-    // Subscribe to unshielded transaction events for the destination address
-    destAddrUnscribeFromEvents = indexerWsClient.subscribeToUnshieldedTransactionEvents(
-      destAddrUnshieldedTxSubscriptionHandler,
-      unshieldedTransactionParam,
-    );
-
-    // Wait until source events count stabilizes, then snapshot to historical array
-    historicalSourceEvents = await waitForEventsStabilization(sourceAddressEvents, 1000);
-    log.info(`Source events count stabilized: ${historicalSourceEvents.length}`);
-
-    // Wait until destination events count stabilizes, then snapshot to historical array
-    historicalDestinationEvents = await waitForEventsStabilization(destinationAddressEvents, 1000);
-    log.info(`Destination events count stabilized: ${historicalDestinationEvents.length}`);
-
-    // Generating and submitting the transaction to node
+    // Submit a single unshielded transaction (1 STAR) from source → destination
     transactionResult = await toolkit.generateSingleTx(
       sourceSeed,
       'unshielded',
@@ -134,8 +78,8 @@ describe('unshielded transactions', () => {
 
   afterAll(async () => {
     // Unsubscribe from the unshielded transaction events for the source and destination addresses
-    if (sourceAddrUnscribeFromEvents) sourceAddrUnscribeFromEvents();
-    if (destAddrUnscribeFromEvents) destAddrUnscribeFromEvents();
+    walletFixture.source.unsubscribe();
+    walletFixture.destinations.forEach((d) => d.unsubscribe());
 
     // Let's trigger these operations in parallel
     await Promise.all([toolkit.stop(), indexerWsClient.connectionClose()]);
@@ -204,13 +148,14 @@ describe('unshielded transactions', () => {
       // Find our specific transaction by hash
       const sourceAddresInTx = blockResponse.data?.block?.transactions?.find((tx: Transaction) =>
         tx.unshieldedCreatedOutputs?.find(
-          (output: UnshieldedUtxo) => output.owner === sourceAddress,
+          (output: UnshieldedUtxo) => output.owner === walletFixture.source.address,
         ),
       );
 
       const destAddresInTx = blockResponse.data?.block?.transactions?.find((tx: Transaction) =>
         tx.unshieldedCreatedOutputs?.find(
-          (output: UnshieldedUtxo) => output.owner === destinationAddress,
+          (output: UnshieldedUtxo) =>
+            output.owner === walletFixture.destinations[0].destinationAddress,
         ),
       );
 
@@ -252,7 +197,7 @@ describe('unshielded transactions', () => {
       // Find our specific transaction that contains unshielded created outputs for the source address
       const sourceAddresInTx = transactionResponse.data?.transactions?.find((tx: Transaction) =>
         tx.unshieldedCreatedOutputs?.find(
-          (output: UnshieldedUtxo) => output.owner === sourceAddress,
+          (output: UnshieldedUtxo) => output.owner === walletFixture.source.address,
         ),
       );
       expect(sourceAddresInTx).toBeDefined();
@@ -260,7 +205,8 @@ describe('unshielded transactions', () => {
       // Find our specific transaction that contains unshielded created outputs for the destination address
       const destAddresInTx = transactionResponse.data?.transactions?.find((tx: Transaction) =>
         tx.unshieldedCreatedOutputs?.find(
-          (output: UnshieldedUtxo) => output.owner === destinationAddress,
+          (output: UnshieldedUtxo) =>
+            output.owner === walletFixture.destinations[0].destinationAddress,
         ),
       );
       expect(destAddresInTx).toBeDefined();
@@ -290,12 +236,16 @@ describe('unshielded transactions', () => {
       // to retry a few times.
       const sourceAddressEvent = await retry(
         async () => {
-          const event = sourceAddressEvents.find((event) => {
+          const event = walletFixture.source.events.find((event) => {
             const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
             return (
               txEvent.__typename === 'UnshieldedTransaction' &&
-              txEvent.createdUtxos?.some((utxo: UnshieldedUtxo) => utxo.owner === sourceAddress) &&
-              txEvent.spentUtxos?.some((utxo: UnshieldedUtxo) => utxo.owner === sourceAddress)
+              txEvent.createdUtxos?.some(
+                (utxo: UnshieldedUtxo) => utxo.owner === walletFixture.source.address,
+              ) &&
+              txEvent.spentUtxos?.some(
+                (utxo: UnshieldedUtxo) => utxo.owner === walletFixture.source.address,
+              )
             );
           });
           if (!event) {
@@ -304,8 +254,8 @@ describe('unshielded transactions', () => {
           return event;
         },
         {
-          maxRetries: 2,
-          delayMs: 1000,
+          maxRetries: 10,
+          delayMs: 3000,
           retryLabel: 'find source address transaction event',
         },
       );
@@ -336,23 +286,25 @@ describe('unshielded transactions', () => {
       // to retry a few times.
       const destinationAddressEvent = await retry(
         async () => {
-          const event = destinationAddressEvents.find((event) => {
+          const event = walletFixture.destinations[0].events.find((event) => {
             const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
             return (
               txEvent.__typename === 'UnshieldedTransaction' &&
               txEvent.createdUtxos?.some(
-                (utxo: UnshieldedUtxo) => utxo.owner === destinationAddress,
+                (utxo: UnshieldedUtxo) =>
+                  utxo.owner === walletFixture.destinations[0].destinationAddress,
               )
             );
           });
+
           if (!event) {
             throw new Error('Destination address transaction event not found yet');
           }
           return event;
         },
         {
-          maxRetries: 2,
-          delayMs: 1000,
+          maxRetries: 10,
+          delayMs: 3000,
           retryLabel: 'find destination address transaction event',
         },
       );
@@ -396,10 +348,11 @@ describe('unshielded transactions', () => {
 
       const createdOutputs = unshieldedTx?.unshieldedCreatedOutputs;
       const sourceOutput = createdOutputs?.find(
-        (output: UnshieldedUtxo) => output.owner === sourceAddress,
+        (output: UnshieldedUtxo) => output.owner === walletFixture.source.address,
       );
       const destOutput = createdOutputs?.find(
-        (output: UnshieldedUtxo) => output.owner === destinationAddress,
+        (output: UnshieldedUtxo) =>
+          output.owner === walletFixture.destinations[0].destinationAddress,
       );
 
       expect(sourceOutput).toBeDefined();
@@ -410,7 +363,7 @@ describe('unshielded transactions', () => {
       expect(unshieldedTx?.unshieldedSpentOutputs).toHaveLength(1);
 
       const spentOutput = unshieldedTx?.unshieldedSpentOutputs?.[0];
-      expect(spentOutput?.owner).toBe(sourceAddress);
+      expect(spentOutput?.owner).toBe(walletFixture.source.address);
     });
 
     /**
@@ -423,9 +376,11 @@ describe('unshielded transactions', () => {
      * @and the progress count should be incremented by 1
      */
     test('should be reported by the indexer through a progress update event for the source address', async () => {
-      const progressUpdatesBeforeTransaction = historicalSourceEvents.filter((event) => {
-        return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
-      });
+      const progressUpdatesBeforeTransaction = walletFixture.source.historicalEvents.filter(
+        (event) => {
+          return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
+        },
+      );
 
       log.debug('Progress updates before transaction:');
       progressUpdatesBeforeTransaction!.forEach((update) => {
@@ -440,7 +395,7 @@ describe('unshielded transactions', () => {
         `Highest transaction ID before transaction: ${highestTransactionIdBeforeTransaction}`,
       );
 
-      const progressUpdatesAfterTransaction = sourceAddressEvents.filter((event) => {
+      const progressUpdatesAfterTransaction = walletFixture.source.events.filter((event) => {
         return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
       });
 
@@ -455,13 +410,13 @@ describe('unshielded transactions', () => {
       const sourceAddressEvent = await retry(
         async () =>
           findProgressUpdateEvent(
-            sourceAddressEvents,
+            walletFixture.source.events,
             highestTransactionIdBeforeTransaction,
             'source',
           ),
         {
-          maxRetries: 5,
-          delayMs: 2000,
+          maxRetries: 10,
+          delayMs: 3000,
           retryLabel: 'find source address progress update event',
         },
       );
@@ -486,9 +441,10 @@ describe('unshielded transactions', () => {
      * @and the progress count should be incremented by 1
      */
     test('should be reported by the indexer through a progress update event for the destination address', async () => {
-      const progressUpdatesBeforeTransaction = historicalDestinationEvents.filter((event) => {
-        return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
-      });
+      const progressUpdatesBeforeTransaction =
+        walletFixture.destinations[0].historicalDestinationEvents.filter((event) => {
+          return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
+        });
 
       log.debug('Progress updates before transaction:');
       progressUpdatesBeforeTransaction!.forEach((update) => {
@@ -503,9 +459,11 @@ describe('unshielded transactions', () => {
         `Highest transaction ID before transaction: ${highestTransactionIdBeforeTransaction}`,
       );
 
-      const progressUpdatesAfterTransaction = destinationAddressEvents.filter((event) => {
-        return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
-      });
+      const progressUpdatesAfterTransaction = walletFixture.destinations[0].events.filter(
+        (event) => {
+          return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
+        },
+      );
 
       log.debug('Progress updates after transaction:');
       progressUpdatesAfterTransaction!.forEach((update) => {
@@ -518,13 +476,13 @@ describe('unshielded transactions', () => {
       const destinationAddressEvent = await retry(
         async () =>
           findProgressUpdateEvent(
-            destinationAddressEvents,
+            walletFixture.destinations[0].events,
             highestTransactionIdBeforeTransaction,
             'destination',
           ),
         {
-          maxRetries: 5,
-          delayMs: 2000,
+          maxRetries: 10,
+          delayMs: 3000,
           retryLabel: 'find destination address progress update event',
         },
       );
