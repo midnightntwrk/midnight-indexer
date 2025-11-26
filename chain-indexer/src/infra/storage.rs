@@ -25,6 +25,7 @@ use indexer_common::{
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
+use log::debug;
 use serde::{Deserialize, Serialize};
 use sqlx::{QueryBuilder, Type, types::Json};
 use std::iter;
@@ -473,6 +474,8 @@ async fn save_created_unshielded_utxos(
         return Ok(());
     }
 
+    debug!(transaction_id, utxos:?; "saving created unshielded UTXOs");
+
     let query_base = indoc! {"
         INSERT INTO unshielded_utxos (
             creating_transaction_id,
@@ -526,6 +529,8 @@ async fn save_spent_unshielded_utxos(
     if utxos.is_empty() {
         return Ok(());
     }
+
+    debug!(transaction_id, utxos:?; "saving spent unshielded UTXOs");
 
     let rows_affected;
 
