@@ -22,10 +22,9 @@ fn main() {
         .join("../.node")
         .join(&node_version)
         .join("metadata.scale");
-    let metadata_path = metadata_path.canonicalize().expect(&format!(
-        "metadata file not found at {}",
-        metadata_path.display()
-    ));
+    let metadata_path = metadata_path
+        .canonicalize()
+        .unwrap_or_else(|_| panic!("metadata file not found at {}", metadata_path.display()));
 
     // Extract version for module name (replace dots and hyphens with underscores).
     // E.g. "0.16.0-da0b6c69" becomes "0_16".
@@ -70,10 +69,12 @@ fn main() {
 
 fn read_node_version() -> String {
     let node_version_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(NODE_VERSION_PATH);
-    let node_version_path = node_version_path.canonicalize().expect(&format!(
-        "node version file not found at {}",
-        node_version_path.display()
-    ));
+    let node_version_path = node_version_path.canonicalize().unwrap_or_else(|_| {
+        panic!(
+            "node version file not found at {}",
+            node_version_path.display()
+        )
+    });
 
     // Read and validate/sanitize the version string.
     match fs::read_to_string(&node_version_path) {
