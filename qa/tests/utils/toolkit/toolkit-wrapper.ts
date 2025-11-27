@@ -15,6 +15,7 @@
 
 import fs from 'fs';
 import { join, resolve } from 'path';
+import { execSync } from 'child_process';
 import { retry } from '../retry-helper';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
@@ -77,6 +78,7 @@ class ToolkitWrapper {
   private container: GenericContainer;
   private startedContainer?: StartedTestContainer;
   private config: ToolkitConfig;
+  private contractDir?: string;
 
   private parseTransactionOutput(output: string): ToolkitTransactionResult {
     const lines = output.trim().split('\n');
@@ -135,7 +137,6 @@ class ToolkitWrapper {
     // Ensure the target directory exists
     if (!fs.existsSync(this.config.targetDir)) {
       fs.mkdirSync(this.config.targetDir, { recursive: true });
-      console.debug(`[SETUP]Created target directory: ${this.config.targetDir}`);
     }
 
     // This block is making sure that if a golden cache directory is available, we use it.
@@ -177,22 +178,36 @@ class ToolkitWrapper {
     log.debug(`Toolkit container name : ${this.config.containerName}`);
     log.debug(`Toolkit sync cache dir : ${this.config.syncCacheDir}`);
 
+    // Set up contract directory path
+    this.contractDir = join(this.config.targetDir!, 'contract');
+
+    // Prepare bind mounts
+    const bindMounts = [
+      {
+        source: this.config.targetDir,
+        target: '/out',
+      },
+      {
+        source: this.config.syncCacheDir,
+        target: `/.cache/sync`,
+      },
+    ];
+
+    // Add contract directory mount if it exists (will be created in start())
+    if (this.contractDir) {
+      bindMounts.push({
+        source: this.contractDir,
+        target: '/toolkit-js/contract',
+      });
+    }
+
     this.container = new GenericContainer(
       `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`,
     )
       .withName(this.config.containerName)
       .withNetworkMode('host') // equivalent to --network host
       .withEntrypoint([]) // equivalent to --entrypoint ""
-      .withBindMounts([
-        {
-          source: this.config.targetDir,
-          target: '/out',
-        },
-        {
-          source: this.config.syncCacheDir,
-          target: `/.cache/sync`,
-        },
-      ])
+      .withBindMounts(bindMounts)
       .withCommand(['sleep', 'infinity']); // equivalent to sleep infinity
   }
 
@@ -215,6 +230,35 @@ class ToolkitWrapper {
         }
       }
       log.debug(`Cleaned output directory: ${this.config.targetDir}`);
+    }
+
+    // Copy contract directory from toolkit image
+    if (this.contractDir) {
+      log.debug('Copying contract directory from toolkit image...');
+      try {
+        const toolkitImage = `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`;
+
+        // Create temporary container to copy from
+        const tmpContainerId = execSync(`docker create ${toolkitImage}`, {
+          encoding: 'utf-8',
+        }).trim();
+
+        try {
+          // Copy contract directory
+          execSync(`docker cp ${tmpContainerId}:/toolkit-js/test/contract ${this.contractDir}`, {
+            encoding: 'utf-8',
+            stdio: 'inherit',
+          });
+          log.debug(`Contract directory copied to: ${this.contractDir}`);
+        } finally {
+          // Clean up temporary container
+          execSync(`docker rm -v ${tmpContainerId}`, { encoding: 'utf-8', stdio: 'ignore' });
+        }
+      } catch (error) {
+        log.warn(
+          `Failed to copy contract directory: ${error}. Intent-based deployment may not work.`,
+        );
+      }
     }
 
     this.startedContainer = await retry(async () => this.container.start(), {
@@ -270,12 +314,12 @@ class ToolkitWrapper {
         (await this.showAddress('0'.repeat(63) + '9')).unshielded,
         1,
       );
-      console.debug(`[SETUP] Warmup cache output:\n${JSON.stringify(output, null, 2)}`);
+      log.debug(`Warmup cache output:\n${JSON.stringify(output, null, 2)}`);
     } catch (_error) {
       log.debug(
         'Heads up, we are expecting an error here, the following log message is only reported for debugging purposes',
       );
-      console.debug(`${_error}`);
+      log.debug(`Warmup cache error: ${_error}`);
     }
   }
 
@@ -377,8 +421,6 @@ class ToolkitWrapper {
       amount.toString(),
     ]);
 
-    log.debug(`Generate single transaction output:\n${result.output}`);
-
     if (result.exitCode !== 0) {
       const errorMessage = result.stderr || result.output || 'Unknown error occurred';
       throw new Error(`Toolkit command failed with exit code ${result.exitCode}: ${errorMessage}`);
@@ -411,7 +453,6 @@ class ToolkitWrapper {
       '--src-file',
       `/out/${contractFile}`,
     ]);
-    log.debug(`contract-address taggedAddress:\n${JSON.stringify(addressResult, null, 2)}`);
     if (addressResult.exitCode !== 0) {
       const e = addressResult.stderr || addressResult.output || 'Unknown error';
       throw new Error(`contract-address failed: ${e}`);
@@ -421,12 +462,15 @@ class ToolkitWrapper {
   }
 
   /**
-   * Call a smart contract function by generating and submitting a circuit transaction.
-   * This method retrieves the current contract state, generates a circuit intent for the specified
-   * contract call, converts it to a transaction, and submits it to the network.
+   * Call a smart contract function using the intent-based approach.
+   * This method:
+   * 1. Gets the current contract state from the chain
+   * 2. Generates a circuit intent for the specified contract call
+   * 3. Converts the intent to a transaction
+   * 4. Submits it to the network
    *
    * @param callKey - The contract function to call (e.g., 'increment'). Defaults to 'increment'.
-   * @param deploymentResult - The deployment result object from deployContract. The contract-address-untagged will be extracted.
+   * @param deploymentResult - The deployment result object from deployContract. The contract-address-untagged and coin-public will be extracted.
    * @param rngSeed - The random number generator seed for the transaction. Defaults to a fixed seed.
    * @returns A promise that resolves to the transaction result containing the transaction hash,
    *          optional block hash, and submission status.
@@ -450,41 +494,423 @@ class ToolkitWrapper {
     }
 
     const contractAddressUntagged = deploymentResult['contract-address-untagged'];
+    const coinPublic = deploymentResult['coin-public'];
 
     if (!contractAddressUntagged) {
-      log.error('Deployment result is missing contract address. Deployment may have failed.');
-      log.debug(`Deployment result received: ${JSON.stringify(deploymentResult, null, 2)}`);
       throw new Error(
         'Contract address is missing in deployment result. The contract deployment may have failed. ' +
           'Please check deployment logs and ensure deployContract() completed successfully.',
       );
     }
 
-    const txFile = `/out/${callKey}_tx.mn`;
+    if (!coinPublic) {
+      throw new Error('Coin public key is missing in deployment result.');
+    }
 
-    log.info(`Generating ${callKey} contract call...`);
+    const callTx = `${callKey}_tx.mn`;
+    const callIntent = `${callKey}_intent.bin`;
+    const contractStateFile = 'contract_state.mn';
+    const callPrivateState = `${callKey}_ps_state.json`;
+    const callZswapState = `${callKey}_zswap_state.json`;
+
+    // Step 1: Get contract state from chain
+    log.info('Getting contract state from chain...');
+    const stateResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'contract-state',
+      '--src-url',
+      env.getNodeWebsocketBaseURL(),
+      '--contract-address',
+      contractAddressUntagged,
+      '--dest-file',
+      `/out/${contractStateFile}`,
+    ]);
+
+    if (stateResult.exitCode !== 0) {
+      const e = stateResult.stderr || stateResult.output || 'Unknown error';
+      throw new Error(`contract-state failed: ${e}`);
+    }
+
+    // Step 2: Generate call intent
+    log.info(`Generating call intent for ${callKey} entrypoint...`);
+    const intentResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'generate-intent',
+      'circuit',
+      '-c',
+      '/toolkit-js/contract/contract.config.ts',
+      '--coin-public',
+      coinPublic,
+      '--input-onchain-state',
+      `/out/${contractStateFile}`,
+      '--input-private-state',
+      '/out/initial_state.json',
+      '--contract-address',
+      contractAddressUntagged,
+      '--output-intent',
+      `/out/${callIntent}`,
+      '--output-private-state',
+      `/out/${callPrivateState}`,
+      '--output-zswap-state',
+      `/out/${callZswapState}`,
+      callKey,
+    ]);
+
+    if (intentResult.exitCode !== 0) {
+      const e = intentResult.stderr || intentResult.output || 'Unknown error';
+      throw new Error(`generate-intent circuit failed: ${e}`);
+    }
+
+    // Verify intent file was created
+    const checkIntentResult = await this.startedContainer.exec([
+      'sh',
+      '-c',
+      `test -f /out/${callIntent} && echo "EXISTS" || echo "MISSING"`,
+    ]);
+    if (!checkIntentResult.output.includes('EXISTS')) {
+      throw new Error(`Intent file not found at /out/${callIntent}`);
+    }
+
+    // Step 3: Convert intent to transaction
+    log.info('Converting call intent to transaction...');
+    const sendIntentResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'send-intent',
+      '--intent-file',
+      `/out/${callIntent}`,
+      '--compiled-contract-dir',
+      '/toolkit-js/contract/managed/counter',
+      '--to-bytes',
+      '--dest-file',
+      `/out/${callTx}`,
+    ]);
+
+    if (sendIntentResult.exitCode !== 0) {
+      const e = sendIntentResult.stderr || sendIntentResult.output || 'Unknown error';
+      throw new Error(`send-intent failed: ${e}`);
+    }
+
+    log.info('Sending call transaction to node...');
+    const sendResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'generate-txs',
+      '--src-file',
+      `/out/${callTx}`,
+      '--dest-url',
+      env.getNodeWebsocketBaseURL(),
+      '-r',
+      '1',
+      'send',
+    ]);
+
+    if (sendResult.exitCode !== 0) {
+      const e = sendResult.stderr || sendResult.output || 'Unknown error';
+      throw new Error(`generate-txs send failed: ${e}`);
+    }
+
+    const rawOutput = sendResult.output.trim();
+    return this.parseTransactionOutput(rawOutput);
+  }
+
+  /**
+   * Deploy a smart contract to the network using the intent-based approach.
+   * This method generates a deployment intent, converts it to a transaction, submits it to the network,
+   * and retrieves both tagged and untagged contract addresses.
+   *
+   * @returns A promise that resolves to the deployment result containing untagged address, tagged address, coin public key, and transaction hashes.
+   * @throws Error if the container is not started or if any step in the deployment process fails.
+   */
+  async deployContract(): Promise<DeployContractResult> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    const outDir = this.config.targetDir!;
+    const deployTx = 'deploy_tx.mn';
+    const deployIntent = 'deploy.bin';
+
+    const coinPublicSeed = '0000000000000000000000000000000000000000000000000000000000000001';
+    const addressInfo = await this.showAddress(coinPublicSeed);
+    const coinPublic = addressInfo.coinPublic;
+
+    // Use intent-based deployment approach
+    log.info('Generating deploy intent...');
+    const intentResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'generate-intent',
+      'deploy',
+      '-c',
+      '/toolkit-js/contract/contract.config.ts',
+      '--coin-public',
+      coinPublic,
+      '--authority-seed',
+      coinPublicSeed,
+      '--output-intent',
+      `/out/${deployIntent}`,
+      '--output-private-state',
+      '/out/initial_state.json',
+      '--output-zswap-state',
+      '/out/temp.json',
+      '20',
+    ]);
+
+    if (intentResult.exitCode !== 0) {
+      const e = intentResult.stderr || intentResult.output || 'Unknown error';
+      throw new Error(`generate-intent deploy failed: ${e}`);
+    }
+
+    // Verify intent file was created
+    const checkIntentResult = await this.startedContainer.exec([
+      'sh',
+      '-c',
+      `test -f /out/${deployIntent} && echo "EXISTS" || echo "MISSING"`,
+    ]);
+    if (!checkIntentResult.output.includes('EXISTS')) {
+      throw new Error(`Intent file not found at /out/${deployIntent}`);
+    }
+
+    // Convert intent to transaction
+    log.info('Converting intent to transaction...');
+    const sendIntentResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'send-intent',
+      '--intent-file',
+      `/out/${deployIntent}`,
+      '--compiled-contract-dir',
+      'contract/managed/counter',
+      '--to-bytes',
+      '--dest-file',
+      `/out/${deployTx}`,
+    ]);
+
+    if (sendIntentResult.exitCode !== 0) {
+      const e = sendIntentResult.stderr || sendIntentResult.output || 'Unknown error';
+      throw new Error(`send-intent failed: ${e}`);
+    }
+
+    const outDeployTx = join(outDir, deployTx);
+    if (!fs.existsSync(outDeployTx)) {
+      throw new Error('send-intent did not produce expected output file');
+    }
+
+    log.info('Sending deployment transaction to node...');
+    const sendResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'generate-txs',
+      '--src-file',
+      `/out/${deployTx}`,
+      '--dest-url',
+      env.getNodeWebsocketBaseURL(),
+      '-r',
+      '1',
+      'send',
+    ]);
+
+    if (sendResult.exitCode !== 0) {
+      const e = sendResult.stderr || sendResult.output || 'Unknown error';
+      throw new Error(`generate-txs send failed: ${e}`);
+    }
+
+    // Get contract address first (needed for result)
+    const contractAddressTagged = await this.getContractAddress(deployTx, 'tagged');
+    const contractAddressUntagged = await this.getContractAddress(deployTx, 'untagged');
+
+    // Extract transaction hash and block hash from output
+    const sendOutput = sendResult.output.trim();
+    const txHashMatch = sendOutput.match(/"midnight_tx_hash":"(0x[^"]+)"/);
+    const blockHashMatch = sendOutput.match(/"block_hash":"(0x[^"]+)"/);
+
+    let txHash = '';
+    let blockHash = '';
+
+    if (txHashMatch) {
+      txHash = txHashMatch[1].replace(/^0x/, ''); // Remove 0x prefix to match indexer format
+    }
+    if (blockHashMatch) {
+      blockHash = blockHashMatch[1].replace(/^0x/, ''); // Remove 0x prefix to match indexer format
+    }
+
+    if (!txHash || !blockHash) {
+      log.warn(
+        `Could not extract transaction/block hash from send output. They will be available from indexer queries later.`,
+      );
+    }
+
+    return {
+      'contract-address-untagged': contractAddressUntagged,
+      'contract-address-tagged': contractAddressTagged,
+      'coin-public': coinPublic,
+      'deploy-tx-hash': txHash,
+      'deploy-block-hash': blockHash,
+    };
+  }
+
+  /**
+   * Switch the maintenance authority for a contract.
+   * This is an optional step that can fail if the contract is not ready or authority seeds are incorrect.
+   *
+   * @param contractAddress - The untagged contract address
+   * @param authoritySeed - The current authority seed
+   * @param newAuthoritySeed - The new authority seed to switch to
+   * @param fundingSeed - The seed to use for funding the transaction (defaults to authoritySeed)
+   * @param counter - The counter value for the transaction (default: 0)
+   * @param rngSeed - The random number generator seed (default: fixed seed)
+   * @returns A promise that resolves to the transaction result, or null if the switch failed
+   * @throws Error if the container is not started
+   */
+  async switchMaintenanceAuthority(
+    contractAddress: string,
+    authoritySeed: string = '0000000000000000000000000000000000000000000000000000000000000001',
+    newAuthoritySeed: string = '1000000000000000000000000000000000000000000000000000000000000001',
+    fundingSeed?: string,
+    counter: number = 0,
+    rngSeed: string = '0000000000000000000000000000000000000000000000000000000000000001',
+  ): Promise<ToolkitTransactionResult | null> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    const fundingSeedToUse = fundingSeed ?? authoritySeed;
+    const txFile = '/out/authority_switch_tx.mn';
+
+    log.info('Generating maintenance authority switch transaction...');
     const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'generate-txs',
-      '--dest-file',
-      txFile,
-      '--to-bytes',
+      '--src-url',
+      env.getNodeWebsocketBaseURL(),
       'contract-simple',
-      'call',
-      '--call-key',
-      callKey,
+      'maintenance',
+      '--funding-seed',
+      fundingSeedToUse,
+      '--authority-seed',
+      authoritySeed,
+      '--new-authority-seed',
+      newAuthoritySeed,
+      '--counter',
+      counter.toString(),
       '--rng-seed',
       rngSeed,
       '--contract-address',
-      contractAddressUntagged,
+      contractAddress,
+      '--to-bytes',
+      '--dest-file',
+      txFile,
     ]);
 
     if (result.exitCode !== 0) {
-      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
-      throw new Error(`Failed to generate contract call: ${errorMessage}`);
+      log.warn(
+        `Failed to generate authority switch transaction: ${result.stderr || result.output}`,
+      );
+      log.warn('Continuing without authority switch - will use default authority for maintenance');
+      return null;
     }
 
-    log.info('Submitting transaction to network...');
+    log.info('Submitting authority switch transaction to network...');
+    const sendResult = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'generate-txs',
+      '--src-file',
+      txFile,
+      '--dest-url',
+      env.getNodeWebsocketBaseURL(),
+      'send',
+    ]);
+
+    if (sendResult.exitCode !== 0) {
+      log.warn(
+        `Failed to submit authority switch transaction: ${sendResult.stderr || sendResult.output}`,
+      );
+      return null;
+    }
+
+    const rawOutput = sendResult.output.trim();
+    return this.parseTransactionOutput(rawOutput);
+  }
+
+  /**
+   * Perform contract maintenance by removing and/or upserting entrypoints.
+   * This method generates a maintenance transaction and submits it to the network.
+   *
+   * @param contractAddress - The untagged contract address
+   * @param options - Maintenance options
+   * @param options.authoritySeed - The authority seed to use (default: default seed)
+   * @param options.fundingSeed - The seed to use for funding (defaults to authoritySeed)
+   * @param options.counter - The counter value for the transaction (default: 0)
+   * @param options.rngSeed - The random number generator seed (default: fixed seed)
+   * @param options.removeEntrypoints - Array of entrypoint names to remove (e.g., ['decrement'])
+   * @param options.upsertEntrypoints - Array of paths to verifier files to upsert (e.g., ['/toolkit-js/contract/managed/counter/keys/increment.verifier'])
+   * @returns A promise that resolves to the transaction result
+   * @throws Error if the container is not started or if maintenance transaction generation fails
+   */
+  async maintainContract(
+    contractAddress: string,
+    options: {
+      authoritySeed?: string;
+      fundingSeed?: string;
+      counter?: number;
+      rngSeed?: string;
+      removeEntrypoints?: string[];
+      upsertEntrypoints?: string[];
+    } = {},
+  ): Promise<ToolkitTransactionResult> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    const {
+      authoritySeed = '0000000000000000000000000000000000000000000000000000000000000001',
+      fundingSeed,
+      counter = 0,
+      rngSeed = '0000000000000000000000000000000000000000000000000000000000000001',
+      removeEntrypoints = [],
+      upsertEntrypoints = [],
+    } = options;
+
+    const fundingSeedToUse = fundingSeed ?? authoritySeed;
+    const txFile = '/out/maintenance_tx.mn';
+
+    // Build the command arguments
+    const commandArgs: string[] = [
+      '/midnight-node-toolkit',
+      'generate-txs',
+      '--src-url',
+      env.getNodeWebsocketBaseURL(),
+      'contract-simple',
+      'maintenance',
+      '--funding-seed',
+      fundingSeedToUse,
+      '--authority-seed',
+      authoritySeed,
+      '--counter',
+      counter.toString(),
+      '--rng-seed',
+      rngSeed,
+      '--contract-address',
+      contractAddress,
+    ];
+
+    // Add remove-entrypoint flags
+    for (const entrypoint of removeEntrypoints) {
+      commandArgs.push('--remove-entrypoint', entrypoint);
+    }
+
+    // Add upsert-entrypoint flags
+    for (const verifierPath of upsertEntrypoints) {
+      commandArgs.push('--upsert-entrypoint', verifierPath);
+    }
+
+    commandArgs.push('--to-bytes', '--dest-file', txFile);
+
+    log.info('Generating contract maintenance transaction...');
+    const result = await this.startedContainer.exec(commandArgs);
+
+    if (result.exitCode !== 0) {
+      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
+      throw new Error(`Failed to generate maintenance transaction: ${errorMessage}`);
+    }
+
+    log.info('Submitting maintenance transaction to network...');
     const sendResult = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'generate-txs',
@@ -497,7 +923,7 @@ class ToolkitWrapper {
 
     if (sendResult.exitCode !== 0) {
       const errorMessage = sendResult.stderr || sendResult.output || 'Unknown error occurred';
-      throw new Error(`Failed to submit transaction: ${errorMessage}`);
+      throw new Error(`Failed to submit maintenance transaction: ${errorMessage}`);
     }
 
     const rawOutput = sendResult.output.trim();
@@ -505,88 +931,126 @@ class ToolkitWrapper {
   }
 
   /**
-   * Deploy a smart contract to the network.
-   * This method generates a deployment intent, converts it to a transaction, submits it to the network,
-   * and retrieves both tagged and untagged contract addresses.
+   * Prepare contract maintenance by copying verifier files.
+   * This is a helper method to prepare the contract directory for maintenance operations.
    *
-   * @returns A promise that resolves to the deployment result containing untagged address, tagged address, and coin public key.
-   * @throws Error if the container is not started or if any step in the deployment process fails.
+   * @param sourceVerifier - The source verifier file path (relative to contract directory)
+   * @param targetVerifier - The target verifier file path (relative to contract directory)
+   * @throws Error if the source verifier file doesn't exist
    */
-  async deployContract(): Promise<DeployContractResult> {
+  private prepareVerifierFile(sourceVerifier: string, targetVerifier: string): void {
+    if (!this.contractDir || !fs.existsSync(this.contractDir)) {
+      throw new Error('Contract directory not available');
+    }
+
+    const sourcePath = join(this.contractDir, sourceVerifier);
+    const targetPath = join(this.contractDir, targetVerifier);
+
+    if (!fs.existsSync(sourcePath)) {
+      throw new Error(`Source verifier file not found: ${sourcePath}`);
+    }
+
+    // Ensure target directory exists
+    const targetDir = join(targetPath, '..');
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    fs.copyFileSync(sourcePath, targetPath);
+    log.debug(`Copied ${sourceVerifier} to ${targetVerifier}`);
+  }
+
+  /**
+   * Perform contract maintenance with optional authority switch and verifier preparation.
+   * This is a high-level method that handles the complete maintenance flow including:
+   * - Optional authority switch
+   * - Verifier file preparation
+   * - Maintenance transaction submission
+   *
+   * @param contractAddress - The untagged contract address
+   * @param options - Maintenance options
+   * @param options.authoritySeed - The authority seed to use (default: default seed)
+   * @param options.newAuthoritySeed - Optional new authority seed to switch to before maintenance
+   * @param options.fundingSeed - The seed to use for funding (defaults to authoritySeed)
+   * @param options.counter - The counter value for the transaction (default: 0)
+   * @param options.rngSeed - The random number generator seed (default: fixed seed)
+   * @param options.removeEntrypoints - Array of entrypoint names to remove (e.g., ['decrement'])
+   * @param options.upsertEntrypoints - Array of paths to verifier files to upsert (e.g., ['/toolkit-js/contract/managed/counter/keys/increment.verifier'])
+   * @param options.prepareVerifiers - Optional array of {source, target} verifier file pairs to copy before maintenance
+   * @param options.waitAfterCall - Wait time in ms after contract call before maintenance (default: 15000)
+   * @param options.waitAfterAuthoritySwitch - Wait time in ms after authority switch (default: 10000)
+   * @returns A promise that resolves to the transaction result
+   * @throws Error if the container is not started or if maintenance transaction generation fails
+   */
+  async performContractMaintenance(
+    contractAddress: string,
+    options: {
+      authoritySeed?: string;
+      newAuthoritySeed?: string;
+      fundingSeed?: string;
+      counter?: number;
+      rngSeed?: string;
+      removeEntrypoints?: string[];
+      upsertEntrypoints?: string[];
+      prepareVerifiers?: Array<{ source: string; target: string }>;
+      waitAfterCall?: number;
+      waitAfterAuthoritySwitch?: number;
+    } = {},
+  ): Promise<ToolkitTransactionResult> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
 
-    const outDir = this.config.targetDir!;
+    const {
+      authoritySeed = '0000000000000000000000000000000000000000000000000000000000000001',
+      newAuthoritySeed,
+      fundingSeed,
+      counter = 0,
+      rngSeed = '0000000000000000000000000000000000000000000000000000000000000001',
+      removeEntrypoints = [],
+      upsertEntrypoints = [],
+      prepareVerifiers = [],
+      waitAfterCall = 15_000,
+      waitAfterAuthoritySwitch = 10_000,
+    } = options;
 
-    const deployTx = 'deploy_tx.mn';
+    // Wait for previous operations to finalize
+    if (waitAfterCall > 0) {
+      await new Promise((resolve) => setTimeout(resolve, waitAfterCall));
+    }
 
-    const outDeployTx = join(outDir, deployTx);
-    const coinPublicSeed = '0000000000000000000000000000000000000000000000000000000000000001';
-    const addressInfo = await this.showAddress(coinPublicSeed);
-    const coinPublic = addressInfo.coinPublic;
-
-    {
-      const result = await this.startedContainer.exec([
-        '/midnight-node-toolkit',
-        'generate-txs',
-        '--dest-file',
-        `/out/${deployTx}`,
-        '--to-bytes',
-        'contract-simple',
-        'deploy',
-        '--rng-seed',
-        '0000000000000000000000000000000000000000000000000000000000000037',
-      ]);
-
-      log.debug(`contract-simple deploy command output:\n${result.output}`);
-      log.debug(`contract-simple deploy command stderr:\n${result.stderr}`);
-      log.debug(`contract-simple deploy exit code: ${result.exitCode}`);
-
-      if (result.exitCode !== 0) {
-        const e = result.stderr || result.output || 'Unknown error';
-        throw new Error(`contract-simple deploy failed: ${e}`);
-      }
-
-      log.debug(`Checking for output files:`);
-      log.debug(`  ${outDeployTx} exists: ${fs.existsSync(outDeployTx)}`);
-
-      if (!fs.existsSync(outDeployTx)) {
-        throw new Error('contract-simple deploy did not produce expected output file');
+    // Step 1: Try to switch maintenance authority if requested
+    let maintenanceAuthoritySeed = authoritySeed;
+    if (newAuthoritySeed) {
+      try {
+        const authoritySwitchResult = await this.switchMaintenanceAuthority(
+          contractAddress,
+          authoritySeed,
+          newAuthoritySeed,
+        );
+        if (authoritySwitchResult) {
+          await new Promise((resolve) => setTimeout(resolve, waitAfterAuthoritySwitch));
+          maintenanceAuthoritySeed = newAuthoritySeed;
+        }
+      } catch (error) {
+        log.debug(`Authority switch failed, continuing with default authority: ${error}`);
       }
     }
 
-    {
-      const result = await this.startedContainer.exec([
-        '/midnight-node-toolkit',
-        'generate-txs',
-        '--src-file',
-        `/out/${deployTx}`,
-        '--dest-url',
-        env.getNodeWebsocketBaseURL(),
-        'send',
-      ]);
-      if (result.exitCode !== 0) {
-        const e = result.stderr || result.output || 'Unknown error';
-        throw new Error(`generate-txs send failed: ${e}`);
-      }
+    // Step 2: Prepare verifier files if needed
+    for (const { source, target } of prepareVerifiers) {
+      this.prepareVerifierFile(source, target);
     }
 
-    const contractAddressTagged = await this.getContractAddress(deployTx, 'tagged');
-    const contractAddressUntagged = await this.getContractAddress(deployTx, 'untagged');
-    const { txHash, blockHash } = await getContractDeploymentHashes(contractAddressUntagged);
-
-    const deploymentResult = {
-      'contract-address-untagged': contractAddressUntagged,
-      'contract-address-tagged': contractAddressTagged,
-      'coin-public': coinPublic,
-      'deploy-tx-hash': txHash,
-      'deploy-block-hash': blockHash,
-    };
-
-    log.debug(`Contract address info:\n${JSON.stringify(deploymentResult, null, 2)}`);
-
-    return deploymentResult;
+    // Step 3: Perform maintenance
+    return this.maintainContract(contractAddress, {
+      authoritySeed: maintenanceAuthoritySeed,
+      fundingSeed: fundingSeed ?? maintenanceAuthoritySeed,
+      counter,
+      rngSeed,
+      removeEntrypoints,
+      upsertEntrypoints,
+    });
   }
 }
 
