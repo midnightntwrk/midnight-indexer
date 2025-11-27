@@ -113,6 +113,8 @@ for i in {1..30}; do
   sleep 2
 done
 
+docker compose --profile cloud logs | grep "Highest known block" 
+
 
 docker ps --format "table {{.Image}}\t{{.Names}}\t{{.Status}}"
 

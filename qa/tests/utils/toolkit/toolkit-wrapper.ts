@@ -238,7 +238,8 @@ class ToolkitWrapper {
     this.config.containerName = config.containerName || `mn-toolkit-${envName}-${randomId}`;
     this.config.targetDir = config.targetDir || resolve('./.tmp/toolkit');
     this.config.nodeTag = config.nodeTag || env.getNodeVersion();
-    this.config.nodeToolkitTag = config.nodeToolkitTag || env.getNodeToolkitVersion();
+    this.config.nodeToolkitTag =
+      config.nodeToolkitTag || process.env.NODE_TOOLKIT_TAG || 'latest-main';
     this.config.warmupCache = config.warmupCache || false;
 
     // Ensure the target directory exists
