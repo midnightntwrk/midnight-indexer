@@ -24,6 +24,9 @@ import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import type { DustGenerationStatusResponse } from '@utils/indexer/indexer-types';
 import { DustGenerationStatusSchema } from '@utils/indexer/graphql/schema';
 
+const GENERATION_DECAY_RATE = 8267;
+const MAX_SPECK_PER_STAR = 5n * 10n ** 9n; // Same as saying 5 million specks per star
+
 const indexerHttpClient = new IndexerHttpClient();
 
 const createTestRewardAddress = (byteValue: number) => {
@@ -47,9 +50,9 @@ describe('dust generation status queries', () => {
     await toolkit.stop();
   });
 
-  describe('a dust generation status query with a valid reward address', () => {
+  describe('a dust generation status query with a valid Cardano reward address', () => {
     /**
-     * A dust generation status query that uses a valid reward address responds with the expected schema
+     * A dust generation status query for a valid Cardano reward address should repond with the expected schema
      *
      * NOTE: here we are not really interested in the status per se, but rather that we get an object back
      * that describes the dust generation status of the requested reward address
@@ -59,9 +62,9 @@ describe('dust generation status queries', () => {
      *
      * @given we have a valid Cardano reward address
      * @when we send a dust generation status query with that key
-     * @then Indexer should respond with a dust generation status according to the requested schema
+     * @then Indexer should respond with a dust generation status response according to the requested schema
      */
-    test('should respond with a dust generation status according to the requested schema', async (ctx: TestContext) => {
+    test('should respond with a dust generation status response according to the requested schema', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['Query', 'Dust', 'Tokenomics', 'cNgD', 'SchemaValidation'],
         testKey: 'PM-18407',
@@ -86,13 +89,14 @@ describe('dust generation status queries', () => {
     });
 
     /**
-     * A dust generation status query validates registered field correctly for a registered reward address
+     * A dust generation status query for a registered Cardano reward address should repond with
+     * that address marked as registered and all generation values set to non-zero
      *
-     * @given we have both registered and non-registered reward addresses
-     * @when we query their status
-     * @then registered keys should have registered=true, non-registered should have registered=false
+     * @given we have a registered Cardano reward address
+     * @when we query the dust generation status for that address
+     * @then the address should be marked as registered and all generation values should be non-zero
      */
-    test('should correctly indicate registration status for a registered key', async (ctx: TestContext) => {
+    test('should indicate registration status for a registered Cardano reward address', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['Query', 'Dust', 'Tokenomics', 'cNgD'],
         testKey: 'PM-18408',
@@ -121,11 +125,12 @@ describe('dust generation status queries', () => {
     });
 
     /**
-     * A dust generation status query validates registered field correctly for a non-registered reward address
+     * A dust generation status query for a non-registered Cardano reward address should repond with
+     * that address marked as not registered and all generation values set to zero
      *
-     * @given we have both registered and non-registered reward addresses
-     * @when we query their status
-     * @then registered keys should have registered=true, non-registered should have registered=false
+     * @given we have a non-registered Cardano reward address
+     * @when we query the dust generation status for that address
+     * @then the address should be marked as not registered and all generation values should be zero
      */
     test('should correctly indicate registration status for a non-registered key', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
@@ -149,19 +154,172 @@ describe('dust generation status queries', () => {
       const registeredStatus = nonRegisteredResponse.data?.dustGenerationStatus[0];
       expect(registeredStatus?.registered).toBe(false);
       expect(registeredStatus?.dustAddress).toBeDefined();
+      expect(registeredStatus?.dustAddress).toBeNull();
+      expect(registeredStatus?.nightBalance).toBe('0');
+      expect(registeredStatus?.generationRate).toBe('0');
+      expect(registeredStatus?.currentCapacity).toBe('0');
+    });
+
+    /**
+     * A dust generation status query correctly indicates zero DUST generation for a registered Cardano reward address
+     * without cNIGHT balance
+     *
+     * This test verifies that when a Cardano reward address is registered for DUST production but has no cNIGHT balance,
+     * the status correctly reflects that no DUST can be generated due to the lack of cNIGHT.
+     *
+     * @given we have a Cardano reward address that is registered for DUST production but has no cNIGHT balance
+     * @when we query the DUST generation status
+     * @then the status should indicate registered=true with a dustAddress, but all generation values should be zero
+     *       because there is no cNIGHT to generate DUST from
+     */
+    test('should indicate zero generation for registered address without cNIGHT balance', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Dust', 'Tokenomics', 'cNgD'],
+        testKey: 'PM-18413',
+      };
+
+      let registeredWithoutDustAddress: string;
+      try {
+        registeredWithoutDustAddress =
+          dataProvider.getCardanoRewardAddress('registered-without-dust');
+      } catch (error) {
+        log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
+      }
+
+      const response: DustGenerationStatusResponse =
+        await indexerHttpClient.getDustGenerationStatus([registeredWithoutDustAddress!]);
+
+      expect(response).toBeSuccess();
+      const dustGenerationStatus = response.data?.dustGenerationStatus;
+      expect(dustGenerationStatus).toBeDefined();
+      expect(Array.isArray(dustGenerationStatus)).toBe(true);
+      expect(dustGenerationStatus?.length).toBe(1);
+
+      const status = dustGenerationStatus![0];
+      // Address is registered for DUST production
+      expect(status?.registered).toBe(true);
+      expect(status?.dustAddress).toBeDefined();
+      expect(status?.dustAddress).not.toBeNull();
+
+      // But has no cNIGHT balance, so no dust can be generated
+      expect(status?.nightBalance).toBe('0');
+      expect(status?.generationRate).toBe('0');
+      expect(status?.currentCapacity).toBe('0');
+    });
+
+    /**
+     * A dust generation status query correctly indicates generation rate and capacity for a registered address with
+     * positive cNIGHT balance
+     *
+     * This test verifies that when a Cardano reward address is registered for DUST production and has positive cNIGHT balance,
+     * the generation rate equals cNIGHT balance * 8267 and the current capacity is calculated correctly.
+     *
+     * @given we have a Cardano reward address that is registered for DUST production with positive cNIGHT balance
+     * @when we query the DUST generation status
+     * @then the status should indicate registered=true, nightBalance > 0, generationRate = nightBalance * 8267,
+     *       and currentCapacity = calculated correctly
+     */
+    test('should report the correct value of max capacity for registered address with cNIGHT', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Dust', 'Tokenomics', 'cNgD'],
+        testKey: 'PM-18414',
+      };
+
+      let registeredWithDustAddress: string;
+      try {
+        registeredWithDustAddress = dataProvider.getCardanoRewardAddress('registered-with-dust');
+      } catch (error) {
+        log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
+      }
+
+      const response: DustGenerationStatusResponse =
+        await indexerHttpClient.getDustGenerationStatus([registeredWithDustAddress!]);
+
+      expect(response).toBeSuccess();
+      const dustGenerationStatus = response.data?.dustGenerationStatus;
+      expect(dustGenerationStatus).toBeDefined();
+      expect(Array.isArray(dustGenerationStatus)).toBe(true);
+      expect(dustGenerationStatus?.length).toBe(1);
+
+      const status = dustGenerationStatus![0];
+      // Address is registered for DUST production
+      expect(status?.registered).toBe(true);
+      expect(status?.dustAddress).not.toBeNull();
+      expect(status?.dustAddress).toBeDefined();
+
+      // Has cNIGHT balance
+      const nightBalanceInStars = BigInt(status?.nightBalance);
+      expect(nightBalanceInStars).toBeGreaterThan(0n);
+
+      // Generation rate should equal nightBalance * GENERATION_DECAY_RATE
+      const expectedGenerationRate = nightBalanceInStars * BigInt(GENERATION_DECAY_RATE);
+      expect(status?.generationRate).toBe(expectedGenerationRate.toString());
+
+      // Current capacity should same as the expected calculated max capacitys
+      expect(BigInt(status?.currentCapacity)).toBe(
+        BigInt(nightBalanceInStars) * MAX_SPECK_PER_STAR,
+      );
+    });
+
+    /**
+     * A dust generation status query correctly indicates deregistered status for a previously registered
+     * Cardano reward address. We won't be able to see the details from this query, in effect the end result
+     * will be same as for a non-registered address.
+     *
+     * This test verifies that when a Cardano reward address was registered for DUST production but has been
+     * deregistered, the status correctly reflects that it is no longer registered and all generation values are zero.
+     *
+     * @given we have a Cardano reward address that was registered for DUST production but has been deregistered
+     * @when we query the dust generation status
+     * @then the status should indicate registered=false, dustAddress=null, and all generation values should be zero
+     */
+    test('should correctly indicate deregistered status for a previously registered Cardano reward address', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Dust', 'Tokenomics', 'cNgD'],
+        testKey: 'PM-18415',
+      };
+
+      let deregisteredAddress: string;
+      try {
+        deregisteredAddress = dataProvider.getCardanoRewardAddress('deregistered');
+      } catch (error) {
+        log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
+      }
+
+      const response: DustGenerationStatusResponse =
+        await indexerHttpClient.getDustGenerationStatus([deregisteredAddress!]);
+
+      expect(response).toBeSuccess();
+      const dustGenerationStatus = response.data?.dustGenerationStatus;
+      expect(dustGenerationStatus).toBeDefined();
+      expect(Array.isArray(dustGenerationStatus)).toBe(true);
+      expect(dustGenerationStatus?.length).toBe(1);
+
+      const status = dustGenerationStatus![0];
+      // Address is no longer registered for DUST production
+      expect(status?.registered).toBe(false);
+      expect(status?.dustAddress).toBeNull();
+
+      // All generation values should be zero
+      expect(status?.nightBalance).toBe('0');
+      expect(status?.generationRate).toBe('0');
+      expect(status?.currentCapacity).toBe('0');
     });
   });
 
-  describe('a dust generation status query with multiple valid reward addresses', () => {
+  describe('a dust generation status query with multiple valid Cardano reward addresses', () => {
     /**
-     * A dust generation status query with multiple reward addresses returns multiple statuses
+     * A dust generation status query with multiple Cardano reward addresses returns multiple statuses
      * given we send the request for 10 addresses (which is the limit after which the indexer returns an error)
      *
      * @given we have 10 Cardano reward addresses
      * @when we send a dust generation status query with those addresses
-     * @then Indexer should return status for each address in the same order
+     * @then Indexer should return statuses for each address in the same order
      */
-    test('should return statuses for multiple reward addresses in order, given the number of addresses is less than 10', async (ctx: TestContext) => {
+    test('should return statuses for multiple Cardano reward addresses in order, given the number of addresses is less than 10', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['Query', 'Dust', 'Tokenomics', 'cNgD'],
         testKey: 'PM-18410',
@@ -265,39 +423,36 @@ describe('dust generation status queries', () => {
 
   describe('a dust generation status query with malformed reward addresses', () => {
     /**
-     * A dust generation status query with hex string of wrong length returns an error
+     * A dust generation status query with hex string should be rejected as invalid Cardano
+     * reward address format
      *
-     * @given we provide a hex string that is too short or too long
+     * @given we provide a Cardano reward address that is in plain hex string format
      * @when we send a dust generation status query
-     * @then Indexer should return an error
+     * @then Indexer should return an error explaining the address format is unexpected and the address is rejected
      */
-    test('should return an error for reward addresses with wrong format', async (ctx: TestContext) => {
+    test('should return an error when the address has an unexpected plain hex stringformat', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['Query', 'Dust', 'Tokenomics', 'cNgD'],
         testKey: 'PM-18980',
       };
 
-      const validRewardAddress = createTestRewardAddress(3);
-      const tooShort = validRewardAddress.slice(0, -1);
-      const tooLong = `${validRewardAddress}q`;
+      const plainHexString =
+        '000200e99d4445695a6244a01ab00d592825e2703c3f9a928f01429561585ce2db1e7';
 
-      const shortResponse: DustGenerationStatusResponse =
-        await indexerHttpClient.getDustGenerationStatus([tooShort]);
-      expect(shortResponse).toBeError();
-
-      const longResponse: DustGenerationStatusResponse =
-        await indexerHttpClient.getDustGenerationStatus([tooLong]);
-      expect(longResponse).toBeError();
+      const response: DustGenerationStatusResponse =
+        await indexerHttpClient.getDustGenerationStatus([plainHexString]);
+      expect(response).toBeError();
+      expect(response.errors?.[0].message).toContain('invalid Cardano reward address');
     });
   });
 
   describe('a dust generation status query with empty list of reward addresses', () => {
     /**
-     * A dust generation status query with empty array returns empty result
+     * A dust generation status with empty array should return an empty array
      *
-     * @given we provide an empty array of reward addresses
+     * @given we provide an empty array of Cardano reward addresses
      * @when we send a dust generation status query
-     * @then Indexer should return an empty array or an error
+     * @then Indexer should return an empty array
      */
     test('should return an empty list of dust generation statuses', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
@@ -320,15 +475,37 @@ describe('dust generation status queries', () => {
     });
   });
 
+  describe('a dust generation status query with a Cardano payment address', () => {
+    /**
+     * A dust generation status query for a Cardano payment address should repond with an error
+     *
+     * @given we have a Cardano payment address (i.e. with addr or addr_test HRP)
+     * @when we send a dust generation status query with that address
+     * @then Indexer should return an error explaining the address format is unexpected
+     */
+    test('should return an error as only Cardano reward addresses are supported', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Dust', 'Tokenomics', 'cNgD'],
+        testKey: 'PM-18983',
+      };
+
+      const paymentAddress = 'addr_test1u80zp3ht7500msrwhcawj4jrqegv9fwhww4k3e95j7dntrq54lptp';
+      const response: DustGenerationStatusResponse =
+        await indexerHttpClient.getDustGenerationStatus([paymentAddress]);
+      expect(response).toBeError();
+      expect(response.errors?.[0].message).toContain('invalid Cardano reward address');
+    });
+  });
+
   describe('a dust generation status query with duplicate reward addresses', () => {
     /**
-     * A dust generation status query with duplicate reward addresses returns status for each occurrence
+     * A dust generation status query with duplicate Cardano reward addresses returns status for each occurrence
      *
-     * @given we provide duplicate reward addresses in the array
+     * @given we provide duplicate Cardano reward addresses in the array
      * @when we send a dust generation status query
      * @then Indexer should return status for each occurrence in the same order
      */
-    test('should handle duplicate reward addresses appropriately', async (ctx: TestContext) => {
+    test('should handle duplicate Cardano reward addresses appropriately', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['Query', 'Dust', 'Tokenomics', 'cNgD'],
         testKey: 'PM-18982',
