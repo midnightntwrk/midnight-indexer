@@ -88,7 +88,7 @@ the script
 # Startup a local environment with test data (transactions + contract actions)
 # with desired node + node toolkit + indexer versions
 export NODE_TAG=0.18.0-rc.1
-export NODE_TOOLKIT=0.18.0-rc.1
+export NODE_TOOLKIT_TAG=latest-main
 export INDEXER_TAG=3.0.0-alpha.6
 bash qa/scripts/startup-localenv-with-data.sh
 TARGET_ENV=undeployed yarn test:integration
@@ -112,10 +112,22 @@ explicitly set them with env vars like in the example below.
 # Startup a local environment from genesis block, without test data
 # with desired node + node toolkit + indexer versions
 export NODE_TAG=0.18.0-rc.1
-export NODE_TOOLKIT=0.18.0-rc.1
+export NODE_TOOLKIT_TAG=latest-main
 export INDEXER_TAG=3.0.0-alpha.6
 bash qa/scripts/startup-localenv-from-genesis.sh
 TARGET_ENV=undeployed yarn test:e2e
+```
+
+Note: if If you need to reproduce a specific behaviour or match a particular toolkit version:
+
+```
+export NODE_TOOLKIT_TAG=$NODE_TAG
+```
+
+For example:
+```
+export NODE_TAG=0.18.0-rc.7
+export NODE_TOOLKIT_TAG=0.18.0-rc.7
 ```
 
 ## Smoke tests on undeployed/local environment
