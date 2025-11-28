@@ -114,6 +114,7 @@ impl<T> HexEncodable for T where T: AsRef<[u8]> {}
 pub enum AddressType {
     Unshielded,
     SecretEncryptionKey,
+    Dust,
 }
 
 impl AddressType {
@@ -131,6 +132,7 @@ impl AddressType {
         match self {
             AddressType::Unshielded => "mn_addr",
             AddressType::SecretEncryptionKey => "mn_shield-esk",
+            AddressType::Dust => "mn_dust",
         }
     }
 }

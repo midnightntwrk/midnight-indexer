@@ -19,11 +19,24 @@
 use crate::{
     domain,
     infra::api::v3::{
-        CardanoNetwork, CardanoRewardAddress, HexEncodable, HexEncoded,
+        AddressType, CardanoNetwork, CardanoRewardAddress, encode_address,
         encode_cardano_reward_address,
     },
 };
-use async_graphql::SimpleObject;
+use async_graphql::{SimpleObject, scalar};
+use indexer_common::domain::NetworkId;
+use serde::{Deserialize, Serialize};
+
+/// Bech32m-encoded DUST address.
+/// The format depends on the network ID:
+/// - Mainnet: `mn_dust` + bech32m data (no network ID suffix)
+/// - Other networks: `mn_dust_` + network-id + bech32m data
+/// DUST addresses are variable length (up to 33 bytes) as they encode a
+/// Scale-encoded compact bigint representing the DUST public key.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DustAddress(pub String);
+
+scalar!(DustAddress);
 
 /// DUST generation status for a specific Cardano reward address.
 #[derive(Debug, Clone, SimpleObject)]
@@ -31,8 +44,8 @@ pub struct DustGenerationStatus {
     /// The Bech32-encoded Cardano reward address (e.g., stake_test1... or stake1...).
     pub cardano_reward_address: CardanoRewardAddress,
 
-    /// The hex-encoded associated DUST address if registered.
-    pub dust_address: Option<HexEncoded>,
+    /// The Bech32m-encoded associated DUST address if registered.
+    pub dust_address: Option<DustAddress>,
 
     /// Whether this reward address is registered.
     pub registered: bool,
@@ -47,8 +60,8 @@ pub struct DustGenerationStatus {
     pub current_capacity: String,
 }
 
-impl From<domain::DustGenerationStatus> for DustGenerationStatus {
-    fn from(status: domain::DustGenerationStatus) -> Self {
+impl From<(domain::DustGenerationStatus, &NetworkId)> for DustGenerationStatus {
+    fn from((status, network_id): (domain::DustGenerationStatus, &NetworkId)) -> Self {
         // TODO: Make the cardano network configurable!
         let cardano_reward_address = CardanoRewardAddress(encode_cardano_reward_address(
             status.cardano_reward_address,
@@ -57,7 +70,9 @@ impl From<domain::DustGenerationStatus> for DustGenerationStatus {
 
         Self {
             cardano_reward_address,
-            dust_address: status.dust_address.map(|addr| addr.hex_encode()),
+            dust_address: status
+                .dust_address
+                .map(|addr| DustAddress(encode_address(addr, AddressType::Dust, network_id))),
             registered: status.registered,
             night_balance: status.night_balance.to_string(),
             generation_rate: status.generation_rate.to_string(),

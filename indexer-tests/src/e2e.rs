@@ -941,8 +941,8 @@ fn viewing_key(network_id: &NetworkId) -> &'static str {
 mod graphql {
     use graphql_client::GraphQLQuery;
     use indexer_api::infra::api::v3::{
-        CardanoRewardAddress, HexEncoded, mutation::Unit, unshielded::UnshieldedAddress,
-        viewing_key::ViewingKey,
+        CardanoRewardAddress, HexEncoded, dust::DustAddress, mutation::Unit,
+        unshielded::UnshieldedAddress, viewing_key::ViewingKey,
     };
 
     #[derive(GraphQLQuery)]
