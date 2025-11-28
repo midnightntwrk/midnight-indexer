@@ -32,7 +32,7 @@ pub struct DustGenerationStatus {
     /// Generation rate in Specks per second.
     pub generation_rate: u128,
 
-    /// Maximum DUST capacity in Specks.
+    /// Maximum DUST capacity in SPECK.
     pub max_capacity: u128,
 
     /// Current generated DUST capacity in Specks.
