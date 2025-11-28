@@ -238,7 +238,11 @@ type DustGenerationStatus {
 	"""
 	generationRate: String!
 	"""
-	Current DUST capacity in SPECK.
+	Maximum DUST capacity in SPECK.
+	"""
+	maxCapacity: String!
+	"""
+	Current generated DUST capacity in SPECK.
 	"""
 	currentCapacity: String!
 }

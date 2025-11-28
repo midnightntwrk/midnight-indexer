@@ -43,7 +43,10 @@ pub struct DustGenerationStatus {
     /// DUST generation rate in SPECK per second.
     pub generation_rate: String,
 
-    /// Current DUST capacity in SPECK.
+    /// Maximum DUST capacity in SPECK.
+    pub max_capacity: String,
+
+    /// Current generated DUST capacity in SPECK.
     pub current_capacity: String,
 }
 
@@ -61,6 +64,7 @@ impl From<domain::DustGenerationStatus> for DustGenerationStatus {
             registered: status.registered,
             night_balance: status.night_balance.to_string(),
             generation_rate: status.generation_rate.to_string(),
+            max_capacity: status.max_capacity.to_string(),
             current_capacity: status.current_capacity.to_string(),
         }
     }
