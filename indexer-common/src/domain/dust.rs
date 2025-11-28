@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{DustPublicKey, NightUtxoHash, Nonce};
+use midnight_ledger_v6::dust::INITIAL_DUST_PARAMETERS;
 use serde::{Deserialize, Serialize};
 
 /// Qualified DUST output information.
@@ -83,9 +84,10 @@ pub struct DustParameters {
     pub dust_grace_period: u64,
 }
 
-/// Initial DUST parameters as specified in the ledger specification.
-/// These values are defined in midnight-ledger/spec/dust.md and determine the economic
-/// properties of DUST generation and decay.
+/// Initial DUST parameters derived from the ledger specification.
+///
+/// Uses `INITIAL_DUST_PARAMETERS` from `midnight-ledger` as the single source of truth.
+/// See midnight-ledger/spec/dust.md for the economic rationale.
 ///
 /// # Unit Conversions
 /// - 1 Night = 10^6 Stars (atomic unit of Night).
@@ -94,24 +96,19 @@ pub struct DustParameters {
 /// # Parameter Explanations
 ///
 /// ## night_dust_ratio = 5_000_000_000 Specks per Star
-/// This represents the maximum DUST that can be generated per NIGHT:
-/// - Target: 5 DUST per NIGHT.
-/// - Calculation: (5 DUST × 10^15 Specks/DUST) / (10^6 Stars/NIGHT) = 5 × 10^9 Specks/Star.
+/// Maximum DUST that can be generated per NIGHT (5 DUST per NIGHT).
+///
 /// ## generation_decay_rate = 8_267 Specks per Star per second
-/// This rate produces an approximately 1-week generation time to reach maximum capacity:
-/// - Time to max = night_dust_ratio / generation_decay_rate.
-/// - = 5_000_000_000 / 8_267 seconds.
-/// - = 604,760 seconds.
-/// - ≈ 7.0002 days ≈ 1 week.
+/// Produces approximately 1-week generation time to reach maximum capacity.
+///
 /// ## dust_grace_period = 10,800 seconds (3 hours)
-/// Maximum time window allowed for DUST spends to prevent transactions from living indefinitely
-/// while still accommodating network congestion.
+/// Maximum time window allowed for DUST spends.
 impl Default for DustParameters {
     fn default() -> Self {
         Self {
-            night_dust_ratio: 5_000_000_000,
-            generation_decay_rate: 8_267,
-            dust_grace_period: 3 * 60 * 60,
+            night_dust_ratio: INITIAL_DUST_PARAMETERS.night_dust_ratio,
+            generation_decay_rate: INITIAL_DUST_PARAMETERS.generation_decay_rate,
+            dust_grace_period: INITIAL_DUST_PARAMETERS.dust_grace_period.as_seconds() as u64,
         }
     }
 }
