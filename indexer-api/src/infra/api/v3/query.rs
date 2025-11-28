@@ -228,6 +228,10 @@ where
             .await
             .map_err_into_server_error(|| "get DUST generation status")?;
 
-        Ok(status_list.into_iter().map(Into::into).collect())
+        let network_id = cx.get_network_id();
+        Ok(status_list
+            .into_iter()
+            .map(|s| (s, network_id).into())
+            .collect())
     }
 }

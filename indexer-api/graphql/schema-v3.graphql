@@ -198,6 +198,8 @@ type ContractUpdate implements ContractAction {
 	unshieldedBalances: [ContractBalance!]!
 }
 
+scalar DustAddress
+
 type DustGenerationDtimeUpdate implements DustLedgerEvent {
 	"""
 	The ID of this dust ledger event.
@@ -222,9 +224,9 @@ type DustGenerationStatus {
 	"""
 	cardanoRewardAddress: CardanoRewardAddress!
 	"""
-	The hex-encoded associated DUST address if registered.
+	The Bech32m-encoded associated DUST address if registered.
 	"""
-	dustAddress: HexEncoded
+	dustAddress: DustAddress
 	"""
 	Whether this reward address is registered.
 	"""
