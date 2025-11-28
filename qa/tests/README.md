@@ -77,6 +77,7 @@ Running the tests on your local/undeployed environment has some prerequisites, d
 ```bash
 # Startup a local environment with test data (transactions + contract actions)
 bash qa/scripts/startup-localenv-with-data.sh
+cd qa/tests
 TARGET_ENV=undeployed yarn test:integration
 ```
 
@@ -87,11 +88,21 @@ the script
 ```bash
 # Startup a local environment with test data (transactions + contract actions)
 # with desired node + node toolkit + indexer versions
-export NODE_TAG=0.18.0-rc.1
-export NODE_TOOLKIT=0.18.0-rc.1
-export INDEXER_TAG=3.0.0-alpha.6
-bash qa/scripts/startup-localenv-with-data.sh
-TARGET_ENV=undeployed yarn test:integration
+export NODE_TAG=0.18.0-rc.7
+export NODE_TOOLKIT_TAG=latest-main
+export INDEXER_TAG=3.0.0-alpha.15
+```
+
+Note: if you need to reproduce a specific behaviour or match a particular toolkit version:
+
+```
+export NODE_TOOLKIT_TAG=$NODE_TAG
+```
+
+For example:
+```
+export NODE_TAG=0.18.0-rc.7
+export NODE_TOOLKIT_TAG=0.18.0-rc.7
 ```
 
 ## E2E tests on undeployed/local environment (from genesis without pre-existing data)
@@ -102,6 +113,7 @@ actions themselves so that they can assert on the outcome of those actions.
 ```bash
 # Startup a local environment from genesis block, without test data
 bash qa/scripts/startup-localenv-from-genesis.sh
+cd qa/tests
 TARGET_ENV=undeployed yarn test:e2e
 ```
 
@@ -111,11 +123,21 @@ explicitly set them with env vars like in the example below.
 ```bash
 # Startup a local environment from genesis block, without test data
 # with desired node + node toolkit + indexer versions
-export NODE_TAG=0.18.0-rc.1
-export NODE_TOOLKIT=0.18.0-rc.1
-export INDEXER_TAG=3.0.0-alpha.6
-bash qa/scripts/startup-localenv-from-genesis.sh
-TARGET_ENV=undeployed yarn test:e2e
+export NODE_TAG=0.18.0-rc.7
+export NODE_TOOLKIT_TAG=latest-main
+export INDEXER_TAG=3.0.0-alpha.15
+```
+
+Note: if you need to reproduce a specific behaviour or match a particular toolkit version:
+
+```
+export NODE_TOOLKIT_TAG=$NODE_TAG
+```
+
+For example:
+```
+export NODE_TAG=0.18.0-rc.7
+export NODE_TOOLKIT_TAG=0.18.0-rc.7
 ```
 
 ## Smoke tests on undeployed/local environment
