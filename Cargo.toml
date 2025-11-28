@@ -51,7 +51,7 @@ itertools                    = { version = "0.14" }
 log                          = { version = "0.4" }
 logforth                     = { version = "0.29" }
 metrics                      = { version = "0.24" }
-metrics-exporter-prometheus  = { version = "0.17", default-features = false }
+metrics-exporter-prometheus  = { version = "0.18", default-features = false }
 midnight-base-crypto_v6      = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-base-crypto", tag = "ledger-6.1.0-alpha.5" }
 midnight-coin-structure_v6   = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-coin-structure", tag = "ledger-6.1.0-alpha.5" }
 midnight-ledger_v6           = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-ledger", tag = "ledger-6.1.0-alpha.5" }
