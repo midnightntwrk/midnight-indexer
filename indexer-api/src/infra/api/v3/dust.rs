@@ -67,12 +67,13 @@ impl From<(domain::DustGenerationStatus, &NetworkId)> for DustGenerationStatus {
             status.cardano_reward_address,
             CardanoNetwork::Testnet,
         ));
+        let dust_address = status
+            .dust_address
+            .map(|addr| DustAddress(encode_address(addr, AddressType::Dust, network_id)));
 
         Self {
             cardano_reward_address,
-            dust_address: status
-                .dust_address
-                .map(|addr| DustAddress(encode_address(addr, AddressType::Dust, network_id))),
+            dust_address,
             registered: status.registered,
             night_balance: status.night_balance.to_string(),
             generation_rate: status.generation_rate.to_string(),
