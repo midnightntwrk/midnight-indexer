@@ -58,6 +58,7 @@ impl DustStorage for Storage {
             let dust_address = ByteVec::from(dust_address);
 
             let mut generation_rate = 0u128;
+            let mut max_capacity = 0u128;
             let mut current_capacity = 0u128;
             let mut night_balance = 0u128;
 
@@ -105,10 +106,12 @@ impl DustStorage for Storage {
                     // Convert from milliseconds to seconds.
                     let elapsed_seconds = ((current_timestamp - ctime).max(0) as u128) / 1000;
 
-                    // Current capacity = Stars * generation_decay_rate * elapsed_seconds.
-                    // Maximum capacity is limited by night_dust_ratio (5 DUST per NIGHT = 5 * 10^15
-                    // Specks per 10^6 Stars).
-                    let max_capacity = value.saturating_mul(NIGHT_DUST_RATIO);
+                    // Maximum capacity (static cap) = Stars * night_dust_ratio
+                    // (5 DUST per NIGHT = 5 * 10^15 Specks per 10^6 Stars).
+                    max_capacity = value.saturating_mul(NIGHT_DUST_RATIO);
+
+                    // Current capacity (time-dependent) = Stars * generation_decay_rate *
+                    // elapsed_seconds. Capped at max_capacity.
                     let generated_capacity = value
                         .saturating_mul(GENERATION_DECAY_RATE)
                         .saturating_mul(elapsed_seconds);
@@ -122,6 +125,7 @@ impl DustStorage for Storage {
                 registered,
                 night_balance,
                 generation_rate,
+                max_capacity,
                 current_capacity,
             });
         }
