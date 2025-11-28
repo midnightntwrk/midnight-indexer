@@ -230,15 +230,15 @@ type DustGenerationStatus {
 	"""
 	registered: Boolean!
 	"""
-	NIGHT balance backing generation.
+	NIGHT balance backing generation in STAR.
 	"""
 	nightBalance: String!
 	"""
-	Generation rate in Specks per second.
+	DUST generation rate in SPECK per second.
 	"""
 	generationRate: String!
 	"""
-	Current DUST capacity.
+	Current DUST capacity in SPECK.
 	"""
 	currentCapacity: String!
 }

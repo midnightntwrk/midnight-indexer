@@ -37,13 +37,13 @@ pub struct DustGenerationStatus {
     /// Whether this reward address is registered.
     pub registered: bool,
 
-    /// NIGHT balance backing generation.
+    /// NIGHT balance backing generation in STAR.
     pub night_balance: String,
 
-    /// Generation rate in Specks per second.
+    /// DUST generation rate in SPECK per second.
     pub generation_rate: String,
 
-    /// Current DUST capacity.
+    /// Current DUST capacity in SPECK.
     pub current_capacity: String,
 }
 
