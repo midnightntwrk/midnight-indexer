@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::storage::Storage,
+    domain::{PROTOCOL_VERSION, storage::Storage},
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
         v3::{
@@ -224,7 +224,7 @@ where
             .map_err_into_client_error(|| "invalid Cardano reward address")?;
 
         let status_list = storage
-            .get_dust_generation_status(&address)
+            .get_dust_generation_status(&address, PROTOCOL_VERSION)
             .await
             .map_err_into_server_error(|| "get DUST generation status")?;
 

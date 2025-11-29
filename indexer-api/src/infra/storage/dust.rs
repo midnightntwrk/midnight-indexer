@@ -17,7 +17,7 @@ use crate::{
 };
 use fastrace::trace;
 use indexer_common::{
-    domain::{ByteVec, CardanoRewardAddress, PROTOCOL_VERSION_000_018_000, ledger},
+    domain::{ByteVec, CardanoRewardAddress, ProtocolVersion, ledger},
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
@@ -27,9 +27,10 @@ impl DustStorage for Storage {
     async fn get_dust_generation_status(
         &self,
         cardano_reward_addresses: &[CardanoRewardAddress],
+        protocol_version: ProtocolVersion,
     ) -> Result<Vec<DustGenerationStatus>, sqlx::Error> {
-        // Get DUST parameters for the current protocol version.
-        let dust_params = ledger::dust_parameters(PROTOCOL_VERSION_000_018_000)
+        // Get DUST parameters for the given protocol version.
+        let dust_params = ledger::dust_parameters(protocol_version)
             .expect("DUST parameters should be available for supported protocol version");
         let generation_decay_rate = dust_params.generation_decay_rate as u128;
         let night_dust_ratio = dust_params.night_dust_ratio as u128;
