@@ -70,48 +70,41 @@ pub struct DustGenerationInfo {
     pub dtime: u64,
 }
 
-/// DUST parameters.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DustParameters {
-    /// Night to DUST ratio.
-    pub night_dust_ratio: u64,
-
-    /// Generation decay rate.
-    pub generation_decay_rate: u32,
-
-    /// DUST grace period in seconds.
-    pub dust_grace_period: u64,
-}
-
-/// Initial DUST parameters as specified in the ledger specification.
+/// DUST parameters as specified in the ledger specification.
 /// These values are defined in midnight-ledger/spec/dust.md and determine the economic
 /// properties of DUST generation and decay.
 ///
 /// # Unit Conversions
-/// - 1 Night = 10^6 Stars (atomic unit of Night).
-/// - 1 Dust = 10^15 Specks (atomic unit of Dust).
+/// - 1 NIGHT = 10^6 STAR (atomic unit of NIGHT).
+/// - 1 DUST = 10^15 SPECK (atomic unit of DUST).
 ///
 /// # Parameter Explanations
 ///
-/// ## night_dust_ratio = 5_000_000_000 Specks per Star
-/// This represents the maximum DUST that can be generated per NIGHT:
+/// ## night_dust_ratio (SPECK per STAR)
+/// Maximum DUST that can be generated per NIGHT (5 DUST per NIGHT).
 /// - Target: 5 DUST per NIGHT.
-/// - Calculation: (5 DUST × 10^15 Specks/DUST) / (10^6 Stars/NIGHT) = 5 × 10^9 Specks/Star.
-/// ## generation_decay_rate = 8_267 Specks per Star per second
-/// This rate produces an approximately 1-week generation time to reach maximum capacity:
+/// - Calculation: (5 DUST × 10^15 SPECK/DUST) / (10^6 STAR/NIGHT) = 5 × 10^9 SPECK/STAR.
+///
+/// ## generation_decay_rate (SPECK per STAR per second)
+/// Rate of DUST generation, producing approximately 1-week generation time to reach max:
 /// - Time to max = night_dust_ratio / generation_decay_rate.
-/// - = 5_000_000_000 / 8_267 seconds.
-/// - = 604,760 seconds.
-/// - ≈ 7.0002 days ≈ 1 week.
-/// ## dust_grace_period = 10,800 seconds (3 hours)
-/// Maximum time window allowed for DUST spends to prevent transactions from living indefinitely
-/// while still accommodating network congestion.
-impl Default for DustParameters {
-    fn default() -> Self {
-        Self {
-            night_dust_ratio: 5_000_000_000,
-            generation_decay_rate: 8_267,
-            dust_grace_period: 3 * 60 * 60,
-        }
-    }
+/// - ≈ 7 days ≈ 1 week.
+///
+/// ## dust_grace_period (seconds)
+/// Maximum time window allowed for DUST spends (3 hours) to prevent transactions from
+/// living indefinitely while still accommodating network congestion.
+///
+/// # Usage
+/// Use [`crate::domain::ledger::dust_parameters`] to get the parameters for a specific
+/// protocol version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DustParameters {
+    /// NIGHT to DUST ratio (SPECK per STAR).
+    pub night_dust_ratio: u64,
+
+    /// Generation decay rate (SPECK per STAR per second).
+    pub generation_decay_rate: u32,
+
+    /// DUST grace period in seconds.
+    pub dust_grace_period: u64,
 }

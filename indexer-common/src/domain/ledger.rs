@@ -22,12 +22,18 @@ pub use secret_key::*;
 pub use transaction::*;
 
 use crate::{
-    domain::{ByteArrayLenError, ByteVec, ProtocolVersion, SerializedContractAddress},
+    domain::{
+        ByteArrayLenError, ByteVec, PROTOCOL_VERSION_000_018_000, ProtocolVersion,
+        SerializedContractAddress, dust::DustParameters,
+    },
     error::BoxError,
 };
 use fastrace::trace;
 use midnight_base_crypto_v6::signatures::Signature as SignatureV6;
-use midnight_ledger_v6::structure::ProofMarker as ProofMarkerV6;
+use midnight_ledger_v6::{
+    dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V6,
+    structure::ProofMarker as ProofMarkerV6,
+};
 use midnight_serialize_v6::{
     Serializable as SerializableV6, Tagged as TaggedV6, tagged_serialize as tagged_serialize_v6,
 };
@@ -117,3 +123,21 @@ where
 }
 
 impl<T> TaggedSerializableV6Ext for T where T: SerializableV6 + TaggedV6 {}
+
+/// Get DUST parameters for the given protocol version.
+/// Returns the initial DUST parameters from the ledger specification.
+/// These parameters define the economic properties of DUST generation:
+/// - `night_dust_ratio`: Maximum DUST capacity per NIGHT (5 DUST per NIGHT).
+/// - `generation_decay_rate`: Rate of DUST generation (~1 week to reach max).
+/// - `dust_grace_period`: Maximum time window for DUST spends (3 hours).
+pub fn dust_parameters(protocol_version: ProtocolVersion) -> Result<DustParameters, Error> {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_018_000) {
+        Ok(DustParameters {
+            night_dust_ratio: INITIAL_DUST_PARAMETERS_V6.night_dust_ratio,
+            generation_decay_rate: INITIAL_DUST_PARAMETERS_V6.generation_decay_rate,
+            dust_grace_period: INITIAL_DUST_PARAMETERS_V6.dust_grace_period.as_seconds() as u64,
+        })
+    } else {
+        Err(Error::InvalidProtocolVersion(protocol_version))
+    }
+}
