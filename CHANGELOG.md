@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0-alpha.15] - 2025-11-26
+## [3.0.0-alpha.16] - 2025-12-01
 
 ### 🚀 Features
 
@@ -46,6 +46,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Integrate CardanoRewardAddress changes from latest Node (#505)
 - Validate network ID is lowercase at startup (#518)
 - Ensure non-0 exit codes (#524)
+- *(api)* Add maxCapacity field to DustGenerationStatus (#552)
+- *(api)* Change dustAddress from HexEncoded to Bech32m format (#554)
 
 ### 🐛 Bug Fixes
 
@@ -102,6 +104,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Storage unification (#171)
 - Remove unused code, better naming, etc. (#232)
 - Rename GraphQL field from parameters to ledgerParameters (#384)
+- Use ledger INITIAL_DUST_PARAMETERS via protocol-version-aware submodule (#558)
 
 ### 📚 Documentation
 
@@ -114,6 +117,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add comprehensive guide for updating node versions (#281)
 - *(api)* Enhance v3 api documentation with DUST features and field updates (#473)
 - Clarify currentCapacity limitations in dustGenerationStatus (#503)
+- Extend comment for nightBalance, make clear it is in STAR (#551)
 
 ### ⚙️ Miscellaneous Tasks
 
@@ -140,6 +144,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Further address audit (#495)
 - Richer error messages (#494)
 - *(chain-indexer)* Add some debug level logging (#541)
+- *(test)* Default toolkit to latest-main (#549)
+- *(test)* Show wallet from toolkit wrapper (#514)
 
 ## [2.1.4] - 2025-06-30
 
