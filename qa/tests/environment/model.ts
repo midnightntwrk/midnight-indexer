@@ -17,6 +17,7 @@ import fs from 'fs';
 import log from '@utils/logging/logger';
 
 export enum EnvironmentName {
+  MAINNET = 'mainnet',
   UNDEPLOYED = 'undeployed',
   NODEDEV01 = 'node-dev-01',
   DEVNET = 'devnet',

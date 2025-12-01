@@ -201,7 +201,8 @@ export const ContractActionUnionSchema = z.discriminatedUnion('__typename', [
 const isCardanoRewardAddress = (value: string) => {
   try {
     const decoded = bech32.decode(value.toLowerCase());
-    return decoded.prefix.length > 0;
+    const hrp = decoded.prefix;
+    return hrp === 'stake' || hrp === 'stake_test';
   } catch {
     return false;
   }
@@ -215,6 +216,7 @@ export const DustGenerationStatusSchema = z.object({
   registered: z.boolean(),
   nightBalance: z.string().regex(/^\d+$/),
   generationRate: z.string().regex(/^\d+$/),
+  maxCapacity: z.string().regex(/^\d+$/),
   currentCapacity: z.string().regex(/^\d+$/),
 });
 
