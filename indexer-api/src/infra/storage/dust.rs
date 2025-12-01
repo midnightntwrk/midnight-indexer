@@ -17,26 +17,24 @@ use crate::{
 };
 use fastrace::trace;
 use indexer_common::{
-    domain::{ByteVec, CardanoRewardAddress},
+    domain::{ByteVec, CardanoRewardAddress, ProtocolVersion, ledger},
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
-
-/// DUST generation rate in Specks per Star per second.
-/// Based on ledger spec: midnight-ledger/spec/dust.md.
-const GENERATION_DECAY_RATE: u128 = 8_267;
-
-/// Maximum DUST capacity in Specks per Star.
-/// Represents 5 DUST per NIGHT = 5 * 10^15 Specks / 10^6 Stars.
-/// Based on ledger spec: midnight-ledger/spec/dust.md.
-const NIGHT_DUST_RATIO: u128 = 5_000_000_000;
 
 impl DustStorage for Storage {
     #[trace]
     async fn get_dust_generation_status(
         &self,
         cardano_reward_addresses: &[CardanoRewardAddress],
+        protocol_version: ProtocolVersion,
     ) -> Result<Vec<DustGenerationStatus>, sqlx::Error> {
+        // Get DUST parameters for the given protocol version.
+        let dust_params = ledger::dust_parameters(protocol_version)
+            .expect("DUST parameters should be available for supported protocol version");
+        let generation_decay_rate = dust_params.generation_decay_rate as u128;
+        let night_dust_ratio = dust_params.night_dust_ratio as u128;
+
         let mut statuses = vec![];
 
         for reward_address in cardano_reward_addresses {
@@ -81,11 +79,8 @@ impl DustStorage for Storage {
                     let value = u128::from(value);
                     night_balance = value;
 
-                    // DUST generation rate calculation based on ledger spec:
-                    // - generation_decay_rate = 8,267 Specks per Star per second
-                    // - 1 Night = 10^6 Stars
-                    // - Therefore: generation_rate = Stars * 8,267 Specks/second.
-                    generation_rate = value.saturating_mul(GENERATION_DECAY_RATE);
+                    // DUST generation rate = STAR * generation_decay_rate SPECK/second.
+                    generation_rate = value.saturating_mul(generation_decay_rate);
 
                     // Calculate current capacity based on elapsed time since creation.
                     // Get current timestamp from latest block.
@@ -106,14 +101,13 @@ impl DustStorage for Storage {
                     // Convert from milliseconds to seconds.
                     let elapsed_seconds = ((current_timestamp - ctime).max(0) as u128) / 1000;
 
-                    // Maximum capacity (static cap) = Stars * night_dust_ratio
-                    // (5 DUST per NIGHT = 5 * 10^15 Specks per 10^6 Stars).
-                    max_capacity = value.saturating_mul(NIGHT_DUST_RATIO);
+                    // Maximum capacity (static cap) = STAR * night_dust_ratio.
+                    max_capacity = value.saturating_mul(night_dust_ratio);
 
-                    // Current capacity (time-dependent) = Stars * generation_decay_rate *
+                    // Current capacity (time-dependent) = STAR * generation_decay_rate *
                     // elapsed_seconds. Capped at max_capacity.
                     let generated_capacity = value
-                        .saturating_mul(GENERATION_DECAY_RATE)
+                        .saturating_mul(generation_decay_rate)
                         .saturating_mul(elapsed_seconds);
                     current_capacity = generated_capacity.min(max_capacity);
                 }
