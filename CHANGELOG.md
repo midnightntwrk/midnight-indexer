@@ -144,8 +144,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Further address audit (#495)
 - Richer error messages (#494)
 - *(chain-indexer)* Add some debug level logging (#541)
-- *(test)* Default toolkit to latest-main (#549)
-- *(test)* Show wallet from toolkit wrapper (#514)
 
 ## [2.1.4] - 2025-06-30
 
