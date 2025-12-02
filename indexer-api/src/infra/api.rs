@@ -181,19 +181,21 @@ where
         max_depth,
     );
 
+    // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a Service
+    // Builder, so we axum-layer FastraceLayer first.
     Router::new()
         .route("/ready", get(ready))
         .nest("/api/v3", v3_app)
         .route("/api/v1/{*rest}", any(redirect_api_v1_to_latest))
         .route("/api/{*rest}", any(redirect_api_to_latest))
         .with_state(caught_up)
+        .layer(FastraceLayer)
         .layer(
             ServiceBuilder::new()
-                .layer(FastraceLayer)
                 .layer(RequestBodyLimitLayer::new(request_body_limit))
-                .and_then(transform_lentgh_limit_exceeded)
-                .layer(CorsLayer::permissive()),
+                .and_then(transform_lentgh_limit_exceeded),
         )
+        .layer(CorsLayer::permissive())
 }
 
 async fn ready(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {

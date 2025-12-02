@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 /// The format depends on the network ID:
 /// - Mainnet: `mn_dust` + bech32m data (no network ID suffix)
 /// - Other networks: `mn_dust_` + network-id + bech32m data
+///
 /// DUST addresses are variable length (up to 33 bytes) as they encode a
 /// Scale-encoded compact bigint representing the DUST public key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
