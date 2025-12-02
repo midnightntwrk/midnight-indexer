@@ -56,6 +56,12 @@ type SubxtBlock = subxt::blocks::Block<SubstrateConfig, OnlineClient<SubstrateCo
 const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
 const TRAVERSE_BACK_LOG_AFTER: u32 = 1_000;
 
+/// Maximum number of consecutive duplicate blocks before we consider the stream stuck.
+/// After a reconnect, the node may resend old blocks which we filter as duplicates.
+/// If we receive more than this many consecutive duplicates, the subscription is likely stuck
+/// and we should re-subscribe to recover.
+const MAX_CONSECUTIVE_DUPLICATES: u32 = 100;
+
 /// A [Node] implementation based on subxt.
 #[derive(Clone)]
 pub struct SubxtNode {
@@ -147,15 +153,24 @@ impl SubxtNode {
         Ok(compatible_online_client)
     }
 
-    /// Subscribe to finalizded blocks, filtering duplicates and disconnection errors.
+    /// Subscribe to finalized blocks, filtering duplicates and disconnection errors.
     /// Subxt with its reconnecting-rpc-client feature exposes the error case, i.e. yields one `Err`
     /// item, then reconnects and continues with `Ok` items. Therefore we filter out the respective
     /// `Err` item; all other errors need to be propagated as is.
+    ///
+    /// After a reconnect, the node may resend blocks starting from an old height. These are
+    /// filtered as duplicates. However, if we receive too many consecutive duplicates, the
+    /// subscription is likely stuck and we return an error to signal the caller to re-subscribe.
+    ///
+    /// The `known_height` parameter allows the caller to pass in the last successfully processed
+    /// block height, which is used to properly filter duplicates after re-subscribing.
     async fn subscribe_finalized_blocks(
         &self,
+        known_height: Option<u32>,
     ) -> Result<impl Stream<Item = Result<SubxtBlock, SubxtNodeError>> + use<>, SubxtNodeError>
     {
-        let mut last_block_height = None;
+        let mut last_block_height = known_height;
+        let mut consecutive_duplicates = 0u32;
 
         let subscribe_finalized_blocks = self
             .default_online_client
@@ -163,21 +178,31 @@ impl SubxtNode {
             .subscribe_finalized()
             .await
             .map_err(|error| SubxtNodeError::SubscribeFinalizedBlocks(error.into()))?
-            .filter(move |block| {
-                let pass = match block {
+            .filter_map(move |block| {
+                let result = match block {
                     Ok(block) => {
                         let height = block.number();
 
                         if Some(height) <= last_block_height {
+                            consecutive_duplicates += 1;
                             warn!(
                                 hash:% = block.hash(),
-                                height = block.number();
+                                height = block.number(),
+                                consecutive_duplicates;
                                 "received duplicate, possibly after reconnect"
                             );
-                            false
+
+                            if consecutive_duplicates >= MAX_CONSECUTIVE_DUPLICATES {
+                                Some(Err(SubxtNodeError::SubscriptionStuck(
+                                    consecutive_duplicates,
+                                )))
+                            } else {
+                                None // Filter out duplicate
+                            }
                         } else {
+                            consecutive_duplicates = 0;
                             last_block_height = Some(height);
-                            true
+                            Some(Ok(block))
                         }
                     }
 
@@ -186,15 +211,14 @@ impl SubxtNode {
                         subxt_rpcs::Error::DisconnectedWillReconnect(_),
                     ))) => {
                         warn!("node disconnected, reconnecting");
-                        false
+                        None
                     }
 
-                    _ => true,
+                    Err(error) => Some(Err(SubxtNodeError::ReceiveBlock(error.into()))),
                 };
 
-                ready(pass)
-            })
-            .map_err(|error| SubxtNodeError::ReceiveBlock(error.into()));
+                ready(result)
+            });
 
         Ok(subscribe_finalized_blocks)
     }
@@ -298,7 +322,7 @@ impl Node for SubxtNode {
         &self,
     ) -> Result<impl Stream<Item = Result<BlockInfo, Self::Error>> + Send, Self::Error> {
         let highest_blocks = self
-            .subscribe_finalized_blocks()
+            .subscribe_finalized_blocks(None)
             .await?
             .map_ok(|block| BlockInfo {
                 hash: block.hash().0.into(),
@@ -323,9 +347,10 @@ impl Node for SubxtNode {
 
         let after_hash = after_hash.unwrap_or_default();
         let mut authorities = None;
+        let mut last_yielded_height = after_height;
 
         try_stream! {
-            let mut finalized_blocks = self.subscribe_finalized_blocks().await?;
+            let mut finalized_blocks = self.subscribe_finalized_blocks(after_height).await?;
 
             // First we receive the first finalized block.
             let Some(first_block) = receive_block(&mut finalized_blocks).await?
@@ -388,24 +413,47 @@ impl Node for SubxtNode {
                         parent_hash:% = block.header().parent_hash;
                         "block fetched"
                     );
-                    yield self.make_block(block, &mut authorities).await?;
+                    let made_block = self.make_block(block, &mut authorities).await?;
+                    last_yielded_height = Some(made_block.height);
+                    yield made_block;
                 }
 
                 // Then we yield the first finalized block.
-                yield self.make_block(first_block, &mut authorities).await?;
+                let made_block = self.make_block(first_block, &mut authorities).await?;
+                last_yielded_height = Some(made_block.height);
+                yield made_block;
             }
 
             // Finally we emit all other finalized ones.
-            while let Some(block) = receive_block(&mut finalized_blocks).await?
-            {
-                debug!(
-                    hash:% = block.hash(),
-                    height = block.number(),
-                    parent_hash:% = block.header().parent_hash;
-                    "block received"
-                );
+            // If the subscription gets stuck (too many consecutive duplicates after reconnect),
+            // we catch the error and re-subscribe instead of propagating the error.
+            loop {
+                match receive_block(&mut finalized_blocks).await {
+                    Ok(Some(block)) => {
+                        debug!(
+                            hash:% = block.hash(),
+                            height = block.number(),
+                            parent_hash:% = block.header().parent_hash;
+                            "block received"
+                        );
+                        let made_block = self.make_block(block, &mut authorities).await?;
+                        last_yielded_height = Some(made_block.height);
+                        yield made_block;
+                    }
 
-                yield self.make_block(block, &mut authorities).await?;
+                    Ok(None) => break, // Stream ended normally
+
+                    Err(SubxtNodeError::SubscriptionStuck(count)) => {
+                        warn!(
+                            count,
+                            last_yielded_height:?;
+                            "subscription stuck after reconnect, re-subscribing"
+                        );
+                        finalized_blocks = self.subscribe_finalized_blocks(last_yielded_height).await?;
+                    }
+
+                    Err(e) => Err(e)?, // Propagate other errors
+                }
             }
         }
     }
@@ -442,6 +490,9 @@ pub enum SubxtNodeError {
 
     #[error("cannot receive finalized block")]
     ReceiveBlock(#[source] Box<subxt::Error>),
+
+    #[error("subscription stuck after reconnect: received {0} consecutive duplicate blocks")]
+    SubscriptionStuck(u32),
 
     #[error("cannot fetch block at hash {0}")]
     FetchBlock(H256, #[source] Box<subxt::Error>),
