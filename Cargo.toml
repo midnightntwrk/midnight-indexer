@@ -77,7 +77,7 @@ stream-cancel                = { version = "0.8" }
 subxt                        = { version = "0.44" }
 tempfile                     = { version = "3.23" }
 testcontainers               = { version = "0.25" }
-testcontainers-modules       = { version = "0.13" }
+testcontainers-modules       = { version = "0.14" }
 thiserror                    = { version = "2.0" }
 tokio                        = { version = "1" }
 tokio-stream                 = { version = "0.1" }
