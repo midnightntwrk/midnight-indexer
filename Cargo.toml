@@ -76,7 +76,7 @@ sqlx                         = { version = "0.8" }
 stream-cancel                = { version = "0.8" }
 subxt                        = { version = "0.44" }
 tempfile                     = { version = "3.23" }
-testcontainers               = { version = "0.25" }
+testcontainers               = { version = "0.26" }
 testcontainers-modules       = { version = "0.13" }
 thiserror                    = { version = "2.0" }
 tokio                        = { version = "1" }
