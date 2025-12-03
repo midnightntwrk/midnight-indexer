@@ -604,7 +604,7 @@ describe('contract action subscriptions', () => {
     test('should receive error message when both height and hash are provided in block offset', async () => {
       const contractAddress = dataProvider.getKnownContractAddress();
 
-      const knownBlockHash = dataProvider.getKnownBlockHash();
+      const knownBlockHash = await dataProvider.getKnownBlockHash();
       const knownBlockHeight = await dataProvider.getContractDeployBlockHeight();
 
       const receivedMessages: ContractActionSubscriptionResponse[] = [];

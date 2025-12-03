@@ -187,12 +187,17 @@ class TestDataProvider {
   getBlockHashFromBlocks() {
     const envName = env.getCurrentEnvironmentName();
     const baseDir = `data/static/${envName}`;
-    
+
     if (!this.blocks) {
       this.blocks = importJsoncData(`${baseDir}/blocks.jsonc`) as JsonObject;
     }
-    
-    if (this.blocks && this.blocks['other-blocks'] && Array.isArray(this.blocks['other-blocks']) && this.blocks['other-blocks'].length > 0) {
+
+    if (
+      this.blocks &&
+      this.blocks['other-blocks'] &&
+      Array.isArray(this.blocks['other-blocks']) &&
+      this.blocks['other-blocks'].length > 0
+    ) {
       return this.blocks['other-blocks'][0] as string; // Return the first block hash from the array
     }
     throw new Error('No block hashes available in blocks.jsonc');
