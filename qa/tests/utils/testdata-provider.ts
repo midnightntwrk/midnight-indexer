@@ -89,6 +89,41 @@ class TestDataProvider {
   }
 
   /**
+   * Gets the RNG (Random Number Generator) seed for contract operations.
+   * The RNG seed is used to generate deterministic contract addresses and transaction randomness.
+   * First checks for an environment-specific variable (e.g., RNG_SEED_PREVIEW),
+   * then falls back to a default seed for undeployed environments.
+   *
+   * Note that for node-dev-01 the variable will have to be RNG_SEED_NODE_DEV_01
+   * as "-" is not allowed in environment variable names.
+   * @returns The RNG seed as a string (64 hex characters).
+   */
+  getRngSeed() {
+    // Build the environment-specific variable name (e.g., RNG_SEED_PREVIEW)
+    const envName = env.getCurrentEnvironmentName();
+    const envNameUppercase = envName.toUpperCase().replace(/-/g, '_');
+    const envVarName = `RNG_SEED_${envNameUppercase}`;
+
+    // Try environment-specific variable first
+    const rngSeed = process.env[envVarName];
+
+    if (rngSeed) {
+      return rngSeed;
+    }
+
+    if (envName !== 'undeployed') {
+      throw new Error(
+        `Please provide an RNG seed for ${envName} environment by setting up a variable named RNG_SEED_${envNameUppercase}`,
+      );
+    }
+
+    // Default fallback - using the same seed as deployContract for consistency
+    // This ensures deterministic contract addresses across test runs
+    const undeployedRngSeed = '00000000000000000000000000000000000000000000000000000000000000AB';
+    return undeployedRngSeed;
+  }
+
+  /**
    * Retrieves an unshielded address from the test data by property name.
    * @param property - The property name of the unshielded address to retrieve.
    * @returns The unshielded address as a string.
