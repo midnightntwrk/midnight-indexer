@@ -50,6 +50,7 @@ use subxt::{
     utils::H256,
 };
 use thiserror::Error;
+use tokio::time::timeout;
 
 type SubxtBlock = subxt::blocks::Block<SubstrateConfig, OnlineClient<SubstrateConfig>>;
 
@@ -63,6 +64,7 @@ pub struct SubxtNode {
     rpc_client: RpcClient,
     default_online_client: OnlineClient<SubstrateConfig>,
     compatible_online_client: Option<(ProtocolVersion, OnlineClient<SubstrateConfig>)>,
+    subscription_recovery_timeout: Duration,
 }
 
 impl SubxtNode {
@@ -73,6 +75,7 @@ impl SubxtNode {
             genesis_protocol_version,
             reconnect_max_delay: retry_max_delay,
             reconnect_max_attempts: retry_max_attempts,
+            subscription_recovery_timeout,
         } = config;
 
         let retry_policy = ExponentialBackoff::from_millis(10)
@@ -92,6 +95,7 @@ impl SubxtNode {
             genesis_protocol_version,
             default_online_client,
             compatible_online_client: None,
+            subscription_recovery_timeout,
         })
     }
 
@@ -147,15 +151,19 @@ impl SubxtNode {
         Ok(compatible_online_client)
     }
 
-    /// Subscribe to finalizded blocks, filtering duplicates and disconnection errors.
+    /// Subscribe to finalized blocks, filtering duplicates and disconnection errors.
     /// Subxt with its reconnecting-rpc-client feature exposes the error case, i.e. yields one `Err`
     /// item, then reconnects and continues with `Ok` items. Therefore we filter out the respective
     /// `Err` item; all other errors need to be propagated as is.
+    ///
+    /// The `known_height` parameter allows the caller to pass in the last successfully processed
+    /// block height, which is used to properly filter duplicates after re-subscribing.
     async fn subscribe_finalized_blocks(
         &self,
+        known_height: Option<u32>,
     ) -> Result<impl Stream<Item = Result<SubxtBlock, SubxtNodeError>> + use<>, SubxtNodeError>
     {
-        let mut last_block_height = None;
+        let mut last_block_height = known_height;
 
         let subscribe_finalized_blocks = self
             .default_online_client
@@ -298,7 +306,7 @@ impl Node for SubxtNode {
         &self,
     ) -> Result<impl Stream<Item = Result<BlockInfo, Self::Error>> + Send, Self::Error> {
         let highest_blocks = self
-            .subscribe_finalized_blocks()
+            .subscribe_finalized_blocks(None)
             .await?
             .map_ok(|block| BlockInfo {
                 hash: block.hash().0.into(),
@@ -323,9 +331,11 @@ impl Node for SubxtNode {
 
         let after_hash = after_hash.unwrap_or_default();
         let mut authorities = None;
+        let recovery_timeout = self.subscription_recovery_timeout;
 
         try_stream! {
-            let mut finalized_blocks = self.subscribe_finalized_blocks().await?;
+            let mut finalized_blocks = self.subscribe_finalized_blocks(after_height).await?;
+            let mut last_yielded_height = after_height;
 
             // First we receive the first finalized block.
             let Some(first_block) = receive_block(&mut finalized_blocks).await?
@@ -388,24 +398,47 @@ impl Node for SubxtNode {
                         parent_hash:% = block.header().parent_hash;
                         "block fetched"
                     );
-                    yield self.make_block(block, &mut authorities).await?;
+                    let made_block = self.make_block(block, &mut authorities).await?;
+                    yield made_block;
                 }
 
                 // Then we yield the first finalized block.
-                yield self.make_block(first_block, &mut authorities).await?;
+                let made_block = self.make_block(first_block, &mut authorities).await?;
+                last_yielded_height = Some(made_block.height);
+                yield made_block;
             }
 
             // Finally we emit all other finalized ones.
-            while let Some(block) = receive_block(&mut finalized_blocks).await?
-            {
-                debug!(
-                    hash:% = block.hash(),
-                    height = block.number(),
-                    parent_hash:% = block.header().parent_hash;
-                    "block received"
-                );
+            // If no block is received within the recovery timeout, re-subscribe to recover
+            // from potentially stuck subscriptions (e.g., after a reconnect).
+            loop {
+                match timeout(recovery_timeout, receive_block(&mut finalized_blocks)).await {
+                    Ok(Ok(Some(block))) => {
+                        debug!(
+                            hash:% = block.hash(),
+                            height = block.number(),
+                            parent_hash:% = block.header().parent_hash;
+                            "block received"
+                        );
+                        let made_block = self.make_block(block, &mut authorities).await?;
+                        last_yielded_height = Some(made_block.height);
+                        yield made_block;
+                    }
 
-                yield self.make_block(block, &mut authorities).await?;
+                    Ok(Ok(None)) => break, // Stream ended normally
+
+                    Ok(Err(e)) => Err(e)?,
+
+                    Err(_) => {
+                        // Timeout: no block received within recovery_timeout
+                        warn!(
+                            last_yielded_height:?,
+                            timeout_secs = recovery_timeout.as_secs();
+                            "subscription appears stuck, re-subscribing"
+                        );
+                        finalized_blocks = self.subscribe_finalized_blocks(last_yielded_height).await?;
+                    }
+                }
             }
         }
     }
@@ -422,6 +455,19 @@ pub struct Config {
     pub reconnect_max_delay: Duration,
 
     pub reconnect_max_attempts: usize,
+
+    /// Timeout for receiving a valid block after a reconnect or duplicate event.
+    /// If no valid block is received within this duration, the subscription is considered
+    /// stuck and will be re-established. Defaults to 30 seconds.
+    #[serde(
+        with = "humantime_serde",
+        default = "default_subscription_recovery_timeout"
+    )]
+    pub subscription_recovery_timeout: Duration,
+}
+
+fn default_subscription_recovery_timeout() -> Duration {
+    Duration::from_secs(30)
 }
 
 /// Error possibly returned by [SubxtNode::new].
