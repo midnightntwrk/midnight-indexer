@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { randomBytes } from 'crypto';
 import log from '@utils/logging/logger';
-import '@utils/logging/test-logging-hooks';
 import { env } from 'environment/model';
+import { randomBytes } from 'node:crypto';
+import '@utils/logging/test-logging-hooks';
 import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 
 describe('key material derivation validation', () => {
@@ -45,7 +45,10 @@ describe('key material derivation validation', () => {
 
       log.info(`Shielded address: ${address}`);
 
-      const addressPrefix = 'mn_shield-addr_';
+      // Mainnet addresses do not have a network ID prefix
+      const networkId = env.getCurrentEnvironmentName();
+      const addressPrefix =
+        networkId === 'mainnet' ? `mn_shield-addr` : `mn_shield-addr_${networkId}`;
       expect(address).toMatch(new RegExp(`^${addressPrefix}`));
     });
 
@@ -63,7 +66,9 @@ describe('key material derivation validation', () => {
         const address = (await toolkit.showAddress(seed, networkId)).shielded;
         log.info(`Shielded address: ${address}`);
 
-        const addressPrefix = `mn_shield-addr_${networkId}`;
+        // Mainnet addresses do not have a network ID prefix
+        const addressPrefix =
+          networkId === 'mainnet' ? `mn_shield-addr` : `mn_shield-addr_${networkId}`;
         expect(address).toMatch(new RegExp(`^${addressPrefix}`));
       }
     });
@@ -82,7 +87,9 @@ describe('key material derivation validation', () => {
 
       log.info(`Unshielded address: ${address}`);
 
-      const addressPrefix = 'mn_addr_';
+      // Mainnet addresses do not have a network ID prefix
+      const networkId = env.getCurrentEnvironmentName();
+      const addressPrefix = networkId === 'mainnet' ? `mn_addr` : `mn_addr_${networkId}`;
       expect(address).toMatch(new RegExp(`^${addressPrefix}`));
     });
 
@@ -100,7 +107,8 @@ describe('key material derivation validation', () => {
         const address = (await toolkit.showAddress(seed, networkId)).unshielded;
         log.info(`Unshielded address: ${address}`);
 
-        const addressPrefix = `mn_addr_${networkId}`;
+        // Mainnet addresses do not have a network ID prefix
+        const addressPrefix = networkId === 'mainnet' ? `mn_addr` : `mn_addr_${networkId}`;
         expect(address).toMatch(new RegExp(`^${addressPrefix}`));
       }
     });
@@ -137,7 +145,9 @@ describe('key material derivation validation', () => {
         const address = await toolkit.showViewingKey(seed, networkId);
         log.info(`Viewing key for ${networkId}: ${address}`);
 
-        const addressPrefix = `mn_shield-esk_${networkId}`;
+        // Mainnet addresses do not have a network ID prefix
+        const addressPrefix =
+          networkId === 'mainnet' ? `mn_shield-esk` : `mn_shield-esk_${networkId}`;
         expect(address).toMatch(new RegExp(`^${addressPrefix}`));
       }
     });
