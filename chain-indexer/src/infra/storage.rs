@@ -838,8 +838,48 @@ async fn save_dust_registration_events(
                     .await?;
             }
 
-            // MappingAdded and MappingRemoved are not part of this minimal cherry-pick.
-            _ => {}
+            DustRegistrationEvent::MappingAdded {
+                cardano_address,
+                dust_address,
+                utxo_id,
+                utxo_index,
+            } => {
+                let query = indoc! {"
+                    UPDATE cnight_registrations
+                    SET utxo_tx_hash = $1,
+                        utxo_output_index = $2
+                    WHERE cardano_address = $3
+                    AND dust_address = $4
+                "};
+
+                sqlx::query(query)
+                    .bind(utxo_id.as_ref())
+                    .bind(*utxo_index as i64)
+                    .bind(cardano_address.as_ref())
+                    .bind(dust_address.as_ref())
+                    .execute(&mut **tx)
+                    .await?;
+            }
+
+            DustRegistrationEvent::MappingRemoved {
+                cardano_address,
+                dust_address,
+                ..
+            } => {
+                let query = indoc! {"
+                    UPDATE cnight_registrations
+                    SET utxo_tx_hash = NULL,
+                        utxo_output_index = NULL
+                    WHERE cardano_address = $1
+                    AND dust_address = $2
+                "};
+
+                sqlx::query(query)
+                    .bind(cardano_address.as_ref())
+                    .bind(dust_address.as_ref())
+                    .execute(&mut **tx)
+                    .await?;
+            }
         }
     }
 

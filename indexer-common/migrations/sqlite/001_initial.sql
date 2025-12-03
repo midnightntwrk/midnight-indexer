@@ -171,6 +171,8 @@ CREATE TABLE cnight_registrations (
   registered_at INTEGER NOT NULL,
   removed_at INTEGER,
   block_id INTEGER REFERENCES blocks (id),
+  utxo_tx_hash BLOB,
+  utxo_output_index INTEGER,
   UNIQUE (cardano_address, dust_address)
 );
 CREATE INDEX cnight_registrations_cardano_address_idx ON cnight_registrations (cardano_address);

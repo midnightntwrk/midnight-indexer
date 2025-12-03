@@ -19,8 +19,8 @@
 use crate::{
     domain,
     infra::api::v3::{
-        AddressType, CardanoNetwork, CardanoRewardAddress, encode_address,
-        encode_cardano_reward_address,
+        AddressType, CardanoNetwork, CardanoRewardAddress, HexEncodable, HexEncoded,
+        encode_address, encode_cardano_reward_address,
     },
 };
 use async_graphql::{SimpleObject, scalar};
@@ -62,6 +62,12 @@ pub struct DustGenerationStatus {
 
     /// Current generated DUST capacity in SPECK.
     pub current_capacity: String,
+
+    /// Cardano UTXO transaction hash for update/unregister operations.
+    pub utxo_tx_hash: Option<HexEncoded>,
+
+    /// Cardano UTXO output index for update/unregister operations.
+    pub utxo_output_index: Option<u32>,
 }
 
 impl From<(domain::DustGenerationStatus, &NetworkId)> for DustGenerationStatus {
@@ -83,6 +89,8 @@ impl From<(domain::DustGenerationStatus, &NetworkId)> for DustGenerationStatus {
             generation_rate: status.generation_rate.to_string(),
             max_capacity: status.max_capacity.to_string(),
             current_capacity: status.current_capacity.to_string(),
+            utxo_tx_hash: status.utxo_tx_hash.map(|h| h.hex_encode()),
+            utxo_output_index: status.utxo_output_index,
         }
     }
 }

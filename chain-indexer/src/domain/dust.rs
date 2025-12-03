@@ -33,6 +33,7 @@ pub enum DustRegistrationEvent {
         cardano_address: CardanoRewardAddress,
         dust_address: DustPublicKey,
         utxo_id: DustUtxoId,
+        utxo_index: u32,
     },
 
     /// UTXO mapping removed from registration.
@@ -40,5 +41,6 @@ pub enum DustRegistrationEvent {
         cardano_address: CardanoRewardAddress,
         dust_address: DustPublicKey,
         utxo_id: DustUtxoId,
+        utxo_index: u32,
     },
 }

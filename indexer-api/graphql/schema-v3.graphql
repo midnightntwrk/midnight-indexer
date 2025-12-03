@@ -247,6 +247,14 @@ type DustGenerationStatus {
 	Current generated DUST capacity in SPECK.
 	"""
 	currentCapacity: String!
+	"""
+	Cardano UTXO transaction hash for update/unregister operations.
+	"""
+	utxoTxHash: HexEncoded
+	"""
+	Cardano UTXO output index for update/unregister operations.
+	"""
+	utxoOutputIndex: Int
 }
 
 type DustInitialUtxo implements DustLedgerEvent {

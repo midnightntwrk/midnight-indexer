@@ -170,6 +170,8 @@ CREATE TABLE cnight_registrations (
   registered_at BIGINT NOT NULL,
   removed_at BIGINT,
   block_id BIGINT REFERENCES blocks (id),
+  utxo_tx_hash BYTEA,
+  utxo_output_index BIGINT,
   UNIQUE (cardano_address, dust_address)
 );
 CREATE INDEX ON cnight_registrations (cardano_address);
