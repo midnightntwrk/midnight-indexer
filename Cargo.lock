@@ -1012,7 +1012,7 @@ dependencies = [
  "async-stream",
  "byte-unit",
  "clap",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "fake",
  "fastrace",
  "futures",
@@ -1219,9 +1219,9 @@ checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
 name = "convert_case"
-version = "0.7.1"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb402b8d4c85569410425650ce3eddc7d698ed96d39a73f941b08fb63082f1e7"
+checksum = "633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9"
 dependencies = [
  "unicode-segmentation",
 ]
@@ -1528,11 +1528,11 @@ dependencies = [
 
 [[package]]
 name = "derive_more"
-version = "2.0.1"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
+checksum = "10b768e943bed7bf2cab53df09f4bc34bfd217cdb57d971e769874c9a6710618"
 dependencies = [
- "derive_more-impl 2.0.1",
+ "derive_more-impl 2.1.0",
 ]
 
 [[package]]
@@ -1548,13 +1548,14 @@ dependencies = [
 
 [[package]]
 name = "derive_more-impl"
-version = "2.0.1"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
+checksum = "6d286bfdaf75e988b4a78e013ecd79c581e06399ab53fbacd2d916c2f904f30b"
 dependencies = [
  "convert_case",
  "proc-macro2",
  "quote 1.0.42",
+ "rustc_version",
  "syn 2.0.111",
  "unicode-xid 0.2.6",
 ]
@@ -2980,7 +2981,7 @@ dependencies = [
  "chacha20poly1305",
  "clap",
  "const-hex",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "drop-stream",
  "fastrace",
  "fastrace-axum",
@@ -3012,7 +3013,7 @@ dependencies = [
  "bip32",
  "chacha20poly1305",
  "const-hex",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "fastrace",
  "fastrace-opentelemetry",
  "figment",
@@ -3073,7 +3074,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "fs_extra",
  "futures",
  "graphql_client",
@@ -6253,7 +6254,7 @@ dependencies = [
  "bs58",
  "chacha20",
  "crossbeam-queue",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "ed25519-zebra",
  "either",
  "event-listener",
@@ -6303,7 +6304,7 @@ dependencies = [
  "base64 0.22.1",
  "blake2-rfc",
  "bs58",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "either",
  "event-listener",
  "fnv",
@@ -7872,7 +7873,7 @@ dependencies = [
  "async-stream",
  "chacha20poly1305",
  "dashmap",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "fastrace",
  "futures",
  "humantime-serde",
