@@ -35,27 +35,27 @@ impl DustStorage for Storage {
         let generation_decay_rate = dust_params.generation_decay_rate as u128;
         let night_dust_ratio = dust_params.night_dust_ratio as u128;
 
-        let mut statuses = vec![];
+        let mut statuses = Vec::with_capacity(cardano_reward_addresses.len());
 
         for reward_address in cardano_reward_addresses {
             // Query registration info.
             let registration_query = indoc! {"
                 SELECT dust_address, valid, utxo_tx_hash, utxo_output_index
                 FROM cnight_registrations
-                WHERE cardano_address = $1 AND removed_at IS NULL
+                WHERE cardano_address = $1
+                AND removed_at IS NULL
                 ORDER BY registered_at DESC
                 LIMIT 1
             "};
 
             let (dust_address, registered, utxo_tx_hash, utxo_output_index) =
-                sqlx::query_as::<_, (Vec<u8>, bool, Option<Vec<u8>>, Option<i64>)>(
+                sqlx::query_as::<_, (ByteVec, bool, Option<Vec<u8>>, Option<i64>)>(
                     registration_query,
                 )
                 .bind(reward_address.as_ref())
                 .fetch_optional(&*self.pool)
                 .await?
                 .unwrap_or_default();
-            let dust_address = ByteVec::from(dust_address);
 
             let mut generation_rate = 0u128;
             let mut max_capacity = 0u128;
@@ -67,7 +67,8 @@ impl DustStorage for Storage {
                 let generation_query = indoc! {"
                     SELECT value, ctime
                     FROM dust_generation_info
-                    WHERE owner = $1 AND dtime IS NULL
+                    WHERE owner = $1
+                    AND dtime IS NULL
                     ORDER BY ctime DESC
                     LIMIT 1
                 "};
