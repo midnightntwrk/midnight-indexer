@@ -15,7 +15,7 @@
 
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
-import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import { UnshieldedTransactionEvent, isUnshieldedTransaction } from '@utils/indexer/indexer-types';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
 import {

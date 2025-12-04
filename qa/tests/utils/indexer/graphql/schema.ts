@@ -80,7 +80,6 @@ export const DustLedgerEventSchema = z.object({
   maxId: z.number(),
 });
 
-
 export const DustParamChangeSchema = z.object({
   __typename: z.literal('ParamChange'),
   id: z.number(),

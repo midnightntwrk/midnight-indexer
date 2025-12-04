@@ -508,8 +508,21 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       );
     });
 
+    /**
+     * Once an unshielded transaction has been confirmed, the indexer should stream the full sequence of DUST events associated with that transaction.
+     *
+     * @given a confirmed unshielded transaction that produces DUST activity
+     * @when we subscribe to dustLedgerEvents starting from the previous maxId
+     * @then the indexer should deliver exactly three events in the order:
+     *       DustGenerationDtimeUpdate, DustInitialUtxo, DustSpendProcessed
+     */
     test('should deliver dust events in correct sequence after unshielded transaction', async () => {
-      const received = await collectValidDustEvents(indexerWsClient, indexerEventCoordinator, 3, previousMaxDustId + 1);
+      const received = await collectValidDustEvents(
+        indexerWsClient,
+        indexerEventCoordinator,
+        3,
+        previousMaxDustId + 1,
+      );
       expect(received).toHaveLength(3);
 
       received.forEach((msg) => {
