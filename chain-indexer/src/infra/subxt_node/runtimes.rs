@@ -210,6 +210,7 @@ async fn make_block_details_runtime_0_18(
                         cardano_address: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                         utxo_id: event.utxo_tx_hash.0.as_ref().into(),
+                        utxo_index: event.utxo_index.into(),
                     });
                 }
 
@@ -218,6 +219,7 @@ async fn make_block_details_runtime_0_18(
                         cardano_address: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                         utxo_id: event.utxo_tx_hash.0.as_ref().into(),
+                        utxo_index: event.utxo_index.into(),
                     });
                 }
 

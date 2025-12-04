@@ -37,4 +37,10 @@ pub struct DustGenerationStatus {
 
     /// Current generated DUST capacity in SPECK.
     pub current_capacity: u128,
+
+    /// Cardano UTXO transaction hash for update/unregister operations.
+    pub utxo_tx_hash: Option<Vec<u8>>,
+
+    /// Cardano UTXO output index for update/unregister operations.
+    pub utxo_output_index: Option<u32>,
 }
