@@ -156,15 +156,13 @@ impl SubxtNode {
     /// item, then reconnects and continues with `Ok` items. Therefore we filter out the respective
     /// `Err` item; all other errors need to be propagated as is.
     ///
-    /// The `known_height` parameter allows the caller to pass in the last successfully processed
+    /// The `last_height` parameter allows the caller to pass in the last successfully processed
     /// block height, which is used to properly filter duplicates after re-subscribing.
     async fn subscribe_finalized_blocks(
         &self,
-        known_height: Option<u32>,
+        mut last_height: Option<u32>,
     ) -> Result<impl Stream<Item = Result<SubxtBlock, SubxtNodeError>> + use<>, SubxtNodeError>
     {
-        let mut last_block_height = known_height;
-
         let subscribe_finalized_blocks = self
             .default_online_client
             .blocks()
@@ -176,15 +174,16 @@ impl SubxtNode {
                     Ok(block) => {
                         let height = block.number();
 
-                        if Some(height) <= last_block_height {
+                        if Some(height) <= last_height {
                             warn!(
                                 hash:% = block.hash(),
-                                height = block.number();
+                                height = block.number(),
+                                last_height:?;
                                 "received duplicate, possibly after reconnect"
                             );
                             false
                         } else {
-                            last_block_height = Some(height);
+                            last_height = Some(height);
                             true
                         }
                     }
@@ -331,15 +330,13 @@ impl Node for SubxtNode {
 
         let after_hash = after_hash.unwrap_or_default();
         let mut authorities = None;
-        let recovery_timeout = self.subscription_recovery_timeout;
 
         try_stream! {
             let mut finalized_blocks = self.subscribe_finalized_blocks(after_height).await?;
             let mut last_yielded_height = after_height;
 
             // First we receive the first finalized block.
-            let Some(first_block) = receive_block(&mut finalized_blocks).await?
-            else {
+            let Some(first_block) = receive_block(&mut finalized_blocks).await? else {
                 return;
             };
             debug!(
@@ -359,8 +356,7 @@ impl Node for SubxtNode {
                 // (one year ~ 5,256,000 blocks).
                 let genesis_parent_hash = self
                     .fetch_block(self.default_online_client.genesis_hash())
-                    .await
-                    ?
+                    .await?
                     .header()
                     .parent_hash;
 
@@ -398,19 +394,19 @@ impl Node for SubxtNode {
                         parent_hash:% = block.header().parent_hash;
                         "block fetched"
                     );
-                    let made_block = self.make_block(block, &mut authorities).await?;
-                    yield made_block;
+                    yield self.make_block(block, &mut authorities).await?;
                 }
 
                 // Then we yield the first finalized block.
-                let made_block = self.make_block(first_block, &mut authorities).await?;
-                last_yielded_height = Some(made_block.height);
-                yield made_block;
+                let block = self.make_block(first_block, &mut authorities).await?;
+                last_yielded_height = Some(block.height);
+                yield block;
             }
 
             // Finally we emit all other finalized ones.
             // If no block is received within the recovery timeout, re-subscribe to recover
             // from potentially stuck subscriptions (e.g., after a reconnect).
+            let recovery_timeout = self.subscription_recovery_timeout;
             loop {
                 match timeout(recovery_timeout, receive_block(&mut finalized_blocks)).await {
                     Ok(Ok(Some(block))) => {
@@ -420,23 +416,26 @@ impl Node for SubxtNode {
                             parent_hash:% = block.header().parent_hash;
                             "block received"
                         );
-                        let made_block = self.make_block(block, &mut authorities).await?;
-                        last_yielded_height = Some(made_block.height);
-                        yield made_block;
+                        let block = self.make_block(block, &mut authorities).await?;
+                        last_yielded_height = Some(block.height);
+                        yield block;
                     }
 
-                    Ok(Ok(None)) => break, // Stream ended normally
+                    // Stream completed normally.
+                    Ok(Ok(None)) => break,
 
+                    // Stream completed with error.
                     Ok(Err(e)) => Err(e)?,
 
+                    // Timeout: no block received within recovery_timeout => resubscribe.
                     Err(_) => {
-                        // Timeout: no block received within recovery_timeout
                         warn!(
                             last_yielded_height:?,
-                            timeout_secs = recovery_timeout.as_secs();
+                            recovery_timeout:?;
                             "subscription appears stuck, re-subscribing"
                         );
-                        finalized_blocks = self.subscribe_finalized_blocks(last_yielded_height).await?;
+                        finalized_blocks =
+                            self.subscribe_finalized_blocks(last_yielded_height).await?;
                     }
                 }
             }
