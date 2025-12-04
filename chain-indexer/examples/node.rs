@@ -37,6 +37,7 @@ impl Cli {
             genesis_protocol_version: PROTOCOL_VERSION_000_018_000,
             reconnect_max_delay: Duration::from_secs(1),
             reconnect_max_attempts: 1,
+            subscription_recovery_timeout: Duration::from_secs(30),
         };
         let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 
