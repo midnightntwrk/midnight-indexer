@@ -273,3 +273,35 @@ export const CONTRACT_ACTIONS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription 
         ${CONTRACT_ACTION_SUBSCRIPTION_FRAGMENT}
     }
 }`;
+
+export const DUST_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT = `
+  subscription DustLedgerEvents {
+    dustLedgerEvents {
+      __typename
+      id
+      raw
+      maxId
+      ... on DustInitialUtxo {
+        output {
+          nonce
+        }
+      }
+    }
+  }
+`;
+
+export const DUST_LEDGER_EVENTS_SUBSCRIPTION_FROM_OFFSET = `
+  subscription DustLedgerEvents($id: Int) {
+    dustLedgerEvents(id: $id) {
+      __typename
+      id
+      raw
+      maxId
+      ... on DustInitialUtxo {
+        output {
+          nonce
+        }
+      }
+    }
+  }
+`;

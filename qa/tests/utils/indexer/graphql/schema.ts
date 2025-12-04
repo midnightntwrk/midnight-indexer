@@ -80,6 +80,48 @@ export const DustLedgerEventSchema = z.object({
   maxId: z.number(),
 });
 
+
+export const DustParamChangeSchema = z.object({
+  __typename: z.literal('ParamChange'),
+  id: z.number(),
+  raw: z.string(),
+  maxId: z.number(),
+});
+
+export const DustInitialUtxoSchema = z.object({
+  __typename: z.literal('DustInitialUtxo'),
+  id: z.number(),
+  raw: z.string(),
+  maxId: z.number(),
+  output: z.object({
+    nonce: z
+      .string()
+      .length(64)
+      .regex(/^[a-f0-9]+$/),
+  }),
+});
+
+export const DustGenerationDtimeUpdateSchema = z.object({
+  __typename: z.literal('DustGenerationDtimeUpdate'),
+  id: z.number(),
+  raw: z.string(),
+  maxId: z.number(),
+});
+
+export const DustSpendProcessedSchema = z.object({
+  __typename: z.literal('DustSpendProcessed'),
+  id: z.number(),
+  raw: z.string(),
+  maxId: z.number(),
+});
+
+export const DustLedgerEventsUnionSchema = z.discriminatedUnion('__typename', [
+  DustParamChangeSchema,
+  DustInitialUtxoSchema,
+  DustGenerationDtimeUpdateSchema,
+  DustSpendProcessedSchema,
+]);
+
 // Base transaction schema (common to both RegularTransaction and SystemTransaction)
 const BaseTransactionFields = {
   id: z.number(),
