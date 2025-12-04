@@ -222,6 +222,7 @@ export interface DustGenerationStatus {
   nightBalance: string;
   generationRate: string;
   currentCapacity: string;
+  maxCapacity: string;
 }
 
 export interface ZswapLedgerEvent {

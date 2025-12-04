@@ -204,6 +204,7 @@ describe('dust generation status queries', () => {
       expect(registeredStatus?.nightBalance).toBe('0');
       expect(registeredStatus?.generationRate).toBe('0');
       expect(registeredStatus?.currentCapacity).toBe('0');
+      expect(registeredStatus?.maxCapacity).toBe('0');
     });
 
     /**
@@ -252,6 +253,7 @@ describe('dust generation status queries', () => {
       expect(status?.nightBalance).toBe('0');
       expect(status?.generationRate).toBe('0');
       expect(status?.currentCapacity).toBe('0');
+      expect(status?.maxCapacity).toBe('0');
     });
 
     /**
@@ -264,7 +266,7 @@ describe('dust generation status queries', () => {
      * @given we have a Cardano reward address that is registered for DUST production with positive cNIGHT balance
      * @when we query the DUST generation status
      * @then the status should indicate registered=true, nightBalance > 0, generationRate = nightBalance * 8267,
-     *       and currentCapacity = calculated correctly
+     *       currentCapacity = between 0 and maxCapacity, and finally maxCapacity = nightBalance * 5 * 10^9
      */
     test('should report the correct value of max capacity for registered address with cNIGHT', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
@@ -304,9 +306,8 @@ describe('dust generation status queries', () => {
       expect(status?.generationRate).toBe(expectedGenerationRate.toString());
 
       // Current capacity should be the same as the expected calculated max capacity
-      expect(BigInt(status?.currentCapacity)).toBe(
-        BigInt(nightBalanceInStars) * MAX_SPECK_PER_STAR,
-      );
+      expect(BigInt(status?.maxCapacity)).toBe(BigInt(nightBalanceInStars) * MAX_SPECK_PER_STAR);
+      expect(BigInt(status?.currentCapacity)).toBeLessThanOrEqual(BigInt(status?.maxCapacity));
     });
 
     /**
@@ -353,6 +354,7 @@ describe('dust generation status queries', () => {
       expect(status?.nightBalance).toBe('0');
       expect(status?.generationRate).toBe('0');
       expect(status?.currentCapacity).toBe('0');
+      expect(status?.maxCapacity).toBe('0');
     });
   });
 
@@ -476,7 +478,7 @@ describe('dust generation status queries', () => {
      * @when we send a dust generation status query
      * @then Indexer should return an error explaining the address format is unexpected and the address is rejected
      */
-    test('should return an error when the address has an unexpected plain hex string format', async (ctx: TestContext) => {
+    test('should return an error when the address is in plain hex string format', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['Query', 'Dust', 'Tokenomics', 'cNgD'],
         testKey: 'PM-18980',
@@ -539,6 +541,59 @@ describe('dust generation status queries', () => {
       const response: DustGenerationStatusResponse =
         await indexerHttpClient.getDustGenerationStatus([paymentAddress]);
       expect(response).toBeError();
+      expect(response.errors?.[0].message).toContain('invalid Cardano reward address');
+    });
+  });
+
+  describe('a dust generation status query with a Cardano reward address not meant for this network', () => {
+    /**
+     * A dust generation status query for a Cardano reward address not meant for this network
+     * should repond with an error
+     *
+     * NOTE: we are talking about Cardano network mismatch, and we need to consider the connection between
+     * Cardano networks and Midnight environments. This is the mapping we are using:
+     * - Cardano mainnet(mainnet) -> Midnight mainnet
+     * - Cardano preprod(testnet) -> Midnight preprod
+     * - Cardano preview(testnet) -> Midnight preview
+     * -         |                -> Midnight qanet
+     * -         |                -> Midnight node-dev-01
+     *
+     * So essntially to check the expected encoding, it's enough to check the Midnight environment name, given
+     * the mapping above. Also note that preprod and preview addresses in Cardano have the test label in the
+     * HRP, whilst mainnet addresses do not.
+     *
+     * @given we have a Cardano reward address not meant for this network
+     * @when we send a dust generation status query with that address
+     * @then Indexer should return an error reporting the target network mismatch
+     */
+    test('should return an error reporting the target network mismatch', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Dust', 'Tokenomics', 'cNgD'],
+        testKey: 'PM-18983',
+      };
+
+      ctx.skip?.(
+        true,
+        'Skipping this test for when this has been delivered by developers https://shielded.atlassian.net/browse/PM-20789',
+      );
+
+      let rewardAddress: string;
+      const connectedCardanoNetworkType = env.getCardanoNetworkType();
+
+      // We need to use Cardano reward address that is not meant for the connected Cardano network
+      // to validate indexer rejects it as invalid.
+      if (connectedCardanoNetworkType === 'mainnet') {
+        rewardAddress = 'stake_test1uqlkhzj4uqvl7x7q4qccgcmvyvjxa9xym4zvcmgemgltwnqt77qfc';
+      } else {
+        rewardAddress = 'stake1ux0k2hy4h6c8k95vzr52ant8yy77ggxg2wmk7cha4h4kraqjq4sfe';
+      }
+
+      console.log(rewardAddress);
+      const response: DustGenerationStatusResponse =
+        await indexerHttpClient.getDustGenerationStatus([rewardAddress]);
+      console.log(response.data);
+      expect(response).toBeError();
+
       expect(response.errors?.[0].message).toContain('invalid Cardano reward address');
     });
   });
