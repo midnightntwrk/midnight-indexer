@@ -29,6 +29,9 @@ import {
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
+import { collectValidDustEvents } from 'tests/shared/ dust-utils';
+import { EventCoordinator } from '@utils/event-coordinator';
+import { DustLedgerEventsUnionSchema } from '@utils/indexer/graphql/schema';
 
 describe('unshielded transactions', { timeout: 200_000 }, () => {
   let indexerWsClient: IndexerWsClient;
@@ -46,6 +49,10 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
 
   // Addresses for the source and destination wallets, derived from their seeds
   let destinationAddress: string;
+
+  let indexerEventCoordinator: EventCoordinator;
+  indexerEventCoordinator = new EventCoordinator();
+  let previousMaxDustId: number;
 
   beforeAll(async () => {
     indexerHttpClient = new IndexerHttpClient();
@@ -66,6 +73,10 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
     sourceSeed = walletFixture.source.seed;
 
     destinationAddress = walletFixture.destinations[0].destinationAddress;
+
+    const beforeEvents = await collectValidDustEvents(indexerWsClient, indexerEventCoordinator, 1);
+    previousMaxDustId = beforeEvents[0].data!.dustLedgerEvents.maxId;
+    log.debug(`Previous max dust ID before tx = ${previousMaxDustId}`);
 
     // Submit a single unshielded transaction (1 STAR) from source → destination
     transactionResult = await toolkit.generateSingleTx(
@@ -495,6 +506,27 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       expect(highestTransactionIdAfterTransaction).toBeGreaterThan(
         highestTransactionIdBeforeTransaction,
       );
+    });
+
+    test('should deliver dust events in correct sequence after unshielded transaction', async () => {
+      const received = await collectValidDustEvents(indexerWsClient, indexerEventCoordinator, 3, previousMaxDustId + 1);
+      expect(received).toHaveLength(3);
+
+      received.forEach((msg) => {
+        const event = msg.data!.dustLedgerEvents;
+        const parsed = DustLedgerEventsUnionSchema.safeParse(event);
+        expect(
+          parsed.success,
+          `Schema error: ${JSON.stringify(parsed.error?.format(), null, 2)}`,
+        ).toBe(true);
+      });
+
+      const eventTypes = received.map((msg) => msg.data!.dustLedgerEvents.__typename);
+      expect(eventTypes).toEqual([
+        'DustGenerationDtimeUpdate',
+        'DustInitialUtxo',
+        'DustSpendProcessed',
+      ]);
     });
   });
 });

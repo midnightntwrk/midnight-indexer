@@ -14,11 +14,8 @@
 // limitations under the License.
 
 import '@utils/logging/test-logging-hooks';
-import {
-  IndexerWsClient,
-  SubscriptionHandlers,
-  DustLedgerEventSubscriptionResponse,
-} from '@utils/indexer/websocket-client';
+import { IndexerWsClient } from '@utils/indexer/websocket-client';
+import { collectValidDustEvents, collectDustEventError } from '../../../shared/ dust-utils';
 import { EventCoordinator } from '@utils/event-coordinator';
 import { DustLedgerEventsUnionSchema } from '@utils/indexer/graphql/schema';
 
@@ -37,92 +34,6 @@ describe('dust ledger event subscriptions', () => {
     eventCoordinator.clear();
   });
 
-  /**
-   * Helper to subscribe to dust ledger events and collect a specific number of valid responses.
-   * Supports optional ID-based historical replay via `fromId`.
-   */
-  async function collectValidDustEvents(
-    expectedCount: number,
-    fromId?: number,
-  ): Promise<DustLedgerEventSubscriptionResponse[]> {
-    const received: DustLedgerEventSubscriptionResponse[] = [];
-    const eventName = `${expectedCount} DustLedger Events`;
-
-    let unsubscribe: (() => void) | null = null;
-    let finished = false;
-
-    const handler: SubscriptionHandlers<DustLedgerEventSubscriptionResponse> = {
-      next: (payload) => {
-        if (finished) return;
-        received.push(payload);
-
-        if (received.length >= expectedCount) {
-          finished = true;
-          unsubscribe?.();
-          eventCoordinator.notify(eventName);
-        }
-      },
-    };
-
-    const offset = fromId !== undefined ? { id: fromId } : undefined;
-    unsubscribe = indexerWsClient.subscribeToDustLedgerEvents(handler, offset);
-    await eventCoordinator.waitForAll([eventName], 10000);
-    return received;
-  }
-
-  /**
-   * Helper to subscribe to dust ledger events and capture GraphQL error responses.
-   * Used for testing invalid variables (e.g. negative offsets) or invalid fields.
-   */
-  async function collectDustEventError(
-    variables: Record<string, unknown> | null,
-    unknownField: boolean = false,
-  ): Promise<string> {
-    return new Promise((resolve) => {
-      const validQuery = `
-      subscription DustLedgerEvents($id: Int) {
-        dustLedgerEvents(id: $id) {
-          id
-        }
-      }
-    `;
-
-      const invalidFieldQuery = `
-      subscription DustLedgerEvents {
-        dustLedgerEvents {
-          unknownField
-        }
-      }
-    `;
-
-      const query = unknownField ? invalidFieldQuery : validQuery;
-      let unsubscribe: (() => void) | null = null;
-      const handler: SubscriptionHandlers<unknown> = {
-        next: (payload) => {
-          if (typeof payload === 'object' && payload !== null && 'errors' in payload) {
-            const p = payload as { errors: { message: string }[] };
-            resolve(p.errors[0].message);
-            unsubscribe?.();
-          }
-        },
-        error: (err) => {
-          resolve(String(err));
-          unsubscribe?.();
-        },
-      };
-
-      unsubscribe = indexerWsClient.subscribeToDustLedgerEvents(handler, undefined, query);
-
-      if (variables) {
-        indexerWsClient.send({
-          id: '0',
-          type: 'start',
-          payload: { query, variables },
-        });
-      }
-    });
-  }
-
   describe('a subscription to dust ledger events without offset (default replay)', () => {
     /**
      * Subscribing to DustLedger events without providing an offset should replay
@@ -134,7 +45,7 @@ describe('dust ledger event subscriptions', () => {
      * @and the subscription must maintain strict event ordering via monotonic IDs
      */
     test('streams events in strictly increasing order', async () => {
-      const received = await collectValidDustEvents(3);
+      const received = await collectValidDustEvents(indexerWsClient, eventCoordinator, 3);
 
       expect(received.length === 3, `Expected 3 events, got: ${received.length}`).toBe(true);
 
@@ -158,11 +69,11 @@ describe('dust ledger event subscriptions', () => {
      * @and the subscription must maintain strict event ordering via monotonic IDs
      */
     test('streams events starting from the specified ID', async () => {
-      const firstEvent = await collectValidDustEvents(1);
+      const firstEvent = await collectValidDustEvents(indexerWsClient, eventCoordinator, 3);
       const latestId = firstEvent[0].data!.dustLedgerEvents.maxId;
 
       const startId = Math.max(latestId - 5, 0);
-      const received = await collectValidDustEvents(3, startId);
+      const received = await collectValidDustEvents(indexerWsClient, eventCoordinator, 3, startId);
       expect(received.length).toBe(3);
 
       const ids = received.map((e) => e.data!.dustLedgerEvents.id);
@@ -187,11 +98,11 @@ describe('dust ledger event subscriptions', () => {
      * @then each received event must match the DustLedgerEventsUnionSchema definition
      */
     test('validates historical dust events against schema', async () => {
-      const firstEvent = await collectValidDustEvents(1);
+      const firstEvent = await await collectValidDustEvents(indexerWsClient, eventCoordinator, 1);
       const latestId = firstEvent[0].data!.dustLedgerEvents.maxId;
 
       const fromId = Math.max(latestId - 5, 0);
-      const received = await collectValidDustEvents(5, fromId);
+      const received = await collectValidDustEvents(indexerWsClient, eventCoordinator, 5, fromId);
       received
         .filter((msg) => msg.data?.dustLedgerEvents)
         .forEach((msg) => {
@@ -207,7 +118,7 @@ describe('dust ledger event subscriptions', () => {
     });
   });
 
-  describe('subscription error handlin', () => {
+  describe('subscription error handling', () => {
     /**
      * Subscribing with a query that references a nonexistent field should return
      * a GraphQL validation error instead of streaming dust ledger events.
@@ -218,8 +129,7 @@ describe('dust ledger event subscriptions', () => {
      * @and no dust ledger events should be streamed
      */
     test('should return an error for unknown field', async () => {
-      const errorMessage = await collectDustEventError(null, true);
-
+      const errorMessage = await collectDustEventError(indexerWsClient, null, true);
       expect(errorMessage).toBe(`Unknown field "unknownField" on type "DustLedgerEvent".`);
     });
 
@@ -231,8 +141,7 @@ describe('dust ledger event subscriptions', () => {
      * @then an error should be returned
      */
     test('rejects negative offset ID with an error', async () => {
-      const errorMessage = await collectDustEventError({ id: -50 });
-
+      const errorMessage = await collectDustEventError(indexerWsClient, { id: -50 });
       expect(errorMessage).toBe(`Failed to parse "Int": Invalid number`);
     });
   });
