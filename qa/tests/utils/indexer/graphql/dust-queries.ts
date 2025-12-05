@@ -20,6 +20,7 @@ export const DUST_GENERATION_STATUS_BODY_FRAGMENT = `
   nightBalance
   generationRate
   currentCapacity
+  maxCapacity
 `;
 
 export const GET_DUST_GENERATION_STATUS = `

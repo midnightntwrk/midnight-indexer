@@ -597,7 +597,11 @@ class ToolkitWrapper {
           total: total,
         };
       }
-    } catch {}
+    } catch {
+      log.error(
+        `Could not find expected dust balance structure in output. Found ${jsonObjects.length} JSON object(s).`,
+      );
+    }
 
     throw new Error(
       `Could not find expected dust balance structure in output. Found ${jsonObjects.length} JSON object(s).`,

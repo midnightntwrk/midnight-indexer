@@ -79,7 +79,7 @@ class TestDataProvider {
 
     if (envName !== 'undeployed') {
       throw new Error(
-        `Please provide a funding seed for ${envName} environment by setting up a varialbe named FUNDING_SEED_${envNameUppercase}`,
+        `Please provide a funding seed for ${envName} environment by setting up an env varialbe named FUNDING_SEED_${envNameUppercase}`,
       );
     }
 
@@ -355,11 +355,11 @@ class TestDataProvider {
       const baseDir = `data/static/${envName}`;
       try {
         this.cardanoRewardAddresses = importJsoncData(
-          `${baseDir}/cardano-stake-keys.jsonc`,
+          `${baseDir}/cardano-stake-addresses.jsonc`,
         ) as Record<string, string>;
       } catch (_) {
         throw new Error(
-          `Test data provider is missing the cardano stake key file for ${envName} environment`,
+          `Test data provider is missing the cardano stake address file for ${envName} environment`,
         );
       }
     }
@@ -368,7 +368,7 @@ class TestDataProvider {
       this.cardanoRewardAddresses[property] === undefined
     ) {
       throw new Error(
-        `Test data provider is missing the cardano stake key data for ${property} for ${envName} environment`,
+        `Test data provider is missing the cardano stake address data for ${property} for ${envName} environment`,
       );
     }
     return this.cardanoRewardAddresses[property];

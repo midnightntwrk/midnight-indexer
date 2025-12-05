@@ -17,6 +17,7 @@ import fs from 'fs';
 import log from '@utils/logging/logger';
 
 export enum EnvironmentName {
+  MAINNET = 'mainnet',
   UNDEPLOYED = 'undeployed',
   NODEDEV01 = 'node-dev-01',
   DEVNET = 'devnet',
@@ -25,6 +26,17 @@ export enum EnvironmentName {
   PREPROD = 'preprod',
   TESTNET = 'testnet',
   TESTNET02 = 'testnet02',
+}
+
+export enum CardanoNetwork {
+  MAINNET = 'mainnet',
+  PREVIEW = 'preview',
+  PREPROD = 'preprod',
+}
+
+export enum CardanoNetworkType {
+  MAINNET = 'mainnet',
+  TESTNET = 'testnet',
 }
 
 type HostConfig = {
@@ -136,6 +148,43 @@ export class Environment {
     return this.envName;
   }
 
+  /**
+   * Get the Cardano network connected to a given Midnight environment.
+   * @param envName - The Midnight environment name to get the Cardano network for.
+   *                  If not provided, the current environment name will be used.
+   * @returns The Cardano network.
+   */
+  getCardanoNetwork(envName: EnvironmentName | undefined = undefined): CardanoNetwork {
+    const targetenv: EnvironmentName = envName || this.getCurrentEnvironmentName();
+    switch (targetenv) {
+      case EnvironmentName.MAINNET:
+        return CardanoNetwork.MAINNET;
+      case EnvironmentName.PREPROD:
+        return CardanoNetwork.PREPROD;
+      case EnvironmentName.PREVIEW:
+      case EnvironmentName.NODEDEV01:
+      case EnvironmentName.QANET:
+        return CardanoNetwork.PREVIEW;
+      default:
+        throw new Error(`Unsupported environment name: ${this.envName}`);
+    }
+  }
+
+  /**
+   * Get the Cardano network type for a given Cardano network.
+   * @param network - The Cardano network to get the type for.
+   *                  If not provided, the current Cardano network will be used.
+   * @returns The Cardano network type.
+   */
+  getCardanoNetworkType(network: CardanoNetwork | undefined = undefined): CardanoNetworkType {
+    const cardanoNetwork = network || this.getCardanoNetwork();
+    return cardanoNetwork === 'mainnet' ? CardanoNetworkType.MAINNET : CardanoNetworkType.TESTNET;
+  }
+
+  /**
+   * Get all the known/supported Midnightenvironment names.
+   * @returns All the environment names currently known/supported.
+   */
   getAllEnvironmentNames(): string[] {
     return Object.values(EnvironmentName);
   }
