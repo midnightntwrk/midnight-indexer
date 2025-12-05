@@ -133,10 +133,10 @@ describe('dust generation status queries', () => {
       const registeredStatus = dustGenerationStatus![0];
       expect(registeredStatus?.registered).toBe(true);
       expect(registeredStatus?.dustAddress).toBeDefined();
-      expect(registeredStatus?.nightBalance).toBeGreaterThan(0);
-      expect(registeredStatus?.generationRate).toBeGreaterThan(0);
-      expect(registeredStatus?.currentCapacity).toBeGreaterThan(0);
-      expect(registeredStatus?.maxCapacity).toBeGreaterThan(0);
+      expect(BigInt(registeredStatus?.nightBalance)).toBeGreaterThan(0n);
+      expect(BigInt(registeredStatus?.generationRate)).toBeGreaterThan(0n);
+      expect(BigInt(registeredStatus?.currentCapacity)).toBeGreaterThan(0n);
+      expect(BigInt(registeredStatus?.maxCapacity)).toBeGreaterThan(0n);
     });
 
     /**
@@ -204,7 +204,6 @@ describe('dust generation status queries', () => {
       expect(nonRegisteredResponse).toBeSuccess();
       const registeredStatus = nonRegisteredResponse.data?.dustGenerationStatus[0];
       expect(registeredStatus?.registered).toBe(false);
-      expect(registeredStatus?.dustAddress).toBeDefined();
       expect(registeredStatus?.dustAddress).toBeNull();
       expect(registeredStatus?.nightBalance).toBe('0');
       expect(registeredStatus?.generationRate).toBe('0');
@@ -310,8 +309,9 @@ describe('dust generation status queries', () => {
       const expectedGenerationRate = nightBalanceInStars * BigInt(GENERATION_DECAY_RATE);
       expect(status?.generationRate).toBe(expectedGenerationRate.toString());
 
-      // Current capacity should be the same as the expected calculated max capacity
+      // Max capacity should equal nightBalance * MAX_SPECK_PER_STAR
       expect(BigInt(status?.maxCapacity)).toBe(BigInt(nightBalanceInStars) * MAX_SPECK_PER_STAR);
+      // Current capacity should be less than or equal to max capacity
       expect(BigInt(status?.currentCapacity)).toBeLessThanOrEqual(BigInt(status?.maxCapacity));
     });
 
@@ -366,9 +366,9 @@ describe('dust generation status queries', () => {
   describe('a dust generation status query with multiple valid Cardano reward addresses', () => {
     /**
      * A dust generation status query with multiple Cardano reward addresses returns multiple statuses
-     * given we send the request for 10 addresses (which is the limit after which the indexer returns an error)
+     * given we send the request for multiple addresses (up to 10, which is the limit after which the indexer returns an error)
      *
-     * @given we have 10 Cardano reward addresses
+     * @given we have exactly 10 Cardano reward addresses
      * @when we send a dust generation status query with those addresses
      * @then Indexer should return statuses for each address in the same order
      */
@@ -378,31 +378,40 @@ describe('dust generation status queries', () => {
         testKey: 'PM-18410',
       };
 
-      let registeredRewardAddress: string;
-      let nonRegisteredRewardAddress: string;
+      const rewardAddresses = [];
+      const maxAcceptedAddresses = 10;
+
+      // To get 10 cardano addresses in the request, we gather 2 ...
+      let registeredRewardAddressWithDust: string;
+      let registeredRewardAddressWithoutDust: string;
       try {
-        registeredRewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust');
-        nonRegisteredRewardAddress = dataProvider.getCardanoRewardAddress('non-registered');
+        registeredRewardAddressWithDust =
+          dataProvider.getCardanoRewardAddress('registered-with-dust');
+        registeredRewardAddressWithoutDust =
+          dataProvider.getCardanoRewardAddress('registered-without-dust');
       } catch (error) {
         log.warn(error);
         ctx.skip?.(true, (error as Error).message);
       }
 
-      const rewardAddresses = [registeredRewardAddress!, nonRegisteredRewardAddress!];
+      // ... and repeat them 5 times so we get 10 addresses in the request
+      for (let i = 0; i < maxAcceptedAddresses / 2; i++) {
+        rewardAddresses.push(registeredRewardAddressWithDust!);
+        rewardAddresses.push(registeredRewardAddressWithoutDust!);
+      }
       const response: DustGenerationStatusResponse =
         await indexerHttpClient.getDustGenerationStatus(rewardAddresses);
 
       expect(response).toBeSuccess();
       expect(response.data?.dustGenerationStatus).toBeDefined();
-      expect(response.data?.dustGenerationStatus).toHaveLength(2);
+      expect(response.data?.dustGenerationStatus).toHaveLength(maxAcceptedAddresses);
 
-      // Verify order is preserved (normalize case for string comparison)
-      expect(response.data?.dustGenerationStatus[0].cardanoRewardAddress.toLowerCase()).toBe(
-        registeredRewardAddress!.toLowerCase(),
-      );
-      expect(response.data?.dustGenerationStatus[1].cardanoRewardAddress.toLowerCase()).toBe(
-        nonRegisteredRewardAddress!.toLowerCase(),
-      );
+      // Verify order is preserved
+      for (let i = 0; i < rewardAddresses.length; i++) {
+        expect(response.data?.dustGenerationStatus[i].cardanoRewardAddress).toBe(
+          rewardAddresses[i],
+        );
+      }
     });
 
     /**
@@ -454,7 +463,7 @@ describe('dust generation status queries', () => {
      *
      * @given we have 11 Cardano reward addresses
      * @when we send a dust generation status query with those addresses
-     * @then Indexer should return status for each address in the same order
+     * @then Indexer should return an error
      */
     test('should return an error given the number of addresses is greater than 10', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
@@ -625,7 +634,7 @@ describe('dust generation status queries', () => {
         ctx.skip?.(true, (error as Error).message);
       }
 
-      // Send the same key twice
+      // Send the same address twice
       const duplicateRewardAddresses = [registeredRewardAddress!, registeredRewardAddress!];
       const response: DustGenerationStatusResponse =
         await indexerHttpClient.getDustGenerationStatus(duplicateRewardAddresses);
@@ -635,10 +644,10 @@ describe('dust generation status queries', () => {
       expect(response.data?.dustGenerationStatus).toHaveLength(2);
 
       // Both results should have the same reward address
-      expect(response.data?.dustGenerationStatus[0].cardanoRewardAddress.toLocaleLowerCase()).toBe(
+      expect(response.data?.dustGenerationStatus[0].cardanoRewardAddress.toLowerCase()).toBe(
         registeredRewardAddress!.toLowerCase(),
       );
-      expect(response.data?.dustGenerationStatus[1].cardanoRewardAddress.toLocaleLowerCase()).toBe(
+      expect(response.data?.dustGenerationStatus[1].cardanoRewardAddress.toLowerCase()).toBe(
         registeredRewardAddress!.toLowerCase(),
       );
     });
