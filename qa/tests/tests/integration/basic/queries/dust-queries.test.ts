@@ -133,6 +133,10 @@ describe('dust generation status queries', () => {
       const registeredStatus = dustGenerationStatus![0];
       expect(registeredStatus?.registered).toBe(true);
       expect(registeredStatus?.dustAddress).toBeDefined();
+      expect(registeredStatus?.nightBalance).toBeGreaterThan(0);
+      expect(registeredStatus?.generationRate).toBeGreaterThan(0);
+      expect(registeredStatus?.currentCapacity).toBeGreaterThan(0);
+      expect(registeredStatus?.maxCapacity).toBeGreaterThan(0);
     });
 
     /**
@@ -146,6 +150,7 @@ describe('dust generation status queries', () => {
     test('should give the DUST destination address for the expected network when Cardano reward address is registered', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['Query', 'Dust', 'Tokenomics', 'cNgD'],
+        testKey: 'PM-17341',
       };
 
       let registeredRewardAddress: string;
@@ -569,7 +574,7 @@ describe('dust generation status queries', () => {
     test('should return an error reporting the target network mismatch', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['Query', 'Dust', 'Tokenomics', 'cNgD'],
-        testKey: 'PM-18983',
+        testKey: 'PM-18911',
       };
 
       ctx.skip?.(
