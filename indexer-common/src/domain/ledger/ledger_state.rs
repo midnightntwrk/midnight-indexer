@@ -68,6 +68,27 @@ use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 const OUTPUT_INDEX_ZERO: u32 = 0;
 
+/// Parse a hex-encoded merkle root from the `midnight_dustRootHistory` RPC response.
+/// Handles:
+/// - "00" → 32 zero bytes (empty/default root at genesis).
+/// - 64 hex chars → 32 bytes directly.
+/// - 66 hex chars → 33 bytes with prefix, skip first byte.
+fn parse_dust_root_hex(hex: &str, name: &'static str) -> Result<[u8; 32], Error> {
+    // Handle "00" shorthand for zero merkle root (genesis state).
+    if hex == "00" {
+        return Ok([0u8; 32]);
+    }
+
+    let bytes = const_hex::decode(hex).map_err(|error| Error::InvalidHex(name, error))?;
+
+    // Handle different byte lengths from RPC.
+    match bytes.len() {
+        32 => Ok(bytes.try_into().unwrap()),
+        33 => Ok(bytes[1..].try_into().unwrap()),
+        _ => Err(Error::InvalidFieldElement(name)),
+    }
+}
+
 static STRICTNESS_V6: LazyLock<WellFormedStrictnessV6> = LazyLock::new(|| {
     let mut strictness = WellFormedStrictnessV6::default();
     strictness.enforce_balancing = false;
@@ -112,11 +133,10 @@ impl LedgerState {
                 ledger_state,
                 block_fullness,
             } => {
-                // Parse hex strings to bytes.
-                let utxo_root_bytes = const_hex::decode(utxo_root_hex)
-                    .map_err(|error| Error::InvalidHex("utxo_root", error))?;
-                let generation_root_bytes = const_hex::decode(generation_root_hex)
-                    .map_err(|error| Error::InvalidHex("generation_root", error))?;
+                // Parse hex strings to 32-byte arrays.
+                let utxo_root_bytes = parse_dust_root_hex(utxo_root_hex, "utxo_root")?;
+                let generation_root_bytes =
+                    parse_dust_root_hex(generation_root_hex, "generation_root")?;
 
                 // Construct MerkleTreeDigest from Fr.
                 let utxo_fr = FrV6::from_le_bytes(&utxo_root_bytes)
