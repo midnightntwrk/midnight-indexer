@@ -17,7 +17,8 @@ RUN cargo build -p chain-indexer --locked --features cloud --profile $PROFILE &&
     mv "./target/${PROFILE/dev/debug}/chain-indexer" /runtime/usr/local/bin && \
     mv /build/chain-indexer/bin/entrypoint.sh /runtime/usr/local/bin && \
     mkdir -p /runtime/opt/chain-indexer && \
-    mv /build/chain-indexer/config.yaml /runtime/opt/chain-indexer
+    mv /build/chain-indexer/config.yaml /runtime/opt/chain-indexer && \
+    mv /build/chain-indexer/res /runtime/opt/chain-indexer
 
 FROM debian:trixie-slim@sha256:66b37a5078a77098bfc80175fb5eb881a3196809242fd295b25502854e12cbec AS runtime
 RUN apt-get update && \

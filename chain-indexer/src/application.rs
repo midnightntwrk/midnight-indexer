@@ -27,8 +27,8 @@ use byte_unit::{Byte, UnitType};
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{
-    BlockIndexed, LedgerStateStorage, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxoIndexed,
-    ledger,
+    BlockIndexed, LedgerStateStorage, NetworkId, PROTOCOL_VERSION_000_018_000, ProtocolVersion,
+    Publisher, UnshieldedUtxoIndexed, ledger,
 };
 use log::{debug, error, info, warn};
 use parking_lot::RwLock;
@@ -99,13 +99,20 @@ pub async fn run(
             Ok::<_, anyhow::Error>((ledger_state.into(), Some(block_height)))
         })
         .transpose()?
-        .unwrap_or_else(|| (LedgerState::new(network_id.clone()), Default::default()));
+        .map_or_else(
+            || {
+                // No stored ledger state exists. Load from bundled genesis state file to ensure
+                // the indexer has the correct initial Merkle tree state including offline genesis
+                // commitments (e.g., glacier drop funding UTXOs).
+                load_genesis_state(&network_id)
+            },
+            |(ledger_state, block_height)| Ok((ledger_state, block_height)),
+        )?;
 
     // Reset ledger state if storage is behind ledger state storage (which should not happen during
     // normal operations, but e.g. by a database reset).
     if ledger_state_block_height > highest_height {
-        ledger_state_block_height = None;
-        ledger_state = LedgerState::new(network_id);
+        (ledger_state, ledger_state_block_height) = load_genesis_state(&network_id)?;
     }
 
     // Apply the transactions to the ledger state from the saved ledger state height (exclusively)
@@ -471,6 +478,48 @@ fn format_bytes(value: impl Into<Byte>) -> String {
     let unit = bytes.get_unit();
 
     format!("{value:.3} {unit}")
+}
+
+/// Load genesis state from bundled file based on network_id.
+/// Falls back to empty LedgerState if the file doesn't exist (e.g., in tests).
+///
+/// Returns `(LedgerState, Option<u32>)` where the second element is:
+/// - `Some(0)` if genesis state was loaded from file (block 0 is already processed)
+/// - `None` if falling back to empty state (no blocks processed yet)
+///
+/// TODO: This is a temporary fix to make preview green again. The genesis state files are
+/// copied from midnight-node and bundled here. A more maintainable solution should be
+/// implemented (e.g., config option for genesis file path, or proper distribution mechanism).
+fn load_genesis_state(network_id: &NetworkId) -> anyhow::Result<(LedgerState, Option<u32>)> {
+    let genesis_filename = format!("genesis_state_{network_id}.mn");
+
+    // Try paths in order: Docker image path, then local development path
+    let paths = [
+        format!("res/genesis/{genesis_filename}"),
+        format!("chain-indexer/res/genesis/{genesis_filename}"),
+    ];
+
+    for genesis_file in &paths {
+        match std::fs::read(genesis_file) {
+            Ok(bytes) => {
+                info!(genesis_file:%; "loading genesis state from bundled file");
+                let ledger_state =
+                    ledger::LedgerState::deserialize(&bytes, PROTOCOL_VERSION_000_018_000)
+                        .context("deserialize genesis state")?;
+                // Genesis state file represents state AFTER block 0, so return Some(0)
+                return Ok((ledger_state.into(), Some(0)));
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                continue;
+            }
+            Err(err) => {
+                return Err(err).with_context(|| format!("read genesis state file {genesis_file}"));
+            }
+        }
+    }
+
+    warn!(paths:?; "genesis state file not found in any path, starting with empty state");
+    Ok((LedgerState::new(network_id.clone()), None))
 }
 
 #[cfg(test)]
