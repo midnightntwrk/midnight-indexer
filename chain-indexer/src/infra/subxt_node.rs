@@ -102,12 +102,20 @@ impl SubxtNode {
 
     /// Call the `midnight_dustRootHistory` RPC to get genesis dust root_history entries.
     /// Returns (utxo_root_hex, generation_root_hex) as hex-encoded 32-byte digests.
+    /// Queries at the genesis block to get the actual genesis-seeded values (not pruned).
     pub async fn get_dust_root_history(
         &self,
         timestamp_secs: u64,
     ) -> Result<(String, String), SubxtNodeError> {
-        // Build params array: [timestamp_secs, null].
-        let params_value = serde_json::json!([timestamp_secs, null]);
+        // Use genesis block hash to query state at genesis, not latest.
+        // The node seeds root_history during offline genesis construction, but those
+        // entries get pruned from current state after dust_grace_period (3 hours).
+        // Querying at genesis block returns the actual genesis-seeded values.
+        let genesis_hash = self.default_online_client.genesis_hash();
+        let genesis_hash_hex = format!("{:#x}", genesis_hash);
+
+        // Build params array: [timestamp_secs, genesis_hash].
+        let params_value = serde_json::json!([timestamp_secs, genesis_hash_hex]);
         let params: Box<RawValue> = serde_json::value::to_raw_value(&params_value)
             .map_err(|error| SubxtNodeError::GetDustRootHistory(error.into()))?;
 
