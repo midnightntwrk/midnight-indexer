@@ -39,6 +39,15 @@ where
         &mut self,
         after: Option<BlockInfo>,
     ) -> impl Stream<Item = Result<Block, Self::Error>>;
+
+    /// Get dust root history entries from the node for a given timestamp.
+    /// Returns hex-encoded merkle tree digests for (utxo_root, generation_root).
+    /// This is used to seed genesis root_history state that the node creates during
+    /// offline genesis construction.
+    async fn get_dust_root_history(
+        &self,
+        timestamp_secs: u64,
+    ) -> Result<(String, String), Self::Error>;
 }
 
 #[derive(Debug, Clone)]

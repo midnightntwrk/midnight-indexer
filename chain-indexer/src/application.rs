@@ -88,24 +88,68 @@ pub async fn run(
         .context("get contract action count")?;
     let metrics = Metrics::new(highest_height, transaction_count, contract_action_count);
 
+    // BEGINNING timestamp: Genesis-seeded timestamp for dust root_history.
+    // This is the timestamp used by the node during offline genesis construction.
+    // Source: midnight-node/util/toolkit/src/genesis_generator.rs (GLACIER_DROP_START_UNIX_EPOC)
+    const BEGINNING_TIMESTAMP_SECS: u64 = 1754395200;
+
+    // Helper to make a fresh ledger state with seeded genesis root_history.
+    async fn make_fresh_ledger_state(
+        network_id: NetworkId,
+        node: &impl Node,
+    ) -> anyhow::Result<LedgerState> {
+        let mut ledger_state = LedgerState::new(network_id);
+
+        // Seed genesis dust root_history from node RPC.
+        // The node seeds these entries during offline genesis construction at the BEGINNING
+        // timestamp. The indexer needs to match this state, otherwise proof verification
+        // will fail because find_predecessor() returns different values.
+        match node.get_dust_root_history(BEGINNING_TIMESTAMP_SECS).await {
+            Ok((utxo_root_hex, generation_root_hex)) => {
+                info!(
+                    utxo_root_hex,
+                    generation_root_hex,
+                    timestamp_secs = BEGINNING_TIMESTAMP_SECS;
+                    "seeding genesis dust root_history from node"
+                );
+                ledger_state
+                    .seed_genesis_root_history(
+                        BEGINNING_TIMESTAMP_SECS,
+                        &utxo_root_hex,
+                        &generation_root_hex,
+                    )
+                    .context("seed genesis root_history")?;
+            }
+            Err(error) => {
+                warn!(error:% = error; "failed to get dust root history from node, continuing without seeding genesis state.");
+            }
+        }
+
+        Ok(ledger_state)
+    }
+
     // Load ledger state.
-    let (mut ledger_state, mut ledger_state_block_height) = ledger_state_storage
+    let (mut ledger_state, mut ledger_state_block_height) = match ledger_state_storage
         .load_ledger_state()
         .await
         .context("load ledger state")?
-        .map(|(ledger_state, block_height, protocol_version)| {
+    {
+        Some((ledger_state, block_height, protocol_version)) => {
             let ledger_state = ledger::LedgerState::deserialize(&ledger_state, protocol_version)
                 .context("deserialize ledger state")?;
-            Ok::<_, anyhow::Error>((ledger_state.into(), Some(block_height)))
-        })
-        .transpose()?
-        .unwrap_or_else(|| (LedgerState::new(network_id.clone()), Default::default()));
+            (ledger_state.into(), Some(block_height))
+        }
+        None => {
+            let ledger_state = make_fresh_ledger_state(network_id.clone(), &node).await?;
+            (ledger_state, None)
+        }
+    };
 
     // Reset ledger state if storage is behind ledger state storage (which should not happen during
     // normal operations, but e.g. by a database reset).
     if ledger_state_block_height > highest_height {
         ledger_state_block_height = None;
-        ledger_state = LedgerState::new(network_id);
+        ledger_state = make_fresh_ledger_state(network_id.clone(), &node).await?;
     }
 
     // Apply the transactions to the ledger state from the saved ledger state height (exclusively)
@@ -518,6 +562,14 @@ mod tests {
         ) -> impl Stream<Item = Result<node::Block, Self::Error>> {
             stream::iter([&*BLOCK_0, &*BLOCK_1, &*BLOCK_2, &*BLOCK_3])
                 .map(|block| Ok(block.to_owned()))
+        }
+
+        async fn get_dust_root_history(
+            &self,
+            _timestamp_secs: u64,
+        ) -> Result<(String, String), Self::Error> {
+            // Return dummy values for mock.
+            Ok(("0".repeat(64), "0".repeat(64)))
         }
     }
 

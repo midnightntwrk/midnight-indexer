@@ -34,6 +34,7 @@ use indexer_common::{
 };
 use log::{debug, info, warn};
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use std::{future::ready, time::Duration};
 use subxt::{
     OnlineClient, SubstrateConfig,
@@ -97,6 +98,30 @@ impl SubxtNode {
             compatible_online_client: None,
             subscription_recovery_timeout,
         })
+    }
+
+    /// Call the `midnight_dustRootHistory` RPC to get genesis dust root_history entries.
+    /// Returns (utxo_root_hex, generation_root_hex) as hex-encoded 32-byte digests.
+    pub async fn get_dust_root_history(
+        &self,
+        timestamp_secs: u64,
+    ) -> Result<(String, String), SubxtNodeError> {
+        // Build params array: [timestamp_secs, null].
+        let params_value = serde_json::json!([timestamp_secs, null]);
+        let params: Box<RawValue> = serde_json::value::to_raw_value(&params_value)
+            .map_err(|error| SubxtNodeError::GetDustRootHistory(error.into()))?;
+
+        let raw_result = self
+            .rpc_client
+            .request("midnight_dustRootHistory".to_string(), Some(params))
+            .await
+            .map_err(|error| SubxtNodeError::GetDustRootHistory(error.into()))?;
+
+        // Deserialize the result.
+        let result: (String, String) = serde_json::from_str(raw_result.get())
+            .map_err(|error| SubxtNodeError::GetDustRootHistory(error.into()))?;
+
+        Ok(result)
     }
 
     async fn compatible_online_client(
@@ -441,6 +466,13 @@ impl Node for SubxtNode {
             }
         }
     }
+
+    async fn get_dust_root_history(
+        &self,
+        timestamp_secs: u64,
+    ) -> Result<(String, String), Self::Error> {
+        SubxtNode::get_dust_root_history(self, timestamp_secs).await
+    }
 }
 
 /// Config for node connection.
@@ -532,6 +564,9 @@ pub enum SubxtNodeError {
 
     #[error("cannot get zswap state root")]
     GetZswapStateRoot(#[source] BoxError),
+
+    #[error("cannot get dust root history")]
+    GetDustRootHistory(#[source] BoxError),
 
     #[error("cannot get transaction cost")]
     GetTransactionCost(#[source] BoxError),

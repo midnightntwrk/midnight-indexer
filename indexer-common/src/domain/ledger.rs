@@ -90,6 +90,12 @@ pub enum Error {
 
     #[error("cannot calculate transaction cost")]
     TransactionCost(#[source] BoxError),
+
+    #[error("invalid hex encoding for {0}")]
+    InvalidHex(&'static str, #[source] const_hex::FromHexError),
+
+    #[error("invalid field element for {0}")]
+    InvalidFieldElement(&'static str),
 }
 
 /// Extension methods for `Serializable` implementations.

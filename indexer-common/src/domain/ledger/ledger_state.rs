@@ -36,7 +36,8 @@ use midnight_coin_structure_v6::{
 };
 use midnight_ledger_v6::{
     dust::{
-        DustGenerationInfo as DustGenerationInfoV6, InitialNonce as InitialNonceV6,
+        DustGenerationInfo as DustGenerationInfoV6, DustGenerationState as DustGenerationStateV6,
+        DustState as DustStateV6, DustUtxoState as DustUtxoStateV6, InitialNonce as InitialNonceV6,
         QualifiedDustOutput as QualifiedDustOutputV6,
     },
     events::{Event as EventV6, EventDetails as EventDetailsV6},
@@ -54,10 +55,13 @@ use midnight_onchain_runtime_v6::context::BlockContext as BlockContextV6;
 use midnight_serialize_v6::{
     Deserializable as DeserializableV6, tagged_deserialize as tagged_deserialize_v6,
 };
-use midnight_storage_v6::DefaultDB as DefaultDBV6;
-use midnight_transient_crypto_v6::merkle_tree::{
-    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV6,
-    MerkleTreeDigest as MerkleTreeDigestV6, TreeInsertionPath as TreeInsertionPathV6,
+use midnight_storage_v6::{DefaultDB as DefaultDBV6, arena::Sp as SpV6};
+use midnight_transient_crypto_v6::{
+    curve::Fr as FrV6,
+    merkle_tree::{
+        MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV6,
+        MerkleTreeDigest as MerkleTreeDigestV6, TreeInsertionPath as TreeInsertionPathV6,
+    },
 };
 use midnight_zswap_v6::ledger::State as ZswapStateV6;
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
@@ -85,6 +89,78 @@ impl LedgerState {
         Self::V6 {
             ledger_state: LedgerStateV6::new(network_id),
             block_fullness: Default::default(),
+        }
+    }
+
+    /// Seed the genesis root_history entries for dust UTXO and generation states.
+    /// The node seeds these entries during offline genesis construction at the BEGINNING timestamp.
+    /// The indexer needs to call this at startup to match the node's state, otherwise proof
+    /// verification will fail because `find_predecessor()` returns different values.
+    /// # Arguments
+    /// * `timestamp_secs` - The timestamp in seconds (e.g., 1754395200 for BEGINNING)
+    /// * `utxo_root_hex` - Hex-encoded 32-byte merkle tree digest for dust UTXO root_history
+    /// * `generation_root_hex` - Hex-encoded 32-byte merkle tree digest for dust generation
+    ///   root_history
+    pub fn seed_genesis_root_history(
+        &mut self,
+        timestamp_secs: u64,
+        utxo_root_hex: &str,
+        generation_root_hex: &str,
+    ) -> Result<(), Error> {
+        match self {
+            Self::V6 {
+                ledger_state,
+                block_fullness,
+            } => {
+                // Parse hex strings to bytes.
+                let utxo_root_bytes = const_hex::decode(utxo_root_hex)
+                    .map_err(|error| Error::InvalidHex("utxo_root", error))?;
+                let generation_root_bytes = const_hex::decode(generation_root_hex)
+                    .map_err(|error| Error::InvalidHex("generation_root", error))?;
+
+                // Construct MerkleTreeDigest from Fr.
+                let utxo_fr = FrV6::from_le_bytes(&utxo_root_bytes)
+                    .ok_or(Error::InvalidFieldElement("utxo_root"))?;
+                let generation_fr = FrV6::from_le_bytes(&generation_root_bytes)
+                    .ok_or(Error::InvalidFieldElement("generation_root"))?;
+
+                let utxo_digest = MerkleTreeDigestV6::from(utxo_fr);
+                let generation_digest = MerkleTreeDigestV6::from(generation_fr);
+
+                // Create timestamp.
+                let timestamp = TimestampV6::from_secs(timestamp_secs);
+
+                // Clone and modify the dust state.
+                let dust_state = ledger_state.dust.deref().clone();
+                let new_utxo = DustUtxoStateV6 {
+                    root_history: dust_state.utxo.root_history.insert(timestamp, utxo_digest),
+                    ..dust_state.utxo
+                };
+                let new_generation = DustGenerationStateV6 {
+                    root_history: dust_state
+                        .generation
+                        .root_history
+                        .insert(timestamp, generation_digest),
+                    ..dust_state.generation
+                };
+                let new_dust_state = DustStateV6 {
+                    utxo: new_utxo,
+                    generation: new_generation,
+                };
+
+                // Create new ledger state with updated dust.
+                let new_ledger_state = LedgerStateV6 {
+                    dust: SpV6::new(new_dust_state),
+                    ..ledger_state.clone()
+                };
+
+                *self = Self::V6 {
+                    ledger_state: new_ledger_state,
+                    block_fullness: *block_fullness,
+                };
+
+                Ok(())
+            }
         }
     }
 
