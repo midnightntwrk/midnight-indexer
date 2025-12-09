@@ -359,9 +359,20 @@ async fn index_block(
 ) -> Result<LedgerState, anyhow::Error> {
     let (mut block, transactions) = block.into();
 
-    let (transactions, ledger_parameters) = ledger_state
-        .apply_node_transactions(transactions, block.parent_hash, block.timestamp)
-        .context("apply node transactions to ledger state")?;
+    // Skip applying block 0 transactions if ledger state was loaded from genesis file.
+    // Genesis state file already contains state AFTER block 0 transactions were applied,
+    // so re-applying them would trigger replay protection errors.
+    let skip_genesis_block =
+        block.height == 0 && ledger_state.zswap_merkle_tree_root() == block.zswap_state_root;
+
+    let (transactions, ledger_parameters) = if skip_genesis_block {
+        info!("skipping block 0 transaction application (genesis state already loaded)");
+        ledger_state.skip_node_transactions(transactions, block.parent_hash, block.timestamp)?
+    } else {
+        ledger_state
+            .apply_node_transactions(transactions, block.parent_hash, block.timestamp)
+            .context("apply node transactions to ledger state")?
+    };
     debug!(transactions:?; "transactions applied to ledger state");
 
     if ledger_state.zswap_merkle_tree_root() != block.zswap_state_root {

@@ -99,6 +99,33 @@ impl LedgerState {
         Ok((transactions, ledger_parameters))
     }
 
+    /// Skip applying node transactions (for genesis block when state was loaded from file).
+    /// Converts transactions to domain format without modifying ledger state.
+    pub fn skip_node_transactions(
+        &mut self,
+        transactions: impl IntoIterator<Item = node::Transaction>,
+        _block_parent_hash: BlockHash,
+        _block_timestamp: u64,
+    ) -> Result<(Vec<Transaction>, LedgerParameters), Error> {
+        let transactions = transactions
+            .into_iter()
+            .map(|transaction| match transaction {
+                node::Transaction::Regular(transaction) => {
+                    Transaction::Regular(RegularTransaction::from(transaction).into())
+                }
+                node::Transaction::System(transaction) => {
+                    Transaction::System(SystemTransaction::from(transaction))
+                }
+            })
+            .collect();
+
+        // Return current ledger parameters without calling finalize_apply_transactions
+        // since genesis state already has post_block_update applied
+        let ledger_parameters = self.get_ledger_parameters();
+
+        Ok((transactions, ledger_parameters))
+    }
+
     /// The highest used zswap state index or none.
     pub fn highest_zswap_state_index(&self) -> Option<u64> {
         (self.zswap_first_free() != 0).then(|| self.zswap_first_free() - 1)

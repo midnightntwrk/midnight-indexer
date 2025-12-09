@@ -314,6 +314,16 @@ impl LedgerState {
             }
         }
     }
+
+    /// Get current ledger parameters without calling post_block_update.
+    /// Used when skipping genesis block application (state already loaded from file).
+    pub fn get_ledger_parameters(&self) -> LedgerParameters {
+        match self {
+            Self::V6 { ledger_state, .. } => {
+                LedgerParameters::V6(ledger_state.parameters.deref().to_owned())
+            }
+        }
+    }
 }
 
 /// Facade for ledger parameters across supported (protocol) versions.
