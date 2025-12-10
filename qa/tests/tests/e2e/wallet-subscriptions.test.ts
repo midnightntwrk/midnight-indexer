@@ -15,7 +15,7 @@
 
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
-import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import { UnshieldedTransactionEvent, isUnshieldedTransaction } from '@utils/indexer/indexer-types';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
 import {
@@ -316,42 +316,6 @@ describe.sequential('wallet event subscriptions', { timeout: 200_000 }, () => {
 
       // Ensure B1 did NOT receive the B2 transaction
       expect(latestB1Tx.transaction.hash).not.toBe(latestB2Tx.transaction.hash);
-    });
-  });
-
-  describe('transaction failure scenario', () => {
-    /**
-     * Ensures that failed unshielded transactions do NOT produce any UTXOs.
-     *
-     * @given a wallet submits an invalid unshielded transaction
-     * @when the node rejects the transaction with TransactionResult::Failure
-     * @then the indexer must ignore the transaction entirely — no UTXOs are created, and GetTransactionByOffset must return an empty result
-     */
-    test('should NOT create UTXOs for a failed unshielded transaction', async () => {
-      const sourceSeed = '0000000000000000000000000000000000000000000000000000000000000001';
-      const destinationSeed = '0000000000000000000000000000000000000000000000000000000000000002';
-      const destinationAddress = (await toolkit.showAddress(destinationSeed)).unshielded;
-
-      let failedResult: ToolkitTransactionResult | null = null;
-
-      failedResult = await toolkit.generateSingleTx(
-        sourceSeed,
-        'unshielded',
-        destinationAddress,
-        1,
-      );
-
-      const failedHash = failedResult?.txHash ?? null;
-      const response = await indexerHttpClient.getTransactionByOffset({
-        hash: failedHash!,
-      });
-
-      log.debug(`Index lookup for failed transaction ${failedHash}: indexer returned ${response.data?.transactions?.length}
-         transactions (expected 0).`);
-
-      expect(response.data).not.toBeNull();
-      expect(response.data!.transactions).toBeDefined();
-      expect(response.data!.transactions.length).toBe(0);
     });
   });
 

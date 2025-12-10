@@ -29,6 +29,9 @@ import {
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
+import { collectValidDustEvents } from 'tests/shared/dust-utils';
+import { EventCoordinator } from '@utils/event-coordinator';
+import { DustLedgerEventsUnionSchema } from '@utils/indexer/graphql/schema';
 
 describe('unshielded transactions', { timeout: 200_000 }, () => {
   let indexerWsClient: IndexerWsClient;
@@ -46,6 +49,10 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
 
   // Addresses for the source and destination wallets, derived from their seeds
   let destinationAddress: string;
+
+  let indexerEventCoordinator: EventCoordinator;
+  indexerEventCoordinator = new EventCoordinator();
+  let previousMaxDustId: number;
 
   beforeAll(async () => {
     indexerHttpClient = new IndexerHttpClient();
@@ -66,6 +73,10 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
     sourceSeed = walletFixture.source.seed;
 
     destinationAddress = walletFixture.destinations[0].destinationAddress;
+
+    const beforeEvents = await collectValidDustEvents(indexerWsClient, indexerEventCoordinator, 1);
+    previousMaxDustId = beforeEvents[0].data!.dustLedgerEvents.maxId;
+    log.debug(`Previous max dust ID before tx = ${previousMaxDustId}`);
 
     // Submit a single unshielded transaction (1 STAR) from source → destination
     transactionResult = await toolkit.generateSingleTx(
@@ -154,8 +165,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
 
       const destAddresInTx = blockResponse.data?.block?.transactions?.find((tx: Transaction) =>
         tx.unshieldedCreatedOutputs?.find(
-          (output: UnshieldedUtxo) =>
-            output.owner === walletFixture.destinations[0].destinationAddress,
+          (output: UnshieldedUtxo) => output.owner === destinationAddress,
         ),
       );
 
@@ -205,8 +215,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       // Find our specific transaction that contains unshielded created outputs for the destination address
       const destAddresInTx = transactionResponse.data?.transactions?.find((tx: Transaction) =>
         tx.unshieldedCreatedOutputs?.find(
-          (output: UnshieldedUtxo) =>
-            output.owner === walletFixture.destinations[0].destinationAddress,
+          (output: UnshieldedUtxo) => output.owner === destinationAddress,
         ),
       );
       expect(destAddresInTx).toBeDefined();
@@ -291,8 +300,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
             return (
               txEvent.__typename === 'UnshieldedTransaction' &&
               txEvent.createdUtxos?.some(
-                (utxo: UnshieldedUtxo) =>
-                  utxo.owner === walletFixture.destinations[0].destinationAddress,
+                (utxo: UnshieldedUtxo) => utxo.owner === destinationAddress,
               )
             );
           });
@@ -351,8 +359,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
         (output: UnshieldedUtxo) => output.owner === walletFixture.source.address,
       );
       const destOutput = createdOutputs?.find(
-        (output: UnshieldedUtxo) =>
-          output.owner === walletFixture.destinations[0].destinationAddress,
+        (output: UnshieldedUtxo) => output.owner === destinationAddress,
       );
 
       expect(sourceOutput).toBeDefined();
@@ -495,6 +502,101 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       expect(highestTransactionIdAfterTransaction).toBeGreaterThan(
         highestTransactionIdBeforeTransaction,
       );
+    });
+
+    /**
+     * Once an unshielded transaction has been confirmed, the indexer should stream the full sequence of DUST events associated with that transaction
+     *
+     * @given a confirmed unshielded transaction that produces DUST activity
+     * @when we subscribe to dustLedgerEvents starting from (previousMaxId + 1) to ensure we only receive new dust events produced by this transaction
+     * @then the indexer should deliver exactly three events in the order:
+     * DustGenerationDtimeUpdate, DustInitialUtxo, DustSpendProcessed
+     */
+    test('should deliver dust events in correct sequence after unshielded transaction', async () => {
+      const received = await collectValidDustEvents(
+        indexerWsClient,
+        indexerEventCoordinator,
+        3,
+        previousMaxDustId + 1,
+      );
+      expect(received).toHaveLength(3);
+
+      received.forEach((msg) => {
+        const event = msg.data!.dustLedgerEvents;
+        const parsed = DustLedgerEventsUnionSchema.safeParse(event);
+        expect(
+          parsed.success,
+          `Schema error: ${JSON.stringify(parsed.error?.format(), null, 2)}`,
+        ).toBe(true);
+      });
+
+      const eventTypes = received.map((msg) => msg.data!.dustLedgerEvents.__typename);
+      expect(eventTypes).toEqual([
+        'DustGenerationDtimeUpdate',
+        'DustInitialUtxo',
+        'DustSpendProcessed',
+      ]);
+    });
+  });
+
+  describe('transaction failure scenario', () => {
+    /**
+     * When a transaction fails at application-time, the indexer should not record any outputs or state changes for it.
+     *
+     * @given a source wallet and the indexer tracking unshielded transactions
+     * @when we send several unshielded transactions very close together from the same funding wallet
+     * @and one of them fails at application-time due to node validation
+     * @then the indexer must ignore the transaction entirely - no UTXOs are created and getTransactionByOffset must return an empty result
+     */
+    test('should NOT create UTXOs for a failed unshielded transaction', async () => {
+      const submitted: ToolkitTransactionResult[] = [];
+
+      // Submit several transactions concurrently from the same funding wallet.
+      // Even if the toolkit accepts all of them, the node will reject some during apply-time because they compete for the same state
+      submitted.push(
+        ...(await Promise.all(
+          Array.from({ length: 5 }, () =>
+            toolkit.generateSingleTx(sourceSeed, 'unshielded', destinationAddress, 5),
+          ),
+        )),
+      );
+      await new Promise((r) => setTimeout(r, 6000));
+      let failingTx: ToolkitTransactionResult | null = null;
+
+      for (const tx of submitted) {
+        const res = await indexerHttpClient.getTransactionByOffset({ hash: tx.txHash });
+        const records = res.data?.transactions ?? [];
+
+        if (records.length === 0) {
+          failingTx = tx;
+          break;
+        }
+
+        // A single tx hash can have multiple records because failed txs don't reserve hashes. 
+        // This means the same hash might appear as:
+        //   - a failed attempt (no created/spent UTXOs), or
+        //   - a later successful attempt (with created/spent UTXOs).
+        // We only want to detect a REAL failure: at least one failed record AND no successful record.
+        const successes = records.filter(
+          (r) =>
+            (r.unshieldedCreatedOutputs?.length ?? 0) > 0 ||
+            (r.unshieldedSpentOutputs?.length ?? 0) > 0,
+        );
+
+        const failures = records.filter(
+          (r) =>
+            (r.unshieldedCreatedOutputs?.length ?? 0) === 0 &&
+            (r.unshieldedSpentOutputs?.length ?? 0) === 0,
+        );
+
+        // Pure failure: failed AND never succeeded
+        if (failures.length > 0 && successes.length === 0) {
+          log.debug(`Detected pure failure for hash=${tx.txHash}`);
+          failingTx = tx;
+          break;
+        }
+      }
+      expect(failingTx).not.toBeNull();
     });
   });
 });

@@ -20,6 +20,7 @@ import { retry } from '@utils/retry-helper';
 import type {
   Block,
   BlockOffset,
+  DustLedgerEvent,
   ShieldedTransactionsEvent,
   UnshieldedTransactionEvent,
   ContractAction,
@@ -33,6 +34,8 @@ import {
   UNSHIELDED_TX_SUBSCRIPTION_BY_ADDRESS_AND_TRANSACTION_ID,
   CONTRACT_ACTIONS_SUBSCRIPTION_FROM_LATEST_BLOCK,
   CONTRACT_ACTIONS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET,
+  DUST_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT,
+  DUST_LEDGER_EVENTS_SUBSCRIPTION_FROM_OFFSET,
 } from './graphql/subscriptions';
 
 export type BlockSubscriptionResponse = GraphQLResponse<{ blocks: Block }>;
@@ -47,6 +50,10 @@ export type ShieldedTxSubscriptionResponse = GraphQLResponse<{
 
 export type ContractActionSubscriptionResponse = GraphQLResponse<{
   contractActions: ContractAction;
+}>;
+
+export type DustLedgerEventSubscriptionResponse = GraphQLResponse<{
+  dustLedgerEvents: DustLedgerEvent;
 }>;
 
 /**
@@ -728,6 +735,68 @@ export class IndexerWsClient {
       const stopMessage: GraphQLStopMessage = { id, type: 'stop' };
       this.ws.send(JSON.stringify(stopMessage));
       this.handlersMap.delete(id);
+    };
+  }
+
+  /**
+   * Subscribes to dust ledger events.
+   * 
+   * This method starts a GraphQL subscription that streams DustLedgerEvent updates from the indexer:
+   *
+   * - Without an offset: streams all new dust events from the latest position.
+   * - With an offset (id): streams dust events starting from that event ID (e.g., previousMaxId + 1 to receive only new events).
+   *
+   * The correct GraphQL query is selected automatically unless a custom
+   * queryOverride is provided. All incoming messages are routed to the given
+   * handlers, and the returned function can be used to unsubscribe.
+   *
+   * @param handlers - Callback functions for handling incoming dust events
+   * @param offset - Optional object containing an event ID to start from
+   * @param queryOverride - Optional custom GraphQL subscription query
+   *
+   * @returns A function that unsubscribes from the dust event stream
+   */
+  subscribeToDustLedgerEvents(
+    handlers: SubscriptionHandlers<DustLedgerEventSubscriptionResponse>,
+    offset?: { id: number },
+    queryOverride?: string,
+  ): () => void {
+    const subscriptionId = this.getNextId();
+
+    const isOffset = !!offset;
+
+    const query =
+      queryOverride ??
+      (isOffset
+        ? DUST_LEDGER_EVENTS_SUBSCRIPTION_FROM_OFFSET
+        : DUST_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT);
+
+    const variables = offset;
+
+    log.debug(`Dust Ledger Events query:\n${query}`);
+    log.debug(`Dust Ledger Events variables:\n${JSON.stringify(variables, null, 2)}`);
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: {
+        query,
+        variables,
+      },
+    };
+
+    log.debug(`Dust Ledger Events payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.ws.send(JSON.stringify(payload));
+
+    return () => {
+      const stopMessage: GraphQLStopMessage = {
+        id: subscriptionId,
+        type: 'stop',
+      };
+      this.ws.send(JSON.stringify(stopMessage));
+      this.handlersMap.delete(subscriptionId);
     };
   }
 }
