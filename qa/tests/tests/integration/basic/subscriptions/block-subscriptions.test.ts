@@ -54,7 +54,7 @@ describe('block subscriptions', () => {
     // We wait until expected number of blocks has been recieved, as we want to make sure that
     // the subscription is working and we are receiving blocks
     const receivedBlocks: BlockSubscriptionResponse[] = [];
-    const eventName = `${expectedCount}BlocksReceived`;
+    const eventName = `${expectedCount} blocks received`;
     const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
       next: (payload: BlockSubscriptionResponse) => {
         log.debug(`Received data:\n${JSON.stringify(payload)}`);
