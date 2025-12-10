@@ -3,6 +3,9 @@ node_modules/
 
 # Yarn Zero-Install cache (only needed if using PnP — you're not)
 .yarn/
+# Yarn versioned binaries (kept out of git)
+.yarnrc.yml
+.yarn/releases/
 
 # Logs
 logs/
