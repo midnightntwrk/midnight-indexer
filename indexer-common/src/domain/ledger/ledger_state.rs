@@ -88,6 +88,13 @@ impl LedgerState {
         }
     }
 
+    /// Returns the network ID of this ledger state.
+    pub fn network_id(&self) -> &str {
+        match self {
+            Self::V6 { ledger_state, .. } => &ledger_state.network_id,
+        }
+    }
+
     /// Deserialize the given serialized ledger state using the given protocol version.
     #[trace(properties = { "protocol_version": "{protocol_version}" })]
     pub fn deserialize(

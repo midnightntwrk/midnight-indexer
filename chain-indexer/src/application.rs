@@ -359,15 +359,27 @@ async fn index_block(
 ) -> Result<LedgerState, anyhow::Error> {
     let (mut block, transactions) = block.into();
 
-    // Skip applying block 0 transactions if ledger state was loaded from genesis file.
-    // Genesis state file already contains state AFTER block 0 transactions were applied,
-    // so re-applying them would trigger replay protection errors.
-    let skip_genesis_block =
+    // For block 0 with genesis state loaded: apply transactions to a fresh ledger state
+    // to get UTXO data, but keep the loaded genesis state for subsequent blocks.
+    // Genesis state file contains state AFTER block 0 transactions, so we can't re-apply
+    // them directly (replay protection). But we need the UTXO data for the database.
+    let genesis_state_loaded =
         block.height == 0 && ledger_state.zswap_merkle_tree_root() == block.zswap_state_root;
 
-    let (transactions, ledger_parameters) = if skip_genesis_block {
-        info!("skipping block 0 transaction application (genesis state already loaded)");
-        ledger_state.skip_node_transactions(transactions, block.parent_hash, block.timestamp)?
+    let (transactions, ledger_parameters) = if genesis_state_loaded {
+        info!("applying block 0 to fresh state to extract UTXOs (genesis state already loaded)");
+        // Apply to fresh state to get UTXO data, but keep the genesis state
+        let network_id = ledger_state
+            .network_id()
+            .try_into()
+            .expect("network_id from ledger state should be valid");
+        let mut fresh_state = LedgerState::new(network_id);
+        let (transactions, _) = fresh_state
+            .apply_node_transactions(transactions, block.parent_hash, block.timestamp)
+            .context("apply block 0 transactions to fresh state")?;
+        // Return genesis state's ledger parameters (not fresh state's)
+        let ledger_parameters = ledger_state.get_ledger_parameters();
+        (transactions, ledger_parameters)
     } else {
         ledger_state
             .apply_node_transactions(transactions, block.parent_hash, block.timestamp)
