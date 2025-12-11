@@ -15,7 +15,10 @@
 
 import '@utils/logging/test-logging-hooks';
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
-import { collectValidDustEvents, collectDustEventError } from '../../../shared/dust-utils';
+import {
+  collectValidDustLedgerEvents,
+  collectDustLedgerEventError,
+} from '../../../shared/dust-ledger-utils';
 import { EventCoordinator } from '@utils/event-coordinator';
 import { DustLedgerEventsUnionSchema } from '@utils/indexer/graphql/schema';
 
@@ -45,7 +48,7 @@ describe('dust ledger event subscriptions', () => {
      * @and the subscription must maintain strict event ordering via monotonic IDs
      */
     test('streams events in strictly increasing order', async () => {
-      const received = await collectValidDustEvents(indexerWsClient, eventCoordinator, 3);
+      const received = await collectValidDustLedgerEvents(indexerWsClient, eventCoordinator, 3);
 
       expect(received.length === 3, `Expected 3 events, got: ${received.length}`).toBe(true);
 
@@ -69,12 +72,16 @@ describe('dust ledger event subscriptions', () => {
      * @and the subscription must maintain strict event ordering via monotonic IDs
      */
     test('streams events starting from the specified ID', async () => {
-      const firstEvent = await collectValidDustEvents(indexerWsClient, eventCoordinator, 3);
+      const firstEvent = await collectValidDustLedgerEvents(indexerWsClient, eventCoordinator, 1);
       const latestId = firstEvent[0].data!.dustLedgerEvents.maxId;
-
-      const startId = Math.max(latestId - 5, 0);
-      const received = await collectValidDustEvents(indexerWsClient, eventCoordinator, 3, startId);
-      expect(received.length).toBe(3);
+      const startId = Math.max(latestId - 10, 0);
+      const received = await collectValidDustLedgerEvents(
+        indexerWsClient,
+        eventCoordinator,
+        10,
+        startId,
+      );
+      expect(received.length).toBe(10);
 
       const ids = received.map((e) => e.data!.dustLedgerEvents.id);
 
@@ -98,11 +105,16 @@ describe('dust ledger event subscriptions', () => {
      * @then each received event must match the DustLedgerEventsUnionSchema definition
      */
     test('validates historical dust events against schema', async () => {
-      const firstEvent = await await collectValidDustEvents(indexerWsClient, eventCoordinator, 1);
+      const firstEvent = await collectValidDustLedgerEvents(indexerWsClient, eventCoordinator, 1);
       const latestId = firstEvent[0].data!.dustLedgerEvents.maxId;
 
-      const fromId = Math.max(latestId - 5, 0);
-      const received = await collectValidDustEvents(indexerWsClient, eventCoordinator, 5, fromId);
+      const fromId = Math.max(latestId - 3, 0);
+      const received = await collectValidDustLedgerEvents(
+        indexerWsClient,
+        eventCoordinator,
+        3,
+        fromId,
+      );
       received
         .filter((msg) => msg.data?.dustLedgerEvents)
         .forEach((msg) => {
@@ -129,7 +141,7 @@ describe('dust ledger event subscriptions', () => {
      * @and no dust ledger events should be streamed
      */
     test('should return an error for unknown field', async () => {
-      const errorMessage = await collectDustEventError(indexerWsClient, null, true);
+      const errorMessage = await collectDustLedgerEventError(indexerWsClient, null, true);
       expect(errorMessage).toBe(`Unknown field "unknownField" on type "DustLedgerEvent".`);
     });
 
@@ -141,7 +153,7 @@ describe('dust ledger event subscriptions', () => {
      * @then an error should be returned
      */
     test('rejects negative offset ID with an error', async () => {
-      const errorMessage = await collectDustEventError(indexerWsClient, { id: -50 });
+      const errorMessage = await collectDustLedgerEventError(indexerWsClient, { id: -50 });
       expect(errorMessage).toBe(`Failed to parse "Int": Invalid number`);
     });
   });

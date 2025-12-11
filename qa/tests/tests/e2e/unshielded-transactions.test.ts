@@ -29,9 +29,42 @@ import {
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
-import { collectValidDustEvents } from 'tests/shared/dust-utils';
+import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
 import { EventCoordinator } from '@utils/event-coordinator';
 import { DustLedgerEventsUnionSchema } from '@utils/indexer/graphql/schema';
+
+/**
+ * Helper function to find a progress update event with an incremented transaction ID.
+ * This is the logic used inside the retry function for both source and destination address tests.
+ *
+ * @param events - The events array to search
+ * @param baselineTransactionId - The transaction ID to compare against
+ * @param addressLabel - Label for error messages (e.g., 'source' or 'destination')
+ * @returns The found event
+ * @throws Error if no matching event is found
+ */
+function findProgressUpdateEvent(
+  events: UnshieldedTxSubscriptionResponse[],
+  baselineTransactionId: number,
+  addressLabel: string,
+): UnshieldedTxSubscriptionResponse {
+  const event = events.find((event) => {
+    const txEvent = event.data?.unshieldedTransactions as UnshieldedTransactionEvent;
+
+    log.debug(`waiting for UnshieldedTransactionsProgress event`);
+    if (txEvent.__typename === 'UnshieldedTransactionsProgress') {
+      const progressUpdate = txEvent;
+      log.debug(`progressUpdate received: ${JSON.stringify(progressUpdate, null, 2)}`);
+      if (progressUpdate.highestTransactionId > baselineTransactionId) {
+        return true;
+      }
+    }
+  });
+  if (!event) {
+    throw new Error(`${addressLabel} address progress update event not found yet`);
+  }
+  return event;
+}
 
 describe('unshielded transactions', { timeout: 200_000 }, () => {
   let indexerWsClient: IndexerWsClient;
@@ -74,7 +107,11 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
 
     destinationAddress = walletFixture.destinations[0].destinationAddress;
 
-    const beforeEvents = await collectValidDustEvents(indexerWsClient, indexerEventCoordinator, 1);
+    const beforeEvents = await collectValidDustLedgerEvents(
+      indexerWsClient,
+      indexerEventCoordinator,
+      1,
+    );
     previousMaxDustId = beforeEvents[0].data!.dustLedgerEvents.maxId;
     log.debug(`Previous max dust ID before tx = ${previousMaxDustId}`);
 
@@ -95,39 +132,6 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
     // Let's trigger these operations in parallel
     await Promise.all([toolkit.stop(), indexerWsClient.connectionClose()]);
   });
-
-  /**
-   * Helper function to find a progress update event with an incremented transaction ID.
-   * This is the logic used inside the retry function for both source and destination address tests.
-   *
-   * @param events - The events array to search
-   * @param baselineTransactionId - The transaction ID to compare against
-   * @param addressLabel - Label for error messages (e.g., 'source' or 'destination')
-   * @returns The found event
-   * @throws Error if no matching event is found
-   */
-  function findProgressUpdateEvent(
-    events: UnshieldedTxSubscriptionResponse[],
-    baselineTransactionId: number,
-    addressLabel: string,
-  ): UnshieldedTxSubscriptionResponse {
-    const event = events.find((event) => {
-      const txEvent = event.data?.unshieldedTransactions as UnshieldedTransactionEvent;
-
-      log.debug(`waiting for UnshieldedTransactionsProgress event`);
-      if (txEvent.__typename === 'UnshieldedTransactionsProgress') {
-        const progressUpdate = txEvent as UnshieldedTransactionsProgress;
-        log.debug(`progressUpdate received: ${JSON.stringify(progressUpdate, null, 2)}`);
-        if (progressUpdate.highestTransactionId > baselineTransactionId) {
-          return true;
-        }
-      }
-    });
-    if (!event) {
-      throw new Error(`${addressLabel} address progress update event not found yet`);
-    }
-    return event;
-  }
 
   describe('a successful unshielded transaction transferring 1 STAR between two addresses', async () => {
     /**
@@ -150,7 +154,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       );
 
       // The expected block might take a bit more to show up by indexer, so we retry a few times
-      const blockResponse = await getBlockByHashWithRetry(transactionResult.blockHash!);
+      const blockResponse = await getBlockByHashWithRetry(transactionResult.blockHash);
 
       // Verify the transaction appears in the block
       expect(blockResponse?.data?.block?.transactions).toBeDefined();
@@ -339,7 +343,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       );
 
       // The expected block might take a bit more to show up by indexer, so we retry a few times
-      const blockResponse = await getBlockByHashWithRetry(transactionResult.blockHash!);
+      const blockResponse = await getBlockByHashWithRetry(transactionResult.blockHash);
 
       // Find the transaction with unshielded outputs
       const unshieldedTx = blockResponse.data?.block?.transactions?.find((tx: Transaction) => {
@@ -390,12 +394,12 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       );
 
       log.debug('Progress updates before transaction:');
-      progressUpdatesBeforeTransaction!.forEach((update) => {
+      progressUpdatesBeforeTransaction.forEach((update) => {
         log.debug(`${JSON.stringify(update, null, 2)}`);
       });
 
       const highestTransactionIdBeforeTransaction = (
-        progressUpdatesBeforeTransaction![progressUpdatesBeforeTransaction!.length - 1].data
+        progressUpdatesBeforeTransaction[progressUpdatesBeforeTransaction.length - 1].data
           ?.unshieldedTransactions as UnshieldedTransactionsProgress
       ).highestTransactionId;
       log.info(
@@ -407,7 +411,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       });
 
       log.debug('Progress updates after transaction:');
-      progressUpdatesAfterTransaction!.forEach((update) => {
+      progressUpdatesAfterTransaction.forEach((update) => {
         log.debug(`${JSON.stringify(update, null, 2)}`);
       });
 
@@ -454,12 +458,12 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
         });
 
       log.debug('Progress updates before transaction:');
-      progressUpdatesBeforeTransaction!.forEach((update) => {
+      progressUpdatesBeforeTransaction.forEach((update) => {
         log.debug(`${JSON.stringify(update, null, 2)}`);
       });
 
       const highestTransactionIdBeforeTransaction = (
-        progressUpdatesBeforeTransaction![progressUpdatesBeforeTransaction!.length - 1].data
+        progressUpdatesBeforeTransaction[progressUpdatesBeforeTransaction.length - 1].data
           ?.unshieldedTransactions as UnshieldedTransactionsProgress
       ).highestTransactionId;
       log.info(
@@ -473,7 +477,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       );
 
       log.debug('Progress updates after transaction:');
-      progressUpdatesAfterTransaction!.forEach((update) => {
+      progressUpdatesAfterTransaction.forEach((update) => {
         log.debug(`${JSON.stringify(update, null, 2)}`);
       });
 
@@ -513,7 +517,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
      * DustGenerationDtimeUpdate, DustInitialUtxo, DustSpendProcessed
      */
     test('should deliver dust events in correct sequence after unshielded transaction', async () => {
-      const received = await collectValidDustEvents(
+      const received = await collectValidDustLedgerEvents(
         indexerWsClient,
         indexerEventCoordinator,
         3,
@@ -572,7 +576,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
           break;
         }
 
-        // A single tx hash can have multiple records because failed txs don't reserve hashes. 
+        // A single tx hash can have multiple records because failed txs don't reserve hashes.
         // This means the same hash might appear as:
         //   - a failed attempt (no created/spent UTXOs), or
         //   - a later successful attempt (with created/spent UTXOs).
