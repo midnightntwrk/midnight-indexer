@@ -152,7 +152,7 @@ async fn make_block_details_runtime_0_18(
         _ => None,
     });
 
-    let mut transactions = calls
+    let transactions = calls
         .into_iter()
         .filter_map(|call| match call {
             Call::Midnight(send_mn_transaction { midnight_tx }) => {
@@ -168,6 +168,7 @@ async fn make_block_details_runtime_0_18(
         .collect::<Vec<_>>();
 
     let mut dust_registration_events = vec![];
+    let mut system_transactions_from_events = vec![];
 
     for event_details in events.iter() {
         let event_details =
@@ -183,8 +184,10 @@ async fn make_block_details_runtime_0_18(
             }
 
             // System transaction created by the node (not from extrinsics).
+            // These come from inherents which execute BEFORE regular transactions,
+            // so they must be prepended to maintain correct execution order.
             Event::MidnightSystem(SystemTransactionApplied(transaction_applied)) => {
-                transactions.push(Transaction::System(ByteVec::from(
+                system_transactions_from_events.push(Transaction::System(ByteVec::from(
                     transaction_applied.serialized_system_transaction,
                 )));
             }
@@ -229,6 +232,11 @@ async fn make_block_details_runtime_0_18(
             _ => {}
         }
     }
+
+    // Prepend system transactions from events (inherents) before regular transactions.
+    // In Substrate, inherents execute before regular transactions in a block.
+    system_transactions_from_events.extend(transactions);
+    let transactions = system_transactions_from_events;
 
     Ok(BlockDetails {
         timestamp,
