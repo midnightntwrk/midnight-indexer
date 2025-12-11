@@ -151,20 +151,28 @@ impl LedgerState {
                     .map_err(|error| Error::MalformedTransaction(error.into()))?;
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
-                let block_fullness = *block_fullness + cost;
 
-                let (transaction_result, events) = match transaction_result {
-                    TransactionResultV6::Success(events) => (TransactionResult::Success, events),
+                let (transaction_result, events, should_count_cost) = match transaction_result {
+                    TransactionResultV6::Success(events) => {
+                        (TransactionResult::Success, events, true)
+                    }
 
                     TransactionResultV6::PartialSuccess(segments, events) => {
                         let segments = segments
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
                             .collect::<Vec<_>>();
-                        (TransactionResult::PartialSuccess(segments), events)
+                        (TransactionResult::PartialSuccess(segments), events, true)
                     }
 
-                    TransactionResultV6::Failure(_) => (TransactionResult::Failure, vec![]),
+                    TransactionResultV6::Failure(_) => (TransactionResult::Failure, vec![], false),
+                };
+
+                // Only count cost for successful/partial transactions (match node behavior)
+                let block_fullness = if should_count_cost {
+                    *block_fullness + cost
+                } else {
+                    *block_fullness
                 };
 
                 let (created_unshielded_utxos, spent_unshielded_utxos) =
