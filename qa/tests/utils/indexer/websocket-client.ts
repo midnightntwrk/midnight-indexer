@@ -21,6 +21,7 @@ import type {
   Block,
   BlockOffset,
   DustLedgerEvent,
+  ZswapLedgerEvent,
   ShieldedTransactionsEvent,
   UnshieldedTransactionEvent,
   ContractAction,
@@ -35,7 +36,9 @@ import {
   CONTRACT_ACTIONS_SUBSCRIPTION_FROM_LATEST_BLOCK,
   CONTRACT_ACTIONS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET,
   DUST_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT,
-  DUST_LEDGER_EVENTS_SUBSCRIPTION_FROM_OFFSET,
+  DUST_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID,
+  ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT,
+  ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID,
 } from './graphql/subscriptions';
 
 export type BlockSubscriptionResponse = GraphQLResponse<{ blocks: Block }>;
@@ -54,6 +57,10 @@ export type ContractActionSubscriptionResponse = GraphQLResponse<{
 
 export type DustLedgerEventSubscriptionResponse = GraphQLResponse<{
   dustLedgerEvents: DustLedgerEvent;
+}>;
+
+export type ZswapLedgerEventSubscriptionResponse = GraphQLResponse<{
+  zswapLedgerEvents: ZswapLedgerEvent;
 }>;
 
 /**
@@ -743,7 +750,7 @@ export class IndexerWsClient {
 
   /**
    * Subscribes to dust ledger events.
-   * 
+   *
    * This method starts a GraphQL subscription that streams DustLedgerEvent updates from the indexer:
    *
    * - Without an offset: streams all new dust events from the latest position.
@@ -763,21 +770,18 @@ export class IndexerWsClient {
     handlers: SubscriptionHandlers<DustLedgerEventSubscriptionResponse>,
     offset?: { id: number },
     queryOverride?: string,
-  ): () => void {
+  ): { unsubscribe: () => void; id: string } {
+    const hasOffset = offset !== undefined && offset.id !== undefined;
+
+    let query = queryOverride;
+    if (!query) {
+      query = hasOffset
+        ? DUST_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID
+        : DUST_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT;
+    }
+    const variables = hasOffset ? { id: offset.id } : undefined;
+
     const subscriptionId = this.getNextId();
-
-    const isOffset = !!offset;
-
-    const query =
-      queryOverride ??
-      (isOffset
-        ? DUST_LEDGER_EVENTS_SUBSCRIPTION_FROM_OFFSET
-        : DUST_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT);
-
-    const variables = offset;
-
-    log.debug(`Dust Ledger Events query:\n${query}`);
-    log.debug(`Dust Ledger Events variables:\n${JSON.stringify(variables, null, 2)}`);
 
     const payload: GraphQLStartMessage = {
       id: subscriptionId,
@@ -793,13 +797,60 @@ export class IndexerWsClient {
     this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
     this.ws.send(JSON.stringify(payload));
 
-    return () => {
-      const stopMessage: GraphQLStopMessage = {
-        id: subscriptionId,
-        type: 'stop',
-      };
-      this.ws.send(JSON.stringify(stopMessage));
-      this.handlersMap.delete(subscriptionId);
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = {
+          id: subscriptionId,
+          type: 'stop',
+        };
+        this.ws.send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
+    };
+  }
+
+  subscribeToZswapLedgerEvents(
+    handlers: SubscriptionHandlers<ZswapLedgerEventSubscriptionResponse>,
+    offset?: { id: number },
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const hasOffset = offset !== undefined && offset.id !== undefined;
+
+    let query = queryOverride;
+    if (!query) {
+      query = hasOffset
+        ? ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID
+        : ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT;
+    }
+    const variables = hasOffset ? { id: offset.id } : undefined;
+
+    const subscriptionId = this.getNextId();
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: {
+        query,
+        variables,
+      },
+    };
+
+    log.debug(`Zswap Ledger Events payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.ws.send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = {
+          id: subscriptionId,
+          type: 'stop',
+        };
+        this.ws.send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
     };
   }
 }

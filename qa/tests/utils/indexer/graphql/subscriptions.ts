@@ -290,7 +290,7 @@ export const DUST_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT = `
   }
 `;
 
-export const DUST_LEDGER_EVENTS_SUBSCRIPTION_FROM_OFFSET = `
+export const DUST_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID = `
   subscription DustLedgerEvents($id: Int) {
     dustLedgerEvents(id: $id) {
       __typename
@@ -302,6 +302,26 @@ export const DUST_LEDGER_EVENTS_SUBSCRIPTION_FROM_OFFSET = `
           nonce
         }
       }
+    }
+  }
+`;
+
+export const ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT = `
+  subscription ZswapEvents {
+    zswapLedgerEvents {
+      id
+      raw
+      maxId
+    }
+  }
+`;
+
+export const ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID = `
+  subscription ZswapEvents($id: Int) {
+    zswapLedgerEvents(id: $id) {
+      id
+      raw
+      maxId
     }
   }
 `;
