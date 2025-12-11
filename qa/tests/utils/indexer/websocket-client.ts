@@ -810,6 +810,27 @@ export class IndexerWsClient {
     };
   }
 
+  /**
+   * Subscribes to zswap ledger events.
+   *
+   * This method starts a GraphQL subscription that streams ZswapLedgerEvent updates from the indexer:
+   *
+   * - Without an offset: streams historical zswap events from the beginning.
+   * - With an offset (id): streams zswap events starting from that event ID.
+   *
+   * The correct GraphQL query is selected automatically unless a custom
+   * queryOverride is provided. All incoming messages are routed to the given
+   * handlers, and the returned function can be used to unsubscribe.
+   *
+   * Note: Unlike dust ledger events, zswap event IDs may not be strictly sequential
+   * and events may be delivered in different orders depending on the offset.
+   *
+   * @param handlers - Callback functions for handling incoming zswap events
+   * @param offset - Optional object containing an event ID to start from
+   * @param queryOverride - Optional custom GraphQL subscription query
+   *
+   * @returns An object with subscription ID and unsubscribe function
+   */
   subscribeToZswapLedgerEvents(
     handlers: SubscriptionHandlers<ZswapLedgerEventSubscriptionResponse>,
     offset?: { id: number },
