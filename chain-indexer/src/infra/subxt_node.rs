@@ -49,6 +49,7 @@ use subxt::{
     ext::subxt_rpcs,
     utils::H256,
 };
+use subxt::ext::jsonrpsee::core::JsonRawValue;
 use thiserror::Error;
 use tokio::time::timeout;
 
@@ -360,18 +361,20 @@ impl Node for SubxtNode {
                     .header()
                     .parent_hash;
 
-                let capacity = match after_height {
-                    Some(after_height) if after_height < first_block.number() => {
-                        (first_block.number() - after_height) as usize + 1
-                    }
-                    _ => first_block.number() as usize + 1,
-                };
-                // Cap at one year, see comment above.
-                let capacity = capacity.min(5_256_000);
-                let mut hashes = Vec::with_capacity(capacity);
+                // length in blocks
+                const SESSION_LENGTH: usize = 300;
+                let mut hashes_and_height = Vec::with_capacity(SESSION_LENGTH);
+                // The last finalized block can't be retrieved by height with certainty from any node.
+                // But the prior finalized blocks can be retrieved by block height with certainty.
+                // Grandpa may finalize many blocks at once, but it will always finalize at the start
+                // of each session. So any blocks in the previous finalised session or older we can use
+                // block num to retrieve. Only the blocks in the current session do we have to be more
+                // careful with and fetch by hash.
+
+                let mut countdown = SESSION_LENGTH;
 
                 let mut parent_hash = first_block.header().parent_hash;
-                while parent_hash.0 != after_hash.0 && parent_hash != genesis_parent_hash {
+                while parent_hash.0 != after_hash.0 && parent_hash != genesis_parent_hash && countdown > 0 {
                     let block = self.fetch_block(parent_hash).await?;
                     if block.number() % TRAVERSE_BACK_LOG_AFTER == 0 {
                         info!(
@@ -382,11 +385,65 @@ impl Node for SubxtNode {
                         );
                     }
                     parent_hash = block.header().parent_hash;
-                    hashes.push(block.hash());
+                    hashes_and_height.push((block.hash(), block.number()));
+                    countdown -= 1;
                 }
 
+                let concurrency = 16;
+                let chunk_size = 256;
+                let next = after_height.map(|after| after + 1).unwrap_or(0);
+                let heights: Vec<Vec<u32>> = (next..hashes_and_height[0].1)
+                    .collect::<Vec<u32>>()
+                    .chunks(chunk_size)
+                    .map(|chunk| chunk.to_vec())
+                    .collect();
+
+                let mut stable_height_hashes: Vec<(Vec<H256>, Vec<u32>)> = futures::stream::iter(heights.into_iter())
+                    .map(|h| {
+                        let array = serde_json::Value::Array(h.iter()
+                            .map(|height| serde_json::Value::Number(
+                                serde_json::Number::from_u128(*height as u128).unwrap())).collect());
+
+                        let x = serde_json::Value::Array(vec![ array ]);
+
+                        let par = JsonRawValue::from_string(x.to_string()).unwrap();//lol simplify
+                        let fut = self.rpc_client.request("chain_getBlockHash".to_string(), Some(par));
+                        async move {
+                            let raw = fut.await.unwrap();//TODO
+
+                            let s: serde_json::Value = serde_json::from_str(raw.get()).unwrap();
+                            let results: Vec<_> = if let serde_json::Value::Array(hashes) = s {
+                                hashes.iter().map(|v|
+                                {
+                                    let serde_json::Value::String(s) = v else { panic!("not a string") };
+                                    s.parse::<subxt::utils::H256>().expect(&format!("Can't parse as a hash:{}", v.to_string()))
+                                }).collect()
+                            } else {
+                                vec![] //TODO
+                            };
+
+                            Ok::<_, subxt_rpcs::Error>((results, h))
+                        }
+                    })
+                    .buffer_unordered(concurrency)
+                    .try_collect()
+                    .await.unwrap();//todo
+
+                stable_height_hashes.sort_by_key(|x| x.1[0]);
+
+                info!("stable height len {}", stable_height_hashes.len());
+
+                let mut stable_height_hashes: Vec<(H256, u32)> = stable_height_hashes
+                .into_iter()
+                .flat_map(|(hashes, nums)| {
+                    hashes.into_iter().zip(nums.into_iter())
+                })
+                .collect();
+
+                stable_height_hashes.extend(hashes_and_height.into_iter().rev());
+
                 // We fetch and yield the blocks for the stored block hashes.
-                for hash in hashes.into_iter().rev() {
+                for (hash, height) in stable_height_hashes.into_iter() {
                     let block = self.fetch_block(hash).await?;
                     debug!(
                         hash:% = block.hash(),
