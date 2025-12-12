@@ -46,10 +46,9 @@ use subxt::{
         Hasher,
         substrate::{ConsensusEngineId, DigestItem, SubstrateHeader},
     },
-    ext::subxt_rpcs,
+    ext::{jsonrpsee::core::JsonRawValue, subxt_rpcs},
     utils::H256,
 };
-use subxt::ext::jsonrpsee::core::JsonRawValue;
 use thiserror::Error;
 use tokio::time::timeout;
 
