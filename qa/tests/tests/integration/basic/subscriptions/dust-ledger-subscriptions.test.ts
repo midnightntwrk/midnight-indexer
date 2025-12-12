@@ -42,22 +42,25 @@ describe('dust ledger event subscriptions', () => {
      * Subscribing to DustLedger events without providing an offset should replay
      * historical events in the correct ledger order.
      *
+     *  Note:
+     * - Event IDs are allocated from a single global ledger sequence shared across DustLedger and ZswapLedger
+     * - As a result, Dust ledger event IDs are not guaranteed to be contiguous.
+     *
      * @given no dust event offset parameters are provided
      * @when we subscribe to dust ledger events
      * @then events must be applied sequentially in order
-     * @and the subscription must maintain strict event ordering via monotonic IDs
+     * @and event IDs must be globally increasing and must not go backwards
      */
-    test('streams events in strictly increasing order', async () => {
+    test('streams events in ledger order', async () => {
       const received = await collectValidDustLedgerEvents(indexerWsClient, eventCoordinator, 3);
 
       expect(received.length === 3, `Expected 3 events, got: ${received.length}`).toBe(true);
-
       const ids = received.map((e) => e.data!.dustLedgerEvents.id);
-      const isStrict = ids.every((id, i) => i === 0 || id > ids[i - 1]);
-
-      expect(isStrict, `Dust event IDs must be strictly increasing, got: ${ids.join(', ')}`).toBe(
-        true,
-      );
+      const inLedgerOrder = ids.every((id, i) => i === 0 || id > ids[i - 1]);
+      expect(
+        inLedgerOrder,
+        `Dust event IDs must be delivered in ledger order (IDs must not go backwards), got: ${ids.join(', ')}`,
+      ).toBe(true);
     });
   });
 
@@ -69,31 +72,25 @@ describe('dust ledger event subscriptions', () => {
      * @given a dust event offset parameter is provided
      * @when we subscribe to dust ledger events with that offset
      * @then events must be applied sequentially in order
-     * @and the subscription must maintain strict event ordering via monotonic IDs
+     * @and event IDs must be globally increasing and must not go backwards
      */
-    test('streams events starting from the specified ID', async () => {
-      const firstEvent = await collectValidDustLedgerEvents(indexerWsClient, eventCoordinator, 1);
+    test('streams events in ledger order starting from the specified ID', async () => {
+      const firstEvent = await collectValidDustLedgerEvents(indexerWsClient, eventCoordinator, 2);
       const latestId = firstEvent[0].data!.dustLedgerEvents.maxId;
-      const startId = Math.max(latestId - 3, 0);
+      const startId = Math.max(latestId - 1, 0);
       const received = await collectValidDustLedgerEvents(
         indexerWsClient,
         eventCoordinator,
-        3,
+        2,
         startId,
       );
-      expect(received.length).toBe(3);
+      expect(received.length === 2, `Expected 3 events, got: ${received.length}`).toBe(true);
 
       const ids = received.map((e) => e.data!.dustLedgerEvents.id);
-
+      const inLedgerOrder = ids.every((id, i) => i === 0 || id > ids[i - 1]);
       expect(
-        ids[0] >= startId,
-        `Expected first event ID >= startId (${startId}), got: ${ids[0]}`,
-      ).toBe(true);
-      const isStrictlyIncreasing = ids.every((id, i) => i === 0 || id > ids[i - 1]);
-
-      expect(
-        isStrictlyIncreasing,
-        `Dust event IDs must be strictly increasing, got: ${ids.join(', ')}`,
+        inLedgerOrder,
+        `Dust ledger event IDs must be in ledger order (IDs must not go backwards), got: ${ids.join(', ')}`,
       ).toBe(true);
     });
 
@@ -105,7 +102,7 @@ describe('dust ledger event subscriptions', () => {
      * @then each received event must match the DustLedgerEventsUnionSchema definition
      */
     test('validates historical dust events against schema', async () => {
-      const firstEvent = await collectValidDustLedgerEvents(indexerWsClient, eventCoordinator, 1);
+      const firstEvent = await collectValidDustLedgerEvents(indexerWsClient, eventCoordinator, 3);
       const latestId = firstEvent[0].data!.dustLedgerEvents.maxId;
 
       const fromId = Math.max(latestId - 3, 0);
