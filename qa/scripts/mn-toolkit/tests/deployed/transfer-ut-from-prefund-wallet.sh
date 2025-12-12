@@ -1,0 +1,125 @@
+#!/bin/bash
+
+set -euo pipefail
+
+getUnshieldedAddress() {
+    local env=$1
+    local seed=$2
+    docker run --rm -e RUST_BACKTRACE=1 "$TOOLKIT_IMAGE" \
+        show-address \
+        --network "$env" \
+        --seed "$seed" | jq .unshielded | tr -d '"'
+}
+
+setEnvData() {
+    local env=$1
+    # Get script directory to locate environments.json
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    ENVIRONMENTS_JSON="${SCRIPT_DIR}/environments.json"
+
+    case "$env" in
+        "undeployed")
+            TARGET_URL="ws://localhost:9944"
+            SOURCE_SEED_ENV="FUNDING_SEED_UNDEPLOYED"
+            ;;
+        "devnet")
+            TARGET_URL="wss://rpc.devnet.midnight.network"
+            SOURCE_SEED_ENV="FUNDING_SEED_DEVNET"
+            ;;
+        "preview")
+            TARGET_URL="wss://rpc.preview.midnight.network"
+            SOURCE_SEED_ENV="FUNDING_SEED_PREVIEW"
+            ;;
+        "testnet02")
+            TARGET_URL="wss://rpc.testnet02.midnight.network"
+            SOURCE_SEED_ENV="FUNDING_SEED_TESTNET02"
+            ;;
+        "qanet")
+            TARGET_URL="wss://rpc.qanet.dev.midnight.network"
+            SOURCE_SEED_ENV="FUNDING_SEED_QANET"
+            ;;
+        "nodedev01")
+            TARGET_URL="wss://rpc.node-dev-01.dev.midnight.network"
+            SOURCE_SEED_ENV="FUNDING_SEED_NODE_DEV_01"
+            ;;
+    esac
+}
+
+getNodeToolkit() {
+    local env=$1
+    NODE_TOOLKIT_TAG=${NODE_TOOLKIT_TAG:-latest-main}
+    TOOLKIT_IMAGE="ghcr.io/midnight-ntwrk/midnight-node-toolkit:$NODE_TOOLKIT_TAG"
+    docker pull $TOOLKIT_IMAGE
+    HOST_CACHE_DIR="/tmp/toolkit/.sync_cache-${env}"
+    echo "NODE_TOOLKIT_TAG=$NODE_TOOLKIT_TAG"
+}
+
+setSourceSeed() {
+    SOURCE_SEED="${FUNDING_SEED:-0000000000000000000000000000000000000000000000000000000000000001}"
+    # Get source seed - either directly from JSON or from environment variable
+    #SOURCE_SEED_ENV=$(jq -r ".environments.\"${ENVIRONMENT}\".source_seed_env // empty" "$ENVIRONMENTS_JSON")
+    if [ -n "$SOURCE_SEED_ENV" ]; then
+        # Use environment variable
+        SOURCE_SEED_VAR_NAME="$SOURCE_SEED_ENV"
+        SOURCE_SEED="${!SOURCE_SEED_VAR_NAME}"
+    fi
+}
+
+ENVIRONMENT=$1
+if [ -z "$ENVIRONMENT" ]; then
+    echo "Please provide an environment"
+    echo "Usage: $0 <environment>"
+    exit 1
+fi
+
+
+getNodeToolkit "$ENVIRONMENT"
+setEnvData "$ENVIRONMENT"
+
+DESTINATION_SEED="0000000000000000000000000000000000000000000000000000000987654321"
+
+setSourceSeed
+
+# We need a funding seed that we take from the prefund wallet in this case
+SOURCE_ADDRESS=$(getUnshieldedAddress "$ENVIRONMENT" "$SOURCE_SEED")
+
+# We use an address passed from the command line or from the hardcoded seed
+if [ -n "${2:-}" ]; then
+    DESTINATION_ADDRESS=$2
+else
+    DESTINATION_ADDRESS=$(getUnshieldedAddress "$ENVIRONMENT" "$DESTINATION_SEED")
+fi
+
+# Piotr's address
+#DESTINATION_ADDRESS="mn_addr_preview1gkasr3z3vwyscy2jpp53nzr37v7n4r3lsfgj6v5g584dakjzt0xqxf3rh0"
+
+# My address
+#DESTINATION_ADDRESS="mn_addr_preview1hm22vf0me89f8rwf907j52cawvz3mgmnyvcvsapvmk5ejwuu4ycslk6u4p"
+
+# Joe's address
+#DESTINATION_ADDRESS="mn_addr_qanet1ewca799slmaungwx9r3lg59ws8q4kwh5zar65apyu9uzusj5wrhq5sdxdg"
+
+# Joe's second address
+#DESTINATION_ADDRESS="mn_addr_qanet15rwd0mxrp0d9wyx0hjlxk8uunfmtw8fu9rpv69jhs0l5wrau7cuss3dems"
+
+mkdir -p $HOST_CACHE_DIR
+ls -ls $HOST_CACHE_DIR
+
+echo "SOURCE_SEED: $SOURCE_SEED"
+echo "DESTINATION_ADDRESS: $DESTINATION_ADDRESS"
+
+docker run --rm -e RUST_LOG=error -e RUST_BACKTRACE=0 -v $HOST_CACHE_DIR:/.cache/sync "$TOOLKIT_IMAGE" \
+    generate-txs \
+    --src-url $TARGET_URL \
+    --dest-url $TARGET_URL \
+    single-tx \
+    --source-seed "$SOURCE_SEED" \
+    --unshielded-amount 12300000 \
+    --destination-address "$DESTINATION_ADDRESS"
+
+ls -ls $HOST_CACHE_DIR
+
+echo "SOURCE_SEED   : $SOURCE_SEED"
+echo "SOURCE_ADDRESS: $SOURCE_ADDRESS"
+echo "DESTINATION_SEED   : $DESTINATION_SEED"
+echo "DESTINATION_ADDRESS: $DESTINATION_ADDRESS"
