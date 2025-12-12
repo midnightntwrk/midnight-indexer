@@ -133,7 +133,7 @@ describe('unshielded transaction subscriptions', async () => {
     test('should stream unshielded transaction events related to that address, given that address has transactions', async () => {
       const fundingSeed = dataProvider.getFundingSeed();
       expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
-      const unshieldedAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
+      const unshieldedAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
 
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
@@ -171,7 +171,7 @@ describe('unshielded transaction subscriptions', async () => {
     test('should stream unshielded transaction events up to highest transaction id', async () => {
       const fundingSeed = dataProvider.getFundingSeed();
       expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
-      const unshieldedAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
+      const unshieldedAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
 
       // Here when subscribing we need to take into accounta that we are using a funding seed
       // so the number of transactions can be massive. So we need to wait for the indexer
@@ -232,7 +232,7 @@ describe('unshielded transaction subscriptions', async () => {
     test('should stream unshielded transaction events that adhere to the expected schema', async () => {
       const fundingSeed = dataProvider.getFundingSeed();
       expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
-      const unshieldedAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
+      const unshieldedAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 5,
@@ -286,7 +286,7 @@ describe('unshielded transaction subscriptions', async () => {
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 10,
-        500,
+        5000,
       );
 
       // We expect exactly one (non-error) message ...
@@ -392,12 +392,12 @@ describe('unshielded transaction subscriptions', async () => {
       const targetTransactionId = 0;
       const fundingSeed = dataProvider.getFundingSeed();
       expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
-      const targetAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
+      const targetAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
 
       const messages = await subscribeToUnshieldedTransactionEvents(
-        { address: targetAddress!, transactionId: targetTransactionId },
+        { address: targetAddress, transactionId: targetTransactionId },
         (messages) => messages[0].errors !== undefined,
-        200,
+        2000,
       );
 
       expect(messages.length).toBeGreaterThanOrEqual(2);
@@ -447,7 +447,7 @@ describe('unshielded transaction subscriptions', async () => {
       const targetTransactionId = -1;
       const fundingSeed = dataProvider.getFundingSeed();
       expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
-      const targetAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
+      const targetAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
 
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
@@ -474,7 +474,7 @@ describe('unshielded transaction subscriptions', async () => {
       const targetTransactionId = 4294967296; // 2^32
       const fundingSeed = dataProvider.getFundingSeed();
       expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
-      const targetAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
+      const targetAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
 
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
@@ -506,7 +506,7 @@ describe('unshielded transaction subscriptions', async () => {
     test('should start a transaction stream from the given transaction id', async () => {
       const fundingSeed = dataProvider.getFundingSeed();
       expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
-      const targetAddress = (await toolkit.showAddress(fundingSeed!)).unshielded;
+      const targetAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
 
       let messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress },

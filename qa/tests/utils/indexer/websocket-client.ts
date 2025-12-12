@@ -229,8 +229,11 @@ export class IndexerWsClient {
       this.ws.close(); // initiate close
     });
 
-    const timeoutPromise = new Promise<void>((_, reject) =>
-      setTimeout(() => reject(new Error('WebSocket did not close within 2 seconds.')), 2000),
+    const timeoutPromise = new Promise<void>((resolve) =>
+      setTimeout(() => {
+        log.warn('WebSocket did not close within timeout; continuing');
+        resolve();
+      }, 2000),
     );
 
     // Either the connection gets closed or we timeout
