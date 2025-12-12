@@ -18,6 +18,7 @@ const INDEXER_BASE_URL: Record<string, string> = {
   "node-dev-01": "indexer.node-dev-01.dev.midnight.network",
   devnet: "indexer.devnet.midnight.network",
   preview: "indexer.preview.midnight.network",
+  preprod: "indexer.preprod.midnight.network",
   qanet: "indexer.qanet.dev.midnight.network",
   testnet02: "indexer.testnet-02.midnight.network",
 };
