@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use clap::{Parser, command, value_parser};
+use clap::{Parser, value_parser};
 use indexer_common::domain::NetworkId;
 use indexer_tests::e2e;
 

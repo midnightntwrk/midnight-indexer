@@ -14,7 +14,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-use clap::{Parser, Subcommand, command};
+use clap::{Parser, Subcommand};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
