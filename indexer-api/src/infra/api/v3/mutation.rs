@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{PROTOCOL_VERSION, storage::Storage},
+    domain::{LATEST_PROTOCOL_VERSION, storage::Storage},
     infra::api::{
         ApiResult, ContextExt, ResultExt,
         v3::{HexEncodable, HexEncoded, decode_session_id, viewing_key::ViewingKey},
@@ -43,7 +43,7 @@ where
     #[trace]
     async fn connect(&self, cx: &Context<'_>, viewing_key: ViewingKey) -> ApiResult<HexEncoded> {
         let viewing_key = viewing_key
-            .try_into_domain(cx.get_network_id(), PROTOCOL_VERSION)
+            .try_into_domain(cx.get_network_id(), LATEST_PROTOCOL_VERSION)
             .map_err_into_client_error(|| "invalid viewing key")?;
 
         cx.get_storage::<S>()

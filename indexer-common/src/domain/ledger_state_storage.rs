@@ -21,8 +21,8 @@ use std::{convert::Infallible, error::Error as StdError};
 pub trait LedgerStateStorage: Sync + 'static {
     type Error: StdError + Send + Sync + 'static;
 
-    /// Load the last index.
-    async fn load_last_index(&self) -> Result<Option<u64>, Self::Error>;
+    /// Load the highest zswap state index.
+    async fn load_highest_zswap_state_index(&self) -> Result<Option<u64>, Self::Error>;
 
     /// Load the ledger state, block height and protocol version.
     async fn load_ledger_state(
@@ -44,7 +44,7 @@ pub struct NoopLedgerStateStorage;
 impl LedgerStateStorage for NoopLedgerStateStorage {
     type Error = Infallible;
 
-    async fn load_last_index(&self) -> Result<Option<u64>, Self::Error> {
+    async fn load_highest_zswap_state_index(&self) -> Result<Option<u64>, Self::Error> {
         unimplemented!()
     }
 

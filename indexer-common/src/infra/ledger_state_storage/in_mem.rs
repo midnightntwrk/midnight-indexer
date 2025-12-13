@@ -24,7 +24,7 @@ pub struct InMemZswapStateStorage {
 impl LedgerStateStorage for InMemZswapStateStorage {
     type Error = Infallible;
 
-    async fn load_last_index(&self) -> Result<Option<u64>, Self::Error> {
+    async fn load_highest_zswap_state_index(&self) -> Result<Option<u64>, Self::Error> {
         Ok(self.data.read().highest_zswap_state_index)
     }
 
