@@ -41,25 +41,16 @@ impl LedgerStateCache {
         // Acquire a read lock.
         let mut ledger_state_read = self.0.read().await;
 
-        // Check if the current zswap state is stale and needs to be updated.
+        // Check if the current ledger state is stale and needs to be updated.
         if end_index >= ledger_state_read.zswap_first_free() {
-            debug!(
-                end_index,
-                first_free = ledger_state_read.zswap_first_free();
-                "zswap state is stale"
-            );
-
             // Release the read lock and acquire a write lock.
             drop(ledger_state_read);
             let mut ledger_state_write = self.0.write().await;
 
-            // Check if the state has been updated in the meantime.
-            if end_index >= ledger_state_write.zswap_first_free() {
-                debug!(
-                    end_index,
-                    first_free = ledger_state_write.zswap_first_free();
-                    "zswap state is still stale, loading"
-                );
+            // Check if the ledger state has been updated in the meantime.
+            let first_free = ledger_state_write.zswap_first_free();
+            if end_index >= first_free {
+                debug!(end_index, first_free; "stale ledger state, loading from storage");
 
                 let ledger_state_and_protocol_version = ledger_state_storage
                     .load_ledger_state()

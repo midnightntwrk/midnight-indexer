@@ -34,4 +34,4 @@ pub use unshielded::*;
 use indexer_common::domain::{PROTOCOL_VERSION_000_018_000, ProtocolVersion};
 
 /// This must always point to the latest (highest) supported version.
-pub const PROTOCOL_VERSION: ProtocolVersion = PROTOCOL_VERSION_000_018_000;
+pub const LATEST_PROTOCOL_VERSION: ProtocolVersion = PROTOCOL_VERSION_000_018_000;

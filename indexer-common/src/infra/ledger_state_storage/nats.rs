@@ -16,31 +16,31 @@ use async_nats::{
     ConnectError, ConnectOptions,
     jetstream::{
         self, Context as Jetstream,
-        context::CreateObjectStoreError,
-        object_store::{
-            self, DeleteError, GetError, ListError, ObjectStore, PutError, WatcherError,
-        },
+        context::{CreateKeyValueError, CreateObjectStoreError},
+        kv::{self, EntryError, Store},
+        object_store::{self, GetError, ObjectStore, PutError},
     },
 };
 use fastrace::trace;
-use futures::{StreamExt, TryStreamExt, stream};
-use log::{debug, info};
+use futures::{StreamExt, stream};
+use log::info;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
-use std::{
-    array::TryFromSliceError,
-    io::{self, Cursor},
-};
+use std::io::{self, Cursor};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
-use tokio_util::io::StreamReader;
+use tokio_util::{bytes::Bytes, io::StreamReader};
 
-const BUCKET_NAME: &str = "ledger_state_store";
-const OBJECT_NAME: &str = "ledger_state";
+const AB_SELECTOR_STORE_NAME: &str = "ab_selector_store";
+const AB_SELECTOR_KEY: &str = "ab_selector";
+const LEDGER_STATE_STORE_NAME: &str = "ledger_state_store";
+const LEDGER_STATE_KEY_A: &str = "ledger_state_a";
+const LEDGER_STATE_KEY_B: &str = "ledger_state_b";
 
 /// NATS based ledger state storage implementation.
 pub struct NatsLedgerStateStorage {
     ledger_state_store: ObjectStore,
+    ab_selector_store: Store,
 }
 
 impl NatsLedgerStateStorage {
@@ -57,21 +57,23 @@ impl NatsLedgerStateStorage {
         let client = options.connect(url).await?;
         let jetstream = jetstream::new(client);
         let ledger_state_store = create_ledger_state_store(&jetstream).await?;
+        let ab_selector_store = create_ab_selector_store(&jetstream).await?;
 
-        Ok(Self { ledger_state_store })
+        Ok(Self {
+            ledger_state_store,
+            ab_selector_store,
+        })
     }
 
-    #[trace]
-    async fn current_object_name(&self) -> Result<Option<String>, LedgerStateStorageError> {
-        let objects = self.ledger_state_store.list().await?;
+    async fn ab_selector(&self) -> Result<ABSelector, LedgerStateStorageError> {
+        let ab_selector = self
+            .ab_selector_store
+            .get(AB_SELECTOR_KEY)
+            .await?
+            .map(Into::into)
+            .unwrap_or_default();
 
-        let names = objects
-            .map_ok(|info| info.name)
-            .try_collect::<Vec<_>>()
-            .await?;
-        let object_name = names.into_iter().max();
-
-        Ok(object_name)
+        Ok(ab_selector)
     }
 }
 
@@ -79,30 +81,21 @@ impl LedgerStateStorage for NatsLedgerStateStorage {
     type Error = LedgerStateStorageError;
 
     #[trace]
-    async fn load_last_index(&self) -> Result<Option<u64>, Self::Error> {
-        let object_name = self.current_object_name().await?;
-        debug!(object_name; "loading highest_zswap_state_index");
+    async fn load_highest_zswap_state_index(&self) -> Result<Option<u64>, Self::Error> {
+        let ab_selector = self.ab_selector().await?;
+        let object = self.ledger_state_store.get(ab_selector.object_name()).await;
 
-        match object_name {
-            Some(object_name) => {
-                let object = self.ledger_state_store.get(object_name).await;
+        match object {
+            Ok(mut object) => {
+                let highest_zswap_state_index = object.read_u64_le().await?;
 
-                match object {
-                    Ok(mut object) => {
-                        let highest_zswap_state_index = object.read_u64_le().await?;
-
-                        // We (ab)use `u64::MAX` as None!
-                        Ok((highest_zswap_state_index != u64::MAX)
-                            .then_some(highest_zswap_state_index))
-                    }
-
-                    Err(error) if error.kind() == object_store::GetErrorKind::NotFound => Ok(None),
-
-                    Err(other) => Err(other)?,
-                }
+                // We (ab)use `u64::MAX` as None!
+                Ok((highest_zswap_state_index != u64::MAX).then_some(highest_zswap_state_index))
             }
 
-            None => Ok(None),
+            Err(error) if error.kind() == object_store::GetErrorKind::NotFound => Ok(None),
+
+            Err(other) => Err(other)?,
         }
     }
 
@@ -110,31 +103,23 @@ impl LedgerStateStorage for NatsLedgerStateStorage {
     async fn load_ledger_state(
         &self,
     ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, Self::Error> {
-        let object_name = self.current_object_name().await?;
-        debug!(object_name; "loading ledger state");
+        let ab_selector = self.ab_selector().await?;
+        let object = self.ledger_state_store.get(ab_selector.object_name()).await;
 
-        match object_name {
-            Some(object_name) => {
-                let object = self.ledger_state_store.get(object_name).await;
+        match object {
+            Ok(mut object) => {
+                let _ = object.read_u64_le().await?;
+                let block_height = object.read_u32_le().await?;
+                let protocol_version = object.read_u32_le().await?.into();
+                let mut bytes = Vec::with_capacity(object.info.size - 16);
+                object.read_to_end(&mut bytes).await?;
 
-                match object {
-                    Ok(mut object) => {
-                        let _ = object.read_u64_le().await?;
-                        let block_height = object.read_u32_le().await?;
-                        let protocol_version = object.read_u32_le().await?.into();
-                        let mut bytes = Vec::with_capacity(object.info.size - 12);
-                        object.read_to_end(&mut bytes).await?;
-
-                        Ok(Some((bytes.into(), block_height, protocol_version)))
-                    }
-
-                    Err(error) if error.kind() == object_store::GetErrorKind::NotFound => Ok(None),
-
-                    Err(other) => Err(other)?,
-                }
+                Ok(Some((bytes.into(), block_height, protocol_version)))
             }
 
-            None => Ok(None),
+            Err(error) if error.kind() == object_store::GetErrorKind::NotFound => Ok(None),
+
+            Err(other) => Err(other)?,
         }
     }
 
@@ -148,71 +133,125 @@ impl LedgerStateStorage for NatsLedgerStateStorage {
     ) -> Result<(), Self::Error> {
         info!(block_height, highest_zswap_state_index:?; "saving ledger state");
 
+        let mut size = 0;
+
         // We (ab)use `u64::MAX` as None!
         let highest_zswap_state_index = highest_zswap_state_index.unwrap_or(u64::MAX).to_le_bytes();
+        size += highest_zswap_state_index.len();
         let highest_zswap_state_index = Cursor::new(highest_zswap_state_index.as_slice());
 
         let block_height = block_height.to_le_bytes();
+        size += block_height.len();
         let block_height = Cursor::new(block_height.as_slice());
 
         let protocol_version = protocol_version.0.to_le_bytes();
+        size += protocol_version.len();
         let protocol_version = Cursor::new(protocol_version.as_slice());
 
+        size += ledger_state.len();
         let ledger_state = Cursor::new(ledger_state.as_ref());
 
-        let object = stream::iter(
-            [
-                highest_zswap_state_index,
-                block_height,
-                protocol_version,
-                ledger_state,
-            ]
-            .into_iter(),
-        );
+        let object = stream::iter([
+            highest_zswap_state_index,
+            block_height,
+            protocol_version,
+            ledger_state,
+        ]);
         let mut object = StreamReader::new(object.map(Ok::<_, io::Error>));
 
-        self.ledger_state_store
-            .put(OBJECT_NAME, &mut object)
+        let ab_selector = self.ab_selector().await?.toggle();
+
+        let info = self
+            .ledger_state_store
+            .put(ab_selector.object_name(), &mut object)
+            .await?;
+
+        if info.size != size {
+            return Err(LedgerStateStorageError::SaveLedgerStateSize(
+                info.size, size,
+            ));
+        }
+
+        self.ab_selector_store
+            .put(AB_SELECTOR_KEY, ab_selector.into())
             .await?;
 
         Ok(())
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+enum ABSelector {
+    #[default]
+    A,
+    B,
+}
+
+impl ABSelector {
+    fn toggle(self) -> Self {
+        match self {
+            ABSelector::A => ABSelector::B,
+            ABSelector::B => ABSelector::A,
+        }
+    }
+
+    fn object_name(self) -> &'static str {
+        match self {
+            ABSelector::A => LEDGER_STATE_KEY_A,
+            ABSelector::B => LEDGER_STATE_KEY_B,
+        }
+    }
+}
+
+impl From<Bytes> for ABSelector {
+    fn from(bytes: Bytes) -> Self {
+        match bytes.as_ref() {
+            [] | [0] => ABSelector::A,
+            _ => ABSelector::B,
+        }
+    }
+}
+
+impl From<ABSelector> for Bytes {
+    fn from(ab_selector: ABSelector) -> Self {
+        match ab_selector {
+            ABSelector::A => vec![0].into(),
+            ABSelector::B => vec![1].into(),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("cannot create storage, because cannot connect")]
+    #[error("cannot connect to NATS server")]
     Connect(#[from] ConnectError),
 
-    #[error("cannot create storage, because cannot create object store")]
-    CreateObjectStore(#[from] CreateObjectStoreError),
+    #[error("cannot create ledger state store")]
+    CreateLedgerStateStore(#[source] CreateObjectStoreError),
+
+    #[error("cannot create A/B selector store")]
+    CreateABSelectorStore(#[source] CreateKeyValueError),
 }
 
 #[derive(Debug, Error)]
 pub enum LedgerStateStorageError {
-    #[error("cannot convert into last index")]
-    LastIndex(#[from] TryFromSliceError),
+    #[error("cannot get AB selector")]
+    GetABSelector(#[from] EntryError),
+
+    #[error("cannot put AB selector")]
+    PutABSelector(#[from] kv::PutError),
 
     #[error("cannot load ledger state")]
-    Get(#[from] GetError),
+    GetLedgerState(#[from] GetError),
 
-    #[error("cannot load ledger state")]
-    Read(#[from] io::Error),
+    #[error("cannot read ledger state")]
+    ReadLedgerState(#[from] io::Error),
 
     #[error("cannot save ledger state")]
-    Put(#[from] PutError),
+    SaveLedgerState(#[from] PutError),
 
-    #[error("cannot cleanup ledger state store")]
-    Cleanup(CleanupError),
-
-    #[error("trying to receive an error from the cleanup task failed")]
-    CleanupErrorReceiver,
-
-    #[error("cannot list objects")]
-    List(#[from] ListError),
-
-    #[error("cannot get next listed object")]
-    Next(#[from] WatcherError),
+    #[error("cannot save ledger state: invalid object size ${0}, expected ${1}")]
+    SaveLedgerStateSize(usize, usize),
 }
 
 /// Configuration settings for [NatsLedgerStateStorage].
@@ -223,27 +262,28 @@ pub struct Config {
     pub password: SecretString,
 }
 
-#[derive(Debug, Error)]
-pub enum CleanupError {
-    #[error("cannot list objects")]
-    List(#[from] ListError),
-
-    #[error("cannot get next listed object")]
-    Next(#[from] WatcherError),
-
-    #[error("cannot delete object")]
-    Delete(#[from] DeleteError),
-}
-
-async fn create_ledger_state_store(
-    jetstream: &Jetstream,
-) -> Result<ObjectStore, CreateObjectStoreError> {
+async fn create_ledger_state_store(jetstream: &Jetstream) -> Result<ObjectStore, Error> {
     let config = object_store::Config {
-        bucket: BUCKET_NAME.to_string(),
+        bucket: LEDGER_STATE_STORE_NAME.to_string(),
         ..Default::default()
     };
 
-    jetstream.create_object_store(config).await
+    jetstream
+        .create_object_store(config)
+        .await
+        .map_err(Error::CreateLedgerStateStore)
+}
+
+async fn create_ab_selector_store(jetstream: &Jetstream) -> Result<Store, Error> {
+    let config = kv::Config {
+        bucket: AB_SELECTOR_STORE_NAME.to_string(),
+        ..Default::default()
+    };
+
+    jetstream
+        .create_key_value(config)
+        .await
+        .map_err(Error::CreateABSelectorStore)
 }
 
 #[cfg(test)]
@@ -300,7 +340,7 @@ mod tests {
             .context("create NatsZswapStateStorage")?;
 
         let last_index = ledger_state_storage
-            .load_last_index()
+            .load_highest_zswap_state_index()
             .await
             .context("load last index")?;
         assert!(last_index.is_none());
@@ -311,14 +351,15 @@ mod tests {
             .context("load ledger state")?;
         assert!(ledger_state.is_none());
 
-        let default_state = ByteVec::default();
+        let state = ByteVec::from([0u8; 1024].as_slice());
+
         ledger_state_storage
-            .save(&default_state, 0, None, PROTOCOL_VERSION_000_018_000)
+            .save(&state, 0, None, PROTOCOL_VERSION_000_018_000)
             .await
             .context("save ledger state")?;
 
         let last_index = ledger_state_storage
-            .load_last_index()
+            .load_highest_zswap_state_index()
             .await
             .context("load last index")?;
         assert!(last_index.is_none());
@@ -329,24 +370,30 @@ mod tests {
             .context("load ledger state")?;
         assert_matches!(
             ledger_state,
-            Some((state, 0, PROTOCOL_VERSION_000_018_000)) if state == default_state
+            Some((s, 0, PROTOCOL_VERSION_000_018_000)) if s == state
         );
 
+        let state = ByteVec::from([1u8; 1024].as_slice());
+
         ledger_state_storage
-            .save(
-                &ByteVec::default(),
-                42,
-                Some(42),
-                PROTOCOL_VERSION_000_018_000,
-            )
+            .save(&state, 42, Some(42), PROTOCOL_VERSION_000_018_000)
             .await
             .context("save ledger state")?;
 
         let last_index = ledger_state_storage
-            .load_last_index()
+            .load_highest_zswap_state_index()
             .await
             .context("load last index")?;
         assert_matches!(last_index, Some(42));
+
+        let ledger_state = ledger_state_storage
+            .load_ledger_state()
+            .await
+            .context("load ledger state")?;
+        assert_matches!(
+            ledger_state,
+            Some((s, 42, PROTOCOL_VERSION_000_018_000)) if s == state
+        );
 
         Ok(())
     }
