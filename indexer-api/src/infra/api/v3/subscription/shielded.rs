@@ -27,7 +27,7 @@ use futures::{
     future::ok,
     stream::{self, TryStreamExt},
 };
-use indexer_common::domain::{LedgerStateStorage, SessionId, Subscriber, WalletIndexed};
+use indexer_common::domain::{SessionId, Subscriber, WalletIndexed};
 use log::{debug, warn};
 use std::{
     future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, sync::Arc, time::Duration,
@@ -121,28 +121,25 @@ impl From<domain::MerkleTreeCollapsedUpdate> for CollapsedMerkleTree {
     }
 }
 
-pub struct ShieldedTransactionsSubscription<S, B, Z> {
+pub struct ShieldedTransactionsSubscription<S, B> {
     _s: PhantomData<S>,
     _b: PhantomData<B>,
-    _z: PhantomData<Z>,
 }
 
-impl<S, B, Z> Default for ShieldedTransactionsSubscription<S, B, Z> {
+impl<S, B> Default for ShieldedTransactionsSubscription<S, B> {
     fn default() -> Self {
         Self {
             _s: PhantomData,
             _b: PhantomData,
-            _z: PhantomData,
         }
     }
 }
 
 #[Subscription]
-impl<S, B, Z> ShieldedTransactionsSubscription<S, B, Z>
+impl<S, B> ShieldedTransactionsSubscription<S, B>
 where
     S: Storage,
     B: Subscriber,
-    Z: LedgerStateStorage,
 {
     /// Subscribe to shielded transaction events for the given session ID starting at the given
     /// index or at zero if omitted.
@@ -151,10 +148,8 @@ where
         cx: &'a Context<'a>,
         session_id: HexEncoded,
         index: Option<u64>,
-    ) -> Result<
-        impl Stream<Item = ApiResult<ShieldedTransactionsEvent<S>>> + use<'a, S, B, Z>,
-        ApiError,
-    > {
+    ) -> Result<impl Stream<Item = ApiResult<ShieldedTransactionsEvent<S>>> + use<'a, S, B>, ApiError>
+    {
         cx.get_metrics().wallets_connected.increment(1);
 
         let session_id =
@@ -168,7 +163,7 @@ where
         // waiting for both streams to complete.
         let (trigger, tripwire) = Tripwire::new();
 
-        let relevant_transactions = make_relevant_transactions::<S, B, Z>(
+        let relevant_transactions = make_relevant_transactions::<S, B>(
             cx, session_id, index, trigger,
         )
         .map_ok(|relevant_transaction| {
@@ -204,21 +199,19 @@ where
     }
 }
 
-fn make_relevant_transactions<'a, S, B, Z>(
+fn make_relevant_transactions<'a, S, B>(
     cx: &'a Context<'a>,
     session_id: SessionId,
     mut index: u64,
     trigger: Trigger,
-) -> impl Stream<Item = ApiResult<RelevantTransaction<S>>> + use<'a, S, B, Z>
+) -> impl Stream<Item = ApiResult<RelevantTransaction<S>>> + use<'a, S, B>
 where
     S: Storage,
     B: Subscriber,
-    Z: LedgerStateStorage,
 {
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
-    let ledger_state_storage = cx.get_ledger_state_storage::<Z>();
-    let zswap_state_cache = cx.get_ledger_state_cache();
+    let ledger_state_cache = cx.get_ledger_state_cache();
 
     let wallet_indexed_events = subscriber
         .subscribe::<WalletIndexed>()
@@ -239,8 +232,8 @@ where
             yield make_relevant_transaction(
                 index,
                 transaction,
-                ledger_state_storage,
-                zswap_state_cache,
+                storage,
+                ledger_state_cache,
             )
             .await?;
 
@@ -271,8 +264,8 @@ where
                 yield make_relevant_transaction(
                     index,
                     transaction,
-                    ledger_state_storage,
-                    zswap_state_cache,
+                    storage,
+                    ledger_state_cache,
                 )
                 .await?;
 
@@ -287,15 +280,14 @@ where
 }
 
 #[trace(properties = { "index": "{index:?}" })]
-async fn make_relevant_transaction<S, Z>(
+async fn make_relevant_transaction<S>(
     index: u64,
     transaction: domain::RegularTransaction,
-    ledger_state_storage: &Z,
+    storage: &S,
     zswap_state_cache: &LedgerStateCache,
 ) -> ApiResult<RelevantTransaction<S>>
 where
     S: Storage,
-    Z: LedgerStateStorage,
 {
     debug!(index, transaction:?; "making relevant transaction");
 
@@ -307,7 +299,7 @@ where
             .collapsed_update(
                 index,
                 transaction.start_index - 1,
-                ledger_state_storage,
+                storage,
                 transaction.protocol_version,
             )
             .await

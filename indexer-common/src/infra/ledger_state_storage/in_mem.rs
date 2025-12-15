@@ -11,47 +11,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{LedgerStateStorage, ProtocolVersion, SerializedLedgerState};
+use crate::domain::{LedgerStateStorage, SerializedLedgerState};
 use parking_lot::RwLock;
-use std::{convert::Infallible, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
+use thiserror::Error;
 
 /// In-memory based ledger state storage implementation.
 #[derive(Default, Clone)]
-pub struct InMemZswapStateStorage {
-    data: Arc<RwLock<Data>>,
+pub struct InMemLedgerStateStorage {
+    ledger_state: Arc<RwLock<HashMap<String, SerializedLedgerState>>>,
 }
 
-impl LedgerStateStorage for InMemZswapStateStorage {
-    type Error = Infallible;
+impl LedgerStateStorage for InMemLedgerStateStorage {
+    type Error = NotFound;
 
-    async fn load_highest_zswap_state_index(&self) -> Result<Option<u64>, Self::Error> {
-        Ok(self.data.read().highest_zswap_state_index)
-    }
-
-    async fn load_ledger_state(
-        &self,
-    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, Self::Error> {
-        Ok(self.data.read().ledger_state.clone())
+    async fn load(&self, key: &str) -> Result<SerializedLedgerState, Self::Error> {
+        self.ledger_state
+            .read()
+            .get(key)
+            .cloned()
+            .ok_or_else(|| NotFound(key.to_owned()))
     }
 
     async fn save(
         &mut self,
         ledger_state: &SerializedLedgerState,
-        block_height: u32,
-        highest_zswap_state_index: Option<u64>,
-        protocol_version: ProtocolVersion,
+        key: &str,
     ) -> Result<(), Self::Error> {
-        let mut data = self.data.write();
-
-        data.ledger_state = Some((ledger_state.to_owned(), block_height, protocol_version));
-        data.highest_zswap_state_index = highest_zswap_state_index;
-
+        self.ledger_state
+            .write()
+            .insert(key.to_owned(), ledger_state.to_owned());
         Ok(())
     }
 }
 
-#[derive(Default)]
-struct Data {
-    ledger_state: Option<(SerializedLedgerState, u32, ProtocolVersion)>,
-    highest_zswap_state_index: Option<u64>,
-}
+#[derive(Debug, Error)]
+#[error("ledger state for key {0} not found")]
+pub struct NotFound(String);

@@ -163,7 +163,7 @@ impl SubxtNode {
         mut last_height: Option<u32>,
     ) -> Result<impl Stream<Item = Result<SubxtBlock, SubxtNodeError>> + use<>, SubxtNodeError>
     {
-        let subscribe_finalized_blocks = self
+        let finalized_blocks = self
             .default_online_client
             .blocks()
             .subscribe_finalized()
@@ -203,7 +203,7 @@ impl SubxtNode {
             })
             .map_err(|error| SubxtNodeError::ReceiveBlock(error.into()));
 
-        Ok(subscribe_finalized_blocks)
+        Ok(finalized_blocks)
     }
 
     async fn make_block(

@@ -15,19 +15,18 @@ mod block;
 mod contract_action;
 mod dust;
 mod ledger_events;
+mod ledger_state;
 mod transaction;
 mod unshielded;
 mod wallet;
 
 use crate::domain;
 use chacha20poly1305::ChaCha20Poly1305;
-use derive_more::Debug;
 
 /// Unified storage implementation for PostgreSQL (cloud) and SQLite (standalone). Uses Cargo
 /// features to select the appropriate database backend at build time.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Storage {
-    #[debug(skip)]
     cipher: ChaCha20Poly1305,
 
     #[cfg(feature = "cloud")]
@@ -35,6 +34,13 @@ pub struct Storage {
 
     #[cfg(feature = "standalone")]
     pool: indexer_common::infra::pool::sqlite::SqlitePool,
+
+    #[cfg(feature = "cloud")]
+    ledger_state_storage: indexer_common::infra::ledger_state_storage::nats::NatsLedgerStateStorage,
+
+    #[cfg(feature = "standalone")]
+    ledger_state_storage:
+        indexer_common::infra::ledger_state_storage::in_mem::InMemLedgerStateStorage,
 }
 
 impl Storage {
@@ -42,16 +48,26 @@ impl Storage {
     pub fn new(
         cipher: ChaCha20Poly1305,
         pool: indexer_common::infra::pool::postgres::PostgresPool,
+        ledger_state_storage: indexer_common::infra::ledger_state_storage::nats::NatsLedgerStateStorage,
     ) -> Self {
-        Self { cipher, pool }
+        Self {
+            cipher,
+            pool,
+            ledger_state_storage,
+        }
     }
 
     #[cfg(feature = "standalone")]
     pub fn new(
         cipher: ChaCha20Poly1305,
         pool: indexer_common::infra::pool::sqlite::SqlitePool,
+        ledger_state_storage: indexer_common::infra::ledger_state_storage::in_mem::InMemLedgerStateStorage,
     ) -> Self {
-        Self { cipher, pool }
+        Self {
+            cipher,
+            pool,
+            ledger_state_storage,
+        }
     }
 }
 

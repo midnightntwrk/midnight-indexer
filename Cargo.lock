@@ -2928,6 +2928,7 @@ dependencies = [
  "figment",
  "futures",
  "humantime-serde",
+ "indoc",
  "itertools 0.14.0",
  "log",
  "logforth",

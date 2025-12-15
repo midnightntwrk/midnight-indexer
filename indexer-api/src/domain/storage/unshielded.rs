@@ -20,7 +20,6 @@ use crate::domain::{
 };
 use indexer_common::domain::UnshieldedAddress;
 use sqlx::Error;
-use std::fmt::Debug;
 
 #[trait_variant::make(Send)]
 pub trait UnshieldedUtxoStorage
@@ -29,7 +28,6 @@ where
         + ContractActionStorage
         + TransactionStorage
         + WalletStorage
-        + Debug
         + Clone
         + Send
         + Sync

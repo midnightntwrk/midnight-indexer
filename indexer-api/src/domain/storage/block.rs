@@ -14,12 +14,12 @@
 use crate::domain::{Block, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{BlockHash, SerializedLedgerParameters};
-use std::{fmt::Debug, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 #[trait_variant::make(Send)]
 pub trait BlockStorage
 where
-    Self: Debug + Clone + Send + Sync + 'static,
+    Self: Clone + Send + Sync + 'static,
 {
     /// Get the latest block.
     async fn get_latest_block(&self) -> Result<Option<Block>, sqlx::Error>;

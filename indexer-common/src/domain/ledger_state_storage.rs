@@ -13,54 +13,40 @@
 
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-use crate::domain::{ProtocolVersion, SerializedLedgerState};
+use crate::domain::SerializedLedgerState;
 use std::{convert::Infallible, error::Error as StdError};
 
 /// Abstraction for ledger state storage.
 #[trait_variant::make(Send)]
-pub trait LedgerStateStorage: Sync + 'static {
+pub trait LedgerStateStorage: Clone + Sync + 'static {
     type Error: StdError + Send + Sync + 'static;
 
-    /// Load the highest zswap state index.
-    async fn load_highest_zswap_state_index(&self) -> Result<Option<u64>, Self::Error>;
+    /// Load the ledger state.
+    async fn load(&self, key: &str) -> Result<SerializedLedgerState, Self::Error>;
 
-    /// Load the ledger state, block height and protocol version.
-    async fn load_ledger_state(
-        &self,
-    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, Self::Error>;
-
-    /// Save the given ledger state, block_height and highest zswap state index.
+    /// Save the given ledger state.
     async fn save(
         &mut self,
         ledger_state: &SerializedLedgerState,
-        block_height: u32,
-        highest_zswap_state_index: Option<u64>,
-        protocol_version: ProtocolVersion,
+        key: &str,
     ) -> Result<(), Self::Error>;
 }
 
+#[derive(Clone)]
 pub struct NoopLedgerStateStorage;
 
+#[allow(unused_variables)]
 impl LedgerStateStorage for NoopLedgerStateStorage {
     type Error = Infallible;
 
-    async fn load_highest_zswap_state_index(&self) -> Result<Option<u64>, Self::Error> {
+    async fn load(&self, key: &str) -> Result<SerializedLedgerState, Self::Error> {
         unimplemented!()
     }
 
-    async fn load_ledger_state(
-        &self,
-    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, Self::Error> {
-        unimplemented!()
-    }
-
-    #[allow(unused_variables)]
     async fn save(
         &mut self,
         ledger_state: &SerializedLedgerState,
-        block_height: u32,
-        highest_zswap_state_index: Option<u64>,
-        protocol_version: ProtocolVersion,
+        key: &str,
     ) -> Result<(), Self::Error> {
         unimplemented!()
     }

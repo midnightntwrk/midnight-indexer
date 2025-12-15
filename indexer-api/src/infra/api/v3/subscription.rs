@@ -28,27 +28,25 @@ use crate::{
     },
 };
 use async_graphql::MergedSubscription;
-use indexer_common::domain::{LedgerStateStorage, Subscriber};
+use indexer_common::domain::Subscriber;
 
 #[derive(MergedSubscription)]
-pub struct Subscription<S, B, Z>(
+pub struct Subscription<S, B>(
     BlockSubscription<S, B>,
     ContractActionSubscription<S, B>,
     DustLedgerEventsSubscription<S, B>,
-    ShieldedTransactionsSubscription<S, B, Z>,
+    ShieldedTransactionsSubscription<S, B>,
     UnshieldedTransactionsSubscription<S, B>,
     ZswapLedgerEventsSubscription<S, B>,
 )
 where
     S: Storage,
-    B: Subscriber,
-    Z: LedgerStateStorage;
+    B: Subscriber;
 
-impl<S, B, Z> Default for Subscription<S, B, Z>
+impl<S, B> Default for Subscription<S, B>
 where
     S: Storage,
     B: Subscriber,
-    Z: LedgerStateStorage,
 {
     fn default() -> Self {
         Subscription(

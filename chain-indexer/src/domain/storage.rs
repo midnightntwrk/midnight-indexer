@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use indexer_common::domain::{ProtocolVersion, SerializedLedgerState};
+
 use crate::domain::{
     Block, BlockTransactions, DustRegistrationEvent, Transaction, node::BlockInfo,
 };
@@ -36,11 +38,25 @@ where
         block_height: u32,
     ) -> Result<BlockTransactions, sqlx::Error>;
 
+    /// Get the ledger state, block height and protocol version.
+    async fn get_ledger_state(
+        &self,
+    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, sqlx::Error>;
+
     /// Save the given block with parameters and return the max regular transaction ID.
     async fn save_block(
-        &self,
+        &mut self,
         block: &Block,
         transactions: &[Transaction],
         dust_registration_events: &[DustRegistrationEvent],
+        ledger_state: Option<&SerializedLedgerState>,
     ) -> Result<Option<u64>, sqlx::Error>;
+
+    /// Save the given serialized ledger state with its metadata.
+    async fn save_ledger_state(
+        &mut self,
+        ledger_state: &SerializedLedgerState,
+        block_height: u32,
+        protocol_version: ProtocolVersion,
+    ) -> Result<(), sqlx::Error>;
 }

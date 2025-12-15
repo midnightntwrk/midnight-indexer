@@ -19,8 +19,9 @@ use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
-        LedgerEventAttributes, TransactionVariant, UnshieldedUtxo,
+        ABSelector, BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
+        LedgerEventAttributes, LedgerStateStorage, ProtocolVersion, SerializedLedgerState,
+        TransactionVariant, UnshieldedUtxo,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -28,7 +29,7 @@ use indoc::indoc;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use sqlx::{QueryBuilder, Type, types::Json};
-use std::iter;
+use std::{io, iter};
 
 #[cfg(feature = "cloud")]
 /// Sqlx transaction for Postgres.
@@ -41,27 +42,104 @@ type SqlxTransaction = sqlx::Transaction<'static, sqlx::Sqlite>;
 /// Unified storage implementation for PostgreSQL (cloud) and SQLite (standalone). Uses Cargo
 /// features to select the appropriate database backend at build time.
 #[derive(Debug, Clone)]
-pub struct Storage {
+pub struct Storage<S> {
     #[cfg(feature = "cloud")]
     pool: indexer_common::infra::pool::postgres::PostgresPool,
 
     #[cfg(feature = "standalone")]
     pool: indexer_common::infra::pool::sqlite::SqlitePool,
+
+    ledger_state_storage: S,
 }
 
-impl Storage {
+impl<S> Storage<S> {
     #[cfg(feature = "cloud")]
-    pub fn new(pool: indexer_common::infra::pool::postgres::PostgresPool) -> Self {
-        Self { pool }
+    pub fn new(
+        pool: indexer_common::infra::pool::postgres::PostgresPool,
+        ledger_state_storage: S,
+    ) -> Self {
+        Self {
+            pool,
+            ledger_state_storage,
+        }
     }
 
     #[cfg(feature = "standalone")]
-    pub fn new(pool: indexer_common::infra::pool::sqlite::SqlitePool) -> Self {
-        Self { pool }
+    pub fn new(
+        pool: indexer_common::infra::pool::sqlite::SqlitePool,
+        ledger_state_storage: S,
+    ) -> Self {
+        Self {
+            pool,
+            ledger_state_storage,
+        }
+    }
+
+    #[trace]
+    async fn save_ledger_state(
+        &mut self,
+        tx: &mut SqlxTransaction,
+        ledger_state: Option<&SerializedLedgerState>,
+        block_height: u32,
+        protocol_version: ProtocolVersion,
+    ) -> Result<(), sqlx::Error>
+    where
+        S: LedgerStateStorage,
+    {
+        let query = indoc! {"
+            SELECT ab_selector
+            FROM ledger_state
+            WHERE id = 0
+        "};
+
+        // Load AB selector.
+        let mut ab_selector = sqlx::query_as::<_, (ABSelector,)>(query)
+            .fetch_optional(&mut **tx)
+            .await?
+            .map(|(x,)| x)
+            .unwrap_or_default();
+
+        // If ledger state is to be saved, toggle AB selector and save.
+        if let Some(ledger_state) = ledger_state {
+            ab_selector = ab_selector.toggle();
+
+            self.ledger_state_storage
+                .save(ledger_state, ab_selector.as_str())
+                .await
+                .map_err(|error| sqlx::Error::Io(io::Error::other(error)))?;
+        }
+
+        // Save metadata.
+        let query = indoc! {"
+            INSERT INTO ledger_state (
+                id,
+                block_height,
+                protocol_version,
+                ab_selector
+            )
+            VALUES (0, $1, $2, $3)
+            ON CONFLICT (id)
+            DO UPDATE SET
+                block_height = EXCLUDED.block_height,
+                protocol_version = EXCLUDED.protocol_version,
+                ab_selector = EXCLUDED.ab_selector
+        "};
+
+        sqlx::query(query)
+            .bind(block_height as i64)
+            .bind(protocol_version.0 as i64)
+            .bind(ab_selector)
+            .execute(&mut **tx)
+            .await?;
+
+        Ok(())
     }
 }
 
-impl domain::storage::Storage for Storage {
+impl<S> domain::storage::Storage for Storage<S>
+where
+    S: LedgerStateStorage,
+{
     #[trace]
     async fn get_highest_block_info(&self) -> Result<Option<BlockInfo>, sqlx::Error> {
         let query = indoc! {"
@@ -171,20 +249,88 @@ impl domain::storage::Storage for Storage {
     }
 
     #[trace]
-    async fn save_block(
+    async fn get_ledger_state(
         &self,
+    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT
+                block_height,
+                protocol_version,
+                ab_selector
+            FROM ledger_state
+            WHERE id = 0
+        "};
+
+        let Some((block_height, protocol_version, ab_selector)) =
+            sqlx::query_as::<_, (i64, i64, ABSelector)>(query)
+                .fetch_optional(&*self.pool)
+                .await?
+        else {
+            return Ok(None);
+        };
+
+        let ledger_state = self
+            .ledger_state_storage
+            .load(ab_selector.as_str())
+            .await
+            .map_err(|error| sqlx::Error::Io(io::Error::other(error)))?;
+
+        Ok(Some((
+            ledger_state,
+            block_height as u32,
+            (protocol_version as u32).into(),
+        )))
+    }
+
+    #[trace]
+    async fn save_block(
+        &mut self,
         block: &Block,
         transactions: &[Transaction],
         dust_registration_events: &[DustRegistrationEvent],
+        ledger_state: Option<&SerializedLedgerState>,
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
+
+        self.save_ledger_state(&mut tx, ledger_state, block.height, block.protocol_version)
+            .await?;
+
         let max_transaction_id =
             save_block(block, transactions, dust_registration_events, &mut tx).await?;
+
         tx.commit().await?;
 
         Ok(max_transaction_id)
     }
+
+    /// Save the given serialized ledger state with its metadata.
+    async fn save_ledger_state(
+        &mut self,
+        ledger_state: &SerializedLedgerState,
+        block_height: u32,
+        protocol_version: ProtocolVersion,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        self.save_ledger_state(&mut tx, Some(ledger_state), block_height, protocol_version)
+            .await?;
+        tx.commit().await
+    }
 }
+
+// #[error("cannot load abselector from database")]
+// LoadABSelector(#[source] sqlx::Error),
+
+// #[error("cannot load highest_zswap_state_index from database")]
+// LoadHighestZswapStateIndex(#[source] sqlx::Error),
+
+// #[error("cannot load ledger state from database")]
+// LoadLedgerState(#[source] sqlx::Error),
+
+// #[error("cannot save ledger state to database")]
+// SaveLedgerState(#[source] sqlx::Error),
+
+// #[error("cannot begin or commit database transaction")]
+// Tx(#[source] sqlx::Error),
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[cfg_attr(feature = "cloud", sqlx(type_name = "CONTRACT_ACTION_VARIANT"))]
@@ -277,7 +423,9 @@ async fn save_block(
         .await?;
 
     let max_transaction_id = save_transactions(transactions, block_id, tx).await?;
+
     save_dust_registration_events(dust_registration_events, block_id, block.timestamp, tx).await?;
+
     Ok(max_transaction_id)
 }
 
@@ -796,7 +944,8 @@ async fn save_dust_registration_events(
                         valid,
                         registered_at,
                         block_id
-                    ) VALUES ($1, $2, $3, $4, $5)
+                    )
+                    VALUES ($1, $2, $3, $4, $5)
                     ON CONFLICT (cardano_address, dust_address)
                     DO UPDATE SET
                         valid = EXCLUDED.valid,

@@ -39,8 +39,7 @@ use bech32::{Bech32, Bech32m, Hrp};
 use const_hex::FromHexError;
 use derive_more::{AsRef, Debug, Display};
 use indexer_common::domain::{
-    ByteArrayLenError, ByteVec, LedgerStateStorage, NetworkId, NoopLedgerStateStorage,
-    NoopSubscriber, SessionId, Subscriber,
+    ByteArrayLenError, ByteVec, NetworkId, NoopSubscriber, SessionId, Subscriber,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -288,16 +287,15 @@ impl CardanoNetwork {
 pub fn export_schema() -> String {
     // Once traits with async functions are object safe, `NoopStorage` can be replaced with
     // `<Box<dyn Storage>`.
-    schema_builder::<NoopStorage, NoopSubscriber, NoopLedgerStateStorage>()
+    schema_builder::<NoopStorage, NoopSubscriber>()
         .finish()
         .sdl()
 }
 
-pub fn make_app<S, B, Z>(
+pub fn make_app<S, B>(
     network_id: NetworkId,
     zswap_state_cache: LedgerStateCache,
     storage: S,
-    ledger_state_storage: Z,
     subscriber: B,
     max_complexity: usize,
     max_depth: usize,
@@ -305,15 +303,13 @@ pub fn make_app<S, B, Z>(
 where
     S: Storage,
     B: Subscriber,
-    Z: LedgerStateStorage,
 {
     let metrics = Metrics::default();
 
-    let schema = schema_builder::<S, B, Z>()
+    let schema = schema_builder::<S, B>()
         .data(network_id)
         .data(zswap_state_cache)
         .data(storage)
-        .data(ledger_state_storage)
         .data(subscriber)
         .data(metrics)
         .limit_complexity(max_complexity)
@@ -326,16 +322,15 @@ where
         .route_service("/graphql/ws", GraphQLSubscription::new(schema))
 }
 
-fn schema_builder<S, B, Z>() -> SchemaBuilder<Query<S>, Mutation<S>, Subscription<S, B, Z>>
+fn schema_builder<S, B>() -> SchemaBuilder<Query<S>, Mutation<S>, Subscription<S, B>>
 where
     S: Storage,
     B: Subscriber,
-    Z: LedgerStateStorage,
 {
     Schema::build(
         Query::<S>::default(),
         Mutation::<S>::default(),
-        Subscription::<S, B, Z>::default(),
+        Subscription::<S, B>::default(),
     )
 }
 

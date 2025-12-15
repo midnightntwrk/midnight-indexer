@@ -11,9 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::domain::storage::Storage;
 use derive_more::derive::{Deref, From};
 use indexer_common::{
-    domain::{ByteVec, LedgerStateStorage, NetworkId, ProtocolVersion, ledger},
+    domain::{ByteVec, NetworkId, ProtocolVersion, ledger},
     error::BoxError,
 };
 use log::debug;
@@ -35,7 +36,7 @@ impl LedgerStateCache {
         &self,
         start_index: u64,
         end_index: u64,
-        ledger_state_storage: &impl LedgerStateStorage,
+        storage: &impl Storage,
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, LedgerStateCacheError> {
         // Acquire a read lock.
@@ -52,11 +53,10 @@ impl LedgerStateCache {
             if end_index >= first_free {
                 debug!(end_index, first_free; "stale ledger state, loading from storage");
 
-                let ledger_state_and_protocol_version = ledger_state_storage
-                    .load_ledger_state()
+                let ledger_state_and_protocol_version = storage
+                    .get_ledger_state()
                     .await
-                    .map_err(|error| LedgerStateCacheError::Load(error.into()))?
-                    .map(|(ledger_state, _, protocol_version)| (ledger_state, protocol_version));
+                    .map_err(|error| LedgerStateCacheError::Load(error.into()))?;
 
                 match ledger_state_and_protocol_version {
                     Some((ledger_state, protocol_version)) => {

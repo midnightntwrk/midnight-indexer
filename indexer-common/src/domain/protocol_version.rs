@@ -48,12 +48,6 @@ impl ProtocolVersion {
     }
 }
 
-impl Default for ProtocolVersion {
-    fn default() -> Self {
-        Self(1)
-    }
-}
-
 impl TryFrom<&[u8]> for ProtocolVersion {
     type Error = ScaleDecodeProtocolVersionError;
 
