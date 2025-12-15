@@ -60,7 +60,6 @@ const TRAVERSE_BACK_LOG_AFTER: u32 = 1_000;
 /// A [Node] implementation based on subxt.
 #[derive(Clone)]
 pub struct SubxtNode {
-    genesis_protocol_version: ProtocolVersion,
     rpc_client: RpcClient,
     default_online_client: OnlineClient<SubstrateConfig>,
     compatible_online_client: Option<(ProtocolVersion, OnlineClient<SubstrateConfig>)>,
@@ -72,7 +71,6 @@ impl SubxtNode {
     pub async fn new(config: Config) -> Result<Self, Error> {
         let Config {
             url,
-            genesis_protocol_version,
             reconnect_max_delay: retry_max_delay,
             reconnect_max_attempts: retry_max_attempts,
             subscription_recovery_timeout,
@@ -92,7 +90,6 @@ impl SubxtNode {
 
         Ok(Self {
             rpc_client,
-            genesis_protocol_version,
             default_online_client,
             compatible_online_client: None,
             subscription_recovery_timeout,
@@ -217,7 +214,7 @@ impl SubxtNode {
         let protocol_version = block
             .header()
             .protocol_version()?
-            .unwrap_or(self.genesis_protocol_version);
+            .expect("protocol version header is present");
 
         debug!(
             hash:%,
@@ -447,8 +444,6 @@ impl Node for SubxtNode {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub url: String,
-
-    pub genesis_protocol_version: ProtocolVersion,
 
     #[serde(with = "humantime_serde")]
     pub reconnect_max_delay: Duration,

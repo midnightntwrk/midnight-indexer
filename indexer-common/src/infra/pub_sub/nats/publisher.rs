@@ -15,7 +15,8 @@ use crate::{
     domain::{Message, Publisher},
     infra::pub_sub::nats::Config,
 };
-use async_nats::{Client, ConnectOptions};
+use async_nats::{Client, ConnectOptions, Event};
+use log::{debug, warn};
 use secrecy::ExposeSecret;
 use thiserror::Error;
 
@@ -31,10 +32,24 @@ impl NatsPublisher {
             url,
             username,
             password,
+            max_reconnects,
         } = config;
 
-        let options =
-            ConnectOptions::new().user_and_password(username, password.expose_secret().to_owned());
+        let options = ConnectOptions::new()
+            .user_and_password(username, password.expose_secret().to_owned())
+            .max_reconnects(max_reconnects)
+            .event_callback(|event| async {
+                match event {
+                    Event::Connected => debug!("NATS client connected"),
+                    Event::Disconnected => warn!("NATS client disconnected"),
+                    Event::LameDuckMode => warn!("NATS client in lame duck mode"),
+                    Event::Draining => warn!("NATS client draining"),
+                    Event::Closed => warn!("NATS client closed"),
+                    Event::SlowConsumer(_) => warn!("NATS client has slow consumer"),
+                    Event::ServerError(error) => warn!(error:%; "NATS server error"),
+                    Event::ClientError(error) => warn!(error:%; "NATS client error"),
+                }
+            });
         let client = options.connect(url).await?;
 
         Ok(Self { client })

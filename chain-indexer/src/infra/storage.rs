@@ -79,7 +79,7 @@ impl<S> Storage<S> {
     async fn save_ledger_state(
         &mut self,
         tx: &mut SqlxTransaction,
-        ledger_state: Option<&SerializedLedgerState>,
+        ledger_state: &SerializedLedgerState,
         block_height: u32,
         protocol_version: ProtocolVersion,
     ) -> Result<(), sqlx::Error>
@@ -92,22 +92,17 @@ impl<S> Storage<S> {
             WHERE id = 0
         "};
 
-        // Load AB selector.
-        let mut ab_selector = sqlx::query_as::<_, (ABSelector,)>(query)
+        let ab_selector = sqlx::query_as::<_, (ABSelector,)>(query)
             .fetch_optional(&mut **tx)
             .await?
             .map(|(x,)| x)
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .toggle();
 
-        // If ledger state is to be saved, toggle AB selector and save.
-        if let Some(ledger_state) = ledger_state {
-            ab_selector = ab_selector.toggle();
-
-            self.ledger_state_storage
-                .save(ledger_state, ab_selector.as_str())
-                .await
-                .map_err(|error| sqlx::Error::Io(io::Error::other(error)))?;
-        }
+        self.ledger_state_storage
+            .save(ledger_state, ab_selector.as_str())
+            .await
+            .map_err(|error| sqlx::Error::Io(io::Error::other(error)))?;
 
         // Save metadata.
         let query = indoc! {"
@@ -292,8 +287,10 @@ where
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
-        self.save_ledger_state(&mut tx, ledger_state, block.height, block.protocol_version)
-            .await?;
+        if let Some(ledger_state) = ledger_state {
+            self.save_ledger_state(&mut tx, ledger_state, block.height, block.protocol_version)
+                .await?;
+        }
 
         let max_transaction_id =
             save_block(block, transactions, dust_registration_events, &mut tx).await?;
@@ -311,26 +308,11 @@ where
         protocol_version: ProtocolVersion,
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        self.save_ledger_state(&mut tx, Some(ledger_state), block_height, protocol_version)
+        self.save_ledger_state(&mut tx, ledger_state, block_height, protocol_version)
             .await?;
         tx.commit().await
     }
 }
-
-// #[error("cannot load abselector from database")]
-// LoadABSelector(#[source] sqlx::Error),
-
-// #[error("cannot load highest_zswap_state_index from database")]
-// LoadHighestZswapStateIndex(#[source] sqlx::Error),
-
-// #[error("cannot load ledger state from database")]
-// LoadLedgerState(#[source] sqlx::Error),
-
-// #[error("cannot save ledger state to database")]
-// SaveLedgerState(#[source] sqlx::Error),
-
-// #[error("cannot begin or commit database transaction")]
-// Tx(#[source] sqlx::Error),
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[cfg_attr(feature = "cloud", sqlx(type_name = "CONTRACT_ACTION_VARIANT"))]
