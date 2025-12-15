@@ -11,27 +11,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod storage;
+use indexer_common::domain::{ProtocolVersion, SerializedLedgerState};
 
-mod api;
-mod block;
-mod contract_action;
-pub mod dust;
-mod ledger_event;
-mod ledger_state;
-mod transaction;
-mod unshielded;
+use crate::domain::storage::NoopStorage;
 
-pub use api::*;
-pub use block::*;
-pub use contract_action::*;
-pub use dust::*;
-pub use ledger_event::*;
-pub use ledger_state::*;
-pub use transaction::*;
-pub use unshielded::*;
+#[trait_variant::make(Send)]
+pub trait LedgerStateStorage
+where
+    Self: Clone + Send + Sync + 'static,
+{
+    /// Get the ledger state and protocol version.
+    async fn get_ledger_state(
+        &self,
+    ) -> Result<Option<(SerializedLedgerState, ProtocolVersion)>, sqlx::Error>;
+}
 
-use indexer_common::domain::{PROTOCOL_VERSION_000_018_000, ProtocolVersion};
-
-/// This must always point to the latest (highest) supported version.
-pub const LATEST_PROTOCOL_VERSION: ProtocolVersion = PROTOCOL_VERSION_000_018_000;
+#[allow(unused_variables)]
+impl LedgerStateStorage for NoopStorage {
+    async fn get_ledger_state(
+        &self,
+    ) -> Result<Option<(SerializedLedgerState, ProtocolVersion)>, sqlx::Error> {
+        unimplemented!()
+    }
+}

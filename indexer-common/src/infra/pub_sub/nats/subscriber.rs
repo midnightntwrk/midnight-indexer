@@ -36,10 +36,12 @@ impl NatsSubscriber {
             url,
             username,
             password,
+            max_reconnects,
         } = config;
 
         let options = ConnectOptions::new()
             .user_and_password(username, password.expose_secret().to_owned())
+            .max_reconnects(max_reconnects)
             .event_callback(|event| async {
                 match event {
                     Event::Connected => debug!("NATS client connected"),

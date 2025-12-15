@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{Block, ContractAction, Transaction};
-use indexer_common::domain::{ContractAttributes, SerializedLedgerState};
+use indexer_common::domain::ContractAttributes;
 use metrics::{Counter, Gauge, counter, gauge};
 
 pub struct Metrics {
@@ -62,9 +62,9 @@ impl Metrics {
         &self,
         block: &Block,
         transactions: &[Transaction],
-        ledger_state: &SerializedLedgerState,
         node_block_height: u32,
         caught_up: bool,
+        ledger_state_size: Option<usize>,
     ) {
         self.block_height.absolute(block.height as u64);
 
@@ -137,7 +137,8 @@ impl Metrics {
                 .count() as u64,
         );
 
-        self.ledger_state_size
-            .set(ledger_state.as_ref().len() as f64);
+        if let Some(ledger_state_size) = ledger_state_size {
+            self.ledger_state_size.set(ledger_state_size as f64);
+        }
     }
 }

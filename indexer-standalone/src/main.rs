@@ -97,7 +97,7 @@ async fn run() -> anyhow::Result<()> {
 
     let cipher = make_cipher(secret).context("make cipher")?;
 
-    let ledger_state_storage = ledger_state_storage::in_mem::InMemZswapStateStorage::default();
+    let ledger_state_storage = ledger_state_storage::in_mem::InMemLedgerStateStorage::default();
 
     let pub_sub = pub_sub::in_mem::InMemPubSub::default();
 
@@ -105,14 +105,14 @@ async fn run() -> anyhow::Result<()> {
         let node = SubxtNode::new(node_config)
             .await
             .context("create SubxtNode")?;
-        let storage = chain_indexer::infra::storage::Storage::new(pool.clone());
+        let storage =
+            chain_indexer::infra::storage::Storage::new(pool.clone(), ledger_state_storage.clone());
         let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
         chain_indexer::application::run(
             application_config.clone().into(),
             node,
             storage,
-            ledger_state_storage.clone(),
             pub_sub.publisher(),
             sigterm,
         )
@@ -120,13 +120,12 @@ async fn run() -> anyhow::Result<()> {
 
     let indexer_api = task::spawn({
         let subscriber = pub_sub.subscriber();
-        let storage = indexer_api::infra::storage::Storage::new(cipher.clone(), pool.clone());
-        let api = AxumApi::new(
-            api_config,
-            storage,
-            ledger_state_storage,
-            subscriber.clone(),
+        let storage = indexer_api::infra::storage::Storage::new(
+            cipher.clone(),
+            pool.clone(),
+            ledger_state_storage.clone(),
         );
+        let api = AxumApi::new(api_config, storage, subscriber.clone());
         let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
         indexer_api::application::run(application_config.clone().into(), api, subscriber, sigterm)

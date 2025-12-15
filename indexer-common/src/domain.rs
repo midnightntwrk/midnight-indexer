@@ -321,3 +321,27 @@ pub enum LedgerEventGrouping {
     Zswap,
     Dust,
 }
+
+#[derive(Debug, Clone, Copy, Default, Type)]
+#[cfg_attr(feature = "cloud", sqlx(type_name = "AB_SELECTOR"))]
+pub enum ABSelector {
+    #[default]
+    A,
+    B,
+}
+
+impl ABSelector {
+    pub fn toggle(self) -> Self {
+        match self {
+            ABSelector::A => ABSelector::B,
+            ABSelector::B => ABSelector::A,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ABSelector::A => "A",
+            ABSelector::B => "B",
+        }
+    }
+}

@@ -26,7 +26,7 @@ use axum::{
 use derive_more::Debug;
 use fastrace_axum::FastraceLayer;
 use indexer_common::{
-    domain::{LedgerStateStorage, NetworkId, Subscriber},
+    domain::{NetworkId, Subscriber},
     error::StdErrorExt,
 };
 use log::{error, info, warn};
@@ -56,29 +56,26 @@ use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
 const LENGTH_LIMIT_EXCEEDED_BODY: &[u8] =
     b"Io(Custom { kind: Other, error: \"length limit exceeded\" })";
 
-pub struct AxumApi<S, Z, B> {
+pub struct AxumApi<S, B> {
     config: Config,
     storage: S,
-    ledger_state_storage: Z,
     subscriber: B,
 }
 
-impl<S, Z, B> AxumApi<S, Z, B> {
-    pub fn new(config: Config, storage: S, ledger_state_storage: Z, subscriber: B) -> Self {
+impl<S, B> AxumApi<S, B> {
+    pub fn new(config: Config, storage: S, subscriber: B) -> Self {
         Self {
             config,
             storage,
-            ledger_state_storage,
             subscriber,
         }
     }
 }
 
-impl<S, Z, B> Api for AxumApi<S, Z, B>
+impl<S, B> Api for AxumApi<S, B>
 where
     S: Storage,
     B: Subscriber,
-    Z: LedgerStateStorage,
 {
     type Error = AxumApiError;
 
@@ -100,7 +97,6 @@ where
             caught_up,
             network_id,
             self.storage,
-            self.ledger_state_storage,
             self.subscriber,
             max_complexity,
             max_depth,
@@ -154,11 +150,10 @@ impl Default for Metrics {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn make_app<S, Z, B>(
+fn make_app<S, B>(
     caught_up: Arc<AtomicBool>,
     network_id: NetworkId,
     storage: S,
-    ledger_state_storage: Z,
     subscriber: B,
     max_complexity: usize,
     max_depth: usize,
@@ -167,7 +162,6 @@ fn make_app<S, Z, B>(
 where
     S: Storage,
     B: Subscriber,
-    Z: LedgerStateStorage,
 {
     let zswap_state_cache = LedgerStateCache::new(network_id.clone());
 
@@ -175,7 +169,6 @@ where
         network_id,
         zswap_state_cache,
         storage,
-        ledger_state_storage,
         subscriber,
         max_complexity,
         max_depth,
@@ -273,10 +266,6 @@ trait ContextExt {
     where
         B: Subscriber;
 
-    fn get_ledger_state_storage<Z>(&self) -> &Z
-    where
-        Z: LedgerStateStorage;
-
     fn get_ledger_state_cache(&self) -> &LedgerStateCache;
 
     fn get_metrics(&self) -> &Metrics;
@@ -300,14 +289,6 @@ impl ContextExt for Context<'_> {
         B: Subscriber,
     {
         self.data::<B>().expect("Subscriber is stored in Context")
-    }
-
-    fn get_ledger_state_storage<Z>(&self) -> &Z
-    where
-        Z: LedgerStateStorage,
-    {
-        self.data::<Z>()
-            .expect("LedgerStateStorage is stored in Context")
     }
 
     fn get_ledger_state_cache(&self) -> &LedgerStateCache {
