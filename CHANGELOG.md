@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0-alpha.18] - 2025-12-04
+## [3.0.0-alpha.20] - 2025-12-16
 
 ### 🚀 Features
 
@@ -49,6 +49,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - *(api)* Add maxCapacity field to DustGenerationStatus (#552)
 - *(api)* Change dustAddress from HexEncoded to Bech32m format (#554)
 - *(api)* Add Cardano UTXO reference to dustGenerationStatus (#575)
+- Validate saving ledger state (#600)
 
 ### 🐛 Bug Fixes
 
@@ -87,6 +88,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Treat dust public key as variable length encoded (#538)
 - *(indexer-api)* Prevent duplicate transactions (#573)
 - *(chain-indexer)* Add timeout-based recovery for stuck subscriptions (#576)
+- Correct ledger state divergence from TX ordering and failed TX cost handling (#592)
 
 ### 💼 Other
 
