@@ -1019,6 +1019,7 @@ dependencies = [
  "parity-scale-codec",
  "parking_lot",
  "serde",
+ "serde_json",
  "sqlx",
  "subxt",
  "thiserror 2.0.17",
