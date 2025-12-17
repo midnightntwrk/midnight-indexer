@@ -23,7 +23,8 @@ CREATE TABLE blocks (
   parent_hash BYTEA NOT NULL,
   author BYTEA,
   timestamp BIGINT NOT NULL,
-  ledger_parameters BYTEA NOT NULL
+  ledger_parameters BYTEA NOT NULL,
+  ledger_state_key BYTEA NOT NULL
 );
 --------------------------------------------------------------------------------
 -- transactions
@@ -187,7 +188,6 @@ CREATE TABLE system_parameters_terms_and_conditions (
   url TEXT NOT NULL
 );
 CREATE INDEX ON system_parameters_terms_and_conditions (block_height DESC);
-
 CREATE TABLE system_parameters_d (
   id BIGSERIAL PRIMARY KEY,
   block_height BIGINT NOT NULL,

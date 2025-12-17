@@ -13,11 +13,10 @@
 
 use crate::domain::{ContractAction, node};
 use indexer_common::domain::{
-    ByteArray, LedgerEvent, ProtocolVersion, SerializedTransaction,
-    SerializedTransactionIdentifier, SerializedZswapStateRoot, TransactionHash, TransactionResult,
-    TransactionVariant, UnshieldedUtxo,
+    LedgerEvent, ProtocolVersion, SerializedTransaction, SerializedTransactionIdentifier,
+    SerializedZswapStateRoot, TransactionHash, TransactionResult, TransactionVariant,
+    UnshieldedUtxo,
 };
-use sqlx::FromRow;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,19 +133,4 @@ impl From<node::SystemTransaction> for SystemTransaction {
             ledger_events: Default::default(),
         }
     }
-}
-
-/// All serialized transactions from a single block along with metadata needed for ledger state
-/// application.
-#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
-pub struct BlockTransactions {
-    pub transactions: Vec<(TransactionVariant, SerializedTransaction)>,
-
-    #[sqlx(try_from = "i64")]
-    pub protocol_version: ProtocolVersion,
-
-    pub block_parent_hash: ByteArray<32>,
-
-    #[sqlx(try_from = "i64")]
-    pub block_timestamp: u64,
 }

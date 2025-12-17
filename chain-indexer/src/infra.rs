@@ -23,11 +23,11 @@ pub struct Config {
     #[serde(rename = "storage")]
     pub storage_config: indexer_common::infra::pool::postgres::Config,
 
+    #[serde(rename = "ledger_db")]
+    pub ledger_db_config: indexer_common::infra::ledger_db::Config,
+
     #[serde(rename = "pub_sub")]
     pub pub_sub_config: indexer_common::infra::pub_sub::nats::Config,
-
-    #[serde(rename = "ledger_state_storage")]
-    pub ledger_state_storage_config: indexer_common::infra::ledger_state_storage::nats::Config,
 
     #[serde(rename = "node")]
     pub node_config: subxt_node::Config,

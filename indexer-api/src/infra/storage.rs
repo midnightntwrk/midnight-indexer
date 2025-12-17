@@ -36,13 +36,6 @@ pub struct Storage {
 
     #[cfg(feature = "standalone")]
     pool: indexer_common::infra::pool::sqlite::SqlitePool,
-
-    #[cfg(feature = "cloud")]
-    ledger_state_storage: indexer_common::infra::ledger_state_storage::nats::NatsLedgerStateStorage,
-
-    #[cfg(feature = "standalone")]
-    ledger_state_storage:
-        indexer_common::infra::ledger_state_storage::in_mem::InMemLedgerStateStorage,
 }
 
 impl Storage {
@@ -50,26 +43,16 @@ impl Storage {
     pub fn new(
         cipher: ChaCha20Poly1305,
         pool: indexer_common::infra::pool::postgres::PostgresPool,
-        ledger_state_storage: indexer_common::infra::ledger_state_storage::nats::NatsLedgerStateStorage,
     ) -> Self {
-        Self {
-            cipher,
-            pool,
-            ledger_state_storage,
-        }
+        Self { cipher, pool }
     }
 
     #[cfg(feature = "standalone")]
     pub fn new(
         cipher: ChaCha20Poly1305,
         pool: indexer_common::infra::pool::sqlite::SqlitePool,
-        ledger_state_storage: indexer_common::infra::ledger_state_storage::in_mem::InMemLedgerStateStorage,
     ) -> Self {
-        Self {
-            cipher,
-            pool,
-            ledger_state_storage,
-        }
+        Self { cipher, pool }
     }
 }
 

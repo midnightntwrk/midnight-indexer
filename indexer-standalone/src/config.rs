@@ -33,7 +33,6 @@ pub struct Config {
 pub struct ApplicationConfig {
     pub network_id: NetworkId,
     pub blocks_buffer: usize,
-    pub save_ledger_state_after: u32,
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
     #[serde(with = "humantime_serde")]
@@ -50,7 +49,6 @@ impl From<ApplicationConfig> for chain_indexer::application::Config {
         let ApplicationConfig {
             network_id,
             blocks_buffer,
-            save_ledger_state_after,
             caught_up_max_distance,
             caught_up_leeway,
             ..
@@ -59,7 +57,6 @@ impl From<ApplicationConfig> for chain_indexer::application::Config {
         Self {
             network_id,
             blocks_buffer,
-            save_ledger_state_after,
             caught_up_max_distance,
             caught_up_leeway,
         }
@@ -97,6 +94,9 @@ impl From<ApplicationConfig> for wallet_indexer::application::Config {
 pub struct InfraConfig {
     #[serde(rename = "storage")]
     pub storage_config: pool::sqlite::Config,
+
+    #[serde(rename = "ledger_db")]
+    pub ledger_db_config: indexer_common::infra::ledger_db::Config,
 
     #[serde(rename = "node")]
     pub node_config: chain_indexer::infra::subxt_node::Config,

@@ -11,7 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{self, ContractAction, DustRegistrationEvent, SystemParametersChange};
+use crate::domain::{
+    self, BlockRef, ContractAction, DustRegistrationEvent, SystemParametersChange,
+};
 use futures::Stream;
 use indexer_common::domain::{
     BlockAuthor, BlockHash, ProtocolVersion, SerializedTransaction,
@@ -31,13 +33,13 @@ where
     /// A stream of the latest/highest finalized blocks.
     async fn highest_blocks(
         &self,
-    ) -> Result<impl Stream<Item = Result<BlockInfo, Self::Error>> + Send, Self::Error>;
+    ) -> Result<impl Stream<Item = Result<BlockRef, Self::Error>> + Send, Self::Error>;
 
     /// A stream of finalized [Block]s in natural parent-child order without duplicates but possibly
     /// with gaps, starting after the given block.
     fn finalized_blocks(
         &mut self,
-        after: Option<BlockInfo>,
+        after: Option<BlockRef>,
     ) -> impl Stream<Item = Result<Block, Self::Error>>;
 
     /// Fetch system parameters (D-Parameter and Terms & Conditions) at a given block.
@@ -82,21 +84,6 @@ impl From<Block> for (domain::Block, Vec<Transaction>) {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct BlockInfo {
-    pub hash: BlockHash,
-    pub height: u32,
-}
-
-impl From<&Block> for BlockInfo {
-    fn from(block: &Block) -> Self {
-        Self {
-            hash: block.hash,
-            height: block.height,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Transaction {
     Regular(RegularTransaction),
@@ -119,4 +106,13 @@ pub struct SystemTransaction {
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
     pub raw: SerializedTransaction,
+}
+
+impl From<&Block> for BlockRef {
+    fn from(block: &Block) -> Self {
+        Self {
+            hash: block.hash,
+            height: block.height,
+        }
+    }
 }

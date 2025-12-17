@@ -51,7 +51,7 @@ test:
     fi
 
 doc:
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p indexer-common --no-deps --all-features
+    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p indexer-common --no-deps --features {{feature}}
     RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p chain-indexer  --no-deps --features {{feature}}
     RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p wallet-indexer --no-deps --features {{feature}}
     RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p indexer-api    --no-deps --features {{feature}}
@@ -88,7 +88,7 @@ build-docker-image package profile="dev":
 
 run-chain-indexer node="ws://localhost:9944" network_id="undeployed":
     docker compose up -d --wait postgres nats
-    RUST_LOG=chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,tracing::span=off,midnight_ledger=warn,info \
+    RUST_LOG=chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,tracing::span=off,midnight_ledger=warn,midnight_zswap=warn,info \
         CONFIG_FILE=chain-indexer/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         APP__INFRA__NODE__URL={{node}} \

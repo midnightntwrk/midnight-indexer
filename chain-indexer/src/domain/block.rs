@@ -19,7 +19,7 @@ use std::fmt::Debug;
 
 #[derive(Debug, Clone)]
 pub struct Block {
-    // These fields come from node::Block.
+    // These fields come from the node.
     pub hash: BlockHash,
     pub height: u32,
     pub protocol_version: ProtocolVersion,
@@ -27,10 +27,14 @@ pub struct Block {
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
     pub zswap_state_root: ZswapStateRoot,
-
-    // DUST registration events for this block.
     pub dust_registration_events: Vec<DustRegistrationEvent>,
 
-    // These fields are set after applying transactions to the ledger state.
+    // These fields are set after applying all transactions of this block to the ledger state.
     pub ledger_parameters: SerializedLedgerParameters,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BlockRef {
+    pub hash: BlockHash,
+    pub height: u32,
 }

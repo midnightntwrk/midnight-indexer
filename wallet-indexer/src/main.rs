@@ -39,7 +39,7 @@ async fn run() -> anyhow::Result<()> {
     use indexer_common::{
         cipher::make_cipher,
         config::ConfigExt,
-        infra::{migrations, pool, pub_sub},
+        infra::{ledger_db, migrations, pool, pub_sub},
         telemetry,
     };
     use log::info;
@@ -68,9 +68,10 @@ async fn run() -> anyhow::Result<()> {
     telemetry::init_metrics(metrics_config);
 
     let infra::Config {
-        secret,
         storage_config,
+        ledger_db_config,
         pub_sub_config,
+        secret,
     } = infra_config;
 
     let pool = pool::postgres::PostgresPool::new(storage_config)
@@ -81,8 +82,11 @@ async fn run() -> anyhow::Result<()> {
             .await
             .context("run Postgres migrations")?;
     }
+
     let cipher = make_cipher(secret).context("make cipher")?;
-    let storage = infra::storage::Storage::new(cipher, pool);
+    let storage = infra::storage::Storage::new(cipher, pool.clone());
+
+    ledger_db::init(ledger_db_config, pool);
 
     let publisher = pub_sub::nats::publisher::NatsPublisher::new(pub_sub_config.clone())
         .await

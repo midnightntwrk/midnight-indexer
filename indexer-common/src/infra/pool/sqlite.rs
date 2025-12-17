@@ -14,8 +14,8 @@
 use derive_more::Into;
 use log::debug;
 use serde::Deserialize;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use std::ops::Deref;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use std::{ops::Deref, time::Duration};
 use thiserror::Error;
 
 /// New type for `sqlx::SqlitePool`, allowing for some custom extensions as well as security.
@@ -28,9 +28,12 @@ pub struct SqlitePool(sqlx::SqlitePool);
 impl SqlitePool {
     /// Try to create a new [SqlitePool] with the given config.
     pub async fn new(config: Config) -> Result<Self, Error> {
-        let connect_options = config.try_into().map_err(Error::ConvertConfig)?;
+        let connect_options = SqliteConnectOptions::try_from(config)
+            .map_err(Error::ConvertConfig)?
+            .journal_mode(SqliteJournalMode::Wal)
+            .busy_timeout(Duration::from_secs(15));
         let inner = SqlitePoolOptions::new()
-            .max_connections(1)
+            .max_connections(2)
             .connect_with(connect_options)
             .await?;
         let pool = SqlitePool(inner);

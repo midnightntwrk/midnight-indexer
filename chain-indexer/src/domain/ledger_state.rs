@@ -16,7 +16,7 @@ use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, NetworkId,
-    SerializedContractAddress, SerializedTransaction, TransactionHash, TransactionVariant,
+    ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey, TransactionHash,
     ledger::{self, LedgerParameters},
 };
 use std::ops::DerefMut;
@@ -33,43 +33,22 @@ impl DerefMut for LedgerState {
 }
 
 impl LedgerState {
-    #[allow(missing_docs)]
     pub fn new(network_id: NetworkId) -> Self {
         Self(indexer_common::domain::ledger::LedgerState::new(network_id))
     }
 
-    /// Apply the given storecd transactions to this ledger state.
-    #[trace(properties = { "block_parent_hash": "{block_parent_hash}" })]
-    pub fn apply_stored_transactions<'a>(
-        &mut self,
-        transactions: impl Iterator<Item = &'a (TransactionVariant, SerializedTransaction)>,
-        block_parent_hash: BlockHash,
-        block_timestamp: u64,
-    ) -> Result<LedgerParameters, Error> {
-        for (variant, transaction) in transactions {
-            match variant {
-                TransactionVariant::Regular => {
-                    self.apply_regular_transaction(transaction, block_parent_hash, block_timestamp)
-                        .map_err(|error| Error::ApplyRegularTransaction(None, error))?;
-                }
-
-                TransactionVariant::System => {
-                    self.apply_system_transaction(transaction, block_timestamp)
-                        .map_err(|error| Error::ApplySystemTransaction(None, error))?;
-                }
-            }
-        }
-
-        let ledger_parameters = self
-            .finalize_apply_transactions(block_timestamp)
-            .map_err(Error::PostApplyTransactions)?;
-
-        Ok(ledger_parameters)
+    pub fn load(
+        key: &SerializedLedgerStateKey,
+        protocol_version: ProtocolVersion,
+    ) -> Result<Self, Error> {
+        indexer_common::domain::ledger::LedgerState::load(key, protocol_version)
+            .map_err(Error::Load)
+            .map(Into::into)
     }
 
     /// Apply the given node transactions to this ledger state and return domain transactions.
     #[trace(properties = { "block_parent_hash": "{block_parent_hash}" })]
-    pub fn apply_node_transactions(
+    pub fn apply_transactions(
         &mut self,
         transactions: impl IntoIterator<Item = node::Transaction>,
         block_parent_hash: BlockHash,
@@ -78,17 +57,13 @@ impl LedgerState {
         let transactions = transactions
             .into_iter()
             .map(|transaction| match transaction {
-                node::Transaction::Regular(transaction) => self.apply_regular_node_transaction(
-                    transaction,
-                    block_parent_hash,
-                    block_timestamp,
-                ),
+                node::Transaction::Regular(transaction) => {
+                    self.apply_regular_transaction(transaction, block_parent_hash, block_timestamp)
+                }
 
-                node::Transaction::System(transaction) => self.apply_system_node_transaction(
-                    transaction,
-                    block_parent_hash,
-                    block_timestamp,
-                ),
+                node::Transaction::System(transaction) => {
+                    self.apply_system_transaction(transaction, block_timestamp)
+                }
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -108,7 +83,7 @@ impl LedgerState {
         "block_parent_hash": "{block_parent_hash}",
         "block_timestamp": "{block_timestamp}"
     })]
-    fn apply_regular_node_transaction(
+    fn apply_regular_transaction(
         &mut self,
         transaction: node::RegularTransaction,
         block_parent_hash: BlockHash,
@@ -124,6 +99,7 @@ impl LedgerState {
             spent_unshielded_utxos,
             ledger_events,
         } = self
+            .0
             .apply_regular_transaction(&transaction.raw, block_parent_hash, block_timestamp)
             .map_err(|error| Error::ApplyRegularTransaction(Some(transaction.hash), error))?;
 
@@ -174,13 +150,11 @@ impl LedgerState {
     }
 
     #[trace(properties = {
-        "block_parent_hash": "{block_parent_hash}",
         "block_timestamp": "{block_timestamp}"
     })]
-    fn apply_system_node_transaction(
+    fn apply_system_transaction(
         &mut self,
         transaction: node::SystemTransaction,
-        block_parent_hash: BlockHash,
         block_timestamp: u64,
     ) -> Result<Transaction, Error> {
         let mut transaction = SystemTransaction::from(transaction);
@@ -190,6 +164,7 @@ impl LedgerState {
             created_unshielded_utxos,
             ledger_events,
         } = self
+            .0
             .apply_system_transaction(&transaction.raw, block_timestamp)
             .map_err(|error| Error::ApplySystemTransaction(Some(transaction.hash), error))?;
 
@@ -203,6 +178,9 @@ impl LedgerState {
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error(transparent)]
+    Load(indexer_common::domain::ledger::Error),
+
     #[error("cannot apply regular transaction {hash}", hash = stringify_hash(.0))]
     ApplyRegularTransaction(
         Option<TransactionHash>,

@@ -1,13 +1,14 @@
 --------------------------------------------------------------------------------
--- types
+-- ledger_db_nodes
 --------------------------------------------------------------------------------
-CREATE TYPE AB_SELECTOR AS ENUM('A', 'B');
---------------------------------------------------------------------------------
--- ledger_state
---------------------------------------------------------------------------------
-CREATE TABLE ledger_state (
-  id BIGINT PRIMARY KEY,
-  block_height BIGINT NOT NULL,
-  protocol_version BIGINT NOT NULL,
-  ab_selector AB_SELECTOR NOT NULL
+CREATE TABLE ledger_db_nodes (
+  key BYTEA PRIMARY KEY,
+  object BYTEA NOT NULL,
+  ref_count BIGINT NOT NULL
 );
+CREATE INDEX ON ledger_db_nodes (ref_count);
+--------------------------------------------------------------------------------
+-- ledger_db_roots
+--------------------------------------------------------------------------------
+CREATE TABLE ledger_db_roots (key BYTEA PRIMARY KEY, count BIGINT NOT NULL);
+CREATE INDEX ON ledger_db_roots (count);

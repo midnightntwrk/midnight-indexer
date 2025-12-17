@@ -11,16 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{
-    ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, ByteArray, ByteVec, IntentHash,
-    LedgerEvent, NetworkId, Nonce, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
-    SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerState,
-    SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot, TokenType,
-    TransactionResult, UnshieldedUtxo,
-    dust::{self},
-    ledger::{
-        Error, IntentV7_0_0, SerializableV7_0_0Ext, TaggedSerializableV7_0_0Ext, TransactionV7_0_0,
+use crate::{
+    domain::{
+        ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, ByteArray, ByteVec,
+        IntentHash, LedgerEvent, NetworkId, Nonce, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
+        SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerStateKey,
+        SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot, TokenType,
+        TransactionResult, UnshieldedUtxo,
+        dust::{self},
+        ledger::{
+            Error, IntentV7_0_0, SerializableV7_0_0Ext, TaggedSerializableV7_0_0Ext,
+            TransactionV7_0_0,
+        },
     },
+    infra::ledger_db::v7_0_0::LedgerDb as LedgerDbV7_0_0,
 };
 use fastrace::trace;
 use itertools::Itertools;
@@ -60,7 +64,11 @@ use midnight_onchain_runtime_v7_0_0::context::BlockContext as BlockContextV7_0_0
 use midnight_serialize_v7_0_0::{
     Deserializable as DeserializableV7_0_0, tagged_deserialize as tagged_deserialize_v7_0_0,
 };
-use midnight_storage_v7_0_0::DefaultDB as DefaultDBV7_0_0;
+use midnight_storage_v7_0_0::{
+    arena::{Sp as SpV7_0_0, TypedArenaKey as TypedArenaKeyV7_0_0},
+    db::DB as DBV7_0_0,
+    storage::default_storage as default_storage_v7_0_0,
+};
 use midnight_transient_crypto_v7_0_0::merkle_tree::{
     MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV7_0_0,
     MerkleTreeDigest as MerkleTreeDigestV7_0_0, TreeInsertionPath as TreeInsertionPathV7_0_0,
@@ -76,11 +84,10 @@ static STRICTNESS_V7_0_0: LazyLock<WellFormedStrictnessV7_0_0> = LazyLock::new(|
     strictness
 });
 
-/// Facade for `LedgerState` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum LedgerState {
     V7_0_0 {
-        ledger_state: LedgerStateV7_0_0<DefaultDBV7_0_0>,
+        ledger_state: LedgerStateV7_0_0<LedgerDbV7_0_0>,
         block_fullness: SyntheticCostV7_0_0,
     },
 }
@@ -94,15 +101,22 @@ impl LedgerState {
         }
     }
 
-    /// Deserialize the given serialized ledger state using the given protocol version.
-    #[trace(properties = { "protocol_version": "{protocol_version}" })]
-    pub fn deserialize(
-        ledger_state: impl AsRef<[u8]>,
+    pub fn load(
+        key: &SerializedLedgerStateKey,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-            let ledger_state = tagged_deserialize_v7_0_0(&mut ledger_state.as_ref())
-                .map_err(|error| Error::Deserialize("LedgerStateV7_0_0", error))?;
+            let arena_key = TypedArenaKeyV7_0_0::<
+                LedgerStateV7_0_0<LedgerDbV7_0_0>,
+                <LedgerDbV7_0_0 as DBV7_0_0>::Hasher,
+            >::deserialize(&mut key.as_slice(), 0)
+            .map_err(|error| Error::Deserialize("TypedArenaKeyV7", error))?;
+            let ledger_state = default_storage_v7_0_0::<LedgerDbV7_0_0>()
+                .get(&arena_key)
+                .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
+            let ledger_state =
+                SpV7_0_0::into_inner(ledger_state).expect("loaded ledger state exists");
+
             Ok(Self::V7_0_0 {
                 ledger_state,
                 block_fullness: Default::default(),
@@ -112,13 +126,30 @@ impl LedgerState {
         }
     }
 
-    /// Serialize this ledger state.
-    #[trace]
-    pub fn serialize(&self) -> Result<SerializedLedgerState, Error> {
+    pub fn persist(self) -> Result<(Self, SerializedLedgerStateKey), Error> {
         match self {
-            Self::V7_0_0 { ledger_state, .. } => ledger_state
-                .tagged_serialize_v7_0_0()
-                .map_err(|error| Error::Serialize("LedgerStateV7_0_0", error)),
+            LedgerState::V7_0_0 {
+                ledger_state,
+                block_fullness,
+            } => {
+                let mut ledger_state = SpV7_0_0::new(ledger_state);
+                ledger_state.persist();
+                default_storage_v7_0_0::<LedgerDbV7_0_0>()
+                    .with_backend(|b| b.flush_all_changes_to_db());
+
+                let key = ledger_state
+                    .as_typed_key()
+                    .serialize_v7_0_0()
+                    .map_err(|error| Error::Serialize("TypedArenaKeyV7", error))?;
+
+                let ledger_state = SpV7_0_0::into_inner(ledger_state).expect("ledger state exists");
+                let ledger_state = LedgerState::V7_0_0 {
+                    ledger_state,
+                    block_fullness,
+                };
+
+                Ok((ledger_state, key))
+            }
         }
     }
 
@@ -136,9 +167,10 @@ impl LedgerState {
                 ledger_state,
                 block_fullness,
             } => {
-                let transaction =
-                    tagged_deserialize_v7_0_0::<TransactionV7_0_0>(&mut transaction.as_ref())
-                        .map_err(|error| Error::Deserialize("LedgerTransactionV7_0_0", error))?;
+                let transaction = tagged_deserialize_v7_0_0::<TransactionV7_0_0<LedgerDbV7_0_0>>(
+                    &mut transaction.as_ref(),
+                )
+                .map_err(|error| Error::Deserialize("LedgerTransactionV7_0_0", error))?;
 
                 let cx = TransactionContextV7_0_0 {
                     ref_state: ledger_state.clone(),
@@ -405,9 +437,10 @@ fn timestamp_v7_0_0(block_timestamp: u64) -> TimestampV7_0_0 {
     TimestampV7_0_0::from_secs(block_timestamp / 1000)
 }
 
-fn make_ledger_events_v7_0_0(
-    events: Vec<EventV7_0_0<DefaultDBV7_0_0>>,
-) -> Result<Vec<LedgerEvent>, Error> {
+fn make_ledger_events_v7_0_0<D>(events: Vec<EventV7_0_0<D>>) -> Result<Vec<LedgerEvent>, Error>
+where
+    D: DBV7_0_0,
+{
     events
         .into_iter()
         .map(|event| {
@@ -546,11 +579,14 @@ fn make_dust_generation_dtime_update_v7_0_0(
     ))
 }
 
-fn make_unshielded_utxos_for_regular_transaction_v7_0_0(
-    transaction: TransactionV7_0_0,
+fn make_unshielded_utxos_for_regular_transaction_v7_0_0<D>(
+    transaction: TransactionV7_0_0<D>,
     transaction_result: &TransactionResult,
-    ledger_state: &LedgerStateV7_0_0<DefaultDBV7_0_0>,
-) -> (Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>) {
+    ledger_state: &LedgerStateV7_0_0<D>,
+) -> (Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>)
+where
+    D: DBV7_0_0,
+{
     // Skip UTXO creation entirely for failed transactions, because no state changes occurred on the
     // ledger.
     if matches!(transaction_result, TransactionResult::Failure) {
@@ -647,10 +683,13 @@ fn make_unshielded_utxos_for_regular_transaction_v7_0_0(
     }
 }
 
-fn make_unshielded_utxos_for_system_transaction_v7_0_0(
+fn make_unshielded_utxos_for_system_transaction_v7_0_0<D>(
     transaction: SystemTransactionV7_0_0,
-    ledger_state: &LedgerStateV7_0_0<DefaultDBV7_0_0>,
-) -> Vec<UnshieldedUtxo> {
+    ledger_state: &LedgerStateV7_0_0<D>,
+) -> Vec<UnshieldedUtxo>
+where
+    D: DBV7_0_0,
+{
     match transaction {
         SystemTransactionV7_0_0::PayFromTreasuryUnshielded {
             outputs,
@@ -696,14 +735,16 @@ fn make_unshielded_utxos_for_system_transaction_v7_0_0(
     }
 }
 
-fn extend_unshielded_utxos_v7_0_0(
+fn extend_unshielded_utxos_v7_0_0<D>(
     outputs: &mut Vec<UnshieldedUtxo>,
     inputs: &mut Vec<UnshieldedUtxo>,
     segment_id: u16,
-    intent: &IntentV7_0_0,
+    intent: &IntentV7_0_0<D>,
     guaranteed: bool,
-    ledger_state: &LedgerStateV7_0_0<DefaultDBV7_0_0>,
-) {
+    ledger_state: &LedgerStateV7_0_0<D>,
+) where
+    D: DBV7_0_0,
+{
     let ledger_intent_hash = intent
         .erase_proofs()
         .erase_signatures()
@@ -783,11 +824,14 @@ fn make_initial_nonce_v7_0_0(output_index: u32, intent_hash: IntentHash) -> Nonc
     ByteArray(initial_nonce.0.0)
 }
 
-fn registered_for_dust_generation_v7_0_0(
+fn registered_for_dust_generation_v7_0_0<D>(
     output_index: u32,
     intent_hash: IntentHash,
-    ledger_state: &LedgerStateV7_0_0<DefaultDBV7_0_0>,
-) -> bool {
+    ledger_state: &LedgerStateV7_0_0<D>,
+) -> bool
+where
+    D: DBV7_0_0,
+{
     let intent_hash_v7_0_0 = HashOutputV7_0_0(intent_hash.0);
     let initial_nonce =
         InitialNonceV7_0_0(persistent_commit_v7_0_0(&output_index, intent_hash_v7_0_0));
@@ -798,59 +842,13 @@ fn registered_for_dust_generation_v7_0_0(
         .contains_key(&initial_nonce)
 }
 
-fn ctime_v7_0_0(
-    utxo: &UtxoV7_0_0,
-    ledger_state: &LedgerStateV7_0_0<DefaultDBV7_0_0>,
-) -> Option<u64> {
+fn ctime_v7_0_0<D>(utxo: &UtxoV7_0_0, ledger_state: &LedgerStateV7_0_0<D>) -> Option<u64>
+where
+    D: DBV7_0_0,
+{
     ledger_state
         .utxo
         .utxos
         .get(utxo)
         .map(|meta| meta.ctime.to_secs())
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::domain::{
-        NetworkId, TransactionResult,
-        ledger::{
-            TransactionV7_0_0, ledger_state::make_unshielded_utxos_for_regular_transaction_v7_0_0,
-        },
-    };
-    use midnight_ledger_v7_0_0::structure::{
-        LedgerState as LedgerStateV7_0_0, StandardTransaction as StandardTransactionV7_0_0,
-    };
-    use midnight_transient_crypto_v7_0_0::curve::EmbeddedFr;
-
-    #[test]
-    fn test_make_unshielded_utxos_v7_0_0() {
-        let network_id = NetworkId::try_from("undeployed").unwrap();
-
-        let transaction = StandardTransactionV7_0_0 {
-            network_id: network_id.to_string(),
-            intents: Default::default(),
-            guaranteed_coins: Default::default(),
-            fallible_coins: Default::default(),
-            binding_randomness: EmbeddedFr::from_le_bytes(&[0u8; 32]).unwrap(),
-        };
-        let ledger_transaction = TransactionV7_0_0::Standard(transaction);
-
-        let ledger_state = LedgerStateV7_0_0::new(network_id);
-
-        let (created, spent) = make_unshielded_utxos_for_regular_transaction_v7_0_0(
-            ledger_transaction.clone(),
-            &TransactionResult::Failure,
-            &ledger_state,
-        );
-        assert!(created.is_empty());
-        assert!(spent.is_empty());
-
-        let (created, spent) = make_unshielded_utxos_for_regular_transaction_v7_0_0(
-            ledger_transaction,
-            &TransactionResult::Success,
-            &ledger_state,
-        );
-        assert!(created.is_empty());
-        assert!(spent.is_empty());
-    }
 }

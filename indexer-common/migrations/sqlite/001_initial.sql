@@ -9,7 +9,8 @@ CREATE TABLE blocks (
   parent_hash BLOB NOT NULL,
   author BLOB,
   timestamp INTEGER NOT NULL,
-  ledger_parameters BLOB NOT NULL
+  ledger_parameters BLOB NOT NULL,
+  ledger_state_key BLOB NOT NULL
 );
 --------------------------------------------------------------------------------
 -- transactions
@@ -188,7 +189,6 @@ CREATE TABLE system_parameters_terms_and_conditions (
   url TEXT NOT NULL
 );
 CREATE INDEX system_parameters_tc_block_height_idx ON system_parameters_terms_and_conditions (block_height DESC);
-
 CREATE TABLE system_parameters_d (
   id INTEGER PRIMARY KEY,
   block_height INTEGER NOT NULL,
@@ -224,7 +224,7 @@ CREATE TABLE pool_metadata_cache (
 CREATE TABLE spo_identity (
   spo_sk TEXT PRIMARY KEY,
   sidechain_pubkey TEXT UNIQUE,
-  pool_id TEXT REFERENCES pool_metadata_cache(pool_id),
+  pool_id TEXT REFERENCES pool_metadata_cache (pool_id),
   mainchain_pubkey TEXT UNIQUE,
   aura_pubkey TEXT UNIQUE
 );
@@ -245,7 +245,7 @@ CREATE INDEX committee_membership_epoch_no_idx ON committee_membership (epoch_no
 -- spo_epoch_performance
 --------------------------------------------------------------------------------
 CREATE TABLE spo_epoch_performance (
-  spo_sk TEXT REFERENCES spo_identity(spo_sk),
+  spo_sk TEXT REFERENCES spo_identity (spo_sk),
   identity_label TEXT,
   epoch_no INTEGER NOT NULL,
   expected_blocks INTEGER NOT NULL,
@@ -259,7 +259,7 @@ CREATE INDEX spo_epoch_performance_epoch_no_idx ON spo_epoch_performance (epoch_
 --------------------------------------------------------------------------------
 CREATE TABLE spo_history (
   spo_hist_sk INTEGER PRIMARY KEY,
-  spo_sk TEXT REFERENCES spo_identity(spo_sk),
+  spo_sk TEXT REFERENCES spo_identity (spo_sk),
   epoch_no INTEGER NOT NULL,
   status TEXT NOT NULL,
   valid_from INTEGER NOT NULL,
@@ -271,7 +271,7 @@ CREATE INDEX spo_history_epoch_no_idx ON spo_history (epoch_no);
 -- spo_stake_snapshot
 --------------------------------------------------------------------------------
 CREATE TABLE spo_stake_snapshot (
-  pool_id TEXT PRIMARY KEY REFERENCES pool_metadata_cache(pool_id) ON DELETE CASCADE,
+  pool_id TEXT PRIMARY KEY REFERENCES pool_metadata_cache (pool_id) ON DELETE CASCADE,
   live_stake REAL,
   active_stake REAL,
   live_delegators INTEGER,
@@ -287,7 +287,7 @@ CREATE INDEX spo_stake_snapshot_live_stake_idx ON spo_stake_snapshot (COALESCE(l
 --------------------------------------------------------------------------------
 CREATE TABLE spo_stake_history (
   id INTEGER PRIMARY KEY,
-  pool_id TEXT NOT NULL REFERENCES pool_metadata_cache(pool_id) ON DELETE CASCADE,
+  pool_id TEXT NOT NULL REFERENCES pool_metadata_cache (pool_id) ON DELETE CASCADE,
   recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   mainchain_epoch INTEGER,
   live_stake REAL,
@@ -307,6 +307,8 @@ CREATE TABLE spo_stake_refresh_state (
   last_pool_id TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-INSERT INTO spo_stake_refresh_state (id)
-VALUES (1)
+INSERT INTO
+  spo_stake_refresh_state (id)
+VALUES
+  (1)
 ON CONFLICT (id) DO NOTHING;

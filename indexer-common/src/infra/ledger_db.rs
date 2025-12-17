@@ -11,26 +11,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod api;
+use serde::Deserialize;
+
 #[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
 #[cfg(any(feature = "cloud", feature = "standalone"))]
-pub mod storage;
+pub mod v7_0_0;
 
-#[cfg_attr(docsrs, doc(cfg(feature = "cloud")))]
 #[cfg(feature = "cloud")]
-#[derive(Debug, Clone, serde::Deserialize)]
+pub fn init(config: Config, pool: crate::infra::pool::postgres::PostgresPool) {
+    let Config { cache_size } = config;
+
+    let db = v7_0_0::LedgerDb::new(pool);
+    let _ = midnight_storage_v7_0_0::storage::set_default_storage(|| {
+        midnight_storage_v7_0_0::Storage::new(cache_size, db)
+    });
+}
+
+#[cfg(feature = "standalone")]
+pub fn init(config: Config, pool: crate::infra::pool::sqlite::SqlitePool) {
+    let Config { cache_size } = config;
+
+    let db = v7_0_0::LedgerDb::new(pool);
+    let _ = midnight_storage_v7_0_0::storage::set_default_storage(|| {
+        midnight_storage_v7_0_0::Storage::new(cache_size, db)
+    });
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    #[serde(rename = "storage")]
-    pub storage_config: indexer_common::infra::pool::postgres::Config,
-
-    #[serde(rename = "ledger_db")]
-    pub ledger_db_config: indexer_common::infra::ledger_db::Config,
-
-    #[serde(rename = "pub_sub")]
-    pub pub_sub_config: indexer_common::infra::pub_sub::nats::Config,
-
-    #[serde(rename = "api")]
-    pub api_config: api::Config,
-
-    pub secret: secrecy::SecretString,
+    pub cache_size: usize,
 }
