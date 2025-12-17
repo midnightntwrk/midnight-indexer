@@ -23,7 +23,10 @@ use crate::domain::{
 use fastrace::trace;
 use itertools::Itertools;
 use midnight_base_crypto_v6::{
-    cost_model::SyntheticCost as SyntheticCostV6,
+    cost_model::{
+        FixedPoint as FixedPointV6, NormalizedCost as NormalizedCostV6,
+        SyntheticCost as SyntheticCostV6,
+    },
     hash::{HashOutput as HashOutputV6, persistent_commit as persistent_commit_v6},
     time::Timestamp as TimestampV6,
 };
@@ -307,8 +310,25 @@ impl LedgerState {
                 block_fullness,
             } => {
                 let timestamp = timestamp_v6(block_timestamp);
+                let normalized_fullness = block_fullness
+                    .normalize(ledger_state.parameters.limits.block_limits)
+                    .unwrap_or(NormalizedCostV6::ZERO);
+                let overall_fullness = FixedPointV6::max(
+                    FixedPointV6::max(
+                        FixedPointV6::max(
+                            normalized_fullness.read_time,
+                            normalized_fullness.compute_time,
+                        ),
+                        normalized_fullness.block_usage,
+                    ),
+                    FixedPointV6::max(
+                        normalized_fullness.bytes_written,
+                        normalized_fullness.bytes_churned,
+                    ),
+                );
+
                 let ledger_state = ledger_state
-                    .post_block_update(timestamp, *block_fullness)
+                    .post_block_update(timestamp, normalized_fullness, overall_fullness)
                     .map_err(|error| Error::BlockLimitExceeded(error.into()))?;
 
                 let ledger_parameters = ledger_state.parameters.deref().to_owned();
