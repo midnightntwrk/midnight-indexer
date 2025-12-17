@@ -399,7 +399,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       });
 
       const highestTransactionIdBeforeTransaction = (
-        progressUpdatesBeforeTransaction[progressUpdatesBeforeTransaction.length - 1].data
+        progressUpdatesBeforeTransaction.at(-1)?.data
           ?.unshieldedTransactions as UnshieldedTransactionsProgress
       ).highestTransactionId;
       log.info(
@@ -463,7 +463,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       });
 
       const highestTransactionIdBeforeTransaction = (
-        progressUpdatesBeforeTransaction[progressUpdatesBeforeTransaction.length - 1].data
+        progressUpdatesBeforeTransaction.at(-1)?.data
           ?.unshieldedTransactions as UnshieldedTransactionsProgress
       ).highestTransactionId;
       log.info(
