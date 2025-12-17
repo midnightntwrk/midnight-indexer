@@ -11,39 +11,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io;
-
 use crate::{domain::storage::ledger_state::LedgerStateStorage, infra::storage::Storage};
-use indexer_common::domain::{
-    ABSelector, LedgerStateStorage as _, ProtocolVersion, SerializedLedgerState,
-};
+use indexer_common::domain::{ProtocolVersion, SerializedLedgerStateKey};
 use indoc::indoc;
+use std::io;
 
 impl LedgerStateStorage for Storage {
     async fn get_ledger_state(
         &self,
-    ) -> Result<Option<(SerializedLedgerState, ProtocolVersion)>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT
-                protocol_version,
-                ab_selector
-            FROM ledger_state
-            WHERE id = 0
-        "};
+    ) -> Result<Option<(SerializedLedgerStateKey, ProtocolVersion)>, sqlx::Error> {
+        todo!()
+        // let query = indoc! {"
+        //     SELECT
+        //         protocol_version,
+        //         ab_selector
+        //     FROM ledger_state
+        //     WHERE id = 0
+        // "};
 
-        let Some((protocol_version, ab_selector)) = sqlx::query_as::<_, (i64, ABSelector)>(query)
-            .fetch_optional(&*self.pool)
-            .await?
-        else {
-            return Ok(None);
-        };
+        // let Some((protocol_version, ab_selector)) = sqlx::query_as::<_, (i64, ABSelector)>(query)
+        //     .fetch_optional(&*self.pool)
+        //     .await?
+        // else {
+        //     return Ok(None);
+        // };
 
-        let ledger_state = self
-            .ledger_state_storage
-            .load(ab_selector.as_str())
-            .await
-            .map_err(|error| sqlx::Error::Io(io::Error::other(error)))?;
+        // let ledger_state = self
+        //     .ledger_state_storage
+        //     .load(ab_selector.as_str())
+        //     .await
+        //     .map_err(|error| sqlx::Error::Io(io::Error::other(error)))?;
 
-        Ok(Some((ledger_state, (protocol_version as u32).into())))
+        // Ok(Some((ledger_state, (protocol_version as u32).into())))
     }
 }

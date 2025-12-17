@@ -51,6 +51,15 @@ CREATE TABLE transaction_identifiers (
 CREATE INDEX transaction_identifiers_transaction_id_idx ON transaction_identifiers (transaction_id);
 CREATE INDEX transaction_identifiers_identifier_idx ON transaction_identifiers (identifier);
 --------------------------------------------------------------------------------
+-- ledger_state
+--------------------------------------------------------------------------------
+CREATE TABLE ledger_state (
+  id INTEGER PRIMARY KEY,
+  key BLOB NOT NULL,
+  block_height INTEGER NOT NULL,
+  protocol_version INTEGER NOT NULL
+);
+--------------------------------------------------------------------------------
 -- contract_actions
 --------------------------------------------------------------------------------
 CREATE TABLE contract_actions (

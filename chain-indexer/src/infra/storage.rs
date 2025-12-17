@@ -20,9 +20,9 @@ use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        ABSelector, BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
-        LedgerEventAttributes, LedgerStateStorage, ProtocolVersion, SerializedLedgerState,
-        TermsAndConditionsHash, TransactionVariant, UnshieldedUtxo,
+        BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
+        LedgerEventAttributes, ProtocolVersion, SerializedLedgerStateKey, TermsAndConditionsHash,
+        TransactionVariant, UnshieldedUtxo,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -30,7 +30,7 @@ use indoc::indoc;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use sqlx::{QueryBuilder, Type, types::Json};
-use std::{io, iter};
+use std::iter;
 
 #[cfg(feature = "cloud")]
 /// Sqlx transaction for Postgres.
@@ -43,25 +43,21 @@ type SqlxTransaction = sqlx::Transaction<'static, sqlx::Sqlite>;
 /// Unified storage implementation for PostgreSQL (cloud) and SQLite (standalone). Uses Cargo
 /// features to select the appropriate database backend at build time.
 #[derive(Debug, Clone)]
-pub struct Storage<S> {
+pub struct Storage {
     #[cfg(feature = "cloud")]
     pool: indexer_common::infra::pool::postgres::PostgresPool,
 
     #[cfg(feature = "standalone")]
     pool: indexer_common::infra::pool::sqlite::SqlitePool,
-
-    ledger_state_storage: S,
+    // ledger_state_storage: S,
 }
 
-impl<S> Storage<S> {
+impl Storage {
     #[cfg(feature = "cloud")]
-    pub fn new(
-        pool: indexer_common::infra::pool::postgres::PostgresPool,
-        ledger_state_storage: S,
-    ) -> Self {
+    pub fn new(pool: indexer_common::infra::pool::postgres::PostgresPool) -> Self {
         Self {
             pool,
-            ledger_state_storage,
+            // ledger_state_storage,
         }
     }
 
@@ -80,38 +76,17 @@ impl<S> Storage<S> {
     async fn save_ledger_state(
         &mut self,
         tx: &mut SqlxTransaction,
-        ledger_state: &SerializedLedgerState,
         block_height: u32,
         protocol_version: ProtocolVersion,
-    ) -> Result<(), sqlx::Error>
-    where
-        S: LedgerStateStorage,
-    {
-        let query = indoc! {"
-            SELECT ab_selector
-            FROM ledger_state
-            WHERE id = 0
-        "};
-
-        let ab_selector = sqlx::query_as::<_, (ABSelector,)>(query)
-            .fetch_optional(&mut **tx)
-            .await?
-            .map(|(x,)| x)
-            .unwrap_or_default()
-            .toggle();
-
-        self.ledger_state_storage
-            .save(ledger_state, ab_selector.as_str())
-            .await
-            .map_err(|error| sqlx::Error::Io(io::Error::other(error)))?;
-
+        ledger_state_key: &SerializedLedgerStateKey,
+    ) -> Result<(), sqlx::Error> {
         // Save metadata.
         let query = indoc! {"
             INSERT INTO ledger_state (
                 id,
                 block_height,
                 protocol_version,
-                ab_selector
+                key
             )
             VALUES (0, $1, $2, $3)
             ON CONFLICT (id)
@@ -124,7 +99,7 @@ impl<S> Storage<S> {
         sqlx::query(query)
             .bind(block_height as i64)
             .bind(protocol_version.0 as i64)
-            .bind(ab_selector)
+            .bind(ledger_state_key)
             .execute(&mut **tx)
             .await?;
 
@@ -132,10 +107,7 @@ impl<S> Storage<S> {
     }
 }
 
-impl<S> domain::storage::Storage for Storage<S>
-where
-    S: LedgerStateStorage,
-{
+impl domain::storage::Storage for Storage {
     #[trace]
     async fn get_highest_block_info(&self) -> Result<Option<BlockInfo>, sqlx::Error> {
         let query = indoc! {"
@@ -247,32 +219,27 @@ where
     #[trace]
     async fn get_ledger_state(
         &self,
-    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, sqlx::Error> {
+    ) -> Result<Option<(SerializedLedgerStateKey, u32, ProtocolVersion)>, sqlx::Error> {
         let query = indoc! {"
             SELECT
+                key,
                 block_height,
-                protocol_version,
-                ab_selector
+                protocol_version
             FROM ledger_state
-            WHERE id = 0
+            ORDER BY id DESC
+            LIMIT 1
         "};
 
-        let Some((block_height, protocol_version, ab_selector)) =
-            sqlx::query_as::<_, (i64, i64, ABSelector)>(query)
+        let Some((ledger_state_key, block_height, protocol_version)) =
+            sqlx::query_as::<_, (ByteVec, i64, i64)>(query)
                 .fetch_optional(&*self.pool)
                 .await?
         else {
             return Ok(None);
         };
 
-        let ledger_state = self
-            .ledger_state_storage
-            .load(ab_selector.as_str())
-            .await
-            .map_err(|error| sqlx::Error::Io(io::Error::other(error)))?;
-
         Ok(Some((
-            ledger_state,
+            ledger_state_key,
             block_height as u32,
             (protocol_version as u32).into(),
         )))
@@ -284,13 +251,18 @@ where
         block: &Block,
         transactions: &[Transaction],
         dust_registration_events: &[DustRegistrationEvent],
-        ledger_state: Option<&SerializedLedgerState>,
+        ledger_state_key: Option<&SerializedLedgerStateKey>,
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
-        if let Some(ledger_state) = ledger_state {
-            self.save_ledger_state(&mut tx, ledger_state, block.height, block.protocol_version)
-                .await?;
+        if let Some(ledger_state_key) = ledger_state_key {
+            self.save_ledger_state(
+                &mut tx,
+                block.height,
+                block.protocol_version,
+                ledger_state_key,
+            )
+            .await?;
         }
 
         let max_transaction_id =
@@ -301,37 +273,113 @@ where
         Ok(max_transaction_id)
     }
 
-    /// Save the given serialized ledger state with its metadata.
+    #[trace]
     async fn save_ledger_state(
         &mut self,
-        ledger_state: &SerializedLedgerState,
+        ledger_state_key: &SerializedLedgerStateKey,
         block_height: u32,
         protocol_version: ProtocolVersion,
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
-        self.save_ledger_state(&mut tx, ledger_state, block_height, protocol_version)
+
+        self.save_ledger_state(&mut tx, block_height, protocol_version, ledger_state_key)
             .await?;
+
         tx.commit().await
+    }
+
+    /// Save all system parameters from a change event.
+    #[trace(properties = { "change": "{change:?}" })]
+    async fn save_system_parameters_change(
+        &self,
+        change: &SystemParametersChange,
+    ) -> Result<(), sqlx::Error> {
+        if let Some(ref d_parameter) = change.d_parameter {
+            let query = indoc! {"
+                INSERT INTO system_parameters_d (
+                    block_height,
+                    block_hash,
+                    timestamp,
+                    num_permissioned_candidates,
+                    num_registered_candidates
+                )
+                VALUES ($1, $2, $3, $4, $5)
+            "};
+
+            sqlx::query(query)
+                .bind(change.block_height as i64)
+                .bind(change.block_hash.as_ref())
+                .bind(change.timestamp as i64)
+                .bind(d_parameter.num_permissioned_candidates as i32)
+                .bind(d_parameter.num_registered_candidates as i32)
+                .execute(&*self.pool)
+                .await?;
+        }
+
+        if let Some(ref terms_and_conditions) = change.terms_and_conditions {
+            let query = indoc! {"
+                INSERT INTO system_parameters_terms_and_conditions (
+                    block_height,
+                    block_hash,
+                    timestamp,
+                    hash,
+                    url
+                )
+                VALUES ($1, $2, $3, $4, $5)
+            "};
+
+            sqlx::query(query)
+                .bind(change.block_height as i64)
+                .bind(change.block_hash.as_ref())
+                .bind(change.timestamp as i64)
+                .bind(terms_and_conditions.hash.as_ref())
+                .bind(&terms_and_conditions.url)
+                .execute(&*self.pool)
+                .await?;
+        }
+
+        Ok(())
     }
 
     #[trace]
     async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error> {
-        Storage::get_latest_d_parameter(self).await
+        let query = indoc! {"
+            SELECT num_permissioned_candidates, num_registered_candidates
+            FROM system_parameters_d
+            ORDER BY block_height DESC
+            LIMIT 1
+        "};
+
+        let result = sqlx::query_as::<_, (i32, i32)>(query)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        Ok(result.map(|(num_perm, num_reg)| DParameter {
+            num_permissioned_candidates: num_perm as u16,
+            num_registered_candidates: num_reg as u16,
+        }))
     }
 
     #[trace]
     async fn get_latest_terms_and_conditions(
         &self,
     ) -> Result<Option<TermsAndConditions>, sqlx::Error> {
-        Storage::get_latest_terms_and_conditions(self).await
-    }
+        let query = indoc! {"
+            SELECT hash, url
+            FROM system_parameters_terms_and_conditions
+            ORDER BY block_height DESC
+            LIMIT 1
+        "};
 
-    #[trace]
-    async fn save_system_parameters_change(
-        &self,
-        change: &SystemParametersChange,
-    ) -> Result<(), sqlx::Error> {
-        Storage::save_system_parameters_change(self, change).await
+        let result = sqlx::query_as::<_, (ByteVec, String)>(query)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        Ok(result.map(|(hash_bytes, url)| {
+            let hash =
+                TermsAndConditionsHash::try_from(hash_bytes).expect("hash should be 32 bytes");
+            TermsAndConditions { hash, url }
+        }))
     }
 }
 
@@ -1036,145 +1084,4 @@ async fn save_dust_registration_events(
     }
 
     Ok(())
-}
-
-impl<S> Storage<S>
-where
-    S: LedgerStateStorage,
-{
-    /// Save D-Parameter change to the database.
-    #[trace]
-    pub async fn save_d_parameter(
-        &self,
-        block_height: u32,
-        block_hash: &BlockHash,
-        timestamp: u64,
-        d_parameter: &DParameter,
-    ) -> Result<(), sqlx::Error> {
-        let query = indoc! {"
-            INSERT INTO system_parameters_d (
-                block_height,
-                block_hash,
-                timestamp,
-                num_permissioned_candidates,
-                num_registered_candidates
-            )
-            VALUES ($1, $2, $3, $4, $5)
-        "};
-
-        sqlx::query(query)
-            .bind(block_height as i64)
-            .bind(block_hash.as_ref())
-            .bind(timestamp as i64)
-            .bind(d_parameter.num_permissioned_candidates as i32)
-            .bind(d_parameter.num_registered_candidates as i32)
-            .execute(&*self.pool)
-            .await?;
-
-        Ok(())
-    }
-
-    /// Save Terms and Conditions change to the database.
-    #[trace]
-    pub async fn save_terms_and_conditions(
-        &self,
-        block_height: u32,
-        block_hash: &BlockHash,
-        timestamp: u64,
-        terms_and_conditions: &TermsAndConditions,
-    ) -> Result<(), sqlx::Error> {
-        let query = indoc! {"
-            INSERT INTO system_parameters_terms_and_conditions (
-                block_height,
-                block_hash,
-                timestamp,
-                hash,
-                url
-            )
-            VALUES ($1, $2, $3, $4, $5)
-        "};
-
-        sqlx::query(query)
-            .bind(block_height as i64)
-            .bind(block_hash.as_ref())
-            .bind(timestamp as i64)
-            .bind(terms_and_conditions.hash.as_ref())
-            .bind(&terms_and_conditions.url)
-            .execute(&*self.pool)
-            .await?;
-
-        Ok(())
-    }
-
-    /// Save all system parameters from a change event.
-    #[trace]
-    pub async fn save_system_parameters_change(
-        &self,
-        change: &SystemParametersChange,
-    ) -> Result<(), sqlx::Error> {
-        if let Some(ref d_parameter) = change.d_parameter {
-            self.save_d_parameter(
-                change.block_height,
-                &change.block_hash,
-                change.timestamp,
-                d_parameter,
-            )
-            .await?;
-        }
-
-        if let Some(ref terms_and_conditions) = change.terms_and_conditions {
-            self.save_terms_and_conditions(
-                change.block_height,
-                &change.block_hash,
-                change.timestamp,
-                terms_and_conditions,
-            )
-            .await?;
-        }
-
-        Ok(())
-    }
-
-    /// Get the latest D-Parameter from the database.
-    #[trace]
-    pub async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT num_permissioned_candidates, num_registered_candidates
-            FROM system_parameters_d
-            ORDER BY block_height DESC
-            LIMIT 1
-        "};
-
-        let result = sqlx::query_as::<_, (i32, i32)>(query)
-            .fetch_optional(&*self.pool)
-            .await?;
-
-        Ok(result.map(|(num_perm, num_reg)| DParameter {
-            num_permissioned_candidates: num_perm as u16,
-            num_registered_candidates: num_reg as u16,
-        }))
-    }
-
-    /// Get the latest Terms and Conditions from the database.
-    #[trace]
-    pub async fn get_latest_terms_and_conditions(
-        &self,
-    ) -> Result<Option<TermsAndConditions>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT hash, url
-            FROM system_parameters_terms_and_conditions
-            ORDER BY block_height DESC
-            LIMIT 1
-        "};
-
-        let result = sqlx::query_as::<_, (ByteVec, String)>(query)
-            .fetch_optional(&*self.pool)
-            .await?;
-
-        Ok(result.map(|(hash_bytes, url)| {
-            let hash =
-                TermsAndConditionsHash::try_from(hash_bytes).expect("hash should be 32 bytes");
-            TermsAndConditions { hash, url }
-        }))
-    }
 }
