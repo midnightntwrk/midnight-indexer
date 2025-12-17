@@ -23,7 +23,7 @@ pub use transaction::*;
 
 use crate::{
     domain::{
-        ByteArrayLenError, ByteVec, PROTOCOL_VERSION_000_018_000, ProtocolVersion,
+        ByteArrayLenError, ByteVec, PROTOCOL_VERSION_000_019_000, ProtocolVersion,
         SerializedContractAddress, dust::DustParameters,
     },
     error::BoxError,
@@ -131,7 +131,7 @@ impl<T> TaggedSerializableV6Ext for T where T: SerializableV6 + TaggedV6 {}
 /// - `generation_decay_rate`: Rate of DUST generation (~1 week to reach max).
 /// - `dust_grace_period`: Maximum time window for DUST spends (3 hours).
 pub fn dust_parameters(protocol_version: ProtocolVersion) -> Result<DustParameters, Error> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_018_000) {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_019_000) {
         Ok(DustParameters {
             night_dust_ratio: INITIAL_DUST_PARAMETERS_V6.night_dust_ratio,
             generation_decay_rate: INITIAL_DUST_PARAMETERS_V6.generation_decay_rate,
