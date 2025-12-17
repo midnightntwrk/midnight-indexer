@@ -95,7 +95,8 @@ run_toolkit_commands() {
         generate-txs \
         contract-simple maintenance \
         --rng-seed $rng_seed \
-        --contract-address $(cat /tmp/contract_address.mn)
+        --contract-address $(cat /tmp/contract_address.mn) \
+        --new-authority-seed 1000000000000000000000000000000000000000000000000000000000000001
 }
 
 # Clean up any existing data.
@@ -113,24 +114,42 @@ docker run \
     -e SHOW_CONFIG=false \
     -e CFG_PRESET=dev \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
+    -e THRESHOLD=0 \
     -v $node_dir:/node \
     ghcr.io/midnight-ntwrk/midnight-node:$node_version
 
 # Wait for node to be ready (max 30 seconds).
 echo "Waiting for node to be ready..."
-for i in {1..30}; do
-    if curl -f http://localhost:9944/health/readiness 2>/dev/null; then
-        echo "Node is ready"
-        sleep 2  # Give it a moment to fully initialize
-        break
+
+timeout=30
+address="http://localhost:9944"  # Default address
+target_block="2"
+start_time=$(date +%s)
+
+while true; do
+    result=$(curl -s -X POST "$address" \
+        -H "Content-Type: application/json" \
+        -d '{"jsonrpc":"2.0","id":1,"method":"chain_getHeader","params":[]}' || true)
+    result=$(echo "$result" | sed -n 's/.*"number":"\([^"]*\)".*/\1/p')
+
+    if [[ -n "$result" && "$result" != "null" ]]; then
+        # Convert hex to decimal for comparison
+        result_dec=$((result))
+        target_dec=$((target_block))
+        echo "result_dec: $result_dec"
+        echo "target_dec: $target_dec"
+        [[ $result_dec -ge $target_dec ]] && break
     fi
-    if [ $i -eq 30 ]; then
-        echo "Error: Node failed to start after 30 seconds" >&2
-        docker logs node 2>&1 | tail -20
+
+    if (( $(date +%s) - start_time > timeout )); then
+        echo "Timeout after ${timeout}s waiting for node to boot"
         exit 1
     fi
+
     sleep 1
 done
+
+echo "Node ready - block no: $result"
 
 # Retry the entire toolkit command sequence up to 3 times.
 max_attempts=3

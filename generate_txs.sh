@@ -25,23 +25,41 @@ docker run \
     -e SHOW_CONFIG=false \
     -e CFG_PRESET=dev \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
+    -e THRESHOLD=0 \
     ghcr.io/midnight-ntwrk/midnight-node:$node_version
 
-# Wait for port to be available (max 30 seconds)
+# Wait for node to be ready (max 30 seconds).
 echo "Waiting for node to be ready..."
-for i in {1..30}; do
-    if curl -f http://localhost:9944/health/readiness 2>/dev/null; then
-        echo "Node is ready"
-        sleep 2  # Give it a moment to fully initialize
-        break
+
+timeout=30
+address="http://localhost:9944"  # Default address
+target_block="2"
+start_time=$(date +%s)
+
+while true; do
+    result=$(curl -s -X POST "$address" \
+        -H "Content-Type: application/json" \
+        -d '{"jsonrpc":"2.0","id":1,"method":"chain_getHeader","params":[]}' || true)
+    result=$(echo "$result" | sed -n 's/.*"number":"\([^"]*\)".*/\1/p')
+
+    if [[ -n "$result" && "$result" != "null" ]]; then
+        # Convert hex to decimal for comparison
+        result_dec=$((result))
+        target_dec=$((target_block))
+        echo "result_dec: $result_dec"
+        echo "target_dec: $target_dec"
+        [[ $result_dec -ge $target_dec ]] && break
     fi
-    if [ $i -eq 30 ]; then
-        echo "Error: Node failed to start after 30 seconds" >&2
-        docker logs node 2>&1 | tail -20
+
+    if (( $(date +%s) - start_time > timeout )); then
+        echo "Timeout after ${timeout}s waiting for node to boot"
         exit 1
     fi
+
     sleep 1
 done
+
+echo "Node ready - block no: $result"
 
 # 1 to 2/2.
 docker run \
@@ -56,7 +74,7 @@ docker run \
     --shielded-amount 10 \
     --unshielded-amount 10 \
     --source-seed "0000000000000000000000000000000000000000000000000000000000000001" \
-    --destination-address mn_shield-addr_undeployed1tffkxdesnqz86wvds2aprwuprpvzvag5t3mkveddr33hr7xyhlhqxqzfqqxy54an7cyznaxnzs7p8tduku7fuje5mwqx9auvdn9e8x03kvvy5r6z \
+    --destination-address mn_shield-addr_undeployed1tth9g6jf8he6cmhgtme6arty0jde7wnypsg53qc3x5navl9za355jqqvfftm8asg986dx9puzwkmedeune9nfkuqvtmccmxtjwvlrvccwypcs \
     --destination-address mn_addr_undeployed1gkasr3z3vwyscy2jpp53nzr37v7n4r3lsfgj6v5g584dakjzt0xqun4d4r
 docker run \
     --rm \
@@ -82,7 +100,7 @@ docker run \
     --shielded-amount 10 \
     --unshielded-amount 10 \
     --source-seed "0000000000000000000000000000000000000000000000000000000000000001" \
-    --destination-address mn_shield-addr_undeployed1tffkxdesnqz86wvds2aprwuprpvzvag5t3mkveddr33hr7xyhlhqxqzfqqxy54an7cyznaxnzs7p8tduku7fuje5mwqx9auvdn9e8x03kvvy5r6z \
+    --destination-address mn_shield-addr_undeployed1ngp7ce7cqclgucattj5kuw68v3s4826e9zwalhhmurymwet3v7psvrs4gtpv5p2zx8rd3jxpgjr4m8mxh7js7u3l33g23gcty67uq9cug4xep \
     --destination-address mn_addr_undeployed1g9nr3mvjcey7ca8shcs5d4yjndcnmczf90rhv4nju7qqqlfg4ygs0t4ngm
 docker run \
     --rm \
