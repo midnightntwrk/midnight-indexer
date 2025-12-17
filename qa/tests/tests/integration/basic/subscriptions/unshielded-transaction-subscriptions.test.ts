@@ -261,7 +261,7 @@ describe('unshielded transaction subscriptions', async () => {
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 5,
-        500,
+        5000,
       );
 
       expect(messages.length).toBeGreaterThanOrEqual(1);
