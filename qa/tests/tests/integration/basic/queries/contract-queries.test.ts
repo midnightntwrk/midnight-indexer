@@ -173,9 +173,15 @@ describe('contract queries', () => {
      * @when we send a contract query using that address
      * @then Indexer should respond with successful response and contractAction that conforms to the correct schema
      */
-    test('should respond with a contract action according to the expected schema', async () => {
-      const contractAddress = dataProvider.getKnownContractAddress() as string;
-      const response = await indexerHttpClient.getContractAction(contractAddress);
+    test('should respond with a contract action according to the expected schema', async (ctx: TestContext) => {
+      let contractAddress: string;
+      try {
+        contractAddress = dataProvider.getKnownContractAddress() as string;
+      } catch (error) {
+        log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
+      }
+      const response = await indexerHttpClient.getContractAction(contractAddress!);
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).toBeDefined();
 
