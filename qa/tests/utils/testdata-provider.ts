@@ -118,15 +118,21 @@ class TestDataProvider {
    * Searches through contracts to find a specific contract action by type.
    * @param actionType - The type of contract action to find (e.g., 'ContractDeploy', 'ContractCall').
    * @returns The contract action object if found, null otherwise.
+   * @throws Error if the contract actions file is missing.
    */
   private findContractAction(actionType: string): ContractActionInfo | null {
     // Contracts is an array of contract objects with a contract-actions array
     // NOTE: it could be empty if there are no contracts with all the actions types
     const envName = env.getCurrentEnvironmentName();
     const baseDir = `data/static/${envName}`;
-    const contracts = importJsoncData(
-      `${baseDir}/contract-actions.jsonc`,
-    ) as unknown as ContractInfo[];
+    let contracts: ContractInfo[];
+    try {
+      contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`) as unknown as ContractInfo[];
+    } catch (_) {
+      throw new Error(
+        `Test data provider is missing the contract actions file for ${envName} environment`,
+      );
+    }
 
     for (const contract of contracts) {
       const action = contract['contract-actions'].find((a) => a['action-type'] === actionType);
@@ -267,14 +273,19 @@ class TestDataProvider {
   /**
    * Gets a known contract address from the test data.
    * @returns The contract address as a string.
-   * @throws Error if no contract address is found in the test data.
+   * @throws Error if the contract actions file is missing or no contract address is found in the test data.
    */
   getKnownContractAddress(): string {
     const envName = env.getCurrentEnvironmentName();
     const baseDir = `data/static/${envName}`;
-    const contracts = importJsoncData(
-      `${baseDir}/contract-actions.jsonc`,
-    ) as unknown as ContractInfo[];
+    let contracts: ContractInfo[];
+    try {
+      contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`) as unknown as ContractInfo[];
+    } catch (_) {
+      throw new Error(
+        `Test data provider is missing the contract actions file for ${envName} environment`,
+      );
+    }
     if (contracts.length === 0 || !contracts[0]['contract-address']) {
       throw new Error(
         `Test data provider is missing the known contract address data for ${envName} environment`,
