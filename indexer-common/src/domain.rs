@@ -15,13 +15,13 @@ pub mod dust;
 pub mod ledger;
 
 mod bytes;
-mod ledger_state_storage;
+// mod ledger_state_storage;
 mod protocol_version;
 mod pub_sub;
 mod viewing_key;
 
 pub use bytes::*;
-pub use ledger_state_storage::*;
+// pub use ledger_state_storage::*;
 pub use protocol_version::*;
 pub use pub_sub::*;
 pub use viewing_key::*;
@@ -49,6 +49,7 @@ pub type NightUtxoHash = ByteArray<32>;
 pub type DustUtxoId = ByteVec;
 
 // Untagged serialization: simple and/or stable types that are not expected to change.
+pub type SerializedLedgerStateKey = ByteVec;
 pub type SerializedTransactionIdentifier = ByteVec;
 pub type SerializedZswapStateRoot = ByteVec;
 
@@ -57,7 +58,6 @@ pub type SerializedContractAddress = ByteVec;
 pub type SerializedContractState = ByteVec;
 pub type SerializedLedgerEvent = ByteVec;
 pub type SerializedLedgerParameters = ByteVec;
-pub type SerializedLedgerState = ByteVec;
 pub type SerializedTransaction = ByteVec;
 pub type SerializedZswapState = ByteVec;
 
@@ -320,28 +320,4 @@ pub struct DustOutput {
 pub enum LedgerEventGrouping {
     Zswap,
     Dust,
-}
-
-#[derive(Debug, Clone, Copy, Default, Type)]
-#[cfg_attr(feature = "cloud", sqlx(type_name = "AB_SELECTOR"))]
-pub enum ABSelector {
-    #[default]
-    A,
-    B,
-}
-
-impl ABSelector {
-    pub fn toggle(self) -> Self {
-        match self {
-            ABSelector::A => ABSelector::B,
-            ABSelector::B => ABSelector::A,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ABSelector::A => "A",
-            ABSelector::B => "B",
-        }
-    }
 }

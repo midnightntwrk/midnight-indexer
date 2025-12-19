@@ -56,6 +56,15 @@ CREATE INDEX ON regular_transactions USING GIN (transaction_result);
 CREATE INDEX ON regular_transactions (start_index);
 CREATE INDEX ON regular_transactions (end_index);
 --------------------------------------------------------------------------------
+-- ledger_state
+--------------------------------------------------------------------------------
+CREATE TABLE ledger_state (
+  id BIGSERIAL PRIMARY KEY,
+  key BYTEA NOT NULL,
+  block_height BIGINT NOT NULL,
+  protocol_version BIGINT NOT NULL
+);
+--------------------------------------------------------------------------------
 -- contract_actions
 --------------------------------------------------------------------------------
 CREATE TABLE contract_actions (

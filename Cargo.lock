@@ -2939,6 +2939,7 @@ dependencies = [
  "opentelemetry_sdk",
  "parity-scale-codec",
  "parking_lot",
+ "redb",
  "reqwest",
  "secrecy",
  "serde",
@@ -2946,6 +2947,7 @@ dependencies = [
  "serde_with",
  "sha2 0.10.9",
  "sqlx",
+ "tempfile",
  "testcontainers",
  "testcontainers-modules",
  "thiserror 2.0.17",
@@ -3673,7 +3675,7 @@ dependencies = [
 [[package]]
 name = "midnight-base-crypto"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "anyhow",
  "atomic-write-file",
@@ -3704,7 +3706,7 @@ dependencies = [
 [[package]]
 name = "midnight-base-crypto-derive"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -3738,7 +3740,7 @@ dependencies = [
 [[package]]
 name = "midnight-coin-structure"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "fake",
  "lazy_static",
@@ -3773,7 +3775,7 @@ dependencies = [
 [[package]]
 name = "midnight-ledger"
 version = "6.2.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "anyhow",
  "derive-where",
@@ -3805,7 +3807,7 @@ dependencies = [
 [[package]]
 name = "midnight-ledger-static"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -3814,7 +3816,7 @@ dependencies = [
 [[package]]
 name = "midnight-onchain-runtime"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "derive-where",
  "enum_index",
@@ -3839,7 +3841,7 @@ dependencies = [
 [[package]]
 name = "midnight-onchain-state"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "derive-where",
  "fake",
@@ -3857,7 +3859,7 @@ dependencies = [
 [[package]]
 name = "midnight-onchain-vm"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "derive-where",
  "fake",
@@ -3899,7 +3901,7 @@ dependencies = [
 [[package]]
 name = "midnight-serialize"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "crypto",
  "konst",
@@ -3912,7 +3914,7 @@ dependencies = [
 [[package]]
 name = "midnight-serialize-macros"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -3922,7 +3924,7 @@ dependencies = [
 [[package]]
 name = "midnight-storage"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "archery",
  "crypto",
@@ -3946,7 +3948,7 @@ dependencies = [
 [[package]]
 name = "midnight-storage-macros"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "midnight-serialize-macros",
  "proc-macro2",
@@ -3957,7 +3959,7 @@ dependencies = [
 [[package]]
 name = "midnight-transient-crypto"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "anyhow",
  "blake2b_simd",
@@ -3992,7 +3994,7 @@ dependencies = [
 [[package]]
 name = "midnight-zswap"
 version = "6.2.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=feat%2Fpub-on-disk-object-ref-count#344f0ad732a301af2a22bb96fe69e90a05137542"
 dependencies = [
  "derive-where",
  "fake",
@@ -5066,6 +5068,15 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "redb"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae323eb086579a3769daa2c753bb96deb95993c534711e0dbe881b5192906a06"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

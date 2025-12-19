@@ -52,20 +52,21 @@ log                          = { version = "0.4" }
 logforth                     = { version = "0.29" }
 metrics                      = { version = "0.24" }
 metrics-exporter-prometheus  = { version = "0.18", default-features = false }
-midnight-base-crypto_v6      = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-base-crypto", tag = "ledger-6.2.0-rc.2" }
-midnight-coin-structure_v6   = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-coin-structure", tag = "ledger-6.2.0-rc.2" }
-midnight-ledger_v6           = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-ledger", tag = "ledger-6.2.0-rc.2" }
-midnight-onchain-runtime_v6  = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-onchain-runtime", tag = "ledger-6.2.0-rc.2" }
-midnight-serialize_v6        = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-serialize", tag = "ledger-6.2.0-rc.2" }
-midnight-storage_v6          = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-storage", tag = "ledger-6.2.0-rc.2" }
-midnight-transient-crypto_v6 = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-transient-crypto", tag = "ledger-6.2.0-rc.2" }
-midnight-zswap_v6            = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-zswap", tag = "ledger-6.2.0-rc.2" }
+midnight-base-crypto_v6      = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-base-crypto", branch = "feat/pub-on-disk-object-ref-count" }
+midnight-coin-structure_v6   = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-coin-structure", branch = "feat/pub-on-disk-object-ref-count" }
+midnight-ledger_v6           = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-ledger", branch = "feat/pub-on-disk-object-ref-count" }
+midnight-onchain-runtime_v6  = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-onchain-runtime", branch = "feat/pub-on-disk-object-ref-count" }
+midnight-serialize_v6        = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-serialize", branch = "feat/pub-on-disk-object-ref-count" }
+midnight-storage_v6          = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-storage", branch = "feat/pub-on-disk-object-ref-count" }
+midnight-transient-crypto_v6 = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-transient-crypto", branch = "feat/pub-on-disk-object-ref-count" }
+midnight-zswap_v6            = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-zswap", branch = "feat/pub-on-disk-object-ref-count" }
 nix                          = { version = "0.30" }
 opentelemetry                = { version = "0.31" }
 opentelemetry-otlp           = { version = "0.31" }
 opentelemetry_sdk            = { version = "0.31" }
 parity-scale-codec           = { version = "3.7" }
 parking_lot                  = { version = "0.12" }
+redb                         = { version = "3.1" }
 reqwest                      = { version = "0.12", default-features = false }
 secrecy                      = { version = "0.10" }
 serde                        = { version = "1.0" }

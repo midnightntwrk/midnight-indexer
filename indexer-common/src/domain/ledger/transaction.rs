@@ -27,7 +27,7 @@ use midnight_ledger_v6::structure::{
     SystemTransaction as LedgerSystemTransactionV6,
 };
 use midnight_serialize_v6::tagged_deserialize as tagged_deserialize_v6;
-use midnight_storage_v6::DefaultDB as DefaultDBV6;
+use midnight_storage_v6::db::DB as DBV6;
 use midnight_transient_crypto_v6::{
     encryption::SecretKey as SecretKeyV6, proofs::Proof as ProofV6,
 };
@@ -263,7 +263,7 @@ fn serialize_contract_address(
         .map_err(|error| Error::Serialize("ContractAddressV6", error))
 }
 
-fn can_decrypt_v6(key: &SecretKeyV6, offer: &OfferV6<ProofV6, DefaultDBV6>) -> bool {
+fn can_decrypt_v6<D: DBV6>(key: &SecretKeyV6, offer: &OfferV6<ProofV6, D>) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
     let mut ciphertexts = outputs.chain(transient);

@@ -14,12 +14,13 @@
 use crate::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, ByteArray, ByteVec, IntentHash,
     LedgerEvent, NetworkId, Nonce, PROTOCOL_VERSION_000_018_000, ProtocolVersion,
-    SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerState,
+    SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerStateKey,
     SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot, TokenType,
     TransactionResult, UnshieldedUtxo,
     dust::{self},
     ledger::{Error, IntentV6, SerializableV6Ext, TaggedSerializableV6Ext, TransactionV6},
 };
+use crate::infra::redb_db::RedbDb;
 use fastrace::trace;
 use itertools::Itertools;
 use midnight_base_crypto_v6::{
@@ -57,7 +58,11 @@ use midnight_onchain_runtime_v6::context::BlockContext as BlockContextV6;
 use midnight_serialize_v6::{
     Deserializable as DeserializableV6, tagged_deserialize as tagged_deserialize_v6,
 };
-use midnight_storage_v6::DefaultDB as DefaultDBV6;
+use midnight_storage_v6::{
+    arena::{Sp as SpV6, TypedArenaKey as TypedArenaKeyV6},
+    db::DB as DBV6,
+    storage::default_storage as default_storage_v6,
+};
 use midnight_transient_crypto_v6::merkle_tree::{
     MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV6,
     MerkleTreeDigest as MerkleTreeDigestV6, TreeInsertionPath as TreeInsertionPathV6,
@@ -77,7 +82,7 @@ static STRICTNESS_V6: LazyLock<WellFormedStrictnessV6> = LazyLock::new(|| {
 #[derive(Debug, Clone)]
 pub enum LedgerState {
     V6 {
-        ledger_state: LedgerStateV6<DefaultDBV6>,
+        ledger_state: LedgerStateV6<RedbDb>,
         block_fullness: SyntheticCostV6,
     },
 }
@@ -91,15 +96,22 @@ impl LedgerState {
         }
     }
 
-    /// Deserialize the given serialized ledger state using the given protocol version.
-    #[trace(properties = { "protocol_version": "{protocol_version}" })]
-    pub fn deserialize(
-        ledger_state: impl AsRef<[u8]>,
+    pub fn load(
+        key: &SerializedLedgerStateKey,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_018_000) {
-            let ledger_state = tagged_deserialize_v6(&mut ledger_state.as_ref())
-                .map_err(|error| Error::Deserialize("LedgerStateV6", error))?;
+            let arena_key =
+                TypedArenaKeyV6::<LedgerStateV6<RedbDb>, <RedbDb as DBV6>::Hasher>::deserialize(
+                    &mut key.as_slice(),
+                    0,
+                )
+                .map_err(|error| Error::Deserialize("TypedArenaKeyV6", error))?;
+            let ledger_state = default_storage_v6::<RedbDb>()
+                .get(&arena_key)
+                .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
+            let ledger_state = SpV6::into_inner(ledger_state).expect("loaded ledger state exists");
+
             Ok(Self::V6 {
                 ledger_state,
                 block_fullness: Default::default(),
@@ -109,13 +121,28 @@ impl LedgerState {
         }
     }
 
-    /// Serialize this ledger state.
-    #[trace]
-    pub fn serialize(&self) -> Result<SerializedLedgerState, Error> {
+    pub fn persist(self) -> Result<(Self, SerializedLedgerStateKey), Error> {
         match self {
-            Self::V6 { ledger_state, .. } => ledger_state
-                .tagged_serialize_v6()
-                .map_err(|error| Error::Serialize("LedgerStateV6", error)),
+            LedgerState::V6 {
+                ledger_state,
+                block_fullness,
+            } => {
+                let mut ledger_state = SpV6::new(ledger_state);
+                ledger_state.persist();
+
+                let key = ledger_state
+                    .as_typed_key()
+                    .serialize_v6()
+                    .map_err(|error| Error::Serialize("TypedArenaKeyV6", error))?;
+
+                let ledger_state = SpV6::into_inner(ledger_state).expect("ledger state exists");
+                let ledger_state = LedgerState::V6 {
+                    ledger_state,
+                    block_fullness,
+                };
+
+                Ok((ledger_state, key))
+            }
         }
     }
 
@@ -399,7 +426,7 @@ fn timestamp_v6(block_timestamp: u64) -> TimestampV6 {
     TimestampV6::from_secs(block_timestamp / 1000)
 }
 
-fn make_ledger_events_v6(events: Vec<EventV6<DefaultDBV6>>) -> Result<Vec<LedgerEvent>, Error> {
+fn make_ledger_events_v6(events: Vec<EventV6<RedbDb>>) -> Result<Vec<LedgerEvent>, Error> {
     events
         .into_iter()
         .map(|event| {
@@ -541,7 +568,7 @@ fn make_dust_generation_dtime_update_v6(
 fn make_unshielded_utxos_for_regular_transaction_v6(
     transaction: TransactionV6,
     transaction_result: &TransactionResult,
-    ledger_state: &LedgerStateV6<DefaultDBV6>,
+    ledger_state: &LedgerStateV6<RedbDb>,
 ) -> (Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>) {
     // Skip UTXO creation entirely for failed transactions, because no state changes occurred on the
     // ledger.
@@ -641,7 +668,7 @@ fn make_unshielded_utxos_for_regular_transaction_v6(
 
 fn make_unshielded_utxos_for_system_transaction_v6(
     transaction: SystemTransactionV6,
-    ledger_state: &LedgerStateV6<DefaultDBV6>,
+    ledger_state: &LedgerStateV6<RedbDb>,
 ) -> Vec<UnshieldedUtxo> {
     match transaction {
         SystemTransactionV6::PayFromTreasuryUnshielded {
@@ -691,7 +718,7 @@ fn extend_unshielded_utxos_v6(
     segment_id: u16,
     intent: &IntentV6,
     guaranteed: bool,
-    ledger_state: &LedgerStateV6<DefaultDBV6>,
+    ledger_state: &LedgerStateV6<RedbDb>,
 ) {
     let ledger_intent_hash = intent
         .erase_proofs()
@@ -774,7 +801,7 @@ fn make_initial_nonce_v6(output_index: u32, intent_hash: IntentHash) -> Nonce {
 fn registered_for_dust_generation_v6(
     output_index: u32,
     intent_hash: IntentHash,
-    ledger_state: &LedgerStateV6<DefaultDBV6>,
+    ledger_state: &LedgerStateV6<RedbDb>,
 ) -> bool {
     let intent_hash_v6 = HashOutputV6(intent_hash.0);
     let initial_nonce = InitialNonceV6(persistent_commit_v6(&output_index, intent_hash_v6));
@@ -785,7 +812,7 @@ fn registered_for_dust_generation_v6(
         .contains_key(&initial_nonce)
 }
 
-fn ctime_v6(utxo: &UtxoV6, ledger_state: &LedgerStateV6<DefaultDBV6>) -> Option<u64> {
+fn ctime_v6(utxo: &UtxoV6, ledger_state: &LedgerStateV6<RedbDb>) -> Option<u64> {
     ledger_state
         .utxo
         .utxos
