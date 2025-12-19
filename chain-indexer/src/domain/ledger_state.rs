@@ -203,6 +203,9 @@ impl LedgerState {
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error(transparent)]
+    Persist(indexer_common::domain::ledger::Error),
+
     #[error("cannot apply regular transaction {hash}", hash = stringify_hash(.0))]
     ApplyRegularTransaction(
         Option<TransactionHash>,

@@ -24,9 +24,10 @@ pub use transaction::*;
 use crate::{
     domain::{
         ByteArrayLenError, ByteVec, PROTOCOL_VERSION_000_018_000, ProtocolVersion,
-        SerializedContractAddress, dust::DustParameters,
+        SerializedContractAddress, SerializedLedgerStateKey, dust::DustParameters,
     },
     error::BoxError,
+    infra::postgres_db::RedbDb,
 };
 use fastrace::trace;
 use midnight_base_crypto_v6::signatures::Signature as SignatureV6;
@@ -37,7 +38,6 @@ use midnight_ledger_v6::{
 use midnight_serialize_v6::{
     Serializable as SerializableV6, Tagged as TaggedV6, tagged_serialize as tagged_serialize_v6,
 };
-use midnight_storage_v6::DefaultDB as DefaultDBV6;
 use midnight_transient_crypto_v6::commitment::PureGeneratorPedersen as PureGeneratorPedersenV6;
 use std::{io, string::FromUtf8Error};
 use thiserror::Error;
@@ -46,18 +46,21 @@ type TransactionV6 = midnight_ledger_v6::structure::Transaction<
     SignatureV6,
     ProofMarkerV6,
     PureGeneratorPedersenV6,
-    DefaultDBV6,
+    RedbDb,
 >;
 type IntentV6 = midnight_ledger_v6::structure::Intent<
     SignatureV6,
     ProofMarkerV6,
     PureGeneratorPedersenV6,
-    DefaultDBV6,
+    RedbDb,
 >;
 
 /// Ledger related errors.
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("cannot load ledger state for key {}", const_hex::encode(.0))]
+    LoadLedgerState(SerializedLedgerStateKey, #[source] io::Error),
+
     #[error("cannot serialize {0}")]
     Serialize(&'static str, #[source] io::Error),
 
@@ -100,7 +103,7 @@ where
     /// Serialize this `Serializable` implementation.
     #[trace]
     fn serialize_v6(&self) -> Result<ByteVec, io::Error> {
-        let mut bytes = Vec::with_capacity(self.serialized_size() + 32);
+        let mut bytes = Vec::with_capacity(self.serialized_size());
         SerializableV6::serialize(self, &mut bytes)?;
         Ok(bytes.into())
     }

@@ -11,8 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod ledger_state_storage;
+// pub mod ledger_state_storage;
 pub mod migrations;
 pub mod pool;
+pub mod postgres_db;
 pub mod pub_sub;
 pub mod sqlx;

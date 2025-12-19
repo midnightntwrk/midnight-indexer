@@ -43,7 +43,7 @@ async fn run() -> anyhow::Result<()> {
     };
     use indexer_common::{
         config::ConfigExt,
-        infra::{ledger_state_storage, migrations, pool, pub_sub},
+        infra::{migrations, pool, pub_sub},
         telemetry,
     };
     use log::info;
@@ -73,7 +73,6 @@ async fn run() -> anyhow::Result<()> {
     let infra::Config {
         storage_config,
         pub_sub_config,
-        ledger_state_storage_config,
         node_config,
     } = infra_config;
 
@@ -90,12 +89,7 @@ async fn run() -> anyhow::Result<()> {
             .context("run Postgres migrations")?;
     }
 
-    let ledger_state_storage =
-        ledger_state_storage::nats::NatsLedgerStateStorage::new(ledger_state_storage_config)
-            .await
-            .context("create NatsZswapStateStorage")?;
-
-    let storage = infra::storage::Storage::new(pool, ledger_state_storage);
+    let storage = infra::storage::Storage::new(pool);
 
     let publisher = pub_sub::nats::publisher::NatsPublisher::new(pub_sub_config)
         .await

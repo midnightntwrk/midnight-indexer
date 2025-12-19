@@ -93,9 +93,12 @@ pub async fn run(
         .get_ledger_state()
         .await
         .context("load ledger state")?
-        .map(|(ledger_state, block_height, protocol_version)| {
-            let ledger_state = ledger::LedgerState::deserialize(&ledger_state, protocol_version)
-                .context("deserialize ledger state")?;
+        .map(|(ledger_state_key, block_height, protocol_version)| {
+            let ledger_state = indexer_common::domain::ledger::LedgerState::load(
+                &ledger_state_key,
+                protocol_version,
+            )
+            .context("load ledger state")?;
             Ok::<_, anyhow::Error>((ledger_state.into(), Some(block_height)))
         })
         .transpose()?
@@ -139,10 +142,12 @@ pub async fn run(
                 }
             }
 
-            let ledger_state = ledger_state.serialize().context("serialize ledger state")?;
             let protocol_version = protocol_version.expect("protocol version is defined");
+            let (new_ledger_state, ledger_state_key) =
+                ledger_state.0.persist().context("persist ledger state")?;
+            ledger_state = new_ledger_state.into();
             storage
-                .save_ledger_state(&ledger_state, highest_block_height, protocol_version)
+                .save_ledger_state(&ledger_state_key, highest_block_height, protocol_version)
                 .await
                 .context("save ledger state")?;
         }
@@ -344,11 +349,14 @@ async fn index_block(
 ) -> Result<LedgerState, anyhow::Error> {
     let (mut block, transactions) = block.into();
 
+    // Apply transactions.
     let (transactions, ledger_parameters) = ledger_state
         .apply_node_transactions(transactions, block.parent_hash, block.timestamp)
         .context("apply node transactions to ledger state")?;
+    block.ledger_parameters = ledger_parameters.serialize()?;
     debug!(transactions:?; "transactions applied to ledger state");
 
+    // Validate ledger state.
     if ledger_state.zswap_merkle_tree_root() != block.zswap_state_root {
         bail!(
             "zswap state root mismatch for block {} at height {}",
@@ -357,70 +365,43 @@ async fn index_block(
         );
     }
 
-    block.ledger_parameters = ledger_parameters.serialize()?;
-
     // Determine whether caught up, also allowing to fall back a little in that state.
-    let node_block_height = highest_block_on_node
-        .read()
-        .map(|BlockInfo { height, .. }| height)
-        .unwrap_or_default();
-
     // Use saturating subtraction to handle the case where streams are temporarily out of order.
     // The two subscriptions (highest_blocks and finalized_blocks) are independent with no
     // ordering guarantee, so node_block_height < block.height may happen under certain rare
     // conditions. This will produce 0 when node_block_height < block.height, treating it as
     // caught up.
+    let node_block_height = highest_block_on_node
+        .read()
+        .map(|BlockInfo { height, .. }| height)
+        .unwrap_or_default();
     let distance = node_block_height.saturating_sub(block.height);
     let max_distance = if *caught_up {
         caught_up_max_distance + caught_up_leeway
     } else {
         caught_up_max_distance
     };
-
     let old_caught_up = *caught_up;
     *caught_up = distance <= max_distance;
     if old_caught_up != *caught_up {
         info!(caught_up:%; "caught-up status changed")
     }
 
+    // Persist ledger state.
+    let (new_ledger_state, ledger_state_key) =
+        ledger_state.0.persist().context("persist ledger state")?;
+    ledger_state = new_ledger_state.into();
+
     // Save and update the block with its related data.
-    let save_ledger_state = *caught_up || block.height % save_ledger_state_after == 0;
-    let serialize_ledger_state = if save_ledger_state {
-        let ledger_state = ledger_state.serialize().context("serialize ledger state")?;
-        Some(ledger_state)
-    } else {
-        None
-    };
     let max_transaction_id = storage
         .save_block(
             &block,
             &transactions,
             &block.dust_registration_events,
-            serialize_ledger_state.as_ref(),
+            Some(&ledger_state_key),
         )
         .await
         .context("save block")?;
-
-    let ledger_state_size = serialize_ledger_state.map(|s| s.len());
-
-    info!(
-        hash:% = block.hash,
-        height = block.height,
-        parent_hash:% = block.parent_hash,
-        protocol_version:% = block.protocol_version,
-        distance,
-        caught_up = *caught_up,
-        ledger_state_size = ledger_state_size.map(format_bytes);
-        "block indexed"
-    );
-
-    metrics.update(
-        &block,
-        &transactions,
-        node_block_height,
-        *caught_up,
-        ledger_state_size,
-    );
 
     // Publish BlockIndexed.
     publisher
@@ -453,6 +434,19 @@ async fn index_block(
             .await
             .context("publish UnshieldedUtxoIndexed event")?;
     }
+
+    // Update metrics.
+    metrics.update(&block, &transactions, node_block_height, *caught_up);
+
+    info!(
+        hash:% = block.hash,
+        height = block.height,
+        parent_hash:% = block.parent_hash,
+        protocol_version:% = block.protocol_version,
+        distance,
+        caught_up = *caught_up;
+        "block indexed"
+    );
 
     Ok(ledger_state)
 }

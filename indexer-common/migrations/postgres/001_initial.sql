@@ -23,7 +23,8 @@ CREATE TABLE blocks (
   parent_hash BYTEA NOT NULL,
   author BYTEA,
   timestamp BIGINT NOT NULL,
-  ledger_parameters BYTEA NOT NULL
+  ledger_parameters BYTEA NOT NULL,
+  ledger_state_key BYTEA NOT NULL UNIQUE REFERENCES ledger_state (key)
 );
 --------------------------------------------------------------------------------
 -- transactions
@@ -55,6 +56,10 @@ CREATE INDEX ON regular_transactions (transaction_result);
 CREATE INDEX ON regular_transactions USING GIN (transaction_result);
 CREATE INDEX ON regular_transactions (start_index);
 CREATE INDEX ON regular_transactions (end_index);
+--------------------------------------------------------------------------------
+-- ledger_state
+--------------------------------------------------------------------------------
+CREATE TABLE ledger_state (key BYTEA PRIMARY KEY, value BYTEA NOT NULL);
 --------------------------------------------------------------------------------
 -- contract_actions
 --------------------------------------------------------------------------------
