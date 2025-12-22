@@ -228,16 +228,25 @@ impl SubxtNode {
             .compatible_online_client(protocol_version, hash)
             .await?;
 
-        // Fetch authorities if `None`, either initially or because of a `NewSession` event (below).
-        if authorities.is_none() {
-            *authorities =
-                runtimes::fetch_authorities(hash, protocol_version, online_client).await?;
-        }
-        let author = authorities
+        // FIX #548: Always fetch authorities from the specific block to ensure consistency.
+        // This is especially important when indexing historical blocks or when starting
+        // from different block heights, as it guarantees the same author values
+        // regardless of the indexer's starting point.
+        // The authorities are fetched for each block to ensure they match the session
+        // active at that block's height, preventing discrepancies between indexers
+        // that start from different initial blocks.
+        let block_authorities = runtimes::fetch_authorities(hash, protocol_version, online_client).await?;
+        
+        let author = block_authorities
             .as_ref()
             .map(|authorities| extract_block_author(block.header(), authorities, protocol_version))
             .transpose()?
             .flatten();
+
+        // Update cached authorities if None (for optimization in real-time indexing)
+        if authorities.is_none() {
+            *authorities = block_authorities;
+        }
 
         let zswap_state_root =
             runtimes::get_zswap_state_root(hash, protocol_version, online_client).await?;
