@@ -42,13 +42,14 @@ impl NatsLedgerStateStorage {
             url,
             username,
             password,
+            num_replicas,
         } = config;
 
         let options =
             ConnectOptions::new().user_and_password(username, password.expose_secret().to_owned());
         let client = options.connect(url).await?;
         let jetstream = jetstream::new(client);
-        let ledger_state_store = create_ledger_state_store(&jetstream).await?;
+        let ledger_state_store = create_ledger_state_store(&jetstream, num_replicas).await?;
 
         Ok(Self { ledger_state_store })
     }
@@ -120,11 +121,16 @@ pub struct Config {
     pub url: String,
     pub username: String,
     pub password: SecretString,
+    pub num_replicas: usize,
 }
 
-async fn create_ledger_state_store(jetstream: &Jetstream) -> Result<ObjectStore, Error> {
+async fn create_ledger_state_store(
+    jetstream: &Jetstream,
+    num_replicas: usize,
+) -> Result<ObjectStore, Error> {
     let config = object_store::Config {
         bucket: LEDGER_STATE_STORE_NAME.to_string(),
+        num_replicas,
         ..Default::default()
     };
 
@@ -181,6 +187,7 @@ mod tests {
             url: nats_url,
             username: "indexer".to_string(),
             password: env!("APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD").into(),
+            num_replicas: 1,
         };
         let mut ledger_state_storage = NatsLedgerStateStorage::new(config)
             .await

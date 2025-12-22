@@ -23,6 +23,7 @@ infra:
     url: "localhost:4222"
     username: "indexer"
     max_reconnects: 4
+    num_replicas: 1
 
   api:
     address: "0.0.0.0"
