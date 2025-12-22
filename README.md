@@ -156,6 +156,14 @@ For development, you can use Docker Compose or run components manually:
 
 A `docker-compose.yaml` file is provided that defines services for the Indexer components as well as for dependencies like `postgres`, `nats`, and `node`. The latter are particularly interesting when running Indexer components "manually".
 
+**Note on Permissions:** The Docker Compose configuration uses `user: "${UID:-1000}:${GID:-1000}"` for services with mounted volumes (postgres, nats) to avoid permission issues. If you encounter "permission denied" errors, ensure the `UID` and `GID` environment variables match your host user:
+
+```bash
+export UID=$(id -u)
+export GID=$(id -g)
+docker compose --profile cloud up
+```
+
 #### Manual Startup
 
 The justfile defines recipes for each Indexer component to start it alongside its dependencies. E.g. run the Chain Indexer like this:
