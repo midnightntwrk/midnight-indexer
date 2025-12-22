@@ -916,19 +916,19 @@ async fn save_dust_registration_events(
     for event in events {
         match event {
             DustRegistrationEvent::Registration {
-                cardano_address,
+                cardano_stake_key,
                 dust_address,
             } => {
                 let query = indoc! {"
                     INSERT INTO cnight_registrations (
-                        cardano_address,
+                        cardano_stake_key,
                         dust_address,
                         valid,
                         registered_at,
                         block_id
                     )
                     VALUES ($1, $2, $3, $4, $5)
-                    ON CONFLICT (cardano_address, dust_address)
+                    ON CONFLICT (cardano_stake_key, dust_address)
                     DO UPDATE SET
                         valid = EXCLUDED.valid,
                         registered_at = EXCLUDED.registered_at,
@@ -937,7 +937,7 @@ async fn save_dust_registration_events(
                 "};
 
                 sqlx::query(query)
-                    .bind(cardano_address.as_ref())
+                    .bind(cardano_stake_key.as_ref())
                     .bind(dust_address.as_ref())
                     .bind(true)
                     .bind(block_timestamp as i64)
@@ -947,7 +947,7 @@ async fn save_dust_registration_events(
             }
 
             DustRegistrationEvent::Deregistration {
-                cardano_address,
+                cardano_stake_key,
                 dust_address,
             } => {
                 let query = indoc! {"
@@ -955,7 +955,7 @@ async fn save_dust_registration_events(
                     SET valid = $1,
                         removed_at = $2,
                         block_id = $3
-                    WHERE cardano_address = $4
+                    WHERE cardano_stake_key = $4
                     AND dust_address = $5
                 "};
 
@@ -963,14 +963,14 @@ async fn save_dust_registration_events(
                     .bind(false)
                     .bind(block_timestamp as i64)
                     .bind(block_id)
-                    .bind(cardano_address.as_ref())
+                    .bind(cardano_stake_key.as_ref())
                     .bind(dust_address.as_ref())
                     .execute(&mut **tx)
                     .await?;
             }
 
             DustRegistrationEvent::MappingAdded {
-                cardano_address,
+                cardano_stake_key,
                 dust_address,
                 utxo_id,
                 utxo_index,
@@ -979,21 +979,21 @@ async fn save_dust_registration_events(
                     UPDATE cnight_registrations
                     SET utxo_tx_hash = $1,
                         utxo_output_index = $2
-                    WHERE cardano_address = $3
+                    WHERE cardano_stake_key = $3
                     AND dust_address = $4
                 "};
 
                 sqlx::query(query)
                     .bind(utxo_id.as_ref())
                     .bind(*utxo_index as i64)
-                    .bind(cardano_address.as_ref())
+                    .bind(cardano_stake_key.as_ref())
                     .bind(dust_address.as_ref())
                     .execute(&mut **tx)
                     .await?;
             }
 
             DustRegistrationEvent::MappingRemoved {
-                cardano_address,
+                cardano_stake_key,
                 dust_address,
                 ..
             } => {
@@ -1001,12 +1001,12 @@ async fn save_dust_registration_events(
                     UPDATE cnight_registrations
                     SET utxo_tx_hash = NULL,
                         utxo_output_index = NULL
-                    WHERE cardano_address = $1
+                    WHERE cardano_stake_key = $1
                     AND dust_address = $2
                 "};
 
                 sqlx::query(query)
-                    .bind(cardano_address.as_ref())
+                    .bind(cardano_stake_key.as_ref())
                     .bind(dust_address.as_ref())
                     .execute(&mut **tx)
                     .await?;

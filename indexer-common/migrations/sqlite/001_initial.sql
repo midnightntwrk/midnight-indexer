@@ -165,7 +165,7 @@ CREATE INDEX dust_generation_info_night_utxo_hash_idx ON dust_generation_info (n
 -- cNIGHT registration tracking
 CREATE TABLE cnight_registrations (
   id INTEGER PRIMARY KEY,
-  cardano_address BLOB NOT NULL,
+  cardano_stake_key BLOB NOT NULL,
   dust_address BLOB NOT NULL,
   valid BOOLEAN NOT NULL,
   registered_at INTEGER NOT NULL,
@@ -173,8 +173,8 @@ CREATE TABLE cnight_registrations (
   block_id INTEGER REFERENCES blocks (id),
   utxo_tx_hash BLOB,
   utxo_output_index INTEGER,
-  UNIQUE (cardano_address, dust_address)
+  UNIQUE (cardano_stake_key, dust_address)
 );
-CREATE INDEX cnight_registrations_cardano_address_idx ON cnight_registrations (cardano_address);
+CREATE INDEX cnight_registrations_cardano_stake_key_idx ON cnight_registrations (cardano_stake_key);
 CREATE INDEX cnight_registrations_dust_address_idx ON cnight_registrations (dust_address);
 CREATE INDEX cnight_registrations_block_id_idx ON cnight_registrations (block_id);
