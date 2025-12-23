@@ -39,7 +39,8 @@ use bech32::{Bech32, Bech32m, Hrp};
 use const_hex::FromHexError;
 use derive_more::{AsRef, Debug, Display};
 use indexer_common::domain::{
-    ByteArrayLenError, ByteVec, NetworkId, NoopSubscriber, SessionId, Subscriber,
+    ByteArrayLenError, ByteVec, CardanoRewardAddress as DomainCardanoRewardAddress, NetworkId,
+    NoopSubscriber, SessionId, Subscriber,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -193,9 +194,7 @@ scalar!(CardanoRewardAddress);
 
 impl CardanoRewardAddress {
     /// Decode this Bech32 Cardano reward address into a CardanoRewardAddress.
-    pub fn decode(
-        &self,
-    ) -> Result<indexer_common::domain::CardanoRewardAddress, DecodeCardanoRewardAddressError> {
+    pub fn decode(&self) -> Result<DomainCardanoRewardAddress, DecodeCardanoRewardAddressError> {
         decode_cardano_reward_address(&self.0)
     }
 
@@ -203,7 +202,7 @@ impl CardanoRewardAddress {
     pub fn decode_for_network(
         &self,
         expected_network: CardanoNetworkId,
-    ) -> Result<indexer_common::domain::CardanoRewardAddress, DecodeCardanoRewardAddressError> {
+    ) -> Result<DomainCardanoRewardAddress, DecodeCardanoRewardAddressError> {
         decode_cardano_reward_address_for_network(&self.0, expected_network)
     }
 }
@@ -248,7 +247,7 @@ pub enum DecodeCardanoRewardAddressError {
 /// Supports both mainnet ("stake") and testnet ("stake_test") addresses.
 pub fn decode_cardano_reward_address(
     address: impl AsRef<str>,
-) -> Result<indexer_common::domain::CardanoRewardAddress, DecodeCardanoRewardAddressError> {
+) -> Result<DomainCardanoRewardAddress, DecodeCardanoRewardAddressError> {
     let (_, reward_address) = decode_cardano_reward_address_with_network(address)?;
     Ok(reward_address)
 }
@@ -257,13 +256,7 @@ pub fn decode_cardano_reward_address(
 /// also returning the network ID derived from the HRP.
 pub fn decode_cardano_reward_address_with_network(
     address: impl AsRef<str>,
-) -> Result<
-    (
-        CardanoNetworkId,
-        indexer_common::domain::CardanoRewardAddress,
-    ),
-    DecodeCardanoRewardAddressError,
-> {
+) -> Result<(CardanoNetworkId, DomainCardanoRewardAddress), DecodeCardanoRewardAddressError> {
     let (hrp, bytes) = bech32::decode(address.as_ref())?;
 
     // Validate HRP is a valid Cardano reward address.
@@ -273,17 +266,14 @@ pub fn decode_cardano_reward_address_with_network(
     let reward_address = <[u8; 29]>::try_from(bytes.as_slice())
         .map_err(|_| DecodeCardanoRewardAddressError::InvalidLength(bytes.len()))?;
 
-    Ok((
-        network_id,
-        indexer_common::domain::CardanoRewardAddress::from(reward_address),
-    ))
+    Ok((network_id, DomainCardanoRewardAddress::from(reward_address)))
 }
 
 /// Bech32-decode a Cardano reward address string, validating that it matches the expected network.
 pub fn decode_cardano_reward_address_for_network(
     address: impl AsRef<str>,
     expected_network: CardanoNetworkId,
-) -> Result<indexer_common::domain::CardanoRewardAddress, DecodeCardanoRewardAddressError> {
+) -> Result<DomainCardanoRewardAddress, DecodeCardanoRewardAddressError> {
     let (actual_network, reward_address) = decode_cardano_reward_address_with_network(address)?;
 
     if actual_network != expected_network {
@@ -298,7 +288,7 @@ pub fn decode_cardano_reward_address_for_network(
 
 /// Bech32-encode a 29-byte CardanoRewardAddress to a Cardano reward address string.
 pub fn encode_cardano_reward_address(
-    reward_address: indexer_common::domain::CardanoRewardAddress,
+    reward_address: DomainCardanoRewardAddress,
     network: CardanoNetworkId,
 ) -> String {
     let hrp = Hrp::parse(network.hrp()).expect("HRP for Cardano reward address can be parsed");
