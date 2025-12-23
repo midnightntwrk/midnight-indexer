@@ -16,7 +16,7 @@ use crate::{
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
         v3::{
-            CardanoRewardAddress, HexEncoded,
+            CardanoNetworkId, CardanoRewardAddress, HexEncoded,
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
             dust::DustGenerationStatus,
@@ -215,11 +215,13 @@ where
             .some_or_client_error(|| "maximum of ten reward addresses allowed")?;
 
         let storage = cx.get_storage::<S>();
+        let network_id = cx.get_network_id();
+        let expected_cardano_network = CardanoNetworkId::from(network_id);
 
-        // Convert Bech32 CardanoRewardAddress to binary.
+        // Convert Bech32 CardanoRewardAddress to binary, validating network.
         let address = cardano_reward_addresses
             .into_iter()
-            .map(|key| key.decode())
+            .map(|key| key.decode_for_network(expected_cardano_network))
             .collect::<Result<Vec<_>, _>>()
             .map_err_into_client_error(|| "invalid Cardano reward address")?;
 
@@ -228,7 +230,6 @@ where
             .await
             .map_err_into_server_error(|| "get DUST generation status")?;
 
-        let network_id = cx.get_network_id();
         Ok(status_list
             .into_iter()
             .map(|s| (s, network_id).into())

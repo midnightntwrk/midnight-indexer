@@ -19,7 +19,7 @@
 use crate::{
     domain,
     infra::api::v3::{
-        AddressType, CardanoNetwork, CardanoRewardAddress, HexEncodable, HexEncoded,
+        AddressType, CardanoNetworkId, CardanoRewardAddress, HexEncodable, HexEncoded,
         encode_address, encode_cardano_reward_address,
     },
 };
@@ -72,10 +72,10 @@ pub struct DustGenerationStatus {
 
 impl From<(domain::DustGenerationStatus, &NetworkId)> for DustGenerationStatus {
     fn from((status, network_id): (domain::DustGenerationStatus, &NetworkId)) -> Self {
-        // TODO: Make the cardano network configurable!
+        let cardano_network_id = CardanoNetworkId::from(network_id);
         let cardano_reward_address = CardanoRewardAddress(encode_cardano_reward_address(
             status.cardano_reward_address,
-            CardanoNetwork::Testnet,
+            cardano_network_id,
         ));
         let dust_address = status
             .dust_address
