@@ -18,6 +18,7 @@ pub mod ledger_events;
 pub mod mutation;
 pub mod query;
 pub mod subscription;
+pub mod system_parameters;
 pub mod transaction;
 pub mod unshielded;
 pub mod viewing_key;

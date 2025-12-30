@@ -93,6 +93,9 @@ async fn run() -> anyhow::Result<()> {
         migrations::sqlite::run(&pool)
             .await
             .context("run Sqlite migrations")?;
+        migrations::sqlite::seed_mock_system_parameters(&pool)
+            .await
+            .context("seed mock system parameters")?;
     }
 
     let cipher = make_cipher(secret).context("make cipher")?;

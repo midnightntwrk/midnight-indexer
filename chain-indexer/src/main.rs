@@ -88,6 +88,9 @@ async fn run() -> anyhow::Result<()> {
         migrations::postgres::run(&pool)
             .await
             .context("run Postgres migrations")?;
+        migrations::postgres::seed_mock_system_parameters(&pool)
+            .await
+            .context("seed mock system parameters")?;
     }
 
     let ledger_state_storage =

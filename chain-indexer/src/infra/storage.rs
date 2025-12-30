@@ -1016,3 +1016,149 @@ async fn save_dust_registration_events(
 
     Ok(())
 }
+
+// TODO(PM-21070): Uncomment when integrating with node that has system-parameters pallet.
+/*
+use crate::domain::{DParameter, SystemParametersChange, TermsAndConditions};
+
+impl<S> Storage<S>
+where
+    S: LedgerStateStorage,
+{
+    /// Save D-Parameter change to the database.
+    #[trace]
+    pub async fn save_d_parameter(
+        &self,
+        block_height: u32,
+        block_hash: &BlockHash,
+        timestamp: u64,
+        d_parameter: &DParameter,
+    ) -> Result<(), sqlx::Error> {
+        let query = indoc! {"
+            INSERT INTO system_parameters_d (
+                block_height,
+                block_hash,
+                timestamp,
+                num_permissioned_candidates,
+                num_registered_candidates
+            )
+            VALUES ($1, $2, $3, $4, $5)
+        "};
+
+        sqlx::query(query)
+            .bind(block_height as i64)
+            .bind(block_hash.as_ref())
+            .bind(timestamp as i64)
+            .bind(d_parameter.num_permissioned_candidates as i32)
+            .bind(d_parameter.num_registered_candidates as i32)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Save Terms and Conditions change to the database.
+    #[trace]
+    pub async fn save_terms_and_conditions(
+        &self,
+        block_height: u32,
+        block_hash: &BlockHash,
+        timestamp: u64,
+        terms_and_conditions: &TermsAndConditions,
+    ) -> Result<(), sqlx::Error> {
+        let query = indoc! {"
+            INSERT INTO system_parameters_terms_and_conditions (
+                block_height,
+                block_hash,
+                timestamp,
+                hash,
+                url
+            )
+            VALUES ($1, $2, $3, $4, $5)
+        "};
+
+        sqlx::query(query)
+            .bind(block_height as i64)
+            .bind(block_hash.as_ref())
+            .bind(timestamp as i64)
+            .bind(terms_and_conditions.hash.as_ref())
+            .bind(&terms_and_conditions.url)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Save all system parameters from a change event.
+    #[trace]
+    pub async fn save_system_parameters_change(
+        &self,
+        change: &SystemParametersChange,
+    ) -> Result<(), sqlx::Error> {
+        if let Some(ref d_parameter) = change.d_parameter {
+            self.save_d_parameter(
+                change.block_height,
+                &change.block_hash,
+                change.timestamp,
+                d_parameter,
+            )
+            .await?;
+        }
+
+        if let Some(ref terms_and_conditions) = change.terms_and_conditions {
+            self.save_terms_and_conditions(
+                change.block_height,
+                &change.block_hash,
+                change.timestamp,
+                terms_and_conditions,
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Get the latest D-Parameter from the database.
+    #[trace]
+    pub async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT num_permissioned_candidates, num_registered_candidates
+            FROM system_parameters_d
+            ORDER BY block_height DESC
+            LIMIT 1
+        "};
+
+        let result = sqlx::query_as::<_, (i32, i32)>(query)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        Ok(result.map(|(num_perm, num_reg)| DParameter {
+            num_permissioned_candidates: num_perm as u16,
+            num_registered_candidates: num_reg as u16,
+        }))
+    }
+
+    /// Get the latest Terms and Conditions from the database.
+    #[trace]
+    pub async fn get_latest_terms_and_conditions(
+        &self,
+    ) -> Result<Option<TermsAndConditions>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT hash, url
+            FROM system_parameters_terms_and_conditions
+            ORDER BY block_height DESC
+            LIMIT 1
+        "};
+
+        let result = sqlx::query_as::<_, (ByteVec, String)>(query)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        Ok(result.map(|(hash_bytes, url)| {
+            let mut hash = [0u8; 32];
+            hash.copy_from_slice(hash_bytes.as_ref());
+            TermsAndConditions { hash, url }
+        }))
+    }
+}
+*/

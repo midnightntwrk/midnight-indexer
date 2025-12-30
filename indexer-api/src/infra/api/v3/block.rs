@@ -15,7 +15,11 @@ use crate::{
     domain::{self, storage::Storage},
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
-        v3::{HexEncodable, HexEncoded, transaction::Transaction},
+        v3::{
+            HexEncodable, HexEncoded,
+            system_parameters::{D, SystemParameters, TermsAndConditions},
+            transaction::Transaction,
+        },
     },
 };
 use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject};
@@ -94,6 +98,34 @@ where
             .some_or_server_error(|| format!("block with id {} not found", self.id))?;
 
         Ok(parameters.hex_encode())
+    }
+
+    /// The system parameters (governance) at this block height.
+    async fn system_parameters(&self, cx: &Context<'_>) -> ApiResult<SystemParameters> {
+        let storage = cx.get_storage::<S>();
+
+        let d_param = storage
+            .get_d_parameter_at(self.height)
+            .await
+            .map_err_into_server_error(|| {
+                format!("get D-parameter at block height {}", self.height)
+            })?
+            .map(D::from)
+            .unwrap_or(D {
+                num_permissioned_candidates: 0,
+                num_registered_candidates: 0,
+            });
+
+        let terms_and_conditions = storage
+            .get_terms_and_conditions_at(self.height)
+            .await
+            .map_err_into_server_error(|| format!("get T&C at block height {}", self.height))?
+            .map(TermsAndConditions::from);
+
+        Ok(SystemParameters {
+            d: d_param,
+            terms_and_conditions,
+        })
     }
 }
 
