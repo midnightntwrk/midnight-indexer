@@ -1020,6 +1020,7 @@ async fn save_dust_registration_events(
 // TODO(PM-21070): Uncomment when integrating with node that has system-parameters pallet.
 /*
 use crate::domain::{DParameter, SystemParametersChange, TermsAndConditions};
+use indexer_common::domain::TcDocumentHash;
 
 impl<S> Storage<S>
 where
@@ -1155,8 +1156,7 @@ where
             .await?;
 
         Ok(result.map(|(hash_bytes, url)| {
-            let mut hash = [0u8; 32];
-            hash.copy_from_slice(hash_bytes.as_ref());
+            let hash = TcDocumentHash::try_from(hash_bytes).expect("hash should be 32 bytes");
             TermsAndConditions { hash, url }
         }))
     }

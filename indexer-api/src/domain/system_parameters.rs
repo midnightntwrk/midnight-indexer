@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{BlockHash, ByteArray};
+use indexer_common::domain::{BlockHash, TcDocumentHash};
 use sqlx::FromRow;
 
 /// Terms and Conditions governance parameter.
@@ -22,8 +22,7 @@ pub struct TermsAndConditions {
     pub block_hash: BlockHash,
     #[sqlx(try_from = "i64")]
     pub timestamp: u64,
-    /// SHA-256 hash of the T&C document.
-    pub hash: ByteArray<32>,
+    pub hash: TcDocumentHash,
     pub url: String,
 }
 

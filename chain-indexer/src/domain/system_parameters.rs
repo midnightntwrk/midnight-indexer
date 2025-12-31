@@ -13,7 +13,7 @@
 
 //! System parameters domain types for chain-indexer.
 
-use indexer_common::domain::BlockHash;
+use indexer_common::domain::{BlockHash, TcDocumentHash};
 
 /// D-Parameter from the node RPC.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,8 +25,7 @@ pub struct DParameter {
 /// Terms and Conditions from the node RPC.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TermsAndConditions {
-    /// SHA-256 hash of the T&C document.
-    pub hash: [u8; 32],
+    pub hash: TcDocumentHash,
     pub url: String,
 }
 
@@ -75,8 +74,7 @@ impl TryFrom<TermsAndConditionsRpcResponse> for TermsAndConditions {
     fn try_from(rpc: TermsAndConditionsRpcResponse) -> Result<Self, Self::Error> {
         let hash_str = rpc.hash.strip_prefix("0x").unwrap_or(&rpc.hash);
         let hash_bytes = hex::decode(hash_str)?;
-        let hash: [u8; 32] = hash_bytes
-            .try_into()
+        let hash = TcDocumentHash::try_from(hash_bytes)
             .map_err(|_| hex::FromHexError::InvalidStringLength)?;
 
         Ok(TermsAndConditions {

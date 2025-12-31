@@ -28,7 +28,12 @@ impl SystemParametersStorage for Storage {
         block_height: u32,
     ) -> Result<Option<TermsAndConditions>, sqlx::Error> {
         let query = indoc! {"
-            SELECT block_height, block_hash, timestamp, hash, url
+            SELECT
+                block_height,
+                block_hash,
+                timestamp,
+                hash,
+                url
             FROM system_parameters_terms_and_conditions
             WHERE block_height <= $1
             ORDER BY block_height DESC
@@ -47,7 +52,12 @@ impl SystemParametersStorage for Storage {
         block_height: u32,
     ) -> Result<Option<DParameter>, sqlx::Error> {
         let query = indoc! {"
-            SELECT block_height, block_hash, timestamp, num_permissioned_candidates, num_registered_candidates
+            SELECT
+                block_height,
+                block_hash,
+                timestamp,
+                num_permissioned_candidates,
+                num_registered_candidates
             FROM system_parameters_d
             WHERE block_height <= $1
             ORDER BY block_height DESC
@@ -65,7 +75,12 @@ impl SystemParametersStorage for Storage {
         &self,
     ) -> Result<Vec<TermsAndConditions>, sqlx::Error> {
         let query = indoc! {"
-            SELECT block_height, block_hash, timestamp, hash, url
+            SELECT
+                block_height,
+                block_hash,
+                timestamp,
+                hash,
+                url
             FROM system_parameters_terms_and_conditions
             ORDER BY block_height DESC
         "};
@@ -78,7 +93,12 @@ impl SystemParametersStorage for Storage {
     #[trace]
     async fn get_d_parameter_history(&self) -> Result<Vec<DParameter>, sqlx::Error> {
         let query = indoc! {"
-            SELECT block_height, block_hash, timestamp, num_permissioned_candidates, num_registered_candidates
+            SELECT
+                block_height,
+                block_hash,
+                timestamp,
+                num_permissioned_candidates,
+                num_registered_candidates
             FROM system_parameters_d
             ORDER BY block_height DESC
         "};
