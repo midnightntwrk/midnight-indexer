@@ -22,8 +22,8 @@ publish       = false
 [workspace.dependencies]
 anyhow                       = { version = "1.0" }
 assert_matches               = { version = "1.5" }
-async-graphql                = { version = "7.0" }
-async-graphql-axum           = { version = "7.0" }
+async-graphql                = { version = "7.1" }
+async-graphql-axum           = { version = "7.1" }
 async-nats                   = { version = "0.45" }
 async-stream                 = { version = "0.3" }
 axum                         = { version = "0.8" }
@@ -66,7 +66,7 @@ opentelemetry-otlp           = { version = "0.31" }
 opentelemetry_sdk            = { version = "0.31" }
 parity-scale-codec           = { version = "3.7" }
 parking_lot                  = { version = "0.12" }
-reqwest                      = { version = "0.12", default-features = false }
+reqwest                      = { version = "0.13", default-features = false }
 secrecy                      = { version = "0.10" }
 serde                        = { version = "1.0" }
 serde_json                   = { version = "1.0" }
@@ -82,7 +82,6 @@ thiserror                    = { version = "2.0" }
 tokio                        = { version = "1" }
 tokio-stream                 = { version = "0.1" }
 tokio-tungstenite            = { version = "0.28" }
-tokio-util                   = { version = "0.7" }
 tower                        = { version = "0.5" }
 tower-http                   = { version = "0.6" }
 trait-variant                = { version = "0.1" }
