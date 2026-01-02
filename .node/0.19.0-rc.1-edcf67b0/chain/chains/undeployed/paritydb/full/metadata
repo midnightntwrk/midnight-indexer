@@ -1,0 +1,15 @@
+version=8
+salt=e6ece9eb7b682eb326bbe5a1e4664597ce685ff2bcffc861c9354fbc733f2e8a
+col0=preimage: false, uniform: false, refc: false, compression: 0, ordered: false
+col1=preimage: true, uniform: true, refc: true, compression: 1, ordered: false
+col2=preimage: false, uniform: false, refc: false, compression: 0, ordered: false
+col3=preimage: false, uniform: false, refc: false, compression: 0, ordered: false
+col4=preimage: false, uniform: false, refc: false, compression: 1, ordered: false
+col5=preimage: false, uniform: false, refc: false, compression: 1, ordered: false
+col6=preimage: false, uniform: false, refc: false, compression: 1, ordered: false
+col7=preimage: false, uniform: false, refc: false, compression: 0, ordered: false
+col8=preimage: false, uniform: false, refc: false, compression: 0, ordered: false
+col9=preimage: false, uniform: false, refc: false, compression: 0, ordered: false
+col10=preimage: false, uniform: false, refc: false, compression: 0, ordered: false
+col11=preimage: true, uniform: true, refc: true, compression: 1, ordered: false
+col12=preimage: false, uniform: false, refc: false, compression: 1, ordered: false

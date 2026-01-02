@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euxo pipefail
+set -euo pipefail
 
 # Cleanup function to ensure node container is removed.
 cleanup() {
@@ -20,90 +20,10 @@ readonly toolkit_image="ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_versi
 readonly rng_seed="0000000000000000000000000000000000000000000000000000000000000037"
 readonly node_dir="$(pwd)/.node/$node_version"
 
-# Function to run all toolkit commands.
-run_toolkit_commands() {
-    docker run \
-        --rm \
-        --network host \
-        -v toolkit_out:/out \
-        $toolkit_image \
-        generate-txs \
-        batches -n 1 -b 1
-
-    # Send shielded and unshielded tokens from wallet 01 to ff.
-    docker run \
-        --rm \
-        --network host \
-        -v toolkit_out:/out \
-        $toolkit_image \
-        generate-txs \
-        single-tx \
-        --shielded-amount 42 \
-        --unshielded-amount 42 \
-        --source-seed "0000000000000000000000000000000000000000000000000000000000000001" \
-        --destination-address mn_shield-addr_undeployed14lthhq9xj62zdyeekyc3r6gfght8q8q6xp0h8npmq045fljhss8qxqxvjjwd74sl6272ezec5tfuhxqh99qyunx889yx3euy9m6k2r74qvd60zx5 \
-        --destination-address mn_addr_undeployed1792ny9snf3hkzglcfs07agsela6v9dkkqs2m9xyvk4ryl3k99d2s8ea4ga
-
-    docker run \
-        --rm \
-        --network host \
-        -v toolkit_out:/out \
-        $toolkit_image \
-        generate-txs --dest-file /out/contract_tx_1_deploy.mn --to-bytes \
-        contract-simple \
-        deploy \
-        --rng-seed $rng_seed
-
-    docker run \
-        --rm \
-        --network host \
-        -v toolkit_out:/out \
-        $toolkit_image \
-        contract-address --src-file /out/contract_tx_1_deploy.mn > /tmp/contract_address.mn
-
-    docker run \
-        --rm \
-        --network host \
-        -v toolkit_out:/out \
-        $toolkit_image \
-        generate-txs --src-file /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 \
-        send
-
-    # The 'store' function inserts data into a Merkle tree in the test contract
-    # (see midnight-node MerkleTreeContract). We need this to generate contract
-    # action events in the test data so the indexer can verify it properly tracks
-    # and indexes contract state changes.
-    docker run \
-        --rm \
-        --network host \
-        -v toolkit_out:/out \
-        $toolkit_image \
-        generate-txs \
-        contract-simple call \
-        --call-key store \
-        --rng-seed $rng_seed \
-        --contract-address $(cat /tmp/contract_address.mn)
-
-    # Wait for the contract call to be finalized before running maintenance.
-    sleep 15
-
-    docker run \
-        --rm \
-        --network host \
-        -v toolkit_out:/out \
-        $toolkit_image \
-        generate-txs \
-        contract-simple maintenance \
-        --rng-seed $rng_seed \
-        --contract-address $(cat /tmp/contract_address.mn) \
-        --new-authority-seed 1000000000000000000000000000000000000000000000000000000000000001
-}
-
-# Clean up any existing data.
+# Set up fresh node data directory.
 if [ -d $node_dir ]; then
     rm -r $node_dir;
 fi
-
 mkdir -p $node_dir
 
 # Start the node container.
@@ -118,66 +38,119 @@ docker run \
     -v $node_dir:/node \
     ghcr.io/midnight-ntwrk/midnight-node:$node_version
 
-# Wait for node to be ready (max 30 seconds).
+# Wait for node to be ready.
 echo "Waiting for node to be ready..."
-
-timeout=30
-address="http://localhost:9944"  # Default address
-target_block="2"
+timeout=60
 start_time=$(date +%s)
-
 while true; do
-    result=$(curl -s -X POST "$address" \
-        -H "Content-Type: application/json" \
-        -d '{"jsonrpc":"2.0","id":1,"method":"chain_getHeader","params":[]}' || true)
-    result=$(echo "$result" | sed -n 's/.*"number":"\([^"]*\)".*/\1/p')
-
-    if [[ -n "$result" && "$result" != "null" ]]; then
-        # Convert hex to decimal for comparison
-        result_dec=$((result))
-        target_dec=$((target_block))
-        echo "result_dec: $result_dec"
-        echo "target_dec: $target_dec"
-        [[ $result_dec -ge $target_dec ]] && break
-    fi
+    sleep 3
 
     if (( $(date +%s) - start_time > timeout )); then
-        echo "Timeout after ${timeout}s waiting for node to boot"
+        echo "Timeout after ${timeout}s waiting for node to be ready"
         exit 1
     fi
 
-    sleep 1
-done
-
-echo "Node ready - block no: $result"
-
-# Retry the entire toolkit command sequence up to 3 times.
-max_attempts=3
-attempt=1
-
-while [ $attempt -le $max_attempts ]; do
-    echo "Running toolkit commands (attempt $attempt of $max_attempts)..."
-
-    # Try to run all toolkit commands.
-    if run_toolkit_commands; then
-        echo "Successfully generated node data"
-        exit 0
+    finalized_hash=$(curl -s -X POST http://localhost:9944 \
+        -H "Content-Type: application/json" \
+        -d '{
+            "jsonrpc":"2.0",
+            "id":1,
+            "method":"chain_getFinalizedHead",
+            "params":[]
+        }' | jq -r .result)
+    if [[ -z "$finalized_hash" || "$finalized_hash" == "null" ]]; then
+        echo "No finalized hash"
+        continue
     fi
 
-    echo "Toolkit commands failed on attempt $attempt" >&2
-
-    # If this wasn't the last attempt, clean up and retry.
-    if [ $attempt -lt $max_attempts ]; then
-        echo "Cleaning up node data folder for retry..." >&2
-        rm -rf $node_dir/*
-        echo "Waiting before retry..." >&2
-        sleep $((attempt * 5))
+    finalized_number=$(curl -s -X POST http://localhost:9944 \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"jsonrpc\":\"2.0\",
+            \"id\":2,
+            \"method\":\"chain_getHeader\",
+            \"params\":[\"$finalized_hash\"]
+        }" | jq -r '.result.number')
+    if [[ -z "$finalized_number" || "$finalized_number" == "null" ]]; then
+        echo "No finalized number"
+        continue
     fi
 
-    attempt=$((attempt + 1))
+    height=$((finalized_number))
+    echo "finalized height: $height"
+    if [[ $height -ge 1 ]]; then
+        echo "Node ready - finalized height: $height"
+        break
+    fi
 done
 
-echo "Failed to generate node data after $max_attempts attempts" >&2
-# Clean up the folder on final failure.
-rm -rf $node_dir
-exit 1
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs \
+    batches -n 1 -b 1
+
+# Send shielded and unshielded tokens from wallet 01 to ff.
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs \
+    single-tx \
+    --shielded-amount 42 \
+    --unshielded-amount 42 \
+    --source-seed "0000000000000000000000000000000000000000000000000000000000000001" \
+    --destination-address mn_shield-addr_undeployed157w7tlh2tjdcgnpm96ljf0n6srngrtdutw4zttpvpl78lskz3gnue9yumatpl54u4j9n3gknewvpw22qfexvww2gdrncgth4v58a2qcevfags \
+    --destination-address mn_addr_undeployed1792ny9snf3hkzglcfs07agsela6v9dkkqs2m9xyvk4ryl3k99d2s8ea4ga
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs --dest-file /out/contract_tx_1_deploy.mn --to-bytes \
+    contract-simple \
+    deploy \
+    --rng-seed $rng_seed
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    contract-address --src-file /out/contract_tx_1_deploy.mn > /tmp/contract_address.mn
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs --src-file /out/contract_tx_1_deploy.mn --dest-url ws://127.0.0.1:9944 \
+    send
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs \
+    contract-simple call \
+    --call-key store \
+    --rng-seed $rng_seed \
+    --contract-address $(cat /tmp/contract_address.mn)
+
+# Wait for the contract call to be finalized before running maintenance.
+sleep 15
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs \
+    contract-simple maintenance \
+    --rng-seed $rng_seed \
+    --contract-address $(cat /tmp/contract_address.mn) \
+    --new-authority-seed 1000000000000000000000000000000000000000000000000000000000000001
