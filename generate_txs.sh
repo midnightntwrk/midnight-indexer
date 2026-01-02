@@ -15,7 +15,8 @@ if [ -z "$1" ]; then
     echo "Usage: $0 <node_version>" >&2
     exit 1
 fi
-node_version="$1"
+readonly node_version="$1"
+readonly toolkit_image="ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version"
 
 # Start the node container.
 docker run \
@@ -28,45 +29,58 @@ docker run \
     -e THRESHOLD=0 \
     ghcr.io/midnight-ntwrk/midnight-node:$node_version
 
-# Wait for node to be ready (max 30 seconds).
+# Wait for node to be ready.
 echo "Waiting for node to be ready..."
-
-timeout=30
-address="http://localhost:9944"  # Default address
-target_block="2"
+timeout=60
 start_time=$(date +%s)
-
 while true; do
-    result=$(curl -s -X POST "$address" \
-        -H "Content-Type: application/json" \
-        -d '{"jsonrpc":"2.0","id":1,"method":"chain_getHeader","params":[]}' || true)
-    result=$(echo "$result" | sed -n 's/.*"number":"\([^"]*\)".*/\1/p')
-
-    if [[ -n "$result" && "$result" != "null" ]]; then
-        # Convert hex to decimal for comparison
-        result_dec=$((result))
-        target_dec=$((target_block))
-        echo "result_dec: $result_dec"
-        echo "target_dec: $target_dec"
-        [[ $result_dec -ge $target_dec ]] && break
-    fi
+    sleep 3
 
     if (( $(date +%s) - start_time > timeout )); then
-        echo "Timeout after ${timeout}s waiting for node to boot"
+        echo "Timeout after ${timeout}s waiting for node to be ready"
         exit 1
     fi
 
-    sleep 1
-done
+    finalized_hash=$(curl -s -X POST http://localhost:9944 \
+        -H "Content-Type: application/json" \
+        -d '{
+            "jsonrpc":"2.0",
+            "id":1,
+            "method":"chain_getFinalizedHead",
+            "params":[]
+        }' | jq -r .result)
+    if [[ -z "$finalized_hash" || "$finalized_hash" == "null" ]]; then
+        echo "No finalized hash"
+        continue
+    fi
 
-echo "Node ready - block no: $result"
+    finalized_number=$(curl -s -X POST http://localhost:9944 \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"jsonrpc\":\"2.0\",
+            \"id\":2,
+            \"method\":\"chain_getHeader\",
+            \"params\":[\"$finalized_hash\"]
+        }" | jq -r '.result.number')
+    if [[ -z "$finalized_number" || "$finalized_number" == "null" ]]; then
+        echo "No finalized number"
+        continue
+    fi
+
+    height=$((finalized_number))
+    echo "finalized height: $height"
+    if [[ $height -ge 1 ]]; then
+        echo "Node ready - finalized height: $height"
+        break
+    fi
+done
 
 # 1 to 2/2.
 docker run \
     --rm \
     --network host \
     -v ./target:/out \
-    ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
+    $toolkit_image \
     generate-txs \
     --dest-file /out/tx_1_2_2.mn \
     --to-bytes \
@@ -80,7 +94,7 @@ docker run \
     --rm \
     --network host \
     -v ./target:/out \
-    ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
+    $toolkit_image \
     get-tx-from-context \
     --src-file /out/tx_1_2_2.mn \
     --network undeployed \
@@ -92,7 +106,7 @@ docker run \
     --rm \
     --network host \
     -v ./target:/out \
-    ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
+    $toolkit_image \
     generate-txs \
     --dest-file /out/tx_1_2_3.mn \
     --to-bytes \
@@ -106,7 +120,7 @@ docker run \
     --rm \
     --network host \
     -v ./target:/out \
-    ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version \
+    $toolkit_image \
     get-tx-from-context \
     --src-file /out/tx_1_2_3.mn \
     --network undeployed \

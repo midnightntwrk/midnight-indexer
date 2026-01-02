@@ -60,11 +60,6 @@ impl Cli {
                             "\t## REGULAR TRANSACTION: hash={}, \t{transaction:?}",
                             transaction.hash
                         );
-
-                        println!(
-                            "\t\t ### Contract Action len: {}",
-                            transaction.contract_actions.len()
-                        );
                     }
 
                     node::Transaction::System(transaction) => {

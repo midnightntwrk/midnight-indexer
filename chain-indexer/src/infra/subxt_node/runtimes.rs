@@ -99,6 +99,8 @@ pub async fn get_zswap_state_root(
     }
 }
 
+// TODO: This does not return the cost in DUST/SPEC, but some substrate weight based cost; this
+// needs to be replaced by getting the read cost from Node events. See PM-20973.
 /// Get cost for the given serialized transaction depending on the given protocol version.
 pub async fn get_transaction_cost(
     transaction: impl AsRef<[u8]>,
