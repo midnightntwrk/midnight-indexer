@@ -931,8 +931,12 @@ fn viewing_key(network_id: &NetworkId) -> &'static str {
         "undeployed" => {
             "mn_shield-esk_undeployed1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs9ete5h"
         }
-        "dev" => "mn_shield-esk_dev1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsp7rsx2",
-        "test" => "mn_shield-esk_test1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsuv0u5j",
+        "devnet" => {
+            "mn_shield-esk_devnet1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs64mtz0"
+        }
+        "testnet" => {
+            "mn_shield-esk_testnet1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs8fw0p6"
+        }
         "mainnet" => "mn_shield-esk1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsucf6ww",
         other => panic!("unexpected network ID {other}"),
     }

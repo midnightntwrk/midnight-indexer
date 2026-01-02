@@ -52,13 +52,18 @@ impl Cli {
         }
 
         while let Some(block) = blocks.try_next().await.context("get next block")? {
-            println!("## BLOCK: height={}, \thash={}", block.height, block.hash);
+            println!("## BLOCK: height={}, hash={}", block.height, block.hash);
             for transaction in block.transactions {
                 match transaction {
                     node::Transaction::Regular(transaction) => {
                         println!(
-                            "    ## REGULAR TRANSACTION: hash={}, \t{transaction:?}",
+                            "\t## REGULAR TRANSACTION: hash={}, \t{transaction:?}",
                             transaction.hash
+                        );
+
+                        println!(
+                            "\t\t ### Contract Action len: {}",
+                            transaction.contract_actions.len()
                         );
                     }
 
