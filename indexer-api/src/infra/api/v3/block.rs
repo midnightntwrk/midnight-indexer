@@ -17,7 +17,7 @@ use crate::{
         ApiResult, ContextExt, OptionExt, ResultExt,
         v3::{
             HexEncodable, HexEncoded,
-            system_parameters::{D, SystemParameters, TermsAndConditions},
+            system_parameters::{DParameter, SystemParameters, TermsAndConditions},
             transaction::Transaction,
         },
     },
@@ -110,8 +110,8 @@ where
             .map_err_into_server_error(|| {
                 format!("get D-parameter at block height {}", self.height)
             })?
-            .map(D::from)
-            .unwrap_or(D {
+            .map(DParameter::from)
+            .unwrap_or(DParameter {
                 num_permissioned_candidates: 0,
                 num_registered_candidates: 0,
             });
@@ -123,7 +123,7 @@ where
             .map(TermsAndConditions::from);
 
         Ok(SystemParameters {
-            d: d_param,
+            d_parameter: d_param,
             terms_and_conditions,
         })
     }

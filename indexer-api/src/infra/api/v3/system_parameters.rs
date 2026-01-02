@@ -21,7 +21,7 @@ use async_graphql::SimpleObject;
 #[derive(Debug, SimpleObject)]
 pub struct SystemParameters {
     /// The D-parameter controlling validator committee composition.
-    pub d: D,
+    pub d_parameter: DParameter,
 
     /// The current Terms and Conditions, if any have been set.
     pub terms_and_conditions: Option<TermsAndConditions>,
@@ -29,7 +29,8 @@ pub struct SystemParameters {
 
 /// The D-parameter controlling validator committee composition.
 #[derive(Debug, SimpleObject)]
-pub struct D {
+#[graphql(name = "DParameter")]
+pub struct DParameter {
     /// Number of permissioned candidates.
     pub num_permissioned_candidates: u16,
 
@@ -49,6 +50,7 @@ pub struct TermsAndConditions {
 
 /// D-parameter change record for history queries.
 #[derive(Debug, SimpleObject)]
+#[graphql(name = "DParameterChange")]
 pub struct DParameterChange {
     /// The block height where this parameter became effective.
     pub block_height: u32,
@@ -85,9 +87,9 @@ pub struct TermsAndConditionsChange {
     pub url: String,
 }
 
-impl From<domain::DParameter> for D {
+impl From<domain::DParameter> for DParameter {
     fn from(value: domain::DParameter) -> Self {
-        D {
+        DParameter {
             num_permissioned_candidates: value.num_permissioned_candidates,
             num_registered_candidates: value.num_registered_candidates,
         }

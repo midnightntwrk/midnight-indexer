@@ -205,7 +205,7 @@ type ContractUpdate implements ContractAction {
 """
 The D-parameter controlling validator committee composition.
 """
-type D {
+type DParameter {
 	"""
 	Number of permissioned candidates.
 	"""
@@ -219,7 +219,7 @@ type D {
 """
 D-parameter change record for history queries.
 """
-type DparameterChange {
+type DParameterChange {
 	"""
 	The block height where this parameter became effective.
 	"""
@@ -402,7 +402,7 @@ type Query {
 	"""
 	Get the full history of D-parameter changes for governance auditability.
 	"""
-	dParameterHistory: [DparameterChange!]!
+	dParameterHistory: [DParameterChange!]!
 	"""
 	Get the full history of Terms and Conditions changes for governance auditability.
 	"""
@@ -577,7 +577,7 @@ type SystemParameters {
 	"""
 	The D-parameter controlling validator committee composition.
 	"""
-	d: D!
+	dParameter: DParameter!
 	"""
 	The current Terms and Conditions, if any have been set.
 	"""
