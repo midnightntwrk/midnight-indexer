@@ -16,6 +16,7 @@ mod contract_action;
 mod dust;
 mod ledger_events;
 mod ledger_state;
+mod system_parameters;
 mod transaction;
 mod unshielded;
 mod wallet;

@@ -19,6 +19,7 @@ mod contract_action;
 pub mod dust;
 mod ledger_event;
 mod ledger_state;
+pub mod system_parameters;
 mod transaction;
 mod unshielded;
 
@@ -28,6 +29,7 @@ pub use contract_action::*;
 pub use dust::*;
 pub use ledger_event::*;
 pub use ledger_state::*;
+pub use system_parameters::*;
 pub use transaction::*;
 pub use unshielded::*;
 

@@ -670,3 +670,72 @@ async fn make_system_transaction(
 
     Ok(Transaction::System(transaction))
 }
+
+// TODO(PM-21070): Uncomment when integrating with node that has system-parameters pallet.
+/*
+use crate::domain::{
+    DParameter, SystemParametersChange, TermsAndConditions,
+    system_parameters::{DParameterRpcResponse, TermsAndConditionsRpcResponse},
+};
+
+impl SubxtNode {
+    /// Fetch the current D-Parameter via `systemParameters_getDParameter` RPC.
+    #[trace]
+    pub async fn fetch_d_parameter(
+        &self,
+        block_hash: BlockHash,
+    ) -> Result<DParameter, SubxtNodeError> {
+        let params = serde_json::json!([format!("0x{}", hex::encode(block_hash.0))]);
+
+        let response: DParameterRpcResponse = self
+            .rpc_client
+            .request("systemParameters_getDParameter", params)
+            .await
+            .map_err(|error| SubxtNodeError::GetDParameter(error.into()))?;
+
+        Ok(response.into())
+    }
+
+    /// Fetch T&C via `systemParameters_getTermsAndConditions` RPC.
+    #[trace]
+    pub async fn fetch_terms_and_conditions(
+        &self,
+        block_hash: BlockHash,
+    ) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
+        let params = serde_json::json!([format!("0x{}", hex::encode(block_hash.0))]);
+
+        let response: Option<TermsAndConditionsRpcResponse> = self
+            .rpc_client
+            .request("systemParameters_getTermsAndConditions", params)
+            .await
+            .map_err(|error| SubxtNodeError::GetTermsAndConditions(error.into()))?;
+
+        response
+            .map(|rpc| rpc.try_into())
+            .transpose()
+            .map_err(|error| SubxtNodeError::ParseTermsAndConditions(error))
+    }
+
+    /// Fetch all system parameters at a given block.
+    #[trace]
+    pub async fn fetch_system_parameters(
+        &self,
+        block_hash: BlockHash,
+        block_height: u32,
+        timestamp: u64,
+    ) -> Result<SystemParametersChange, SubxtNodeError> {
+        let (d_parameter, terms_and_conditions) = tokio::try_join!(
+            self.fetch_d_parameter(block_hash),
+            self.fetch_terms_and_conditions(block_hash),
+        )?;
+
+        Ok(SystemParametersChange {
+            block_height,
+            block_hash,
+            timestamp,
+            d_parameter: Some(d_parameter),
+            terms_and_conditions,
+        })
+    }
+}
+*/

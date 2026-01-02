@@ -20,6 +20,7 @@ use crate::{
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
             dust::DustGenerationStatus,
+            system_parameters::{DParameterChange, TermsAndConditionsChange},
             transaction::{Transaction, TransactionOffset},
         },
     },
@@ -233,6 +234,38 @@ where
         Ok(status_list
             .into_iter()
             .map(|s| (s, network_id).into())
+            .collect())
+    }
+
+    /// Get the full history of D-parameter changes for governance auditability.
+    #[trace]
+    async fn d_parameter_history(&self, cx: &Context<'_>) -> ApiResult<Vec<DParameterChange>> {
+        let storage = cx.get_storage::<S>();
+
+        let history = storage
+            .get_d_parameter_history()
+            .await
+            .map_err_into_server_error(|| "get D-parameter history")?;
+
+        Ok(history.into_iter().map(DParameterChange::from).collect())
+    }
+
+    /// Get the full history of Terms and Conditions changes for governance auditability.
+    #[trace]
+    async fn terms_and_conditions_history(
+        &self,
+        cx: &Context<'_>,
+    ) -> ApiResult<Vec<TermsAndConditionsChange>> {
+        let storage = cx.get_storage::<S>();
+
+        let history = storage
+            .get_terms_and_conditions_history()
+            .await
+            .map_err_into_server_error(|| "get Terms and Conditions history")?;
+
+        Ok(history
+            .into_iter()
+            .map(TermsAndConditionsChange::from)
             .collect())
     }
 }
