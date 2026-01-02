@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -euxo pipefail
 
 # Cleanup function to ensure node container is removed.
 cleanup() {
@@ -154,3 +154,5 @@ docker run \
     --rng-seed $rng_seed \
     --contract-address $(cat /tmp/contract_address.mn) \
     --new-authority-seed 1000000000000000000000000000000000000000000000000000000000000001
+
+echo "Successfully generated node data"
