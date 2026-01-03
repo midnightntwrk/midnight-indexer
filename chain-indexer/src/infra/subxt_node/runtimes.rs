@@ -16,7 +16,7 @@ include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
 
 use crate::{domain::DustRegistrationEvent, infra::subxt_node::SubxtNodeError};
 use indexer_common::domain::{
-    BlockHash, ByteVec, PROTOCOL_VERSION_000_019_000, ProtocolVersion, SerializedContractAddress,
+    BlockHash, ByteVec, PROTOCOL_VERSION_000_020_000, ProtocolVersion, SerializedContractAddress,
     SerializedContractState,
 };
 use itertools::Itertools;
@@ -44,8 +44,8 @@ pub async fn make_block_details(
     protocol_version: ProtocolVersion,
 ) -> Result<BlockDetails, SubxtNodeError> {
     // TODO Replace this often repeated pattern with a macro?
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_019_000) {
-        make_block_details_runtime_0_19(extrinsics, events, authorities).await
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
+        make_block_details_runtime_0_20(extrinsics, events, authorities).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -57,8 +57,8 @@ pub async fn fetch_authorities(
     protocol_version: ProtocolVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<Vec<[u8; 32]>>, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_019_000) {
-        fetch_authorities_runtime_0_19(block_hash, online_client).await
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
+        fetch_authorities_runtime_0_20(block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -66,8 +66,8 @@ pub async fn fetch_authorities(
 
 /// Decode slot depending on the given protocol version.
 pub fn decode_slot(slot: &[u8], protocol_version: ProtocolVersion) -> Result<u64, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_019_000) {
-        decode_slot_runtime_0_19(slot)
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
+        decode_slot_runtime_0_20(slot)
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -80,8 +80,8 @@ pub async fn get_contract_state(
     protocol_version: ProtocolVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<SerializedContractState, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_019_000) {
-        get_contract_state_runtime_0_19(address, block_hash, online_client).await
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
+        get_contract_state_runtime_0_20(address, block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -92,8 +92,8 @@ pub async fn get_zswap_state_root(
     protocol_version: ProtocolVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Vec<u8>, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_019_000) {
-        get_zswap_state_root_runtime_0_19(block_hash, online_client).await
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
+        get_zswap_state_root_runtime_0_20(block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -108,19 +108,19 @@ pub async fn get_transaction_cost(
     protocol_version: ProtocolVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<u128, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_019_000) {
-        get_transaction_cost_runtime_0_19(transaction.as_ref(), block_hash, online_client).await
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
+        get_transaction_cost_runtime_0_20(transaction.as_ref(), block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
 }
 
-async fn make_block_details_runtime_0_19(
+async fn make_block_details_runtime_0_20(
     extrinsics: Extrinsics<SubstrateConfig, OnlineClient<SubstrateConfig>>,
     events: Events<SubstrateConfig>,
     authorities: &mut Option<Vec<[u8; 32]>>,
 ) -> Result<BlockDetails, SubxtNodeError> {
-    use self::runtime_0_19::{
+    use self::runtime_0_20::{
         Call, Event,
         runtime_types::{
             pallet_cnight_observation::pallet::Event as CnightObservationEvent,
@@ -247,14 +247,14 @@ async fn make_block_details_runtime_0_19(
     })
 }
 
-async fn fetch_authorities_runtime_0_19(
+async fn fetch_authorities_runtime_0_20(
     block_hash: BlockHash,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<Vec<[u8; 32]>>, SubxtNodeError> {
     let authorities = online_client
         .storage()
         .at(H256(block_hash.0))
-        .fetch(&runtime_0_19::storage().aura().authorities())
+        .fetch(&runtime_0_20::storage().aura().authorities())
         .await
         .map_err(|error| SubxtNodeError::FetchAuthorities(error.into()))?
         .map(|authorities| authorities.0.into_iter().map(|public| public.0).collect());
@@ -262,19 +262,19 @@ async fn fetch_authorities_runtime_0_19(
     Ok(authorities)
 }
 
-fn decode_slot_runtime_0_19(mut slot: &[u8]) -> Result<u64, SubxtNodeError> {
+fn decode_slot_runtime_0_20(mut slot: &[u8]) -> Result<u64, SubxtNodeError> {
     let slot =
-        runtime_0_19::runtime_types::sp_consensus_slots::Slot::decode(&mut slot).map(|x| x.0)?;
+        runtime_0_20::runtime_types::sp_consensus_slots::Slot::decode(&mut slot).map(|x| x.0)?;
     Ok(slot)
 }
 
-async fn get_contract_state_runtime_0_19(
+async fn get_contract_state_runtime_0_20(
     address: SerializedContractAddress,
     block_hash: BlockHash,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<SerializedContractState, SubxtNodeError> {
     // This returns the serialized contract state.
-    let get_state = runtime_0_19::apis()
+    let get_state = runtime_0_20::apis()
         .midnight_runtime_api()
         .get_contract_state(address.as_slice().into());
 
@@ -294,11 +294,11 @@ async fn get_contract_state_runtime_0_19(
     Ok(state)
 }
 
-async fn get_zswap_state_root_runtime_0_19(
+async fn get_zswap_state_root_runtime_0_20(
     block_hash: BlockHash,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Vec<u8>, SubxtNodeError> {
-    let get_zswap_state_root = runtime_0_19::apis()
+    let get_zswap_state_root = runtime_0_20::apis()
         .midnight_runtime_api()
         .get_zswap_state_root();
 
@@ -313,12 +313,12 @@ async fn get_zswap_state_root_runtime_0_19(
     Ok(root)
 }
 
-async fn get_transaction_cost_runtime_0_19(
+async fn get_transaction_cost_runtime_0_20(
     transaction: &[u8],
     block_hash: BlockHash,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<u128, SubxtNodeError> {
-    let get_transaction_cost = runtime_0_19::apis()
+    let get_transaction_cost = runtime_0_20::apis()
         .midnight_runtime_api()
         .get_transaction_cost(transaction.to_owned());
 

@@ -23,36 +23,37 @@ pub use transaction::*;
 
 use crate::{
     domain::{
-        ByteArrayLenError, ByteVec, PROTOCOL_VERSION_000_019_000, ProtocolVersion,
+        ByteArrayLenError, ByteVec, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
         SerializedContractAddress, dust::DustParameters,
     },
     error::BoxError,
 };
 use fastrace::trace;
-use midnight_base_crypto_v6::signatures::Signature as SignatureV6;
-use midnight_ledger_v6::{
-    dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V6,
-    structure::ProofMarker as ProofMarkerV6,
+use midnight_base_crypto_v7_0_0::signatures::Signature as SignatureV7_0_0;
+use midnight_ledger_v7_0_0::{
+    dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V7_0_0,
+    structure::ProofMarker as ProofMarkerV7_0_0,
 };
-use midnight_serialize_v6::{
-    Serializable as SerializableV6, Tagged as TaggedV6, tagged_serialize as tagged_serialize_v6,
+use midnight_serialize_v7_0_0::{
+    Serializable as SerializableV7_0_0, Tagged as TaggedV7_0_0,
+    tagged_serialize as tagged_serialize_v7_0_0,
 };
-use midnight_storage_v6::DefaultDB as DefaultDBV6;
-use midnight_transient_crypto_v6::commitment::PureGeneratorPedersen as PureGeneratorPedersenV6;
+use midnight_storage_v7_0_0::DefaultDB as DefaultDBV7_0_0;
+use midnight_transient_crypto_v7_0_0::commitment::PureGeneratorPedersen as PureGeneratorPedersenV7_0_0;
 use std::{io, string::FromUtf8Error};
 use thiserror::Error;
 
-type TransactionV6 = midnight_ledger_v6::structure::Transaction<
-    SignatureV6,
-    ProofMarkerV6,
-    PureGeneratorPedersenV6,
-    DefaultDBV6,
+type TransactionV7_0_0 = midnight_ledger_v7_0_0::structure::Transaction<
+    SignatureV7_0_0,
+    ProofMarkerV7_0_0,
+    PureGeneratorPedersenV7_0_0,
+    DefaultDBV7_0_0,
 >;
-type IntentV6 = midnight_ledger_v6::structure::Intent<
-    SignatureV6,
-    ProofMarkerV6,
-    PureGeneratorPedersenV6,
-    DefaultDBV6,
+type IntentV7_0_0 = midnight_ledger_v7_0_0::structure::Intent<
+    SignatureV7_0_0,
+    ProofMarkerV7_0_0,
+    PureGeneratorPedersenV7_0_0,
+    DefaultDBV7_0_0,
 >;
 
 /// Ledger related errors.
@@ -93,36 +94,36 @@ pub enum Error {
 }
 
 /// Extension methods for `Serializable` implementations.
-pub trait SerializableV6Ext
+pub trait SerializableV7_0_0Ext
 where
-    Self: SerializableV6,
+    Self: SerializableV7_0_0,
 {
     /// Serialize this `Serializable` implementation.
     #[trace]
-    fn serialize_v6(&self) -> Result<ByteVec, io::Error> {
+    fn serialize_v7_0_0(&self) -> Result<ByteVec, io::Error> {
         let mut bytes = Vec::with_capacity(self.serialized_size() + 32);
-        SerializableV6::serialize(self, &mut bytes)?;
+        SerializableV7_0_0::serialize(self, &mut bytes)?;
         Ok(bytes.into())
     }
 }
 
-impl<T> SerializableV6Ext for T where T: SerializableV6 {}
+impl<T> SerializableV7_0_0Ext for T where T: SerializableV7_0_0 {}
 
 /// Extension methods for `Serializable + Tagged` implementations.
-pub trait TaggedSerializableV6Ext
+pub trait TaggedSerializableV7_0_0Ext
 where
-    Self: SerializableV6 + TaggedV6 + Sized,
+    Self: SerializableV7_0_0 + TaggedV7_0_0 + Sized,
 {
     /// Serialize this `Serializable + Tagged` implementation.
     #[trace]
-    fn tagged_serialize_v6(&self) -> Result<ByteVec, io::Error> {
+    fn tagged_serialize_v7_0_0(&self) -> Result<ByteVec, io::Error> {
         let mut bytes = Vec::with_capacity(self.serialized_size() + 32);
-        tagged_serialize_v6(self, &mut bytes)?;
+        tagged_serialize_v7_0_0(self, &mut bytes)?;
         Ok(bytes.into())
     }
 }
 
-impl<T> TaggedSerializableV6Ext for T where T: SerializableV6 + TaggedV6 {}
+impl<T> TaggedSerializableV7_0_0Ext for T where T: SerializableV7_0_0 + TaggedV7_0_0 {}
 
 /// Get DUST parameters for the given protocol version.
 /// Returns the initial DUST parameters from the ledger specification.
@@ -131,11 +132,13 @@ impl<T> TaggedSerializableV6Ext for T where T: SerializableV6 + TaggedV6 {}
 /// - `generation_decay_rate`: Rate of DUST generation (~1 week to reach max).
 /// - `dust_grace_period`: Maximum time window for DUST spends (3 hours).
 pub fn dust_parameters(protocol_version: ProtocolVersion) -> Result<DustParameters, Error> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_019_000) {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
         Ok(DustParameters {
-            night_dust_ratio: INITIAL_DUST_PARAMETERS_V6.night_dust_ratio,
-            generation_decay_rate: INITIAL_DUST_PARAMETERS_V6.generation_decay_rate,
-            dust_grace_period: INITIAL_DUST_PARAMETERS_V6.dust_grace_period.as_seconds() as u64,
+            night_dust_ratio: INITIAL_DUST_PARAMETERS_V7_0_0.night_dust_ratio,
+            generation_decay_rate: INITIAL_DUST_PARAMETERS_V7_0_0.generation_decay_rate,
+            dust_grace_period: INITIAL_DUST_PARAMETERS_V7_0_0
+                .dust_grace_period
+                .as_seconds() as u64,
         })
     } else {
         Err(Error::InvalidProtocolVersion(protocol_version))
