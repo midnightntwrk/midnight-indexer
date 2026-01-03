@@ -24,7 +24,6 @@ fastrace-opentelemetry       = { workspace = true }
 figment                      = { workspace = true, features = [ "env", "yaml" ] }
 futures                      = { workspace = true }
 humantime-serde              = { workspace = true }
-indoc                        = { workspace = true }
 itertools                    = { workspace = true }
 log                          = { workspace = true, features = [ "kv_std" ] }
 logforth                     = { workspace = true, features = [ "append-fastrace", "diagnostic-fastrace", "starter-log" ] }
@@ -51,7 +50,6 @@ sqlx                         = { workspace = true, features = [ "runtime-tokio",
 thiserror                    = { workspace = true }
 tokio                        = { workspace = true, features = [ "time" ] }
 tokio-stream                 = { workspace = true, features = [ "sync" ] }
-tokio-util                   = { workspace = true, features = [ "io" ] }
 trait-variant                = { workspace = true }
 
 [dev-dependencies]

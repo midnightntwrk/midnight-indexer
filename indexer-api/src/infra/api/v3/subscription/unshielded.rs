@@ -21,7 +21,8 @@ use crate::{
         },
     },
 };
-use async_graphql::{Context, SimpleObject, Subscription, Union, async_stream::try_stream};
+use async_graphql::{Context, SimpleObject, Subscription, Union};
+use async_stream::try_stream;
 use derive_more::Debug;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt};
