@@ -642,15 +642,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32637268377fc7b10a8c6d51de3e7fba1ce5dd371a96e342b34e6078db558e7f"
 
 [[package]]
-name = "bench_macros"
-version = "0.1.0"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2#64ba405fedab8c96e09abde3dc134c902c6f2c6f"
-dependencies = [
- "quote 1.0.42",
- "syn 2.0.111",
-]
-
-[[package]]
 name = "bincode"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -752,6 +743,22 @@ checksum = "5d6d530bdd2d52966a6d03b7a964add7ae1a288d25214066fd4b600f0f796400"
 dependencies = [
  "arrayvec 0.4.12",
  "constant_time_eq 0.1.5",
+]
+
+[[package]]
+name = "blake2b_halo2"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba44fa3e70871c2bc00d44f08c95be68145ae28a60de8182e649eee2f17a872b"
+dependencies = [
+ "ff",
+ "hex",
+ "midnight-curves",
+ "midnight-proofs",
+ "num-bigint",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2450,37 +2457,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "halo2curves"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d380afeef3f1d4d3245b76895172018cfb087d9976a7cabcd5597775b2933e07"
-dependencies = [
- "blake2",
- "digest 0.10.7",
- "ff",
- "group",
- "halo2derive",
- "lazy_static",
- "num-bigint",
- "num-integer",
- "num-traits",
- "pairing",
- "pasta_curves",
- "paste",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "rayon",
- "sha2 0.10.9",
- "static_assertions",
- "subtle",
- "unroll",
-]
-
-[[package]]
 name = "halo2derive"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdb99e7492b4f5ff469d238db464131b86c2eaac814a78715acba369f64d2c76"
+checksum = "a0d74794c1b24716c5abf5d6bfd98ee3c2d346bc67da374ba21d80adb38c336c"
 dependencies = [
  "num-bigint",
  "num-integer",
@@ -2574,6 +2554,9 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "hex-conservative"
@@ -3792,8 +3775,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto"
-version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+version = "1.0.0-rc.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "anyhow",
  "atomic-write-file",
@@ -3823,8 +3806,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto-derive"
-version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+version = "1.0.0-rc.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -3833,16 +3816,14 @@ dependencies = [
 
 [[package]]
 name = "midnight-circuits"
-version = "5.0.2"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2#64ba405fedab8c96e09abde3dc134c902c6f2c6f"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff204b6d67ebe408c695751e4d8e078c6f8b3e178f5cb5f55b2615b08070a4dc"
 dependencies = [
  "base64 0.13.1",
- "bench_macros",
- "bincode",
- "blake2b_simd",
+ "blake2b_halo2",
  "ff",
  "group",
- "halo2curves",
  "lazy_static",
  "midnight-curves",
  "midnight-proofs",
@@ -3852,13 +3833,14 @@ dependencies = [
  "rand 0.8.5",
  "rustc-hash",
  "sha2 0.10.9",
+ "sha3-circuit",
  "subtle",
 ]
 
 [[package]]
 name = "midnight-coin-structure"
-version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+version = "2.0.0-alpha.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "fake",
  "lazy_static",
@@ -3873,27 +3855,35 @@ dependencies = [
 
 [[package]]
 name = "midnight-curves"
-version = "0.1.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2#64ba405fedab8c96e09abde3dc134c902c6f2c6f"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71df41292a1fd7796bf6c0c6eff7ad717d628406a59a79240e68579716c3566a"
 dependencies = [
  "bitvec",
  "blst",
  "byte-slice-cast",
+ "digest 0.10.7",
  "ff",
  "getrandom 0.2.16",
  "group",
- "halo2curves",
+ "halo2derive",
+ "hex",
+ "lazy_static",
  "num-bigint",
  "pairing",
+ "paste",
  "rand_core 0.6.4",
+ "rayon",
  "serde",
+ "serde_arrays",
+ "sha2 0.10.9",
  "subtle",
 ]
 
 [[package]]
 name = "midnight-ledger"
-version = "6.2.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+version = "7.0.0-alpha.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "anyhow",
  "derive-where",
@@ -3925,7 +3915,7 @@ dependencies = [
 [[package]]
 name = "midnight-ledger-static"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -3933,8 +3923,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+version = "2.0.0-alpha.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "derive-where",
  "enum_index",
@@ -3958,8 +3948,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+version = "2.0.0-alpha.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "derive-where",
  "fake",
@@ -3976,8 +3966,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+version = "1.0.1-alpha.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "derive-where",
  "fake",
@@ -3997,15 +3987,14 @@ dependencies = [
 
 [[package]]
 name = "midnight-proofs"
-version = "0.5.2"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2#64ba405fedab8c96e09abde3dc134c902c6f2c6f"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c977f57dc14235eb02ea9579f6bee1996b0edd50efaa5ab7ad55cb87966c0d7d"
 dependencies = [
- "bench_macros",
  "blake2b_simd",
  "ff",
  "getrandom 0.2.16",
  "group",
- "halo2curves",
  "midnight-curves",
  "num-bigint",
  "rand_chacha 0.3.1",
@@ -4018,8 +4007,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize"
-version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+version = "1.0.0-rc.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "crypto",
  "konst",
@@ -4031,8 +4020,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize-macros"
-version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+version = "1.0.0-rc.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -4041,8 +4030,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+version = "1.1.0-rc.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "archery",
  "crypto",
@@ -4065,8 +4054,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-macros"
-version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+version = "1.0.0-rc.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "midnight-serialize-macros",
  "proc-macro2",
@@ -4076,8 +4065,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "1.0.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+version = "2.0.0-alpha.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "anyhow",
  "blake2b_simd",
@@ -4098,6 +4087,7 @@ dependencies = [
  "midnight-proofs",
  "midnight-serialize",
  "midnight-storage",
+ "midnight-zk-stdlib",
  "pastey",
  "rand 0.8.5",
  "serde",
@@ -4110,9 +4100,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-zk-stdlib"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0252a1e687f530a355d89bd6d4bce99d8361eef8abe6dff5b3b864fe8e426901"
+dependencies = [
+ "base64 0.13.1",
+ "bincode",
+ "blake2b_halo2",
+ "blake2b_simd",
+ "ff",
+ "group",
+ "midnight-circuits",
+ "midnight-curves",
+ "midnight-proofs",
+ "num-bigint",
+ "num-traits",
+ "rand 0.8.5",
+ "sha2 0.10.9",
+ "sha3-circuit",
+]
+
+[[package]]
 name = "midnight-zswap"
-version = "6.2.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-6.2.0-rc.2#9caeb31bc495a40c452cb8ee5f582f49bcb5d077"
+version = "7.0.0-alpha.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "derive-where",
  "fake",
@@ -4587,21 +4599,6 @@ dependencies = [
  "regex-syntax",
  "structmeta",
  "syn 2.0.111",
-]
-
-[[package]]
-name = "pasta_curves"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3e57598f73cc7e1b2ac63c79c517b31a0877cd7c402cdcaa311b5208de7a095"
-dependencies = [
- "blake2b_simd",
- "ff",
- "group",
- "lazy_static",
- "rand 0.8.5",
- "static_assertions",
- "subtle",
 ]
 
 [[package]]
@@ -5950,6 +5947,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_arrays"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94a16b99c5ea4fe3daccd14853ad260ec00ea043b2708d1fd1da3106dcd8d9df"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_buf"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6150,6 +6156,20 @@ checksum = "75872d278a8f37ef87fa0ddbda7802605cb18344497949862c0d4dcb291eba60"
 dependencies = [
  "digest 0.10.7",
  "keccak",
+]
+
+[[package]]
+name = "sha3-circuit"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be83e5373c70fbe71d6aa678da6d139029a497faccd1c693f393526fe0195101"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "midnight-curves",
+ "midnight-proofs",
+ "num-bigint",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -7661,16 +7681,6 @@ checksum = "fc1de2c688dc15305988b563c3854064043356019f97a4b46276fe734c4f07ea"
 dependencies = [
  "crypto-common",
  "subtle",
-]
-
-[[package]]
-name = "unroll"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ad948c1cb799b1a70f836077721a92a35ac177d4daddf4c20a633786d4cf618"
-dependencies = [
- "quote 1.0.42",
- "syn 1.0.109",
 ]
 
 [[package]]
