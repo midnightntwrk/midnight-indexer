@@ -175,7 +175,7 @@ where
     );
 
     // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a Service
-    // Builder, so we axum-layer FastraceLayer first.
+    // Builder, so we layer FastraceLayer first.
     Router::new()
         .route("/ready", get(ready))
         .nest("/api/v3", v3_app)
