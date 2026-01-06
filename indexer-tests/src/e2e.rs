@@ -48,7 +48,7 @@ use std::{future::ready, time::Duration};
 use tokio::time::sleep;
 use unshielded_transactions_subscription::UnshieldedTransactionsSubscriptionUnshieldedTransactions as UnshieldedTransactions;
 
-const MAX_HEIGHT: usize = 30;
+const MAX_HEIGHT: usize = 32;
 
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
