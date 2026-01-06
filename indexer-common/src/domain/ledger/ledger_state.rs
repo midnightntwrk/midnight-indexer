@@ -13,7 +13,7 @@
 
 use crate::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, ByteArray, ByteVec, IntentHash,
-    LedgerEvent, NetworkId, Nonce, PROTOCOL_VERSION_000_018_000, ProtocolVersion,
+    LedgerEvent, NetworkId, Nonce, PROTOCOL_VERSION_000_019_000, ProtocolVersion,
     SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerState,
     SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot, TokenType,
     TransactionResult, UnshieldedUtxo,
@@ -23,7 +23,10 @@ use crate::domain::{
 use fastrace::trace;
 use itertools::Itertools;
 use midnight_base_crypto_v6::{
-    cost_model::SyntheticCost as SyntheticCostV6,
+    cost_model::{
+        FixedPoint as FixedPointV6, NormalizedCost as NormalizedCostV6,
+        SyntheticCost as SyntheticCostV6,
+    },
     hash::{HashOutput as HashOutputV6, persistent_commit as persistent_commit_v6},
     time::Timestamp as TimestampV6,
 };
@@ -94,7 +97,7 @@ impl LedgerState {
         ledger_state: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_018_000) {
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_019_000) {
             let ledger_state = tagged_deserialize_v6(&mut ledger_state.as_ref())
                 .map_err(|error| Error::Deserialize("LedgerStateV6", error))?;
             Ok(Self::V6 {
@@ -307,8 +310,25 @@ impl LedgerState {
                 block_fullness,
             } => {
                 let timestamp = timestamp_v6(block_timestamp);
+                let normalized_fullness = block_fullness
+                    .normalize(ledger_state.parameters.limits.block_limits)
+                    .unwrap_or(NormalizedCostV6::ZERO);
+                let overall_fullness = FixedPointV6::max(
+                    FixedPointV6::max(
+                        FixedPointV6::max(
+                            normalized_fullness.read_time,
+                            normalized_fullness.compute_time,
+                        ),
+                        normalized_fullness.block_usage,
+                    ),
+                    FixedPointV6::max(
+                        normalized_fullness.bytes_written,
+                        normalized_fullness.bytes_churned,
+                    ),
+                );
+
                 let ledger_state = ledger_state
-                    .post_block_update(timestamp, *block_fullness)
+                    .post_block_update(timestamp, normalized_fullness, overall_fullness)
                     .map_err(|error| Error::BlockLimitExceeded(error.into()))?;
 
                 let ledger_parameters = ledger_state.parameters.deref().to_owned();
@@ -355,7 +375,7 @@ impl ZswapStateRoot {
         zswap_state_root: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_018_000) {
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_019_000) {
             let digest = MerkleTreeDigestV6::deserialize(&mut zswap_state_root.as_ref(), 0)
                 .map_err(|error| Error::Deserialize("MerkleTreeDigestV6", error))?;
             Ok(Self::V6(digest))

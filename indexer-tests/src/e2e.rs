@@ -39,7 +39,7 @@ use anyhow::{Context, bail};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::infra::api::v3::{HexEncodable, viewing_key::ViewingKey};
-use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_018_000};
+use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_019_000};
 use itertools::Itertools;
 use reqwest::Client;
 use serde::Serialize;
@@ -48,7 +48,7 @@ use std::{future::ready, time::Duration};
 use tokio::time::sleep;
 use unshielded_transactions_subscription::UnshieldedTransactionsSubscriptionUnshieldedTransactions as UnshieldedTransactions;
 
-const MAX_HEIGHT: usize = 30;
+const MAX_HEIGHT: usize = 32;
 
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
@@ -738,7 +738,7 @@ async fn test_shielded_transactions_subscription(
     network_id: &NetworkId,
 ) -> anyhow::Result<()> {
     let session_id = ViewingKey::from(viewing_key(network_id))
-        .try_into_domain(network_id, PROTOCOL_VERSION_000_018_000)?
+        .try_into_domain(network_id, PROTOCOL_VERSION_000_019_000)?
         .to_session_id()
         .hex_encode();
 
@@ -931,8 +931,12 @@ fn viewing_key(network_id: &NetworkId) -> &'static str {
         "undeployed" => {
             "mn_shield-esk_undeployed1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs9ete5h"
         }
-        "dev" => "mn_shield-esk_dev1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsp7rsx2",
-        "test" => "mn_shield-esk_test1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsuv0u5j",
+        "devnet" => {
+            "mn_shield-esk_devnet1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs64mtz0"
+        }
+        "testnet" => {
+            "mn_shield-esk_testnet1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs8fw0p6"
+        }
         "mainnet" => "mn_shield-esk1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsucf6ww",
         other => panic!("unexpected network ID {other}"),
     }
