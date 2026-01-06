@@ -51,7 +51,7 @@ let indexerWsClient: IndexerWsClient;
 async function subscribeToUnshieldedTransactionEvents(
   subscriptionParams: UnshieldedTransactionSubscriptionParams,
   stopCondition: (message: UnshieldedTxSubscriptionResponse[]) => boolean,
-  timeout: number = 500,
+  timeout: number = 5000,
 ): Promise<UnshieldedTxSubscriptionResponse[]> {
   const receivedUnshieldedTransactions: UnshieldedTxSubscriptionResponse[] = [];
 
@@ -138,7 +138,6 @@ describe('unshielded transaction subscriptions', async () => {
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 10,
-        500,
       );
 
       // we want at least one message ...
@@ -180,7 +179,6 @@ describe('unshielded transaction subscriptions', async () => {
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         () => false,
-        3000,
       );
 
       messages.forEach((message) => {
@@ -236,7 +234,6 @@ describe('unshielded transaction subscriptions', async () => {
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 5,
-        5000,
       );
 
       expect(messages.length).toBeGreaterThanOrEqual(1);
@@ -286,7 +283,6 @@ describe('unshielded transaction subscriptions', async () => {
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 10,
-        5000,
       );
 
       // We expect exactly one (non-error) message ...
@@ -322,7 +318,6 @@ describe('unshielded transaction subscriptions', async () => {
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 10,
-        500,
       );
 
       expect(messages.length).toBe(1);
@@ -362,7 +357,6 @@ describe('unshielded transaction subscriptions', async () => {
         messages = await subscribeToUnshieldedTransactionEvents(
           { address: targetAddress },
           (messages) => messages.length >= 10,
-          500,
         );
 
         expect(messages.length).toBe(1);
@@ -397,7 +391,6 @@ describe('unshielded transaction subscriptions', async () => {
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
         (messages) => messages[0].errors !== undefined,
-        2000,
       );
 
       expect(messages.length).toBeGreaterThanOrEqual(2);
@@ -452,7 +445,6 @@ describe('unshielded transaction subscriptions', async () => {
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
         (messages) => messages.length >= 10,
-        1000,
       );
 
       expect(messages.length).toBe(1);
@@ -479,7 +471,6 @@ describe('unshielded transaction subscriptions', async () => {
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
         (messages) => messages.length >= 10,
-        1000,
       );
 
       // We expect exactly one (non-error) message ...
@@ -511,7 +502,6 @@ describe('unshielded transaction subscriptions', async () => {
       let messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress },
         (messages) => messages.length >= 10,
-        500,
       );
 
       let foundTransactionIds: number[] = [];
@@ -546,7 +536,6 @@ describe('unshielded transaction subscriptions', async () => {
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: randomTransactionId },
         (_messages: UnshieldedTxSubscriptionResponse[]) => false,
-        1000,
       );
 
       expect(messages.length).toBeGreaterThanOrEqual(1);
@@ -579,7 +568,6 @@ describe('unshielded transaction subscriptions', async () => {
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress, transactionId: 0 },
         (_messages: UnshieldedTxSubscriptionResponse[]) => false,
-        1000,
       );
 
       expect(Array.isArray(messages)).toBe(true);

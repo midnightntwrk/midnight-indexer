@@ -586,11 +586,6 @@ describe('dust generation status queries', () => {
         testKey: 'PM-18911',
       };
 
-      ctx.skip?.(
-        true,
-        'Skipping this test for when this has been delivered by developers https://shielded.atlassian.net/browse/PM-20789',
-      );
-
       let rewardAddress: string;
       const connectedCardanoNetworkType = env.getCardanoNetworkType();
 

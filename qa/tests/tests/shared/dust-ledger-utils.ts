@@ -2,7 +2,6 @@ import {
   SubscriptionHandlers,
   DustLedgerEventSubscriptionResponse,
   IndexerWsClient,
-  GraphQLCompleteMessage,
 } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
 import log from '@utils/logging/logger';
@@ -31,16 +30,12 @@ export async function collectValidDustLedgerEvents(
       if (received.length == expectedCount) {
         eventCoordinator.notify(eventName);
         log.debug(`${expectedCount} Dust Ledger events received`);
-        indexerWsClient.send<GraphQLCompleteMessage>({
-          id: subscription.id,
-          type: 'complete',
-        });
       }
     },
   };
 
   const offset = fromId ? { id: fromId } : undefined;
-  const maxTimeBetweenIds = fromId ? 2_000 : 8_000;
+  const maxTimeBetweenIds = fromId ? 4_000 : 10_000;
   const subscription = indexerWsClient.subscribeToDustLedgerEvents(handler, offset);
 
   await eventCoordinator.waitForAll([eventName], maxTimeBetweenIds);

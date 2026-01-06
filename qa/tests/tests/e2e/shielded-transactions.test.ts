@@ -22,7 +22,7 @@ import type { Transaction } from '@utils/indexer/indexer-types';
 import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
 import { TestContext } from 'vitest';
 import { collectValidZswapEvents } from 'tests/shared/zswap-events-utils';
-import { ZswapLedgerEventSchema } from '@utils/indexer/graphql/schema';
+import { RegularTransactionSchema, ZswapLedgerEventSchema } from '@utils/indexer/graphql/schema';
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
 import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
@@ -134,13 +134,29 @@ describe('shielded transactions', () => {
       );
       // The expected transaction might take a bit more to show up by indexer, so we retry a few times
       const transactionResponse = await getTransactionByHashWithRetry(transactionResult.txHash!);
-
       expect(transactionResponse).toBeSuccess();
       expect(transactionResponse?.data?.transactions).toBeDefined();
       expect(transactionResponse?.data?.transactions?.length).toBeGreaterThan(0);
-      expect(
-        transactionResponse?.data?.transactions?.map((tx: Transaction) => `${tx.hash}`),
-      ).toContain(transactionResult.txHash);
+
+      const tx = transactionResponse!.data!.transactions!.find(
+        (t: Transaction) => t.hash === transactionResult.txHash,
+      );
+
+      expect(tx).toBeDefined();
+
+      // Validate transaction shape and narrow type using schema
+      const parsed = RegularTransactionSchema.safeParse(tx);
+      expect(parsed.success, JSON.stringify(parsed.error?.format(), null, 2)).toBe(true);
+
+      const regularTx = parsed.data!;
+
+      // Shielded transactions do NOT expose unshielded details
+      expect(regularTx.unshieldedCreatedOutputs).toEqual([]);
+      expect(regularTx.unshieldedSpentOutputs).toEqual([]);
+
+      // Shielded transactions do NOT expose fees
+      expect(regularTx.fees.paidFees).toBe('0');
+      expect(regularTx.fees.estimatedFees).toBe('0');
     });
 
     /**

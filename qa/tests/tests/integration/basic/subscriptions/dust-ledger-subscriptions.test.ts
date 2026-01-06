@@ -84,7 +84,7 @@ describe('dust ledger event subscriptions', () => {
         2,
         startId,
       );
-      expect(received.length === 2, `Expected 3 events, got: ${received.length}`).toBe(true);
+      expect(received.length === 2, `Expected 2 events, got: ${received.length}`).toBe(true);
 
       const ids = received.map((e) => e.data!.dustLedgerEvents.id);
       const inLedgerOrder = ids.every((id, i) => i === 0 || id > ids[i - 1]);
