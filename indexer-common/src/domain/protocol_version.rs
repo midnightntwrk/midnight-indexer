@@ -20,7 +20,7 @@ use std::{
 };
 use thiserror::Error;
 
-pub const PROTOCOL_VERSION_000_019_000: ProtocolVersion = ProtocolVersion(19_000);
+pub const PROTOCOL_VERSION_000_020_000: ProtocolVersion = ProtocolVersion(000_020_000);
 
 /// The runtime specification version of the chain; defaults to 1, i.e. 0.0.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, From)]
