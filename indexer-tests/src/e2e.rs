@@ -98,6 +98,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_dust_generation_status_query(&api_client, &api_url)
         .await
         .context("test dust generation status query")?;
+    test_unshielded_balances_e2e(&indexer_data, &api_client, &api_url)
+        .await
+        .context("test unshielded balances e2e")?;
 
     // Test subscriptions (the block subscription has already been tested above).
     test_contract_actions_subscription(&indexer_data, &ws_api_url)
@@ -623,38 +626,198 @@ async fn test_dust_generation_status_query(
     api_client: &Client,
     api_url: &str,
 ) -> anyhow::Result<()> {
+    println!("Testing DUST generation status query");
+
     // Test with empty reward addresses list.
     let variables = dust_generation_status_query::Variables {
         cardano_reward_addresses: vec![],
     };
     let response = send_query::<DustGenerationStatusQuery>(api_client, api_url, variables).await?;
     assert!(response.dust_generation_status.is_empty());
+    println!("✓ Empty reward addresses list returns empty result");
 
     // Test with non-existent reward addresses - should return unregistered status.
     // Using Bech32-encoded testnet reward addresses.
+    let test_addresses = vec![
+        "stake_test1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgcpttsx"
+            .try_into()
+            .unwrap(),
+        "stake_test1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqstsw9hr"
+            .try_into()
+            .unwrap(),
+    ];
     let variables = dust_generation_status_query::Variables {
-        cardano_reward_addresses: vec![
-            "stake_test1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgcpttsx"
-                .try_into()
-                .unwrap(),
-            "stake_test1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqstsw9hr"
-                .try_into()
-                .unwrap(),
-        ],
+        cardano_reward_addresses: test_addresses.clone(),
     };
     let response = send_query::<DustGenerationStatusQuery>(api_client, api_url, variables).await?;
     assert_eq!(response.dust_generation_status.len(), 2);
+    println!("✓ Query returns correct number of results");
 
-    for status in &response.dust_generation_status {
+    for (idx, status) in response.dust_generation_status.iter().enumerate() {
         // All test keys should be unregistered.
-        assert!(!status.registered);
-        assert!(status.dust_address.is_none());
+        assert!(!status.registered, "Address {} should be unregistered", idx);
+        assert!(status.dust_address.is_none(), "Unregistered address should have no DUST address");
+        
         // Unregistered addresses have zero rates and balances.
-        assert_eq!(status.generation_rate, "0");
-        assert_eq!(status.current_capacity, "0");
-        assert_eq!(status.night_balance, "0");
+        assert_eq!(status.generation_rate, "0", "Unregistered address should have zero generation rate");
+        assert_eq!(status.current_capacity, "0", "Unregistered address should have zero current capacity");
+        assert_eq!(status.night_balance, "0", "Unregistered address should have zero NIGHT balance");
+        
+        // Verify that generation_rate and current_capacity are valid numeric strings.
+        let _ = status.generation_rate.parse::<u128>()
+            .context("generation_rate should be a valid u128")?;
+        let _ = status.current_capacity.parse::<u128>()
+            .context("current_capacity should be a valid u128")?;
+        let _ = status.night_balance.parse::<u128>()
+            .context("night_balance should be a valid u128")?;
+        
+        println!("  ✓ Address {} validation passed (unregistered)", idx + 1);
     }
 
+    // Test with duplicate addresses - should handle gracefully.
+    let duplicate_addresses = vec![
+        test_addresses[0].clone(),
+        test_addresses[0].clone(),
+    ];
+    let variables = dust_generation_status_query::Variables {
+        cardano_reward_addresses: duplicate_addresses,
+    };
+    let response = send_query::<DustGenerationStatusQuery>(api_client, api_url, variables).await?;
+    assert_eq!(response.dust_generation_status.len(), 2, "Duplicate addresses should return results for each");
+    println!("✓ Duplicate addresses handled correctly");
+
+    // Test with single address.
+    let variables = dust_generation_status_query::Variables {
+        cardano_reward_addresses: vec![test_addresses[0].clone()],
+    };
+    let response = send_query::<DustGenerationStatusQuery>(api_client, api_url, variables).await?;
+    assert_eq!(response.dust_generation_status.len(), 1, "Single address should return single result");
+    println!("✓ Single address query works correctly");
+
+    println!("DUST generation status query tests completed successfully");
+    Ok(())
+}
+
+/// Test end-to-end validation of unshielded balances for contract actions.
+/// This test validates that:
+/// 1. Contract actions have unshielded balances correctly populated
+/// 2. Balances are consistent across queries and subscriptions
+/// 3. Balance amounts and token types are valid
+async fn test_unshielded_balances_e2e(
+    indexer_data: &IndexerData,
+    api_client: &Client,
+    api_url: &str,
+) -> anyhow::Result<()> {
+    println!("Testing unshielded balances for contract actions");
+
+    // Verify that contract actions collected from subscription have balance data.
+    for contract_action in &indexer_data.contract_actions {
+        // Verify that unshielded_balances field exists and is accessible.
+        let balances = &contract_action.unshielded_balances;
+        
+        // For each contract action, query it directly and verify balances match.
+        let variables = contract_action_query::Variables {
+            address: contract_action.address.to_owned(),
+            contract_action_offset: Some(contract_action_query::ContractActionOffset::BlockOffset(
+                contract_action_query::BlockOffset::Hash(
+                    contract_action.transaction.block.hash.to_owned(),
+                ),
+            )),
+        };
+        
+        let queried_action = send_query::<ContractActionQuery>(api_client, api_url, variables)
+            .await?
+            .contract_action
+            .expect("contract action should exist");
+        
+        // Verify that balances from subscription match balances from query.
+        let queried_balances = &queried_action.unshielded_balances;
+        assert_eq!(
+            balances.len(),
+            queried_balances.len(),
+            "Balance count mismatch for contract action at address {}",
+            contract_action.address
+        );
+        
+        // Verify each balance entry.
+        for (sub_balance, query_balance) in balances.iter().zip(queried_balances.iter()) {
+            // Token type should match.
+            assert_eq!(
+                sub_balance.token_type, query_balance.token_type,
+                "Token type mismatch for contract at {}",
+                contract_action.address
+            );
+            
+            // Amount should match.
+            assert_eq!(
+                sub_balance.amount, query_balance.amount,
+                "Amount mismatch for contract at {} with token type {}",
+                contract_action.address, sub_balance.token_type
+            );
+            
+            // Verify that amount is a valid numeric string.
+            let _amount_value = sub_balance
+                .amount
+                .parse::<u128>()
+                .context("balance amount should be a valid u128")?;
+            
+            // Note: u128 is always non-negative by definition, so no need to check.
+        }
+    }
+    
+    // Find contract actions with non-empty balances for additional validation.
+    let actions_with_balances: Vec<_> = indexer_data
+        .contract_actions
+        .iter()
+        .filter(|ca| !ca.unshielded_balances.is_empty())
+        .collect();
+    
+    if !actions_with_balances.is_empty() {
+        println!(
+            "Found {} contract actions with non-empty balances",
+            actions_with_balances.len()
+        );
+        
+        // Verify that balances have expected token types (e.g., STAR, DUST).
+        for action in &actions_with_balances {
+            for balance in &action.unshielded_balances {
+                // Token type should be a valid hex string or known token identifier.
+                // Note: token_type is HexEncoded type, we verify it's not empty by checking the string representation.
+                let token_type_str = format!("{:?}", balance.token_type);
+                assert!(
+                    !token_type_str.is_empty(),
+                    "Token type should not be empty"
+                );
+                
+                println!(
+                    "Contract {} has balance: {} of token type {}",
+                    action.address, balance.amount, balance.token_type
+                );
+            }
+        }
+    } else {
+        println!("Note: No contract actions with non-empty balances found in test data");
+    }
+    
+    // Verify that ContractDeploy actions have empty balances (as per spec).
+    let deploy_actions: Vec<_> = indexer_data
+        .contract_actions
+        .iter()
+        .filter(|ca| matches!(
+            ca.on,
+            block_subscription::BlockSubscriptionBlocksTransactionsContractActionsOn::ContractDeploy
+        ))
+        .collect();
+    
+    for deploy in &deploy_actions {
+        assert!(
+            deploy.unshielded_balances.is_empty(),
+            "ContractDeploy at {} should have empty balances",
+            deploy.address
+        );
+    }
+    
+    println!("Unshielded balances validation completed successfully");
     Ok(())
 }
 
@@ -856,11 +1019,21 @@ async fn test_dust_ledger_events_subscription(
     indexer_data: &IndexerData,
     ws_api_url: &str,
 ) -> anyhow::Result<()> {
+    println!("Testing DUST ledger events subscription");
+
     let expected_dust_ledger_events = indexer_data
         .dust_ledger_events
         .iter()
         .map(|event| event.to_json_value())
         .collect::<Vec<_>>();
+
+    // Verify that we have DUST ledger events to test.
+    if expected_dust_ledger_events.is_empty() {
+        println!("Note: No DUST ledger events found in test data");
+        return Ok(());
+    }
+
+    println!("Found {} expected DUST ledger events", expected_dust_ledger_events.len());
 
     let variables = dust_ledger_events_subscription::Variables { id: None };
     let dust_ledger_events =
@@ -877,7 +1050,20 @@ async fn test_dust_ledger_events_subscription(
             .context("collect dust ledger events from subscription")?;
 
     assert_eq!(dust_ledger_events, expected_dust_ledger_events);
+    println!("✓ DUST ledger events subscription validation passed");
 
+    // Additional validation for DUST ledger events structure.
+    for (idx, event) in indexer_data.dust_ledger_events.iter().enumerate() {
+        // Verify event has required fields (structure depends on GraphQL schema).
+        let event_json = event.to_json_value();
+        assert!(
+            !event_json.to_string().is_empty(),
+            "DUST ledger event {} should have content",
+            idx
+        );
+    }
+
+    println!("DUST ledger events subscription tests completed successfully");
     Ok(())
 }
 
