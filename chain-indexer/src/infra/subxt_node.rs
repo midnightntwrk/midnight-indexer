@@ -16,7 +16,7 @@ mod runtimes;
 
 use crate::{
     domain::{
-        TransactionFees,
+        SystemParametersChange, TransactionFees,
         node::{Block, BlockInfo, Node, RegularTransaction, SystemTransaction, Transaction},
     },
     infra::subxt_node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
@@ -26,8 +26,8 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{
-        BlockAuthor, BlockHash, ByteVec, ProtocolVersion, ScaleDecodeProtocolVersionError,
-        SerializedContractAddress,
+        BlockAuthor, BlockHash, ByteArrayFromHexError, ByteVec, ProtocolVersion,
+        ScaleDecodeProtocolVersionError, SerializedContractAddress,
         ledger::{self, ZswapStateRoot},
     },
     error::BoxError,
@@ -438,6 +438,15 @@ impl Node for SubxtNode {
             }
         }
     }
+
+    async fn fetch_system_parameters(
+        &self,
+        block_hash: BlockHash,
+        block_height: u32,
+        timestamp: u64,
+    ) -> Result<SystemParametersChange, Self::Error> {
+        SubxtNode::fetch_system_parameters(self, block_hash, block_height, timestamp).await
+    }
 }
 
 /// Config for node connection.
@@ -539,6 +548,21 @@ pub enum SubxtNodeError {
 
     #[error("invalid DUST address length: expected 32 bytes, was {0}")]
     InvalidDustAddress(usize),
+
+    #[error("cannot get D-Parameter")]
+    GetDParameter(#[source] BoxError),
+
+    #[error("cannot get Terms and Conditions")]
+    GetTermsAndConditions(#[source] BoxError),
+
+    #[error("cannot parse Terms and Conditions hash")]
+    ParseTermsAndConditions(#[from] ByteArrayFromHexError),
+
+    #[error("cannot serialize RPC params")]
+    SerializeRpcParams(#[source] serde_json::Error),
+
+    #[error("cannot deserialize RPC response")]
+    DeserializeRpcResponse(#[source] serde_json::Error),
 }
 
 #[trace]
@@ -671,11 +695,8 @@ async fn make_system_transaction(
     Ok(Transaction::System(transaction))
 }
 
-// TODO(PM-21070): Uncomment when integrating with node that has system-parameters pallet.
-/*
 use crate::domain::{
-    DParameter, SystemParametersChange, TermsAndConditions,
-    system_parameters::{DParameterRpcResponse, TermsAndConditionsRpcResponse},
+    DParameter, DParameterRpcResponse, TermsAndConditions, TermsAndConditionsRpcResponse,
 };
 
 impl SubxtNode {
@@ -685,13 +706,23 @@ impl SubxtNode {
         &self,
         block_hash: BlockHash,
     ) -> Result<DParameter, SubxtNodeError> {
-        let params = serde_json::json!([format!("0x{}", hex::encode(block_hash.0))]);
+        let params = serde_json::json!([format!("0x{block_hash}")]);
+        let params_str =
+            serde_json::to_string(&params).map_err(SubxtNodeError::SerializeRpcParams)?;
+        let params_raw = serde_json::value::RawValue::from_string(params_str)
+            .map_err(SubxtNodeError::SerializeRpcParams)?;
 
-        let response: DParameterRpcResponse = self
+        let raw_response = self
             .rpc_client
-            .request("systemParameters_getDParameter", params)
+            .request(
+                "systemParameters_getDParameter".to_owned(),
+                Some(params_raw),
+            )
             .await
             .map_err(|error| SubxtNodeError::GetDParameter(error.into()))?;
+
+        let response = serde_json::from_str::<DParameterRpcResponse>(raw_response.get())
+            .map_err(SubxtNodeError::DeserializeRpcResponse)?;
 
         Ok(response.into())
     }
@@ -702,18 +733,26 @@ impl SubxtNode {
         &self,
         block_hash: BlockHash,
     ) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
-        let params = serde_json::json!([format!("0x{}", hex::encode(block_hash.0))]);
+        let params = serde_json::json!([format!("0x{block_hash}")]);
+        let params_str =
+            serde_json::to_string(&params).map_err(SubxtNodeError::SerializeRpcParams)?;
+        let params_raw = serde_json::value::RawValue::from_string(params_str)
+            .map_err(SubxtNodeError::SerializeRpcParams)?;
 
-        let response: Option<TermsAndConditionsRpcResponse> = self
+        let raw_response = self
             .rpc_client
-            .request("systemParameters_getTermsAndConditions", params)
+            .request(
+                "systemParameters_getTermsAndConditions".to_owned(),
+                Some(params_raw),
+            )
             .await
             .map_err(|error| SubxtNodeError::GetTermsAndConditions(error.into()))?;
 
-        response
-            .map(|rpc| rpc.try_into())
-            .transpose()
-            .map_err(|error| SubxtNodeError::ParseTermsAndConditions(error))
+        let response =
+            serde_json::from_str::<Option<TermsAndConditionsRpcResponse>>(raw_response.get())
+                .map_err(SubxtNodeError::DeserializeRpcResponse)?;
+
+        Ok(response.map(|rpc| rpc.try_into()).transpose()?)
     }
 
     /// Fetch all system parameters at a given block.
@@ -738,4 +777,3 @@ impl SubxtNode {
         })
     }
 }
-*/

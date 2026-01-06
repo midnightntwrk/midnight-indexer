@@ -16,7 +16,7 @@ mod metrics;
 use crate::{
     application::metrics::Metrics,
     domain::{
-        LedgerState, Transaction,
+        Block, LedgerState, SystemParametersChange, Transaction,
         node::{self, BlockInfo, Node},
         storage::Storage,
     },
@@ -183,34 +183,39 @@ pub async fn run(
     });
 
     // Spawn task to index blocks.
-    let index_blocks_task = task::spawn(async move {
-        let blocks = blocks(highest_block_info, node)
-            .map(ready)
-            .buffered(blocks_buffer);
-        let mut blocks = pin!(blocks);
-        let mut caught_up = false;
+    let index_blocks_task = task::spawn({
+        let node_for_rpc = node.clone();
 
-        while let Some(next_ledger_state) = get_and_index_block(
-            save_ledger_state_after,
-            caught_up_max_distance,
-            caught_up_leeway,
-            &mut blocks,
-            ledger_state,
-            &highest_block_on_node,
-            &mut caught_up,
-            &mut storage,
-            &publisher,
-            &metrics,
-        )
-        .in_span(Span::root("get-and-index-block", SpanContext::random()))
-        .await?
-        {
-            ledger_state = next_ledger_state
+        async move {
+            let blocks = blocks(highest_block_info, node)
+                .map(ready)
+                .buffered(blocks_buffer);
+            let mut blocks = pin!(blocks);
+            let mut caught_up = false;
+
+            while let Some(next_ledger_state) = get_and_index_block(
+                save_ledger_state_after,
+                caught_up_max_distance,
+                caught_up_leeway,
+                &mut blocks,
+                ledger_state,
+                &highest_block_on_node,
+                &mut caught_up,
+                &mut storage,
+                &publisher,
+                &metrics,
+                &node_for_rpc,
+            )
+            .in_span(Span::root("get-and-index-block", SpanContext::random()))
+            .await?
+            {
+                ledger_state = next_ledger_state
+            }
+
+            error!("index_blocks_task completed unexpectedly");
+
+            Ok::<_, anyhow::Error>(())
         }
-
-        error!("index_blocks_task completed unexpectedly");
-
-        Ok::<_, anyhow::Error>(())
     });
 
     // Handle task completion or SIGTERM termination. "Successful" completion of the tasks is
@@ -279,7 +284,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[trace]
-async fn get_and_index_block<E>(
+async fn get_and_index_block<E, N>(
     save_ledger_state_after: u32,
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
@@ -290,9 +295,11 @@ async fn get_and_index_block<E>(
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
+    node: &N,
 ) -> Result<Option<LedgerState>, anyhow::Error>
 where
     E: StdError + Send + Sync + 'static,
+    N: Node,
 {
     let block = get_next_block(blocks)
         .await
@@ -311,6 +318,7 @@ where
                 storage,
                 publisher,
                 metrics,
+                node,
             )
             .await?;
 
@@ -330,7 +338,7 @@ async fn get_next_block<E>(
 
 #[allow(clippy::too_many_arguments)]
 #[trace]
-async fn index_block(
+async fn index_block<N>(
     save_ledger_state_after: u32,
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
@@ -341,7 +349,11 @@ async fn index_block(
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
-) -> Result<LedgerState, anyhow::Error> {
+    node: &N,
+) -> Result<LedgerState, anyhow::Error>
+where
+    N: Node,
+{
     let (mut block, transactions) = block.into();
 
     let (transactions, ledger_parameters) = ledger_state
@@ -401,6 +413,11 @@ async fn index_block(
         .await
         .context("save block")?;
 
+    // Fetch and store system parameters if changed.
+    if let Err(error) = update_system_parameters(&block, storage, node).await {
+        warn!(error:%; "failed to update system parameters, continuing");
+    }
+
     let ledger_state_size = serialize_ledger_state.map(|s| s.len());
 
     info!(
@@ -457,6 +474,83 @@ async fn index_block(
     Ok(ledger_state)
 }
 
+/// Fetch system parameters from the node and store if changed.
+#[trace]
+async fn update_system_parameters<N>(
+    block: &Block,
+    storage: &mut impl Storage,
+    node: &N,
+) -> anyhow::Result<()>
+where
+    N: Node,
+{
+    // Fetch current system parameters from the node.
+    let current = node
+        .fetch_system_parameters(block.hash, block.height, block.timestamp)
+        .await
+        .map_err(|error| anyhow::anyhow!("fetch system parameters: {error}"))?;
+
+    // Get the latest stored parameters.
+    let stored_d_param = storage
+        .get_latest_d_parameter()
+        .await
+        .context("get latest D-parameter")?;
+    let stored_tc = storage
+        .get_latest_terms_and_conditions()
+        .await
+        .context("get latest terms and conditions")?;
+
+    // Determine what has changed.
+    let d_param_changed = current.d_parameter.as_ref().is_some_and(|current_d| {
+        stored_d_param.as_ref().is_none_or(|stored_d| {
+            current_d.num_permissioned_candidates != stored_d.num_permissioned_candidates
+                || current_d.num_registered_candidates != stored_d.num_registered_candidates
+        })
+    });
+
+    let tc_changed = match (&current.terms_and_conditions, &stored_tc) {
+        (Some(current_tc), Some(stored_tc)) => {
+            current_tc.hash != stored_tc.hash || current_tc.url != stored_tc.url
+        }
+        (Some(_), None) => true,  // New T&C where none existed.
+        (None, Some(_)) => false, // T&C removed - don't record this as a change.
+        (None, None) => false,
+    };
+
+    // Store changes if any.
+    if d_param_changed || tc_changed {
+        let change = SystemParametersChange {
+            block_height: block.height,
+            block_hash: block.hash,
+            timestamp: block.timestamp,
+            d_parameter: if d_param_changed {
+                current.d_parameter
+            } else {
+                None
+            },
+            terms_and_conditions: if tc_changed {
+                current.terms_and_conditions
+            } else {
+                None
+            },
+        };
+
+        storage
+            .save_system_parameters_change(&change)
+            .await
+            .context("save system parameters change")?;
+
+        debug!(
+            block_height = block.height,
+            d_param_changed,
+            tc_changed;
+            "system parameters updated"
+        );
+    }
+
+    Ok(())
+}
+
 fn format_bytes(value: impl Into<Byte>) -> String {
     let bytes = value.into().get_appropriate_unit(UnitType::Binary);
 
@@ -470,7 +564,10 @@ fn format_bytes(value: impl Into<Byte>) -> String {
 mod tests {
     use crate::{
         application::blocks,
-        domain::node::{self, BlockInfo, Node},
+        domain::{
+            SystemParametersChange,
+            node::{self, BlockInfo, Node},
+        },
     };
     use fake::{Fake, Faker};
     use futures::{Stream, StreamExt, TryStreamExt, stream};
@@ -511,6 +608,21 @@ mod tests {
         ) -> impl Stream<Item = Result<node::Block, Self::Error>> {
             stream::iter([&*BLOCK_0, &*BLOCK_1, &*BLOCK_2, &*BLOCK_3])
                 .map(|block| Ok(block.to_owned()))
+        }
+
+        async fn fetch_system_parameters(
+            &self,
+            block_hash: BlockHash,
+            block_height: u32,
+            timestamp: u64,
+        ) -> Result<SystemParametersChange, Self::Error> {
+            Ok(SystemParametersChange {
+                block_height,
+                block_hash,
+                timestamp,
+                d_parameter: None,
+                terms_and_conditions: None,
+            })
         }
     }
 

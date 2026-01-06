@@ -12,8 +12,9 @@
 // limitations under the License.
 
 use crate::domain::{
-    self, Block, BlockTransactions, ContractAction, DustRegistrationEvent, RegularTransaction,
-    SystemTransaction, Transaction, node::BlockInfo,
+    self, Block, BlockTransactions, ContractAction, DParameter, DustRegistrationEvent,
+    RegularTransaction, SystemParametersChange, SystemTransaction, TermsAndConditions, Transaction,
+    node::BlockInfo,
 };
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
@@ -311,6 +312,26 @@ where
         self.save_ledger_state(&mut tx, ledger_state, block_height, protocol_version)
             .await?;
         tx.commit().await
+    }
+
+    #[trace]
+    async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error> {
+        Storage::get_latest_d_parameter(self).await
+    }
+
+    #[trace]
+    async fn get_latest_terms_and_conditions(
+        &self,
+    ) -> Result<Option<TermsAndConditions>, sqlx::Error> {
+        Storage::get_latest_terms_and_conditions(self).await
+    }
+
+    #[trace]
+    async fn save_system_parameters_change(
+        &self,
+        change: &SystemParametersChange,
+    ) -> Result<(), sqlx::Error> {
+        Storage::save_system_parameters_change(self, change).await
     }
 }
 
@@ -1017,9 +1038,6 @@ async fn save_dust_registration_events(
     Ok(())
 }
 
-// TODO(PM-21070): Uncomment when integrating with node that has system-parameters pallet.
-/*
-use crate::domain::{DParameter, SystemParametersChange, TermsAndConditions};
 use indexer_common::domain::TcDocumentHash;
 
 impl<S> Storage<S>
@@ -1161,4 +1179,3 @@ where
         }))
     }
 }
-*/

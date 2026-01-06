@@ -13,7 +13,7 @@
 
 //! System parameters domain types for chain-indexer.
 
-use indexer_common::domain::{BlockHash, TcDocumentHash};
+use indexer_common::domain::{BlockHash, ByteArrayFromHexError, TcDocumentHash};
 
 /// D-Parameter from the node RPC.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,8 +39,6 @@ pub struct SystemParametersChange {
     pub terms_and_conditions: Option<TermsAndConditions>,
 }
 
-// TODO(PM-21070): Uncomment when integrating with node that has system-parameters pallet.
-/*
 use serde::Deserialize;
 
 /// RPC response for systemParameters_getDParameter.
@@ -69,18 +67,10 @@ pub struct TermsAndConditionsRpcResponse {
 }
 
 impl TryFrom<TermsAndConditionsRpcResponse> for TermsAndConditions {
-    type Error = hex::FromHexError;
+    type Error = ByteArrayFromHexError;
 
     fn try_from(rpc: TermsAndConditionsRpcResponse) -> Result<Self, Self::Error> {
-        let hash_str = rpc.hash.strip_prefix("0x").unwrap_or(&rpc.hash);
-        let hash_bytes = hex::decode(hash_str)?;
-        let hash = TcDocumentHash::try_from(hash_bytes)
-            .map_err(|_| hex::FromHexError::InvalidStringLength)?;
-
-        Ok(TermsAndConditions {
-            hash,
-            url: rpc.url,
-        })
+        let hash = TcDocumentHash::from_hex(&rpc.hash)?;
+        Ok(TermsAndConditions { hash, url: rpc.url })
     }
 }
-*/

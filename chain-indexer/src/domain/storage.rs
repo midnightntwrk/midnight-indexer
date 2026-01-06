@@ -14,7 +14,8 @@
 use indexer_common::domain::{ProtocolVersion, SerializedLedgerState};
 
 use crate::domain::{
-    Block, BlockTransactions, DustRegistrationEvent, Transaction, node::BlockInfo,
+    Block, BlockTransactions, DParameter, DustRegistrationEvent, SystemParametersChange,
+    TermsAndConditions, Transaction, node::BlockInfo,
 };
 
 /// Storage abstraction.
@@ -58,5 +59,19 @@ where
         ledger_state: &SerializedLedgerState,
         block_height: u32,
         protocol_version: ProtocolVersion,
+    ) -> Result<(), sqlx::Error>;
+
+    /// Get the latest D-Parameter from the database.
+    async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error>;
+
+    /// Get the latest Terms and Conditions from the database.
+    async fn get_latest_terms_and_conditions(
+        &self,
+    ) -> Result<Option<TermsAndConditions>, sqlx::Error>;
+
+    /// Save system parameters change to the database.
+    async fn save_system_parameters_change(
+        &self,
+        change: &SystemParametersChange,
     ) -> Result<(), sqlx::Error>;
 }
