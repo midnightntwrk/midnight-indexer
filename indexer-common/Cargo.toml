@@ -24,19 +24,18 @@ fastrace-opentelemetry       = { workspace = true }
 figment                      = { workspace = true, features = [ "env", "yaml" ] }
 futures                      = { workspace = true }
 humantime-serde              = { workspace = true }
-indoc                        = { workspace = true }
 itertools                    = { workspace = true }
 log                          = { workspace = true, features = [ "kv_std" ] }
 logforth                     = { workspace = true, features = [ "append-fastrace", "diagnostic-fastrace", "starter-log" ] }
 metrics-exporter-prometheus  = { workspace = true, features = [ "http-listener" ] }
-midnight-base-crypto_v6      = { workspace = true }
-midnight-coin-structure_v6   = { workspace = true }
-midnight-ledger_v6           = { workspace = true }
-midnight-onchain-runtime_v6  = { workspace = true }
-midnight-serialize_v6        = { workspace = true }
-midnight-storage_v6          = { workspace = true }
-midnight-transient-crypto_v6 = { workspace = true }
-midnight-zswap_v6            = { workspace = true }
+midnight-base-crypto_v7_0_0      = { workspace = true }
+midnight-coin-structure_v7_0_0   = { workspace = true }
+midnight-ledger_v7_0_0           = { workspace = true }
+midnight-onchain-runtime_v7_0_0  = { workspace = true }
+midnight-serialize_v7_0_0        = { workspace = true }
+midnight-storage_v7_0_0          = { workspace = true }
+midnight-transient-crypto_v7_0_0 = { workspace = true }
+midnight-zswap_v7_0_0            = { workspace = true }
 opentelemetry                = { workspace = true }
 opentelemetry_sdk            = { workspace = true }
 opentelemetry-otlp           = { workspace = true, features = [ "grpc-tonic" ] }
@@ -51,7 +50,6 @@ sqlx                         = { workspace = true, features = [ "runtime-tokio",
 thiserror                    = { workspace = true }
 tokio                        = { workspace = true, features = [ "time" ] }
 tokio-stream                 = { workspace = true, features = [ "sync" ] }
-tokio-util                   = { workspace = true, features = [ "io" ] }
 trait-variant                = { workspace = true }
 
 [dev-dependencies]

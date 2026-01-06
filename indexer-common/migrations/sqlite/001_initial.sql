@@ -24,6 +24,7 @@ CREATE TABLE transactions (
 );
 CREATE INDEX transactions_block_id_idx ON transactions (block_id);
 CREATE INDEX transactions_hash_idx ON transactions (hash);
+CREATE INDEX transactions_variant_id_idx ON transactions (variant, id);
 --------------------------------------------------------------------------------
 -- regular_transactions
 --------------------------------------------------------------------------------
