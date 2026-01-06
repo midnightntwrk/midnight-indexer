@@ -1,7 +1,6 @@
 import {
   ZswapLedgerEventSubscriptionResponse,
   IndexerWsClient,
-  GraphQLCompleteMessage,
   SubscriptionHandlers,
 } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
@@ -26,16 +25,12 @@ export async function collectValidZswapEvents(
       );
       if (received.length == expectedCount) {
         eventCoordinator.notify(eventName);
-        indexerWsClient.send<GraphQLCompleteMessage>({
-          id: subscription.id,
-          type: 'complete',
-        });
       }
     },
   };
 
   const offset = fromId ? { id: fromId } : undefined;
-  const maxTimeBetweenIds = fromId ? 2_000 : 8_000;
+  const maxTimeBetweenIds = fromId ? 4_000 : 10_000;
   const subscription = indexerWsClient.subscribeToZswapLedgerEvents(handler, offset);
 
   await eventCoordinator.waitForAll([eventName], maxTimeBetweenIds);
