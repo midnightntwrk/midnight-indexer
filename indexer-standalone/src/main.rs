@@ -93,10 +93,6 @@ async fn run() -> anyhow::Result<()> {
         migrations::sqlite::run(&pool)
             .await
             .context("run Sqlite migrations")?;
-        // TODO(PM-21070): Remove mock seeding when node has system-parameters pallet.
-        migrations::sqlite::seed_mock_system_parameters(&pool)
-            .await
-            .context("seed mock system parameters")?;
     }
 
     let cipher = make_cipher(secret).context("make cipher")?;

@@ -88,10 +88,6 @@ async fn run() -> anyhow::Result<()> {
         migrations::postgres::run(&pool)
             .await
             .context("run Postgres migrations")?;
-        // TODO(PM-21070): Remove mock seeding when node has system-parameters pallet.
-        migrations::postgres::seed_mock_system_parameters(&pool)
-            .await
-            .context("seed mock system parameters")?;
     }
 
     let ledger_state_storage =
