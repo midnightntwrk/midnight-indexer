@@ -6,6 +6,16 @@ query BlockQuery($block_offset: BlockOffset) {
         timestamp
         author
         ledgerParameters
+        systemParameters {
+            dParameter {
+                numPermissionedCandidates
+                numRegisteredCandidates
+            }
+            termsAndConditions {
+                hash
+                url
+            }
+        }
         parent {
             hash
             height
@@ -423,6 +433,16 @@ subscription BlockSubscription($block_offset: BlockOffset) {
         timestamp
         author
         ledgerParameters
+        systemParameters {
+            dParameter {
+                numPermissionedCandidates
+                numRegisteredCandidates
+            }
+            termsAndConditions {
+                hash
+                url
+            }
+        }
         parent {
             hash
             height
@@ -809,5 +829,25 @@ query DustGenerationStatusQuery($cardanoRewardAddresses: [CardanoRewardAddress!]
         nightBalance
         generationRate
         currentCapacity
+    }
+}
+
+query DParameterHistoryQuery {
+    dParameterHistory {
+        blockHeight
+        blockHash
+        timestamp
+        numPermissionedCandidates
+        numRegisteredCandidates
+    }
+}
+
+query TermsAndConditionsHistoryQuery {
+    termsAndConditionsHistory {
+        blockHeight
+        blockHash
+        timestamp
+        hash
+        url
     }
 }

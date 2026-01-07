@@ -16,9 +16,10 @@
 use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
-        ContractActionSubscription, DisconnectMutation, DustGenerationStatusQuery,
-        DustLedgerEventsSubscription, ShieldedTransactionsSubscription, TransactionsQuery,
-        UnshieldedTransactionsSubscription, ZswapLedgerEventsSubscription, block_query,
+        ContractActionSubscription, DParameterHistoryQuery, DisconnectMutation,
+        DustGenerationStatusQuery, DustLedgerEventsSubscription, ShieldedTransactionsSubscription,
+        TermsAndConditionsHistoryQuery, TransactionsQuery, UnshieldedTransactionsSubscription,
+        ZswapLedgerEventsSubscription, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
@@ -98,6 +99,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_dust_generation_status_query(&api_client, &api_url)
         .await
         .context("test dust generation status query")?;
+    test_governance_queries(&api_client, &api_url)
+        .await
+        .context("test governance queries")?;
 
     // Test subscriptions (the block subscription has already been tested above).
     test_contract_actions_subscription(&indexer_data, &ws_api_url)
@@ -658,6 +662,31 @@ async fn test_dust_generation_status_query(
     Ok(())
 }
 
+/// Test governance queries (D-Parameter and Terms & Conditions history).
+async fn test_governance_queries(api_client: &Client, api_url: &str) -> anyhow::Result<()> {
+    use crate::e2e::graphql::{d_parameter_history_query, terms_and_conditions_history_query};
+
+    // Test D-Parameter history.
+    let variables = d_parameter_history_query::Variables {};
+    let response = send_query::<DParameterHistoryQuery>(api_client, api_url, variables).await?;
+    assert!(!response.d_parameter_history.is_empty());
+    for entry in &response.d_parameter_history {
+        assert!(entry.block_height >= 0);
+    }
+
+    // Test Terms and Conditions history.
+    let variables = terms_and_conditions_history_query::Variables {};
+    let response =
+        send_query::<TermsAndConditionsHistoryQuery>(api_client, api_url, variables).await?;
+    assert!(!response.terms_and_conditions_history.is_empty());
+    for entry in &response.terms_and_conditions_history {
+        assert!(entry.block_height >= 0);
+        assert!(!entry.url.is_empty());
+    }
+
+    Ok(())
+}
+
 /// Test the contract action subscription.
 async fn test_contract_actions_subscription(
     indexer_data: &IndexerData,
@@ -1044,4 +1073,20 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct DustGenerationStatusQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DParameterHistoryQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct TermsAndConditionsHistoryQuery;
 }

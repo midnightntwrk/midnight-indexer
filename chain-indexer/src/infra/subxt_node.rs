@@ -16,7 +16,7 @@ mod runtimes;
 
 use crate::{
     domain::{
-        TransactionFees,
+        SystemParametersChange, TransactionFees,
         node::{Block, BlockInfo, Node, RegularTransaction, SystemTransaction, Transaction},
     },
     infra::subxt_node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
@@ -438,6 +438,31 @@ impl Node for SubxtNode {
             }
         }
     }
+
+    async fn fetch_system_parameters(
+        &self,
+        block_hash: BlockHash,
+        block_height: u32,
+        timestamp: u64,
+        protocol_version: ProtocolVersion,
+    ) -> Result<SystemParametersChange, Self::Error> {
+        let (d_parameter, terms_and_conditions) = tokio::try_join!(
+            runtimes::get_d_parameter(block_hash, protocol_version, &self.default_online_client),
+            runtimes::get_terms_and_conditions(
+                block_hash,
+                protocol_version,
+                &self.default_online_client
+            ),
+        )?;
+
+        Ok(SystemParametersChange {
+            block_height,
+            block_hash,
+            timestamp,
+            d_parameter: Some(d_parameter),
+            terms_and_conditions,
+        })
+    }
 }
 
 /// Config for node connection.
@@ -539,6 +564,12 @@ pub enum SubxtNodeError {
 
     #[error("invalid DUST address length: expected 32 bytes, was {0}")]
     InvalidDustAddress(usize),
+
+    #[error("cannot get D-Parameter")]
+    GetDParameter(#[source] BoxError),
+
+    #[error("cannot get Terms and Conditions")]
+    GetTermsAndConditions(#[source] BoxError),
 }
 
 #[trace]

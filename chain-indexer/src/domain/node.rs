@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{self, ContractAction, DustRegistrationEvent};
+use crate::domain::{self, ContractAction, DustRegistrationEvent, SystemParametersChange};
 use futures::Stream;
 use indexer_common::domain::{
     BlockAuthor, BlockHash, ProtocolVersion, SerializedTransaction,
@@ -39,6 +39,15 @@ where
         &mut self,
         after: Option<BlockInfo>,
     ) -> impl Stream<Item = Result<Block, Self::Error>>;
+
+    /// Fetch system parameters (D-Parameter and Terms & Conditions) at a given block.
+    async fn fetch_system_parameters(
+        &self,
+        block_hash: BlockHash,
+        block_height: u32,
+        timestamp: u64,
+        protocol_version: ProtocolVersion,
+    ) -> Result<SystemParametersChange, Self::Error>;
 }
 
 #[derive(Debug, Clone)]
