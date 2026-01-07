@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0-alpha.21] - 2025-12-23
+## [3.0.0-alpha.22] - 2026-01-07
 
 ### 🚀 Features
 
@@ -125,6 +125,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - *(api)* Enhance v3 api documentation with DUST features and field updates (#473)
 - Clarify currentCapacity limitations in dustGenerationStatus (#503)
 - Extend comment for nightBalance, make clear it is in STAR (#551)
+
+### ⚡ Performance
+
+- Add composite index on transactions(variant, id) (#647)
 
 ### ⚙️ Miscellaneous Tasks
 
