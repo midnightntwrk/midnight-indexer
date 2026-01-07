@@ -61,15 +61,15 @@ where
         protocol_version: ProtocolVersion,
     ) -> Result<(), sqlx::Error>;
 
-    /// Get the latest D-Parameter from the database.
+    /// Get the latest D-Parameter.
     async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error>;
 
-    /// Get the latest Terms and Conditions from the database.
+    /// Get the latest Terms and Conditions.
     async fn get_latest_terms_and_conditions(
         &self,
     ) -> Result<Option<TermsAndConditions>, sqlx::Error>;
 
-    /// Save system parameters change to the database.
+    /// Save system parameters change.
     async fn save_system_parameters_change(
         &self,
         change: &SystemParametersChange,

@@ -46,6 +46,7 @@ where
         block_hash: BlockHash,
         block_height: u32,
         timestamp: u64,
+        protocol_version: ProtocolVersion,
     ) -> Result<SystemParametersChange, Self::Error>;
 }
 

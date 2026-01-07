@@ -332,3 +332,75 @@ async fn get_transaction_cost_runtime_0_20(
 
     Ok(cost as u128)
 }
+
+use crate::domain::{DParameter, TermsAndConditions};
+use indexer_common::domain::TermsAndConditionsHash;
+
+/// Get D-Parameter depending on the given protocol version.
+pub async fn get_d_parameter(
+    block_hash: BlockHash,
+    protocol_version: ProtocolVersion,
+    online_client: &OnlineClient<SubstrateConfig>,
+) -> Result<DParameter, SubxtNodeError> {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
+        get_d_parameter_runtime_0_20(block_hash, online_client).await
+    } else {
+        Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
+    }
+}
+
+/// Get Terms and Conditions depending on the given protocol version.
+pub async fn get_terms_and_conditions(
+    block_hash: BlockHash,
+    protocol_version: ProtocolVersion,
+    online_client: &OnlineClient<SubstrateConfig>,
+) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
+        get_terms_and_conditions_runtime_0_20(block_hash, online_client).await
+    } else {
+        Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
+    }
+}
+
+async fn get_d_parameter_runtime_0_20(
+    block_hash: BlockHash,
+    online_client: &OnlineClient<SubstrateConfig>,
+) -> Result<DParameter, SubxtNodeError> {
+    let get_d_param = runtime_0_20::apis()
+        .system_parameters_api()
+        .get_d_parameter();
+
+    let d_param = online_client
+        .runtime_api()
+        .at(H256(block_hash.0))
+        .call(get_d_param)
+        .await
+        .map_err(|error| SubxtNodeError::GetDParameter(error.into()))?;
+
+    Ok(DParameter {
+        num_permissioned_candidates: d_param.num_permissioned_candidates,
+        num_registered_candidates: d_param.num_registered_candidates,
+    })
+}
+
+async fn get_terms_and_conditions_runtime_0_20(
+    block_hash: BlockHash,
+    online_client: &OnlineClient<SubstrateConfig>,
+) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
+    let get_tc = runtime_0_20::apis()
+        .system_parameters_api()
+        .get_terms_and_conditions();
+
+    let tc = online_client
+        .runtime_api()
+        .at(H256(block_hash.0))
+        .call(get_tc)
+        .await
+        .map_err(|error| SubxtNodeError::GetTermsAndConditions(error.into()))?;
+
+    Ok(tc.map(|response| {
+        let hash = TermsAndConditionsHash::from(response.hash.0);
+        let url = String::from_utf8_lossy(&response.url).to_string();
+        TermsAndConditions { hash, url }
+    }))
+}

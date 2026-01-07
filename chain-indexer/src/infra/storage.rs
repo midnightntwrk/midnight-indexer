@@ -22,7 +22,7 @@ use indexer_common::{
     domain::{
         ABSelector, BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
         LedgerEventAttributes, LedgerStateStorage, ProtocolVersion, SerializedLedgerState,
-        TransactionVariant, UnshieldedUtxo,
+        TermsAndConditionsHash, TransactionVariant, UnshieldedUtxo,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -1038,8 +1038,6 @@ async fn save_dust_registration_events(
     Ok(())
 }
 
-use indexer_common::domain::TcDocumentHash;
-
 impl<S> Storage<S>
 where
     S: LedgerStateStorage,
@@ -1174,7 +1172,8 @@ where
             .await?;
 
         Ok(result.map(|(hash_bytes, url)| {
-            let hash = TcDocumentHash::try_from(hash_bytes).expect("hash should be 32 bytes");
+            let hash =
+                TermsAndConditionsHash::try_from(hash_bytes).expect("hash should be 32 bytes");
             TermsAndConditions { hash, url }
         }))
     }

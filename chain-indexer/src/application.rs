@@ -184,10 +184,10 @@ pub async fn run(
 
     // Spawn task to index blocks.
     let index_blocks_task = task::spawn({
-        let node_for_rpc = node.clone();
+        let node = node.clone();
 
         async move {
-            let blocks = blocks(highest_block_info, node)
+            let blocks = blocks(highest_block_info, node.clone())
                 .map(ready)
                 .buffered(blocks_buffer);
             let mut blocks = pin!(blocks);
@@ -204,7 +204,7 @@ pub async fn run(
                 &mut storage,
                 &publisher,
                 &metrics,
-                &node_for_rpc,
+                &node,
             )
             .in_span(Span::root("get-and-index-block", SpanContext::random()))
             .await?
@@ -486,7 +486,12 @@ where
 {
     // Fetch current system parameters from the node.
     let current = node
-        .fetch_system_parameters(block.hash, block.height, block.timestamp)
+        .fetch_system_parameters(
+            block.hash,
+            block.height,
+            block.timestamp,
+            block.protocol_version,
+        )
         .await
         .map_err(|error| anyhow::anyhow!("fetch system parameters: {error}"))?;
 
@@ -615,6 +620,7 @@ mod tests {
             block_hash: BlockHash,
             block_height: u32,
             timestamp: u64,
+            _protocol_version: ProtocolVersion,
         ) -> Result<SystemParametersChange, Self::Error> {
             Ok(SystemParametersChange {
                 block_height,

@@ -13,19 +13,19 @@
 
 //! System parameters domain types for chain-indexer.
 
-use indexer_common::domain::{BlockHash, ByteArrayFromHexError, TcDocumentHash};
+use indexer_common::domain::{BlockHash, TermsAndConditionsHash};
 
-/// D-Parameter from the node RPC.
+/// D-Parameter from the node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DParameter {
     pub num_permissioned_candidates: u16,
     pub num_registered_candidates: u16,
 }
 
-/// Terms and Conditions from the node RPC.
+/// Terms and Conditions from the node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TermsAndConditions {
-    pub hash: TcDocumentHash,
+    pub hash: TermsAndConditionsHash,
     pub url: String,
 }
 
@@ -37,40 +37,4 @@ pub struct SystemParametersChange {
     pub timestamp: u64,
     pub d_parameter: Option<DParameter>,
     pub terms_and_conditions: Option<TermsAndConditions>,
-}
-
-use serde::Deserialize;
-
-/// RPC response for systemParameters_getDParameter.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DParameterRpcResponse {
-    pub num_permissioned_candidates: u16,
-    pub num_registered_candidates: u16,
-}
-
-impl From<DParameterRpcResponse> for DParameter {
-    fn from(rpc: DParameterRpcResponse) -> Self {
-        DParameter {
-            num_permissioned_candidates: rpc.num_permissioned_candidates,
-            num_registered_candidates: rpc.num_registered_candidates,
-        }
-    }
-}
-
-/// RPC response for systemParameters_getTermsAndConditions.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TermsAndConditionsRpcResponse {
-    pub hash: String,
-    pub url: String,
-}
-
-impl TryFrom<TermsAndConditionsRpcResponse> for TermsAndConditions {
-    type Error = ByteArrayFromHexError;
-
-    fn try_from(rpc: TermsAndConditionsRpcResponse) -> Result<Self, Self::Error> {
-        let hash = TcDocumentHash::from_hex(&rpc.hash)?;
-        Ok(TermsAndConditions { hash, url: rpc.url })
-    }
 }

@@ -26,8 +26,8 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{
-        BlockAuthor, BlockHash, ByteArrayFromHexError, ByteVec, ProtocolVersion,
-        ScaleDecodeProtocolVersionError, SerializedContractAddress,
+        BlockAuthor, BlockHash, ByteVec, ProtocolVersion, ScaleDecodeProtocolVersionError,
+        SerializedContractAddress,
         ledger::{self, ZswapStateRoot},
     },
     error::BoxError,
@@ -444,8 +444,24 @@ impl Node for SubxtNode {
         block_hash: BlockHash,
         block_height: u32,
         timestamp: u64,
+        protocol_version: ProtocolVersion,
     ) -> Result<SystemParametersChange, Self::Error> {
-        SubxtNode::fetch_system_parameters(self, block_hash, block_height, timestamp).await
+        let (d_parameter, terms_and_conditions) = tokio::try_join!(
+            runtimes::get_d_parameter(block_hash, protocol_version, &self.default_online_client),
+            runtimes::get_terms_and_conditions(
+                block_hash,
+                protocol_version,
+                &self.default_online_client
+            ),
+        )?;
+
+        Ok(SystemParametersChange {
+            block_height,
+            block_hash,
+            timestamp,
+            d_parameter: Some(d_parameter),
+            terms_and_conditions,
+        })
     }
 }
 
@@ -554,15 +570,6 @@ pub enum SubxtNodeError {
 
     #[error("cannot get Terms and Conditions")]
     GetTermsAndConditions(#[source] BoxError),
-
-    #[error("cannot parse Terms and Conditions hash")]
-    ParseTermsAndConditions(#[from] ByteArrayFromHexError),
-
-    #[error("cannot serialize RPC params")]
-    SerializeRpcParams(#[source] serde_json::Error),
-
-    #[error("cannot deserialize RPC response")]
-    DeserializeRpcResponse(#[source] serde_json::Error),
 }
 
 #[trace]
@@ -693,87 +700,4 @@ async fn make_system_transaction(
     };
 
     Ok(Transaction::System(transaction))
-}
-
-use crate::domain::{
-    DParameter, DParameterRpcResponse, TermsAndConditions, TermsAndConditionsRpcResponse,
-};
-
-impl SubxtNode {
-    /// Fetch the current D-Parameter via `systemParameters_getDParameter` RPC.
-    #[trace]
-    pub async fn fetch_d_parameter(
-        &self,
-        block_hash: BlockHash,
-    ) -> Result<DParameter, SubxtNodeError> {
-        let params = serde_json::json!([format!("0x{block_hash}")]);
-        let params_str =
-            serde_json::to_string(&params).map_err(SubxtNodeError::SerializeRpcParams)?;
-        let params_raw = serde_json::value::RawValue::from_string(params_str)
-            .map_err(SubxtNodeError::SerializeRpcParams)?;
-
-        let raw_response = self
-            .rpc_client
-            .request(
-                "systemParameters_getDParameter".to_owned(),
-                Some(params_raw),
-            )
-            .await
-            .map_err(|error| SubxtNodeError::GetDParameter(error.into()))?;
-
-        let response = serde_json::from_str::<DParameterRpcResponse>(raw_response.get())
-            .map_err(SubxtNodeError::DeserializeRpcResponse)?;
-
-        Ok(response.into())
-    }
-
-    /// Fetch T&C via `systemParameters_getTermsAndConditions` RPC.
-    #[trace]
-    pub async fn fetch_terms_and_conditions(
-        &self,
-        block_hash: BlockHash,
-    ) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
-        let params = serde_json::json!([format!("0x{block_hash}")]);
-        let params_str =
-            serde_json::to_string(&params).map_err(SubxtNodeError::SerializeRpcParams)?;
-        let params_raw = serde_json::value::RawValue::from_string(params_str)
-            .map_err(SubxtNodeError::SerializeRpcParams)?;
-
-        let raw_response = self
-            .rpc_client
-            .request(
-                "systemParameters_getTermsAndConditions".to_owned(),
-                Some(params_raw),
-            )
-            .await
-            .map_err(|error| SubxtNodeError::GetTermsAndConditions(error.into()))?;
-
-        let response =
-            serde_json::from_str::<Option<TermsAndConditionsRpcResponse>>(raw_response.get())
-                .map_err(SubxtNodeError::DeserializeRpcResponse)?;
-
-        Ok(response.map(|rpc| rpc.try_into()).transpose()?)
-    }
-
-    /// Fetch all system parameters at a given block.
-    #[trace]
-    pub async fn fetch_system_parameters(
-        &self,
-        block_hash: BlockHash,
-        block_height: u32,
-        timestamp: u64,
-    ) -> Result<SystemParametersChange, SubxtNodeError> {
-        let (d_parameter, terms_and_conditions) = tokio::try_join!(
-            self.fetch_d_parameter(block_hash),
-            self.fetch_terms_and_conditions(block_hash),
-        )?;
-
-        Ok(SystemParametersChange {
-            block_height,
-            block_hash,
-            timestamp,
-            d_parameter: Some(d_parameter),
-            terms_and_conditions,
-        })
-    }
 }

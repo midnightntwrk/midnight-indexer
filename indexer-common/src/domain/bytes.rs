@@ -93,6 +93,7 @@ impl<const N: usize> ByteArray<N> {
 pub enum ByteArrayFromHexError {
     #[error("invalid hex string")]
     InvalidHex(#[from] const_hex::FromHexError),
+
     #[error(transparent)]
     InvalidLength(#[from] ByteArrayLenError),
 }
