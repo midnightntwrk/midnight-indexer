@@ -8,12 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### 🚀 Features
 
-- Add governance system parameters (D-Parameter and T&C) to GraphQL API (#637)
-
-## [3.0.0-alpha.22] - 2026-01-07
-
-### 🚀 Features
-
 - Unify configuration across components (#20)
 - Extend PostgreSQL pool configuration (#50)
 - *(chain-indexer)* Start supporting node 0.13 (#21)
@@ -58,6 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Validate saving ledger state (#600)
 - *(nats)* Add num_replicas config for JetStream stream replication (#626)
 - *(api)* Validate Cardano reward address network against Midnight network (#620)
+- Add governance system parameters (D-Parameter and T&C) to GraphQL API (#637)
 
 ### 🐛 Bug Fixes
 
