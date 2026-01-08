@@ -270,6 +270,22 @@ impl IndexerData {
                 .all(|(call_address, deploy_address)| call_address == deploy_address)
         );
 
+        // Verify that all unshielded balances have valid token_type and amount.
+        assert!(contract_actions.iter().all(|contract_action| {
+            contract_action.unshielded_balances.iter().all(|balance| {
+                // Validate token_type is valid hex (should be 32 bytes = 64 hex chars).
+                let valid_token_type = balance.token_type.as_ref().len() == 64
+                    && balance
+                        .token_type
+                        .as_ref()
+                        .chars()
+                        .all(|c| c.is_ascii_hexdigit());
+                // Validate amount is parseable as u128.
+                let valid_amount = balance.amount.parse::<u128>().is_ok();
+                valid_token_type && valid_amount
+            })
+        }));
+
         // Collect unshielded UTXOs.
         let unshielded_utxos = transactions
             .iter()
