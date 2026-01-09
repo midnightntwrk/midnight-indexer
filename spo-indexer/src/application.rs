@@ -24,10 +24,11 @@ use blake2::{
     Blake2bVar,
     digest::{Update, VariableOutput},
 };
+use log::{debug, error, info, warn};
 use serde::Deserialize;
 use std::{cmp, collections::HashMap, time::Duration};
 use subxt::utils::to_hex;
-use tokio::time;
+use tokio::{select, signal::unix::Signal, time};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -46,7 +47,12 @@ pub struct StakeRefreshConfig {
     pub max_rps: u32,
 }
 
-pub async fn run(config: Config, client: SPOClient, storage: impl Storage) -> anyhow::Result<()> {
+pub async fn run(
+    config: Config,
+    client: SPOClient,
+    storage: impl Storage,
+    mut sigterm: Signal,
+) -> anyhow::Result<()> {
     // Mandatory background task: refresh stake snapshots periodically using Blockfrost
     let st_cfg = config.stake_refresh.clone();
     let storage_bg = storage.clone();
@@ -58,87 +64,108 @@ pub async fn run(config: Config, client: SPOClient, storage: impl Storage) -> an
         loop {
             ticker.tick().await;
             if let Err(e) = refresh_stake_snapshots(&client_bg, &storage_bg, &st_cfg).await {
-                eprintln!("stake refresh failed: {e:?}");
+                error!("stake refresh failed: {e:?}");
             }
         }
     });
 
     loop {
-        let cur_epoch = get_epoch_to_process(&client, &storage).await?;
-
-        if cur_epoch.is_none() {
-            println!("latest epoch reached");
-            time::sleep(Duration::new(config.interval.into(), 0)).await;
-            continue;
-        }
-
-        let epoch = cur_epoch.unwrap();
-        println!("processing epoch {}", epoch.epoch_no);
-
-        let mut tx = storage.create_tx().await?;
-        let committee = client.get_committee(epoch.epoch_no).await?;
-        let raw_spos = client.get_spo_registrations(epoch.epoch_no).await?;
-        let membership = committee_to_membership(&client, &committee);
-
-        storage.save_epoch(&epoch, &mut tx).await?;
-        storage.save_membership(&membership, &mut tx).await?;
-
-        let mut blocks_produced: HashMap<String, u32> = HashMap::new();
-        let mut val_to_registration: HashMap<String, CandidateRegistration> = HashMap::new();
-
-        for (_, registrations) in raw_spos.candidate_registrations {
-            for raw_spo in &registrations {
-                let cardano_id = get_cardano_id(&raw_spo.mainchain_pub_key);
-                // Normalize all keys by stripping optional 0x prefix for consistency with DB values
-                let spo_sk = remove_hex_prefix(raw_spo.sidechain_pub_key.to_string());
-
-                val_to_registration.insert(spo_sk.clone(), raw_spo.clone());
-                save_pool_metadata(&client, &storage, &mut tx, cardano_id.clone()).await?;
-                save_spo_identity(&storage, &raw_spo, cardano_id, &mut tx).await?;
-                save_spo_history(&storage, &raw_spo, epoch.epoch_no.into(), &mut tx).await?;
-
-                let count_mk = blocks_produced.entry(spo_sk).or_insert(0);
-                *count_mk += 1;
+        select! {
+            result = process_next_epoch(&config, &client, &storage) => {
+                result?;
+            }
+            _ = sigterm.recv() => {
+                warn!("SIGTERM received");
+                return Ok(());
             }
         }
-
-        println!("\tcommittee size: {}", committee.len());
-        if committee.len() > 0 {
-            let blocks_remainder = client.epoch_duration % committee.len() as u32;
-            let expected_blocks = get_expected_blocks(&client, &epoch, committee.len() as u32);
-
-            for (index, spo) in committee.iter().enumerate() {
-                let spo_sk = remove_hex_prefix(spo.sidechain_pubkey.to_string());
-                let produced = blocks_produced.get(&spo_sk);
-
-                // only count if the validator has produced a block
-                if produced.is_some() {
-                    let raw_spo = val_to_registration.get(&spo_sk).unwrap();
-                    let cardano_id = get_cardano_id(&raw_spo.mainchain_pub_key);
-
-                    let spo_performance = SPOEpochPerformance {
-                        spo_sk,
-                        epoch_no: epoch.epoch_no as u64,
-                        expected_blocks: expected_blocks
-                            + (if (index as u32) < blocks_remainder {
-                                1
-                            } else {
-                                0
-                            }),
-                        produced_blocks: *produced.unwrap() as u64,
-                        identity_label: cardano_id,
-                    };
-
-                    storage
-                        .save_spo_performance(&spo_performance, &mut tx)
-                        .await?;
-                }
-            }
-        }
-
-        tx.commit().await?;
-        println!("processed epoch {}", epoch.epoch_no);
     }
+}
+
+async fn process_next_epoch(
+    config: &Config,
+    client: &SPOClient,
+    storage: &impl Storage,
+) -> anyhow::Result<()> {
+    let cur_epoch = get_epoch_to_process(client, storage).await?;
+
+    if cur_epoch.is_none() {
+        debug!("latest epoch reached");
+        time::sleep(Duration::new(config.interval.into(), 0)).await;
+        return Ok(());
+    }
+
+    let epoch = cur_epoch.expect("epoch should exist after is_none() check");
+    info!("processing epoch {}", epoch.epoch_no);
+
+    let mut tx = storage.create_tx().await?;
+    let committee = client.get_committee(epoch.epoch_no).await?;
+    let raw_spos = client.get_spo_registrations(epoch.epoch_no).await?;
+    let membership = committee_to_membership(client, &committee);
+
+    storage.save_epoch(&epoch, &mut tx).await?;
+    storage.save_membership(&membership, &mut tx).await?;
+
+    let mut blocks_produced: HashMap<String, u32> = HashMap::new();
+    let mut val_to_registration: HashMap<String, CandidateRegistration> = HashMap::new();
+
+    for (_, registrations) in raw_spos.candidate_registrations {
+        for raw_spo in &registrations {
+            let cardano_id = get_cardano_id(&raw_spo.mainchain_pub_key);
+            // Normalize all keys by stripping optional 0x prefix for consistency with DB values
+            let spo_sk = remove_hex_prefix(raw_spo.sidechain_pub_key.to_string());
+
+            val_to_registration.insert(spo_sk.clone(), raw_spo.clone());
+            save_pool_metadata(client, storage, &mut tx, cardano_id.clone()).await?;
+            save_spo_identity(storage, raw_spo, cardano_id, &mut tx).await?;
+            save_spo_history(storage, raw_spo, epoch.epoch_no.into(), &mut tx).await?;
+
+            let count_mk = blocks_produced.entry(spo_sk).or_insert(0);
+            *count_mk += 1;
+        }
+    }
+
+    debug!("committee size: {}", committee.len());
+    if committee.len() > 0 {
+        let blocks_remainder = client.epoch_duration % committee.len() as u32;
+        let expected_blocks = get_expected_blocks(client, &epoch, committee.len() as u32);
+
+        for (index, spo) in committee.iter().enumerate() {
+            let spo_sk = remove_hex_prefix(spo.sidechain_pubkey.to_string());
+            let produced = blocks_produced.get(&spo_sk);
+
+            // only count if the validator has produced a block
+            if produced.is_some() {
+                let raw_spo = val_to_registration
+                    .get(&spo_sk)
+                    .expect("validator should have registration");
+                let cardano_id = get_cardano_id(&raw_spo.mainchain_pub_key);
+
+                let spo_performance = SPOEpochPerformance {
+                    spo_sk,
+                    epoch_no: epoch.epoch_no as u64,
+                    expected_blocks: expected_blocks
+                        + (if (index as u32) < blocks_remainder {
+                            1
+                        } else {
+                            0
+                        }),
+                    produced_blocks: *produced
+                        .expect("produced should exist after is_some() check")
+                        as u64,
+                    identity_label: cardano_id,
+                };
+
+                storage
+                    .save_spo_performance(&spo_performance, &mut tx)
+                    .await?;
+            }
+        }
+    }
+
+    tx.commit().await?;
+    info!("processed epoch {}", epoch.epoch_no);
+    Ok(())
 }
 
 async fn refresh_stake_snapshots(
@@ -213,7 +240,7 @@ async fn refresh_stake_snapshots(
                 total_updated += 1;
             }
             Err(err) => {
-                eprintln!("stake refresh for {pid} failed: {err:?}");
+                error!("stake refresh for {pid} failed: {err:?}");
             }
         }
         if sleep_per_req_ms > 0 {
@@ -227,7 +254,7 @@ async fn refresh_stake_snapshots(
     storage.set_stake_refresh_cursor(last_id).await?;
 
     if total_updated > 0 {
-        println!(
+        info!(
             "stake refresh: updated {} pools (cursor at {:?})",
             total_updated, last_id
         );
@@ -336,7 +363,7 @@ fn committee_to_membership(
             spo_sk: remove_hex_prefix(c.sidechain_pubkey.clone()),
             sidechain_pubkey: remove_hex_prefix(c.sidechain_pubkey.clone()),
             expected_slots: slots_per_epoch / num_validators
-                + if leftover > index.try_into().unwrap() {
+                + if leftover > index.try_into().expect("index should fit in u32") {
                     1
                 } else {
                     0
@@ -353,7 +380,7 @@ async fn get_epoch_to_process(
     let latest_processed = storage.get_latest_epoch().await?;
     let current_epoch = client.get_current_epoch().await?;
     let latest_epoch_num = if latest_processed.is_some() {
-        latest_processed.unwrap().epoch_no
+        latest_processed.expect("epoch should exist after is_some() check").epoch_no
     } else {
         client.get_first_epoch_num().await?
     };
@@ -374,11 +401,11 @@ async fn get_epoch_to_process(
 
 fn get_cardano_id(mainchain_pk: &String) -> String {
     let mainchain_pk = hex_to_bytes(&mainchain_pk);
-    let mut hasher = Blake2bVar::new(28).unwrap();
+    let mut hasher = Blake2bVar::new(28).expect("blake2b output size 28 is valid");
     hasher.update(&mainchain_pk);
 
     let mut buffer = [0u8; 28];
-    hasher.finalize_variable(&mut buffer).unwrap();
+    hasher.finalize_variable(&mut buffer).expect("blake2b finalize should succeed with valid buffer");
 
     let hex_hash = to_hex(&buffer);
 

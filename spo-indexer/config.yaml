@@ -36,12 +36,12 @@ infra:
     genesis_protocol_version: 16000
     reconnect_max_delay: "10s" # 10ms, 100ms, 1s, 10s
     reconnect_max_attempts: 30 # Roughly 5m
-    blockfrost_id: "previewukkFxumNW31cXmsBtKI1JTnbxvcVCbCj"
+    blockfrost_id: "${BLOCKFROST_PROJECT_ID}"
 
 telemetry:
   tracing:
     enabled: false
-    service_name: "chain-indexer"
+    service_name: "spo-indexer"
     otlp_exporter_endpoint: "http://localhost:4317"
   metrics:
     enabled: false

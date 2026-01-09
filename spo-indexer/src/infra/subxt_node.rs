@@ -20,8 +20,6 @@ use crate::{
 };
 use blockfrost::{BlockfrostAPI, BlockfrostError};
 use indexer_common::error::BoxError;
-use log::error;
-use polkadot::sidechain::storage::types::epoch_number::EpochNumber;
 use reqwest::Client as HttpClient;
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::value::RawValue;
@@ -117,7 +115,8 @@ impl SPOClient {
     }
 
     pub async fn get_block_timestamp(&self, block_number: u32) -> Result<u64, SPOClientError> {
-        let params_blockhash = RawValue::from_string(format!("[{}]", block_number)).unwrap();
+        let params_blockhash = RawValue::from_string(format!("[{}]", block_number))
+            .expect("JSON serialization of block number should not fail");
         let blockhash_res = self
             .rpc_client
             .request("chain_getBlockHash".to_string(), Some(params_blockhash))
@@ -127,7 +126,11 @@ impl SPOClient {
             })?;
 
         let str_blockhash = remove_hex_prefix(blockhash_res.get().to_string().replace("\"", ""));
-        let raw_blockhash = H256::from_slice(hex::decode(str_blockhash).unwrap().as_slice());
+        let raw_blockhash = H256::from_slice(
+            hex::decode(str_blockhash)
+                .expect("block hash should be valid hex")
+                .as_slice(),
+        );
         let storage_query = polkadot::storage().timestamp().now();
 
         let result = self
@@ -136,8 +139,8 @@ impl SPOClient {
             .at(raw_blockhash)
             .fetch(&storage_query)
             .await
-            .unwrap();
-        let timestamp = result.unwrap();
+            .expect("storage fetch should succeed for valid block");
+        let timestamp = result.expect("timestamp should exist in block storage");
 
         Ok(timestamp)
     }
@@ -168,7 +171,8 @@ impl SPOClient {
         &self,
         epoch_number: u32,
     ) -> Result<SPORegistrationResponse, SPOClientError> {
-        let rpc_params = RawValue::from_string(format!("[{}]", epoch_number)).unwrap();
+        let rpc_params = RawValue::from_string(format!("[{}]", epoch_number))
+            .expect("JSON serialization of epoch number should not fail");
 
         let raw_response = self
             .rpc_client
@@ -360,7 +364,8 @@ impl PoolStakeData {
 async fn get_epoch_duration(
     api: &OnlineClient<PolkadotConfig>,
 ) -> Result<(u32, u32), SPOClientError> {
-    let slot: Vec<u8> = hex::decode(SLOT_PER_EPOCH_KEY).unwrap();
+    let slot: Vec<u8> = hex::decode(SLOT_PER_EPOCH_KEY)
+        .expect("SLOT_PER_EPOCH_KEY constant should be valid hex");
     let storage_cli = api
         .storage()
         .at_latest()
@@ -371,7 +376,10 @@ async fn get_epoch_duration(
         .fetch_raw(slot)
         .await
         .map_err(|_| SPOClientError::UnexpectedResponse("".to_string()))?;
-    let raw_response: [u8; 4] = res.unwrap().try_into().unwrap();
+    let raw_response: [u8; 4] = res
+        .expect("slots per epoch storage value should exist")
+        .try_into()
+        .expect("slots per epoch should be 4 bytes");
     let slots_per_epoch = u32::from_le_bytes(raw_response);
 
     Ok((SLOT_DURATION * slots_per_epoch, slots_per_epoch))
