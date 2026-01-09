@@ -80,6 +80,24 @@ impl<const N: usize> TryFrom<ByteVec> for ByteArray<N> {
     }
 }
 
+impl<const N: usize> ByteArray<N> {
+    /// Parse a hex string into a ByteArray.
+    pub fn from_hex(s: &str) -> Result<Self, ByteArrayFromHexError> {
+        let bytes = const_hex::decode(s)?;
+        bytes.try_into().map_err(ByteArrayFromHexError::from)
+    }
+}
+
+/// Error when parsing a hex string into a ByteArray.
+#[derive(Debug, Error)]
+pub enum ByteArrayFromHexError {
+    #[error("invalid hex string")]
+    InvalidHex(#[from] const_hex::FromHexError),
+
+    #[error(transparent)]
+    InvalidLength(#[from] ByteArrayLenError),
+}
+
 impl<const N: usize> Debug for ByteArray<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         debug(self, f)

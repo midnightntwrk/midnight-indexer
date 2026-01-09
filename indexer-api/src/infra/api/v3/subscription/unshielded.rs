@@ -21,7 +21,8 @@ use crate::{
         },
     },
 };
-use async_graphql::{Context, SimpleObject, Subscription, Union, async_stream::try_stream};
+use async_graphql::{Context, SimpleObject, Subscription, Union};
+use async_stream::try_stream;
 use derive_more::Debug;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -157,7 +158,7 @@ where
             .await
             .map_err_into_server_error(|| format!("get next transaction for address {address}"))?
         {
-            if let Some(utxo_update) = make_unshielded_transaction(
+            if let Some(unshielded_transaction) = make_unshielded_transaction(
                 &mut transaction_id,
                 storage,
                 address,
@@ -166,7 +167,7 @@ where
             )
             .await?
             {
-                yield utxo_update;
+                yield unshielded_transaction;
             }
         }
 
@@ -219,22 +220,18 @@ async fn make_unshielded_transaction<S>(
 where
     S: Storage,
 {
-    *transaction_id = transaction.id();
-    let transaction_id = *transaction_id;
+    let id = transaction.id();
+    *transaction_id = id + 1;
 
     let created = storage
-        .get_unshielded_utxos_by_address_created_by_transaction(address, transaction_id)
+        .get_unshielded_utxos_by_address_created_by_transaction(address, id)
         .await
-        .map_err_into_server_error(|| {
-            format!("get created UTXOs for transaction with ID {transaction_id}")
-        })?;
+        .map_err_into_server_error(|| format!("get created UTXOs for transaction with ID {id}"))?;
 
     let spent = storage
-        .get_unshielded_utxos_by_address_spent_by_transaction(address, transaction_id)
+        .get_unshielded_utxos_by_address_spent_by_transaction(address, id)
         .await
-        .map_err_into_server_error(|| {
-            format!("get spent UTXOs for transaction with ID {transaction_id}")
-        })?;
+        .map_err_into_server_error(|| format!("get spent UTXOs for transaction with ID {id}"))?;
 
     // Only emit an event for transactions that have UTXOs for this address.
     let unshielded_utxo_update = (!created.is_empty() || !spent.is_empty()).then(|| {

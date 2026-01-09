@@ -498,6 +498,7 @@ impl TransactionStorage for Storage {
         Ok(id.map(|id| id as u64))
     }
 
+    #[allow(clippy::type_complexity)]
     #[trace(properties = { "session_id": "{session_id}" })]
     async fn get_highest_end_indices(
         &self,

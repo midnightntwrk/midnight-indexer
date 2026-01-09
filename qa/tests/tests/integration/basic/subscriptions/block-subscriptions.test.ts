@@ -15,7 +15,6 @@
 
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
-import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import type { Block, BlockOffset } from '@utils/indexer/indexer-types';
 import {
@@ -55,7 +54,7 @@ describe('block subscriptions', () => {
     // We wait until expected number of blocks has been recieved, as we want to make sure that
     // the subscription is working and we are receiving blocks
     const receivedBlocks: BlockSubscriptionResponse[] = [];
-    const eventName = `${expectedCount}BlocksReceived`;
+    const eventName = `${expectedCount} blocks received`;
     const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
       next: (payload: BlockSubscriptionResponse) => {
         log.debug(`Received data:\n${JSON.stringify(payload)}`);
@@ -476,14 +475,17 @@ describe('block subscriptions', () => {
   describe('a subscription to block updates by height and hash', () => {
     /**
      * Subscribing to block updates with a valid block height and hash should
-     * return an error message, as only only one parameter at a time can be used
+     * return an error message, as only one parameter at a time can be used
      *
      * @given a valid block height and hash
      * @when we subscribe to block events with that height and hash as offset
      * @then we should receive an error message indicating that only one parameter at a time can be used
      */
-    test('should return an error message, as only only one parameter at a time can be used', async () => {
-      const blockOffset: BlockOffset = { height: 1, hash: await dataProvider.getKnownBlockHash() };
+    test('should return an error message, as only one parameter at a time can be used', async () => {
+      const blockOffset: BlockOffset = {
+        height: 1,
+        hash: '0'.repeat(64),
+      };
 
       const blockMessagesReceived: BlockSubscriptionResponse[] = [];
 

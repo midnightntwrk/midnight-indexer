@@ -28,7 +28,8 @@ async fn main() {
     if let Err(error) = run().await {
         let backtrace = error.backtrace();
         let error = format!("{error:#}");
-        error!(error, backtrace:%; "process exited with ERROR")
+        error!(error, backtrace:%; "process exited with ERROR");
+        std::process::exit(1);
     }
 }
 
@@ -87,21 +88,17 @@ async fn run() -> anyhow::Result<()> {
             .context("run Postgres migrations")?;
     }
     let cipher = make_cipher(secret).context("make cipher")?;
-    let storage = infra::storage::Storage::new(cipher, pool);
 
     let ledger_state_storage =
         ledger_state_storage::nats::NatsLedgerStateStorage::new(ledger_state_storage_config)
             .await
             .context("create NatsZswapStateStorage")?;
 
+    let storage = infra::storage::Storage::new(cipher, pool, ledger_state_storage);
+
     let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config).await?;
 
-    let api = AxumApi::new(
-        api_config,
-        storage,
-        ledger_state_storage,
-        subscriber.clone(),
-    );
+    let api = AxumApi::new(api_config, storage, subscriber.clone());
 
     application::run(application_config, api, subscriber, sigterm)
         .await

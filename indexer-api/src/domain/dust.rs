@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{CardanoRewardAddress, DustAddress};
+use indexer_common::domain::{CardanoRewardAddress, DustPublicKey};
 use serde::{Deserialize, Serialize};
 
 /// DUST generation status for a specific Cardano reward address.
@@ -20,8 +20,8 @@ pub struct DustGenerationStatus {
     /// Cardano reward address.
     pub cardano_reward_address: CardanoRewardAddress,
 
-    /// Associated DUST address if registered.
-    pub dust_address: Option<DustAddress>,
+    /// Associated DUST address (DUST public key) if registered.
+    pub dust_address: Option<DustPublicKey>,
 
     /// Whether this reward address is registered.
     pub registered: bool,
@@ -32,6 +32,15 @@ pub struct DustGenerationStatus {
     /// Generation rate in Specks per second.
     pub generation_rate: u128,
 
-    /// Current DUST capacity.
+    /// Maximum DUST capacity in SPECK.
+    pub max_capacity: u128,
+
+    /// Current generated DUST capacity in SPECK.
     pub current_capacity: u128,
+
+    /// Cardano UTXO transaction hash for update/unregister operations.
+    pub utxo_tx_hash: Option<Vec<u8>>,
+
+    /// Cardano UTXO output index for update/unregister operations.
+    pub utxo_output_index: Option<u32>,
 }

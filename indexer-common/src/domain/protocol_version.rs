@@ -20,7 +20,8 @@ use std::{
 };
 use thiserror::Error;
 
-pub const PROTOCOL_VERSION_000_018_000: ProtocolVersion = ProtocolVersion(18_000);
+#[allow(clippy::zero_prefixed_literal)]
+pub const PROTOCOL_VERSION_000_020_000: ProtocolVersion = ProtocolVersion(000_020_000);
 
 /// The runtime specification version of the chain; defaults to 1, i.e. 0.0.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, From)]
@@ -45,12 +46,6 @@ impl ProtocolVersion {
     /// The patch version, i.e. `3` in `1.2.3`.
     pub fn patch(&self) -> u32 {
         self.0 % 1_000
-    }
-}
-
-impl Default for ProtocolVersion {
-    fn default() -> Self {
-        Self(1)
     }
 }
 

@@ -60,6 +60,8 @@ export interface UnshieldedUtxo {
   owner: string;
   intentHash: string;
   value: string;
+  ctime: number | null;
+  registeredForDustGeneration: boolean;
   tokenType: string;
   outputIndex: number;
   createdAtTransaction: Transaction;
@@ -95,6 +97,7 @@ export interface Transaction {
   protocolVersion?: number;
   raw?: string;
   block?: Block;
+  identifiers?: string[];
   contractActions?: ContractAction[];
   unshieldedCreatedOutputs?: UnshieldedUtxo[];
   unshieldedSpentOutputs?: UnshieldedUtxo[];
@@ -170,6 +173,12 @@ export interface UnshieldedTransaction {
   spentUtxos: UnshieldedUtxo[];
 }
 
+export function isUnshieldedTransaction(
+  event: UnshieldedTransactionEvent,
+): event is UnshieldedTransaction {
+  return event.__typename === 'UnshieldedTransaction';
+}
+
 export type ContractAction = ContractDeploy | ContractCall | ContractUpdate;
 
 export interface ContractDeploy {
@@ -213,6 +222,7 @@ export interface DustGenerationStatus {
   nightBalance: string;
   generationRate: string;
   currentCapacity: string;
+  maxCapacity: string;
 }
 
 export interface ZswapLedgerEvent {
@@ -221,9 +231,33 @@ export interface ZswapLedgerEvent {
   maxId: number;
 }
 
-export interface DustLedgerEvent {
-  id: number;
-  raw: string;
-  maxId: number;
-}
+export type DustLedgerEvent =
+  | {
+      __typename: 'ParamChange';
+      id: number;
+      raw: string;
+      maxId: number;
+    }
+  | {
+      __typename: 'DustInitialUtxo';
+      id: number;
+      raw: string;
+      maxId: number;
+      output: {
+        nonce: string;
+      };
+    }
+  | {
+      __typename: 'DustGenerationDtimeUpdate';
+      id: number;
+      raw: string;
+      maxId: number;
+    }
+  | {
+      __typename: 'DustSpendProcessed';
+      id: number;
+      raw: string;
+      maxId: number;
+    };
+
 export type ViewingKey = string & { __brand: 'ViewingKey' };

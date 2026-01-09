@@ -16,12 +16,12 @@ use futures::{Stream, stream};
 use indexer_common::domain::{
     SerializedTransactionIdentifier, SessionId, TransactionHash, UnshieldedAddress,
 };
-use std::{fmt::Debug, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 #[trait_variant::make(Send)]
 pub trait TransactionStorage
 where
-    Self: Debug + Clone + Send + Sync + 'static,
+    Self: Clone + Send + Sync + 'static,
 {
     /// Get a transaction for the given ID.
     async fn get_transaction_by_id(&self, id: u64) -> Result<Option<Transaction>, sqlx::Error>;

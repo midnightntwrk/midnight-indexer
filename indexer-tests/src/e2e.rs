@@ -16,9 +16,10 @@
 use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
-        ContractActionSubscription, DisconnectMutation, DustGenerationStatusQuery,
-        DustLedgerEventsSubscription, ShieldedTransactionsSubscription, TransactionsQuery,
-        UnshieldedTransactionsSubscription, ZswapLedgerEventsSubscription, block_query,
+        ContractActionSubscription, DParameterHistoryQuery, DisconnectMutation,
+        DustGenerationStatusQuery, DustLedgerEventsSubscription, ShieldedTransactionsSubscription,
+        TermsAndConditionsHistoryQuery, TransactionsQuery, UnshieldedTransactionsSubscription,
+        ZswapLedgerEventsSubscription, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
@@ -39,7 +40,7 @@ use anyhow::{Context, bail};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::infra::api::v3::{HexEncodable, viewing_key::ViewingKey};
-use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_018_000};
+use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_020_000};
 use itertools::Itertools;
 use reqwest::Client;
 use serde::Serialize;
@@ -48,7 +49,7 @@ use std::{future::ready, time::Duration};
 use tokio::time::sleep;
 use unshielded_transactions_subscription::UnshieldedTransactionsSubscriptionUnshieldedTransactions as UnshieldedTransactions;
 
-const MAX_HEIGHT: usize = 30;
+const MAX_HEIGHT: usize = 32;
 
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
@@ -98,6 +99,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_dust_generation_status_query(&api_client, &api_url)
         .await
         .context("test dust generation status query")?;
+    test_governance_queries(&api_client, &api_url)
+        .await
+        .context("test governance queries")?;
 
     // Test subscriptions (the block subscription has already been tested above).
     test_contract_actions_subscription(&indexer_data, &ws_api_url)
@@ -265,6 +269,22 @@ impl IndexerData {
                 }})
                 .all(|(call_address, deploy_address)| call_address == deploy_address)
         );
+
+        // Verify that all unshielded balances have valid token_type and amount.
+        assert!(contract_actions.iter().all(|contract_action| {
+            contract_action.unshielded_balances.iter().all(|balance| {
+                // Validate token_type is valid hex (should be 32 bytes = 64 hex chars).
+                let valid_token_type = balance.token_type.as_ref().len() == 64
+                    && balance
+                        .token_type
+                        .as_ref()
+                        .chars()
+                        .all(|c| c.is_ascii_hexdigit());
+                // Validate amount is parseable as u128.
+                let valid_amount = balance.amount.parse::<u128>().is_ok();
+                valid_token_type && valid_amount
+            })
+        }));
 
         // Collect unshielded UTXOs.
         let unshielded_utxos = transactions
@@ -658,6 +678,31 @@ async fn test_dust_generation_status_query(
     Ok(())
 }
 
+/// Test governance queries (D-Parameter and Terms & Conditions history).
+async fn test_governance_queries(api_client: &Client, api_url: &str) -> anyhow::Result<()> {
+    use crate::e2e::graphql::{d_parameter_history_query, terms_and_conditions_history_query};
+
+    // Test D-Parameter history.
+    let variables = d_parameter_history_query::Variables {};
+    let response = send_query::<DParameterHistoryQuery>(api_client, api_url, variables).await?;
+    assert!(!response.d_parameter_history.is_empty());
+    for entry in &response.d_parameter_history {
+        assert!(entry.block_height >= 0);
+    }
+
+    // Test Terms and Conditions history.
+    let variables = terms_and_conditions_history_query::Variables {};
+    let response =
+        send_query::<TermsAndConditionsHistoryQuery>(api_client, api_url, variables).await?;
+    assert!(!response.terms_and_conditions_history.is_empty());
+    for entry in &response.terms_and_conditions_history {
+        assert!(entry.block_height >= 0);
+        assert!(!entry.url.is_empty());
+    }
+
+    Ok(())
+}
+
 /// Test the contract action subscription.
 async fn test_contract_actions_subscription(
     indexer_data: &IndexerData,
@@ -738,7 +783,7 @@ async fn test_shielded_transactions_subscription(
     network_id: &NetworkId,
 ) -> anyhow::Result<()> {
     let session_id = ViewingKey::from(viewing_key(network_id))
-        .try_into_domain(network_id, PROTOCOL_VERSION_000_018_000)?
+        .try_into_domain(network_id, PROTOCOL_VERSION_000_020_000)?
         .to_session_id()
         .hex_encode();
 
@@ -931,8 +976,12 @@ fn viewing_key(network_id: &NetworkId) -> &'static str {
         "undeployed" => {
             "mn_shield-esk_undeployed1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs9ete5h"
         }
-        "dev" => "mn_shield-esk_dev1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsp7rsx2",
-        "test" => "mn_shield-esk_test1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsuv0u5j",
+        "devnet" => {
+            "mn_shield-esk_devnet1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs64mtz0"
+        }
+        "testnet" => {
+            "mn_shield-esk_testnet1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs8fw0p6"
+        }
         "mainnet" => "mn_shield-esk1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcsucf6ww",
         other => panic!("unexpected network ID {other}"),
     }
@@ -941,8 +990,8 @@ fn viewing_key(network_id: &NetworkId) -> &'static str {
 mod graphql {
     use graphql_client::GraphQLQuery;
     use indexer_api::infra::api::v3::{
-        CardanoRewardAddress, HexEncoded, mutation::Unit, unshielded::UnshieldedAddress,
-        viewing_key::ViewingKey,
+        CardanoRewardAddress, HexEncoded, dust::DustAddress, mutation::Unit,
+        unshielded::UnshieldedAddress, viewing_key::ViewingKey,
     };
 
     #[derive(GraphQLQuery)]
@@ -1040,4 +1089,20 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct DustGenerationStatusQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DParameterHistoryQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct TermsAndConditionsHistoryQuery;
 }

@@ -19,11 +19,25 @@
 use crate::{
     domain,
     infra::api::v3::{
-        CardanoNetwork, CardanoRewardAddress, HexEncodable, HexEncoded,
-        encode_cardano_reward_address,
+        AddressType, CardanoNetworkId, CardanoRewardAddress, HexEncodable, HexEncoded,
+        encode_address, encode_cardano_reward_address,
     },
 };
-use async_graphql::SimpleObject;
+use async_graphql::{SimpleObject, scalar};
+use indexer_common::domain::NetworkId;
+use serde::{Deserialize, Serialize};
+
+/// Bech32m-encoded DUST address.
+/// The format depends on the network ID:
+/// - Mainnet: `mn_dust` + bech32m data (no network ID suffix)
+/// - Other networks: `mn_dust_` + network-id + bech32m data
+///
+/// DUST addresses are variable length (up to 33 bytes) as they encode a
+/// Scale-encoded compact bigint representing the DUST public key.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DustAddress(pub String);
+
+scalar!(DustAddress);
 
 /// DUST generation status for a specific Cardano reward address.
 #[derive(Debug, Clone, SimpleObject)]
@@ -31,37 +45,52 @@ pub struct DustGenerationStatus {
     /// The Bech32-encoded Cardano reward address (e.g., stake_test1... or stake1...).
     pub cardano_reward_address: CardanoRewardAddress,
 
-    /// The hex-encoded associated DUST address if registered.
-    pub dust_address: Option<HexEncoded>,
+    /// The Bech32m-encoded associated DUST address if registered.
+    pub dust_address: Option<DustAddress>,
 
     /// Whether this reward address is registered.
     pub registered: bool,
 
-    /// NIGHT balance backing generation.
+    /// NIGHT balance backing generation in STAR.
     pub night_balance: String,
 
-    /// Generation rate in Specks per second.
+    /// DUST generation rate in SPECK per second.
     pub generation_rate: String,
 
-    /// Current DUST capacity.
+    /// Maximum DUST capacity in SPECK.
+    pub max_capacity: String,
+
+    /// Current generated DUST capacity in SPECK.
     pub current_capacity: String,
+
+    /// Cardano UTXO transaction hash for update/unregister operations.
+    pub utxo_tx_hash: Option<HexEncoded>,
+
+    /// Cardano UTXO output index for update/unregister operations.
+    pub utxo_output_index: Option<u32>,
 }
 
-impl From<domain::DustGenerationStatus> for DustGenerationStatus {
-    fn from(status: domain::DustGenerationStatus) -> Self {
-        // TODO: Make the cardano network configurable!
+impl From<(domain::DustGenerationStatus, &NetworkId)> for DustGenerationStatus {
+    fn from((status, network_id): (domain::DustGenerationStatus, &NetworkId)) -> Self {
+        let cardano_network_id = CardanoNetworkId::from(network_id);
         let cardano_reward_address = CardanoRewardAddress(encode_cardano_reward_address(
             status.cardano_reward_address,
-            CardanoNetwork::Testnet,
+            cardano_network_id,
         ));
+        let dust_address = status
+            .dust_address
+            .map(|addr| DustAddress(encode_address(addr, AddressType::Dust, network_id)));
 
         Self {
             cardano_reward_address,
-            dust_address: status.dust_address.map(|addr| addr.hex_encode()),
+            dust_address,
             registered: status.registered,
             night_balance: status.night_balance.to_string(),
             generation_rate: status.generation_rate.to_string(),
+            max_capacity: status.max_capacity.to_string(),
             current_capacity: status.current_capacity.to_string(),
+            utxo_tx_hash: status.utxo_tx_hash.map(|h| h.hex_encode()),
+            utxo_output_index: status.utxo_output_index,
         }
     }
 }

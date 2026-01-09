@@ -28,7 +28,8 @@ async fn main() {
     if let Err(error) = run().await {
         let backtrace = error.backtrace();
         let error = format!("{error:#}");
-        error!(error, backtrace:%; "process exited with ERROR")
+        error!(error, backtrace:%; "process exited with ERROR");
+        std::process::exit(1);
     }
 }
 
@@ -88,26 +89,19 @@ async fn run() -> anyhow::Result<()> {
             .await
             .context("run Postgres migrations")?;
     }
-    let storage = infra::storage::Storage::new(pool);
 
     let ledger_state_storage =
         ledger_state_storage::nats::NatsLedgerStateStorage::new(ledger_state_storage_config)
             .await
             .context("create NatsZswapStateStorage")?;
 
+    let storage = infra::storage::Storage::new(pool, ledger_state_storage);
+
     let publisher = pub_sub::nats::publisher::NatsPublisher::new(pub_sub_config)
         .await
         .context("create NatsPublisher")?;
 
-    application::run(
-        application_config,
-        node,
-        storage,
-        ledger_state_storage,
-        publisher,
-        sigterm,
-    )
-    .await
+    application::run(application_config, node, storage, publisher, sigterm).await
 }
 
 #[cfg(not(feature = "cloud"))]

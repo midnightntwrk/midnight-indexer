@@ -1,8 +1,0 @@
-{
-  // A cardano address that is registered for dust production
-  "registered-with-dust": "D398B5878FECF30DD21C96559140080E6380440AAEFF285F01187161DA2B596A",
-  // A cardano address that is registered for dust production, but has no dust
-  "registered-without-dust": "0000000000000000000000000000000000000000000000000000000000000002",
-  // A cardano address that is not registered
-  "non-registered": "0000000000000000000000000000000000000000000000000000000000000003"
-}

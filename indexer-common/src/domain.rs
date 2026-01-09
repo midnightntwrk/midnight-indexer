@@ -38,13 +38,13 @@ pub type BlockHash = ByteArray<32>;
 pub type IntentHash = ByteArray<32>;
 pub type Nonce = ByteArray<32>;
 pub type SessionId = ByteArray<32>;
+pub type TermsAndConditionsHash = ByteArray<32>;
 pub type TokenType = ByteArray<32>;
 pub type TransactionHash = ByteArray<32>;
 pub type UnshieldedAddress = ByteArray<32>;
 
 // DUST-specific types for dustGenerationStatus query.
-pub type DustOwner = ByteArray<32>;
-pub type DustAddress = ByteArray<33>;
+pub type DustPublicKey = ByteVec;
 pub type CardanoRewardAddress = ByteArray<29>;
 pub type NightUtxoHash = ByteArray<32>;
 pub type DustUtxoId = ByteVec;
@@ -321,4 +321,28 @@ pub struct DustOutput {
 pub enum LedgerEventGrouping {
     Zswap,
     Dust,
+}
+
+#[derive(Debug, Clone, Copy, Default, Type)]
+#[cfg_attr(feature = "cloud", sqlx(type_name = "AB_SELECTOR"))]
+pub enum ABSelector {
+    #[default]
+    A,
+    B,
+}
+
+impl ABSelector {
+    pub fn toggle(self) -> Self {
+        match self {
+            ABSelector::A => ABSelector::B,
+            ABSelector::B => ABSelector::A,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ABSelector::A => "A",
+            ABSelector::B => "B",
+        }
+    }
 }

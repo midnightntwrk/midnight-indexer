@@ -12,16 +12,16 @@
 // limitations under the License.
 
 use crate::domain::{
-    ByteArray, PROTOCOL_VERSION_000_018_000, ProtocolVersion, VIEWING_KEY_LEN, ledger::Error,
+    ByteArray, PROTOCOL_VERSION_000_020_000, ProtocolVersion, VIEWING_KEY_LEN, ledger::Error,
 };
 use fastrace::trace;
-use midnight_serialize_v6::Deserializable as DeserializableV6;
-use midnight_transient_crypto_v6::encryption::SecretKey as SecretKeyV6;
+use midnight_serialize_v7_0_0::Deserializable as DeserializableV7_0_0;
+use midnight_transient_crypto_v7_0_0::encryption::SecretKey as SecretKeyV7_0_0;
 
 /// Facade for `SecretKey` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum SecretKey {
-    V6(SecretKeyV6),
+    V7_0_0(SecretKeyV7_0_0),
 }
 
 impl SecretKey {
@@ -31,10 +31,10 @@ impl SecretKey {
         secret_key: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_018_000) {
-            let secret_key = SecretKeyV6::deserialize(&mut secret_key.as_ref(), 0)
-                .map_err(|error| Error::Io("cannot deserialize SecretKeyV6", error))?;
-            Ok(Self::V6(secret_key))
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
+            let secret_key = SecretKeyV7_0_0::deserialize(&mut secret_key.as_ref(), 0)
+                .map_err(|error| Error::Deserialize("SecretKeyV7_0_0", error))?;
+            Ok(Self::V7_0_0(secret_key))
         } else {
             Err(Error::InvalidProtocolVersion(protocol_version))
         }
@@ -43,7 +43,7 @@ impl SecretKey {
     /// Get the repr of this secret key.
     pub fn expose_secret(&self) -> ByteArray<VIEWING_KEY_LEN> {
         match self {
-            Self::V6(secret_key) => secret_key.repr().into(),
+            Self::V7_0_0(secret_key) => secret_key.repr().into(),
         }
     }
 }

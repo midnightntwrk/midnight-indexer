@@ -20,6 +20,18 @@ import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
 import { getContractDeploymentHashes } from '../../tests/e2e/test-utils';
+import { z } from 'zod';
+import {
+  Coin,
+  DustBalance,
+  DustBalanceSchema,
+  DustOutput,
+  PrivateWalletState,
+  PrivateWalletStateSchema,
+  PublicWalletState,
+  PublicWalletStateSchema,
+  Utxo,
+} from './schemas';
 
 export type AddressType = 'shielded' | 'unshielded';
 
@@ -43,6 +55,7 @@ interface ToolkitConfig {
   targetDir?: string;
   chain?: string;
   nodeTag?: string;
+  nodeToolkitTag?: string;
   syncCacheDir?: string;
   coinSeed?: string;
   warmupCache?: boolean;
@@ -118,27 +131,137 @@ class ToolkitWrapper {
     };
   }
 
+  /**
+   * Parse and validate the first valid JSON object from an array of JSON strings using a Zod schema.
+   *
+   * @param jsonObjects - Array of JSON strings to parse and validate
+   * @param schema - Zod schema to validate against
+   * @returns The first valid parsed object, or null if none match
+   */
+  private parseFirstValid<T>(jsonObjects: string[], schema: z.ZodSchema<T>): T | null {
+    for (const jsonString of jsonObjects) {
+      try {
+        const parsed: unknown = JSON.parse(jsonString);
+        const result = schema.safeParse(parsed);
+        if (result.success) {
+          return result.data;
+        }
+      } catch {
+        // Invalid JSON or schema validation failed, try next object
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Parse wallet state from toolkit output.
+   * This helper method extracts JSON objects and validates the wallet state structure.
+   *
+   * @param output - The raw output from the toolkit command
+   * @param stateType - The type of wallet state being parsed ('private' or 'public')
+   * @returns The parsed wallet state object
+   * @throws Error if no valid wallet state structure is found
+   */
+  private parseWalletState(
+    output: string,
+    stateType: 'private' | 'public',
+  ): PrivateWalletState | PublicWalletState {
+    const jsonObjects = this.extractJsonObjects(output);
+
+    if (jsonObjects.length === 0) {
+      throw new Error(
+        `Could not find any JSON objects in show-wallet output. Output: ${output.substring(0, 500)}...`,
+      );
+    }
+
+    const schema = stateType === 'private' ? PrivateWalletStateSchema : PublicWalletStateSchema;
+    const walletState = this.parseFirstValid(jsonObjects, schema);
+
+    if (!walletState) {
+      throw new Error(
+        `Could not find expected ${stateType} wallet state structure in output. Found ${jsonObjects.length} JSON object(s).`,
+      );
+    }
+
+    return walletState;
+  }
+
+  /**
+   * Extract all JSON objects from a string that may contain text and multiple JSON objects.
+   * This helper method finds complete JSON objects by matching braces.
+   *
+   * @param output - The output string that may contain JSON objects
+   * @returns An array of JSON strings, each representing a complete JSON object
+   */
+  private extractJsonObjects(output: string): string[] {
+    const jsonObjects: string[] = [];
+    let startIndex = 0;
+
+    while (startIndex < output.length) {
+      const braceIndex = output.indexOf('{', startIndex);
+      if (braceIndex === -1) break;
+
+      // Extract from this '{' and find the matching closing brace
+      let braceCount = 0;
+      let endIndex = -1;
+      for (let i = braceIndex; i < output.length; i++) {
+        if (output[i] === '{') {
+          braceCount++;
+        } else if (output[i] === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            endIndex = i + 1;
+            break;
+          }
+        }
+      }
+
+      if (endIndex > 0) {
+        const jsonString = output.substring(braceIndex, endIndex);
+        jsonObjects.push(jsonString);
+        startIndex = endIndex;
+      } else {
+        break;
+      }
+    }
+
+    return jsonObjects;
+  }
+
   constructor(config: ToolkitConfig) {
     this.config = config;
 
     const randomId = Math.random().toString(36).slice(2, 12);
 
-    const envName = env.getEnvName();
+    const envName = env.getCurrentEnvironmentName();
 
     this.config.containerName = config.containerName || `mn-toolkit-${envName}-${randomId}`;
     this.config.targetDir = config.targetDir || resolve('./.tmp/toolkit');
     this.config.nodeTag = config.nodeTag || env.getNodeVersion();
+    this.config.nodeToolkitTag =
+      config.nodeToolkitTag || process.env.NODE_TOOLKIT_TAG || 'latest-main';
     this.config.warmupCache = config.warmupCache || false;
 
     // Ensure the target directory exists
     if (!fs.existsSync(this.config.targetDir)) {
       fs.mkdirSync(this.config.targetDir, { recursive: true });
-      log.debug(`Created target directory: ${this.config.targetDir}`);
+      console.debug(`[SETUP]Created target directory: ${this.config.targetDir}`);
     }
 
-    // This block is making sure that if we explicitly provide a target dir
+    // This block is making sure that if a golden cache directory is available, we use it.
     if (this.config.warmupCache) {
+      log.debug('Warmup cache is enabled, using the golden cache directory');
       this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${envName}`;
+
+      // Check if there is any .bin file in the golden cache directory
+      if (
+        fs.existsSync(this.config.syncCacheDir) &&
+        fs.readdirSync(this.config.syncCacheDir).some((file) => file.endsWith('.bin'))
+      ) {
+        console.debug(`[SETUP] Golden cache file found at: ${this.config.syncCacheDir}, using it`);
+      } else {
+        console.debug(`[SETUP] Golden cache directory not found at: ${this.config.syncCacheDir}`);
+      }
     } else {
       this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${envName}-${randomId}`;
       // copy the golden sync cache directory to the instance-specific cache
@@ -158,13 +281,14 @@ class ToolkitWrapper {
       );
     }
 
-    log.debug(`Toolkit container name   : ${this.config.containerName}`);
-    log.debug(`Toolkit target dir       : ${this.config.targetDir}`);
-    log.debug(`Toolkit node/toolkit tag : ${this.config.nodeTag}`);
-    log.debug(`Toolkit sync cache dir   : ${this.config.syncCacheDir}`);
+    log.debug(`NODE_TAG         : ${this.config.nodeTag}`);
+    log.debug(`NODE_TOOLKIT_TAG : ${this.config.nodeToolkitTag}`);
+    log.debug(`Toolkit target dir     : ${this.config.targetDir}`);
+    log.debug(`Toolkit container name : ${this.config.containerName}`);
+    log.debug(`Toolkit sync cache dir : ${this.config.syncCacheDir}`);
 
     this.container = new GenericContainer(
-      `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeTag}`,
+      `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`,
     )
       .withName(this.config.containerName)
       .withNetworkMode('host') // equivalent to --network host
@@ -176,7 +300,7 @@ class ToolkitWrapper {
         },
         {
           source: this.config.syncCacheDir,
-          target: `/.sync_cache`,
+          target: `/.cache/sync`,
         },
       ])
       .withCommand(['sleep', 'infinity']); // equivalent to sleep infinity
@@ -247,16 +371,21 @@ class ToolkitWrapper {
     }
 
     // We use generate single tx to warm up the cache because it will try to sync the cache
-    // before it gets to validate the arguments that are explicitly wrong.
+    // before it gets to validate the arguments that are wrong on purpose.
+    let output: ToolkitTransactionResult;
     try {
-      await this.generateSingleTx(
+      output = await this.generateSingleTx(
         '0'.repeat(64), // Invalid seed
         'unshielded',
         (await this.showAddress('0'.repeat(63) + '9')).unshielded,
         1,
       );
+      console.debug(`[SETUP] Warmup cache output:\n${JSON.stringify(output, null, 2)}`);
     } catch (_error) {
-      // Do nothing as we are actually expecting an error
+      log.debug(
+        'Heads up, we are expecting an error here, the following log message is only reported for debugging purposes',
+      );
+      console.debug(`${_error}`);
     }
   }
 
@@ -320,6 +449,163 @@ class ToolkitWrapper {
     }
 
     return result.output.trim();
+  }
+
+  /**
+   * Execute show-wallet command and parse the result.
+   * This helper method handles the common logic for both private and public wallet state queries.
+   *
+   * @param flag - The flag to use ('--seed' or '--address')
+   * @param value - The value for the flag (seed or address)
+   * @param stateType - The type of wallet state ('private' or 'public')
+   * @param logPrefix - Prefix for log messages
+   * @returns The parsed wallet state object
+   * @throws Error if the container is not started or if the command fails
+   */
+  private async executeShowWallet(
+    flag: '--seed' | '--address',
+    value: string,
+    stateType: 'private' | 'public',
+    logPrefix: string,
+  ): Promise<PrivateWalletState | PublicWalletState> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    log.debug(`${logPrefix}: ${value.substring(0, flag === '--seed' ? 8 : 20)}...`);
+
+    const result = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'show-wallet',
+      flag,
+      value,
+    ]);
+
+    if (result.exitCode !== 0) {
+      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
+      throw new Error(
+        `Toolkit show-wallet command failed with exit code ${result.exitCode}: ${errorMessage}`,
+      );
+    }
+
+    // Parse the output to extract the JSON object(s)
+    // The output may contain text before the JSON (e.g., "fetching 0x...", "sync cache...")
+    const output = result.output.trim();
+    return this.parseWalletState(output, stateType);
+  }
+
+  /**
+   * Show private wallet state from a wallet seed.
+   * This method queries the private wallet state including coins, UTXOs, and dust UTXOs.
+   *
+   * @param walletSeed - The wallet seed to query private wallet state for (required)
+   *
+   * @returns A promise that resolves to the private wallet state object containing coins, utxos, and dust_utxos.
+   * @throws Error if the container is not started or if the show-wallet command fails.
+   */
+  async showPrivateWalletState(walletSeed: string): Promise<PrivateWalletState> {
+    return (await this.executeShowWallet(
+      '--seed',
+      walletSeed,
+      'private',
+      'Querying private wallet state for wallet seed',
+    )) as PrivateWalletState;
+  }
+
+  /**
+   * Show public wallet state from a wallet address.
+   * This method queries the public wallet state for the specified address.
+   *
+   * @param walletAddress - The wallet address to query public wallet state for (required)
+   *
+   * @returns A promise that resolves to the public wallet state object.
+   * @throws Error if the container is not started or if the show-wallet command fails.
+   */
+  async showPublicWalletState(walletAddress: string): Promise<PublicWalletState> {
+    return (await this.executeShowWallet(
+      '--address',
+      walletAddress,
+      'public',
+      'Querying public wallet state for wallet address',
+    )) as PublicWalletState;
+  }
+
+  /**
+   * Get DUST balance for a wallet seed.
+   * This method queries the current DUST balance and generation information for the specified wallet.
+   * The toolkit output may contain a full structure with generation_infos, source, and total,
+   * or only a source object (map of nonces to values). In the latter case, the method constructs
+   * a DustBalance object with empty generation_infos and calculates the total from source values.
+   *
+   * @param walletSeed - The wallet seed to query DUST balance for (required)
+   *
+   * @returns A promise that resolves to the dust balance object containing generation_infos, source, and total.
+   *          The total field can be accessed directly: `const balance = await toolkit.getDustBalance(seed); const total = balance.total;`
+   * @throws Error if the container is not started or if the dust-balance command fails.
+   */
+  async getDustBalance(walletSeed: string): Promise<DustBalance> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    log.debug(`Querying dust balance for wallet seed: ${walletSeed.substring(0, 8)}...`);
+
+    const result = await this.startedContainer.exec([
+      '/midnight-node-toolkit',
+      'dust-balance',
+      '--seed',
+      walletSeed,
+    ]);
+
+    if (result.exitCode !== 0) {
+      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
+      throw new Error(
+        `Toolkit dust-balance command failed with exit code ${result.exitCode}: ${errorMessage}`,
+      );
+    }
+
+    // Parse the output to extract the JSON object(s)
+    // The output may contain text before the JSON, and may have multiple JSON objects
+    const output = result.output.trim();
+    const jsonObjects = this.extractJsonObjects(output);
+
+    if (jsonObjects.length === 0) {
+      throw new Error(
+        `Could not find any JSON objects in dust-balance output. Output: ${output.substring(0, 500)}...`,
+      );
+    }
+
+    // Try to find the JSON object with the expected structure using schema validation
+    const fullObject = this.parseFirstValid(jsonObjects, DustBalanceSchema);
+
+    if (fullObject) {
+      return fullObject;
+    }
+
+    // If we didn't find the full structure, check if we have just the source object
+    // The toolkit may output only the source object, in which case we construct the response
+    const lastJsonString = jsonObjects[jsonObjects.length - 1];
+    try {
+      const parsed: unknown = JSON.parse(lastJsonString);
+      const sourceValidation = DustBalanceSchema.shape.source.safeParse(parsed);
+
+      if (sourceValidation.success && sourceValidation.data) {
+        const total = Object.values(sourceValidation.data).reduce((sum, val) => sum + val, 0);
+        return {
+          generation_infos: [],
+          source: sourceValidation.data,
+          total: total,
+        };
+      }
+    } catch {
+      log.error(
+        `Could not find expected dust balance structure in output. Found ${jsonObjects.length} JSON object(s).`,
+      );
+    }
+
+    throw new Error(
+      `Could not find expected dust balance structure in output. Found ${jsonObjects.length} JSON object(s).`,
+    );
   }
 
   /**
@@ -572,3 +858,4 @@ class ToolkitWrapper {
 }
 
 export { ToolkitWrapper, ToolkitConfig };
+export type { Coin, DustBalance, DustOutput, PrivateWalletState, PublicWalletState, Utxo };

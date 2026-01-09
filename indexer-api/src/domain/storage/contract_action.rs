@@ -16,12 +16,12 @@ use futures::{Stream, stream};
 use indexer_common::domain::{
     BlockHash, SerializedContractAddress, SerializedTransactionIdentifier, TransactionHash,
 };
-use std::{fmt::Debug, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 #[trait_variant::make(Send)]
 pub trait ContractActionStorage
 where
-    Self: Debug + Clone + Send + Sync + 'static,
+    Self: Clone + Send + Sync + 'static,
 {
     /// Get the contract deploy for the given address.
     async fn get_contract_deploy_by_address(

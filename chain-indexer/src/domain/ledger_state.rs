@@ -16,7 +16,7 @@ use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, NetworkId,
-    SerializedTransaction, TransactionHash, TransactionVariant,
+    SerializedContractAddress, SerializedTransaction, TransactionHash, TransactionVariant,
     ledger::{self, LedgerParameters},
 };
 use std::ops::DerefMut;
@@ -60,7 +60,9 @@ impl LedgerState {
             }
         }
 
-        let ledger_parameters = self.post_apply_transactions(block_timestamp)?;
+        let ledger_parameters = self
+            .finalize_apply_transactions(block_timestamp)
+            .map_err(Error::PostApplyTransactions)?;
 
         Ok(ledger_parameters)
     }
@@ -75,12 +77,24 @@ impl LedgerState {
     ) -> Result<(Vec<Transaction>, LedgerParameters), Error> {
         let transactions = transactions
             .into_iter()
-            .map(|transaction| {
-                self.apply_node_transaction(transaction, block_parent_hash, block_timestamp)
+            .map(|transaction| match transaction {
+                node::Transaction::Regular(transaction) => self.apply_regular_node_transaction(
+                    transaction,
+                    block_parent_hash,
+                    block_timestamp,
+                ),
+
+                node::Transaction::System(transaction) => self.apply_system_node_transaction(
+                    transaction,
+                    block_parent_hash,
+                    block_timestamp,
+                ),
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let ledger_parameters = self.post_apply_transactions(block_timestamp)?;
+        let ledger_parameters = self
+            .finalize_apply_transactions(block_timestamp)
+            .map_err(Error::PostApplyTransactions)?;
 
         Ok((transactions, ledger_parameters))
     }
@@ -88,27 +102,6 @@ impl LedgerState {
     /// The highest used zswap state index or none.
     pub fn highest_zswap_state_index(&self) -> Option<u64> {
         (self.zswap_first_free() != 0).then(|| self.zswap_first_free() - 1)
-    }
-
-    #[trace(properties = {
-        "block_parent_hash": "{block_parent_hash}",
-        "block_timestamp": "{block_timestamp}"
-    })]
-    fn apply_node_transaction(
-        &mut self,
-        transaction: node::Transaction,
-        block_parent_hash: BlockHash,
-        block_timestamp: u64,
-    ) -> Result<Transaction, Error> {
-        match transaction {
-            node::Transaction::Regular(transaction) => {
-                self.apply_regular_node_transaction(transaction, block_parent_hash, block_timestamp)
-            }
-
-            node::Transaction::System(transaction) => {
-                self.apply_system_node_transaction(transaction, block_parent_hash, block_timestamp)
-            }
-        }
     }
 
     #[trace(properties = {
@@ -136,7 +129,10 @@ impl LedgerState {
 
         // Update transaction.
         transaction.transaction_result = transaction_result;
-        transaction.merkle_tree_root = self.zswap_merkle_tree_root().serialize()?;
+        transaction.merkle_tree_root = self
+            .zswap_merkle_tree_root()
+            .serialize()
+            .map_err(|error| Error::SerializeMerkleTreeRoot(transaction.hash, error))?;
         transaction.start_index = start_index;
         transaction.end_index = self.zswap_first_free();
         transaction.created_unshielded_utxos = created_unshielded_utxos;
@@ -145,18 +141,33 @@ impl LedgerState {
 
         // Update contract actions.
         for contract_action in transaction.contract_actions.iter_mut() {
-            let zswap_state = self.extract_contract_zswap_state(&contract_action.address)?;
+            let zswap_state = self
+                .extract_contract_zswap_state(&contract_action.address)
+                .map_err(|error| Error::ExtractContractZswapState(transaction.hash, error))?;
             contract_action.zswap_state = zswap_state;
-        }
 
-        // Update extracted balances of contract actions.
-        for contract_action in &mut transaction.contract_actions {
-            let contract_state = ledger::ContractState::deserialize(
-                &contract_action.state,
-                transaction.protocol_version,
-            )?;
-            let balances = contract_state.balances()?;
-            contract_action.extracted_balances = balances;
+            // TODO: Workaround until we filter failed contract actions (empty state means failed).
+            if !contract_action.state.is_empty() {
+                let contract_state = ledger::ContractState::deserialize(
+                    &contract_action.state,
+                    transaction.protocol_version,
+                )
+                .map_err(|error| {
+                    Error::DeserializeContractState(
+                        transaction.hash,
+                        contract_action.address.clone(),
+                        error,
+                    )
+                })?;
+                let balances = contract_state.balances().map_err(|error| {
+                    Error::GetContractBalances(
+                        transaction.hash,
+                        contract_action.address.clone(),
+                        error,
+                    )
+                })?;
+                contract_action.extracted_balances = balances;
+            }
         }
 
         Ok(Transaction::Regular(transaction.into()))
@@ -204,8 +215,34 @@ pub enum Error {
         #[source] indexer_common::domain::ledger::Error,
     ),
 
-    #[error(transparent)]
-    Ledger(#[from] indexer_common::domain::ledger::Error),
+    #[error("cannot finalize transaction application")]
+    PostApplyTransactions(#[source] indexer_common::domain::ledger::Error),
+
+    #[error("cannot serialize merkle tree root for transaction {0}")]
+    SerializeMerkleTreeRoot(
+        TransactionHash,
+        #[source] indexer_common::domain::ledger::Error,
+    ),
+
+    #[error("cannot extract contract zswap state for transaction {0}")]
+    ExtractContractZswapState(
+        TransactionHash,
+        #[source] indexer_common::domain::ledger::Error,
+    ),
+
+    #[error("cannot deserialize contract state for transaction {0} and contract address {1}")]
+    DeserializeContractState(
+        TransactionHash,
+        SerializedContractAddress,
+        #[source] indexer_common::domain::ledger::Error,
+    ),
+
+    #[error("cannot get contract balances for transaction {0} and contract address {1}")]
+    GetContractBalances(
+        TransactionHash,
+        SerializedContractAddress,
+        #[source] indexer_common::domain::ledger::Error,
+    ),
 }
 
 fn stringify_hash(hash: &Option<TransactionHash>) -> String {

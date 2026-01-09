@@ -25,8 +25,10 @@ export interface UnshieldedUtxo {
   owner: string;
   intentHash: string;
   value: string;
+  ctime?: number;
   tokenType: string;
   outputIndex: number;
+  registeredForDustGeneration: boolean;
   createdAtTransaction: Transaction;
   spentAtTransaction: Transaction;
 }

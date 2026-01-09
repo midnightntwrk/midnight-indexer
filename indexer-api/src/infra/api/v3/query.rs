@@ -12,14 +12,15 @@
 // limitations under the License.
 
 use crate::{
-    domain::storage::Storage,
+    domain::{LATEST_PROTOCOL_VERSION, storage::Storage},
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
         v3::{
-            CardanoRewardAddress, HexEncoded,
+            CardanoNetworkId, CardanoRewardAddress, HexEncoded,
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
             dust::DustGenerationStatus,
+            system_parameters::{DParameterChange, TermsAndConditionsChange},
             transaction::{Transaction, TransactionOffset},
         },
     },
@@ -215,19 +216,56 @@ where
             .some_or_client_error(|| "maximum of ten reward addresses allowed")?;
 
         let storage = cx.get_storage::<S>();
+        let network_id = cx.get_network_id();
+        let expected_cardano_network = CardanoNetworkId::from(network_id);
 
-        // Convert Bech32 CardanoRewardAddress to binary.
+        // Convert Bech32 CardanoRewardAddress to binary, validating network.
         let address = cardano_reward_addresses
             .into_iter()
-            .map(|key| key.decode())
+            .map(|key| key.decode_for_network(expected_cardano_network))
             .collect::<Result<Vec<_>, _>>()
             .map_err_into_client_error(|| "invalid Cardano reward address")?;
 
         let status_list = storage
-            .get_dust_generation_status(&address)
+            .get_dust_generation_status(&address, LATEST_PROTOCOL_VERSION)
             .await
             .map_err_into_server_error(|| "get DUST generation status")?;
 
-        Ok(status_list.into_iter().map(Into::into).collect())
+        Ok(status_list
+            .into_iter()
+            .map(|s| (s, network_id).into())
+            .collect())
+    }
+
+    /// Get the full history of D-parameter changes for governance auditability.
+    #[trace]
+    async fn d_parameter_history(&self, cx: &Context<'_>) -> ApiResult<Vec<DParameterChange>> {
+        let storage = cx.get_storage::<S>();
+
+        let history = storage
+            .get_d_parameter_history()
+            .await
+            .map_err_into_server_error(|| "get D-parameter history")?;
+
+        Ok(history.into_iter().map(DParameterChange::from).collect())
+    }
+
+    /// Get the full history of Terms and Conditions changes for governance auditability.
+    #[trace]
+    async fn terms_and_conditions_history(
+        &self,
+        cx: &Context<'_>,
+    ) -> ApiResult<Vec<TermsAndConditionsChange>> {
+        let storage = cx.get_storage::<S>();
+
+        let history = storage
+            .get_terms_and_conditions_history()
+            .await
+            .map_err_into_server_error(|| "get Terms and Conditions history")?;
+
+        Ok(history
+            .into_iter()
+            .map(TermsAndConditionsChange::from)
+            .collect())
     }
 }

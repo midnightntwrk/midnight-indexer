@@ -16,7 +16,7 @@ mod metrics;
 use crate::{
     application::metrics::Metrics,
     domain::{
-        LedgerState, Transaction,
+        Block, LedgerState, SystemParametersChange, Transaction,
         node::{self, BlockInfo, Node},
         storage::Storage,
     },
@@ -26,10 +26,7 @@ use async_stream::stream;
 use byte_unit::{Byte, UnitType};
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
-use indexer_common::domain::{
-    BlockIndexed, LedgerStateStorage, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxoIndexed,
-    ledger,
-};
+use indexer_common::domain::{BlockIndexed, NetworkId, Publisher, UnshieldedUtxoIndexed, ledger};
 use log::{debug, error, info, warn};
 use parking_lot::RwLock;
 use serde::Deserialize;
@@ -56,8 +53,7 @@ pub struct Config {
 pub async fn run(
     config: Config,
     node: impl Node,
-    storage: impl Storage,
-    mut ledger_state_storage: impl LedgerStateStorage,
+    mut storage: impl Storage,
     publisher: impl Publisher,
     mut sigterm: Signal,
 ) -> anyhow::Result<()> {
@@ -69,13 +65,13 @@ pub async fn run(
         caught_up_leeway,
     } = config;
 
-    // Initialize highes block.
-    let highest_block = storage
+    // Initialize highest block info.
+    let highest_block_info = storage
         .get_highest_block_info()
         .await
         .context("get highest block")?;
-    let highest_height = highest_block.map(|b| b.height);
-    info!(highest_height:?; "starting indexing");
+    let highest_block_height = highest_block_info.map(|info| info.height);
+    info!(highest_block_height:?; "starting indexing");
 
     // Initialize metrics.
     let transaction_count = storage
@@ -86,11 +82,15 @@ pub async fn run(
         .get_contract_action_count()
         .await
         .context("get contract action count")?;
-    let metrics = Metrics::new(highest_height, transaction_count, contract_action_count);
+    let metrics = Metrics::new(
+        highest_block_height,
+        transaction_count,
+        contract_action_count,
+    );
 
     // Load ledger state.
-    let (mut ledger_state, mut ledger_state_block_height) = ledger_state_storage
-        .load_ledger_state()
+    let (mut ledger_state, mut ledger_state_block_height) = storage
+        .get_ledger_state()
         .await
         .context("load ledger state")?
         .map(|(ledger_state, block_height, protocol_version)| {
@@ -99,26 +99,26 @@ pub async fn run(
             Ok::<_, anyhow::Error>((ledger_state.into(), Some(block_height)))
         })
         .transpose()?
-        .unwrap_or_else(|| (LedgerState::new(network_id.clone()), Default::default()));
+        .unwrap_or_else(|| (LedgerState::new(network_id.clone()), None));
 
     // Reset ledger state if storage is behind ledger state storage (which should not happen during
     // normal operations, but e.g. by a database reset).
-    if ledger_state_block_height > highest_height {
+    if ledger_state_block_height > highest_block_height {
         ledger_state_block_height = None;
         ledger_state = LedgerState::new(network_id);
     }
 
-    // Apply the transactions to the ledger state from the saved ledger state height (exclusively)
-    // to the highest saved block height (inclusively); also save the ledger state thereafter.
-    if let Some(highest_height) = highest_height {
+    // Apply transactions to ledger state from saved ledger state block height (exclusively) to
+    // highest saved block height (inclusively); save ledger state thereafter.
+    if let Some(highest_block_height) = highest_block_height {
         let ledger_state_block_height = ledger_state_block_height.unwrap_or_default();
 
-        if ledger_state_block_height < highest_height {
-            debug!(ledger_state_block_height, highest_height; "updating ledger state");
+        if ledger_state_block_height < highest_block_height {
+            debug!(ledger_state_block_height, highest_block_height; "updating ledger state");
 
-            let mut protocol_version = ProtocolVersion::default();
+            let mut protocol_version = None;
 
-            for block_height in (ledger_state_block_height + 1)..=highest_height {
+            for block_height in (ledger_state_block_height + 1)..=highest_block_height {
                 let block_transactions = storage
                     .get_block_transactions(block_height)
                     .await
@@ -134,19 +134,15 @@ pub async fn run(
                         format!("apply transactions for block at height {block_height}")
                     })?;
 
-                if block_height == highest_height {
-                    protocol_version = block_transactions.protocol_version;
+                if block_height == highest_block_height {
+                    protocol_version = Some(block_transactions.protocol_version);
                 }
             }
 
-            let raw_ledger_state = ledger_state.serialize().context("serialize ledger state")?;
-            ledger_state_storage
-                .save(
-                    &raw_ledger_state,
-                    highest_height,
-                    ledger_state.highest_zswap_state_index(),
-                    protocol_version,
-                )
+            let ledger_state = ledger_state.serialize().context("serialize ledger state")?;
+            let protocol_version = protocol_version.expect("protocol version is defined");
+            storage
+                .save_ledger_state(&ledger_state, highest_block_height, protocol_version)
                 .await
                 .context("save ledger state")?;
         }
@@ -187,35 +183,39 @@ pub async fn run(
     });
 
     // Spawn task to index blocks.
-    let index_blocks_task = task::spawn(async move {
-        let blocks = blocks(highest_block, node)
-            .map(ready)
-            .buffered(blocks_buffer);
-        let mut blocks = pin!(blocks);
-        let mut caught_up = false;
+    let index_blocks_task = task::spawn({
+        let node = node.clone();
 
-        while let Some(next_ledger_state) = get_and_index_block(
-            save_ledger_state_after,
-            caught_up_max_distance,
-            caught_up_leeway,
-            &mut blocks,
-            ledger_state,
-            &highest_block_on_node,
-            &mut caught_up,
-            &storage,
-            &mut ledger_state_storage,
-            &publisher,
-            &metrics,
-        )
-        .in_span(Span::root("get-and-index-block", SpanContext::random()))
-        .await?
-        {
-            ledger_state = next_ledger_state
+        async move {
+            let blocks = blocks(highest_block_info, node.clone())
+                .map(ready)
+                .buffered(blocks_buffer);
+            let mut blocks = pin!(blocks);
+            let mut caught_up = false;
+
+            while let Some(next_ledger_state) = get_and_index_block(
+                save_ledger_state_after,
+                caught_up_max_distance,
+                caught_up_leeway,
+                &mut blocks,
+                ledger_state,
+                &highest_block_on_node,
+                &mut caught_up,
+                &mut storage,
+                &publisher,
+                &metrics,
+                &node,
+            )
+            .in_span(Span::root("get-and-index-block", SpanContext::random()))
+            .await?
+            {
+                ledger_state = next_ledger_state
+            }
+
+            error!("index_blocks_task completed unexpectedly");
+
+            Ok::<_, anyhow::Error>(())
         }
-
-        error!("index_blocks_task completed unexpectedly");
-
-        Ok::<_, anyhow::Error>(())
     });
 
     // Handle task completion or SIGTERM termination. "Successful" completion of the tasks is
@@ -284,7 +284,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[trace]
-async fn get_and_index_block<E>(
+async fn get_and_index_block<E, N>(
     save_ledger_state_after: u32,
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
@@ -292,13 +292,14 @@ async fn get_and_index_block<E>(
     ledger_state: LedgerState,
     highest_block_on_node: &Arc<RwLock<Option<BlockInfo>>>,
     caught_up: &mut bool,
-    storage: &impl Storage,
-    ledger_state_storage: &mut impl LedgerStateStorage,
+    storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
+    node: &N,
 ) -> Result<Option<LedgerState>, anyhow::Error>
 where
     E: StdError + Send + Sync + 'static,
+    N: Node,
 {
     let block = get_next_block(blocks)
         .await
@@ -315,9 +316,9 @@ where
                 highest_block_on_node,
                 caught_up,
                 storage,
-                ledger_state_storage,
                 publisher,
                 metrics,
+                node,
             )
             .await?;
 
@@ -337,7 +338,7 @@ async fn get_next_block<E>(
 
 #[allow(clippy::too_many_arguments)]
 #[trace]
-async fn index_block(
+async fn index_block<N>(
     save_ledger_state_after: u32,
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
@@ -345,16 +346,21 @@ async fn index_block(
     mut ledger_state: LedgerState,
     highest_block_on_node: &Arc<RwLock<Option<BlockInfo>>>,
     caught_up: &mut bool,
-    storage: &impl Storage,
-    ledger_state_storage: &mut impl LedgerStateStorage,
+    storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
-) -> Result<LedgerState, anyhow::Error> {
+    node: &N,
+) -> Result<LedgerState, anyhow::Error>
+where
+    N: Node,
+{
     let (mut block, transactions) = block.into();
 
     let (transactions, ledger_parameters) = ledger_state
         .apply_node_transactions(transactions, block.parent_hash, block.timestamp)
         .context("apply node transactions to ledger state")?;
+    debug!(transactions:?; "transactions applied to ledger state");
+
     if ledger_state.zswap_merkle_tree_root() != block.zswap_state_root {
         bail!(
             "zswap state root mismatch for block {} at height {}",
@@ -362,6 +368,7 @@ async fn index_block(
             block.height
         );
     }
+
     block.ledger_parameters = ledger_parameters.serialize()?;
 
     // Determine whether caught up, also allowing to fall back a little in that state.
@@ -388,25 +395,30 @@ async fn index_block(
         info!(caught_up:%; "caught-up status changed")
     }
 
-    // First save and update the block with its transactions.
+    // Save and update the block with its related data.
+    let save_ledger_state = *caught_up || block.height % save_ledger_state_after == 0;
+    let serialize_ledger_state = if save_ledger_state {
+        let ledger_state = ledger_state.serialize().context("serialize ledger state")?;
+        Some(ledger_state)
+    } else {
+        None
+    };
     let max_transaction_id = storage
-        .save_block(&block, &transactions, &block.dust_registration_events)
+        .save_block(
+            &block,
+            &transactions,
+            &block.dust_registration_events,
+            serialize_ledger_state.as_ref(),
+        )
         .await
         .context("save block")?;
 
-    // Then save the ledger state. This order is important to maintain consistency.
-    let serialized_ledger_state = ledger_state.serialize().context("serialize ledger state")?;
-    if *caught_up || block.height % save_ledger_state_after == 0 {
-        ledger_state_storage
-            .save(
-                &serialized_ledger_state,
-                block.height,
-                ledger_state.highest_zswap_state_index(),
-                block.protocol_version,
-            )
-            .await
-            .context("save ledger state")?;
+    // Fetch and store system parameters if changed.
+    if let Err(error) = update_system_parameters(&block, storage, node).await {
+        warn!(error:%; "failed to update system parameters, continuing");
     }
+
+    let ledger_state_size = serialize_ledger_state.map(|s| s.len());
 
     info!(
         hash:% = block.hash,
@@ -415,16 +427,16 @@ async fn index_block(
         protocol_version:% = block.protocol_version,
         distance,
         caught_up = *caught_up,
-        ledger_state_size = format_bytes(serialized_ledger_state.as_ref().len());
+        ledger_state_size = ledger_state_size.map(format_bytes);
         "block indexed"
     );
 
     metrics.update(
         &block,
         &transactions,
-        &serialized_ledger_state,
         node_block_height,
         *caught_up,
+        ledger_state_size,
     );
 
     // Publish BlockIndexed.
@@ -462,6 +474,88 @@ async fn index_block(
     Ok(ledger_state)
 }
 
+/// Fetch system parameters from the node and store if changed.
+#[trace]
+async fn update_system_parameters<N>(
+    block: &Block,
+    storage: &mut impl Storage,
+    node: &N,
+) -> anyhow::Result<()>
+where
+    N: Node,
+{
+    // Fetch current system parameters from the node.
+    let current = node
+        .fetch_system_parameters(
+            block.hash,
+            block.height,
+            block.timestamp,
+            block.protocol_version,
+        )
+        .await
+        .map_err(|error| anyhow::anyhow!("fetch system parameters: {error}"))?;
+
+    // Get the latest stored parameters.
+    let stored_d_param = storage
+        .get_latest_d_parameter()
+        .await
+        .context("get latest D-parameter")?;
+    let stored_tc = storage
+        .get_latest_terms_and_conditions()
+        .await
+        .context("get latest terms and conditions")?;
+
+    // Determine what has changed.
+    let d_param_changed = current.d_parameter.as_ref().is_some_and(|current_d| {
+        stored_d_param.as_ref().is_none_or(|stored_d| {
+            current_d.num_permissioned_candidates != stored_d.num_permissioned_candidates
+                || current_d.num_registered_candidates != stored_d.num_registered_candidates
+        })
+    });
+
+    let tc_changed = match (&current.terms_and_conditions, &stored_tc) {
+        (Some(current_tc), Some(stored_tc)) => {
+            current_tc.hash != stored_tc.hash || current_tc.url != stored_tc.url
+        }
+        (Some(_), None) => true,  // New T&C where none existed.
+        (None, Some(_)) => false, // T&C removed - don't record this as a change.
+        (None, None) => false,
+    };
+
+    // Store changes if any.
+    if d_param_changed || tc_changed {
+        let change = SystemParametersChange {
+            block_height: block.height,
+            block_hash: block.hash,
+            timestamp: block.timestamp,
+            d_parameter: if d_param_changed {
+                current.d_parameter
+            } else {
+                None
+            },
+            terms_and_conditions: if tc_changed {
+                current.terms_and_conditions
+            } else {
+                None
+            },
+        };
+
+        storage
+            .save_system_parameters_change(&change)
+            .await
+            .context("save system parameters change")?;
+
+        debug!(
+            block_height = block.height,
+            d_param_changed,
+            tc_changed;
+            "system parameters updated"
+        );
+    }
+
+    Ok(())
+}
+
 fn format_bytes(value: impl Into<Byte>) -> String {
     let bytes = value.into().get_appropriate_unit(UnitType::Binary);
 
@@ -475,7 +569,10 @@ fn format_bytes(value: impl Into<Byte>) -> String {
 mod tests {
     use crate::{
         application::blocks,
-        domain::node::{self, BlockInfo, Node},
+        domain::{
+            SystemParametersChange,
+            node::{self, BlockInfo, Node},
+        },
     };
     use fake::{Fake, Faker};
     use futures::{Stream, StreamExt, TryStreamExt, stream};
@@ -517,6 +614,22 @@ mod tests {
             stream::iter([&*BLOCK_0, &*BLOCK_1, &*BLOCK_2, &*BLOCK_3])
                 .map(|block| Ok(block.to_owned()))
         }
+
+        async fn fetch_system_parameters(
+            &self,
+            block_hash: BlockHash,
+            block_height: u32,
+            timestamp: u64,
+            _protocol_version: ProtocolVersion,
+        ) -> Result<SystemParametersChange, Self::Error> {
+            Ok(SystemParametersChange {
+                block_height,
+                block_hash,
+                timestamp,
+                d_parameter: None,
+                terms_and_conditions: None,
+            })
+        }
     }
 
     static BLOCK_0: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -526,7 +639,7 @@ mod tests {
         parent_hash: ZERO_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
+        zswap_state_root: ZswapStateRoot::V7_0_0(Faker.fake()),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -538,7 +651,7 @@ mod tests {
         parent_hash: BLOCK_0_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
+        zswap_state_root: ZswapStateRoot::V7_0_0(Faker.fake()),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -550,7 +663,7 @@ mod tests {
         parent_hash: BLOCK_1_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
+        zswap_state_root: ZswapStateRoot::V7_0_0(Faker.fake()),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -562,7 +675,7 @@ mod tests {
         parent_hash: BLOCK_2_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: ZswapStateRoot::V6(Faker.fake()),
+        zswap_state_root: ZswapStateRoot::V7_0_0(Faker.fake()),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });

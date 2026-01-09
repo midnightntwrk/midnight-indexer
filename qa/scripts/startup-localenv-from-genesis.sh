@@ -42,7 +42,14 @@ mkdir -p target/debug
 tree target/data
 
 export NODE_TAG=${NODE_TAG:-`cat NODE_VERSION`}
-export NODE_TOOLKIT_TAG=${NODE_TOOLKIT_TAG:-`echo $NODE_TAG`}
+if [ -n "$NODE_TOOLKIT_TAG" ]; then
+  echo "Using explicit NODE_TOOLKIT_TAG: $NODE_TOOLKIT_TAG"
+else
+  # If the user explicitly sets NODE_TOOLKIT_TAG=$NODE_TAG, they control it
+  # Otherwise default to latest-main
+  export NODE_TOOLKIT_TAG=latest-main
+  echo "NODE_TOOLKIT_TAG not set; defaulting to 'latest-main'"
+fi
 
 # Use the derived Docker Compose project name to create volume name
 DOCKER_VOLUME_NAME="${DOCKER_PROJECT_NAME}_node_data"
@@ -96,10 +103,17 @@ echo " NODE_TOOLKIT_TAG: $NODE_TOOLKIT_TAG"
 
 docker compose --profile cloud up -d
 
-echo "Waiting for services to start..."
-sleep 5
+echo "Waiting for indexer API to become ready..."
+for i in {1..30}; do
+  if curl -sf http://localhost:8088/ready >/dev/null; then
+    echo "Indexer API is ready"
+    break
+  fi
+  echo "Not ready yet... ($i)"
+  sleep 2
+done
 
-docker compose --profile cloud logs |grep "Highest known block"
+docker compose --profile cloud logs | grep "Highest known block" 
 
 
 docker ps --format "table {{.Image}}\t{{.Names}}\t{{.Status}}"
