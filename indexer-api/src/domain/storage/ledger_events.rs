@@ -14,12 +14,12 @@
 use crate::domain::{LedgerEvent, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::LedgerEventGrouping;
-use std::{fmt::Debug, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 #[trait_variant::make(Send)]
 pub trait LedgerEventStorage
 where
-    Self: Debug + Clone + Send + Sync + 'static,
+    Self: Clone + Send + Sync + 'static,
 {
     /// Get a stream of ledger events for the given grouping starting at the given ID, ordered by
     /// ID.

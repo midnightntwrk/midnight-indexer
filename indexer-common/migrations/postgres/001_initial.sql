@@ -38,6 +38,7 @@ CREATE TABLE transactions (
 );
 CREATE INDEX ON transactions (block_id);
 CREATE INDEX ON transactions (hash);
+CREATE INDEX ON transactions (variant, id);
 --------------------------------------------------------------------------------
 -- regular_transactions
 --------------------------------------------------------------------------------
@@ -170,8 +171,29 @@ CREATE TABLE cnight_registrations (
   registered_at BIGINT NOT NULL,
   removed_at BIGINT,
   block_id BIGINT REFERENCES blocks (id),
+  utxo_tx_hash BYTEA,
+  utxo_output_index BIGINT,
   UNIQUE (cardano_address, dust_address)
 );
 CREATE INDEX ON cnight_registrations (cardano_address);
 CREATE INDEX ON cnight_registrations (dust_address);
 CREATE INDEX ON cnight_registrations (block_id);
+CREATE TABLE system_parameters_terms_and_conditions (
+  id BIGSERIAL PRIMARY KEY,
+  block_height BIGINT NOT NULL,
+  block_hash BYTEA NOT NULL,
+  timestamp BIGINT NOT NULL,
+  hash BYTEA NOT NULL,
+  url TEXT NOT NULL
+);
+CREATE INDEX ON system_parameters_terms_and_conditions (block_height DESC);
+
+CREATE TABLE system_parameters_d (
+  id BIGSERIAL PRIMARY KEY,
+  block_height BIGINT NOT NULL,
+  block_hash BYTEA NOT NULL,
+  timestamp BIGINT NOT NULL,
+  num_permissioned_candidates INTEGER NOT NULL,
+  num_registered_candidates INTEGER NOT NULL
+);
+CREATE INDEX ON system_parameters_d (block_height DESC);

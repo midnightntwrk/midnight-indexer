@@ -11,34 +11,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{LedgerStateStorage, ProtocolVersion, SerializedLedgerState};
+use crate::domain::{LedgerStateStorage, SerializedLedgerState};
 use async_nats::{
     ConnectError, ConnectOptions,
     jetstream::{
         self, Context as Jetstream,
         context::CreateObjectStoreError,
-        object_store::{
-            self, DeleteError, GetError, ListError, ObjectStore, PutError, WatcherError,
-        },
+        object_store::{self, GetError, ObjectStore, PutError},
     },
 };
 use fastrace::trace;
-use futures::{StreamExt, TryStreamExt, stream};
-use log::{debug, info};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
-use std::{
-    array::TryFromSliceError,
-    io::{self, Cursor},
-};
+use std::io::{self};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
-use tokio_util::io::StreamReader;
 
-const BUCKET_NAME: &str = "ledger_state_store";
-const OBJECT_NAME: &str = "ledger_state";
+const LEDGER_STATE_STORE_NAME: &str = "ledger_state_store";
 
-/// NATS based ledger state storage implementation.
+/// NATS and PostgreSQL based ledger state storage implementation.
+#[derive(Clone)]
 pub struct NatsLedgerStateStorage {
     ledger_state_store: ObjectStore,
 }
@@ -50,28 +42,16 @@ impl NatsLedgerStateStorage {
             url,
             username,
             password,
+            num_replicas,
         } = config;
 
         let options =
             ConnectOptions::new().user_and_password(username, password.expose_secret().to_owned());
         let client = options.connect(url).await?;
         let jetstream = jetstream::new(client);
-        let ledger_state_store = create_ledger_state_store(&jetstream).await?;
+        let ledger_state_store = create_ledger_state_store(&jetstream, num_replicas).await?;
 
         Ok(Self { ledger_state_store })
-    }
-
-    #[trace]
-    async fn current_object_name(&self) -> Result<Option<String>, LedgerStateStorageError> {
-        let objects = self.ledger_state_store.list().await?;
-
-        let names = objects
-            .map_ok(|info| info.name)
-            .try_collect::<Vec<_>>()
-            .await?;
-        let object_name = names.into_iter().max();
-
-        Ok(object_name)
     }
 }
 
@@ -79,101 +59,33 @@ impl LedgerStateStorage for NatsLedgerStateStorage {
     type Error = LedgerStateStorageError;
 
     #[trace]
-    async fn load_last_index(&self) -> Result<Option<u64>, Self::Error> {
-        let object_name = self.current_object_name().await?;
-        debug!(object_name; "loading highest_zswap_state_index");
+    async fn load(&self, key: &str) -> Result<SerializedLedgerState, Self::Error> {
+        let mut object = self.ledger_state_store.get(key).await?;
 
-        match object_name {
-            Some(object_name) => {
-                let object = self.ledger_state_store.get(object_name).await;
+        let mut ledger_state = Vec::with_capacity(object.info.size);
+        object.read_to_end(&mut ledger_state).await?;
 
-                match object {
-                    Ok(mut object) => {
-                        let highest_zswap_state_index = object.read_u64_le().await?;
-
-                        // We (ab)use `u64::MAX` as None!
-                        Ok((highest_zswap_state_index != u64::MAX)
-                            .then_some(highest_zswap_state_index))
-                    }
-
-                    Err(error) if error.kind() == object_store::GetErrorKind::NotFound => Ok(None),
-
-                    Err(other) => Err(other)?,
-                }
-            }
-
-            None => Ok(None),
-        }
-    }
-
-    #[trace]
-    async fn load_ledger_state(
-        &self,
-    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, Self::Error> {
-        let object_name = self.current_object_name().await?;
-        debug!(object_name; "loading ledger state");
-
-        match object_name {
-            Some(object_name) => {
-                let object = self.ledger_state_store.get(object_name).await;
-
-                match object {
-                    Ok(mut object) => {
-                        let _ = object.read_u64_le().await?;
-                        let block_height = object.read_u32_le().await?;
-                        let protocol_version = object.read_u32_le().await?.into();
-                        let mut bytes = Vec::with_capacity(object.info.size - 12);
-                        object.read_to_end(&mut bytes).await?;
-
-                        Ok(Some((bytes.into(), block_height, protocol_version)))
-                    }
-
-                    Err(error) if error.kind() == object_store::GetErrorKind::NotFound => Ok(None),
-
-                    Err(other) => Err(other)?,
-                }
-            }
-
-            None => Ok(None),
-        }
+        Ok(ledger_state.into())
     }
 
     #[trace]
     async fn save(
         &mut self,
         ledger_state: &SerializedLedgerState,
-        block_height: u32,
-        highest_zswap_state_index: Option<u64>,
-        protocol_version: ProtocolVersion,
+        key: &str,
     ) -> Result<(), Self::Error> {
-        info!(block_height, highest_zswap_state_index:?; "saving ledger state");
+        let info = self
+            .ledger_state_store
+            .put(key, &mut ledger_state.as_slice())
+            .await
+            .map_err(LedgerStateStorageError::PutLedgerState)?;
 
-        // We (ab)use `u64::MAX` as None!
-        let highest_zswap_state_index = highest_zswap_state_index.unwrap_or(u64::MAX).to_le_bytes();
-        let highest_zswap_state_index = Cursor::new(highest_zswap_state_index.as_slice());
-
-        let block_height = block_height.to_le_bytes();
-        let block_height = Cursor::new(block_height.as_slice());
-
-        let protocol_version = protocol_version.0.to_le_bytes();
-        let protocol_version = Cursor::new(protocol_version.as_slice());
-
-        let ledger_state = Cursor::new(ledger_state.as_ref());
-
-        let object = stream::iter(
-            [
-                highest_zswap_state_index,
-                block_height,
-                protocol_version,
-                ledger_state,
-            ]
-            .into_iter(),
-        );
-        let mut object = StreamReader::new(object.map(Ok::<_, io::Error>));
-
-        self.ledger_state_store
-            .put(OBJECT_NAME, &mut object)
-            .await?;
+        if info.size != ledger_state.len() {
+            return Err(LedgerStateStorageError::PutLedgerStateSize(
+                info.size,
+                ledger_state.len(),
+            ));
+        }
 
         Ok(())
     }
@@ -181,38 +93,26 @@ impl LedgerStateStorage for NatsLedgerStateStorage {
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("cannot create storage, because cannot connect")]
+    #[error("cannot connect to NATS server")]
     Connect(#[from] ConnectError),
 
-    #[error("cannot create storage, because cannot create object store")]
-    CreateObjectStore(#[from] CreateObjectStoreError),
+    #[error("cannot create ledger state store")]
+    CreateLedgerStateStore(#[source] CreateObjectStoreError),
 }
 
 #[derive(Debug, Error)]
 pub enum LedgerStateStorageError {
-    #[error("cannot convert into last index")]
-    LastIndex(#[from] TryFromSliceError),
+    #[error("cannot get ledger state from NATS")]
+    GetLedgerState(#[from] GetError),
 
-    #[error("cannot load ledger state")]
-    Get(#[from] GetError),
+    #[error("cannot save ledger state to NATS")]
+    PutLedgerState(#[source] PutError),
 
-    #[error("cannot load ledger state")]
-    Read(#[from] io::Error),
+    #[error("cannot save ledger state to NATS: invalid object size {0}, expected {1}")]
+    PutLedgerStateSize(usize, usize),
 
-    #[error("cannot save ledger state")]
-    Put(#[from] PutError),
-
-    #[error("cannot cleanup ledger state store")]
-    Cleanup(CleanupError),
-
-    #[error("trying to receive an error from the cleanup task failed")]
-    CleanupErrorReceiver,
-
-    #[error("cannot list objects")]
-    List(#[from] ListError),
-
-    #[error("cannot get next listed object")]
-    Next(#[from] WatcherError),
+    #[error("cannot read ledger state from NATS")]
+    ReadLedgerState(#[from] io::Error),
 }
 
 /// Configuration settings for [NatsLedgerStateStorage].
@@ -221,39 +121,32 @@ pub struct Config {
     pub url: String,
     pub username: String,
     pub password: SecretString,
-}
-
-#[derive(Debug, Error)]
-pub enum CleanupError {
-    #[error("cannot list objects")]
-    List(#[from] ListError),
-
-    #[error("cannot get next listed object")]
-    Next(#[from] WatcherError),
-
-    #[error("cannot delete object")]
-    Delete(#[from] DeleteError),
+    pub num_replicas: usize,
 }
 
 async fn create_ledger_state_store(
     jetstream: &Jetstream,
-) -> Result<ObjectStore, CreateObjectStoreError> {
+    num_replicas: usize,
+) -> Result<ObjectStore, Error> {
     let config = object_store::Config {
-        bucket: BUCKET_NAME.to_string(),
+        bucket: LEDGER_STATE_STORE_NAME.to_string(),
+        num_replicas,
         ..Default::default()
     };
 
-    jetstream.create_object_store(config).await
+    jetstream
+        .create_object_store(config)
+        .await
+        .map_err(Error::CreateLedgerStateStore)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{ByteVec, LedgerStateStorage, PROTOCOL_VERSION_000_018_000},
+        domain::{ByteVec, LedgerStateStorage},
         infra::ledger_state_storage::nats::{Config, NatsLedgerStateStorage},
     };
     use anyhow::Context;
-    use assert_matches::assert_matches;
     use std::time::{Duration, Instant};
     use testcontainers::{GenericImage, ImageExt, core::WaitFor, runners::AsyncRunner};
     use tokio::time::sleep;
@@ -294,59 +187,37 @@ mod tests {
             url: nats_url,
             username: "indexer".to_string(),
             password: env!("APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD").into(),
+            num_replicas: 1,
         };
         let mut ledger_state_storage = NatsLedgerStateStorage::new(config)
             .await
             .context("create NatsZswapStateStorage")?;
 
-        let last_index = ledger_state_storage
-            .load_last_index()
-            .await
-            .context("load last index")?;
-        assert!(last_index.is_none());
+        let state = ByteVec::from([0u8; 1024].as_slice());
 
-        let ledger_state = ledger_state_storage
-            .load_ledger_state()
-            .await
-            .context("load ledger state")?;
-        assert!(ledger_state.is_none());
-
-        let default_state = ByteVec::default();
         ledger_state_storage
-            .save(&default_state, 0, None, PROTOCOL_VERSION_000_018_000)
+            .save(&state, "ledger_state_a")
             .await
             .context("save ledger state")?;
 
-        let last_index = ledger_state_storage
-            .load_last_index()
-            .await
-            .context("load last index")?;
-        assert!(last_index.is_none());
-
         let ledger_state = ledger_state_storage
-            .load_ledger_state()
+            .load("ledger_state_a")
             .await
             .context("load ledger state")?;
-        assert_matches!(
-            ledger_state,
-            Some((state, 0, PROTOCOL_VERSION_000_018_000)) if state == default_state
-        );
+        assert_eq!(ledger_state, state);
+
+        let state = ByteVec::from([1u8; 1024].as_slice());
 
         ledger_state_storage
-            .save(
-                &ByteVec::default(),
-                42,
-                Some(42),
-                PROTOCOL_VERSION_000_018_000,
-            )
+            .save(&state, "ledger_state_b")
             .await
             .context("save ledger state")?;
 
-        let last_index = ledger_state_storage
-            .load_last_index()
+        let ledger_state = ledger_state_storage
+            .load("ledger_state_b")
             .await
-            .context("load last index")?;
-        assert_matches!(last_index, Some(42));
+            .context("load ledger state")?;
+        assert_eq!(ledger_state, state);
 
         Ok(())
     }

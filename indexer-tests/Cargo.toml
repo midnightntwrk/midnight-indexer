@@ -19,7 +19,7 @@ graphql_client    = { workspace = true, features = [ "reqwest-rustls" ] }
 indexer-api       = { path = "../indexer-api" }
 indexer-common    = { path = "../indexer-common" }
 itertools         = { workspace = true }
-reqwest           = { workspace = true, features = [ "json", "rustls-tls" ] }
+reqwest           = { workspace = true, features = [ "json", "rustls" ] }
 serde             = { workspace = true, features = [ "derive" ] }
 serde_json        = { workspace = true }
 tokio             = { workspace = true, features = [ "macros", "process", "rt-multi-thread" ] }

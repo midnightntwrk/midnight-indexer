@@ -524,6 +524,11 @@ async function main(): Promise<boolean> {
       // Update spinner with current progress
       spinner.update(receivedBlocks.length);
     },
+    error: (err) => {
+      console.error(
+        `[ERROR] - Subscription handler received error payload:\n${JSON.stringify(err, null, 2)}`,
+      );
+    },
     complete: () => {
       console.debug("Completed sent from Indexer");
     },

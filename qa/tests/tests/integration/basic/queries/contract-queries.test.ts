@@ -313,7 +313,7 @@ describe('contract queries', () => {
     test('should return null when contract with valid address and valid offset does not exist', async (ctx: TestContext) => {
       let knownBlockHash: string;
       try {
-        knownBlockHash = await dataProvider.getKnownBlockHash();
+        knownBlockHash = await dataProvider.getContractDeployBlockHash();
       } catch (error) {
         log.warn(error);
         ctx.skip?.(true, (error as Error).message);
@@ -351,7 +351,7 @@ describe('contract queries', () => {
     test('should return error when contract with invalid address and valid hash', async (ctx: TestContext) => {
       let knownBlockHash: string;
       try {
-        knownBlockHash = await dataProvider.getKnownBlockHash();
+        knownBlockHash = await dataProvider.getContractDeployBlockHash();
       } catch (error) {
         log.warn(error);
         ctx.skip?.(true, (error as Error).message);

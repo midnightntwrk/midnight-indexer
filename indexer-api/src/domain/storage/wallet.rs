@@ -13,12 +13,11 @@
 
 use crate::domain::storage::NoopStorage;
 use indexer_common::domain::{SessionId, ViewingKey};
-use std::fmt::Debug;
 
 #[trait_variant::make(Send)]
 pub trait WalletStorage
 where
-    Self: Debug + Clone + Send + Sync + 'static,
+    Self: Clone + Send + Sync + 'static,
 {
     /// Connect a wallet, i.e. add it to the active ones.
     async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<(), sqlx::Error>;

@@ -12,19 +12,19 @@
 // limitations under the License.
 
 use crate::domain::{
-    ContractBalance, PROTOCOL_VERSION_000_018_000, ProtocolVersion, TokenType,
-    ledger::{Error, TaggedSerializableV6Ext},
+    ContractBalance, PROTOCOL_VERSION_000_020_000, ProtocolVersion, TokenType,
+    ledger::{Error, TaggedSerializableV7_0_0Ext},
 };
 use fastrace::trace;
-use midnight_coin_structure_v6::coin::TokenType as TokenTypeV6;
-use midnight_onchain_runtime_v6::state::ContractState as ContractStateV6;
-use midnight_serialize_v6::tagged_deserialize as tagged_deserialize_v6;
-use midnight_storage_v6::{DefaultDB as DefaultDBV6, arena::Sp as SpV6};
+use midnight_coin_structure_v7_0_0::coin::TokenType as TokenTypeV7_0_0;
+use midnight_onchain_runtime_v7_0_0::state::ContractState as ContractStateV7_0_0;
+use midnight_serialize_v7_0_0::tagged_deserialize as tagged_deserialize_v7_0_0;
+use midnight_storage_v7_0_0::{DefaultDB as DefaultDBV7_0_0, arena::Sp as SpV7_0_0};
 
 /// Facade for `ContractState` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum ContractState {
-    V6(ContractStateV6<DefaultDBV6>),
+    V7_0_0(ContractStateV7_0_0<DefaultDBV7_0_0>),
 }
 
 impl ContractState {
@@ -34,10 +34,10 @@ impl ContractState {
         contract_state: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_018_000) {
-            let contract_state = tagged_deserialize_v6(&mut contract_state.as_ref())
-                .map_err(|error| Error::Io("cannot deserialize ContractStateV6", error))?;
-            Ok(Self::V6(contract_state))
+        if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
+            let contract_state = tagged_deserialize_v7_0_0(&mut contract_state.as_ref())
+                .map_err(|error| Error::Deserialize("ContractStateV7_0_0", error))?;
+            Ok(Self::V7_0_0(contract_state))
         } else {
             Err(Error::InvalidProtocolVersion(protocol_version))
         }
@@ -46,35 +46,33 @@ impl ContractState {
     /// Get the token balances for this contract.
     pub fn balances(&self) -> Result<Vec<ContractBalance>, Error> {
         match self {
-            Self::V6(contract_state) => {
+            Self::V7_0_0(contract_state) => {
                 contract_state
                     .balance
                     .iter()
                     .filter_map(|entry| {
-                        let (token_type_sp, amount_sp) = SpV6::into_inner(entry)?;
-                        let token_type = SpV6::into_inner(token_type_sp)?;
-                        let amount = SpV6::into_inner(amount_sp)?;
+                        let (token_type_sp, amount_sp) = SpV7_0_0::into_inner(entry)?;
+                        let token_type = SpV7_0_0::into_inner(token_type_sp)?;
+                        let amount = SpV7_0_0::into_inner(amount_sp)?;
 
                         (amount > 0).then_some((token_type, amount))
                     })
                     .map(|(token_type, amount)| {
                         match token_type {
                             // For unshielded tokens extract the type directly.
-                            TokenTypeV6::Unshielded(unshielded) => Ok(ContractBalance {
+                            TokenTypeV7_0_0::Unshielded(unshielded) => Ok(ContractBalance {
                                 token_type: unshielded.0.0.into(),
                                 amount,
                             }),
 
                             // For other tokens we serialize the type.
                             _ => {
-                                let token_type =
-                                    token_type.tagged_serialize_v6().map_err(|error| {
-                                        Error::Io("cannot serialize TokenTypeV6", error)
-                                    })?;
+                                let token_type = token_type
+                                    .tagged_serialize_v7_0_0()
+                                    .map_err(|error| Error::Serialize("TokenTypeV7_0_0", error))?;
 
-                                let len = token_type.len();
                                 let token_type = TokenType::try_from(token_type.as_ref())
-                                    .map_err(|_| Error::TokenTypeLen(len))?;
+                                    .map_err(Error::ByteArrayLen)?;
 
                                 Ok(ContractBalance { token_type, amount })
                             }

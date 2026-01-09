@@ -11,9 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::domain::storage::Storage;
 use derive_more::derive::{Deref, From};
 use indexer_common::{
-    domain::{ByteVec, LedgerStateStorage, NetworkId, ProtocolVersion, ledger},
+    domain::{ByteVec, NetworkId, ProtocolVersion, ledger},
     error::BoxError,
 };
 use log::debug;
@@ -35,37 +36,27 @@ impl LedgerStateCache {
         &self,
         start_index: u64,
         end_index: u64,
-        ledger_state_storage: &impl LedgerStateStorage,
+        storage: &impl Storage,
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, LedgerStateCacheError> {
         // Acquire a read lock.
         let mut ledger_state_read = self.0.read().await;
 
-        // Check if the current zswap state is stale and needs to be updated.
+        // Check if the current ledger state is stale and needs to be updated.
         if end_index >= ledger_state_read.zswap_first_free() {
-            debug!(
-                end_index,
-                first_free = ledger_state_read.zswap_first_free();
-                "zswap state is stale"
-            );
-
             // Release the read lock and acquire a write lock.
             drop(ledger_state_read);
             let mut ledger_state_write = self.0.write().await;
 
-            // Check if the state has been updated in the meantime.
-            if end_index >= ledger_state_write.zswap_first_free() {
-                debug!(
-                    end_index,
-                    first_free = ledger_state_write.zswap_first_free();
-                    "zswap state is still stale, loading"
-                );
+            // Check if the ledger state has been updated in the meantime.
+            let first_free = ledger_state_write.zswap_first_free();
+            if end_index >= first_free {
+                debug!(end_index, first_free; "stale ledger state, loading from storage");
 
-                let ledger_state_and_protocol_version = ledger_state_storage
-                    .load_ledger_state()
+                let ledger_state_and_protocol_version = storage
+                    .get_ledger_state()
                     .await
-                    .map_err(|error| LedgerStateCacheError::Load(error.into()))?
-                    .map(|(ledger_state, _, protocol_version)| (ledger_state, protocol_version));
+                    .map_err(|error| LedgerStateCacheError::Load(error.into()))?;
 
                 match ledger_state_and_protocol_version {
                     Some((ledger_state, protocol_version)) => {

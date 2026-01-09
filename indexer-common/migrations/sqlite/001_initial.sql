@@ -24,6 +24,7 @@ CREATE TABLE transactions (
 );
 CREATE INDEX transactions_block_id_idx ON transactions (block_id);
 CREATE INDEX transactions_hash_idx ON transactions (hash);
+CREATE INDEX transactions_variant_id_idx ON transactions (variant, id);
 --------------------------------------------------------------------------------
 -- regular_transactions
 --------------------------------------------------------------------------------
@@ -171,8 +172,29 @@ CREATE TABLE cnight_registrations (
   registered_at INTEGER NOT NULL,
   removed_at INTEGER,
   block_id INTEGER REFERENCES blocks (id),
+  utxo_tx_hash BLOB,
+  utxo_output_index INTEGER,
   UNIQUE (cardano_address, dust_address)
 );
 CREATE INDEX cnight_registrations_cardano_address_idx ON cnight_registrations (cardano_address);
 CREATE INDEX cnight_registrations_dust_address_idx ON cnight_registrations (dust_address);
 CREATE INDEX cnight_registrations_block_id_idx ON cnight_registrations (block_id);
+CREATE TABLE system_parameters_terms_and_conditions (
+  id INTEGER PRIMARY KEY,
+  block_height INTEGER NOT NULL,
+  block_hash BLOB NOT NULL,
+  timestamp INTEGER NOT NULL,
+  hash BLOB NOT NULL,
+  url TEXT NOT NULL
+);
+CREATE INDEX system_parameters_tc_block_height_idx ON system_parameters_terms_and_conditions (block_height DESC);
+
+CREATE TABLE system_parameters_d (
+  id INTEGER PRIMARY KEY,
+  block_height INTEGER NOT NULL,
+  block_hash BLOB NOT NULL,
+  timestamp INTEGER NOT NULL,
+  num_permissioned_candidates INTEGER NOT NULL,
+  num_registered_candidates INTEGER NOT NULL
+);
+CREATE INDEX system_parameters_d_block_height_idx ON system_parameters_d (block_height DESC);

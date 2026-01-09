@@ -5,7 +5,6 @@ use chain_indexer::{
 };
 use clap::Parser;
 use futures::{Stream, StreamExt, TryStreamExt};
-use indexer_common::domain::PROTOCOL_VERSION_000_018_000;
 use std::{pin::Pin, time::Duration};
 
 #[tokio::main]
@@ -34,9 +33,9 @@ impl Cli {
     async fn run(self) -> anyhow::Result<()> {
         let config = Config {
             url: self.node,
-            genesis_protocol_version: PROTOCOL_VERSION_000_018_000,
             reconnect_max_delay: Duration::from_secs(1),
             reconnect_max_attempts: 1,
+            subscription_recovery_timeout: Duration::from_secs(30),
         };
         let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 
@@ -53,12 +52,12 @@ impl Cli {
         }
 
         while let Some(block) = blocks.try_next().await.context("get next block")? {
-            println!("## BLOCK: height={}, \thash={}", block.height, block.hash);
+            println!("## BLOCK: height={}, hash={}", block.height, block.hash);
             for transaction in block.transactions {
                 match transaction {
                     node::Transaction::Regular(transaction) => {
                         println!(
-                            "    ## REGULAR TRANSACTION: hash={}, \t{transaction:?}",
+                            "\t## REGULAR TRANSACTION: hash={}, \t{transaction:?}",
                             transaction.hash
                         );
                     }

@@ -25,6 +25,7 @@ pub struct Config {
     pub url: String,
     pub username: String,
     pub password: SecretString,
+    pub max_reconnects: usize,
 }
 
 impl ToSubject for Topic {
@@ -86,6 +87,7 @@ mod tests {
             url: nats_url.clone(),
             username: "indexer".to_string(),
             password: env!("APP__INFRA__PUB_SUB__PASSWORD").into(),
+            max_reconnects: 1,
         };
 
         let subscriber = NatsSubscriber::new(config.clone())

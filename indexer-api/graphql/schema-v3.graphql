@@ -34,6 +34,10 @@ type Block {
 	The hex-encoded ledger parameters for this block.
 	"""
 	ledgerParameters: HexEncoded!
+	"""
+	The system parameters (governance) at this block height.
+	"""
+	systemParameters: SystemParameters!
 }
 
 """
@@ -198,6 +202,48 @@ type ContractUpdate implements ContractAction {
 	unshieldedBalances: [ContractBalance!]!
 }
 
+"""
+The D-parameter controlling validator committee composition.
+"""
+type DParameter {
+	"""
+	Number of permissioned candidates.
+	"""
+	numPermissionedCandidates: Int!
+	"""
+	Number of registered candidates.
+	"""
+	numRegisteredCandidates: Int!
+}
+
+"""
+D-parameter change record for history queries.
+"""
+type DParameterChange {
+	"""
+	The block height where this parameter became effective.
+	"""
+	blockHeight: Int!
+	"""
+	The hex-encoded block hash where this parameter became effective.
+	"""
+	blockHash: HexEncoded!
+	"""
+	The UNIX timestamp when this parameter became effective.
+	"""
+	timestamp: Int!
+	"""
+	Number of permissioned candidates.
+	"""
+	numPermissionedCandidates: Int!
+	"""
+	Number of registered candidates.
+	"""
+	numRegisteredCandidates: Int!
+}
+
+scalar DustAddress
+
 type DustGenerationDtimeUpdate implements DustLedgerEvent {
 	"""
 	The ID of this dust ledger event.
@@ -222,25 +268,37 @@ type DustGenerationStatus {
 	"""
 	cardanoRewardAddress: CardanoRewardAddress!
 	"""
-	The hex-encoded associated DUST address if registered.
+	The Bech32m-encoded associated DUST address if registered.
 	"""
-	dustAddress: HexEncoded
+	dustAddress: DustAddress
 	"""
 	Whether this reward address is registered.
 	"""
 	registered: Boolean!
 	"""
-	NIGHT balance backing generation.
+	NIGHT balance backing generation in STAR.
 	"""
 	nightBalance: String!
 	"""
-	Generation rate in Specks per second.
+	DUST generation rate in SPECK per second.
 	"""
 	generationRate: String!
 	"""
-	Current DUST capacity.
+	Maximum DUST capacity in SPECK.
+	"""
+	maxCapacity: String!
+	"""
+	Current generated DUST capacity in SPECK.
 	"""
 	currentCapacity: String!
+	"""
+	Cardano UTXO transaction hash for update/unregister operations.
+	"""
+	utxoTxHash: HexEncoded
+	"""
+	Cardano UTXO output index for update/unregister operations.
+	"""
+	utxoOutputIndex: Int
 }
 
 type DustInitialUtxo implements DustLedgerEvent {
@@ -341,6 +399,14 @@ type Query {
 	Get DUST generation status for specific Cardano reward addresses.
 	"""
 	dustGenerationStatus(cardanoRewardAddresses: [CardanoRewardAddress!]!): [DustGenerationStatus!]!
+	"""
+	Get the full history of D-parameter changes for governance auditability.
+	"""
+	dParameterHistory: [DParameterChange!]!
+	"""
+	Get the full history of Terms and Conditions changes for governance auditability.
+	"""
+	termsAndConditionsHistory: [TermsAndConditionsChange!]!
 }
 
 """
@@ -505,6 +571,20 @@ type Subscription {
 }
 
 """
+System parameters at a specific block height.
+"""
+type SystemParameters {
+	"""
+	The D-parameter controlling validator committee composition.
+	"""
+	dParameter: DParameter!
+	"""
+	The current Terms and Conditions, if any have been set.
+	"""
+	termsAndConditions: TermsAndConditions
+}
+
+"""
 A system Midnight transaction.
 """
 type SystemTransaction implements Transaction {
@@ -548,6 +628,46 @@ type SystemTransaction implements Transaction {
 	Dust ledger events of this transaction.
 	"""
 	dustLedgerEvents: [DustLedgerEvent!]!
+}
+
+"""
+Terms and Conditions agreement.
+"""
+type TermsAndConditions {
+	"""
+	The hex-encoded hash of the Terms and Conditions document.
+	"""
+	hash: HexEncoded!
+	"""
+	The URL where the Terms and Conditions can be found.
+	"""
+	url: String!
+}
+
+"""
+Terms and Conditions change record for history queries.
+"""
+type TermsAndConditionsChange {
+	"""
+	The block height where this T&C version became effective.
+	"""
+	blockHeight: Int!
+	"""
+	The hex-encoded block hash where this T&C version became effective.
+	"""
+	blockHash: HexEncoded!
+	"""
+	The UNIX timestamp when this T&C version became effective.
+	"""
+	timestamp: Int!
+	"""
+	The hex-encoded hash of the Terms and Conditions document.
+	"""
+	hash: HexEncoded!
+	"""
+	The URL where the Terms and Conditions can be found.
+	"""
+	url: String!
 }
 
 """

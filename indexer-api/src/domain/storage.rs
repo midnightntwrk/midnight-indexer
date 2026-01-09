@@ -17,16 +17,18 @@ pub mod block;
 pub mod contract_action;
 pub mod dust;
 pub mod ledger_events;
+pub mod ledger_state;
+pub mod system_parameters;
 pub mod transaction;
 pub mod unshielded;
 pub mod wallet;
 
 use crate::domain::storage::{
     block::BlockStorage, contract_action::ContractActionStorage, dust::DustStorage,
-    ledger_events::LedgerEventStorage, transaction::TransactionStorage,
+    ledger_events::LedgerEventStorage, ledger_state::LedgerStateStorage,
+    system_parameters::SystemParametersStorage, transaction::TransactionStorage,
     unshielded::UnshieldedUtxoStorage, wallet::WalletStorage,
 };
-use std::fmt::Debug;
 
 /// Storage abstraction.
 #[trait_variant::make(Send)]
@@ -36,10 +38,11 @@ where
         + ContractActionStorage
         + DustStorage
         + LedgerEventStorage
+        + LedgerStateStorage
+        + SystemParametersStorage
         + TransactionStorage
         + UnshieldedUtxoStorage
         + WalletStorage
-        + Debug
         + Clone
         + Send
         + Sync
@@ -51,7 +54,7 @@ where
 /// features like "cloud" and hence types like `infra::postgres::PostgresStorage` cannot be used.
 /// Once traits with async functions are object safe, this can go away and be replaced with
 /// `Box<dyn Storage>` at the type level.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct NoopStorage;
 
 impl Storage for NoopStorage {}

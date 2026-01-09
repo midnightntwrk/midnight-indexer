@@ -21,7 +21,8 @@ use crate::{
         },
     },
 };
-use async_graphql::{Context, Subscription, async_stream::try_stream};
+use async_graphql::{Context, Subscription};
+use async_stream::try_stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext};
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};

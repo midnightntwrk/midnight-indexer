@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { bech32 } from 'bech32';
 import { z } from 'zod';
 
 export const Hash64 = z
@@ -78,6 +79,47 @@ export const DustLedgerEventSchema = z.object({
   raw: z.string(),
   maxId: z.number(),
 });
+
+export const DustParamChangeSchema = z.object({
+  __typename: z.literal('ParamChange'),
+  id: z.number(),
+  raw: z.string(),
+  maxId: z.number(),
+});
+
+export const DustInitialUtxoSchema = z.object({
+  __typename: z.literal('DustInitialUtxo'),
+  id: z.number(),
+  raw: z.string(),
+  maxId: z.number(),
+  output: z.object({
+    nonce: z
+      .string()
+      .length(64)
+      .regex(/^[a-f0-9]+$/),
+  }),
+});
+
+export const DustGenerationDtimeUpdateSchema = z.object({
+  __typename: z.literal('DustGenerationDtimeUpdate'),
+  id: z.number(),
+  raw: z.string(),
+  maxId: z.number(),
+});
+
+export const DustSpendProcessedSchema = z.object({
+  __typename: z.literal('DustSpendProcessed'),
+  id: z.number(),
+  raw: z.string(),
+  maxId: z.number(),
+});
+
+export const DustLedgerEventsUnionSchema = z.discriminatedUnion('__typename', [
+  DustParamChangeSchema,
+  DustInitialUtxoSchema,
+  DustGenerationDtimeUpdateSchema,
+  DustSpendProcessedSchema,
+]);
 
 // Base transaction schema (common to both RegularTransaction and SystemTransaction)
 const BaseTransactionFields = {
@@ -197,12 +239,24 @@ export const ContractActionUnionSchema = z.discriminatedUnion('__typename', [
 ]);
 
 // DUST Generation Status schema
+const isCardanoRewardAddress = (value: string) => {
+  try {
+    const decoded = bech32.decode(value.toLowerCase());
+    return decoded.prefix.length > 0;
+  } catch {
+    return false;
+  }
+};
+
 export const DustGenerationStatusSchema = z.object({
-  cardanoRewardAddress: z.string().regex(/^[a-f0-9]{64}$/),
+  cardanoRewardAddress: z
+    .string()
+    .refine(isCardanoRewardAddress, { message: 'Invalid Cardano reward address format' }),
   dustAddress: z.string().nullable(),
   registered: z.boolean(),
   nightBalance: z.string().regex(/^\d+$/),
   generationRate: z.string().regex(/^\d+$/),
+  maxCapacity: z.string().regex(/^\d+$/),
   currentCapacity: z.string().regex(/^\d+$/),
 });
 

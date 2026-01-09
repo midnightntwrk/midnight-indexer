@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0-alpha.9] - 2025-11-10
+## [3.0.0-alpha.23] - 2026-01-07
 
 ### 🚀 Features
 
@@ -43,7 +43,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - *(api)* Add dustGenerationStatus query for cNIGHT tracking (#419)
 - Add ctime to unshielded UTXO (#425)
 - Change network ID from enum to string (#426)
-- Integrate CardanoRewardAddress changes from node 0.18.0-rc.5 (#505)
+- Integrate CardanoRewardAddress changes from latest Node (#505)
+- Validate network ID is lowercase at startup (#518)
+- Ensure non-0 exit codes (#524)
+- *(api)* Add maxCapacity field to DustGenerationStatus (#552)
+- *(api)* Change dustAddress from HexEncoded to Bech32m format (#554)
+- *(api)* Add Cardano UTXO reference to dustGenerationStatus (#575)
+- Validate saving ledger state (#600)
+- *(nats)* Add num_replicas config for JetStream stream replication (#626)
+- *(api)* Validate Cardano reward address network against Midnight network (#620)
+- Add governance system parameters (D-Parameter and T&C) to GraphQL API (#637)
 
 ### 🐛 Bug Fixes
 
@@ -76,6 +85,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - *(chain-indexer)* Create unshielded UTXOs from system transactions (#408)
 - *(indexer-api)* Correct index update order in shieldedTransactions subscription (#455)
 - Always populate zswap_state for contract actions (#471)
+- Populate dust_generation_info from DustInitialUtxo events (#517)
+- *(chain-indexer)* Skip balance for failed contract actions (#527)
+- *(api)* DustGenerationStatus query returns zeros for some fields (#530)
+- Treat dust public key as variable length encoded (#538)
+- *(indexer-api)* Prevent duplicate transactions (#573)
+- *(chain-indexer)* Add timeout-based recovery for stuck subscriptions (#576)
+- Correct ledger state divergence from TX ordering and failed TX cost handling (#592)
 
 ### 💼 Other
 
@@ -96,6 +112,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Storage unification (#171)
 - Remove unused code, better naming, etc. (#232)
 - Rename GraphQL field from parameters to ledgerParameters (#384)
+- Use ledger INITIAL_DUST_PARAMETERS via protocol-version-aware submodule (#558)
 
 ### 📚 Documentation
 
@@ -107,6 +124,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add missing requirements to README (#253)
 - Add comprehensive guide for updating node versions (#281)
 - *(api)* Enhance v3 api documentation with DUST features and field updates (#473)
+- Clarify currentCapacity limitations in dustGenerationStatus (#503)
+- Extend comment for nightBalance, make clear it is in STAR (#551)
+
+### ⚡ Performance
+
+- Add composite index on transactions(variant, id) (#647)
 
 ### ⚙️ Miscellaneous Tasks
 
@@ -132,8 +155,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Address various audit findings (#477)
 - Further address audit (#495)
 - Richer error messages (#494)
-- Bump Rust to 1.91.0 (#497)
-- Update upload-sarif-github-action to latest version with security fixes (#498)
+- *(chain-indexer)* Add some debug level logging (#541)
 
 ## [2.1.4] - 2025-06-30
 

@@ -12,22 +12,25 @@
 // limitations under the License.
 
 use crate::domain::{
-    self, Block, BlockTransactions, ContractAction, DustRegistrationEvent, RegularTransaction,
-    SystemTransaction, Transaction, node::BlockInfo,
+    self, Block, BlockTransactions, ContractAction, DParameter, DustRegistrationEvent,
+    RegularTransaction, SystemParametersChange, SystemTransaction, TermsAndConditions, Transaction,
+    node::BlockInfo,
 };
 use fastrace::trace;
 use futures::{TryFutureExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
-        LedgerEventAttributes, TransactionVariant, UnshieldedUtxo,
+        ABSelector, BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
+        LedgerEventAttributes, LedgerStateStorage, ProtocolVersion, SerializedLedgerState,
+        TermsAndConditionsHash, TransactionVariant, UnshieldedUtxo,
     },
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
+use log::debug;
 use serde::{Deserialize, Serialize};
 use sqlx::{QueryBuilder, Type, types::Json};
-use std::iter;
+use std::{io, iter};
 
 #[cfg(feature = "cloud")]
 /// Sqlx transaction for Postgres.
@@ -40,27 +43,99 @@ type SqlxTransaction = sqlx::Transaction<'static, sqlx::Sqlite>;
 /// Unified storage implementation for PostgreSQL (cloud) and SQLite (standalone). Uses Cargo
 /// features to select the appropriate database backend at build time.
 #[derive(Debug, Clone)]
-pub struct Storage {
+pub struct Storage<S> {
     #[cfg(feature = "cloud")]
     pool: indexer_common::infra::pool::postgres::PostgresPool,
 
     #[cfg(feature = "standalone")]
     pool: indexer_common::infra::pool::sqlite::SqlitePool,
+
+    ledger_state_storage: S,
 }
 
-impl Storage {
+impl<S> Storage<S> {
     #[cfg(feature = "cloud")]
-    pub fn new(pool: indexer_common::infra::pool::postgres::PostgresPool) -> Self {
-        Self { pool }
+    pub fn new(
+        pool: indexer_common::infra::pool::postgres::PostgresPool,
+        ledger_state_storage: S,
+    ) -> Self {
+        Self {
+            pool,
+            ledger_state_storage,
+        }
     }
 
     #[cfg(feature = "standalone")]
-    pub fn new(pool: indexer_common::infra::pool::sqlite::SqlitePool) -> Self {
-        Self { pool }
+    pub fn new(
+        pool: indexer_common::infra::pool::sqlite::SqlitePool,
+        ledger_state_storage: S,
+    ) -> Self {
+        Self {
+            pool,
+            ledger_state_storage,
+        }
+    }
+
+    #[trace]
+    async fn save_ledger_state(
+        &mut self,
+        tx: &mut SqlxTransaction,
+        ledger_state: &SerializedLedgerState,
+        block_height: u32,
+        protocol_version: ProtocolVersion,
+    ) -> Result<(), sqlx::Error>
+    where
+        S: LedgerStateStorage,
+    {
+        let query = indoc! {"
+            SELECT ab_selector
+            FROM ledger_state
+            WHERE id = 0
+        "};
+
+        let ab_selector = sqlx::query_as::<_, (ABSelector,)>(query)
+            .fetch_optional(&mut **tx)
+            .await?
+            .map(|(x,)| x)
+            .unwrap_or_default()
+            .toggle();
+
+        self.ledger_state_storage
+            .save(ledger_state, ab_selector.as_str())
+            .await
+            .map_err(|error| sqlx::Error::Io(io::Error::other(error)))?;
+
+        // Save metadata.
+        let query = indoc! {"
+            INSERT INTO ledger_state (
+                id,
+                block_height,
+                protocol_version,
+                ab_selector
+            )
+            VALUES (0, $1, $2, $3)
+            ON CONFLICT (id)
+            DO UPDATE SET
+                block_height = EXCLUDED.block_height,
+                protocol_version = EXCLUDED.protocol_version,
+                ab_selector = EXCLUDED.ab_selector
+        "};
+
+        sqlx::query(query)
+            .bind(block_height as i64)
+            .bind(protocol_version.0 as i64)
+            .bind(ab_selector)
+            .execute(&mut **tx)
+            .await?;
+
+        Ok(())
     }
 }
 
-impl domain::storage::Storage for Storage {
+impl<S> domain::storage::Storage for Storage<S>
+where
+    S: LedgerStateStorage,
+{
     #[trace]
     async fn get_highest_block_info(&self) -> Result<Option<BlockInfo>, sqlx::Error> {
         let query = indoc! {"
@@ -170,18 +245,93 @@ impl domain::storage::Storage for Storage {
     }
 
     #[trace]
-    async fn save_block(
+    async fn get_ledger_state(
         &self,
+    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT
+                block_height,
+                protocol_version,
+                ab_selector
+            FROM ledger_state
+            WHERE id = 0
+        "};
+
+        let Some((block_height, protocol_version, ab_selector)) =
+            sqlx::query_as::<_, (i64, i64, ABSelector)>(query)
+                .fetch_optional(&*self.pool)
+                .await?
+        else {
+            return Ok(None);
+        };
+
+        let ledger_state = self
+            .ledger_state_storage
+            .load(ab_selector.as_str())
+            .await
+            .map_err(|error| sqlx::Error::Io(io::Error::other(error)))?;
+
+        Ok(Some((
+            ledger_state,
+            block_height as u32,
+            (protocol_version as u32).into(),
+        )))
+    }
+
+    #[trace]
+    async fn save_block(
+        &mut self,
         block: &Block,
         transactions: &[Transaction],
         dust_registration_events: &[DustRegistrationEvent],
+        ledger_state: Option<&SerializedLedgerState>,
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
+
+        if let Some(ledger_state) = ledger_state {
+            self.save_ledger_state(&mut tx, ledger_state, block.height, block.protocol_version)
+                .await?;
+        }
+
         let max_transaction_id =
             save_block(block, transactions, dust_registration_events, &mut tx).await?;
+
         tx.commit().await?;
 
         Ok(max_transaction_id)
+    }
+
+    /// Save the given serialized ledger state with its metadata.
+    async fn save_ledger_state(
+        &mut self,
+        ledger_state: &SerializedLedgerState,
+        block_height: u32,
+        protocol_version: ProtocolVersion,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        self.save_ledger_state(&mut tx, ledger_state, block_height, protocol_version)
+            .await?;
+        tx.commit().await
+    }
+
+    #[trace]
+    async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error> {
+        Storage::get_latest_d_parameter(self).await
+    }
+
+    #[trace]
+    async fn get_latest_terms_and_conditions(
+        &self,
+    ) -> Result<Option<TermsAndConditions>, sqlx::Error> {
+        Storage::get_latest_terms_and_conditions(self).await
+    }
+
+    #[trace]
+    async fn save_system_parameters_change(
+        &self,
+        change: &SystemParametersChange,
+    ) -> Result<(), sqlx::Error> {
+        Storage::save_system_parameters_change(self, change).await
     }
 }
 
@@ -276,7 +426,9 @@ async fn save_block(
         .await?;
 
     let max_transaction_id = save_transactions(transactions, block_id, tx).await?;
+
     save_dust_registration_events(dust_registration_events, block_id, block.timestamp, tx).await?;
+
     Ok(max_transaction_id)
 }
 
@@ -392,6 +544,8 @@ async fn save_regular_transaction(
 
     save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
 
+    save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await?;
+
     Ok(transaction_id as u64)
 }
 
@@ -404,7 +558,9 @@ async fn save_system_transaction(
     save_created_unshielded_utxos(&transaction.created_unshielded_utxos, transaction_id, tx)
         .await?;
 
-    save_ledger_events(&transaction.ledger_events, transaction_id, tx).await
+    save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
+
+    save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
@@ -469,6 +625,8 @@ async fn save_created_unshielded_utxos(
         return Ok(());
     }
 
+    debug!(transaction_id, utxos:?; "saving created unshielded UTXOs");
+
     let query_base = indoc! {"
         INSERT INTO unshielded_utxos (
             creating_transaction_id,
@@ -522,6 +680,8 @@ async fn save_spent_unshielded_utxos(
     if utxos.is_empty() {
         return Ok(());
     }
+
+    debug!(transaction_id, utxos:?; "saving spent unshielded UTXOs");
 
     let rows_affected;
 
@@ -636,6 +796,79 @@ async fn save_ledger_events(
     Ok(())
 }
 
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn save_dust_generation_info(
+    ledger_events: &[LedgerEvent],
+    transaction_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    if ledger_events.is_empty() {
+        return Ok(());
+    }
+
+    for ledger_event in ledger_events {
+        match &ledger_event.attributes {
+            LedgerEventAttributes::DustInitialUtxo {
+                output,
+                generation_info,
+                ..
+            } => {
+                let query = indoc! {"
+                    INSERT INTO dust_generation_info (
+                        night_utxo_hash,
+                        value,
+                        owner,
+                        nonce,
+                        ctime,
+                        merkle_index,
+                        dtime
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                "};
+
+                let dtime = if generation_info.dtime == u64::MAX {
+                    None
+                } else {
+                    Some(generation_info.dtime as i64)
+                };
+
+                sqlx::query(query)
+                    .bind(generation_info.night_utxo_hash.as_ref())
+                    .bind(U128BeBytes::from(&generation_info.value))
+                    .bind(generation_info.owner.as_ref())
+                    .bind(generation_info.nonce.as_ref())
+                    .bind(generation_info.ctime as i64)
+                    .bind(output.mt_index as i64)
+                    .bind(dtime)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+
+            LedgerEventAttributes::DustGenerationDtimeUpdate {
+                generation_info, ..
+            } => {
+                let query = indoc! {"
+                    UPDATE dust_generation_info
+                    SET dtime = $1
+                    WHERE night_utxo_hash = $2
+                "};
+
+                sqlx::query(query)
+                    .bind(generation_info.dtime as i64)
+                    .bind(generation_info.night_utxo_hash.as_ref())
+                    .execute(&mut **tx)
+                    .await?;
+            }
+
+            // Other event types (ZswapInput, ZswapOutput, ParamChange, DustSpendProcessed)
+            // are not relevant to dust_generation_info table.
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
 #[trace]
 async fn save_contract_balances(
     balances: &[(i64, ContractBalance)],
@@ -714,7 +947,8 @@ async fn save_dust_registration_events(
                         valid,
                         registered_at,
                         block_id
-                    ) VALUES ($1, $2, $3, $4, $5)
+                    )
+                    VALUES ($1, $2, $3, $4, $5)
                     ON CONFLICT (cardano_address, dust_address)
                     DO UPDATE SET
                         valid = EXCLUDED.valid,
@@ -756,10 +990,191 @@ async fn save_dust_registration_events(
                     .await?;
             }
 
-            // MappingAdded and MappingRemoved are not part of this minimal cherry-pick.
-            _ => {}
+            DustRegistrationEvent::MappingAdded {
+                cardano_address,
+                dust_address,
+                utxo_id,
+                utxo_index,
+            } => {
+                let query = indoc! {"
+                    UPDATE cnight_registrations
+                    SET utxo_tx_hash = $1,
+                        utxo_output_index = $2
+                    WHERE cardano_address = $3
+                    AND dust_address = $4
+                "};
+
+                sqlx::query(query)
+                    .bind(utxo_id.as_ref())
+                    .bind(*utxo_index as i64)
+                    .bind(cardano_address.as_ref())
+                    .bind(dust_address.as_ref())
+                    .execute(&mut **tx)
+                    .await?;
+            }
+
+            DustRegistrationEvent::MappingRemoved {
+                cardano_address,
+                dust_address,
+                ..
+            } => {
+                let query = indoc! {"
+                    UPDATE cnight_registrations
+                    SET utxo_tx_hash = NULL,
+                        utxo_output_index = NULL
+                    WHERE cardano_address = $1
+                    AND dust_address = $2
+                "};
+
+                sqlx::query(query)
+                    .bind(cardano_address.as_ref())
+                    .bind(dust_address.as_ref())
+                    .execute(&mut **tx)
+                    .await?;
+            }
         }
     }
 
     Ok(())
+}
+
+impl<S> Storage<S>
+where
+    S: LedgerStateStorage,
+{
+    /// Save D-Parameter change to the database.
+    #[trace]
+    pub async fn save_d_parameter(
+        &self,
+        block_height: u32,
+        block_hash: &BlockHash,
+        timestamp: u64,
+        d_parameter: &DParameter,
+    ) -> Result<(), sqlx::Error> {
+        let query = indoc! {"
+            INSERT INTO system_parameters_d (
+                block_height,
+                block_hash,
+                timestamp,
+                num_permissioned_candidates,
+                num_registered_candidates
+            )
+            VALUES ($1, $2, $3, $4, $5)
+        "};
+
+        sqlx::query(query)
+            .bind(block_height as i64)
+            .bind(block_hash.as_ref())
+            .bind(timestamp as i64)
+            .bind(d_parameter.num_permissioned_candidates as i32)
+            .bind(d_parameter.num_registered_candidates as i32)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Save Terms and Conditions change to the database.
+    #[trace]
+    pub async fn save_terms_and_conditions(
+        &self,
+        block_height: u32,
+        block_hash: &BlockHash,
+        timestamp: u64,
+        terms_and_conditions: &TermsAndConditions,
+    ) -> Result<(), sqlx::Error> {
+        let query = indoc! {"
+            INSERT INTO system_parameters_terms_and_conditions (
+                block_height,
+                block_hash,
+                timestamp,
+                hash,
+                url
+            )
+            VALUES ($1, $2, $3, $4, $5)
+        "};
+
+        sqlx::query(query)
+            .bind(block_height as i64)
+            .bind(block_hash.as_ref())
+            .bind(timestamp as i64)
+            .bind(terms_and_conditions.hash.as_ref())
+            .bind(&terms_and_conditions.url)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Save all system parameters from a change event.
+    #[trace]
+    pub async fn save_system_parameters_change(
+        &self,
+        change: &SystemParametersChange,
+    ) -> Result<(), sqlx::Error> {
+        if let Some(ref d_parameter) = change.d_parameter {
+            self.save_d_parameter(
+                change.block_height,
+                &change.block_hash,
+                change.timestamp,
+                d_parameter,
+            )
+            .await?;
+        }
+
+        if let Some(ref terms_and_conditions) = change.terms_and_conditions {
+            self.save_terms_and_conditions(
+                change.block_height,
+                &change.block_hash,
+                change.timestamp,
+                terms_and_conditions,
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Get the latest D-Parameter from the database.
+    #[trace]
+    pub async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT num_permissioned_candidates, num_registered_candidates
+            FROM system_parameters_d
+            ORDER BY block_height DESC
+            LIMIT 1
+        "};
+
+        let result = sqlx::query_as::<_, (i32, i32)>(query)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        Ok(result.map(|(num_perm, num_reg)| DParameter {
+            num_permissioned_candidates: num_perm as u16,
+            num_registered_candidates: num_reg as u16,
+        }))
+    }
+
+    /// Get the latest Terms and Conditions from the database.
+    #[trace]
+    pub async fn get_latest_terms_and_conditions(
+        &self,
+    ) -> Result<Option<TermsAndConditions>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT hash, url
+            FROM system_parameters_terms_and_conditions
+            ORDER BY block_height DESC
+            LIMIT 1
+        "};
+
+        let result = sqlx::query_as::<_, (ByteVec, String)>(query)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        Ok(result.map(|(hash_bytes, url)| {
+            let hash =
+                TermsAndConditionsHash::try_from(hash_bytes).expect("hash should be 32 bytes");
+            TermsAndConditions { hash, url }
+        }))
+    }
 }

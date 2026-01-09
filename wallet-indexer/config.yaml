@@ -21,6 +21,7 @@ infra:
   pub_sub:
     url: "localhost:4222"
     username: "indexer"
+    max_reconnects: 4
 
 telemetry:
   tracing:

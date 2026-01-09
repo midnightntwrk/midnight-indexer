@@ -16,7 +16,7 @@ mod runtimes;
 
 use crate::{
     domain::{
-        TransactionFees,
+        SystemParametersChange, TransactionFees,
         node::{Block, BlockInfo, Node, RegularTransaction, SystemTransaction, Transaction},
     },
     infra::subxt_node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
@@ -50,6 +50,7 @@ use subxt::{
     utils::H256,
 };
 use thiserror::Error;
+use tokio::time::timeout;
 
 type SubxtBlock = subxt::blocks::Block<SubstrateConfig, OnlineClient<SubstrateConfig>>;
 
@@ -59,10 +60,10 @@ const TRAVERSE_BACK_LOG_AFTER: u32 = 1_000;
 /// A [Node] implementation based on subxt.
 #[derive(Clone)]
 pub struct SubxtNode {
-    genesis_protocol_version: ProtocolVersion,
     rpc_client: RpcClient,
     default_online_client: OnlineClient<SubstrateConfig>,
     compatible_online_client: Option<(ProtocolVersion, OnlineClient<SubstrateConfig>)>,
+    subscription_recovery_timeout: Duration,
 }
 
 impl SubxtNode {
@@ -70,9 +71,9 @@ impl SubxtNode {
     pub async fn new(config: Config) -> Result<Self, Error> {
         let Config {
             url,
-            genesis_protocol_version,
             reconnect_max_delay: retry_max_delay,
             reconnect_max_attempts: retry_max_attempts,
+            subscription_recovery_timeout,
         } = config;
 
         let retry_policy = ExponentialBackoff::from_millis(10)
@@ -89,9 +90,9 @@ impl SubxtNode {
 
         Ok(Self {
             rpc_client,
-            genesis_protocol_version,
             default_online_client,
             compatible_online_client: None,
+            subscription_recovery_timeout,
         })
     }
 
@@ -147,17 +148,19 @@ impl SubxtNode {
         Ok(compatible_online_client)
     }
 
-    /// Subscribe to finalizded blocks, filtering duplicates and disconnection errors.
+    /// Subscribe to finalized blocks, filtering duplicates and disconnection errors.
     /// Subxt with its reconnecting-rpc-client feature exposes the error case, i.e. yields one `Err`
     /// item, then reconnects and continues with `Ok` items. Therefore we filter out the respective
     /// `Err` item; all other errors need to be propagated as is.
+    ///
+    /// The `last_height` parameter allows the caller to pass in the last successfully processed
+    /// block height, which is used to properly filter duplicates after re-subscribing.
     async fn subscribe_finalized_blocks(
         &self,
+        mut last_height: Option<u32>,
     ) -> Result<impl Stream<Item = Result<SubxtBlock, SubxtNodeError>> + use<>, SubxtNodeError>
     {
-        let mut last_block_height = None;
-
-        let subscribe_finalized_blocks = self
+        let finalized_blocks = self
             .default_online_client
             .blocks()
             .subscribe_finalized()
@@ -168,15 +171,16 @@ impl SubxtNode {
                     Ok(block) => {
                         let height = block.number();
 
-                        if Some(height) <= last_block_height {
+                        if Some(height) <= last_height {
                             warn!(
                                 hash:% = block.hash(),
-                                height = block.number();
+                                height = block.number(),
+                                last_height:?;
                                 "received duplicate, possibly after reconnect"
                             );
                             false
                         } else {
-                            last_block_height = Some(height);
+                            last_height = Some(height);
                             true
                         }
                     }
@@ -196,7 +200,7 @@ impl SubxtNode {
             })
             .map_err(|error| SubxtNodeError::ReceiveBlock(error.into()));
 
-        Ok(subscribe_finalized_blocks)
+        Ok(finalized_blocks)
     }
 
     async fn make_block(
@@ -210,7 +214,7 @@ impl SubxtNode {
         let protocol_version = block
             .header()
             .protocol_version()?
-            .unwrap_or(self.genesis_protocol_version);
+            .expect("protocol version header is present");
 
         debug!(
             hash:%,
@@ -298,7 +302,7 @@ impl Node for SubxtNode {
         &self,
     ) -> Result<impl Stream<Item = Result<BlockInfo, Self::Error>> + Send, Self::Error> {
         let highest_blocks = self
-            .subscribe_finalized_blocks()
+            .subscribe_finalized_blocks(None)
             .await?
             .map_ok(|block| BlockInfo {
                 hash: block.hash().0.into(),
@@ -325,11 +329,11 @@ impl Node for SubxtNode {
         let mut authorities = None;
 
         try_stream! {
-            let mut finalized_blocks = self.subscribe_finalized_blocks().await?;
+            let mut finalized_blocks = self.subscribe_finalized_blocks(after_height).await?;
+            let mut last_yielded_height = after_height;
 
             // First we receive the first finalized block.
-            let Some(first_block) = receive_block(&mut finalized_blocks).await?
-            else {
+            let Some(first_block) = receive_block(&mut finalized_blocks).await? else {
                 return;
             };
             debug!(
@@ -349,8 +353,7 @@ impl Node for SubxtNode {
                 // (one year ~ 5,256,000 blocks).
                 let genesis_parent_hash = self
                     .fetch_block(self.default_online_client.genesis_hash())
-                    .await
-                    ?
+                    .await?
                     .header()
                     .parent_hash;
 
@@ -392,22 +395,73 @@ impl Node for SubxtNode {
                 }
 
                 // Then we yield the first finalized block.
-                yield self.make_block(first_block, &mut authorities).await?;
+                let block = self.make_block(first_block, &mut authorities).await?;
+                last_yielded_height = Some(block.height);
+                yield block;
             }
 
             // Finally we emit all other finalized ones.
-            while let Some(block) = receive_block(&mut finalized_blocks).await?
-            {
-                debug!(
-                    hash:% = block.hash(),
-                    height = block.number(),
-                    parent_hash:% = block.header().parent_hash;
-                    "block received"
-                );
+            // If no block is received within the recovery timeout, re-subscribe to recover
+            // from potentially stuck subscriptions (e.g., after a reconnect).
+            let recovery_timeout = self.subscription_recovery_timeout;
+            loop {
+                match timeout(recovery_timeout, receive_block(&mut finalized_blocks)).await {
+                    Ok(Ok(Some(block))) => {
+                        debug!(
+                            hash:% = block.hash(),
+                            height = block.number(),
+                            parent_hash:% = block.header().parent_hash;
+                            "block received"
+                        );
+                        let block = self.make_block(block, &mut authorities).await?;
+                        last_yielded_height = Some(block.height);
+                        yield block;
+                    }
 
-                yield self.make_block(block, &mut authorities).await?;
+                    // Stream completed normally.
+                    Ok(Ok(None)) => break,
+
+                    // Stream completed with error.
+                    Ok(Err(e)) => Err(e)?,
+
+                    // Timeout: no block received within recovery_timeout => resubscribe.
+                    Err(_) => {
+                        warn!(
+                            last_yielded_height:?,
+                            recovery_timeout:?;
+                            "subscription appears stuck, re-subscribing"
+                        );
+                        finalized_blocks =
+                            self.subscribe_finalized_blocks(last_yielded_height).await?;
+                    }
+                }
             }
         }
+    }
+
+    async fn fetch_system_parameters(
+        &self,
+        block_hash: BlockHash,
+        block_height: u32,
+        timestamp: u64,
+        protocol_version: ProtocolVersion,
+    ) -> Result<SystemParametersChange, Self::Error> {
+        let (d_parameter, terms_and_conditions) = tokio::try_join!(
+            runtimes::get_d_parameter(block_hash, protocol_version, &self.default_online_client),
+            runtimes::get_terms_and_conditions(
+                block_hash,
+                protocol_version,
+                &self.default_online_client
+            ),
+        )?;
+
+        Ok(SystemParametersChange {
+            block_height,
+            block_hash,
+            timestamp,
+            d_parameter: Some(d_parameter),
+            terms_and_conditions,
+        })
     }
 }
 
@@ -416,12 +470,23 @@ impl Node for SubxtNode {
 pub struct Config {
     pub url: String,
 
-    pub genesis_protocol_version: ProtocolVersion,
-
     #[serde(with = "humantime_serde")]
     pub reconnect_max_delay: Duration,
 
     pub reconnect_max_attempts: usize,
+
+    /// Timeout for receiving a valid block after a reconnect or duplicate event.
+    /// If no valid block is received within this duration, the subscription is considered
+    /// stuck and will be re-established. Defaults to 30 seconds.
+    #[serde(
+        with = "humantime_serde",
+        default = "default_subscription_recovery_timeout"
+    )]
+    pub subscription_recovery_timeout: Duration,
+}
+
+fn default_subscription_recovery_timeout() -> Duration {
+    Duration::from_secs(30)
 }
 
 /// Error possibly returned by [SubxtNode::new].
@@ -499,6 +564,12 @@ pub enum SubxtNodeError {
 
     #[error("invalid DUST address length: expected 32 bytes, was {0}")]
     InvalidDustAddress(usize),
+
+    #[error("cannot get D-Parameter")]
+    GetDParameter(#[source] BoxError),
+
+    #[error("cannot get Terms and Conditions")]
+    GetTermsAndConditions(#[source] BoxError),
 }
 
 #[trace]

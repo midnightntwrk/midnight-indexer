@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
       - name: Install cargo-deny
         run: cargo install cargo-deny
@@ -43,43 +43,23 @@ jobs:
           password: ${{ secrets.MIDNIGHTCI_REPO }}
 
       - name: Run cargo-deny
+        # cargo-deny 0.19.0+ includes fix for empty locations in SARIF output
         run: cargo deny -f sarif check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed | tee scan.sarif || true
         # TODO: once everything's open sourced remove -Aunlicensed
-
-      - name: Fix SARIF for GitHub upload
-        run: |
-          # GitHub requires at least one location per result, but cargo-deny may generate
-          # results with empty locations (e.g., for git dependencies). Add Cargo.lock as
-          # the location for any results missing locations.
-          if [ -f scan.sarif ]; then
-            jq '.runs[].results |= map(
-              if .locations == [] or .locations == null then
-                .locations = [{
-                  "physicalLocation": {
-                    "artifactLocation": {
-                      "uri": "Cargo.lock"
-                    },
-                    "region": {
-                      "startLine": 1
-                    }
-                  }
-                }]
-              else . end
-            )' scan.sarif > scan-fixed.sarif && mv scan-fixed.sarif scan.sarif
-          fi
 
       - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@7273f08caa1dcf2c2837f362f1982de0ab4dc344
         with:
           sarif_file: scan.sarif
 
-      # Skip Checkmarx BYOR upload for fork PRs (no secrets available)
-      - name: Upload SARIF to Checkmarx
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        uses: midnightntwrk/upload-sarif-github-action@32b96caabd2472b3d142ed0a278d619d6bd82bf8
-        with:
-          sarif-file: scan.sarif
-          project-name: midnightntwrk/midnight-indexer
-          cx-client-id: ${{ secrets.CX_CLIENT_ID }}
-          cx-client-secret: ${{ secrets.CX_CLIENT_SECRET_EU }}
-          cx-tenant: ${{ secrets.CX_TENANT }}
+      # skip for now until checkmarx user has permissions to upload BYOR
+      # # Skip Checkmarx BYOR upload for fork PRs (no secrets available)
+      # - name: Upload SARIF to Checkmarx
+      #   if: github.event.pull_request.head.repo.full_name == github.repository
+      #   uses: midnightntwrk/upload-sarif-github-action@32b96caabd2472b3d142ed0a278d619d6bd82bf8
+      #   with:
+      #     sarif-file: scan.sarif
+      #     project-name: midnightntwrk/midnight-indexer
+      #     cx-client-id: ${{ secrets.CX_CLIENT_ID }}
+      #     cx-client-secret: ${{ secrets.CX_CLIENT_SECRET_EU }}
+      #     cx-tenant: ${{ secrets.CX_TENANT }}

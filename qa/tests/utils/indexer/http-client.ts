@@ -182,10 +182,10 @@ export class IndexerHttpClient {
   }
 
   /**
-   * Retrieves DUST generation status for given Cardano stake keys from the indexer
-   * @param cardanoRewardAddresses - Array of hex-encoded Cardano stake keys to query
+   * Retrieves DUST generation status for given Cardano reward addresses from the indexer
+   * @param cardanoRewardAddresses - Array of Cardano reward addresses to query
    * @param queryOverride - Optional custom GraphQL query to override the default DUST generation status query
-   * @returns Promise resolving to the DUST generation status response containing status for each stake key
+   * @returns Promise resolving to the DUST generation status response containing status for each reward address
    */
   async getDustGenerationStatus(
     cardanoRewardAddresses: string[],
