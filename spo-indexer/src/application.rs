@@ -33,17 +33,17 @@ use tokio::{select, signal::unix::Signal, time};
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub interval: u32,
-    /// Stake refresh config (mandatory)
+    /// Stake refresh config (mandatory).
     pub stake_refresh: StakeRefreshConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct StakeRefreshConfig {
-    /// How often to refresh stake data in seconds
+    /// How often to refresh stake data in seconds.
     pub period_secs: u64,
-    /// Number of pools to fetch per cycle
+    /// Number of pools to fetch per cycle.
     pub page_size: u32,
-    /// Max requests per second to Blockfrost (rudimentary rate limit)
+    /// Max requests per second to Blockfrost (rudimentary rate limit).
     pub max_rps: u32,
 }
 
@@ -53,18 +53,18 @@ pub async fn run(
     storage: impl Storage,
     mut sigterm: Signal,
 ) -> anyhow::Result<()> {
-    // Mandatory background task: refresh stake snapshots periodically using Blockfrost
+    // Mandatory background task: refresh stake snapshots periodically using Blockfrost.
     let st_cfg = config.stake_refresh.clone();
     let storage_bg = storage.clone();
     let client_bg = client.clone();
     tokio::spawn(async move {
         let mut ticker = time::interval(Duration::from_secs(st_cfg.period_secs.max(60)));
-        // initial delay to avoid hammering on startup
+        // Initial delay to avoid hammering on startup.
         ticker.tick().await;
         loop {
             ticker.tick().await;
-            if let Err(e) = refresh_stake_snapshots(&client_bg, &storage_bg, &st_cfg).await {
-                error!("stake refresh failed: {e:?}");
+            if let Err(error) = refresh_stake_snapshots(&client_bg, &storage_bg, &st_cfg).await {
+                error!("stake refresh failed: {error:?}");
             }
         }
     });
@@ -75,7 +75,7 @@ pub async fn run(
                 result?;
             }
             _ = sigterm.recv() => {
-                warn!("SIGTERM received");
+                warn!("sigterm received");
                 return Ok(());
             }
         }
@@ -87,16 +87,12 @@ async fn process_next_epoch(
     client: &SPOClient,
     storage: &impl Storage,
 ) -> anyhow::Result<()> {
-    let cur_epoch = get_epoch_to_process(client, storage).await?;
-
-    if cur_epoch.is_none() {
+    let Some(epoch) = get_epoch_to_process(client, storage).await? else {
         debug!("latest epoch reached");
         time::sleep(Duration::new(config.interval.into(), 0)).await;
         return Ok(());
-    }
-
-    let epoch = cur_epoch.expect("epoch should exist after is_none() check");
-    info!("processing epoch {}", epoch.epoch_no);
+    };
+    info!(epoch_no = epoch.epoch_no; "processing epoch");
 
     let mut tx = storage.create_tx().await?;
     let committee = client.get_committee(epoch.epoch_no).await?;
@@ -112,7 +108,7 @@ async fn process_next_epoch(
     for (_, registrations) in raw_spos.candidate_registrations {
         for raw_spo in &registrations {
             let cardano_id = get_cardano_id(&raw_spo.mainchain_pub_key);
-            // Normalize all keys by stripping optional 0x prefix for consistency with DB values
+            // Normalize all keys by stripping optional 0x prefix for consistency with DB values.
             let spo_sk = remove_hex_prefix(raw_spo.sidechain_pub_key.to_string());
 
             val_to_registration.insert(spo_sk.clone(), raw_spo.clone());
@@ -125,17 +121,15 @@ async fn process_next_epoch(
         }
     }
 
-    debug!("committee size: {}", committee.len());
-    if committee.len() > 0 {
+    debug!(committee_size = committee.len(); "committee");
+    if !committee.is_empty() {
         let blocks_remainder = client.epoch_duration % committee.len() as u32;
         let expected_blocks = get_expected_blocks(client, &epoch, committee.len() as u32);
 
         for (index, spo) in committee.iter().enumerate() {
             let spo_sk = remove_hex_prefix(spo.sidechain_pubkey.to_string());
-            let produced = blocks_produced.get(&spo_sk);
-
-            // only count if the validator has produced a block
-            if produced.is_some() {
+            // Only count if the validator has produced a block.
+            if let Some(&produced_count) = blocks_produced.get(&spo_sk) {
                 let raw_spo = val_to_registration
                     .get(&spo_sk)
                     .expect("validator should have registration");
@@ -150,9 +144,7 @@ async fn process_next_epoch(
                         } else {
                             0
                         }),
-                    produced_blocks: *produced
-                        .expect("produced should exist after is_some() check")
-                        as u64,
+                    produced_blocks: produced_count as u64,
                     identity_label: cardano_id,
                 };
 
@@ -164,7 +156,7 @@ async fn process_next_epoch(
     }
 
     tx.commit().await?;
-    info!("processed epoch {}", epoch.epoch_no);
+    info!(epoch_no = epoch.epoch_no; "processed epoch");
     Ok(())
 }
 
@@ -239,8 +231,8 @@ async fn refresh_stake_snapshots(
                     .await?;
                 total_updated += 1;
             }
-            Err(err) => {
-                error!("stake refresh for {pid} failed: {err:?}");
+            Err(error) => {
+                error!("stake refresh for {pid} failed: {error:?}");
             }
         }
         if sleep_per_req_ms > 0 {
@@ -254,10 +246,7 @@ async fn refresh_stake_snapshots(
     storage.set_stake_refresh_cursor(last_id).await?;
 
     if total_updated > 0 {
-        info!(
-            "stake refresh: updated {} pools (cursor at {:?})",
-            total_updated, last_id
-        );
+        info!(total_updated, cursor:? = last_id; "stake refresh completed");
     }
     Ok(())
 }
@@ -268,7 +257,7 @@ async fn save_spo_history(
     epoch: u64,
     tx: &mut SqlxTransaction,
 ) -> anyhow::Result<()> {
-    // Normalize to hex without 0x
+    // Normalize to hex without 0x.
     let spo_sk = remove_hex_prefix(raw_spo.sidechain_pub_key.to_string());
 
     let spo = SPOHistory {
@@ -291,16 +280,16 @@ async fn save_spo_identity(
     cardano_id: String,
     tx: &mut SqlxTransaction,
 ) -> anyhow::Result<()> {
-    // Normalize all hex-like identifiers to avoid mixed representations
+    // Normalize all hex-like identifiers to avoid mixed representations.
     let spo_sk = remove_hex_prefix(raw_spo.sidechain_pub_key.to_string());
     let aura_pk = remove_hex_prefix(raw_spo.keys.aura.to_string());
     let main_pk = remove_hex_prefix(raw_spo.mainchain_pub_key.to_string());
 
     let spo = SPO {
         spo_sk: spo_sk.clone(),
-        sidechain_pubkey: spo_sk.clone(),
-        pool_id: cardano_id.clone().to_string(),
-        aura_pubkey: aura_pk.clone(),
+        sidechain_pubkey: spo_sk,
+        pool_id: cardano_id,
+        aura_pubkey: aura_pk,
         mainchain_pubkey: main_pk,
     };
 
@@ -314,20 +303,17 @@ async fn save_pool_metadata(
     tx: &mut SqlxTransaction,
     cardano_id: String,
 ) -> anyhow::Result<()> {
-    let meta = client.get_pool_metadata(cardano_id.clone()).await;
-
-    let saved_meta = if meta.is_ok() {
-        meta?
-    } else {
-        PoolMetadata {
-            pool_id: cardano_id.to_string(),
-            hex_id: cardano_id.to_string(),
-            name: "".to_string(),
-            ticker: "".to_string(),
-            homepage_url: "".to_string(),
-            url: "".to_string(),
-        }
-    };
+    let saved_meta = client
+        .get_pool_metadata(cardano_id.clone())
+        .await
+        .unwrap_or_else(|_| PoolMetadata {
+            pool_id: cardano_id.clone(),
+            hex_id: cardano_id,
+            name: String::new(),
+            ticker: String::new(),
+            homepage_url: String::new(),
+            url: String::new(),
+        });
 
     storage.save_pool_meta(&saved_meta, tx).await?;
     Ok(())
@@ -343,9 +329,9 @@ fn get_expected_blocks(client: &SPOClient, epoch: &Epoch, committee_size: u32) -
 
 fn committee_to_membership(
     client: &SPOClient,
-    committee: &Vec<Validator>,
+    committee: &[Validator],
 ) -> Vec<ValidatorMembership> {
-    if committee.len() == 0 {
+    if committee.is_empty() {
         return vec![];
     }
 
@@ -354,12 +340,12 @@ fn committee_to_membership(
     let leftover = slots_per_epoch % num_validators;
 
     committee
-        .into_iter()
+        .iter()
         .enumerate()
         .map(|(index, c)| ValidatorMembership {
             epoch_no: c.epoch_no,
             position: c.position,
-            // Normalize to hex without 0x for consistency with identity/performance
+            // Normalize to hex without 0x for consistency with identity/performance.
             spo_sk: remove_hex_prefix(c.sidechain_pubkey.clone()),
             sidechain_pubkey: remove_hex_prefix(c.sidechain_pubkey.clone()),
             expected_slots: slots_per_epoch / num_validators
@@ -372,17 +358,16 @@ fn committee_to_membership(
         .collect()
 }
 
-/// if option is None, it means that we are already at the latest epoch
+/// If option is None, it means that we are already at the latest epoch.
 async fn get_epoch_to_process(
     client: &SPOClient,
     storage: &impl Storage,
 ) -> anyhow::Result<Option<Epoch>> {
     let latest_processed = storage.get_latest_epoch().await?;
     let current_epoch = client.get_current_epoch().await?;
-    let latest_epoch_num = if latest_processed.is_some() {
-        latest_processed.expect("epoch should exist after is_some() check").epoch_no
-    } else {
-        client.get_first_epoch_num().await?
+    let latest_epoch_num = match latest_processed {
+        Some(epoch) => epoch.epoch_no,
+        None => client.get_first_epoch_num().await?,
     };
 
     let time_offset: i64 =
@@ -399,15 +384,17 @@ async fn get_epoch_to_process(
     }
 }
 
-fn get_cardano_id(mainchain_pk: &String) -> String {
-    let mainchain_pk = hex_to_bytes(&mainchain_pk);
+fn get_cardano_id(mainchain_pk: &str) -> String {
+    let mainchain_pk = hex_to_bytes(mainchain_pk);
     let mut hasher = Blake2bVar::new(28).expect("blake2b output size 28 is valid");
     hasher.update(&mainchain_pk);
 
     let mut buffer = [0u8; 28];
-    hasher.finalize_variable(&mut buffer).expect("blake2b finalize should succeed with valid buffer");
+    hasher
+        .finalize_variable(&mut buffer)
+        .expect("blake2b finalize should succeed with valid buffer");
 
-    let hex_hash = to_hex(&buffer);
+    let hex_hash = to_hex(buffer);
 
     remove_hex_prefix(hex_hash.to_string())
 }

@@ -24,7 +24,7 @@ pub type SqlxTransaction = sqlx::Transaction<'static, sqlx::Postgres>;
 pub type SqlxTransaction = sqlx::Transaction<'static, sqlx::Sqlite>;
 
 #[cfg(not(any(feature = "cloud", feature = "standalone")))]
-/// Default to Postgres when no feature is explicitly enabled (workspace builds)
+/// Default to Postgres when no feature is explicitly enabled (workspace builds).
 pub type SqlxTransaction = sqlx::Transaction<'static, sqlx::Postgres>;
 
 /// Storage abstraction.
@@ -43,7 +43,7 @@ where
 
     async fn save_membership(
         &self,
-        memberships: &Vec<ValidatorMembership>,
+        memberships: &[ValidatorMembership],
         tx: &mut SqlxTransaction,
     ) -> Result<(), sqlx::Error>;
 
@@ -68,8 +68,12 @@ where
     /// Return a page of pool_ids known to the system (for stake refreshers).
     /// Implementations should order by most recently updated metadata first when possible.
     async fn list_pool_ids(&self, limit: i64, offset: i64) -> Result<Vec<String>, sqlx::Error>;
-    /// Return pool_ids after a given id, lexicographically, for cursor-based rotation
-    async fn list_pool_ids_after(&self, after: &str, limit: i64) -> Result<Vec<String>, sqlx::Error>;
+    /// Return pool_ids after a given id, lexicographically, for cursor-based rotation.
+    async fn list_pool_ids_after(
+        &self,
+        after: &str,
+        limit: i64,
+    ) -> Result<Vec<String>, sqlx::Error>;
 
     /// Upsert latest stake snapshot for a pool.
     async fn save_stake_snapshot(
@@ -84,7 +88,7 @@ where
         tx: &mut SqlxTransaction,
     ) -> Result<(), sqlx::Error>;
 
-    /// Append a history row for stake
+    /// Append a history row for stake.
     async fn insert_stake_history(
         &self,
         pool_id: &str,
@@ -98,7 +102,7 @@ where
         tx: &mut SqlxTransaction,
     ) -> Result<(), sqlx::Error>;
 
-    /// Refresh cursor helpers
+    /// Refresh cursor helpers.
     async fn get_stake_refresh_cursor(&self) -> Result<Option<String>, sqlx::Error>;
     async fn set_stake_refresh_cursor(&self, pool_id: Option<&str>) -> Result<(), sqlx::Error>;
 }

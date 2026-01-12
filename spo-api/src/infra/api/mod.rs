@@ -80,7 +80,8 @@ impl Api for AxumApi {
             max_depth,
         } = self.config;
 
-        // In the current shape AxumApi doesn't own the pool; we keep readiness simple (caught_up only).
+        // In the current shape AxumApi doesn't own the pool; we keep readiness simple (caught_up
+        // only).
         let app = make_app(
             caught_up,
             self.db,
@@ -121,7 +122,9 @@ pub enum AxumApiError {
 
 pub struct Metrics;
 impl Default for Metrics {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -159,9 +162,9 @@ async fn ready(
         )
             .into_response()
     } else {
-        // if a DB is provided, try a lightweight ping
+        // If a DB is provided, try a lightweight ping.
         if let Some(Db(pool)) = db {
-            if let Err(_e) = sqlx::query_scalar::<_, i32>("SELECT 1")
+            if let Err(_error) = sqlx::query_scalar::<_, i32>("SELECT 1")
                 .fetch_one(&*pool)
                 .await
             {
@@ -172,7 +175,7 @@ async fn ready(
     }
 }
 
-// removed custom 400->413 transform; default behavior is acceptable for MVP
+// Removed custom 400->413 transform; default behavior is acceptable for MVP.
 
 async fn shutdown_signal() {
     signal(SignalKind::terminate())

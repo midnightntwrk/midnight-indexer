@@ -3,18 +3,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::{AppState, ContextExt, Db, Metrics};
-use async_graphql::{Context, EmptyMutation, EmptySubscription, Object, Schema};
+use async_graphql::{
+    Context, EmptyMutation, EmptySubscription, Object, Schema, http::GraphiQLSource,
+};
 use async_graphql_axum::{GraphQL, GraphQLSubscription};
 use axum::{
     Router,
-    response::IntoResponse,
+    response::{Html, IntoResponse},
     routing::{get, post_service},
 };
 use indexer_common::domain::NetworkId;
 use log::{info, warn};
-// no extra imports needed here
 use regex::Regex;
-// no rust_decimal to keep sqlx decoding simple; we parse numerics as strings when needed
+// No rust_decimal to keep sqlx decoding simple; we parse numerics as strings when needed.
 
 const DEFAULT_PERFORMANCE_LIMIT: i64 = 20;
 
@@ -41,18 +42,19 @@ pub fn make_app(
         .data(network_id)
         .data(Metrics::default())
         .data(db)
-        // Inject optional Db from AppState via Router state in handlers
+        // Inject optional Db from AppState via Router state in handlers.
         .finish();
 
     // Runtime confirmation that extended schema is present.
     if schema.sdl().contains("spoCompositeByPoolId") {
-        info!("GraphQL schema includes spoCompositeByPoolId");
+        info!("graphQL schema includes spoCompositeByPoolId");
     } else {
         warn!("spoCompositeByPoolId missing from schema – ensure service rebuilt without cache");
     }
 
     Router::new()
-        // Support both /graphql and /graphql/ to avoid 404 (empty body -> GraphiQL JSON parse error)
+        // Support both /graphql and /graphql/ to avoid 404 (empty body -> GraphiQL JSON parse
+        // error).
         .route("/graphql", get(graphiql))
         .route("/graphql/", get(graphiql))
         .route("/graphql", post_service(GraphQL::new(schema.clone())))
@@ -67,7 +69,7 @@ pub struct Query;
 #[Object(rename_fields = "camelCase")]
 impl Query {
     async fn service_info(&self, cx: &Context<'_>) -> ServiceInfo {
-        let network = format!("{}", cx.get_network_id());
+        let network = cx.get_network_id().to_string();
         ServiceInfo {
             name: "spo-api".into(),
             version: env!("CARGO_PKG_VERSION").into(),
@@ -80,10 +82,11 @@ impl Query {
     /// Semantics:
     /// - Domain is limited to pools present in spo_stake_snapshot ("current" pools), so the final
     ///   value equals spo_count by construction.
-    /// - First-seen epoch per pool is computed as the minimum epoch where that pool_id appears in any of:
-    ///   spo_history (via spo_identity), committee_membership (via spo_identity), spo_epoch_performance (via spo_identity).
-    /// - If a current pool has no appearances in those sources, it is assigned first_seen_epoch = to_epoch
-    ///   (it will enter at the end of the requested window so totals match spo_count).
+    /// - First-seen epoch per pool is computed as the minimum epoch where that pool_id appears in
+    ///   any of: spo_history (via spo_identity), committee_membership (via spo_identity),
+    ///   spo_epoch_performance (via spo_identity).
+    /// - If a current pool has no appearances in those sources, it is assigned first_seen_epoch =
+    ///   to_epoch (it will enter at the end of the requested window so totals match spo_count).
     async fn registered_totals_series(
         &self,
         cx: &Context<'_>,
@@ -151,14 +154,16 @@ impl Query {
             {
                 Ok(rows) => rows
                     .into_iter()
-                    .map(|(epoch_no, total_registered, newly_registered)| RegisteredTotals {
-                        epoch_no,
-                        total_registered,
-                        newly_registered,
-                    })
+                    .map(
+                        |(epoch_no, total_registered, newly_registered)| RegisteredTotals {
+                            epoch_no,
+                            total_registered,
+                            newly_registered,
+                        },
+                    )
                     .collect(),
-                Err(e) => {
-                    warn!("registered_totals_series query failed: {e}");
+                Err(error) => {
+                    warn!("registered_totals_series query failed: {error}");
                     vec![]
                 }
             }
@@ -214,8 +219,8 @@ impl Query {
                         },
                     )
                     .collect(),
-                Err(e) => {
-                    warn!("spo_identities query failed: {e}");
+                Err(error) => {
+                    warn!("spo_identities query failed: {error}");
                     vec![]
                 }
             }
@@ -260,8 +265,8 @@ impl Query {
                     validator_class,
                 }),
                 Ok(None) => None,
-                Err(e) => {
-                    warn!("spo_identity_by_pool_id query failed: {e}");
+                Err(error) => {
+                    warn!("spo_identity_by_pool_id query failed: {error}");
                     None
                 }
             }
@@ -310,8 +315,8 @@ impl Query {
                     })
                 }
                 Ok(None) => None,
-                Err(e) => {
-                    warn!("pool_metadata query failed: {e}");
+                Err(error) => {
+                    warn!("pool_metadata query failed: {error}");
                     None
                 }
             }
@@ -382,8 +387,8 @@ impl Query {
                         },
                     )
                     .collect(),
-                Err(e) => {
-                    warn!("pool_metadata_list query failed: {e}");
+                Err(error) => {
+                    warn!("pool_metadata_list query failed: {error}");
                     vec![]
                 }
             }
@@ -415,10 +420,9 @@ impl Query {
             WHERE pool_id = $1
             LIMIT 1
         "#;
-        let identity = match sqlx::query_as::<
-            _,
-            (String, String, String, Option<String>, String),
-        >(identity_sql)
+        let identity = match sqlx::query_as::<_, (String, String, String, Option<String>, String)>(
+            identity_sql,
+        )
         .bind(&pool_id_hex)
         .fetch_optional(&**pool)
         .await
@@ -437,8 +441,8 @@ impl Query {
                 validator_class,
             }),
             Ok(None) => None,
-            Err(e) => {
-                warn!("spo_composite_by_pool_id identity query failed: {e}");
+            Err(error) => {
+                warn!("spo_composite_by_pool_id identity query failed: {error}");
                 None
             }
         };
@@ -477,8 +481,8 @@ impl Query {
                 })
             }
             Ok(None) => None,
-            Err(e) => {
-                warn!("spo_composite_by_pool_id metadata query failed: {e}");
+            Err(error) => {
+                warn!("spo_composite_by_pool_id metadata query failed: {error}");
                 None
             }
         };
@@ -520,8 +524,8 @@ impl Query {
             .await
             {
                 Ok(rows) => rows.into_iter().map(EpochPerf::from_tuple).collect(),
-                Err(e) => {
-                    warn!("spo_composite_by_pool_id performance query failed: {e}");
+                Err(error) => {
+                    warn!("spo_composite_by_pool_id performance query failed: {error}");
                     vec![]
                 }
             }
@@ -553,14 +557,15 @@ impl Query {
                 .fetch_all(&**pool)
                 .await
             {
-                Ok(rows) => return rows,
-                Err(e) => {
-                    warn!("stake_pool_operators query failed: {e}");
-                    return vec![];
+                Ok(rows) => rows,
+                Err(error) => {
+                    warn!("stake_pool_operators query failed: {error}");
+                    vec![]
                 }
             }
+        } else {
+            vec![]
         }
-        vec![]
     }
 
     /// Latest SPO performance entries ordered by epoch (desc) and produced blocks (desc).
@@ -596,8 +601,8 @@ impl Query {
                 .await
             {
                 Ok(rows) => rows.into_iter().map(EpochPerf::from_tuple).collect(),
-                Err(e) => {
-                    warn!("spo_performance_latest query failed: {e}");
+                Err(error) => {
+                    warn!("spo_performance_latest query failed: {error}");
                     vec![]
                 }
             }
@@ -606,7 +611,8 @@ impl Query {
         }
     }
 
-    /// Performance history for a single SPO (identified by its side/mainchain key hex representation).
+    /// Performance history for a single SPO (identified by its side/mainchain key hex
+    /// representation).
     async fn spo_performance_by_spo_sk(
         &self,
         cx: &Context<'_>,
@@ -644,8 +650,8 @@ impl Query {
                 .await
             {
                 Ok(rows) => rows.into_iter().map(EpochPerf::from_tuple).collect(),
-                Err(e) => {
-                    warn!("spo_performance_by_spo_sk query failed: {e}");
+                Err(error) => {
+                    warn!("spo_performance_by_spo_sk query failed: {error}");
                     vec![]
                 }
             }
@@ -688,8 +694,8 @@ impl Query {
                 .await
             {
                 Ok(rows) => rows.into_iter().map(EpochPerf::from_tuple).collect(),
-                Err(e) => {
-                    warn!("epoch_performance query failed: {e}");
+                Err(error) => {
+                    warn!("epoch_performance query failed: {error}");
                     vec![]
                 }
             }
@@ -710,7 +716,11 @@ impl Query {
         let offset = offset.unwrap_or(0).max(0) as i64;
         let search = search.as_ref().and_then(|s| {
             let trimmed = s.trim();
-            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
         });
         if let Some(Db(pool)) = cx.data_opt::<Option<Db>>().and_then(|o| o.as_ref()) {
             // Use spo_stake_snapshot as the canonical current set to align counts with spo_count.
@@ -763,9 +773,9 @@ impl Query {
             q = q.bind(limit).bind(offset);
             if let Some(s) = search {
                 // For text fields use %term% ; for hex-like identifiers also use %term_no_0x%
-                let s_like = format!("%{}%", s);
+                let s_like = format!("%{s}%");
                 let s_hex = normalize_hex(&s).unwrap_or_else(|| s.to_ascii_lowercase());
-                let s_hex_like = format!("%{}%", s_hex);
+                let s_hex_like = format!("%{s_hex}%");
                 q = q.bind(s_like).bind(s_hex_like);
             }
 
@@ -794,8 +804,8 @@ impl Query {
                         },
                     )
                     .collect(),
-                Err(e) => {
-                    warn!("spo_list query failed: {e}");
+                Err(error) => {
+                    warn!("spo_list query failed: {error}");
                     vec![]
                 }
             }
@@ -817,7 +827,11 @@ impl Query {
         let offset = offset.unwrap_or(0).max(0) as i64;
         let search = search.as_ref().and_then(|s| {
             let t = s.trim();
-            if t.is_empty() { None } else { Some(t.to_string()) }
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
         });
 
         if let Some(Db(pool)) = cx.data_opt::<Option<Db>>().and_then(|o| o.as_ref()) {
@@ -826,16 +840,14 @@ impl Query {
                 SELECT COALESCE(SUM(s.live_stake), 0)::TEXT
                 FROM spo_stake_snapshot s
             "#;
-            let total_live_str: String = match sqlx::query_scalar(total_sql)
-                .fetch_one(&**pool)
-                .await
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    warn!("stake_distribution total stake query failed: {e}");
-                    "0".to_string()
-                }
-            };
+            let total_live_str: String =
+                match sqlx::query_scalar(total_sql).fetch_one(&**pool).await {
+                    Ok(v) => v,
+                    Err(error) => {
+                        warn!("stake_distribution total stake query failed: {error}");
+                        "0".to_owned()
+                    }
+                };
             let total_live_f64: f64 = total_live_str.parse::<f64>().unwrap_or(0.0);
 
             let order_desc = order_by_stake_desc.unwrap_or(true);
@@ -868,21 +880,25 @@ impl Query {
                 "#
             };
 
-            // optionally flip order if ascending requested
-            let sql = if order_desc { base_select.to_string() } else { base_select.replace("DESC", "ASC") };
+            // Optionally flip order if ascending requested.
+            let sql = if order_desc {
+                base_select.to_string()
+            } else {
+                base_select.replace("DESC", "ASC")
+            };
 
             let mut q = sqlx::query_as::<
                 _,
                 (
-                    String,               // pool_id_hex
-                    Option<String>,        // name
-                    Option<String>,        // ticker
-                    Option<String>,        // homepage_url
-                    Option<String>,        // logo_url
+                    String,         // pool_id_hex
+                    Option<String>, // name
+                    Option<String>, // ticker
+                    Option<String>, // homepage_url
+                    Option<String>, // logo_url
                     Option<String>, // live_stake (TEXT)
                     Option<String>, // active_stake (TEXT)
-                    Option<i32>,           // live_delegators
-                    Option<f64>,           // live_saturation
+                    Option<i32>,    // live_delegators
+                    Option<f64>,    // live_saturation
                     Option<String>, // declared_pledge (TEXT)
                     Option<String>, // live_pledge (TEXT)
                 ),
@@ -891,22 +907,15 @@ impl Query {
             .bind(offset);
 
             if let Some(s) = search {
-                let s_like = format!("%{}%", s);
+                let s_like = format!("%{s}%");
                 q = q.bind(s_like.clone()).bind(s_like);
             }
 
             match q.fetch_all(&**pool).await {
                 Ok(rows) => rows
                     .into_iter()
-                    .map(|(pool_id_hex, name, ticker, homepage_url, logo_url, live_stake, active_stake, live_delegators, live_saturation, declared_pledge, live_pledge)| {
-                        // Compute share = live_stake / total_live
-                        let share = {
-                            let ls = live_stake.as_deref().unwrap_or("0");
-                            let lv = ls.parse::<f64>().unwrap_or(0.0);
-                            if total_live_f64 > 0.0 { lv / total_live_f64 } else { 0.0 }
-                        };
-                        let live_delegators_i64 = live_delegators.map(|v| v as i64);
-                        StakeShare {
+                    .map(
+                        |(
                             pool_id_hex,
                             name,
                             ticker,
@@ -914,16 +923,41 @@ impl Query {
                             logo_url,
                             live_stake,
                             active_stake,
-                            live_delegators: live_delegators_i64,
+                            live_delegators,
                             live_saturation,
                             declared_pledge,
                             live_pledge,
-                            stake_share: Some(share),
-                        }
-                    })
+                        )| {
+                            // Compute share = live_stake / total_live
+                            let share = {
+                                let ls = live_stake.as_deref().unwrap_or("0");
+                                let lv = ls.parse::<f64>().unwrap_or(0.0);
+                                if total_live_f64 > 0.0 {
+                                    lv / total_live_f64
+                                } else {
+                                    0.0
+                                }
+                            };
+                            let live_delegators_i64 = live_delegators.map(|v| v as i64);
+                            StakeShare {
+                                pool_id_hex,
+                                name,
+                                ticker,
+                                homepage_url,
+                                logo_url,
+                                live_stake,
+                                active_stake,
+                                live_delegators: live_delegators_i64,
+                                live_saturation,
+                                declared_pledge,
+                                live_pledge,
+                                stake_share: Some(share),
+                            }
+                        },
+                    )
                     .collect(),
-                Err(e) => {
-                    warn!("stake_distribution query failed: {e}");
+                Err(error) => {
+                    warn!("stake_distribution query failed: {error}");
                     vec![]
                 }
             }
@@ -984,8 +1018,8 @@ impl Query {
                     homepage_url,
                     logo_url,
                 }),
-                Err(e) => {
-                    warn!("spo_by_pool_id query failed: {e}");
+                Err(error) => {
+                    warn!("spo_by_pool_id query failed: {error}");
                     None
                 }
                 Ok(None) => None,
@@ -1029,15 +1063,18 @@ impl Query {
                 )
                 SELECT epoch_no, duration_seconds, elapsed_seconds FROM synth
             "#;
-            match sqlx::query_as::<_, (i64, i64, i64)>(sql).fetch_optional(&**pool).await {
+            match sqlx::query_as::<_, (i64, i64, i64)>(sql)
+                .fetch_optional(&**pool)
+                .await
+            {
                 Ok(Some((epoch_no, duration_seconds, elapsed_seconds))) => Some(EpochInfo {
                     epoch_no,
                     duration_seconds,
                     elapsed_seconds,
                 }),
                 Ok(None) => None,
-                Err(e) => {
-                    warn!("current_epoch_info query failed: {e}");
+                Err(error) => {
+                    warn!("current_epoch_info query failed: {error}");
                     None
                 }
             }
@@ -1046,7 +1083,8 @@ impl Query {
         }
     }
 
-    /// Epoch-wide block utilization = sum(produced) / sum(expected) (0.0 if no data or expected == 0).
+    /// Epoch-wide block utilization = sum(produced) / sum(expected) (0.0 if no data or expected ==
+    /// 0).
     async fn epoch_utilization(&self, cx: &Context<'_>, epoch: i32) -> Option<f64> {
         if let Some(Db(pool)) = cx.data_opt::<Option<Db>>().and_then(|o| o.as_ref()) {
             let sql = r#"
@@ -1064,8 +1102,8 @@ impl Query {
                 .await
             {
                 Ok(v) => v.or(Some(0.0)),
-                Err(e) => {
-                    warn!("epoch_utilization query failed: {e}");
+                Err(error) => {
+                    warn!("epoch_utilization query failed: {error}");
                     None
                 }
             }
@@ -1083,8 +1121,8 @@ impl Query {
             "#;
             match sqlx::query_scalar::<_, i64>(sql).fetch_one(&**pool).await {
                 Ok(count) => Some(count),
-                Err(e) => {
-                    warn!("spo_count query failed: {e}");
+                Err(error) => {
+                    warn!("spo_count query failed: {error}");
                     None
                 }
             }
@@ -1093,12 +1131,9 @@ impl Query {
         }
     }
 
-    /// Committee membership for an epoch (ordered by position), with identity enrichment when available.
-    async fn committee(
-        &self,
-        cx: &Context<'_>,
-        epoch: i64,
-    ) -> Vec<CommitteeMember> {
+    /// Committee membership for an epoch (ordered by position), with identity enrichment when
+    /// available.
+    async fn committee(&self, cx: &Context<'_>, epoch: i64) -> Vec<CommitteeMember> {
         if let Some(Db(pool)) = cx.data_opt::<Option<Db>>().and_then(|o| o.as_ref()) {
             let sql = r#"
                 SELECT 
@@ -1117,10 +1152,10 @@ impl Query {
             match sqlx::query_as::<
                 _,
                 (
-                    i64,        // epoch_no
-                    i32,        // position
-                    String,     // sidechain_pubkey_hex
-                    i32,        // expected_slots
+                    i64,            // epoch_no
+                    i32,            // position
+                    String,         // sidechain_pubkey_hex
+                    i32,            // expected_slots
                     Option<String>, // aura_pubkey_hex
                     Option<String>, // pool_id_hex
                     Option<String>, // spo_sk_hex
@@ -1132,18 +1167,28 @@ impl Query {
             {
                 Ok(rows) => rows
                     .into_iter()
-                    .map(|(epoch_no, position, sidechain_pubkey_hex, expected_slots, aura_pubkey_hex, pool_id_hex, spo_sk_hex)| CommitteeMember {
-                        epoch_no,
-                        position,
-                        sidechain_pubkey_hex,
-                        expected_slots,
-                        aura_pubkey_hex,
-                        pool_id_hex,
-                        spo_sk_hex,
-                    })
+                    .map(
+                        |(
+                            epoch_no,
+                            position,
+                            sidechain_pubkey_hex,
+                            expected_slots,
+                            aura_pubkey_hex,
+                            pool_id_hex,
+                            spo_sk_hex,
+                        )| CommitteeMember {
+                            epoch_no,
+                            position,
+                            sidechain_pubkey_hex,
+                            expected_slots,
+                            aura_pubkey_hex,
+                            pool_id_hex,
+                            spo_sk_hex,
+                        },
+                    )
                     .collect(),
-                Err(e) => {
-                    warn!("committee query failed: {e}");
+                Err(error) => {
+                    warn!("committee query failed: {error}");
                     vec![]
                 }
             }
@@ -1167,8 +1212,9 @@ impl Query {
             // - registered_valid_count: distinct VALID in spo_history per epoch
             // - registered_invalid_count: distinct INVALID in spo_history per epoch
             // - federated_invalid_count: 0 (not tracked)
-            // - dparam: same as registered_valid_count as DOUBLE PRECISION (frontend can derive other metrics)
-                        let sql = r#"
+            // - dparam: same as registered_valid_count as DOUBLE PRECISION (frontend can derive
+            //   other metrics)
+            let sql = r#"
                 WITH rng AS (
                     SELECT generate_series($1::BIGINT, $2::BIGINT) AS epoch_no
                 ),
@@ -1220,17 +1266,21 @@ impl Query {
             {
                 Ok(rows) => rows
                     .into_iter()
-                    .map(|(epoch_no, f_valid, f_invalid, r_valid, r_invalid, dparam)| RegisteredStat {
-                        epoch_no,
-                        federated_valid_count: f_valid,
-                        federated_invalid_count: f_invalid,
-                        registered_valid_count: r_valid,
-                        registered_invalid_count: r_invalid,
-                        dparam,
-                    })
+                    .map(
+                        |(epoch_no, f_valid, f_invalid, r_valid, r_invalid, dparam)| {
+                            RegisteredStat {
+                                epoch_no,
+                                federated_valid_count: f_valid,
+                                federated_invalid_count: f_invalid,
+                                registered_valid_count: r_valid,
+                                registered_invalid_count: r_invalid,
+                                dparam,
+                            }
+                        },
+                    )
                     .collect(),
-                Err(e) => {
-                    warn!("registered_spo_series query failed: {e}");
+                Err(error) => {
+                    warn!("registered_spo_series query failed: {error}");
                     vec![]
                 }
             }
@@ -1239,8 +1289,8 @@ impl Query {
         }
     }
 
-    /// Raw presence events for SPO identity per epoch across sources (history, committee, performance).
-    /// Frontend can reconstruct totals/new registrations from these events.
+    /// Raw presence events for SPO identity per epoch across sources (history, committee,
+    /// performance). Frontend can reconstruct totals/new registrations from these events.
     async fn registered_presence(
         &self,
         cx: &Context<'_>,
@@ -1293,10 +1343,15 @@ impl Query {
             {
                 Ok(rows) => rows
                     .into_iter()
-                    .map(|(epoch_no, id_key, source, status)| PresenceEvent { epoch_no, id_key, source, status })
+                    .map(|(epoch_no, id_key, source, status)| PresenceEvent {
+                        epoch_no,
+                        id_key,
+                        source,
+                        status,
+                    })
                     .collect(),
-                Err(e) => {
-                    warn!("registered_presence query failed: {e}");
+                Err(error) => {
+                    warn!("registered_presence query failed: {error}");
                     vec![]
                 }
             }
@@ -1305,7 +1360,8 @@ impl Query {
         }
     }
 
-    /// First valid epoch per identity (based on spo_history status VALID). Optional cutoff to bound the scan.
+    /// First valid epoch per identity (based on spo_history status VALID). Optional cutoff to bound
+    /// the scan.
     async fn registered_first_valid_epochs(
         &self,
         cx: &Context<'_>,
@@ -1329,10 +1385,13 @@ impl Query {
             {
                 Ok(rows) => rows
                     .into_iter()
-                    .map(|(id_key, first_valid_epoch)| FirstValidEpoch { id_key, first_valid_epoch })
+                    .map(|(id_key, first_valid_epoch)| FirstValidEpoch {
+                        id_key,
+                        first_valid_epoch,
+                    })
                     .collect(),
-                Err(e) => {
-                    warn!("registered_first_valid_epochs query failed: {e}");
+                Err(error) => {
+                    warn!("registered_first_valid_epochs query failed: {error}");
                     vec![]
                 }
             }
@@ -1502,13 +1561,11 @@ pub struct StakeShare {
     pub stake_share: Option<f64>,
 }
 
-
 async fn graphiql() -> impl IntoResponse {
-    use async_graphql::http::GraphiQLSource;
-    use axum::response::Html;
-    info!("Serving GraphiQL at /graphql");
-    // Because this router is nested under /api/v1, we must point the JS client to the fully-qualified path.
-    // Otherwise the generated GraphiQL page will attempt requests to /graphql (404) -> empty body -> JSON parse error.
+    info!("serving GraphiQL at /graphql");
+    // Because this router is nested under /api/v1, we must point the JS client to the
+    // fully-qualified path. Otherwise the generated GraphiQL page will attempt requests to
+    // /graphql (404) -> empty body -> JSON parse error.
     Html(
         GraphiQLSource::build()
             .endpoint("/api/v1/graphql")
@@ -1533,9 +1590,10 @@ fn normalize_hex(input: &str) -> Option<String> {
     if s.len() % 2 != 0 || s.len() > 256 {
         return None;
     }
-    // Cheap validation (compiled once at runtime). If regex creation fails, we fallback to returning original.
-    static HEX_RE: once_cell::sync::Lazy<Regex> =
-        once_cell::sync::Lazy::new(|| Regex::new("^[0-9a-fA-F]+$").unwrap());
+    // Cheap validation (compiled once at runtime). If regex creation fails, we fallback to
+    // returning original.
+    static HEX_RE: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new("^[0-9a-fA-F]+$").unwrap());
     if !HEX_RE.is_match(s) {
         return None;
     }
