@@ -1599,3 +1599,10 @@ fn normalize_hex(input: &str) -> Option<String> {
     }
     Some(s.to_ascii_lowercase())
 }
+
+/// Export the GraphQL schema in SDL format.
+pub fn export_schema() -> String {
+    Schema::build(Query::default(), EmptyMutation, EmptySubscription)
+        .finish()
+        .sdl()
+}

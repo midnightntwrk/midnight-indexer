@@ -47,5 +47,10 @@ cloud      = [ "indexer-common/cloud", "uuid" ]
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [ 'cfg(coverage_nightly)' ] }
 
+[[bin]]
+name              = "spo-api-cli"
+path              = "src/bin/spo-api-cli.rs"
+required-features = [ "cloud" ]
+
 [package.metadata.cargo-shear]
 ignored = [ "uuid" ]

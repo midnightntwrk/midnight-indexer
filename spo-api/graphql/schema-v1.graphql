@@ -1,0 +1,204 @@
+type CommitteeMember {
+	epochNo: Int!
+	position: Int!
+	sidechainPubkeyHex: String!
+	expectedSlots: Int!
+	auraPubkeyHex: String
+	poolIdHex: String
+	spoSkHex: String
+}
+
+type EpochInfo {
+	epochNo: Int!
+	durationSeconds: Int!
+	elapsedSeconds: Int!
+}
+
+type EpochPerf {
+	epochNo: Int!
+	spoSkHex: String!
+	produced: Int!
+	expected: Int!
+	identityLabel: String
+	stakeSnapshot: String
+	poolIdHex: String
+	validatorClass: String
+}
+
+type FirstValidEpoch {
+	idKey: String!
+	firstValidEpoch: Int!
+}
+
+type PoolMetadata {
+	poolIdHex: String!
+	hexId: String
+	name: String
+	ticker: String
+	homepageUrl: String
+	logoUrl: String
+}
+
+type PresenceEvent {
+	epochNo: Int!
+	idKey: String!
+	source: String!
+	status: String
+}
+
+type Query {
+	serviceInfo: ServiceInfo!
+	"""
+	Cumulative total of currently registered SPOs over an epoch range, using first-seen epochs.
+	
+	Semantics:
+	- Domain is limited to pools present in spo_stake_snapshot ("current" pools), so the final
+	value equals spo_count by construction.
+	- First-seen epoch per pool is computed as the minimum epoch where that pool_id appears in
+	any of: spo_history (via spo_identity), committee_membership (via spo_identity),
+	spo_epoch_performance (via spo_identity).
+	- If a current pool has no appearances in those sources, it is assigned first_seen_epoch =
+	to_epoch (it will enter at the end of the requested window so totals match spo_count).
+	"""
+	registeredTotalsSeries(fromEpoch: Int!, toEpoch: Int!): [RegisteredTotals!]!
+	spoIdentities(limit: Int, offset: Int): [SpoIdentity!]!
+	spoIdentityByPoolId(poolIdHex: String!): SpoIdentity
+	poolMetadata(poolIdHex: String!): PoolMetadata
+	poolMetadataList(limit: Int, offset: Int, withNameOnly: Boolean): [PoolMetadata!]!
+	spoCompositeByPoolId(poolIdHex: String!): SpoComposite
+	"""
+	List stake pool operator identifiers (placeholder – returns empty if table missing / error).
+	"""
+	stakePoolOperators(limit: Int): [String!]!
+	"""
+	Latest SPO performance entries ordered by epoch (desc) and produced blocks (desc).
+	"""
+	spoPerformanceLatest(limit: Int, offset: Int): [EpochPerf!]!
+	"""
+	Performance history for a single SPO (identified by its side/mainchain key hex
+	representation).
+	"""
+	spoPerformanceBySpoSk(spoSkHex: String!, limit: Int, offset: Int): [EpochPerf!]!
+	"""
+	Epoch performance for a given epoch, tolerant of missing identity records.
+	"""
+	epochPerformance(epoch: Int!, limit: Int, offset: Int): [EpochPerf!]!
+	"""
+	List SPOs with optional metadata, paginated.
+	"""
+	spoList(limit: Int, offset: Int, search: String): [Spo!]!
+	"""
+	Stake distribution for registered SPOs, based on spo_stake_snapshot (latest values).
+	"""
+	stakeDistribution(limit: Int, offset: Int, search: String, orderByStakeDesc: Boolean): [StakeShare!]!
+	"""
+	Find single SPO by pool ID (hex string).
+	"""
+	spoByPoolId(poolIdHex: String!): Spo
+	"""
+	Current epoch info with duration and elapsed seconds.
+	"""
+	currentEpochInfo: EpochInfo
+	"""
+	Epoch-wide block utilization = sum(produced) / sum(expected) (0.0 if no data or expected ==
+	0).
+	"""
+	epochUtilization(epoch: Int!): Float
+	"""
+	Number of SPO identities (with a pool_id present).
+	"""
+	spoCount: Int
+	"""
+	Committee membership for an epoch (ordered by position), with identity enrichment when
+	available.
+	"""
+	committee(epoch: Int!): [CommitteeMember!]!
+	"""
+	Registration counts series for an epoch range. Uses DB when possible.
+	"""
+	registeredSpoSeries(fromEpoch: Int!, toEpoch: Int!): [RegisteredStat!]!
+	"""
+	Raw presence events for SPO identity per epoch across sources (history, committee,
+	performance). Frontend can reconstruct totals/new registrations from these events.
+	"""
+	registeredPresence(fromEpoch: Int!, toEpoch: Int!): [PresenceEvent!]!
+	"""
+	First valid epoch per identity (based on spo_history status VALID). Optional cutoff to bound
+	the scan.
+	"""
+	registeredFirstValidEpochs(uptoEpoch: Int): [FirstValidEpoch!]!
+}
+
+type RegisteredStat {
+	epochNo: Int!
+	federatedValidCount: Int!
+	federatedInvalidCount: Int!
+	registeredValidCount: Int!
+	registeredInvalidCount: Int!
+	dparam: Float
+}
+
+type RegisteredTotals {
+	epochNo: Int!
+	totalRegistered: Int!
+	newlyRegistered: Int!
+}
+
+type ServiceInfo {
+	name: String!
+	version: String!
+	network: String!
+}
+
+type Spo {
+	poolIdHex: String!
+	validatorClass: String!
+	sidechainPubkeyHex: String!
+	auraPubkeyHex: String
+	name: String
+	ticker: String
+	homepageUrl: String
+	logoUrl: String
+}
+
+type SpoComposite {
+	identity: SpoIdentity
+	metadata: PoolMetadata
+	performance: [EpochPerf!]!
+}
+
+type SpoIdentity {
+	poolIdHex: String!
+	mainchainPubkeyHex: String!
+	sidechainPubkeyHex: String!
+	auraPubkeyHex: String
+	validatorClass: String!
+}
+
+type StakeShare {
+	poolIdHex: String!
+	name: String
+	ticker: String
+	homepageUrl: String
+	logoUrl: String
+	liveStake: String
+	activeStake: String
+	liveDelegators: Int
+	liveSaturation: Float
+	declaredPledge: String
+	livePledge: String
+	stakeShare: Float
+}
+
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+schema {
+	query: Query
+}
+
