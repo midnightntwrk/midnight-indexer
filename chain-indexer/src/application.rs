@@ -111,14 +111,16 @@ pub async fn run(
     // Apply transactions to ledger state from saved ledger state block height (exclusively) to
     // highest saved block height (inclusively); save ledger state thereafter.
     if let Some(highest_block_height) = highest_block_height {
-        let ledger_state_block_height = ledger_state_block_height.unwrap_or_default();
-
-        if ledger_state_block_height < highest_block_height {
+        if ledger_state_block_height < Some(highest_block_height) {
             debug!(ledger_state_block_height, highest_block_height; "updating ledger state");
 
+            // Start from zero (genesis) for None, else add one to start from the next block after
+            // the one for which the ledger state was saved.
+            let ledger_state_block_height =
+                ledger_state_block_height.map(|n| n + 1).unwrap_or_default();
             let mut protocol_version = None;
 
-            for block_height in (ledger_state_block_height + 1)..=highest_block_height {
+            for block_height in ledger_state_block_height..=highest_block_height {
                 let block_transactions = storage
                     .get_block_transactions(block_height)
                     .await
