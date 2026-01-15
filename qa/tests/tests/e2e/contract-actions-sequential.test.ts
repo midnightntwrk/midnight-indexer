@@ -25,9 +25,11 @@ import {
 } from '@utils/toolkit/toolkit-wrapper';
 import { Transaction } from '@utils/indexer/indexer-types';
 
-const TOOLKIT_WRAPPER_TIMEOUT = 60_000; // 1 minute
-const CONTRACT_ACTION_TIMEOUT = 150_000; // 2.5 minutes
-const TEST_TIMEOUT = 10_000; // 10 seconds
+const TOOLKIT_WRAPPER_TIMEOUT = 60_000;
+const DEPLOY_TIMEOUT = 300_000;
+const CALL_TIMEOUT = 180_000;
+const MAINTENANCE_TIMEOUT = 300_000;
+const TEST_TIMEOUT = 10_000;
 
 describe.sequential('contract actions', () => {
   let indexerHttpClient: IndexerHttpClient;
@@ -38,6 +40,9 @@ describe.sequential('contract actions', () => {
   beforeAll(async () => {
     indexerHttpClient = new IndexerHttpClient();
 
+    // Use default toolkit version from environment (NODE_TOOLKIT_TAG env var or NODE_VERSION file)
+    // Note: Contract maintenance features require toolkit version that supports maintenance commands
+    // Override with NODE_TOOLKIT_TAG environment variable if needed
     toolkit = new ToolkitWrapper({});
     await toolkit.start();
   }, TOOLKIT_WRAPPER_TIMEOUT);
@@ -49,7 +54,7 @@ describe.sequential('contract actions', () => {
   describe('a transaction to deploy a smart contract', () => {
     beforeAll(async () => {
       contractDeployResult = await toolkit.deployContract();
-    }, CONTRACT_ACTION_TIMEOUT);
+    }, DEPLOY_TIMEOUT);
 
     /**
      * Once a contract deployment transaction has been submitted to node and confirmed, the indexer should report
@@ -136,7 +141,7 @@ describe.sequential('contract actions', () => {
           labels: ['Query', 'ContractAction', 'ByAddress', 'ContractDeploy'],
         };
 
-        // Query the contract action by address (using the contract address for GraphQL queries)
+        // Query the contract action by address
         const contractActionResponse = await indexerHttpClient.getContractAction(
           contractDeployResult['contract-address-untagged'],
         );
@@ -168,16 +173,13 @@ describe.sequential('contract actions', () => {
     let contractCallTransactionHash: string;
 
     beforeAll(async () => {
-      contractCallResult = await toolkit.callContract('store', contractDeployResult);
+      contractCallResult = await toolkit.callContract('increment', contractDeployResult);
 
       expect(contractCallResult.status).toBe('confirmed');
-      log.debug(`Raw output: ${JSON.stringify(contractCallResult.rawOutput, null, 2)}`);
-      log.debug(`Transaction hash: ${contractCallResult.txHash}`);
-      log.debug(`Block hash: ${contractCallResult.blockHash}`);
 
       contractCallBlockHash = contractCallResult.blockHash;
       contractCallTransactionHash = contractCallResult.txHash;
-    }, CONTRACT_ACTION_TIMEOUT);
+    }, CALL_TIMEOUT);
 
     /**
      * Once a contract call transaction has been submitted to node and confirmed, the indexer should report
@@ -263,7 +265,6 @@ describe.sequential('contract actions', () => {
 
         const contractAction = contractActionResponse.data?.contractAction;
         expect(contractAction?.__typename).toBe('ContractCall');
-
         if (contractAction?.__typename === 'ContractCall') {
           expect(contractAction.address).toBeDefined();
           expect(contractAction.address).toBe(contractDeployResult['contract-address-untagged']);
@@ -277,10 +278,44 @@ describe.sequential('contract actions', () => {
   });
 
   describe('a transaction to update a smart contract', () => {
+    let contractUpdateResult: ToolkitTransactionResult;
+    let contractUpdateBlockHash: string;
+    let contractUpdateTransactionHash: string;
+
     beforeAll(async () => {
-      // TODO: updateContract method is not yet implemented in ToolkitWrapper
-      // This section is empty for now until updateContract is implemented
-    });
+      if (!contractDeployResult) {
+        throw new Error(
+          'Contract deployment result is required. Ensure deployContract() completed successfully.',
+        );
+      }
+
+      const contractAddress = contractDeployResult['contract-address-untagged'];
+
+      contractUpdateResult = await toolkit.performContractMaintenance(contractAddress, {
+        authoritySeed: '0000000000000000000000000000000000000000000000000000000000000001',
+        newAuthoritySeed: '1000000000000000000000000000000000000000000000000000000000000001',
+        counter: 0,
+        rngSeed: '0000000000000000000000000000000000000000000000000000000000000001',
+        removeEntrypoints: ['decrement'],
+        upsertEntrypoints: [
+          '/toolkit-js/contract/managed/counter/keys/increment.verifier',
+          '/toolkit-js/contract/managed/counter/keys/increment2.verifier',
+        ],
+        prepareVerifiers: [
+          {
+            source: 'managed/counter/keys/increment.verifier',
+            target: 'managed/counter/keys/increment2.verifier',
+          },
+        ],
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 10_000));
+
+      expect(contractUpdateResult.status).toBe('confirmed');
+
+      contractUpdateBlockHash = contractUpdateResult.blockHash;
+      contractUpdateTransactionHash = contractUpdateResult.txHash;
+    }, MAINTENANCE_TIMEOUT);
 
     /**
      * Once a contract update transaction has been submitted to node and confirmed, the indexer should report
@@ -290,9 +325,29 @@ describe.sequential('contract actions', () => {
      * @when we query the indexer with a transaction query by hash, using the transaction hash reported by the toolkit
      * @then the transaction should be found and reported correctly
      */
-    test.todo(
+    test(
       'should be reported by the indexer through a transaction query by hash',
-      async () => {},
+      async (context: TestContext) => {
+        context.task!.meta.custom = {
+          labels: ['Query', 'Transaction', 'ByHash', 'ContractUpdate'],
+        };
+
+        const transactionResponse = await getTransactionByHashWithRetry(
+          contractUpdateTransactionHash,
+        );
+
+        // Verify the transaction appears in the response
+        expect(transactionResponse?.data?.transactions).toBeDefined();
+        expect(transactionResponse?.data?.transactions?.length).toBeGreaterThan(0);
+
+        // Find our specific transaction by hash
+        const foundTransaction = transactionResponse.data?.transactions?.find(
+          (tx: Transaction) => tx.hash === contractUpdateTransactionHash,
+        );
+
+        expect(foundTransaction).toBeDefined();
+        expect(foundTransaction?.hash).toBe(contractUpdateTransactionHash);
+      },
       TEST_TIMEOUT,
     );
 
@@ -304,9 +359,20 @@ describe.sequential('contract actions', () => {
      * @when we query the indexer with a block query by hash, using the block hash reported by the toolkit
      * @then the block should contain the contract update transaction
      */
-    test.todo(
+    test(
       'should be reported by the indexer through a block query by hash',
-      async () => {},
+      async (context: TestContext) => {
+        context.task!.meta.custom = {
+          labels: ['Query', 'Block', 'ByHash', 'ContractUpdate'],
+        };
+
+        const blockResponse = await getBlockByHashWithRetry(contractUpdateBlockHash);
+
+        // Verify the block appears in the response
+        expect(blockResponse).toBeSuccess();
+        expect(blockResponse.data?.block).toBeDefined();
+        expect(blockResponse.data?.block?.hash).toBe(contractUpdateBlockHash);
+      },
       TEST_TIMEOUT,
     );
 
@@ -318,9 +384,29 @@ describe.sequential('contract actions', () => {
      * @when we query the indexer with a contract action query by address
      * @then the contract action should be found with __typename 'ContractUpdate'
      */
-    test.todo(
+    test(
       'should be reported by the indexer through a contract action query by address',
-      async () => {},
+      async (context: TestContext) => {
+        context.task!.meta.custom = {
+          labels: ['Query', 'ContractAction', 'ByAddress', 'ContractUpdate'],
+        };
+
+        // Query the contract action by address (using the contract address for GraphQL queries)
+        const contractActionResponse = await indexerHttpClient.getContractAction(
+          contractDeployResult['contract-address-untagged'],
+        );
+
+        // Verify the contract action appears in the response
+        expect(contractActionResponse?.data?.contractAction).toBeDefined();
+
+        const contractAction = contractActionResponse.data?.contractAction;
+        expect(contractAction?.__typename).toBe('ContractUpdate');
+
+        if (contractAction?.__typename === 'ContractUpdate') {
+          expect(contractAction.address).toBeDefined();
+          expect(contractAction.address).toBe(contractDeployResult['contract-address-untagged']);
+        }
+      },
       TEST_TIMEOUT,
     );
   });
