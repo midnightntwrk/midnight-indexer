@@ -17,6 +17,10 @@ name: Indexer QA Block Streaming Test (Preview)
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'qa/tests/**'
+      - '.github/workflows/qa-test-block-subscriptions-preview.yml'
 
 jobs:
   test-block-subscriptions:
