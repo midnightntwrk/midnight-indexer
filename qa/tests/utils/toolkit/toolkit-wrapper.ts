@@ -271,7 +271,7 @@ class ToolkitWrapper {
         fs.mkdirSync(goldenCacheDir);
         log.warn(
           `Golden cache directory not found at: ${goldenCacheDir}\n` +
-            `Please ensure the global setup has run to warm up the cache, or run with warmupCache: true first.`,
+          `Please ensure the global setup has run to warm up the cache, or run with warmupCache: true first.`,
         );
       }
 
@@ -480,6 +480,8 @@ class ToolkitWrapper {
     const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'show-wallet',
+      '--src-url',
+      env.getNodeWebsocketBaseURL(),
       flag,
       value,
     ]);
@@ -556,6 +558,8 @@ class ToolkitWrapper {
     const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'dust-balance',
+      '--src-url',
+      env.getNodeWebsocketBaseURL(),
       '--seed',
       walletSeed,
     ]);
@@ -726,7 +730,7 @@ class ToolkitWrapper {
       log.debug(`Deployment result received: ${JSON.stringify(deploymentResult, null, 2)}`);
       throw new Error(
         'Contract address is missing in deployment result. The contract deployment may have failed. ' +
-          'Please check deployment logs and ensure deployContract() completed successfully.',
+        'Please check deployment logs and ensure deployContract() completed successfully.',
       );
     }
 
