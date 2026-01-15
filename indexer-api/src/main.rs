@@ -56,6 +56,16 @@ async fn run() -> anyhow::Result<()> {
     // Load configuration.
     let config = Config::load().context("load configuration")?;
     info!(config:?; "starting");
+
+    // FIX #597: Log version information and validate compatibility
+    indexer_api::version_validator::log_version_info();
+    // Note: Version validation would require additional infrastructure to query
+    // component versions. For now, we log the expected versions to help users
+    // identify mismatches. Future enhancement: query actual versions from components.
+    indexer_api::version_validator::validate_versions(None, None, None)
+        .unwrap_or_else(|err| {
+            warn!("Version validation warnings: {}", err);
+        });
     let Config {
         run_migrations,
         application_config,
