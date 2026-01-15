@@ -11,14 +11,14 @@ on:
     inputs:
       target_env:
         type: choice
-        description: Midnight target environment (nodedev01/devnet/qanet/testnet02)
+        description: Midnight target environment (devnet/qanet/preview/preprod)
         required: true
         default: qanet
         options:
-          - nodedev01
-          - qanet
           - devnet
-          - testnet02
+          - qanet
+          - preview
+          - preprod
       publish_to_xray:
         type: boolean
         description: Publish the test results to Xray
@@ -43,7 +43,7 @@ on:
     inputs:
       target_env:
         type: string
-        description: Midnight target environment (nodedev01/devnet/qanet/testnet02)
+        description: Midnight target environment (devnet/qanet/preview/preprod)
         required: true
         default: qanet
       ref:
