@@ -12,9 +12,8 @@
 - [✨ Features](#-features)
 - [🛠️ Future Developments & Test Ideas](#-future-developments-improvements--test-ideas)
 
-
-A test suite for validating and experimenting with the Midnight Indexer component through its GraphQL API. 
-This project provides a structured environment for running  smoke and integration tests, covering both GraphQL queries and subscriptions, against various target environments (including local/undeployed), supporting rapid development and testing for the Midnight Indexer component.
+A test suite for validating and experimenting with the Midnight Indexer component through its GraphQL API.
+This project provides a structured environment for running smoke and integration tests, covering both GraphQL queries and subscriptions, against various target environments (including local/undeployed), supporting rapid development and testing for the Midnight Indexer component.
 
 ---
 
@@ -30,15 +29,18 @@ This project provides a structured environment for running  smoke and integratio
 ## 🧰 Install Dependencies
 
 From the **QA tests folder**, install all required dependencies:
+
 ```bash
 cd qa/tests
 yarn install --immutable
 ```
+
 ---
 
 ## 🔐 Environment Setup
 
-### Organization Access 
+### Organization Access
+
 > Your GitHub account must be a member of the midnight-ntwrk organization to read private repositories and pull images: https://github.com/midnight-ntwrk/
 
 Before running the QA tests, make sure your local environment is configured according to the setup steps described in the main project README.
@@ -54,6 +56,7 @@ Before running the QA tests, make sure your local environment is configured acco
 #### Step 5 — [Docker Authentication](../../README.md#docker-authentication)
 
 #### Step 6 — [GPG Setup (Signed Git Commits)](../../README.md#gpg-setup-signed-git-commits)
+
 > This is required to push signed commits to Midnight repositories
 
 ---
@@ -68,81 +71,120 @@ The test suite is organized using **Vitest projects**, which allows running diff
 
 Each project can be run independently or together. E2E tests include a cache warmup phase for the Node Toolkit, while smoke and integration tests start immediately.
 
-### Running Test Projects
+## 🚀 Getting Started
 
-## Integration tests on undeployed/local environment (with pre-existing data)
+### 1) From **qa/tests**, ensure dependencies are installed:
+
+```bash
+cd qa/tests
+yarn install --immutable
+```
+
+### 2) Move to the **repo root**:
+
+```bash
+cd ../..   # move up to the repo root
+```
+
+### 3) Load env
+
+```bash
+source .envrc
+```
+
+### 4) Set versions
+
+By default, the node and indexer version to use will be determined based on the value in `NODE_VERSION` file and the SHA-1 of the commit where that file was updated (which indicates when a working indexer/node pair has been identified).
+Alternatively, you can override versions before running tests, depending on the target environment.
+
+### 4a) Start Toolkit Postgres (required for E2E tests)
+
+E2E tests use the Node Toolkit fetch cache backed by Postgres.  
+Before running **any E2E tests** (local or deployed), start the Toolkit Postgres service in the root of the project:
+
+```bash
+bash qa/scripts/start-toolkit-postgres.sh
+```
+
+#### Undeployed / local environment
+
+When running against undeployed (local) environments, you may override Node, Indexer, and Toolkit versions before running the startup scripts:
+
+```bash
+# Set desired versions of Indexer + Node + Toolkit (must be done BEFORE running the startup scripts)
+export NODE_TAG=0.17.0-rc.4
+export INDEXER_TAG=3.0.0-alpha.5
+export NODE_TOOLKIT_TAG=latest-main
+```
+
+Note: if you need to match a particular toolkit version:
+```bash
+export NODE_TOOLKIT_TAG=0.18.0-rc.7
+```
+
+#### Deployed environment (devnet, qanet, preview, etc)
+
+When running against deployed environments, the Node and Indexer versions are fixed by the target environment and must not be overridden.
+
+In this case, you may only override the Toolkit version used by the tests:
+
+```bash
+export NODE_TOOLKIT_TAG=latest-main
+```
+
+Note: if you need to match a particular toolkit version:
+```bash
+export NODE_TOOLKIT_TAG=0.17.0-rc.4
+```
+
+For full instructions on updating the Node version, see the [Updating Node Version Guide](../../docs/updating-node-version.md)
+
+## Running Test Projects on undeployed/local environment 
+
+### Integration tests on undeployed/local environment (with pre-existing data)
 
 Running the tests on your local/undeployed environment has some prerequisites, depending on the type of tests you want to run. The integration tests require test data to be available for the tests to run, to do so you can use one of the scripts available in the QA folder that will help spin up a local environment with a Midnight chain with some pre-existing data:
 
+> ⚠️ **Important**
+>  
+> Make sure to set the correct versions of **Node / Indexer / Toolkit** **before running the startup script**.  
+> See **“Getting Started – Set versions”**.
+
 ```bash
 # Startup a local environment with test data (transactions + contract actions)
+
+# NOTE: Set Node / Indexer / Toolkit versions first (see “Getting Started – Set versions”
 bash qa/scripts/startup-localenv-with-data.sh
 cd qa/tests
 TARGET_ENV=undeployed yarn test:integration
 ```
 
-Note: the script will find the best/latest indexer + node versions to use, but
-you can override that by explicitly setting the following env variables before running
-the script
 
-```bash
-# Startup a local environment with test data (transactions + contract actions)
-# with desired node + node toolkit + indexer versions
-export NODE_TAG=0.18.0-rc.7
-export NODE_TOOLKIT_TAG=latest-main
-export INDEXER_TAG=3.0.0-alpha.15
-```
-
-Note: if you need to reproduce a specific behaviour or match a particular toolkit version:
-
-```
-export NODE_TOOLKIT_TAG=$NODE_TAG
-```
-
-For example:
-```
-export NODE_TAG=0.18.0-rc.7
-export NODE_TOOLKIT_TAG=0.18.0-rc.7
-```
-
-## E2E tests on undeployed/local environment (from genesis without pre-existing data)
+### E2E tests on undeployed/local environment (from genesis without pre-existing data)
 
 The e2e tests don't require any pre-existing data to be executed, in fact they perform some
 actions themselves so that they can assert on the outcome of those actions.
 
+> ⚠️ **Important**
+>  
+> Make sure to set the correct versions of **Node / Indexer / Toolkit** **before running the startup script**.  
+> See **“Getting Started – Set versions”**.
+
+
 ```bash
+# Start Toolkit Postgres before running E2E tests
+bash qa/scripts/start-toolkit-postgres.sh
+
 # Startup a local environment from genesis block, without test data
 bash qa/scripts/startup-localenv-from-genesis.sh
 cd qa/tests
 TARGET_ENV=undeployed yarn test:e2e
 ```
 
-The same applies for e2e tests in case you want to enforce specific component versions, just
-explicitly set them with env vars like in the example below.
-
-```bash
-# Startup a local environment from genesis block, without test data
-# with desired node + node toolkit + indexer versions
-export NODE_TAG=0.18.0-rc.7
-export NODE_TOOLKIT_TAG=latest-main
-export INDEXER_TAG=3.0.0-alpha.15
-```
-
-Note: if you need to reproduce a specific behaviour or match a particular toolkit version:
-
-```
-export NODE_TOOLKIT_TAG=$NODE_TAG
-```
-
-For example:
-```
-export NODE_TAG=0.18.0-rc.7
-export NODE_TOOLKIT_TAG=0.18.0-rc.7
-```
-
-## Smoke tests on undeployed/local environment
+### Smoke tests on undeployed/local environment
 
 Smoke tests don't require any pre-existing data so just use the following
+
 ```bash
 bash qa/scripts/startup-localenv-from-genesis.sh
 TARGET_ENV=undeployed yarn test:smoke
@@ -151,105 +193,32 @@ TARGET_ENV=undeployed yarn test:smoke
 See the individual project README files for detailed information about each test suite.
 
 ---
-## 🚀 Getting Started (Local Undeployed Environment)
 
 Indexer can be executed locally (this is known as `undeployed` environment). You can start it in two ways, depending on whether you want a clean or pre-seeded environment:
 
-#### **Option 1 — Using the compose file directly**
-
-Brings up all core services (Node, Indexer, NATS, Postgres) but starts the blockchain from genesis, meaning there will be no pre-existing blocks or transactions until you create them. 
-
-See **Step 5** below for how to start it.
-
-#### **Option 2 — Using the helper startup script (recommended for testing)**
-
-This method wraps the compose command and additionally seeds the environment with sample data (blocks with transactions).
-
-See **Step 5** below for how to use the script.
-
-Once you’ve chosen your preferred setup, follow the steps below to install dependencies and run the tests.
-
-### 1) From **qa/tests**, ensure dependencies are installed:
-```bash
-cd qa/tests
-yarn install --immutable
-```
-
-### 2) Move to the **repo root**:
-```bash
-cd ../..   # move up to the repo root
-```
-
-### 3) Load env 
-
-```bash
-source .envrc
-```
-
-### 4) Set versions
-
-By default, the node and indexer version to use will be determined based on the value in `NODE_VERSION` file and the SHA-1 of the commit where that file was updated (which indicates when a working indexer/node pair has been identified)
-Alternatively, you can override indexer and node image, and pin them to specific tags:
-
-```bash
-export NODE_TAG=0.17.0-rc.4
-export INDEXER_TAG=3.0.0-alpha.5
-```
-
-For full instructions on updating the Node version, see the [Updating Node Version Guide](../../docs/updating-node-version.md)
-
-### 5) Start the local environment 
-
-Choose one of the following options:
-
-#### **Option 1 — Compose directly (clean chain):**
-
-```bash
-docker compose --profile cloud up -d
-```
-> Starts all containers, but the chain begins from genesis (no existing blocks or transactions).
-
-#### **Option 2 — Helper startup script (pre-seeded data):**
-
-```bash
-bash qa/scripts/startup-localenv-with-data.sh
-```
-That script will:
-- run `docker compose --profile cloud up -d` 
-- wait for all containers to become healthy
-- seed sample data for GraphQL testing
-
-### 6) Run the tests from the QA folder:
-```bash
-cd qa/tests
-TARGET_ENV=undeployed yarn test 
-```
-
-Run individual test projects:
-```bash
-TARGET_ENV=undeployed yarn test:smoke        # Quick health checks
-TARGET_ENV=undeployed yarn test:integration  # GraphQL API tests
-TARGET_ENV=undeployed yarn test:e2e          # End-to-end with toolkit
-```
-
----
 
 ## 🌐 Running Against Deployed Environments
 
 There are a number of deployed environments that are used for testing components of the Midnight network. They are:
-  - devnet
-  - qanet
-  - preview
-  - testnet02
+
+- devnet
+- qanet
+- preview
+- testnet02
+
+When running **E2E tests** against deployed environments (devnet, qanet, preview, etc.),
+Toolkit Postgres must still be running locally:
+
+```bash
+bash qa/scripts/start-toolkit-postgres.sh
+```
 
 To execute the tests against these environments just change the TARGET_ENV variable accordingly (NOTE: use lower case for environment names)
+
 ```bash
 TARGET_ENV=devnet yarn test       # devnet
-TARGET_ENV=testnet02 yarn test    # testnet02
+TARGET_ENV=qanet yarn test    # qanet
 ```
-NOTE: Although all the known environments are supported, right now, it only makes sense to target `undeployed` or `devnet` environments. 
-This is because we are using the latest Indexer 3.x API which has incompatible changes with respect to Indexer 2.x deployed.
-
 
 ## ✨ Features
 
@@ -281,8 +250,8 @@ This is because we are using the latest Indexer 3.x API which has incompatible c
 
 - **Add Tooling for Test Data Scraping**: Tools for generating synthetic blocks, transactions, and keys.
 
-- **GraphQL Schema Fuzzing**: Randomized query/subscription request schema with corresponding validation 
+- **GraphQL Schema Fuzzing**: Randomized query/subscription request schema with corresponding validation
 
-- **Dynamic Data Fetching**: Use the block scraper to fetch recent block data to execute the test against (potentially) different test data every run 
+- **Dynamic Data Fetching**: Use the block scraper to fetch recent block data to execute the test against (potentially) different test data every run
 
 - **Log file per test**: Right now the test execution is per test file, having log files per test will allow concurrent test execution.

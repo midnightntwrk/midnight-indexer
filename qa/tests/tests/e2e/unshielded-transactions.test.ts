@@ -572,7 +572,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
           break;
         }
 
-        // A single tx hash can have multiple records because failed txs don't reserve hashes. 
+        // A single tx hash can have multiple records because failed txs don't reserve hashes.
         // This means the same hash might appear as:
         //   - a failed attempt (no created/spent UTXOs), or
         //   - a later successful attempt (with created/spent UTXOs).
