@@ -804,6 +804,8 @@ class ToolkitWrapper {
       const result = await this.startedContainer.exec([
         '/midnight-node-toolkit',
         'generate-txs',
+        '--src-url',
+        env.getNodeWebsocketBaseURL(),
         '--dest-file',
         `/out/${deployTx}`,
         '--to-bytes',
