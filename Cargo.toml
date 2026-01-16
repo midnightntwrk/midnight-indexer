@@ -22,7 +22,7 @@ publish       = false
 [workspace.dependencies]
 anyhow                           = { version = "1.0" }
 assert_matches                   = { version = "1.5" }
-async-graphql                    = { version = "7.1" }
+async-graphql                    = { version = "7.2" }
 async-graphql-axum               = { version = "7.1" }
 async-nats                       = { version = "0.45" }
 async-stream                     = { version = "0.3" }
