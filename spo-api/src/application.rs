@@ -42,7 +42,7 @@ pub async fn run(
             .context("serve_api_task panicked")
             .and_then(|r| r.context("serve_api_task failed")),
         _ = sigterm.recv() => {
-            warn!("sigterm received");
+            warn!("SIGTERM received");
             Ok(())
         }
     }

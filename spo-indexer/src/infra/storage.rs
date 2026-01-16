@@ -259,7 +259,7 @@ impl domain::storage::Storage for Storage {
         Ok(())
     }
 
-    async fn list_pool_ids(&self, limit: i64, offset: i64) -> Result<Vec<String>, sqlx::Error> {
+    async fn get_pool_ids(&self, limit: i64, offset: i64) -> Result<Vec<String>, sqlx::Error> {
         let query = indoc! {"
             SELECT pool_id
             FROM pool_metadata_cache
@@ -276,7 +276,7 @@ impl domain::storage::Storage for Storage {
         Ok(rows.into_iter().map(|(pid,)| pid).collect())
     }
 
-    async fn list_pool_ids_after(
+    async fn get_pool_ids_after(
         &self,
         after: &str,
         limit: i64,

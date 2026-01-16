@@ -28,7 +28,11 @@ use log::{debug, error, info, warn};
 use serde::Deserialize;
 use std::{cmp, collections::HashMap, time::Duration};
 use subxt::utils::to_hex;
-use tokio::{select, signal::unix::Signal, time};
+use tokio::{
+    select,
+    signal::unix::Signal,
+    time::{interval, sleep},
+};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -58,7 +62,7 @@ pub async fn run(
     let storage_bg = storage.clone();
     let client_bg = client.clone();
     tokio::spawn(async move {
-        let mut ticker = time::interval(Duration::from_secs(st_cfg.period_secs.max(60)));
+        let mut ticker = interval(Duration::from_secs(st_cfg.period_secs.max(60)));
         // Initial delay to avoid hammering on startup.
         ticker.tick().await;
         loop {
@@ -69,13 +73,15 @@ pub async fn run(
         }
     });
 
+    let poll_interval = Duration::from_secs(config.interval.into());
+
     loop {
         select! {
-            result = process_next_epoch(&config, &client, &storage) => {
+            result = process_next_epoch(poll_interval, &client, &storage) => {
                 result?;
             }
             _ = sigterm.recv() => {
-                warn!("sigterm received");
+                warn!("SIGTERM received");
                 return Ok(());
             }
         }
@@ -83,13 +89,13 @@ pub async fn run(
 }
 
 async fn process_next_epoch(
-    config: &Config,
+    poll_interval: Duration,
     client: &SPOClient,
     storage: &impl Storage,
 ) -> anyhow::Result<()> {
     let Some(epoch) = get_epoch_to_process(client, storage).await? else {
         debug!("latest epoch reached");
-        time::sleep(Duration::new(config.interval.into(), 0)).await;
+        sleep(poll_interval).await;
         return Ok(());
     };
     info!(epoch_no = epoch.epoch_no; "processing epoch");
@@ -109,7 +115,7 @@ async fn process_next_epoch(
         for raw_spo in &registrations {
             let cardano_id = get_cardano_id(&raw_spo.mainchain_pub_key);
             // Normalize all keys by stripping optional 0x prefix for consistency with DB values.
-            let spo_sk = remove_hex_prefix(raw_spo.sidechain_pub_key.to_string());
+            let spo_sk = remove_hex_prefix(&raw_spo.sidechain_pub_key).to_owned();
 
             val_to_registration.insert(spo_sk.clone(), raw_spo.clone());
             save_pool_metadata(client, storage, &mut tx, cardano_id.clone()).await?;
@@ -127,7 +133,7 @@ async fn process_next_epoch(
         let expected_blocks = get_expected_blocks(client, &epoch, committee.len() as u32);
 
         for (index, spo) in committee.iter().enumerate() {
-            let spo_sk = remove_hex_prefix(spo.sidechain_pubkey.to_string());
+            let spo_sk = remove_hex_prefix(&spo.sidechain_pubkey).to_owned();
             // Only count if the validator has produced a block.
             if let Some(&produced_count) = blocks_produced.get(&spo_sk) {
                 let raw_spo = val_to_registration
@@ -173,27 +179,27 @@ async fn refresh_stake_snapshots(
         .ok()
         .map(|s| s.mainchain.epoch as i64);
 
-    // Cursor-based paging: resume after last_pool_id, then wrap to start
+    // Cursor-based paging: resume after last_pool_id, then wrap to start.
     let start_after = storage.get_stake_refresh_cursor().await?;
     let after = start_after.clone();
 
-    // First page: after last_pool_id
+    // First page: after last_pool_id.
     let mut pool_ids = if let Some(ref last) = after {
-        storage.list_pool_ids_after(last, limit).await?
+        storage.get_pool_ids_after(last, limit).await?
     } else {
-        storage.list_pool_ids(limit, 0).await?
+        storage.get_pool_ids(limit, 0).await?
     };
 
-    // If empty, wrap-around from beginning
+    // If empty, wrap-around from beginning.
     if pool_ids.is_empty() {
-        pool_ids = storage.list_pool_ids(limit, 0).await?;
+        pool_ids = storage.get_pool_ids(limit, 0).await?;
     }
 
     if pool_ids.is_empty() {
         return Ok(());
     }
 
-    // Rate limiting
+    // Rate limiting.
     let sleep_per_req_ms = if cfg.max_rps == 0 {
         0
     } else {
@@ -236,7 +242,7 @@ async fn refresh_stake_snapshots(
             }
         }
         if sleep_per_req_ms > 0 {
-            time::sleep(Duration::from_millis(sleep_per_req_ms)).await;
+            sleep(Duration::from_millis(sleep_per_req_ms)).await;
         }
     }
     tx.commit().await?;
@@ -258,7 +264,7 @@ async fn save_spo_history(
     tx: &mut SqlxTransaction,
 ) -> anyhow::Result<()> {
     // Normalize to hex without 0x.
-    let spo_sk = remove_hex_prefix(raw_spo.sidechain_pub_key.to_string());
+    let spo_sk = remove_hex_prefix(&raw_spo.sidechain_pub_key).to_owned();
 
     let spo = SPOHistory {
         spo_sk: spo_sk.clone(),
@@ -281,9 +287,9 @@ async fn save_spo_identity(
     tx: &mut SqlxTransaction,
 ) -> anyhow::Result<()> {
     // Normalize all hex-like identifiers to avoid mixed representations.
-    let spo_sk = remove_hex_prefix(raw_spo.sidechain_pub_key.to_string());
-    let aura_pk = remove_hex_prefix(raw_spo.keys.aura.to_string());
-    let main_pk = remove_hex_prefix(raw_spo.mainchain_pub_key.to_string());
+    let spo_sk = remove_hex_prefix(&raw_spo.sidechain_pub_key).to_owned();
+    let aura_pk = remove_hex_prefix(&raw_spo.keys.aura).to_owned();
+    let main_pk = remove_hex_prefix(&raw_spo.mainchain_pub_key).to_owned();
 
     let spo = SPO {
         spo_sk: spo_sk.clone(),
@@ -346,8 +352,8 @@ fn committee_to_membership(
             epoch_no: c.epoch_no,
             position: c.position,
             // Normalize to hex without 0x for consistency with identity/performance.
-            spo_sk: remove_hex_prefix(c.sidechain_pubkey.clone()),
-            sidechain_pubkey: remove_hex_prefix(c.sidechain_pubkey.clone()),
+            spo_sk: remove_hex_prefix(&c.sidechain_pubkey).to_owned(),
+            sidechain_pubkey: remove_hex_prefix(&c.sidechain_pubkey).to_owned(),
             expected_slots: slots_per_epoch / num_validators
                 + if leftover > index.try_into().expect("index should fit in u32") {
                     1
@@ -396,5 +402,5 @@ fn get_cardano_id(mainchain_pk: &str) -> String {
 
     let hex_hash = to_hex(buffer);
 
-    remove_hex_prefix(hex_hash.to_string())
+    remove_hex_prefix(&hex_hash).to_owned()
 }

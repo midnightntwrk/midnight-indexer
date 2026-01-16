@@ -23,14 +23,16 @@ use indexer_common::error::BoxError;
 use reqwest::Client as HttpClient;
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::value::RawValue;
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 use subxt::{
     OnlineClient, PolkadotConfig,
-    backend::rpc::reconnecting_rpc_client::{ExponentialBackoff, RpcClient},
-    utils::H256,
+    backend::{
+        legacy::LegacyRpcMethods,
+        rpc::reconnecting_rpc_client::{ExponentialBackoff, RpcClient},
+    },
 };
 use thiserror::Error;
-use tokio::time;
+use tokio::time::sleep;
 
 const SLOT_PER_EPOCH_KEY: &str = "3eaeb1cee77dc09baac326e5a1d29726f38178a5f54bee65a8446a55b585f261";
 const MIN_COMMITTEE_SIZE: usize = 300;
@@ -61,7 +63,8 @@ pub struct SPOClient {
     rpc_client: RpcClient,
     blockfrost: BlockfrostAPI,
     http: HttpClient,
-    config: Config,
+    reconnect_delay: Duration,
+    blockfrost_id: SecretString,
     api: OnlineClient<PolkadotConfig>,
 }
 
@@ -94,7 +97,8 @@ impl SPOClient {
             http,
             epoch_duration,
             slots_per_epoch,
-            config,
+            reconnect_delay: config.reconnect_max_delay,
+            blockfrost_id: config.blockfrost_id,
             api,
         })
     }
@@ -115,22 +119,19 @@ impl SPOClient {
     }
 
     pub async fn get_block_timestamp(&self, block_number: u32) -> Result<u64, SPOClientError> {
-        let params = RawValue::from_string(format!("[{block_number}]"))
-            .expect("JSON serialization of block number should not fail");
-        let blockhash = self
-            .rpc_client
-            .request("chain_getBlockHash".to_owned(), Some(params))
+        let legacy_rpc = LegacyRpcMethods::<PolkadotConfig>::new(self.rpc_client.clone().into());
+        let blockhash = legacy_rpc
+            .chain_get_block_hash(Some(block_number.into()))
             .await
             .map_err(|error| {
                 SPOClientError::RpcCall("chain_getBlockHash".to_owned(), error.to_string())
+            })?
+            .ok_or_else(|| {
+                SPOClientError::UnexpectedResponse(format!(
+                    "block hash not found for block {block_number}"
+                ))
             })?;
 
-        let blockhash = remove_hex_prefix(blockhash.get().to_string().replace('"', ""));
-        let blockhash = H256::from_slice(
-            hex::decode(&blockhash)
-                .expect("block hash should be valid hex")
-                .as_slice(),
-        );
         let storage_query = polkadot::storage().timestamp().now();
 
         let result = self
@@ -139,8 +140,10 @@ impl SPOClient {
             .at(blockhash)
             .fetch(&storage_query)
             .await
-            .expect("storage fetch should succeed for valid block");
-        let timestamp = result.expect("timestamp should exist in block storage");
+            .map_err(|error| SPOClientError::Subtx(error.into()))?;
+        let timestamp = result.ok_or_else(|| {
+            SPOClientError::UnexpectedResponse("timestamp not found in block storage".to_owned())
+        })?;
 
         Ok(timestamp)
     }
@@ -171,8 +174,9 @@ impl SPOClient {
         &self,
         epoch_number: u32,
     ) -> Result<SPORegistrationResponse, SPOClientError> {
-        let rpc_params = RawValue::from_string(format!("[{epoch_number}]"))
-            .expect("JSON serialization of epoch number should not fail");
+        let rpc_params = RawValue::from_string(format!("[{epoch_number}]")).map_err(|error| {
+            SPOClientError::UnexpectedResponse(format!("failed to create RPC params: {error}"))
+        })?;
 
         let raw_response = self
             .rpc_client
@@ -192,23 +196,23 @@ impl SPOClient {
             .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
         let mut response: HashMap<String, Vec<CandidateRegistration>> = HashMap::new();
 
-        for (mut key, registrations) in reg_response.clone().candidate_registrations {
-            key = remove_hex_prefix(key);
+        for (key, registrations) in reg_response.clone().candidate_registrations {
+            let key = remove_hex_prefix(&key).to_owned();
 
             let cleaned_registrations = registrations
                 .into_iter()
                 .map(|reg| CandidateRegistration {
-                    sidechain_pub_key: remove_hex_prefix(reg.sidechain_pub_key),
+                    sidechain_pub_key: remove_hex_prefix(&reg.sidechain_pub_key).to_owned(),
                     sidechain_account_id: reg.sidechain_account_id,
-                    mainchain_pub_key: remove_hex_prefix(reg.mainchain_pub_key),
-                    cross_chain_pub_key: remove_hex_prefix(reg.cross_chain_pub_key),
+                    mainchain_pub_key: remove_hex_prefix(&reg.mainchain_pub_key).to_owned(),
+                    cross_chain_pub_key: remove_hex_prefix(&reg.cross_chain_pub_key).to_owned(),
                     keys: CandidateKeys {
-                        aura: remove_hex_prefix(reg.keys.aura),
-                        gran: remove_hex_prefix(reg.keys.gran),
+                        aura: remove_hex_prefix(&reg.keys.aura).to_owned(),
+                        gran: remove_hex_prefix(&reg.keys.gran).to_owned(),
                     },
-                    sidechain_signature: remove_hex_prefix(reg.sidechain_signature),
-                    mainchain_signature: remove_hex_prefix(reg.mainchain_signature),
-                    cross_chain_signature: remove_hex_prefix(reg.cross_chain_signature),
+                    sidechain_signature: remove_hex_prefix(&reg.sidechain_signature).to_owned(),
+                    mainchain_signature: remove_hex_prefix(&reg.mainchain_signature).to_owned(),
+                    cross_chain_signature: remove_hex_prefix(&reg.cross_chain_signature).to_owned(),
 
                     utxo: reg.utxo,
                     is_valid: reg.is_valid,
@@ -259,17 +263,14 @@ impl SPOClient {
                     .map(|(index, pk)| Validator {
                         epoch_no: response.sidechain_epoch,
                         position: index as u64,
-                        sidechain_pubkey: remove_hex_prefix(pk.sidechain_pub_key.clone()),
+                        sidechain_pubkey: remove_hex_prefix(&pk.sidechain_pub_key).to_owned(),
                     })
                     .collect::<Vec<_>>();
 
                 return Ok(committee);
             }
 
-            time::sleep(time::Duration::from_secs(
-                self.config.reconnect_max_delay.as_secs(),
-            ))
-            .await;
+            sleep(self.reconnect_delay).await;
         }
     }
 
@@ -277,7 +278,7 @@ impl SPOClient {
         let raw_meta = self.blockfrost.pools_metadata(&pool_id).await?;
         let meta = PoolMetadata {
             pool_id,
-            hex_id: remove_hex_prefix(raw_meta.hex),
+            hex_id: remove_hex_prefix(&raw_meta.hex).to_owned(),
             name: raw_meta.name.unwrap_or_default(),
             ticker: raw_meta.ticker.unwrap_or_default(),
             homepage_url: raw_meta.homepage.unwrap_or_default(),
@@ -294,7 +295,7 @@ impl SPOClient {
         let resp = self
             .http
             .get(&url)
-            .header("project_id", self.config.blockfrost_id.expose_secret())
+            .header("project_id", self.blockfrost_id.expose_secret())
             .send()
             .await
             .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
@@ -313,7 +314,7 @@ impl SPOClient {
     }
 
     fn blockfrost_base_url(&self) -> &'static str {
-        let id = self.config.blockfrost_id.expose_secret();
+        let id = self.blockfrost_id.expose_secret();
         if id.starts_with("mainnet") {
             "https://cardano-mainnet.blockfrost.io/api/v0"
         } else if id.starts_with("preprod") {
@@ -365,19 +366,21 @@ async fn get_epoch_duration(
 ) -> Result<(u32, u32), SPOClientError> {
     let slot =
         hex::decode(SLOT_PER_EPOCH_KEY).expect("SLOT_PER_EPOCH_KEY constant should be valid hex");
-    let storage_cli = api
+    let storage = api
         .storage()
         .at_latest()
         .await
         .map_err(|error| SPOClientError::Subtx(error.into()))?;
 
-    let res = storage_cli.fetch_raw(slot).await.map_err(|_| {
+    let res = storage.fetch_raw(slot).await.map_err(|_| {
         SPOClientError::UnexpectedResponse("failed to fetch slots per epoch".to_owned())
     })?;
-    let raw_response: [u8; 4] = res
-        .expect("slots per epoch storage value should exist")
-        .try_into()
-        .expect("slots per epoch should be 4 bytes");
+    let raw_bytes = res.ok_or_else(|| {
+        SPOClientError::UnexpectedResponse("slots per epoch storage value not found".to_owned())
+    })?;
+    let raw_response: [u8; 4] = raw_bytes.try_into().map_err(|_| {
+        SPOClientError::UnexpectedResponse("slots per epoch should be 4 bytes".to_owned())
+    })?;
     let slots_per_epoch = u32::from_le_bytes(raw_response);
 
     Ok((SLOT_DURATION * slots_per_epoch, slots_per_epoch))

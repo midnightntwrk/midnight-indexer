@@ -67,13 +67,11 @@ where
 
     /// Return a page of pool_ids known to the system (for stake refreshers).
     /// Implementations should order by most recently updated metadata first when possible.
-    async fn list_pool_ids(&self, limit: i64, offset: i64) -> Result<Vec<String>, sqlx::Error>;
+    async fn get_pool_ids(&self, limit: i64, offset: i64) -> Result<Vec<String>, sqlx::Error>;
+
     /// Return pool_ids after a given id, lexicographically, for cursor-based rotation.
-    async fn list_pool_ids_after(
-        &self,
-        after: &str,
-        limit: i64,
-    ) -> Result<Vec<String>, sqlx::Error>;
+    async fn get_pool_ids_after(&self, after: &str, limit: i64)
+    -> Result<Vec<String>, sqlx::Error>;
 
     /// Upsert latest stake snapshot for a pool.
     async fn save_stake_snapshot(
