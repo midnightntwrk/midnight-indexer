@@ -1,0 +1,60 @@
+name: Indexer QA Block Streaming Test Base Workflow
+
+on:
+  workflow_call:
+    inputs:
+      target_env:
+        description: 'Midnight target environment (devnet/qanet/preview/preprod)'
+        required: true
+        type: string
+        default: qanet
+      node_version:
+        description: 'Node.js version to use'
+        required: false
+        type: string
+        default: '22'
+
+jobs:
+  test:
+    name: Test - block-subscriptions
+    runs-on: ubuntu-latest
+    container:
+      image: node:${{ inputs.node_version }}
+      options: --user root
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+    defaults:
+      run:
+        working-directory: qa/tests
+    env:
+      TARGET_ENV: ${{ inputs.target_env }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Yarn
+        run: |
+          corepack enable
+          corepack prepare yarn@3.6.4 --activate
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Run tests
+        run: yarn test:integration block-subscriptions
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-block-subscriptions
+          path: qa/tests/reports/**
+          retention-days: 7
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-block-subscriptions
+          path: qa/tests/logs/**
+          retention-days: 7
