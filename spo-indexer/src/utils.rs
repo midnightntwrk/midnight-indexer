@@ -1,12 +1,8 @@
-pub fn remove_hex_prefix(s: String) -> String {
-    if s.starts_with("0x") {
-        s[2..].to_string()
-    } else {
-        s.to_string()
-    }
+pub fn remove_hex_prefix(s: &str) -> &str {
+    s.strip_prefix("0x").unwrap_or(s)
 }
 
 pub fn hex_to_bytes(s: &str) -> Vec<u8> {
-    let hex_str = remove_hex_prefix(s.to_string());
-    hex::decode(hex_str).unwrap()
+    let hex = remove_hex_prefix(s);
+    hex::decode(hex).expect("input should be valid hex string")
 }

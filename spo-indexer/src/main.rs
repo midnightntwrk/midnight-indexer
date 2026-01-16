@@ -28,7 +28,8 @@ async fn main() {
     if let Err(error) = run().await {
         let backtrace = error.backtrace();
         let error = format!("{error:#}");
-        error!(error, backtrace:%; "process exited with ERROR")
+        error!(error, backtrace:%; "process exited with ERROR");
+        std::process::exit(1);
     }
 }
 
@@ -46,6 +47,10 @@ async fn run() -> anyhow::Result<()> {
         config::Config,
         infra::{self, subxt_node::SPOClient},
     };
+    use tokio::signal::unix::{SignalKind, signal};
+
+    // Register SIGTERM handler.
+    let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
     // Load configuration.
     let config = Config::load().context("load configuration")?;
@@ -79,7 +84,7 @@ async fn run() -> anyhow::Result<()> {
     }
     let storage = infra::storage::Storage::new(pool);
 
-    application::run(application_config, node, storage).await
+    application::run(application_config, node, storage, sigterm).await
 }
 
 #[cfg(not(feature = "cloud"))]

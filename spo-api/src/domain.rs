@@ -26,14 +26,14 @@ where
 
 #[derive(Debug, Clone)]
 pub struct StakePoolOperator {
-    pub id: String,                   // canonical operator id (e.g. hash or bech32)
-    pub identity_key: Option<String>, // optional identity / metadata key
+    pub id: String,                   // Canonical operator id (e.g. hash or bech32).
+    pub identity_key: Option<String>, // Optional identity / metadata key.
     pub display_name: Option<String>,
     pub created_at_epoch: Option<i64>,
     pub last_active_epoch: Option<i64>,
     pub performance_score: Option<f64>,
     pub commission_rate: Option<f64>,
-    pub total_stake: Option<String>, // string to avoid premature big-int choice
+    pub total_stake: Option<String>, // String to avoid premature big-int choice.
 }
 
 #[derive(Debug, Clone)]
