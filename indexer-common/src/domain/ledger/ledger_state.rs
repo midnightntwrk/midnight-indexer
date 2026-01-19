@@ -822,17 +822,26 @@ fn ctime_v6(utxo: &UtxoV6, ledger_state: &LedgerStateV6<RedbDb>) -> Option<u64> 
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{
-        NetworkId, TransactionResult,
-        ledger::{TransactionV6, ledger_state::make_unshielded_utxos_for_regular_transaction_v6},
+    use crate::{
+        domain::{
+            NetworkId, TransactionResult,
+            ledger::{
+                TransactionV6, ledger_state::make_unshielded_utxos_for_regular_transaction_v6,
+            },
+        },
+        infra::redb_db::RedbDb,
     };
     use midnight_ledger_v6::structure::{
         LedgerState as LedgerStateV6, StandardTransaction as StandardTransactionV6,
     };
+    use midnight_storage_v6::DefaultHasher;
     use midnight_transient_crypto_v6::curve::EmbeddedFr;
 
     #[test]
     fn test_make_unshielded_utxos_v6() {
+        let db = RedbDb::<DefaultHasher>::new("ledger.redb");
+        db.set_as_default_storage();
+
         let network_id = NetworkId::try_from("undeployed").unwrap();
 
         let transaction = StandardTransactionV6 {
