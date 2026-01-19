@@ -6576,37 +6576,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spo-api"
-version = "3.0.0"
-dependencies = [
- "anyhow",
- "async-graphql",
- "async-graphql-axum",
- "axum",
- "byte-unit-serde",
- "clap",
- "derive_more 2.1.1",
- "fastrace",
- "fastrace-axum",
- "futures",
- "indexer-common",
- "indoc",
- "log",
- "metrics",
- "once_cell",
- "regex",
- "serde",
- "serde_with",
- "sqlx",
- "thiserror 2.0.17",
- "tokio",
- "tower",
- "tower-http",
- "trait-variant",
- "uuid",
-]
-
-[[package]]
 name = "spo-indexer"
 version = "3.0.0"
 dependencies = [
