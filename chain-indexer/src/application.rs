@@ -415,9 +415,9 @@ where
         .context("save block")?;
 
     // Fetch and store system parameters if changed.
-    if let Err(error) = update_system_parameters(&block, storage, node).await {
-        warn!(error:%; "failed to update system parameters, continuing");
-    }
+    update_system_parameters(&block, storage, node)
+        .await
+        .context("update system parameters")?;
 
     let ledger_state_size = serialize_ledger_state.map(|s| s.len());
 
