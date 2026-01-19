@@ -44,7 +44,7 @@ async fn run() -> anyhow::Result<()> {
     use indexer_common::{
         cipher::make_cipher,
         config::ConfigExt,
-        infra::{migrations, pool, pub_sub},
+        infra::{migrations, pool, pub_sub, redb_db::new_redb_db},
         telemetry,
     };
     use log::info;
@@ -85,6 +85,9 @@ async fn run() -> anyhow::Result<()> {
     let cipher = make_cipher(secret).context("make cipher")?;
 
     let storage = infra::storage::Storage::new(cipher, pool);
+
+    let db = new_redb_db("ledger.redb");
+    db.set_as_default_storage();
 
     let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config).await?;
 

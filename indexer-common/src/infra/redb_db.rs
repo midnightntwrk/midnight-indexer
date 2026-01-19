@@ -1,10 +1,11 @@
 use derive_more::Debug;
 use midnight_serialize_v7_0_0::{Deserializable, Serializable as SerializableV6};
 use midnight_storage_v7_0_0::{
-    DefaultHasher, WellBehavedHasher,
+    DefaultHasher, Storage, WellBehavedHasher,
     arena::ArenaHash,
     backend::OnDiskObject,
     db::{DB, DummyArbitrary, Update},
+    storage::set_default_storage,
 };
 use redb::{ReadableDatabase, ReadableTable, TableDefinition, WriteTransaction};
 use sha2::digest::generic_array::GenericArray;
@@ -48,8 +49,11 @@ pub struct RedbDb<H = DefaultHasher> {
     _h: PhantomData<H>,
 }
 
-impl<H> RedbDb<H> {
-    pub fn new(file: impl AsRef<Path>) -> Self {
+impl<H> RedbDb<H>
+where
+    H: WellBehavedHasher,
+{
+    pub fn new(file: impl AsRef<Path>) -> RedbDb<H> {
         let inner = redb::Database::create(file).unwrap_or_panic("cannot open redb");
 
         let tx = inner.begin_write().unwrap_or_panic("cannot begin write tx");
@@ -64,6 +68,11 @@ impl<H> RedbDb<H> {
             inner,
             _h: PhantomData,
         }
+    }
+
+    pub fn set_as_default_storage(self) {
+        set_default_storage(|| Storage::new(1_024, self))
+            .expect("RedbDb can be set as default storage");
     }
 }
 
@@ -248,7 +257,10 @@ where
     }
 }
 
-impl<H> Default for RedbDb<H> {
+impl<H> Default for RedbDb<H>
+where
+    H: WellBehavedHasher,
+{
     fn default() -> Self {
         let dir = TempDir::new()
             .unwrap_or_panic("cannot create tempdir")
@@ -259,6 +271,10 @@ impl<H> Default for RedbDb<H> {
 }
 
 impl<H> DummyArbitrary for RedbDb<H> {}
+
+pub fn new_redb_db(file: impl AsRef<Path>) -> RedbDb<DefaultHasher> {
+    RedbDb::<DefaultHasher>::new(file)
+}
 
 fn insert_node<H>(tx: &WriteTransaction, key: ArenaHash<H>, object: OnDiskObject<H>)
 where
