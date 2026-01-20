@@ -281,14 +281,13 @@ fn can_decrypt_v7_0_0<D: DBV7_0_0>(
 mod tests {
     use crate::{
         domain::{PROTOCOL_VERSION_000_020_000, ViewingKey, ledger::Transaction},
-        infra::redb_db::new_redb_db,
+        infra::postgres_db::new_redb_db,
     };
     use bip32::{DerivationPath, XPrv};
     use midnight_zswap_v7_0_0::keys::{SecretKeys, Seed};
     use std::{fs, str::FromStr};
 
     /// Notice: The raw test data is created with `generate_txs.sh`.
-    #[ignore = "cannot be run with code calling set_as_default_storage"]
     #[test]
     fn test_deserialize_relevant() {
         let db = new_redb_db("ledger.redb");

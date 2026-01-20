@@ -22,7 +22,7 @@ use crate::domain::{
         Error, IntentV7_0_0, SerializableV7_0_0Ext, TaggedSerializableV7_0_0Ext, TransactionV7_0_0,
     },
 };
-use crate::infra::redb_db::RedbDb;
+use crate::infra::postgres_db::PostgresDb;
 use fastrace::trace;
 use itertools::Itertools;
 use midnight_base_crypto_v7_0_0::{
@@ -85,7 +85,7 @@ static STRICTNESS_V7_0_0: LazyLock<WellFormedStrictnessV7_0_0> = LazyLock::new(|
 #[derive(Debug, Clone)]
 pub enum LedgerState {
     V7_0_0 {
-        ledger_state: LedgerStateV7_0_0<RedbDb>,
+        ledger_state: LedgerStateV7_0_0<PostgresDb>,
         block_fullness: SyntheticCostV7_0_0,
     },
 }
@@ -105,11 +105,11 @@ impl LedgerState {
     ) -> Result<Self, Error> {
         if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
             let arena_key = TypedArenaKeyV7_0_0::<
-                LedgerStateV7_0_0<RedbDb>,
-                <RedbDb as DBV7_0_0>::Hasher,
+                LedgerStateV7_0_0<PostgresDb>,
+                <PostgresDb as DBV7_0_0>::Hasher,
             >::deserialize(&mut key.as_slice(), 0)
             .map_err(|error| Error::Deserialize("TypedArenaKeyV7", error))?;
-            let ledger_state = default_storage_v7_0_0::<RedbDb>()
+            let ledger_state = default_storage_v7_0_0::<PostgresDb>()
                 .get(&arena_key)
                 .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
             let ledger_state =
@@ -432,7 +432,9 @@ fn timestamp_v7_0_0(block_timestamp: u64) -> TimestampV7_0_0 {
     TimestampV7_0_0::from_secs(block_timestamp / 1000)
 }
 
-fn make_ledger_events_v7_0_0(events: Vec<EventV7_0_0<RedbDb>>) -> Result<Vec<LedgerEvent>, Error> {
+fn make_ledger_events_v7_0_0(
+    events: Vec<EventV7_0_0<PostgresDb>>,
+) -> Result<Vec<LedgerEvent>, Error> {
     events
         .into_iter()
         .map(|event| {
@@ -574,7 +576,7 @@ fn make_dust_generation_dtime_update_v7_0_0(
 fn make_unshielded_utxos_for_regular_transaction_v7_0_0(
     transaction: TransactionV7_0_0,
     transaction_result: &TransactionResult,
-    ledger_state: &LedgerStateV7_0_0<RedbDb>,
+    ledger_state: &LedgerStateV7_0_0<PostgresDb>,
 ) -> (Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>) {
     // Skip UTXO creation entirely for failed transactions, because no state changes occurred on the
     // ledger.
@@ -674,7 +676,7 @@ fn make_unshielded_utxos_for_regular_transaction_v7_0_0(
 
 fn make_unshielded_utxos_for_system_transaction_v7_0_0(
     transaction: SystemTransactionV7_0_0,
-    ledger_state: &LedgerStateV7_0_0<RedbDb>,
+    ledger_state: &LedgerStateV7_0_0<PostgresDb>,
 ) -> Vec<UnshieldedUtxo> {
     match transaction {
         SystemTransactionV7_0_0::PayFromTreasuryUnshielded {
@@ -727,7 +729,7 @@ fn extend_unshielded_utxos_v7_0_0(
     segment_id: u16,
     intent: &IntentV7_0_0,
     guaranteed: bool,
-    ledger_state: &LedgerStateV7_0_0<RedbDb>,
+    ledger_state: &LedgerStateV7_0_0<PostgresDb>,
 ) {
     let ledger_intent_hash = intent
         .erase_proofs()
@@ -811,7 +813,7 @@ fn make_initial_nonce_v7_0_0(output_index: u32, intent_hash: IntentHash) -> Nonc
 fn registered_for_dust_generation_v7_0_0(
     output_index: u32,
     intent_hash: IntentHash,
-    ledger_state: &LedgerStateV7_0_0<RedbDb>,
+    ledger_state: &LedgerStateV7_0_0<PostgresDb>,
 ) -> bool {
     let intent_hash_v7_0_0 = HashOutputV7_0_0(intent_hash.0);
     let initial_nonce =
@@ -823,7 +825,7 @@ fn registered_for_dust_generation_v7_0_0(
         .contains_key(&initial_nonce)
 }
 
-fn ctime_v7_0_0(utxo: &UtxoV7_0_0, ledger_state: &LedgerStateV7_0_0<RedbDb>) -> Option<u64> {
+fn ctime_v7_0_0(utxo: &UtxoV7_0_0, ledger_state: &LedgerStateV7_0_0<PostgresDb>) -> Option<u64> {
     ledger_state
         .utxo
         .utxos

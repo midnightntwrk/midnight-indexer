@@ -23,7 +23,8 @@ CREATE TABLE blocks (
   parent_hash BYTEA NOT NULL,
   author BYTEA,
   timestamp BIGINT NOT NULL,
-  ledger_parameters BYTEA NOT NULL
+  ledger_parameters BYTEA NOT NULL,
+  ledger_state_key BYTEA NOT NULL
 );
 --------------------------------------------------------------------------------
 -- transactions
@@ -56,15 +57,6 @@ CREATE INDEX ON regular_transactions (transaction_result);
 CREATE INDEX ON regular_transactions USING GIN (transaction_result);
 CREATE INDEX ON regular_transactions (start_index);
 CREATE INDEX ON regular_transactions (end_index);
---------------------------------------------------------------------------------
--- ledger_state
---------------------------------------------------------------------------------
-CREATE TABLE ledger_state (
-  id BIGSERIAL PRIMARY KEY,
-  key BYTEA NOT NULL,
-  block_height BIGINT NOT NULL,
-  protocol_version BIGINT NOT NULL
-);
 --------------------------------------------------------------------------------
 -- contract_actions
 --------------------------------------------------------------------------------
@@ -196,7 +188,6 @@ CREATE TABLE system_parameters_terms_and_conditions (
   url TEXT NOT NULL
 );
 CREATE INDEX ON system_parameters_terms_and_conditions (block_height DESC);
-
 CREATE TABLE system_parameters_d (
   id BIGSERIAL PRIMARY KEY,
   block_height BIGINT NOT NULL,

@@ -43,7 +43,7 @@ async fn run() -> anyhow::Result<()> {
     };
     use indexer_common::{
         config::ConfigExt,
-        infra::{migrations, pool, pub_sub, redb_db::new_redb_db},
+        infra::{migrations, pool, postgres_db::new_redb_db, pub_sub},
         telemetry,
     };
     use log::info;

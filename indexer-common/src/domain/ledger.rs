@@ -27,7 +27,7 @@ use crate::{
         SerializedContractAddress, SerializedLedgerStateKey, dust::DustParameters,
     },
     error::BoxError,
-    infra::redb_db::RedbDb,
+    infra::postgres_db::PostgresDb,
 };
 use fastrace::trace;
 use midnight_base_crypto_v7_0_0::signatures::Signature as SignatureV7_0_0;
@@ -47,13 +47,13 @@ type TransactionV7_0_0 = midnight_ledger_v7_0_0::structure::Transaction<
     SignatureV7_0_0,
     ProofMarkerV7_0_0,
     PureGeneratorPedersenV7_0_0,
-    RedbDb,
+    PostgresDb,
 >;
 type IntentV7_0_0 = midnight_ledger_v7_0_0::structure::Intent<
     SignatureV7_0_0,
     ProofMarkerV7_0_0,
     PureGeneratorPedersenV7_0_0,
-    RedbDb,
+    PostgresDb,
 >;
 
 /// Ledger related errors.

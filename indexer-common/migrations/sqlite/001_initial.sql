@@ -9,7 +9,8 @@ CREATE TABLE blocks (
   parent_hash BLOB NOT NULL,
   author BLOB,
   timestamp INTEGER NOT NULL,
-  ledger_parameters BLOB NOT NULL
+  ledger_parameters BLOB NOT NULL,
+  ledger_state_key BLOB NOT NULL
 );
 --------------------------------------------------------------------------------
 -- transactions
@@ -50,15 +51,6 @@ CREATE TABLE transaction_identifiers (
 );
 CREATE INDEX transaction_identifiers_transaction_id_idx ON transaction_identifiers (transaction_id);
 CREATE INDEX transaction_identifiers_identifier_idx ON transaction_identifiers (identifier);
---------------------------------------------------------------------------------
--- ledger_state
---------------------------------------------------------------------------------
-CREATE TABLE ledger_state (
-  id INTEGER PRIMARY KEY,
-  key BLOB NOT NULL,
-  block_height INTEGER NOT NULL,
-  protocol_version INTEGER NOT NULL
-);
 --------------------------------------------------------------------------------
 -- contract_actions
 --------------------------------------------------------------------------------
@@ -197,7 +189,6 @@ CREATE TABLE system_parameters_terms_and_conditions (
   url TEXT NOT NULL
 );
 CREATE INDEX system_parameters_tc_block_height_idx ON system_parameters_terms_and_conditions (block_height DESC);
-
 CREATE TABLE system_parameters_d (
   id INTEGER PRIMARY KEY,
   block_height INTEGER NOT NULL,
