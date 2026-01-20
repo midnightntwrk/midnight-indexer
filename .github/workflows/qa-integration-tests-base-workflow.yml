@@ -98,7 +98,7 @@ jobs:
           node-version: 22.x
 
       - name: Restore Yarn cache
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4.3
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7  
         with:
           path: |
             qa/tests/.yarn/cache
