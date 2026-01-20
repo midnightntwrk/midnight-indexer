@@ -15,25 +15,20 @@ use crate::domain::Api;
 use anyhow::Context as AnyhowContext;
 use futures::{TryStreamExt, future::ok};
 use indexer_common::domain::{BlockIndexed, NetworkId, Subscriber};
-use log::{debug, error, warn};
+use log::{debug, error, info};
 use serde::Deserialize;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use tokio::{select, signal::unix::Signal, task};
+use tokio::{select, task};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub network_id: NetworkId,
 }
 
-pub async fn run(
-    config: Config,
-    api: impl Api,
-    subscriber: impl Subscriber,
-    mut sigterm: Signal,
-) -> anyhow::Result<()> {
+pub async fn run(config: Config, api: impl Api, subscriber: impl Subscriber) -> anyhow::Result<()> {
     let Config { network_id } = config;
 
     let caught_up = Arc::new(AtomicBool::new(false));
@@ -66,7 +61,7 @@ pub async fn run(
                 .await
                 .context("serving API")?;
 
-            error!("serve_api_task completed unexpectedly");
+            info!("serve_api_task completed");
 
             Ok::<(), anyhow::Error>(())
         })
@@ -80,10 +75,5 @@ pub async fn run(
         result = serve_api_task => result
             .context("serve_api_task panicked")
             .and_then(|r| r.context("serve_api_task failed")),
-
-        _ = sigterm.recv() => {
-            warn!("SIGTERM received");
-            Ok(())
-        }
     }
 }

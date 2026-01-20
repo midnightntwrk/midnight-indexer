@@ -48,10 +48,6 @@ async fn run() -> anyhow::Result<()> {
         telemetry,
     };
     use log::info;
-    use tokio::signal::unix::{SignalKind, signal};
-
-    // Register SIGTERM handler.
-    let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
     // Load configuration.
     let config = Config::load().context("load configuration")?;
@@ -100,7 +96,7 @@ async fn run() -> anyhow::Result<()> {
 
     let api = AxumApi::new(api_config, storage, subscriber.clone());
 
-    application::run(application_config, api, subscriber, sigterm)
+    application::run(application_config, api, subscriber)
         .await
         .context("run indexer-API application")
 }
