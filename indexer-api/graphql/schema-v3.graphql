@@ -76,6 +76,19 @@ type CollapsedMerkleTree {
 }
 
 """
+Committee member for an epoch.
+"""
+type CommitteeMember {
+	epochNo: Int!
+	position: Int!
+	sidechainPubkeyHex: String!
+	expectedSlots: Int!
+	auraPubkeyHex: String
+	poolIdHex: String
+	spoSkHex: String
+}
+
+"""
 A contract action.
 """
 interface ContractAction {
@@ -354,6 +367,37 @@ type DustSpendProcessed implements DustLedgerEvent {
 	maxId: Int!
 }
 
+"""
+Current epoch information.
+"""
+type EpochInfo {
+	epochNo: Int!
+	durationSeconds: Int!
+	elapsedSeconds: Int!
+}
+
+"""
+SPO performance for an epoch.
+"""
+type EpochPerf {
+	epochNo: Int!
+	spoSkHex: String!
+	produced: Int!
+	expected: Int!
+	identityLabel: String
+	stakeSnapshot: String
+	poolIdHex: String
+	validatorClass: String
+}
+
+"""
+First valid epoch for an SPO identity.
+"""
+type FirstValidEpoch {
+	idKey: String!
+	firstValidEpoch: Int!
+}
+
 scalar HexEncoded
 
 type Mutation {
@@ -382,6 +426,28 @@ type ParamChange implements DustLedgerEvent {
 	maxId: Int!
 }
 
+"""
+Pool metadata from Cardano.
+"""
+type PoolMetadata {
+	poolIdHex: String!
+	hexId: String
+	name: String
+	ticker: String
+	homepageUrl: String
+	logoUrl: String
+}
+
+"""
+Presence event for an SPO in an epoch.
+"""
+type PresenceEvent {
+	epochNo: Int!
+	idKey: String!
+	source: String!
+	status: String
+}
+
 type Query {
 	"""
 	Find a block for the given optional offset; if not present, the latest block is returned.
@@ -407,6 +473,107 @@ type Query {
 	Get the full history of Terms and Conditions changes for governance auditability.
 	"""
 	termsAndConditionsHistory: [TermsAndConditionsChange!]!
+	"""
+	List SPO identities with pagination.
+	"""
+	spoIdentities(limit: Int, offset: Int): [SpoIdentity!]!
+	"""
+	Get SPO identity by pool ID.
+	"""
+	spoIdentityByPoolId(poolIdHex: String!): SpoIdentity
+	"""
+	Get total count of SPOs.
+	"""
+	spoCount: Int
+	"""
+	Get pool metadata by pool ID.
+	"""
+	poolMetadata(poolIdHex: String!): PoolMetadata
+	"""
+	List pool metadata with pagination.
+	"""
+	poolMetadataList(limit: Int, offset: Int, withNameOnly: Boolean): [PoolMetadata!]!
+	"""
+	Get SPO with metadata by pool ID.
+	"""
+	spoByPoolId(poolIdHex: String!): Spo
+	"""
+	List SPOs with optional search.
+	"""
+	spoList(limit: Int, offset: Int, search: String): [Spo!]!
+	"""
+	Get composite SPO data (identity + metadata + performance).
+	"""
+	spoCompositeByPoolId(poolIdHex: String!): SpoComposite
+	"""
+	Get SPO identifiers ordered by performance.
+	"""
+	stakePoolOperators(limit: Int): [String!]!
+	"""
+	Get latest SPO performance entries.
+	"""
+	spoPerformanceLatest(limit: Int, offset: Int): [EpochPerf!]!
+	"""
+	Get SPO performance by SPO key.
+	"""
+	spoPerformanceBySpoSk(spoSkHex: String!, limit: Int, offset: Int): [EpochPerf!]!
+	"""
+	Get epoch performance for all SPOs.
+	"""
+	epochPerformance(epoch: Int!, limit: Int, offset: Int): [EpochPerf!]!
+	"""
+	Get current epoch information.
+	"""
+	currentEpochInfo: EpochInfo
+	"""
+	Get epoch utilization (produced/expected ratio).
+	"""
+	epochUtilization(epoch: Int!): Float
+	"""
+	Get committee membership for an epoch.
+	"""
+	committee(epoch: Int!): [CommitteeMember!]!
+	"""
+	Get cumulative registration totals for an epoch range.
+	"""
+	registeredTotalsSeries(fromEpoch: Int!, toEpoch: Int!): [RegisteredTotals!]!
+	"""
+	Get registration statistics for an epoch range.
+	"""
+	registeredSpoSeries(fromEpoch: Int!, toEpoch: Int!): [RegisteredStat!]!
+	"""
+	Get raw presence events for an epoch range.
+	"""
+	registeredPresence(fromEpoch: Int!, toEpoch: Int!): [PresenceEvent!]!
+	"""
+	Get first valid epoch for each SPO identity.
+	"""
+	registeredFirstValidEpochs(uptoEpoch: Int): [FirstValidEpoch!]!
+	"""
+	Get stake distribution with search and ordering.
+	"""
+	stakeDistribution(limit: Int, offset: Int, search: String, orderByStakeDesc: Boolean): [StakeShare!]!
+}
+
+"""
+Registration statistics for an epoch.
+"""
+type RegisteredStat {
+	epochNo: Int!
+	federatedValidCount: Int!
+	federatedInvalidCount: Int!
+	registeredValidCount: Int!
+	registeredInvalidCount: Int!
+	dparam: Float
+}
+
+"""
+Cumulative registration totals for an epoch.
+"""
+type RegisteredTotals {
+	epochNo: Int!
+	totalRegistered: Int!
+	newlyRegistered: Int!
 }
 
 """
@@ -537,6 +704,58 @@ type ShieldedTransactionsProgress {
 	zero means that no relevant transactions have been indexed for the subscribing wallet.
 	"""
 	highestRelevantEndIndex: Int!
+}
+
+"""
+SPO with optional metadata.
+"""
+type Spo {
+	poolIdHex: String!
+	validatorClass: String!
+	sidechainPubkeyHex: String!
+	auraPubkeyHex: String
+	name: String
+	ticker: String
+	homepageUrl: String
+	logoUrl: String
+}
+
+"""
+Composite SPO data (identity + metadata + performance).
+"""
+type SpoComposite {
+	identity: SpoIdentity
+	metadata: PoolMetadata
+	performance: [EpochPerf!]!
+}
+
+"""
+SPO identity information.
+"""
+type SpoIdentity {
+	poolIdHex: String!
+	mainchainPubkeyHex: String!
+	sidechainPubkeyHex: String!
+	auraPubkeyHex: String
+	validatorClass: String!
+}
+
+"""
+Stake share information for an SPO.
+"""
+type StakeShare {
+	poolIdHex: String!
+	name: String
+	ticker: String
+	homepageUrl: String
+	logoUrl: String
+	liveStake: String
+	activeStake: String
+	liveDelegators: Int
+	liveSaturation: Float
+	declaredPledge: String
+	livePledge: String
+	stakeShare: Float
 }
 
 type Subscription {
