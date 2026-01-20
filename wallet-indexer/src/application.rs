@@ -19,7 +19,7 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{BlockIndexed, Publisher, Subscriber, WalletIndexed};
 use itertools::Itertools;
-use log::{debug, error, warn};
+use log::{debug, warn};
 use serde::Deserialize;
 use std::{
     num::NonZeroUsize,
@@ -84,7 +84,7 @@ pub async fn run(
                 .await
                 .context("cannot get next BlockIndexed event")?;
 
-            error!("block_indexed_task completed unexpectedly");
+            warn!("block_indexed_task completed");
 
             Ok::<(), anyhow::Error>(())
         }
@@ -127,7 +127,7 @@ pub async fn run(
                 })
                 .await?;
 
-            error!("index_wallets_task completed unexpectedly");
+            warn!("index_wallets_task completed");
 
             Ok::<(), anyhow::Error>(())
         })

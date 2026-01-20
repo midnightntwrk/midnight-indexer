@@ -27,7 +27,7 @@ use byte_unit::{Byte, UnitType};
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{BlockIndexed, NetworkId, Publisher, UnshieldedUtxoIndexed, ledger};
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use parking_lot::RwLock;
 use serde::Deserialize;
 use std::{
@@ -177,7 +177,7 @@ pub async fn run(
                 .await
                 .context("get next block of highest_blocks")?;
 
-            error!("highest_block_on_node_task completed unexpectedly");
+            warn!("highest_block_on_node_task completed");
 
             Ok::<_, anyhow::Error>(())
         }
@@ -213,7 +213,7 @@ pub async fn run(
                 ledger_state = next_ledger_state
             }
 
-            error!("index_blocks_task completed unexpectedly");
+            warn!("index_blocks_task completed");
 
             Ok::<_, anyhow::Error>(())
         }
