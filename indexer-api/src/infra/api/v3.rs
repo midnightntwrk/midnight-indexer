@@ -31,13 +31,10 @@ use crate::{
     },
     infra::api::{
         ApiResult, Metrics, OptionExt, ResultExt,
-        v3::{
-            block::BlockOffset, mutation::Mutation, query::Query, spo::SpoQuery,
-            subscription::Subscription,
-        },
+        v3::{block::BlockOffset, mutation::Mutation, query::Query, subscription::Subscription},
     },
 };
-use async_graphql::{MergedObject, Schema, SchemaBuilder, scalar};
+use async_graphql::{Schema, SchemaBuilder, scalar};
 use async_graphql_axum::{GraphQL, GraphQLSubscription};
 use axum::{Router, routing::post_service};
 use bech32::{Bech32, Bech32m, Hrp};
@@ -335,16 +332,6 @@ impl From<&NetworkId> for CardanoNetworkId {
     }
 }
 
-/// Merged Query combining core queries with SPO queries.
-#[derive(MergedObject)]
-pub struct MergedQuery<S: Storage>(Query<S>, SpoQuery<S>);
-
-impl<S: Storage> Default for MergedQuery<S> {
-    fn default() -> Self {
-        Self(Query::default(), SpoQuery::default())
-    }
-}
-
 /// Export the GraphQL schema in SDL format.
 pub fn export_schema() -> String {
     // Once traits with async functions are object safe, `NoopStorage` can be replaced with
@@ -384,13 +371,13 @@ where
         .route_service("/graphql/ws", GraphQLSubscription::new(schema))
 }
 
-fn schema_builder<S, B>() -> SchemaBuilder<MergedQuery<S>, Mutation<S>, Subscription<S, B>>
+fn schema_builder<S, B>() -> SchemaBuilder<Query<S>, Mutation<S>, Subscription<S, B>>
 where
     S: Storage,
     B: Subscriber,
 {
     Schema::build(
-        MergedQuery::<S>::default(),
+        Query::<S>::default(),
         Mutation::<S>::default(),
         Subscription::<S, B>::default(),
     )

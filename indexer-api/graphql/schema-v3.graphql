@@ -400,10 +400,55 @@ type FirstValidEpoch {
 
 scalar HexEncoded
 
+type Mutation {
+	"""
+	Connect the wallet with the given viewing key and return a session ID.
+	"""
+	connect(viewingKey: ViewingKey!): HexEncoded!
+	"""
+	Disconnect the wallet with the given session ID.
+	"""
+	disconnect(sessionId: HexEncoded!): Unit!
+}
+
+type ParamChange implements DustLedgerEvent {
+	"""
+	The ID of this dust ledger event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all dust ledger events.
+	"""
+	maxId: Int!
+}
+
 """
-Merged Query combining core queries with SPO queries.
+Pool metadata from Cardano.
 """
-type MergedQuery {
+type PoolMetadata {
+	poolIdHex: String!
+	hexId: String
+	name: String
+	ticker: String
+	homepageUrl: String
+	logoUrl: String
+}
+
+"""
+Presence event for an SPO in an epoch.
+"""
+type PresenceEvent {
+	epochNo: Int!
+	idKey: String!
+	source: String!
+	status: String
+}
+
+type Query {
 	"""
 	Find a block for the given optional offset; if not present, the latest block is returned.
 	"""
@@ -508,54 +553,6 @@ type MergedQuery {
 	Get stake distribution with search and ordering.
 	"""
 	stakeDistribution(limit: Int, offset: Int, search: String, orderByStakeDesc: Boolean): [StakeShare!]!
-}
-
-type Mutation {
-	"""
-	Connect the wallet with the given viewing key and return a session ID.
-	"""
-	connect(viewingKey: ViewingKey!): HexEncoded!
-	"""
-	Disconnect the wallet with the given session ID.
-	"""
-	disconnect(sessionId: HexEncoded!): Unit!
-}
-
-type ParamChange implements DustLedgerEvent {
-	"""
-	The ID of this dust ledger event.
-	"""
-	id: Int!
-	"""
-	The hex-encoded serialized event.
-	"""
-	raw: HexEncoded!
-	"""
-	The maximum ID of all dust ledger events.
-	"""
-	maxId: Int!
-}
-
-"""
-Pool metadata from Cardano.
-"""
-type PoolMetadata {
-	poolIdHex: String!
-	hexId: String
-	name: String
-	ticker: String
-	homepageUrl: String
-	logoUrl: String
-}
-
-"""
-Presence event for an SPO in an epoch.
-"""
-type PresenceEvent {
-	epochNo: Int!
-	idKey: String!
-	source: String!
-	status: String
 }
 
 """
@@ -1070,7 +1067,7 @@ Directs the executor to skip this field or fragment when the `if` argument is tr
 """
 directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
 schema {
-	query: MergedQuery
+	query: Query
 	mutation: Mutation
 	subscription: Subscription
 }
