@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0-alpha.25] - 2026-01-14
+## [3.0.0-alpha.26] - 2026-01-21
 
 ### 🚀 Features
 
@@ -93,6 +93,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - *(chain-indexer)* Add timeout-based recovery for stuck subscriptions (#576)
 - Correct ledger state divergence from TX ordering and failed TX cost handling (#592)
 - *(chain-indexer)* Rebuild ledger state from correct block height (#664)
+- *(indexer-api)* Remove duplicate SIGTERM handler to allow graceful shutdown (#685)
 
 ### 💼 Other
 
@@ -157,6 +158,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Further address audit (#495)
 - Richer error messages (#494)
 - *(chain-indexer)* Add some debug level logging (#541)
+- Propagate system parameters update errors (#673)
 
 ## [2.1.4] - 2025-06-30
 
