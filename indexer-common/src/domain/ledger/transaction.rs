@@ -27,7 +27,7 @@ use midnight_ledger_v7_0_0::structure::{
     SystemTransaction as LedgerSystemTransactionV7_0_0,
 };
 use midnight_serialize_v7_0_0::tagged_deserialize as tagged_deserialize_v7_0_0;
-use midnight_storage_v7_0_0::DefaultDB as DefaultDBV7_0_0;
+use midnight_storage_v7_0_0::db::DB as DBV7_0_0;
 use midnight_transient_crypto_v7_0_0::{
     encryption::SecretKey as SecretKeyV7_0_0, proofs::Proof as ProofV7_0_0,
 };
@@ -263,9 +263,9 @@ fn serialize_contract_address(
         .map_err(|error| Error::Serialize("ContractAddressV7_0_0", error))
 }
 
-fn can_decrypt_v7_0_0(
+fn can_decrypt_v7_0_0<D: DBV7_0_0>(
     key: &SecretKeyV7_0_0,
-    offer: &OfferV7_0_0<ProofV7_0_0, DefaultDBV7_0_0>,
+    offer: &OfferV7_0_0<ProofV7_0_0, D>,
 ) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
@@ -279,7 +279,10 @@ fn can_decrypt_v7_0_0(
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{PROTOCOL_VERSION_000_020_000, ViewingKey, ledger::Transaction};
+    use crate::{
+        domain::{PROTOCOL_VERSION_000_020_000, ViewingKey, ledger::Transaction},
+        infra::postgres_db::new_redb_db,
+    };
     use bip32::{DerivationPath, XPrv};
     use midnight_zswap_v7_0_0::keys::{SecretKeys, Seed};
     use std::{fs, str::FromStr};
@@ -287,6 +290,9 @@ mod tests {
     /// Notice: The raw test data is created with `generate_txs.sh`.
     #[test]
     fn test_deserialize_relevant() {
+        let db = new_redb_db("ledger.redb");
+        db.set_as_default_storage();
+
         let transaction = fs::read(format!("{}/tests/tx_1_2_2.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
         let transaction = Transaction::deserialize(transaction, PROTOCOL_VERSION_000_020_000)
