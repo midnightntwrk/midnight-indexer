@@ -1,0 +1,68 @@
+// Array of contract actions
+[
+  {
+    "contract-address": "f5cc028277466fe2c23500cb36ee6176e48d1590c5a78b4a36f77762fefe50b2",
+    "contract-actions": [
+      {
+        "action-type": "ContractDeploy",
+        "block-height": 8929,
+        "block-hash": "ec6c190764ec2cc64afed6a3fdfde5826ccf804a0eda0709f9a44ab1fe4690da"
+      },
+      {
+        "action-type": "ContractCall",
+        "block-height": 8945,
+        "block-hash": "a2fd8bad139d58ad59a77de791fea9337115ca6d56b0e08a9bfa76a5a0deaa41"
+      },
+      {
+        "action-type": "ContractCall",
+        "block-height": 8945,
+        "block-hash": "a2fd8bad139d58ad59a77de791fea9337115ca6d56b0e08a9bfa76a5a0deaa41"
+      },
+      {
+        "action-type": "ContractCall",
+        "block-height": 8945,
+        "block-hash": "a2fd8bad139d58ad59a77de791fea9337115ca6d56b0e08a9bfa76a5a0deaa41"
+      },
+      {
+        "action-type": "ContractCall",
+        "block-height": 8945,
+        "block-hash": "a2fd8bad139d58ad59a77de791fea9337115ca6d56b0e08a9bfa76a5a0deaa41"
+      },
+      {
+        "action-type": "ContractCall",
+        "block-height": 8945,
+        "block-hash": "a2fd8bad139d58ad59a77de791fea9337115ca6d56b0e08a9bfa76a5a0deaa41"
+      },
+      {
+        "action-type": "ContractCall",
+        "block-height": 8954,
+        "block-hash": "9a54fdeaa644b11185611b011a76df6d2e7204919b038431534226c6aad98be1"
+      }
+    ]
+  },
+  {
+    "contract-address": "31cc5ff19b47a74e01ef8fd8185394cfd9f0a004382f7235fd8399bdcb7b03d2",
+    "contract-actions": [
+      {
+        "action-type": "ContractDeploy",
+        "block-height": 9037,
+        "block-hash": "cf0a14975b4b3645ecd7bfdbb9236f588348ac4a9b24fafd1cb1b07c1b8d2ec7"
+      },
+      {
+        "action-type": "ContractCall",
+        "block-height": 9050,
+        "block-hash": "15e1e5fcda9eb389bbf31bc4dc8a3d4c01f5664a1c2cdccc5e0fb41c525e526c"
+      },
+      {
+        "action-type": "ContractCall",
+        "block-height": 9050,
+        "block-hash": "15e1e5fcda9eb389bbf31bc4dc8a3d4c01f5664a1c2cdccc5e0fb41c525e526c"
+      },
+      {
+        "action-type": "ContractCall",
+        "block-height": 9062,
+        "block-hash": "1f8fee9cfabb8d179040e4739104b48099c9362704eda12e1c6f3d4f8503ee03"
+      }
+    ]
+  }
+]
