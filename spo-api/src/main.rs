@@ -5,8 +5,8 @@
 #[cfg(feature = "cloud")]
 #[tokio::main]
 async fn main() {
-    use log::error;
     use indexer_common::telemetry;
+    use log::error;
     use std::panic;
 
     telemetry::init_logging();
@@ -15,7 +15,8 @@ async fn main() {
     if let Err(error) = run().await {
         let backtrace = error.backtrace();
         let error = format!("{error:#}");
-        error!(error, backtrace:%; "process exited with ERROR")
+        error!(error, backtrace:%; "process exited with ERROR");
+        std::process::exit(1);
     }
 }
 
@@ -24,7 +25,12 @@ async fn run() -> anyhow::Result<()> {
     use anyhow::Context;
     use indexer_common::{config::ConfigExt, domain::NoopSubscriber, infra::pool, telemetry};
     use log::info;
-    use spo_api::{application, config::Config, infra, infra::api::{AxumApi, Db}};
+    use spo_api::{
+        application,
+        config::Config,
+        infra,
+        infra::api::{AxumApi, Db},
+    };
     use tokio::signal::unix::{SignalKind, signal};
 
     let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
@@ -57,8 +63,8 @@ async fn run() -> anyhow::Result<()> {
     // Build API without NATS for now.
     let api = AxumApi::new(api_config).with_db(Db(pool));
 
-    // Until we have a catch-up signal, application::run will just serve the API and listen for SIGTERM.
-    // Pass a no-op subscriber for now.
+    // Until we have a catch-up signal, application::run will just serve the API and listen for
+    // SIGTERM. Pass a no-op subscriber for now.
     let subscriber = NoopSubscriber::default();
     application::run(application_config, api, subscriber, sigterm)
         .await

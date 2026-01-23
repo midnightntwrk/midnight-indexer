@@ -75,6 +75,10 @@ generate-indexer-api-schema:
     cargo run -p indexer-api --bin indexer-api-cli print-api-schema-v3 > \
         indexer-api/graphql/schema-v3.graphql
 
+generate-spo-api-schema:
+    cargo run -p spo-api --features cloud --bin spo-api-cli print-api-schema-v1 > \
+        spo-api/graphql/schema-v1.graphql
+
 build-docker-image package profile="dev":
     tag=$(git rev-parse --short=8 HEAD) && \
     docker build \
