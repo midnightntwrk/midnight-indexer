@@ -162,7 +162,6 @@ async fn ready(
         )
             .into_response()
     } else {
-        // If a DB is provided, try a lightweight ping.
         if let Some(Db(pool)) = db {
             if let Err(_error) = sqlx::query_scalar::<_, i32>("SELECT 1")
                 .fetch_one(&*pool)

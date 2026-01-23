@@ -742,19 +742,57 @@ type SpoIdentity {
 
 """
 Stake share information for an SPO.
+
+Values are sourced from mainchain pool data (e.g., Blockfrost) and keyed by Cardano pool_id.
 """
 type StakeShare {
+	"""
+	Cardano pool ID (56-character hex string).
+	"""
 	poolIdHex: String!
+	"""
+	Pool name from metadata.
+	"""
 	name: String
+	"""
+	Pool ticker from metadata.
+	"""
 	ticker: String
+	"""
+	Pool homepage URL from metadata.
+	"""
 	homepageUrl: String
+	"""
+	Pool logo URL from metadata.
+	"""
 	logoUrl: String
+	"""
+	Current live stake in lovelace.
+	"""
 	liveStake: String
+	"""
+	Current active stake in lovelace.
+	"""
 	activeStake: String
+	"""
+	Number of live delegators.
+	"""
 	liveDelegators: Int
+	"""
+	Saturation ratio (0.0 to 1.0+).
+	"""
 	liveSaturation: Float
+	"""
+	Declared pledge in lovelace.
+	"""
 	declaredPledge: String
+	"""
+	Current live pledge in lovelace.
+	"""
 	livePledge: String
+	"""
+	Stake share as a fraction of total stake.
+	"""
 	stakeShare: Float
 }
 

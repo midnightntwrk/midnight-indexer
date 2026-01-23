@@ -275,20 +275,34 @@ impl From<DomainFirstValidEpoch> for FirstValidEpoch {
 }
 
 /// Stake share information for an SPO.
+///
+/// Values are sourced from mainchain pool data (e.g., Blockfrost) and keyed by Cardano pool_id.
 #[derive(SimpleObject)]
 #[graphql(rename_fields = "camelCase")]
 pub struct StakeShare {
+    /// Cardano pool ID (56-character hex string).
     pub pool_id_hex: String,
+    /// Pool name from metadata.
     pub name: Option<String>,
+    /// Pool ticker from metadata.
     pub ticker: Option<String>,
+    /// Pool homepage URL from metadata.
     pub homepage_url: Option<String>,
+    /// Pool logo URL from metadata.
     pub logo_url: Option<String>,
+    /// Current live stake in lovelace.
     pub live_stake: Option<String>,
+    /// Current active stake in lovelace.
     pub active_stake: Option<String>,
+    /// Number of live delegators.
     pub live_delegators: Option<i64>,
+    /// Saturation ratio (0.0 to 1.0+).
     pub live_saturation: Option<f64>,
+    /// Declared pledge in lovelace.
     pub declared_pledge: Option<String>,
+    /// Current live pledge in lovelace.
     pub live_pledge: Option<String>,
+    /// Stake share as a fraction of total stake.
     pub stake_share: Option<f64>,
 }
 
