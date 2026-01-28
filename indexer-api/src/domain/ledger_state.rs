@@ -13,10 +13,7 @@
 
 use crate::domain::storage::Storage;
 use derive_more::derive::{Deref, From};
-use indexer_common::{
-    domain::{ByteVec, NetworkId, ProtocolVersion, ledger},
-    error::BoxError,
-};
+use indexer_common::domain::{ByteVec, NetworkId, ProtocolVersion, ledger};
 use log::debug;
 use thiserror::Error;
 use tokio::sync::RwLock;
@@ -53,22 +50,16 @@ impl LedgerStateCache {
             if end_index >= first_free {
                 debug!(end_index, first_free; "stale ledger state, loading from storage");
 
-                let ledger_state_and_protocol_version = storage
-                    .get_ledger_state()
-                    .await
-                    .map_err(|error| LedgerStateCacheError::Load(error.into()))?;
+                let Some((ledger_state_key, protocol_version)) = storage.get_ledger_state().await?
+                else {
+                    return Err(LedgerStateCacheError::NotFound);
+                };
 
-                match ledger_state_and_protocol_version {
-                    Some((ledger_state, protocol_version)) => {
-                        let ledger_state =
-                            ledger::LedgerState::deserialize(ledger_state, protocol_version)?
-                                .into();
-
-                        *ledger_state_write = ledger_state;
-                    }
-
-                    None => return Err(LedgerStateCacheError::NotFound),
-                }
+                let ledger_state = indexer_common::domain::ledger::LedgerState::load(
+                    &ledger_state_key,
+                    protocol_version,
+                )?;
+                *ledger_state_write = ledger_state.into();
             }
 
             ledger_state_read = ledger_state_write.downgrade();
@@ -86,7 +77,7 @@ impl LedgerStateCache {
 #[derive(Debug, Error)]
 pub enum LedgerStateCacheError {
     #[error("cannot load ledger state")]
-    Load(#[source] BoxError),
+    Load(#[from] sqlx::Error),
 
     #[error("no ledger state stored")]
     NotFound,

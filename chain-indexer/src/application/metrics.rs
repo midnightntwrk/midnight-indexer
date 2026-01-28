@@ -23,7 +23,6 @@ pub struct Metrics {
     contract_deploy_count: Counter,
     contract_call_count: Counter,
     contract_update_count: Counter,
-    ledger_state_size: Gauge,
 }
 
 impl Metrics {
@@ -40,7 +39,6 @@ impl Metrics {
             contract_deploy_count: counter!("indexer_contract_deploy_count"),
             contract_call_count: counter!("indexer_contract_call_count"),
             contract_update_count: counter!("indexer_contract_update_count"),
-            ledger_state_size: gauge!("indexer_ledger_state_size"),
         };
 
         if let Some(block_height) = block_height {
@@ -64,7 +62,6 @@ impl Metrics {
         transactions: &[Transaction],
         node_block_height: u32,
         caught_up: bool,
-        ledger_state_size: Option<usize>,
     ) {
         self.block_height.absolute(block.height as u64);
 
@@ -136,9 +133,5 @@ impl Metrics {
                 })
                 .count() as u64,
         );
-
-        if let Some(ledger_state_size) = ledger_state_size {
-            self.ledger_state_size.set(ledger_state_size as f64);
-        }
     }
 }
