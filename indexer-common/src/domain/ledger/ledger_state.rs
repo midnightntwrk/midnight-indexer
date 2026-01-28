@@ -73,6 +73,8 @@ const OUTPUT_INDEX_ZERO: u32 = 0;
 static STRICTNESS_V7_0_0: LazyLock<WellFormedStrictnessV7_0_0> = LazyLock::new(|| {
     let mut strictness = WellFormedStrictnessV7_0_0::default();
     strictness.enforce_balancing = false;
+    strictness.verify_native_proofs = false;
+    strictness.verify_contract_proofs = false;
     strictness
 });
 
