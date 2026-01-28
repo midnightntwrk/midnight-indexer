@@ -21,8 +21,16 @@ import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/to
 import type { Transaction } from '@utils/indexer/indexer-types';
 import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
 import { TestContext } from 'vitest';
+import { collectValidZswapEvents } from 'tests/shared/zswap-events-utils';
+import { RegularTransactionSchema, ZswapLedgerEventSchema } from '@utils/indexer/graphql/schema';
+import { IndexerWsClient } from '@utils/indexer/websocket-client';
+import { EventCoordinator } from '@utils/event-coordinator';
+import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
 
 describe('shielded transactions', () => {
+  let indexerWsClient: IndexerWsClient;
+  let indexerEventCoordinator: EventCoordinator;
+  let previousMaxZswapId: number;
   let toolkit: ToolkitWrapper;
   let transactionResult: ToolkitTransactionResult;
 
@@ -33,6 +41,9 @@ describe('shielded transactions', () => {
   let destinationAddress: string;
 
   beforeAll(async () => {
+    indexerWsClient = new IndexerWsClient();
+    indexerEventCoordinator = new EventCoordinator();
+    await indexerWsClient.connectionInit();
     // Start a one-off toolkit container
     toolkit = new ToolkitWrapper({});
 
@@ -40,6 +51,14 @@ describe('shielded transactions', () => {
 
     // Derive shielded addresses from seeds
     destinationAddress = (await toolkit.showAddress(destinationSeed)).shielded;
+
+    const beforeZswapEvents = await collectValidZswapEvents(
+      indexerWsClient,
+      indexerEventCoordinator,
+      1,
+    );
+    previousMaxZswapId = beforeZswapEvents[0].data!.zswapLedgerEvents.maxId;
+    log.debug(`Previous max zswap ledger ID before tx = ${previousMaxZswapId}`);
 
     // Submit one shielded->shielded transfer (1 STAR)
     transactionResult = await toolkit.generateSingleTx(
@@ -59,7 +78,7 @@ describe('shielded transactions', () => {
   }, 200_000);
 
   afterAll(async () => {
-    await Promise.all([toolkit.stop()]);
+    await Promise.all([toolkit.stop(), indexerWsClient.connectionClose()]);
   });
 
   describe('a successful shielded transaction transferring 1 Shielded Token between two wallets', async () => {
@@ -115,13 +134,79 @@ describe('shielded transactions', () => {
       );
       // The expected transaction might take a bit more to show up by indexer, so we retry a few times
       const transactionResponse = await getTransactionByHashWithRetry(transactionResult.txHash!);
-
       expect(transactionResponse).toBeSuccess();
       expect(transactionResponse?.data?.transactions).toBeDefined();
       expect(transactionResponse?.data?.transactions?.length).toBeGreaterThan(0);
-      expect(
-        transactionResponse?.data?.transactions?.map((tx: Transaction) => `${tx.hash}`),
-      ).toContain(transactionResult.txHash);
+
+      const tx = transactionResponse!.data!.transactions!.find(
+        (t: Transaction) => t.hash === transactionResult.txHash,
+      );
+
+      expect(tx).toBeDefined();
+
+      // Validate transaction shape and narrow type using schema
+      const parsed = RegularTransactionSchema.safeParse(tx);
+      expect(parsed.success, JSON.stringify(parsed.error?.format(), null, 2)).toBe(true);
+
+      const regularTx = parsed.data!;
+
+      // Shielded transactions do NOT expose unshielded details
+      expect(regularTx.unshieldedCreatedOutputs).toEqual([]);
+      expect(regularTx.unshieldedSpentOutputs).toEqual([]);
+
+      // Shielded transactions do NOT expose fees
+      expect(regularTx.fees.paidFees).toBe('0');
+      expect(regularTx.fees.estimatedFees).toBe('0');
+    });
+
+    /**
+     * After a shielded transaction is confirmed, the indexer streams the Zswap
+     * events in sequence, followed by a DustSpendProcessed event.
+     *
+     * @given a confirmed shielded transaction
+     * @when we subscribe to Zswap events starting from (previousMaxId + 1)
+     * @then the Zswap events are delivered in order
+     * @and the following event is DustSpendProcessed
+     */
+    test('should stream Zswap events followed by DustSpendProcessed after a shielded transaction', async () => {
+      const received = await collectValidZswapEvents(
+        indexerWsClient,
+        indexerEventCoordinator,
+        3,
+        previousMaxZswapId + 1,
+      );
+      expect(received).toHaveLength(3);
+
+      received.forEach((msg) => {
+        const event = msg.data!.zswapLedgerEvents;
+        const parsed = ZswapLedgerEventSchema.safeParse(event);
+        expect(
+          parsed.success,
+          `Schema error: ${JSON.stringify(parsed.error?.format(), null, 2)}`,
+        ).toBe(true);
+      });
+
+      // Validate Zswap event grouping and ordering
+      const events = received.map((m) => m.data!.zswapLedgerEvents);
+      expect(new Set(events.map((e) => e.maxId)).size).toBe(1);
+
+      events.slice(1).forEach((e, i) => {
+        expect(e.id).toBe(events[i].id + 1);
+      });
+
+      const lastZswapMaxId = received.at(-1)!.data!.zswapLedgerEvents.maxId;
+
+      // verify the Dust event directly follows the Zswap events
+      const dustEvents = await collectValidDustLedgerEvents(
+        indexerWsClient,
+        indexerEventCoordinator,
+        1,
+        lastZswapMaxId + 1,
+      );
+      expect(dustEvents).toHaveLength(1);
+      const dust = dustEvents[0].data!.dustLedgerEvents;
+      expect(dust.__typename).toBe('DustSpendProcessed');
+      expect(dust.id).toBe(lastZswapMaxId + 1);
     });
 
     /**

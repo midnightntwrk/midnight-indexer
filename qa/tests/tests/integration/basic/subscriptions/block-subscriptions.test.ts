@@ -62,10 +62,6 @@ describe('block subscriptions', () => {
         if (receivedBlocks.length === expectedCount) {
           eventCoordinator.notify(eventName);
           log.debug(`${expectedCount} blocks received`);
-          indexerWsClient.send<GraphQLCompleteMessage>({
-            id: '1',
-            type: 'complete',
-          });
         }
       },
     };
