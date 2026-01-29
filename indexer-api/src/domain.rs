@@ -19,6 +19,7 @@ mod contract_action;
 pub mod dust;
 mod ledger_event;
 mod ledger_state;
+pub mod spo;
 pub mod system_parameters;
 mod transaction;
 mod unshielded;

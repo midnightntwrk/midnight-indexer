@@ -42,7 +42,7 @@ subxt              = { workspace = true, features = [ "reconnecting-rpc-client" 
 thiserror          = { workspace = true }
 tokio              = { workspace = true, features = [ "macros", "rt-multi-thread", "time", "signal" ] }
 trait-variant      = { workspace = true }
-reqwest            = { workspace = true, features = ["json", "rustls-tls"] }
+reqwest            = { workspace = true, features = ["json", "rustls"] }
 
 [dev-dependencies]
 clap           = { workspace = true, features = [ "derive" ] }

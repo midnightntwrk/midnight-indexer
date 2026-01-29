@@ -72,7 +72,7 @@ impl domain::storage::Storage for Storage {
             .map(|(epoch_no, starts_at, ends_at)| {
                 Ok(Epoch {
                     epoch_no: epoch_no as u32,
-                    // return millis to domain
+                    // Return millis to domain.
                     starts_at: starts_at.timestamp_millis(),
                     ends_at: ends_at.timestamp_millis(),
                 })
@@ -87,7 +87,7 @@ impl domain::storage::Storage for Storage {
              VALUES ($1, $2, $3)"
         })
         .bind(epoch.epoch_no as i64)
-        // epoch.starts_at/ends_at are in millis; store as timestamptz
+        // Epoch starts_at/ends_at are in millis; store as timestamptz.
         .bind(
             DateTime::from_timestamp(
                 epoch.starts_at / 1000,
@@ -142,7 +142,7 @@ impl domain::storage::Storage for Storage {
     #[trace]
     async fn save_membership(
         &self,
-        memberships: &Vec<ValidatorMembership>,
+        memberships: &[ValidatorMembership],
         tx: &mut SqlxTransaction,
     ) -> Result<(), sqlx::Error> {
         for member in memberships.iter() {
@@ -156,7 +156,7 @@ impl domain::storage::Storage for Storage {
                     expected_slots
                 )
                 VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (epoch_no, position) DO NOTHING" // Prevents re-insertion errors
+                ON CONFLICT (epoch_no, position) DO NOTHING" // Prevents re-insertion errors.
             })
             .bind(&member.spo_sk)
             .bind(&member.sidechain_pubkey)
@@ -259,7 +259,7 @@ impl domain::storage::Storage for Storage {
         Ok(())
     }
 
-    async fn list_pool_ids(&self, limit: i64, offset: i64) -> Result<Vec<String>, sqlx::Error> {
+    async fn get_pool_ids(&self, limit: i64, offset: i64) -> Result<Vec<String>, sqlx::Error> {
         let query = indoc! {"
             SELECT pool_id
             FROM pool_metadata_cache
@@ -276,7 +276,11 @@ impl domain::storage::Storage for Storage {
         Ok(rows.into_iter().map(|(pid,)| pid).collect())
     }
 
-    async fn list_pool_ids_after(&self, after: &str, limit: i64) -> Result<Vec<String>, sqlx::Error> {
+    async fn get_pool_ids_after(
+        &self,
+        after: &str,
+        limit: i64,
+    ) -> Result<Vec<String>, sqlx::Error> {
         let query = indoc! {"
             SELECT pool_id
             FROM pool_metadata_cache
@@ -304,7 +308,7 @@ impl domain::storage::Storage for Storage {
         live_pledge: Option<&str>,
         tx: &mut SqlxTransaction,
     ) -> Result<(), sqlx::Error> {
-        // Call the inherent implementation to avoid recursive call to the trait method
+        // Call the inherent implementation to avoid recursive call to the trait method.
         Storage::save_stake_snapshot(
             self,
             pool_id,
@@ -370,7 +374,6 @@ impl domain::storage::Storage for Storage {
         .await?;
         Ok(())
     }
-
 }
 
 impl Storage {
@@ -411,5 +414,4 @@ impl Storage {
 
         Ok(())
     }
-
 }

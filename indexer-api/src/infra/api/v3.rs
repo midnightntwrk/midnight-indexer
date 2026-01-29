@@ -17,6 +17,7 @@ pub mod dust;
 pub mod ledger_events;
 pub mod mutation;
 pub mod query;
+pub mod spo;
 pub mod subscription;
 pub mod system_parameters;
 pub mod transaction;
