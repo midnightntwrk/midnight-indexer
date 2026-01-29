@@ -12,17 +12,16 @@
 // limitations under the License.
 
 use crate::domain::{
-    self, Block, BlockTransactions, ContractAction, DParameter, DustRegistrationEvent,
-    RegularTransaction, SystemParametersChange, SystemTransaction, TermsAndConditions, Transaction,
-    node::BlockInfo,
+    self, Block, BlockRef, ContractAction, DParameter, DustRegistrationEvent, RegularTransaction,
+    SystemParametersChange, SystemTransaction, TermsAndConditions, Transaction,
 };
 use fastrace::trace;
-use futures::{TryFutureExt, TryStreamExt};
+use futures::TryFutureExt;
 use indexer_common::{
     domain::{
         BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
         LedgerEventAttributes, ProtocolVersion, SerializedLedgerStateKey, TermsAndConditionsHash,
-        TransactionVariant, UnshieldedUtxo,
+        UnshieldedUtxo,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -30,7 +29,6 @@ use indoc::indoc;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use sqlx::{QueryBuilder, Type, types::Json};
-use std::iter;
 
 #[cfg(feature = "cloud")]
 /// Sqlx transaction for Postgres.
@@ -49,16 +47,12 @@ pub struct Storage {
 
     #[cfg(feature = "standalone")]
     pool: indexer_common::infra::pool::sqlite::SqlitePool,
-    // ledger_state_storage: S,
 }
 
 impl Storage {
     #[cfg(feature = "cloud")]
     pub fn new(pool: indexer_common::infra::pool::postgres::PostgresPool) -> Self {
-        Self {
-            pool,
-            // ledger_state_storage,
-        }
+        Self { pool }
     }
 
     #[cfg(feature = "standalone")]
@@ -66,226 +60,33 @@ impl Storage {
         pool: indexer_common::infra::pool::sqlite::SqlitePool,
         ledger_state_storage: S,
     ) -> Self {
-        Self {
-            pool,
-            ledger_state_storage,
-        }
-    }
-
-    #[trace]
-    async fn save_ledger_state(
-        &mut self,
-        tx: &mut SqlxTransaction,
-        block_height: u32,
-        protocol_version: ProtocolVersion,
-        ledger_state_key: &SerializedLedgerStateKey,
-    ) -> Result<(), sqlx::Error> {
-        // Save metadata.
-        let query = indoc! {"
-            INSERT INTO ledger_state (
-                id,
-                block_height,
-                protocol_version,
-                key
-            )
-            VALUES (0, $1, $2, $3)
-            ON CONFLICT (id)
-            DO UPDATE SET
-                block_height = EXCLUDED.block_height,
-                protocol_version = EXCLUDED.protocol_version,
-                ab_selector = EXCLUDED.ab_selector
-        "};
-
-        sqlx::query(query)
-            .bind(block_height as i64)
-            .bind(protocol_version.0 as i64)
-            .bind(ledger_state_key)
-            .execute(&mut **tx)
-            .await?;
-
-        Ok(())
+        Self { pool }
     }
 }
 
 impl domain::storage::Storage for Storage {
-    #[trace]
-    async fn get_highest_block_info(&self) -> Result<Option<BlockInfo>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT hash, height
-            FROM blocks
-            ORDER BY height DESC
-            LIMIT 1
-        "};
-
-        sqlx::query_as::<_, (ByteVec, i64)>(query)
-            .fetch_optional(&*self.pool)
-            .await?
-            .map(|(hash, height)| {
-                let hash = BlockHash::try_from(hash.as_ref())
-                    .map_err(|error| sqlx::Error::Decode(error.into()))?;
-
-                Ok(BlockInfo {
-                    hash,
-                    height: height as u32,
-                })
-            })
-            .transpose()
-    }
-
-    #[trace]
-    async fn get_transaction_count(&self) -> Result<u64, sqlx::Error> {
-        let query = indoc! {"
-            SELECT count(*)
-            FROM transactions
-        "};
-
-        let (count,) = sqlx::query_as::<_, (i64,)>(query)
-            .fetch_one(&*self.pool)
-            .await?;
-
-        Ok(count as u64)
-    }
-
-    #[trace]
-    async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error> {
-        let query = indoc! {"
-            SELECT count(*)
-            FROM contract_actions
-            WHERE variant = $1
-        "};
-
-        let (deploy_count,) = sqlx::query_as::<_, (i64,)>(query)
-            .bind(ContractActionVariant::Deploy)
-            .fetch_one(&*self.pool)
-            .await?;
-        let (call_count,) = sqlx::query_as::<_, (i64,)>(query)
-            .bind(ContractActionVariant::Call)
-            .fetch_one(&*self.pool)
-            .await?;
-        let (update_count,) = sqlx::query_as::<_, (i64,)>(query)
-            .bind(ContractActionVariant::Update)
-            .fetch_one(&*self.pool)
-            .await?;
-
-        Ok((deploy_count as u64, call_count as u64, update_count as u64))
-    }
-
-    #[trace(properties = { "block_height": "{block_height}" })]
-    async fn get_block_transactions(
-        &self,
-        block_height: u32,
-    ) -> Result<BlockTransactions, sqlx::Error> {
-        let query = indoc! {"
-            SELECT
-                id,
-                protocol_version,
-                parent_hash,
-                timestamp
-            FROM blocks
-            WHERE height = $1
-        "};
-
-        let (block_id, protocol_version, block_parent_hash, block_timestamp) =
-            sqlx::query_as::<_, (i64, i64, ByteVec, i64)>(query)
-                .bind(block_height as i64)
-                .fetch_one(&*self.pool)
-                .await?;
-        let block_parent_hash = BlockHash::try_from(block_parent_hash.as_ref())
-            .map_err(|error| sqlx::Error::Decode(error.into()))?;
-
-        let query = indoc! {"
-            SELECT
-                variant,
-                raw
-            FROM transactions
-            WHERE block_id = $1
-            ORDER BY id
-        "};
-
-        let transactions = sqlx::query_as::<_, (TransactionVariant, ByteVec)>(query)
-            .bind(block_id)
-            .fetch(&*self.pool)
-            .try_collect::<Vec<_>>()
-            .await?;
-
-        Ok(BlockTransactions {
-            transactions,
-            protocol_version: (protocol_version as u32).into(),
-            block_parent_hash,
-            block_timestamp: block_timestamp as u64,
-        })
-    }
-
-    #[trace]
-    async fn get_ledger_state(
-        &self,
-    ) -> Result<Option<(SerializedLedgerStateKey, u32, ProtocolVersion)>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT
-                key,
-                block_height,
-                protocol_version
-            FROM ledger_state
-            ORDER BY id DESC
-            LIMIT 1
-        "};
-
-        let Some((ledger_state_key, block_height, protocol_version)) =
-            sqlx::query_as::<_, (ByteVec, i64, i64)>(query)
-                .fetch_optional(&*self.pool)
-                .await?
-        else {
-            return Ok(None);
-        };
-
-        Ok(Some((
-            ledger_state_key,
-            block_height as u32,
-            (protocol_version as u32).into(),
-        )))
-    }
-
     #[trace]
     async fn save_block(
         &mut self,
         block: &Block,
         transactions: &[Transaction],
         dust_registration_events: &[DustRegistrationEvent],
-        ledger_state_key: Option<&SerializedLedgerStateKey>,
+        ledger_state_key: &SerializedLedgerStateKey,
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
-        if let Some(ledger_state_key) = ledger_state_key {
-            self.save_ledger_state(
-                &mut tx,
-                block.height,
-                block.protocol_version,
-                ledger_state_key,
-            )
-            .await?;
-        }
-
-        let max_transaction_id =
-            save_block(block, transactions, dust_registration_events, &mut tx).await?;
+        let max_transaction_id = save_block(
+            block,
+            transactions,
+            dust_registration_events,
+            ledger_state_key,
+            &mut tx,
+        )
+        .await?;
 
         tx.commit().await?;
 
         Ok(max_transaction_id)
-    }
-
-    #[trace]
-    async fn save_ledger_state(
-        &mut self,
-        ledger_state_key: &SerializedLedgerStateKey,
-        block_height: u32,
-        protocol_version: ProtocolVersion,
-    ) -> Result<(), sqlx::Error> {
-        let mut tx = self.pool.begin().await?;
-
-        self.save_ledger_state(&mut tx, block_height, protocol_version, ledger_state_key)
-            .await?;
-
-        tx.commit().await
     }
 
     /// Save all system parameters from a change event.
@@ -339,6 +140,72 @@ impl domain::storage::Storage for Storage {
         }
 
         Ok(())
+    }
+
+    #[trace]
+    async fn get_highest_block(
+        &self,
+    ) -> Result<Option<(BlockRef, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT hash, height, protocol_version, ledger_state_key
+            FROM blocks
+            ORDER BY height DESC
+            LIMIT 1
+        "};
+
+        sqlx::query_as::<_, (ByteVec, i64, i64, SerializedLedgerStateKey)>(query)
+            .fetch_optional(&*self.pool)
+            .await?
+            .map(|(hash, height, protocol_version, key)| {
+                let hash = BlockHash::try_from(hash.as_ref())
+                    .map_err(|error| sqlx::Error::Decode(error.into()))?;
+
+                let block_ref = BlockRef {
+                    hash,
+                    height: height as u32,
+                };
+
+                Ok((block_ref, (protocol_version as u32).into(), key))
+            })
+            .transpose()
+    }
+
+    #[trace]
+    async fn get_transaction_count(&self) -> Result<u64, sqlx::Error> {
+        let query = indoc! {"
+            SELECT count(*)
+            FROM transactions
+        "};
+
+        let (count,) = sqlx::query_as::<_, (i64,)>(query)
+            .fetch_one(&*self.pool)
+            .await?;
+
+        Ok(count as u64)
+    }
+
+    #[trace]
+    async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error> {
+        let query = indoc! {"
+            SELECT count(*)
+            FROM contract_actions
+            WHERE variant = $1
+        "};
+
+        let (deploy_count,) = sqlx::query_as::<_, (i64,)>(query)
+            .bind(ContractActionVariant::Deploy)
+            .fetch_one(&*self.pool)
+            .await?;
+        let (call_count,) = sqlx::query_as::<_, (i64,)>(query)
+            .bind(ContractActionVariant::Call)
+            .fetch_one(&*self.pool)
+            .await?;
+        let (update_count,) = sqlx::query_as::<_, (i64,)>(query)
+            .bind(ContractActionVariant::Update)
+            .fetch_one(&*self.pool)
+            .await?;
+
+        Ok((deploy_count as u64, call_count as u64, update_count as u64))
     }
 
     #[trace]
@@ -432,6 +299,7 @@ async fn save_block(
     block: &Block,
     transactions: &[Transaction],
     dust_registration_events: &[DustRegistrationEvent],
+    ledger_state_key: &SerializedLedgerStateKey,
     tx: &mut SqlxTransaction,
 ) -> Result<Option<u64>, sqlx::Error> {
     let query = indoc! {"
@@ -442,7 +310,8 @@ async fn save_block(
             parent_hash,
             author,
             timestamp,
-            ledger_parameters
+            ledger_parameters,
+            ledger_state_key
         )
     "};
 
@@ -465,7 +334,8 @@ async fn save_block(
                 .push_bind(parent_hash.as_ref())
                 .push_bind(author.as_ref().map(|a| a.as_ref()))
                 .push_bind(*timestamp as i64)
-                .push_bind(ledger_parameters.as_ref());
+                .push_bind(ledger_parameters.as_ref())
+                .push_bind(ledger_state_key);
         })
         .push(" RETURNING id")
         .build_query_as::<(i64,)>()

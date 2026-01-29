@@ -11,13 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{
-    ContractAction, ContractAttributes, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
-    SerializedContractAddress, SerializedContractState, SerializedTransactionIdentifier,
-    TransactionHash, TransactionStructure, ViewingKey,
-    ledger::{Error, SerializableV7_0_0Ext, TransactionV7_0_0},
+use crate::{
+    domain::{
+        ContractAction, ContractAttributes, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
+        SerializedContractAddress, SerializedContractState, SerializedTransactionIdentifier,
+        TransactionHash, TransactionStructure, ViewingKey,
+        ledger::{Error, SerializableV7_0_0Ext, TransactionV7_0_0},
+    },
+    infra::ledger_db::postgres::v7_0_0::PostgresDb as PostgresDbV7_0_0,
 };
-use crate::infra::ledger_db::postgres::v7_0_0::PostgresDb as PostgresDbV7_0_0;
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
 use midnight_coin_structure_v7_0_0::{

@@ -16,7 +16,8 @@ use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, NetworkId,
-    SerializedContractAddress, SerializedTransaction, TransactionHash, TransactionVariant,
+    ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey, SerializedTransaction,
+    TransactionHash, TransactionVariant,
     ledger::{self, LedgerParameters},
 };
 use std::ops::DerefMut;
@@ -33,9 +34,17 @@ impl DerefMut for LedgerState {
 }
 
 impl LedgerState {
-    #[allow(missing_docs)]
     pub fn new(network_id: NetworkId) -> Self {
         Self(indexer_common::domain::ledger::LedgerState::new(network_id))
+    }
+
+    pub fn load(
+        key: &SerializedLedgerStateKey,
+        protocol_version: ProtocolVersion,
+    ) -> Result<Self, Error> {
+        indexer_common::domain::ledger::LedgerState::load(key, protocol_version)
+            .map_err(Error::Load)
+            .map(Into::into)
     }
 
     /// Apply the given storecd transactions to this ledger state.
@@ -204,7 +213,7 @@ impl LedgerState {
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
-    Persist(indexer_common::domain::ledger::Error),
+    Load(indexer_common::domain::ledger::Error),
 
     #[error("cannot apply regular transaction {hash}", hash = stringify_hash(.0))]
     ApplyRegularTransaction(
