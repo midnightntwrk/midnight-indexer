@@ -18,7 +18,7 @@ infra:
     port: 5432
     dbname: "indexer"
     user: "indexer"           # matches postgres service (POSTGRES_USER)
-    sslmode: "prefer"       # consistent with spo-api
+    sslmode: "prefer"
     max_connections: 10
     idle_timeout: "1m"
     max_lifetime: "5m"
