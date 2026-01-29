@@ -18,6 +18,7 @@ pub mod contract_action;
 pub mod dust;
 pub mod ledger_events;
 pub mod ledger_state;
+pub mod spo;
 pub mod system_parameters;
 pub mod transaction;
 pub mod unshielded;
@@ -25,7 +26,7 @@ pub mod wallet;
 
 use crate::domain::storage::{
     block::BlockStorage, contract_action::ContractActionStorage, dust::DustStorage,
-    ledger_events::LedgerEventStorage, ledger_state::LedgerStateStorage,
+    ledger_events::LedgerEventStorage, ledger_state::LedgerStateStorage, spo::SpoStorage,
     system_parameters::SystemParametersStorage, transaction::TransactionStorage,
     unshielded::UnshieldedUtxoStorage, wallet::WalletStorage,
 };
@@ -39,6 +40,7 @@ where
         + DustStorage
         + LedgerEventStorage
         + LedgerStateStorage
+        + SpoStorage
         + SystemParametersStorage
         + TransactionStorage
         + UnshieldedUtxoStorage

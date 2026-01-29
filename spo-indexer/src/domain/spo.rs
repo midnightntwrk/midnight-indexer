@@ -23,6 +23,7 @@ pub struct SPOEpochPerformance {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SPOStatus {
     Valid,
+
     Invalid,
 }
 
