@@ -355,6 +355,15 @@ impl domain::storage::Storage for Storage {
         Ok(())
     }
 
+    async fn get_block_timestamp(&self, height: i64) -> Result<Option<i64>, sqlx::Error> {
+        let row =
+            sqlx::query_as::<_, (i64,)>("SELECT timestamp FROM blocks WHERE height = $1")
+                .bind(height)
+                .fetch_optional(&*self.pool)
+                .await?;
+        Ok(row.map(|(ts,)| ts))
+    }
+
     async fn get_stake_refresh_cursor(&self) -> Result<Option<String>, sqlx::Error> {
         let row = sqlx::query_as::<_, (Option<String>,)>(
             "SELECT last_pool_id FROM spo_stake_refresh_state WHERE id = TRUE",

@@ -25,7 +25,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde_json::value::RawValue;
 use std::{collections::HashMap, time::Duration};
 use subxt::{
-    OnlineClient, PolkadotConfig,
+    PolkadotConfig,
     backend::{
         legacy::LegacyRpcMethods,
         rpc::reconnecting_rpc_client::{ExponentialBackoff, RpcClient},
@@ -37,9 +37,6 @@ use tokio::time::sleep;
 const SLOT_PER_EPOCH_KEY: &str = "3eaeb1cee77dc09baac326e5a1d29726f38178a5f54bee65a8446a55b585f261";
 const MIN_COMMITTEE_SIZE: usize = 300;
 pub const SLOT_DURATION: u32 = 6000;
-
-#[subxt::subxt(runtime_metadata_path = "./src/meta/polkadot_metadata.scale")]
-pub mod polkadot {}
 
 /// Config for node connection.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -65,7 +62,6 @@ pub struct SPOClient {
     http: HttpClient,
     reconnect_delay: Duration,
     blockfrost_id: SecretString,
-    api: OnlineClient<PolkadotConfig>,
 }
 
 // We will try to eliminate the 0x from any hex string out of this function.
@@ -75,9 +71,6 @@ impl SPOClient {
         let retry_policy = ExponentialBackoff::from_millis(10)
             .max_delay(config.reconnect_max_delay)
             .take(config.reconnect_max_attempts);
-        let api = OnlineClient::<PolkadotConfig>::from_url(&config.url)
-            .await
-            .map_err(|error| SPOClientError::Subtx(error.into()))?;
         let rpc_client = RpcClient::builder()
             .retry_policy(retry_policy)
             .build(&config.url)
@@ -89,7 +82,7 @@ impl SPOClient {
             .user_agent("midnight-spo-indexer/1.0")
             .build()
             .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
-        let (epoch_duration, slots_per_epoch) = get_epoch_duration(&api).await?;
+        let (epoch_duration, slots_per_epoch) = get_epoch_duration(&rpc_client).await?;
 
         Ok(Self {
             rpc_client,
@@ -99,7 +92,6 @@ impl SPOClient {
             slots_per_epoch,
             reconnect_delay: config.reconnect_max_delay,
             blockfrost_id: config.blockfrost_id,
-            api,
         })
     }
 
@@ -118,43 +110,23 @@ impl SPOClient {
         Ok(response)
     }
 
-    pub async fn get_block_timestamp(&self, block_number: u32) -> Result<u64, SPOClientError> {
-        let legacy_rpc = LegacyRpcMethods::<PolkadotConfig>::new(self.rpc_client.clone().into());
-        let blockhash = legacy_rpc
-            .chain_get_block_hash(Some(block_number.into()))
+    pub async fn get_first_epoch_num(
+        &self,
+        storage: &impl crate::domain::storage::Storage,
+    ) -> Result<u32, SPOClientError> {
+        let current_epoch = self.get_current_epoch().await?;
+        let block_timestamp = storage
+            .get_block_timestamp(1)
             .await
-            .map_err(|error| {
-                SPOClientError::RpcCall("chain_getBlockHash".to_owned(), error.to_string())
-            })?
+            .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?
             .ok_or_else(|| {
-                SPOClientError::UnexpectedResponse(format!(
-                    "block hash not found for block {block_number}"
-                ))
+                SPOClientError::UnexpectedResponse(
+                    "block #1 timestamp not found in database".to_owned(),
+                )
             })?;
 
-        let storage_query = polkadot::storage().timestamp().now();
-
-        let result = self
-            .api
-            .storage()
-            .at(blockhash)
-            .fetch(&storage_query)
-            .await
-            .map_err(|error| SPOClientError::Subtx(error.into()))?;
-        let timestamp = result.ok_or_else(|| {
-            SPOClientError::UnexpectedResponse("timestamp not found in block storage".to_owned())
-        })?;
-
-        Ok(timestamp)
-    }
-
-    pub async fn get_first_epoch_num(&self) -> Result<u32, SPOClientError> {
-        let current_epoch = self.get_current_epoch().await?;
-        let block_timestamp = self.get_block_timestamp(1).await?;
-        let epoch_duration = self.epoch_duration;
-
-        let num_epochs: u64 =
-            (current_epoch.ends_at as u64 - block_timestamp) / (epoch_duration as u64);
+        let num_epochs: u64 = (current_epoch.ends_at as u64 - block_timestamp as u64)
+            / (self.epoch_duration as u64);
 
         Ok(current_epoch.epoch_no - num_epochs as u32)
     }
@@ -361,20 +333,15 @@ impl PoolStakeData {
     }
 }
 
-async fn get_epoch_duration(
-    api: &OnlineClient<PolkadotConfig>,
-) -> Result<(u32, u32), SPOClientError> {
-    let slot =
-        hex::decode(SLOT_PER_EPOCH_KEY).expect("SLOT_PER_EPOCH_KEY constant should be valid hex");
-    let storage = api
-        .storage()
-        .at_latest()
+async fn get_epoch_duration(rpc_client: &RpcClient) -> Result<(u32, u32), SPOClientError> {
+    let legacy_rpc = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client.clone().into());
+    let storage_key = hex::decode(SLOT_PER_EPOCH_KEY)
+        .expect("SLOT_PER_EPOCH_KEY constant should be valid hex");
+
+    let res = legacy_rpc
+        .state_get_storage(&storage_key, None)
         .await
         .map_err(|error| SPOClientError::Subtx(error.into()))?;
-
-    let res = storage.fetch_raw(slot).await.map_err(|_| {
-        SPOClientError::UnexpectedResponse("failed to fetch slots per epoch".to_owned())
-    })?;
     let raw_bytes = res.ok_or_else(|| {
         SPOClientError::UnexpectedResponse("slots per epoch storage value not found".to_owned())
     })?;
