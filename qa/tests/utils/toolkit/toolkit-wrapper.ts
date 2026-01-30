@@ -85,10 +85,66 @@ export interface DeployContractResult {
   'deploy-block-hash': string;
 }
 
+const TOOLKIT_BIN = '/midnight-node-toolkit';
+const CONTRACT_SIMPLE = 'contract-simple';
+const DEFAULT_RNG_SEED = '0000000000000000000000000000000000000000000000000000000000000037';
+const DEFAULT_NEW_AUTHORITY_SEED =
+  '1000000000000000000000000000000000000000000000000000000000000001';
+
 class ToolkitWrapper {
   private container: GenericContainer;
   private startedContainer?: StartedTestContainer;
   private config: ToolkitConfig;
+
+  private getRpcUrl(): string {
+    return env.getNodeWebsocketBaseURL();
+  }
+
+  /**
+   * Run a toolkit command and throw on non-zero exit. Returns exec result for further use.
+   */
+  private async execToolkit(
+    args: string[],
+    errorContext: string,
+  ): Promise<{ output: string; exitCode: number }> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+    const result = await this.startedContainer.exec(args);
+    if (result.exitCode !== 0) {
+      const msg = result.stderr || result.output || 'Unknown error';
+      throw new Error(`${errorContext}: ${msg}`);
+    }
+    return { output: result.output, exitCode: result.exitCode };
+  }
+
+  /**
+   * Build base args for generate-txs (src-url, dest-file, to-bytes contract-simple <subcommand>).
+   */
+  private buildGenerateTxBase(destFile: string, subcommand: string): string[] {
+    return [
+      TOOLKIT_BIN,
+      'generate-txs',
+      '--src-url',
+      this.getRpcUrl(),
+      '--dest-file',
+      destFile,
+      '--to-bytes',
+      CONTRACT_SIMPLE,
+      subcommand,
+    ];
+  }
+
+  /**
+   * Submit a generated tx file to the network. Returns raw output for parsing.
+   */
+  private async sendGeneratedTx(txFileName: string): Promise<string> {
+    const result = await this.execToolkit(
+      [TOOLKIT_BIN, 'generate-txs', '--src-file', `/out/${txFileName}`, 'send', '-d', this.getRpcUrl()],
+      'generate-txs send failed',
+    );
+    return result.output.trim();
+  }
 
   private parseTransactionOutput(output: string): ToolkitTransactionResult {
     const lines = output.trim().split('\n');
@@ -406,7 +462,7 @@ class ToolkitWrapper {
     }
 
     const response = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
+      TOOLKIT_BIN,
       'show-address',
       '--network',
       networkId ?? env.getNetworkId().toLowerCase(),
@@ -438,7 +494,7 @@ class ToolkitWrapper {
     }
 
     const result = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
+      TOOLKIT_BIN,
       'show-viewing-key',
       '--network',
       networkId ?? env.getNetworkId().toLowerCase(),
@@ -478,7 +534,7 @@ class ToolkitWrapper {
     log.debug(`${logPrefix}: ${value.substring(0, flag === '--seed' ? 8 : 20)}...`);
 
     const result = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
+      TOOLKIT_BIN,
       'show-wallet',
       '--src-url',
       env.getNodeWebsocketBaseURL(),
@@ -556,7 +612,7 @@ class ToolkitWrapper {
     log.debug(`Querying dust balance for wallet seed: ${walletSeed.substring(0, 8)}...`);
 
     const result = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
+      TOOLKIT_BIN,
       'dust-balance',
       '--src-url',
       env.getNodeWebsocketBaseURL(),
@@ -636,7 +692,7 @@ class ToolkitWrapper {
     }
 
     const result = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
+      TOOLKIT_BIN,
       'generate-txs',
       '--src-url',
       env.getNodeWebsocketBaseURL(),
@@ -679,7 +735,7 @@ class ToolkitWrapper {
       throw new Error('Container is not started. Call start() first.');
     }
     const addressResult = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
+      TOOLKIT_BIN,
       'contract-address',
       ...(tagType === 'tagged' ? ['--tagged'] : []),
       '--src-file',
@@ -699,9 +755,12 @@ class ToolkitWrapper {
    * This method retrieves the current contract state, generates a circuit intent for the specified
    * contract call, converts it to a transaction, and submits it to the network.
    *
-   * @param callKey - The contract function to call (e.g., 'increment'). Defaults to 'increment'.
+   * Matches all-contract-actions.test.ts: uses --src-url for chain context and optional --funding-seed.
+   *
+   * @param callKey - The contract function to call (e.g., 'store', 'increment'). Defaults to 'increment'.
    * @param deploymentResult - The deployment result object from deployContract. The contract-address-untagged will be extracted.
    * @param rngSeed - The random number generator seed for the transaction. Defaults to a fixed seed.
+   * @param fundingSeed - Optional funding seed for the call wallet. When provided, uses --funding-seed (matches all-contract-actions).
    * @returns A promise that resolves to the transaction result containing the transaction hash,
    *          optional block hash, and submission status.
    * @throws Error if the container is not started or if any step in the contract call process fails.
@@ -709,73 +768,94 @@ class ToolkitWrapper {
   async callContract(
     callKey: string = 'increment',
     deploymentResult: DeployContractResult,
-    rngSeed: string = '0000000000000000000000000000000000000000000000000000000000000037',
+    rngSeed: string = DEFAULT_RNG_SEED,
+    fundingSeed?: string,
   ): Promise<ToolkitTransactionResult> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
 
-    // Validate deployment result
-    if (!deploymentResult) {
-      log.error('No deployment result provided. Cannot call contract without a valid deployment.');
+    if (!deploymentResult?.['contract-address-untagged']) {
+      log.error('Deployment result is missing or has no contract address.');
       throw new Error(
-        'Deployment result is required but was not provided. Ensure deployContract() succeeded before calling callContract().',
+        'Deployment result with contract-address-untagged is required. Ensure deployContract() succeeded before calling callContract().',
       );
     }
 
     const contractAddressUntagged = deploymentResult['contract-address-untagged'];
+    const txFileName = `${callKey}_tx.mn`;
+    const txFile = `/out/${txFileName}`;
 
-    if (!contractAddressUntagged) {
-      log.error('Deployment result is missing contract address. Deployment may have failed.');
-      log.debug(`Deployment result received: ${JSON.stringify(deploymentResult, null, 2)}`);
+    const callGenerateArgs = [
+      ...this.buildGenerateTxBase(txFile, 'call'),
+      '--call-key',
+      callKey,
+      '--contract-address',
+      contractAddressUntagged,
+      '--rng-seed',
+      rngSeed,
+    ];
+    if (fundingSeed != null && fundingSeed !== '') {
+      callGenerateArgs.push('--funding-seed', fundingSeed);
+    }
+
+    log.info(`Generating ${callKey} contract call...`);
+    await this.execToolkit(callGenerateArgs, 'Failed to generate contract call');
+
+    log.info('Submitting transaction to network...');
+    const rawOutput = await this.sendGeneratedTx(txFileName);
+    return this.parseTransactionOutput(rawOutput);
+  }
+
+  /**
+   * Run contract maintenance (update): change contract authority and submit in one toolkit command.
+   * Uses execToolkit and parseTransactionOutput; maintenance does not use a separate generate-then-send step.
+   *
+   * @param deploymentResult - From deployContract; provides contract-address-untagged.
+   * @param fundingSeed - Optional funding seed. When provided, uses --funding-seed (required on preprod/qanet).
+   * @param newAuthoritySeed - Seed for the new authority. Defaults to DEFAULT_NEW_AUTHORITY_SEED.
+   * @returns Transaction result (txHash, blockHash, status).
+   */
+  async updateContract(
+    deploymentResult: DeployContractResult,
+    fundingSeed?: string,
+    newAuthoritySeed: string = DEFAULT_NEW_AUTHORITY_SEED,
+  ): Promise<ToolkitTransactionResult> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+
+    if (!deploymentResult?.['contract-address-untagged']) {
+      log.error('Deployment result is missing or has no contract address.');
       throw new Error(
-        'Contract address is missing in deployment result. The contract deployment may have failed. ' +
-        'Please check deployment logs and ensure deployContract() completed successfully.',
+        'Deployment result with contract-address-untagged is required. Ensure deployContract() succeeded before calling updateContract().',
       );
     }
 
-    const txFile = `/out/${callKey}_tx.mn`;
+    const contractAddressUntagged = deploymentResult['contract-address-untagged'];
+    const rpcUrl = this.getRpcUrl();
 
-    log.info(`Generating ${callKey} contract call...`);
-    const result = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
+    const maintenanceArgs = [
+      TOOLKIT_BIN,
       'generate-txs',
-      '--dest-file',
-      txFile,
-      '--to-bytes',
-      'contract-simple',
-      'call',
-      '--call-key',
-      callKey,
-      '--rng-seed',
-      rngSeed,
+      CONTRACT_SIMPLE,
+      'maintenance',
       '--contract-address',
       contractAddressUntagged,
-    ]);
-
-    if (result.exitCode !== 0) {
-      const errorMessage = result.stderr || result.output || 'Unknown error occurred';
-      throw new Error(`Failed to generate contract call: ${errorMessage}`);
-    }
-
-    log.info('Submitting transaction to network...');
-    const sendResult = await this.startedContainer.exec([
-      '/midnight-node-toolkit',
-      'generate-txs',
-      '--src-file',
-      txFile,
+      '--new-authority-seed',
+      newAuthoritySeed,
+      '--src-url',
+      rpcUrl,
       '--dest-url',
-      env.getNodeWebsocketBaseURL(),
-      'send',
-    ]);
-
-    if (sendResult.exitCode !== 0) {
-      const errorMessage = sendResult.stderr || sendResult.output || 'Unknown error occurred';
-      throw new Error(`Failed to submit transaction: ${errorMessage}`);
+      rpcUrl,
+    ];
+    if (fundingSeed != null && fundingSeed !== '') {
+      maintenanceArgs.push('--funding-seed', fundingSeed);
     }
 
-    const rawOutput = sendResult.output.trim();
-    return this.parseTransactionOutput(rawOutput);
+    log.info('Running contract maintenance (update)...');
+    const result = await this.execToolkit(maintenanceArgs, 'contract maintenance failed');
+    return this.parseTransactionOutput(result.output.trim());
   }
 
   /**
@@ -783,73 +863,46 @@ class ToolkitWrapper {
    * This method generates a deployment intent, converts it to a transaction, submits it to the network,
    * and retrieves both tagged and untagged contract addresses.
    *
+   * When running against preprod/qanet (or any env where the default wallet is not funded), pass a
+   * funding seed via dataProvider.getFundingSeed() so the deploy uses a funded wallet.
+   *
+   * @param fundingSeed - Optional funding seed for the deploy wallet. When provided, uses --funding-seed
+   *                      (matches all-contract-actions.test.ts). When omitted, uses --rng-seed only (backward compat).
    * @returns A promise that resolves to the deployment result containing untagged address, tagged address, and coin public key.
    * @throws Error if the container is not started or if any step in the deployment process fails.
    */
-  async deployContract(): Promise<DeployContractResult> {
+  async deployContract(fundingSeed?: string): Promise<DeployContractResult> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
 
+    const deployTxFileName = 'deploy_tx.mn';
+    const deployTxFile = `/out/${deployTxFileName}`;
     const outDir = this.config.targetDir!;
+    const outDeployTx = join(outDir, deployTxFileName);
 
-    const deployTx = 'deploy_tx.mn';
-
-    const outDeployTx = join(outDir, deployTx);
     const coinPublicSeed = '0000000000000000000000000000000000000000000000000000000000000001';
     const addressInfo = await this.showAddress(coinPublicSeed);
     const coinPublic = addressInfo.coinPublic;
 
-    {
-      const result = await this.startedContainer.exec([
-        '/midnight-node-toolkit',
-        'generate-txs',
-        '--src-url',
-        env.getNodeWebsocketBaseURL(),
-        '--dest-file',
-        `/out/${deployTx}`,
-        '--to-bytes',
-        'contract-simple',
-        'deploy',
-        '--rng-seed',
-        '0000000000000000000000000000000000000000000000000000000000000037',
-      ]);
+    const deployGenerateArgs = [
+      ...this.buildGenerateTxBase(deployTxFile, 'deploy'),
+      ...(fundingSeed != null && fundingSeed !== ''
+        ? ['--funding-seed', fundingSeed]
+        : ['--rng-seed', DEFAULT_RNG_SEED]),
+    ];
 
-      log.debug(`contract-simple deploy command output:\n${result.output}`);
-      log.debug(`contract-simple deploy command stderr:\n${result.stderr}`);
-      log.debug(`contract-simple deploy exit code: ${result.exitCode}`);
+    await this.execToolkit(deployGenerateArgs, 'contract-simple deploy failed');
 
-      if (result.exitCode !== 0) {
-        const e = result.stderr || result.output || 'Unknown error';
-        throw new Error(`contract-simple deploy failed: ${e}`);
-      }
-
-      log.debug(`Checking for output files:`);
-      log.debug(`  ${outDeployTx} exists: ${fs.existsSync(outDeployTx)}`);
-
-      if (!fs.existsSync(outDeployTx)) {
-        throw new Error('contract-simple deploy did not produce expected output file');
-      }
+    log.debug(`Checking for output files: ${outDeployTx} exists: ${fs.existsSync(outDeployTx)}`);
+    if (!fs.existsSync(outDeployTx)) {
+      throw new Error('contract-simple deploy did not produce expected output file');
     }
 
-    {
-      const result = await this.startedContainer.exec([
-        '/midnight-node-toolkit',
-        'generate-txs',
-        '--src-file',
-        `/out/${deployTx}`,
-        '--dest-url',
-        env.getNodeWebsocketBaseURL(),
-        'send',
-      ]);
-      if (result.exitCode !== 0) {
-        const e = result.stderr || result.output || 'Unknown error';
-        throw new Error(`generate-txs send failed: ${e}`);
-      }
-    }
+    await this.sendGeneratedTx(deployTxFileName);
 
-    const contractAddressTagged = await this.getContractAddress(deployTx, 'tagged');
-    const contractAddressUntagged = await this.getContractAddress(deployTx, 'untagged');
+    const contractAddressTagged = await this.getContractAddress(deployTxFileName, 'tagged');
+    const contractAddressUntagged = await this.getContractAddress(deployTxFileName, 'untagged');
     const { txHash, blockHash } = await getContractDeploymentHashes(contractAddressUntagged);
 
     const deploymentResult = {
