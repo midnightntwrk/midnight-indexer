@@ -181,13 +181,13 @@ impl SPOClient {
         let raw_response = self
             .rpc_client
             .request(
-                "sidechain_getAriadneParameters".to_owned(),
+                "systemParameters_getAriadneParameters".to_owned(),
                 Some(rpc_params),
             )
             .await
             .map_err(|error| {
                 SPOClientError::RpcCall(
-                    "sidechain_getAriadneParameters".to_owned(),
+                    "systemParameters_getAriadneParameters".to_owned(),
                     error.to_string(),
                 )
             })?;
