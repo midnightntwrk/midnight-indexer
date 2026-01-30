@@ -217,18 +217,6 @@ CREATE TABLE pool_metadata_cache (
   updated_at TIMESTAMPTZ,
   url TEXT
 );
--- TODO: Move updated_at trigger logic to application layer (PM-21550).
-CREATE OR REPLACE FUNCTION set_updated_at_timestamp()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = NOW();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-CREATE TRIGGER update_pool_metadata_cache_updated_at
-BEFORE UPDATE ON pool_metadata_cache
-FOR EACH ROW
-EXECUTE FUNCTION set_updated_at_timestamp();
 --------------------------------------------------------------------------------
 -- spo_identity
 --------------------------------------------------------------------------------
