@@ -11,11 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{
-    ContractAction, ContractAttributes, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
-    SerializedContractAddress, SerializedContractState, SerializedTransactionIdentifier,
-    TransactionHash, TransactionStructure, ViewingKey,
-    ledger::{Error, SerializableV7_0_0Ext, TransactionV7_0_0},
+use crate::{
+    domain::{
+        ContractAction, ContractAttributes, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
+        SerializedContractAddress, SerializedContractState, SerializedTransactionIdentifier,
+        TransactionHash, TransactionStructure, ViewingKey,
+        ledger::{Error, SerializableV7_0_0Ext, TransactionV7_0_0},
+    },
+    infra::ledger_db::postgres::v7_0_0::PostgresDb as PostgresDbV7_0_0,
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
@@ -27,17 +30,18 @@ use midnight_ledger_v7_0_0::structure::{
     SystemTransaction as LedgerSystemTransactionV7_0_0,
 };
 use midnight_serialize_v7_0_0::tagged_deserialize as tagged_deserialize_v7_0_0;
-use midnight_storage_v7_0_0::DefaultDB as DefaultDBV7_0_0;
+use midnight_storage_v7_0_0::db::DB as DBV7_0_0;
 use midnight_transient_crypto_v7_0_0::{
     encryption::SecretKey as SecretKeyV7_0_0, proofs::Proof as ProofV7_0_0,
 };
 use midnight_zswap_v7_0_0::Offer as OfferV7_0_0;
 use std::error::Error as StdError;
 
+#[cfg(feature = "cloud")]
 /// Facade for `Transaction` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum Transaction {
-    V7_0_0(TransactionV7_0_0),
+    V7_0_0(TransactionV7_0_0<PostgresDbV7_0_0>),
 }
 
 impl Transaction {
@@ -263,9 +267,9 @@ fn serialize_contract_address(
         .map_err(|error| Error::Serialize("ContractAddressV7_0_0", error))
 }
 
-fn can_decrypt_v7_0_0(
+fn can_decrypt_v7_0_0<D: DBV7_0_0>(
     key: &SecretKeyV7_0_0,
-    offer: &OfferV7_0_0<ProofV7_0_0, DefaultDBV7_0_0>,
+    offer: &OfferV7_0_0<ProofV7_0_0, D>,
 ) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
