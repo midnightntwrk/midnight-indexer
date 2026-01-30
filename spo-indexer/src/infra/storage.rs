@@ -212,7 +212,8 @@ impl domain::storage::Storage for Storage {
                 name = CASE WHEN EXCLUDED.name IS NOT NULL AND EXCLUDED.name <> '' THEN EXCLUDED.name ELSE pool_metadata_cache.name END,
                 ticker = CASE WHEN EXCLUDED.ticker IS NOT NULL AND EXCLUDED.ticker <> '' THEN EXCLUDED.ticker ELSE pool_metadata_cache.ticker END,
                 homepage_url = CASE WHEN EXCLUDED.homepage_url IS NOT NULL AND EXCLUDED.homepage_url <> '' THEN EXCLUDED.homepage_url ELSE pool_metadata_cache.homepage_url END,
-                url = CASE WHEN EXCLUDED.url IS NOT NULL AND EXCLUDED.url <> '' THEN EXCLUDED.url ELSE pool_metadata_cache.url END"
+                url = CASE WHEN EXCLUDED.url IS NOT NULL AND EXCLUDED.url <> '' THEN EXCLUDED.url ELSE pool_metadata_cache.url END,
+                updated_at = NOW()"
         })
         .bind(&metadata.pool_id)
         .bind(&metadata.hex_id)
