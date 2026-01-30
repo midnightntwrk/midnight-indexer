@@ -16,7 +16,8 @@ include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
 
 use crate::{domain::DustRegistrationEvent, infra::subxt_node::SubxtNodeError};
 use indexer_common::domain::{
-    BlockHash, ByteVec, PROTOCOL_VERSION_000_020_000, ProtocolVersion, SerializedContractAddress,
+    BlockHash, ByteVec, CardanoRewardAddress, DustPublicKey, DustUtxoId,
+    PROTOCOL_VERSION_000_020_000, ProtocolVersion, SerializedContractAddress,
     SerializedContractState,
 };
 use itertools::Itertools;
@@ -381,6 +382,66 @@ async fn get_d_parameter_runtime_0_20(
         num_permissioned_candidates: d_param.num_permissioned_candidates,
         num_registered_candidates: d_param.num_registered_candidates,
     })
+}
+
+/// Fetch genesis cNight registrations from pallet storage.
+/// At genesis, Substrate does not emit events (Parity PR #5463), so we query
+/// the cNightObservation.Mappings storage directly at block 0.
+pub async fn fetch_genesis_cnight_registrations(
+    block_hash: BlockHash,
+    protocol_version: ProtocolVersion,
+    online_client: &OnlineClient<SubstrateConfig>,
+) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
+        fetch_genesis_cnight_registrations_runtime_0_20(block_hash, online_client).await
+    } else {
+        Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
+    }
+}
+
+async fn fetch_genesis_cnight_registrations_runtime_0_20(
+    block_hash: BlockHash,
+    online_client: &OnlineClient<SubstrateConfig>,
+) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
+    let query = runtime_0_20::storage()
+        .c_night_observation()
+        .mappings_iter();
+    let mut iter = online_client
+        .storage()
+        .at(H256(block_hash.0))
+        .iter(query)
+        .await
+        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))?;
+
+    let mut events = vec![];
+
+    while let Some(result) = iter.next().await {
+        let kv = result
+            .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))?;
+        let mappings = kv.value;
+
+        // A registration is valid only if there is exactly one mapping entry.
+        if mappings.len() == 1 {
+            let entry = &mappings[0];
+            let cardano_address: CardanoRewardAddress = entry.cardano_reward_address.0.into();
+            let dust_address: DustPublicKey = entry.dust_public_key.0.0.clone().into();
+            let utxo_id: DustUtxoId = entry.utxo_tx_hash.0.as_ref().into();
+            let utxo_index: u32 = entry.utxo_index.into();
+
+            events.push(DustRegistrationEvent::Registration {
+                cardano_address,
+                dust_address: dust_address.clone(),
+            });
+            events.push(DustRegistrationEvent::MappingAdded {
+                cardano_address,
+                dust_address,
+                utxo_id,
+                utxo_index,
+            });
+        }
+    }
+
+    Ok(events)
 }
 
 async fn get_terms_and_conditions_runtime_0_20(
