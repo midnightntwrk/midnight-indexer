@@ -13,28 +13,14 @@
 
 pub mod storage;
 
-mod api;
-mod block;
-mod contract_action;
-pub mod dust;
-mod ledger_event;
-mod ledger_state;
-pub mod spo;
-pub mod system_parameters;
-mod transaction;
-mod unshielded;
+mod committee;
+mod epoch;
+mod pool;
+mod rpc;
+mod spo;
 
-pub use api::*;
-pub use block::*;
-pub use contract_action::*;
-pub use dust::*;
-pub use ledger_event::*;
-pub use ledger_state::*;
-pub use system_parameters::*;
-pub use transaction::*;
-pub use unshielded::*;
-
-use indexer_common::domain::{PROTOCOL_VERSION_000_020_000, ProtocolVersion};
-
-/// This must always point to the latest (highest) supported version.
-pub const LATEST_PROTOCOL_VERSION: ProtocolVersion = PROTOCOL_VERSION_000_020_000;
+pub use committee::*;
+pub use epoch::*;
+pub use pool::*;
+pub use rpc::*;
+pub use spo::*;
