@@ -743,7 +743,7 @@ export class IndexerWsClient {
 
   /**
    * Subscribes to dust ledger events.
-   * 
+   *
    * This method starts a GraphQL subscription that streams DustLedgerEvent updates from the indexer:
    *
    * - Without an offset: streams all new dust events from the latest position.

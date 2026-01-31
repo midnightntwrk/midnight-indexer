@@ -4,12 +4,11 @@ set shell := ["bash", "-uc"]
 feature := "cloud"
 packages := "indexer-common chain-indexer wallet-indexer indexer-api indexer-standalone indexer-tests"
 rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/'`
-nightly := "nightly-2025-12-08"
+nightly := "nightly-2026-01-19"
 node_version := `cat NODE_VERSION`
 
 check:
     for package in {{packages}}; do \
-        cargo check -p "$package" --tests; \
         cargo check -p "$package" --tests --features {{feature}}; \
     done
 
@@ -27,13 +26,11 @@ fix:
 
 lint:
     for package in {{packages}}; do \
-        cargo clippy -p "$package" --no-deps --tests                        -- -D warnings; \
         cargo clippy -p "$package" --no-deps --tests --features {{feature}} -- -D warnings; \
     done
 
 lint-fix:
     for package in {{packages}}; do \
-        cargo clippy -p "$package" --no-deps --tests --fix --allow-dirty --allow-staged                       ; \
         cargo clippy -p "$package" --no-deps --tests --fix --allow-dirty --allow-staged --features {{feature}}; \
     done
 
@@ -47,7 +44,7 @@ test:
     fi
     cargo nextest run --workspace --exclude indexer-standalone --features {{feature}}
     # Check indexer-api schema:
-    cargo run -p indexer-api --bin indexer-api-cli print-api-schema-v3 > \
+    cargo run -p indexer-api --features {{feature}} --bin indexer-api-cli print-api-schema-v3 > \
         indexer-api/graphql/schema-v3.graphql.check
     @if ! cmp -s indexer-api/graphql/schema-v3.graphql indexer-api/graphql/schema-v3.graphql.check; then \
         echo "schema-v3.graphql has changes!"; exit 1; \

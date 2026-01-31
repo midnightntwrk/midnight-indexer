@@ -27,7 +27,7 @@ use byte_unit::{Byte, UnitType};
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{BlockIndexed, NetworkId, Publisher, UnshieldedUtxoIndexed, ledger};
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use parking_lot::RwLock;
 use serde::Deserialize;
 use std::{
@@ -110,42 +110,43 @@ pub async fn run(
 
     // Apply transactions to ledger state from saved ledger state block height (exclusively) to
     // highest saved block height (inclusively); save ledger state thereafter.
-    if let Some(highest_block_height) = highest_block_height {
-        let ledger_state_block_height = ledger_state_block_height.unwrap_or_default();
+    if let Some(highest_block_height) = highest_block_height
+        && ledger_state_block_height < Some(highest_block_height)
+    {
+        debug!(ledger_state_block_height:?, highest_block_height; "updating ledger state");
 
-        if ledger_state_block_height < highest_block_height {
-            debug!(ledger_state_block_height, highest_block_height; "updating ledger state");
+        // Start from zero (genesis) for None, else add one to start from the next block after
+        // the one for which the ledger state was saved.
+        let start_block_height = ledger_state_block_height.map(|n| n + 1).unwrap_or_default();
+        let mut protocol_version = None;
 
-            let mut protocol_version = None;
-
-            for block_height in (ledger_state_block_height + 1)..=highest_block_height {
-                let block_transactions = storage
-                    .get_block_transactions(block_height)
-                    .await
-                    .context("get block transactions")?;
-
-                ledger_state
-                    .apply_stored_transactions(
-                        block_transactions.transactions.iter(),
-                        block_transactions.block_parent_hash,
-                        block_transactions.block_timestamp,
-                    )
-                    .with_context(|| {
-                        format!("apply transactions for block at height {block_height}")
-                    })?;
-
-                if block_height == highest_block_height {
-                    protocol_version = Some(block_transactions.protocol_version);
-                }
-            }
-
-            let ledger_state = ledger_state.serialize().context("serialize ledger state")?;
-            let protocol_version = protocol_version.expect("protocol version is defined");
-            storage
-                .save_ledger_state(&ledger_state, highest_block_height, protocol_version)
+        for block_height in start_block_height..=highest_block_height {
+            let block_transactions = storage
+                .get_block_transactions(block_height)
                 .await
-                .context("save ledger state")?;
+                .context("get block transactions")?;
+
+            ledger_state
+                .apply_stored_transactions(
+                    block_transactions.transactions.iter(),
+                    block_transactions.block_parent_hash,
+                    block_transactions.block_timestamp,
+                )
+                .with_context(|| {
+                    format!("apply transactions for block at height {block_height}")
+                })?;
+
+            if block_height == highest_block_height {
+                protocol_version = Some(block_transactions.protocol_version);
+            }
         }
+
+        let ledger_state = ledger_state.serialize().context("serialize ledger state")?;
+        let protocol_version = protocol_version.expect("protocol version is defined");
+        storage
+            .save_ledger_state(&ledger_state, highest_block_height, protocol_version)
+            .await
+            .context("save ledger state")?;
     }
 
     let highest_block_on_node = Arc::new(RwLock::new(None));
@@ -176,7 +177,7 @@ pub async fn run(
                 .await
                 .context("get next block of highest_blocks")?;
 
-            error!("highest_block_on_node_task completed unexpectedly");
+            warn!("highest_block_on_node_task completed");
 
             Ok::<_, anyhow::Error>(())
         }
@@ -212,7 +213,7 @@ pub async fn run(
                 ledger_state = next_ledger_state
             }
 
-            error!("index_blocks_task completed unexpectedly");
+            warn!("index_blocks_task completed");
 
             Ok::<_, anyhow::Error>(())
         }
@@ -414,9 +415,9 @@ where
         .context("save block")?;
 
     // Fetch and store system parameters if changed.
-    if let Err(error) = update_system_parameters(&block, storage, node).await {
-        warn!(error:%; "failed to update system parameters, continuing");
-    }
+    update_system_parameters(&block, storage, node)
+        .await
+        .context("update system parameters")?;
 
     let ledger_state_size = serialize_ledger_state.map(|s| s.len());
 

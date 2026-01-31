@@ -14,6 +14,7 @@
 // limitations under the License.
 
 import log from '@utils/logging/logger';
+import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
 import {
@@ -46,12 +47,11 @@ describe('contract action subscriptions', () => {
    * Helper to subscribe to contract actions and collect a specified number of them.
    */
   async function collectContractActions(
+    contractAddress: string,
     expectedCount = 2,
     offset?: BlockOffset,
     eventName = 'contractActionReceived',
   ): Promise<ContractActionSubscriptionResponse[]> {
-    // We get a known contract address from test data provider
-    const contractAddress = dataProvider.getKnownContractAddress();
     // We wait for at least one contract action to be received
     const receivedContractActions: ContractActionSubscriptionResponse[] = [];
 
@@ -90,9 +90,16 @@ describe('contract action subscriptions', () => {
      * @then we should receive contract actions starting from the latest available
      * @and we should receive new contract actions as they are produced
      */
-    test('should stream contract actions from the latest available block', async () => {
-      const contractAddress = dataProvider.getKnownContractAddress();
+    test('should stream contract actions from the latest available block', async (ctx: TestContext) => {
+      let contractAddress: string;
+      try {
+        contractAddress = dataProvider.getKnownContractAddress();
+      } catch (error) {
+        log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
+      }
       const receivedContractActions = await collectContractActions(
+        contractAddress!,
         2,
         undefined,
         'contractActionReceived',
@@ -121,8 +128,15 @@ describe('contract action subscriptions', () => {
      * @when contract actions are streamed from the indexer
      * @then each received contract action should match its corresponding Zod schema
      */
-    test('should stream contract actions adhering to the expected schema', async () => {
-      const receivedContractActions = await collectContractActions(2);
+    test('should stream contract actions adhering to the expected schema', async (ctx: TestContext) => {
+      let contractAddress: string;
+      try {
+        contractAddress = dataProvider.getKnownContractAddress();
+      } catch (error) {
+        log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
+      }
+      const receivedContractActions = await collectContractActions(contractAddress!, 2);
 
       receivedContractActions
         .filter((msg) => msg?.data?.contractActions)
@@ -155,18 +169,25 @@ describe('contract action subscriptions', () => {
      * @and the first message's block hash should be >= the requested hash
      * @and we should continue to receive new contract actions as they are produced
      */
-    test('should stream historical and new contract actions from a specific block hash', async () => {
+    test('should stream historical and new contract actions from a specific block hash', async (ctx: TestContext) => {
       // We get a known contract address from test data provider
-      const contractAddress = dataProvider.getKnownContractAddress();
-
-      // We get a known block hash from before the latest action
-      // This should be a block hash that contains historical contract actions
-      const historicalBlockHash = await dataProvider.getContractDeployBlockHash();
+      let contractAddress: string;
+      let historicalBlockHash: string;
+      try {
+        contractAddress = dataProvider.getKnownContractAddress();
+        // We get a known block hash from before the latest action
+        // This should be a block hash that contains historical contract actions
+        historicalBlockHash = await dataProvider.getContractDeployBlockHash();
+      } catch (error) {
+        log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
+      }
 
       // We collect all received contract actions
       const receivedContractActions = await collectContractActions(
+        contractAddress!,
         1,
-        { hash: historicalBlockHash },
+        { hash: historicalBlockHash! },
         'firstHistoricalActionReceived',
       );
 
@@ -183,7 +204,7 @@ describe('contract action subscriptions', () => {
           expect(['ContractDeploy', 'ContractCall', 'ContractUpdate']).toContain(
             contractAction.__typename,
           );
-          expect(contractAction.address).toBe(contractAddress);
+          expect(contractAction.address).toBe(contractAddress!);
         }
       }
 
@@ -194,12 +215,12 @@ describe('contract action subscriptions', () => {
         if (firstAction.transaction?.block?.hash) {
           const firstActionBlockHash = firstAction.transaction.block.hash;
           log.debug(`First action block hash: ${firstActionBlockHash}`);
-          log.debug(`Requested historical block hash: ${historicalBlockHash}`);
+          log.debug(`Requested historical block hash: ${historicalBlockHash!}`);
 
           // Note: In a real blockchain, we would compare block heights or hashes
           // For this test, we verify that we received actions and that they match the contract address
           expect(firstActionBlockHash).toBeDefined();
-          expect(firstAction.address).toBe(contractAddress);
+          expect(firstAction.address).toBe(contractAddress!);
         }
       }
     });

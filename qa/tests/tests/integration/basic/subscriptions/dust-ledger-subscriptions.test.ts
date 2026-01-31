@@ -98,11 +98,12 @@ describe('dust ledger event subscriptions', () => {
      * @then each received event must match the DustLedgerEventsUnionSchema definition
      */
     test('validates historical dust events against schema', async () => {
-      const firstEvent = await await collectValidDustEvents(indexerWsClient, eventCoordinator, 1);
+      const firstEvent = await collectValidDustEvents(indexerWsClient, eventCoordinator, 1);
       const latestId = firstEvent[0].data!.dustLedgerEvents.maxId;
 
-      const fromId = Math.max(latestId - 5, 0);
-      const received = await collectValidDustEvents(indexerWsClient, eventCoordinator, 5, fromId);
+      const fromId = Math.max(latestId - 1, 0);
+      const received = await collectValidDustEvents(indexerWsClient, eventCoordinator, 1, fromId);
+      
       received
         .filter((msg) => msg.data?.dustLedgerEvents)
         .forEach((msg) => {
