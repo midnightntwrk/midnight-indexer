@@ -100,6 +100,9 @@ where
         tx: &mut SqlxTransaction,
     ) -> Result<(), sqlx::Error>;
 
+    /// Get the timestamp of a block by height (sourced by chain-indexer).
+    async fn get_block_timestamp(&self, height: i64) -> Result<Option<i64>, sqlx::Error>;
+
     /// Refresh cursor helpers.
     async fn get_stake_refresh_cursor(&self) -> Result<Option<String>, sqlx::Error>;
     async fn set_stake_refresh_cursor(&self, pool_id: Option<&str>) -> Result<(), sqlx::Error>;

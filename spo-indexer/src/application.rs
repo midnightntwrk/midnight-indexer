@@ -373,7 +373,7 @@ async fn get_epoch_to_process(
     let current_epoch = client.get_current_epoch().await?;
     let latest_epoch_num = match latest_processed {
         Some(epoch) => epoch.epoch_no,
-        None => client.get_first_epoch_num().await?,
+        None => client.get_first_epoch_num(storage).await?,
     };
 
     let time_offset: i64 =
