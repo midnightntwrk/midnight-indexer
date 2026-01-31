@@ -65,6 +65,6 @@ describe('dust balance query using toolkit', () => {
 
       expect(dustBalance.total).toBeGreaterThan(0);
       log.debug(`Dust balance total: ${dustBalance.total}`);
-    });
+    }, TOOLKIT_STARTUP_TIMEOUT);
   });
 });

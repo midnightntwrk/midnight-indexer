@@ -173,7 +173,7 @@ services:
   nats:
     profiles:
       - cloud
-    image: "nats:2.11.1"
+    image: "nats:2.12.3"
     restart: "always"
     command:
       ["--user", "indexer", "--pass", $APP__INFRA__PUB_SUB__PASSWORD, "-js"]

@@ -271,7 +271,7 @@ class ToolkitWrapper {
         fs.mkdirSync(goldenCacheDir);
         log.warn(
           `Golden cache directory not found at: ${goldenCacheDir}\n` +
-            `Please ensure the global setup has run to warm up the cache, or run with warmupCache: true first.`,
+          `Please ensure the global setup has run to warm up the cache, or run with warmupCache: true first.`,
         );
       }
 
@@ -303,6 +303,9 @@ class ToolkitWrapper {
           target: `/.cache/sync`,
         },
       ])
+      .withEnvironment({
+        MN_FETCH_CACHE: 'postgres://toolkit:toolkit@host.docker.internal:5434/toolkit',
+      })
       .withCommand(['sleep', 'infinity']); // equivalent to sleep infinity
   }
 
@@ -477,6 +480,8 @@ class ToolkitWrapper {
     const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'show-wallet',
+      '--src-url',
+      env.getNodeWebsocketBaseURL(),
       flag,
       value,
     ]);
@@ -553,6 +558,8 @@ class ToolkitWrapper {
     const result = await this.startedContainer.exec([
       '/midnight-node-toolkit',
       'dust-balance',
+      '--src-url',
+      env.getNodeWebsocketBaseURL(),
       '--seed',
       walletSeed,
     ]);
@@ -723,7 +730,7 @@ class ToolkitWrapper {
       log.debug(`Deployment result received: ${JSON.stringify(deploymentResult, null, 2)}`);
       throw new Error(
         'Contract address is missing in deployment result. The contract deployment may have failed. ' +
-          'Please check deployment logs and ensure deployContract() completed successfully.',
+        'Please check deployment logs and ensure deployContract() completed successfully.',
       );
     }
 
@@ -797,6 +804,8 @@ class ToolkitWrapper {
       const result = await this.startedContainer.exec([
         '/midnight-node-toolkit',
         'generate-txs',
+        '--src-url',
+        env.getNodeWebsocketBaseURL(),
         '--dest-file',
         `/out/${deployTx}`,
         '--to-bytes',

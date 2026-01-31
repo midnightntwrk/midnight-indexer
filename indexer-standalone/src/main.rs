@@ -126,9 +126,8 @@ async fn run() -> anyhow::Result<()> {
             ledger_state_storage.clone(),
         );
         let api = AxumApi::new(api_config, storage, subscriber.clone());
-        let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
-        indexer_api::application::run(application_config.clone().into(), api, subscriber, sigterm)
+        indexer_api::application::run(application_config.clone().into(), api, subscriber)
     });
 
     let wallet_indexer = task::spawn({

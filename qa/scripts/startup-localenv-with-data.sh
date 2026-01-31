@@ -56,10 +56,30 @@ echo "Volume name: $DOCKER_VOLUME_NAME"
 docker volume rm $DOCKER_VOLUME_NAME 2>/dev/null || true
 docker volume create $DOCKER_VOLUME_NAME
 
+# Extract base version (X.Y.Z) from NODE_TAG, removing any tag suffix (e.g., "0.18.0-rc.11" -> "0.18.0")
+# This handles the format change from X.Y.Z-<tag> to X.Y.Z
+NODE_VERSION_BASE=$(echo "$NODE_TAG" | sed 's/-.*$//')
+
+# Determine which .node directory format to use
+# Try new format (X.Y.Z) first, then fallback to old format (X.Y.Z-<tag>) for backward compatibility
+NODE_DATA_DIR=""
+if [ -d "$(pwd)/.node/$NODE_VERSION_BASE" ]; then
+    NODE_DATA_DIR=".node/$NODE_VERSION_BASE"
+    echo "Using new format .node directory: $NODE_DATA_DIR"
+elif [ -d "$(pwd)/.node/$NODE_TAG" ]; then
+    NODE_DATA_DIR=".node/$NODE_TAG"
+    echo "Using old format .node directory: $NODE_DATA_DIR"
+else
+    echo "ERROR: Neither .node/$NODE_VERSION_BASE nor .node/$NODE_TAG directory found!"
+    echo "Available .node directories:"
+    ls -la .node/ 2>/dev/null || echo "  (none found)"
+    exit 1
+fi
+
 # Use a temporary container to copy data into the volume
-echo "Copying fresh node data from .node/$NODE_TAG/ into volume..."
+echo "Copying fresh node data from $NODE_DATA_DIR/ into volume..."
 docker run --rm \
-  -v "$(pwd)/.node/$NODE_TAG:/source:ro" \
+  -v "$(pwd)/$NODE_DATA_DIR:/source:ro" \
   -v $DOCKER_VOLUME_NAME:/node \
   alpine sh -c "cp -r /source/. /node/ && chmod -R 777 /node/chain"
 

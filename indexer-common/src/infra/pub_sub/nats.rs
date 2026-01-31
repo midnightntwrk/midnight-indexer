@@ -55,7 +55,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_subscribe() -> Result<(), BoxError> {
-        let nats_container = GenericImage::new("nats", "2.11.1")
+        let nats_container = GenericImage::new("nats", "2.12.3")
             .with_wait_for(WaitFor::message_on_stderr("Server is ready"))
             .with_cmd([
                 "--user",

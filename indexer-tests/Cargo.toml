@@ -35,5 +35,5 @@ testcontainers-modules = { workspace = true, features = [ "postgres" ] }
 walkdir                = { workspace = true }
 
 [features]
-cloud      = [  ]
-standalone = [  ]
+cloud      = [ "indexer-api/cloud" ]
+standalone = [ "indexer-api/standalone" ]

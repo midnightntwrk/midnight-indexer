@@ -20,8 +20,8 @@ chain-indexer   = { path = "../chain-indexer", optional = true }
 humantime-serde = { workspace = true }
 indexer-api     = { path = "../indexer-api", optional = true }
 indexer-common  = { path = "../indexer-common", optional = true }
-log             = { workspace = true, features = [ "kv" ], optional = true }
-secrecy         = { workspace = true, optional = true }
+log             = { workspace = true, features = [ "kv" ] }
+secrecy         = { workspace = true }
 serde           = { workspace = true, features = [ "derive" ] }
 tokio           = { workspace = true, features = [ "macros", "rt-multi-thread", "signal" ] }
 wallet-indexer  = { path = "../wallet-indexer", optional = true }
@@ -32,7 +32,5 @@ standalone = [
     "chain-indexer/standalone",
     "indexer-api/standalone",
     "indexer-common/standalone",
-    "log",
-    "secrecy",
     "wallet-indexer/standalone",
 ]

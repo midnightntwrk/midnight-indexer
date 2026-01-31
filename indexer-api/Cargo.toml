@@ -44,11 +44,11 @@ tokio-stream       = { workspace = true }
 tower              = { workspace = true }
 tower-http         = { workspace = true, features = [ "cors", "limit" ] }
 trait-variant      = { workspace = true }
-uuid               = { workspace = true, features = [ "v7" ], optional = true }
+uuid               = { workspace = true, features = [ "v7" ] }
 
 [features]
-cloud      = [ "indexer-common/cloud", "uuid" ]
-standalone = [ "indexer-common/standalone", "uuid" ]
+cloud      = [ "indexer-common/cloud" ]
+standalone = [ "indexer-common/standalone" ]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [ 'cfg(coverage_nightly)' ] }

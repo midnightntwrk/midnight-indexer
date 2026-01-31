@@ -65,7 +65,7 @@ describe('show wallet queries using toolkit', () => {
         validationResult.success,
         `PrivateWalletState validation failed: ${JSON.stringify(validationResult.error, null, 2)}`,
       ).toBe(true);
-    });
+    }, TOOLKIT_STARTUP_TIMEOUT);
   });
 
   describe('public wallet state query using toolkit', () => {
@@ -99,6 +99,6 @@ describe('show wallet queries using toolkit', () => {
         validationResult.success,
         `PublicWalletState validation failed: ${JSON.stringify(validationResult.error, null, 2)}`,
       ).toBe(true);
-    });
+    }, TOOLKIT_STARTUP_TIMEOUT);
   });
 });

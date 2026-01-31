@@ -260,7 +260,7 @@ async fn start_postgres() -> anyhow::Result<(ContainerAsync<Postgres>, u16)> {
 async fn start_nats() -> anyhow::Result<(ContainerAsync<GenericImage>, String)> {
     use testcontainers::{ImageExt, core::WaitFor, runners::AsyncRunner};
 
-    let nats_container = GenericImage::new("nats", "2.11.1")
+    let nats_container = GenericImage::new("nats", "2.12.3")
         .with_wait_for(WaitFor::message_on_stderr("Server is ready"))
         .with_cmd([
             "--user",

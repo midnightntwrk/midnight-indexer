@@ -6,3 +6,6 @@
 .vscode
 .zed
 target
+
+# Toolkit Postgres data (local only)
+toolkit-postgres-data/
