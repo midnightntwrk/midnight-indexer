@@ -23,7 +23,7 @@ use indexer_common::error::BoxError;
 use reqwest::Client as HttpClient;
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::value::RawValue;
-use std::{collections::HashMap, time::Duration};
+use std::collections::HashMap;
 use subxt::{
     PolkadotConfig,
     backend::{
@@ -32,10 +32,8 @@ use subxt::{
     },
 };
 use thiserror::Error;
-use tokio::time::sleep;
 
 const SLOT_PER_EPOCH_KEY: &str = "3eaeb1cee77dc09baac326e5a1d29726f38178a5f54bee65a8446a55b585f261";
-const MIN_COMMITTEE_SIZE: usize = 300;
 pub const SLOT_DURATION: u32 = 6000;
 
 /// Config for node connection.
@@ -60,7 +58,6 @@ pub struct SPOClient {
     rpc_client: RpcClient,
     blockfrost: BlockfrostAPI,
     http: HttpClient,
-    reconnect_delay: Duration,
     blockfrost_id: SecretString,
 }
 
@@ -90,7 +87,6 @@ impl SPOClient {
             http,
             epoch_duration,
             slots_per_epoch,
-            reconnect_delay: config.reconnect_max_delay,
             blockfrost_id: config.blockfrost_id,
         })
     }
@@ -205,45 +201,33 @@ impl SPOClient {
             SPOClientError::UnexpectedResponse(format!("failed to create RPC params: {error}"))
         })?;
 
-        loop {
-            let raw_response = self
-                .rpc_client
-                .request(
-                    "sidechain_getEpochCommittee".to_owned(),
-                    Some(rpc_params.clone()),
-                )
-                .await
-                .map_err(|error| {
-                    SPOClientError::RpcCall(
-                        "sidechain_getEpochCommittee".to_owned(),
-                        error.to_string(),
-                    )
-                });
+        let raw_response = self
+            .rpc_client
+            .request("sidechain_getEpochCommittee".to_owned(), Some(rpc_params))
+            .await
+            .map_err(|error| {
+                SPOClientError::RpcCall("sidechain_getEpochCommittee".to_owned(), error.to_string())
+            });
 
-            let Ok(raw_response) = raw_response else {
-                return Ok(vec![]);
-            };
+        let Ok(raw_response) = raw_response else {
+            return Ok(vec![]);
+        };
 
-            let response: EpochCommitteeResponse = serde_json::from_str(raw_response.get())
-                .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
+        let response: EpochCommitteeResponse = serde_json::from_str(raw_response.get())
+            .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
 
-            if response.committee.len() >= MIN_COMMITTEE_SIZE {
-                let committee = response
-                    .committee
-                    .iter()
-                    .enumerate()
-                    .map(|(index, pk)| Validator {
-                        epoch_no: response.sidechain_epoch,
-                        position: index as u64,
-                        sidechain_pubkey: remove_hex_prefix(&pk.sidechain_pub_key).to_owned(),
-                    })
-                    .collect::<Vec<_>>();
+        let committee = response
+            .committee
+            .iter()
+            .enumerate()
+            .map(|(index, pk)| Validator {
+                epoch_no: response.sidechain_epoch,
+                position: index as u64,
+                sidechain_pubkey: remove_hex_prefix(&pk.sidechain_pub_key).to_owned(),
+            })
+            .collect::<Vec<_>>();
 
-                return Ok(committee);
-            }
-
-            sleep(self.reconnect_delay).await;
-        }
+        Ok(committee)
     }
 
     pub async fn get_pool_metadata(&self, pool_id: String) -> Result<PoolMetadata, SPOClientError> {
