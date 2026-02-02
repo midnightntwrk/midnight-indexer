@@ -15,7 +15,7 @@
 include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
 
 use crate::{domain::DustRegistrationEvent, infra::subxt_node::SubxtNodeError};
-use futures::TryStreamExt;
+use futures::{TryStreamExt, stream};
 use indexer_common::domain::{
     BlockHash, ByteVec, DustPublicKey, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
     SerializedContractAddress, SerializedContractState,
@@ -416,7 +416,7 @@ async fn fetch_genesis_cnight_registrations_runtime_0_20(
     mappings
         .map_ok(|kv| {
             // A registration is valid only if there is exactly one mapping entry.
-            if kv.value.len() == 1 {
+            let events = if kv.value.len() == 1 {
                 let entry = &kv.value[0];
                 let cardano_address = entry.cardano_reward_address.0.into();
                 let dust_address = DustPublicKey::from(entry.dust_public_key.0.0.clone());
@@ -437,12 +437,13 @@ async fn fetch_genesis_cnight_registrations_runtime_0_20(
                 ]
             } else {
                 vec![]
-            }
+            };
+            stream::iter(events.into_iter().map(Ok::<_, subxt::Error>))
         })
-        .try_collect::<Vec<_>>()
+        .try_flatten()
+        .try_collect()
         .await
         .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))
-        .map(|vecs| vecs.into_iter().flatten().collect())
 }
 
 async fn get_terms_and_conditions_runtime_0_20(
