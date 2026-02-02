@@ -15,10 +15,10 @@
 include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
 
 use crate::{domain::DustRegistrationEvent, infra::subxt_node::SubxtNodeError};
+use futures::TryStreamExt;
 use indexer_common::domain::{
-    BlockHash, ByteVec, CardanoRewardAddress, DustPublicKey, DustUtxoId,
-    PROTOCOL_VERSION_000_020_000, ProtocolVersion, SerializedContractAddress,
-    SerializedContractState,
+    BlockHash, ByteVec, DustPublicKey, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
+    SerializedContractAddress, SerializedContractState,
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
@@ -406,42 +406,39 @@ async fn fetch_genesis_cnight_registrations_runtime_0_20(
     let query = runtime_0_20::storage()
         .c_night_observation()
         .mappings_iter();
-    let mut iter = online_client
+    let mappings = online_client
         .storage()
         .at(H256(block_hash.0))
         .iter(query)
         .await
         .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))?;
 
-    let mut events = vec![];
+    mappings
+        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))
+        .try_fold(vec![], |mut events, kv| async move {
+            // A registration is valid only if there is exactly one mapping entry.
+            if kv.value.len() == 1 {
+                let entry = &kv.value[0];
+                let cardano_address = entry.cardano_reward_address.0.into();
+                let dust_address = DustPublicKey::from(entry.dust_public_key.0.0.clone());
+                let utxo_id = entry.utxo_tx_hash.0.as_ref().into();
+                let utxo_index = entry.utxo_index.into();
 
-    while let Some(result) = iter.next().await {
-        let kv = result
-            .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))?;
-        let mappings = kv.value;
+                events.push(DustRegistrationEvent::Registration {
+                    cardano_address,
+                    dust_address: dust_address.clone(),
+                });
+                events.push(DustRegistrationEvent::MappingAdded {
+                    cardano_address,
+                    dust_address,
+                    utxo_id,
+                    utxo_index,
+                });
+            }
 
-        // A registration is valid only if there is exactly one mapping entry.
-        if mappings.len() == 1 {
-            let entry = &mappings[0];
-            let cardano_address: CardanoRewardAddress = entry.cardano_reward_address.0.into();
-            let dust_address: DustPublicKey = entry.dust_public_key.0.0.clone().into();
-            let utxo_id: DustUtxoId = entry.utxo_tx_hash.0.as_ref().into();
-            let utxo_index: u32 = entry.utxo_index.into();
-
-            events.push(DustRegistrationEvent::Registration {
-                cardano_address,
-                dust_address: dust_address.clone(),
-            });
-            events.push(DustRegistrationEvent::MappingAdded {
-                cardano_address,
-                dust_address,
-                utxo_id,
-                utxo_index,
-            });
-        }
-    }
-
-    Ok(events)
+            Ok(events)
+        })
+        .await
 }
 
 async fn get_terms_and_conditions_runtime_0_20(
