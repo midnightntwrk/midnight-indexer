@@ -414,8 +414,7 @@ async fn fetch_genesis_cnight_registrations_runtime_0_20(
         .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))?;
 
     mappings
-        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))
-        .try_fold(vec![], |mut events, kv| async move {
+        .map_ok(|kv| {
             // A registration is valid only if there is exactly one mapping entry.
             if kv.value.len() == 1 {
                 let entry = &kv.value[0];
@@ -424,21 +423,26 @@ async fn fetch_genesis_cnight_registrations_runtime_0_20(
                 let utxo_id = entry.utxo_tx_hash.0.as_ref().into();
                 let utxo_index = entry.utxo_index.into();
 
-                events.push(DustRegistrationEvent::Registration {
-                    cardano_address,
-                    dust_address: dust_address.clone(),
-                });
-                events.push(DustRegistrationEvent::MappingAdded {
-                    cardano_address,
-                    dust_address,
-                    utxo_id,
-                    utxo_index,
-                });
+                vec![
+                    DustRegistrationEvent::Registration {
+                        cardano_address,
+                        dust_address: dust_address.clone(),
+                    },
+                    DustRegistrationEvent::MappingAdded {
+                        cardano_address,
+                        dust_address,
+                        utxo_id,
+                        utxo_index,
+                    },
+                ]
+            } else {
+                vec![]
             }
-
-            Ok(events)
         })
+        .try_collect::<Vec<_>>()
         .await
+        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))
+        .map(|vecs| vecs.into_iter().flatten().collect())
 }
 
 async fn get_terms_and_conditions_runtime_0_20(
