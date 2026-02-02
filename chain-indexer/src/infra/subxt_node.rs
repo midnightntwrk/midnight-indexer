@@ -581,7 +581,7 @@ pub enum SubxtNodeError {
     GetTermsAndConditions(#[source] BoxError),
 
     #[error("cannot fetch genesis cNight registrations")]
-    FetchGenesisCnightRegistrations(#[source] Box<subxt::Error>),
+    FetchGenesisCnightRegistrations(#[source] BoxError),
 }
 
 #[trace]
