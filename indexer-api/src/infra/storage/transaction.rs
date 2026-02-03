@@ -523,6 +523,7 @@ impl TransactionStorage for Storage {
                 INNER JOIN relevant_transactions ON regular_transactions.id = relevant_transactions.transaction_id
                 INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
                 WHERE wallets.session_id = $1
+                AND wallets.active = TRUE
                 ORDER BY end_index DESC
                 LIMIT 1
             )
@@ -575,6 +576,7 @@ impl Storage {
             INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
             INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
             WHERE wallets.session_id = $1
+            AND wallets.active = TRUE
             AND regular_transactions.start_index >= $2
             ORDER BY transactions.id
             LIMIT $3
@@ -600,6 +602,7 @@ impl Storage {
             INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
             INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
             WHERE wallets.session_id = $1
+            AND wallets.active = TRUE
             AND regular_transactions.start_index >= $2
             ORDER BY transactions.id
             LIMIT $3
