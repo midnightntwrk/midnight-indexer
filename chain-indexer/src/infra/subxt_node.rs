@@ -254,8 +254,17 @@ impl SubxtNode {
         let BlockDetails {
             timestamp,
             transactions,
-            dust_registration_events,
+            mut dust_registration_events,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
+
+        // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
+        // registrations from pallet storage instead.
+        if height == 0 {
+            let genesis_registrations =
+                runtimes::fetch_genesis_cnight_registrations(hash, protocol_version, online_client)
+                    .await?;
+            dust_registration_events.extend(genesis_registrations);
+        }
 
         let transactions = stream::iter(transactions)
             .then(|t| make_transaction(t, hash, protocol_version, online_client))
@@ -570,6 +579,9 @@ pub enum SubxtNodeError {
 
     #[error("cannot get Terms and Conditions")]
     GetTermsAndConditions(#[source] BoxError),
+
+    #[error("cannot fetch genesis cNight registrations")]
+    FetchGenesisCnightRegistrations(#[source] BoxError),
 }
 
 #[trace]
