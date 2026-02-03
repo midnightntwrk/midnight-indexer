@@ -14,7 +14,7 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiResult, ContextExt, OptionExt, ResultExt,
+        ApiResult, ContextExt, ResultExt,
         v3::{
             HexEncodable, HexEncoded,
             system_parameters::{DParameter, SystemParameters, TermsAndConditions},
@@ -48,6 +48,9 @@ where
 
     /// The hex-encoded block author.
     author: Option<HexEncoded>,
+
+    /// The hex-encoded ledger parameters for this block.
+    ledger_parameters: HexEncoded,
 
     #[graphql(skip)]
     id: u64,
@@ -84,20 +87,6 @@ where
             .map_err_into_server_error(|| format!("get transactions by block id {}", self.id))?;
 
         Ok(transactions.into_iter().map(Into::into).collect())
-    }
-
-    /// The hex-encoded ledger parameters for this block.
-    async fn ledger_parameters(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
-        let parameters = cx
-            .get_storage::<S>()
-            .get_ledger_parameters(self.id)
-            .await
-            .map_err_into_server_error(|| {
-                format!("get ledger parameters for block id {}", self.id)
-            })?
-            .some_or_server_error(|| format!("block with id {} not found", self.id))?;
-
-        Ok(parameters.hex_encode())
     }
 
     /// The system parameters (governance) at this block height.
@@ -142,6 +131,7 @@ where
             author,
             timestamp,
             parent_hash,
+            ledger_parameters,
         } = value;
 
         Block {
@@ -149,6 +139,7 @@ where
             height,
             protocol_version,
             author: author.map(|author| author.hex_encode()),
+            ledger_parameters: ledger_parameters.hex_encode(),
             timestamp,
             id,
             parent_hash,
