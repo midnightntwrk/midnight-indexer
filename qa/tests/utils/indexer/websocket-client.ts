@@ -146,11 +146,14 @@ export interface GraphQLCompleteMessage {
  * related events
  */
 export class IndexerWsClient {
-  /** The active WebSocket connection */
-  private ws: WebSocket;
+  /** The active WebSocket connection; null until connectionInit() succeeds */
+  private ws: WebSocket | null = null;
 
   /** The endpoint where to send graphql subscriptions */
   private readonly graphqlAPIEndpoint: string = '/api/v3/graphql/ws';
+
+  /** WebSocket URL; set in constructor */
+  private readonly targetUrl: string;
 
   /** Counter to generate unique operation IDs */
   private nextId = 0;
@@ -159,74 +162,126 @@ export class IndexerWsClient {
   private handlersMap = new Map<string, SubscriptionHandlers<unknown>>();
 
   /**
-   * Initializes a new WebSocket connection using the GraphQL transport protocol.
+   * Lightweight constructor: only stores the target URL. The actual connection
+   * is created in connectionInit().
    */
   constructor() {
-    const targetUrl = env.getIndexerWebsocketBaseURL() + this.graphqlAPIEndpoint;
-    this.ws = new WebSocket(targetUrl, 'graphql-transport-ws');
-    this.ws.onmessage = this.handleMessage.bind(this);
+    this.targetUrl = env.getIndexerWebsocketBaseURL() + this.graphqlAPIEndpoint;
+  }
+
+  /** Attaches common handlers to the current WebSocket and returns it */
+  private attachWsHandlers(ws: WebSocket): WebSocket {
+    ws.onmessage = this.handleMessage.bind(this);
+    ws.onerror = (event: { type: string; target: unknown; message?: string }) => {
+      const err = typeof event.message === 'string' ? event.message : event.type;
+      log.warn(
+        `WebSocket onerror: type=${event.type}, error=${err}, target=${String(event.target)}`,
+      );
+    };
+    ws.onclose = (event: { code: number; reason: string; wasClean: boolean }) => {
+      log.warn(
+        `WebSocket onclose: code=${event.code}, reason=${event.reason || '(no reason)'}, wasClean=${event.wasClean}`,
+      );
+    };
+    return ws;
+  }
+
+  /** Creates a new WebSocket, attaches handlers, and assigns to this.ws */
+  private createWebSocket(): void {
+    this.ws = this.attachWsHandlers(new WebSocket(this.targetUrl, 'graphql-transport-ws'));
+  }
+
+  /** Returns the active WebSocket; throws if connectionInit() has not succeeded. */
+  private getWs(): WebSocket {
+    if (this.ws == null) {
+      throw new Error(
+        'WebSocket not connected. Call connectionInit() and await it before using the client.',
+      );
+    }
+    return this.ws;
   }
 
   /**
-   * Initialises the websocket connection with a connection_init message
+   * Creates the WebSocket, waits until it is OPEN (or aborts on CLOSED/timeout),
+   * then sends the GraphQL connection_init and waits for connection_ack.
+   * On connection failure (CLOSED or timeout), retries by creating a new WebSocket.
    */
   async connectionInit(payload?: Record<string, unknown>): Promise<void> {
-    // Wait up to 2 seconds for the connection to be established before sending
-    // the connection init (retry every 50ms, up to 40 attempts total = 2000ms)
-    const state = IndexerWsClient.getStateName(this.ws.readyState);
-    log.debug(`Current websocket state: ${state}`);
+    const waitMaxAttempts = 10; // 10 × 500ms = 5s max wait per connection attempt
+    const waitDelayMs = 500;
+
     await retry(
       async () => {
-        if (this.ws.readyState !== WebSocket.OPEN) {
-          throw new Error(`WebSocket still in state: ${state}`);
+        this.createWebSocket();
+        const ws = this.ws!;
+
+        for (let attempt = 1; attempt <= waitMaxAttempts; attempt++) {
+          const state = ws.readyState;
+          const stateName = IndexerWsClient.getStateName(state);
+          log.debug(`WebSocket state (attempt ${attempt}/${waitMaxAttempts}): ${stateName}`);
+
+          if (state === WebSocket.OPEN) break;
+          if (state === WebSocket.CLOSED) {
+            throw new Error(
+              `WebSocket connection failed (state: ${stateName}). Will retry with a new socket.`,
+            );
+          }
+          if (attempt === waitMaxAttempts) {
+            throw new Error(
+              `Failed after ${waitMaxAttempts} attempts for websocket connection ready check. Last state: ${stateName}`,
+            );
+          }
+          await new Promise((resolve) => setTimeout(resolve, waitDelayMs));
         }
+
+        const init: GraphQLConnectionInitMessage = {
+          type: 'connection_init',
+          payload, // Payload is optional and can be used for negotiation
+        };
+
+        const response: Promise<{ type: string }> = new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            ws.removeEventListener('message', onMessage);
+            reject(new Error('Timed out waiting for connection_ack'));
+          }, 2000);
+
+          const onMessage = (event: MessageEvent) => {
+            const message = JSON.parse(event.data);
+            if (message.type === 'connection_ack') {
+              clearTimeout(timeout);
+              ws.removeEventListener('message', onMessage);
+              resolve(message);
+            }
+          };
+
+          ws.addEventListener('message', onMessage);
+          ws.send(JSON.stringify(init));
+        });
+
+        assert((await response).type == 'connection_ack');
       },
       {
-        maxRetries: 20, // 20 total attempts × 100ms = 2000ms timeout
-        delayMs: 100,
-        retryLabel: 'websocket connection ready check',
+        maxRetries: 2,
+        delayMs: 1000,
+        retryLabel: 'websocket connection',
       },
     );
-
-    const init: GraphQLConnectionInitMessage = {
-      type: 'connection_init',
-      payload, // Payload is optional and can be used for negotiation
-    };
-
-    const response: Promise<{ type: string }> = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.ws.removeEventListener('message', onMessage);
-        reject(new Error('Timed out waiting for connection_ack'));
-      }, 2000);
-
-      const onMessage = (event: MessageEvent) => {
-        const message = JSON.parse(event.data);
-        if (message.type === 'connection_ack') {
-          clearTimeout(timeout);
-          this.ws.removeEventListener('message', onMessage);
-          resolve(message);
-        }
-      };
-
-      this.ws.addEventListener('message', onMessage);
-      this.ws.send(JSON.stringify(init));
-    });
-
-    assert((await response).type == 'connection_ack');
   }
 
   /**
    * Terminates the underlying WebSocket connection to the indexer.
    */
   async connectionClose(): Promise<void> {
+    if (this.ws === null) return;
+
     const closePromise = new Promise<void>((resolve, _reject) => {
       const onClose = () => {
-        this.ws.removeEventListener('close', onClose);
+        this.ws!.removeEventListener('close', onClose);
         resolve();
       };
 
-      this.ws.addEventListener('close', onClose);
-      this.ws.close(); // initiate close
+      this.ws!.addEventListener('close', onClose);
+      this.ws!.close(); // initiate close
     });
 
     const timeoutPromise = new Promise<void>((resolve) =>
@@ -238,6 +293,7 @@ export class IndexerWsClient {
 
     // Either the connection gets closed or we timeout
     await Promise.race([closePromise, timeoutPromise]);
+    this.ws = null;
   }
 
   /** Generates a new unique operation ID */
@@ -277,7 +333,7 @@ export class IndexerWsClient {
    * @param payload The payload of the message
    */
   send<T = unknown>(payload: T): void {
-    this.ws.send(JSON.stringify(payload));
+    this.getWs().send(JSON.stringify(payload));
   }
 
   /**
@@ -303,11 +359,11 @@ export class IndexerWsClient {
     };
 
     this.handlersMap.set(id, handlers as SubscriptionHandlers<unknown>);
-    this.ws.send(JSON.stringify(payload));
+    this.getWs().send(JSON.stringify(payload));
 
     return () => {
       const stopMessage: GraphQLStopMessage = { id, type: 'stop' };
-      this.ws.send(JSON.stringify(stopMessage));
+      this.getWs().send(JSON.stringify(stopMessage));
       this.handlersMap.delete(id);
     };
   }
@@ -316,7 +372,7 @@ export class IndexerWsClient {
    * Returns the current socket ready state as a number.
    */
   getState() {
-    return this.ws.readyState;
+    return this.getWs().readyState;
   }
 
   /**
@@ -380,11 +436,11 @@ export class IndexerWsClient {
 
     // Fix type error by casting handlers to SubscriptionHandlers<unknown>
     this.handlersMap.set(id, handlers as SubscriptionHandlers<unknown>);
-    this.ws.send(JSON.stringify(payload));
+    this.getWs().send(JSON.stringify(payload));
 
     return () => {
       const stopMessage: GraphQLStopMessage = { id, type: 'stop' };
-      this.ws.send(JSON.stringify(stopMessage));
+      this.getWs().send(JSON.stringify(stopMessage));
       this.handlersMap.delete(id);
     };
   }
@@ -449,11 +505,11 @@ export class IndexerWsClient {
 
     // Type assertion to satisfy SubscriptionHandlers<unknown> requirement
     this.handlersMap.set(id, handlers as SubscriptionHandlers<unknown>);
-    this.ws.send(JSON.stringify(payload));
+    this.getWs().send(JSON.stringify(payload));
 
     return () => {
       const stopMessage: GraphQLStopMessage = { id, type: 'stop' };
-      this.ws.send(JSON.stringify(stopMessage));
+      this.getWs().send(JSON.stringify(stopMessage));
       this.handlersMap.delete(id);
     };
   }
@@ -511,11 +567,11 @@ export class IndexerWsClient {
 
     // Type assertion to fix type error
     this.handlersMap.set(id, handlers as SubscriptionHandlers<unknown>);
-    this.ws.send(JSON.stringify(payload));
+    this.getWs().send(JSON.stringify(payload));
 
     return () => {
       const stopMessage: GraphQLStopMessage = { id, type: 'stop' };
-      this.ws.send(JSON.stringify(stopMessage));
+      this.getWs().send(JSON.stringify(stopMessage));
       this.handlersMap.delete(id);
     };
   }
@@ -549,7 +605,7 @@ export class IndexerWsClient {
 
     log.debug(connectMutation);
     log.debug(`${JSON.stringify(payload, null, 2)}`);
-    this.ws.send(JSON.stringify(payload));
+    this.getWs().send(JSON.stringify(payload));
 
     return new Promise<string>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -592,11 +648,12 @@ export class IndexerWsClient {
 
       const cleanup = () => {
         clearTimeout(timeout);
+        if (this.ws == null) return;
         this.ws.removeEventListener('message', handleMessage);
         this.ws.send(JSON.stringify({ id, type: 'stop' }));
       };
 
-      this.ws.addEventListener('message', handleMessage);
+      this.getWs().addEventListener('message', handleMessage);
     });
   }
 
@@ -624,7 +681,7 @@ export class IndexerWsClient {
 
     log.debug(disconnectMutation);
     log.debug(`${JSON.stringify(payload, null, 2)}`);
-    this.ws.send(JSON.stringify(payload));
+    this.getWs().send(JSON.stringify(payload));
 
     return new Promise<GraphQLCloseSessionMessage>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -668,11 +725,12 @@ export class IndexerWsClient {
 
       const cleanup = () => {
         clearTimeout(timeout);
+        if (this.ws == null) return;
         this.ws.removeEventListener('message', handleMessage);
         this.ws.send(JSON.stringify({ id, type: 'stop' }));
       };
 
-      this.ws.addEventListener('message', handleMessage);
+      this.getWs().addEventListener('message', handleMessage);
     });
   }
 
@@ -732,11 +790,11 @@ export class IndexerWsClient {
     log.debug(`Contract action subscription full payload:\n${JSON.stringify(payload, null, 2)}`);
 
     this.handlersMap.set(id, handlers as SubscriptionHandlers<unknown>);
-    this.ws.send(JSON.stringify(payload));
+    this.getWs().send(JSON.stringify(payload));
 
     return () => {
       const stopMessage: GraphQLStopMessage = { id, type: 'stop' };
-      this.ws.send(JSON.stringify(stopMessage));
+      this.getWs().send(JSON.stringify(stopMessage));
       this.handlersMap.delete(id);
     };
   }
@@ -791,14 +849,14 @@ export class IndexerWsClient {
     log.debug(`Dust Ledger Events payload:\n${JSON.stringify(payload, null, 2)}`);
 
     this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
-    this.ws.send(JSON.stringify(payload));
+    this.getWs().send(JSON.stringify(payload));
 
     return () => {
       const stopMessage: GraphQLStopMessage = {
         id: subscriptionId,
         type: 'stop',
       };
-      this.ws.send(JSON.stringify(stopMessage));
+      this.getWs().send(JSON.stringify(stopMessage));
       this.handlersMap.delete(subscriptionId);
     };
   }
