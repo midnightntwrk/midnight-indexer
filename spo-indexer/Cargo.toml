@@ -1,0 +1,54 @@
+[package]
+name          = "spo-indexer"
+description   = "SPO Indexer"
+version       = { workspace = true }
+edition       = { workspace = true }
+license       = { workspace = true }
+readme        = { workspace = true }
+homepage      = { workspace = true }
+repository    = { workspace = true }
+documentation = { workspace = true }
+publish       = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = [ "--cfg", "docsrs" ]
+
+[dependencies]
+anyhow             = { workspace = true }
+async-stream       = { workspace = true }
+blake2             = { workspace = true }
+blockfrost         = { workspace = true }
+byte-unit          = { workspace = true }
+derive_more        = { workspace = true, features = [ "from" ] }
+fastrace           = { workspace = true, features = [ "enable" ] }
+futures            = { workspace = true }
+hex                = { workspace = true }
+humantime-serde    = { workspace = true }
+indexer-common     = { path = "../indexer-common" }
+indoc              = { workspace = true }
+itertools          = { workspace = true }
+log                = { workspace = true, features = [ "kv_std" ] }
+metrics            = { workspace = true }
+parity-scale-codec = { workspace = true }
+parking_lot        = { workspace = true }
+paste              = { workspace = true }
+serde              = { workspace = true, features = [ "derive" ] }
+serde_json         = { workspace = true}
+serde_with         = { workspace = true }
+secrecy                      = { workspace = true, features = [ "serde" ] }
+sqlx               = { workspace = true, features = [ "runtime-tokio", "time", "chrono", "postgres", "macros"] }
+subxt              = { workspace = true, features = [ "reconnecting-rpc-client" ] }
+thiserror          = { workspace = true }
+tokio              = { workspace = true, features = [ "macros", "rt-multi-thread", "time", "signal" ] }
+trait-variant      = { workspace = true }
+reqwest            = { workspace = true, features = ["json", "rustls"] }
+
+[dev-dependencies]
+clap           = { workspace = true, features = [ "derive" ] }
+fake           = { workspace = true }
+
+[features]
+cloud      = [ "indexer-common/cloud" ]
+standalone = [ "indexer-common/standalone" ]
+

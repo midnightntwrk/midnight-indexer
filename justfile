@@ -72,6 +72,10 @@ generate-indexer-api-schema:
     cargo run -p indexer-api --bin indexer-api-cli print-api-schema-v3 > \
         indexer-api/graphql/schema-v3.graphql
 
+generate-spo-api-schema:
+    cargo run -p spo-api --features cloud --bin spo-api-cli print-api-schema-v1 > \
+        spo-api/graphql/schema-v1.graphql
+
 build-docker-image package profile="dev":
     tag=$(git rev-parse --short=8 HEAD) && \
     docker build \
@@ -103,6 +107,15 @@ run-indexer-api network_id="undeployed":
         CONFIG_FILE=indexer-api/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         cargo run -p indexer-api --bin indexer-api --features {{feature}}
+
+run-spo-indexer node="ws://localhost:9944" network_id="undeployed":
+    docker compose up -d --wait postgres nats
+    RUST_LOG=spo_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
+        CONFIG_FILE=spo-indexer/config.yaml \
+        APP__APPLICATION__NETWORK_ID={{network_id}} \
+        APP__INFRA__NODE__URL={{node}} \
+        APP__INFRA__PUB_SUB__URL=localhost:4222 \
+        cargo run -p spo-indexer --features {{feature}}
 
 run-indexer-standalone node="ws://localhost:9944" network_id="undeployed":
     mkdir -p target/data

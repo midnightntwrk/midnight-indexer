@@ -69,6 +69,36 @@ services:
       timeout: "2s"
       retries: 2
 
+  spo-indexer:
+    profiles:
+      - cloud
+    depends_on:
+      postgres:
+        condition: "service_healthy"
+      nats:
+        condition: "service_started"
+    build:
+      context: .
+      dockerfile: spo-indexer/Dockerfile
+    image: "spo-indexer:local"
+    restart: "no"
+    environment:
+      RUST_LOG: "spo_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
+      APP__APPLICATION__NETWORK_ID: "preview"
+      APP__INFRA__NODE__URL: "wss://rpc.preview.midnight.network"
+      APP__INFRA__NODE__BLOCKFROST_ID: $APP__INFRA__NODE__BLOCKFROST_ID
+      APP__INFRA__STORAGE__HOST: "postgres"
+      APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+      APP__INFRA__PUB_SUB__URL: "nats:4222"
+      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
+    healthcheck:
+      test: ["CMD-SHELL", "cat /var/run/spo-indexer/running || exit 0"]
+      start_interval: "2s"
+      start_period: "30s"
+      interval: "5s"
+      timeout: "2s"
+      retries: 2
+
   indexer-api:
     profiles:
       - cloud
