@@ -75,12 +75,7 @@ services:
     depends_on:
       postgres:
         condition: "service_healthy"
-      nats:
-        condition: "service_started"
-    build:
-      context: .
-      dockerfile: spo-indexer/Dockerfile
-    image: "spo-indexer:local"
+    image: "ghcr.io/midnight-ntwrk/spo-indexer:${INDEXER_TAG:-latest}"
     restart: "no"
     environment:
       RUST_LOG: "spo_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
@@ -89,8 +84,6 @@ services:
       APP__INFRA__NODE__BLOCKFROST_ID: $APP__INFRA__NODE__BLOCKFROST_ID
       APP__INFRA__STORAGE__HOST: "postgres"
       APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
-      APP__INFRA__PUB_SUB__URL: "nats:4222"
-      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
     healthcheck:
       test: ["CMD-SHELL", "cat /var/run/spo-indexer/running || exit 0"]
       start_interval: "2s"
