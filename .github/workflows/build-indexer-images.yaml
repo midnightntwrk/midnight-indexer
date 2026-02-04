@@ -125,6 +125,11 @@ jobs:
           docker version
           docker compose version
 
+      - name: Set toolchain
+        run: |
+          toolchain=$(grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/')
+          echo "RUST_VERSION=$toolchain" | tee -a "$GITHUB_ENV"
+
       - name: Validate Docker Compose syntax
         run: |
           echo "Validating Docker Compose syntax for ${{ matrix.profile }} profile..."
