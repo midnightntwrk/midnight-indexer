@@ -414,7 +414,7 @@ impl SpoStorage for Storage {
     #[trace]
     async fn get_stake_pool_operator_ids(&self, limit: i64) -> Result<Vec<String>, sqlx::Error> {
         let query = indoc! {"
-            SELECT encode(sep.spo_sk,'hex') AS spo_sk_hex
+            SELECT sep.spo_sk
             FROM spo_epoch_performance sep
             GROUP BY sep.spo_sk
             ORDER BY MAX(sep.produced_blocks) DESC
