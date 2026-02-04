@@ -23,6 +23,10 @@ type Block {
 	"""
 	author: HexEncoded
 	"""
+	The hex-encoded ledger parameters for this block.
+	"""
+	ledgerParameters: HexEncoded!
+	"""
 	The parent of this block.
 	"""
 	parent: Block
@@ -30,10 +34,6 @@ type Block {
 	The transactions within this block.
 	"""
 	transactions: [Transaction!]!
-	"""
-	The hex-encoded ledger parameters for this block.
-	"""
-	ledgerParameters: HexEncoded!
 	"""
 	The system parameters (governance) at this block height.
 	"""
