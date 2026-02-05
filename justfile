@@ -109,12 +109,11 @@ run-indexer-api network_id="undeployed":
         cargo run -p indexer-api --bin indexer-api --features {{feature}}
 
 run-spo-indexer node="ws://localhost:9944" network_id="undeployed":
-    docker compose up -d --wait postgres nats
+    docker compose up -d --wait postgres
     RUST_LOG=spo_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
         CONFIG_FILE=spo-indexer/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         APP__INFRA__NODE__URL={{node}} \
-        APP__INFRA__PUB_SUB__URL=localhost:4222 \
         cargo run -p spo-indexer --features {{feature}}
 
 run-indexer-standalone node="ws://localhost:9944" network_id="undeployed":
