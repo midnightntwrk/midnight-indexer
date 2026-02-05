@@ -13,7 +13,7 @@
 
 use crate::{
     domain::{
-        ContractAction, ContractAttributes, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
+        ContractAction, ContractAttributes, LedgerVersion, ProtocolVersion,
         SerializedContractAddress, SerializedContractState, SerializedTransactionIdentifier,
         TransactionHash, TransactionStructure, ViewingKey,
         ledger::{Error, SerializableV7_0_0Ext, TransactionV7_0_0},
@@ -49,13 +49,15 @@ impl Transaction {
         transaction: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-            let transaction = tagged_deserialize_v7_0_0(&mut transaction.as_ref())
-                .map_err(|error| Error::Deserialize("LedgerTransactionV7_0_0", error))?;
-            Ok(Self::V7_0_0(transaction))
-        } else {
-            Err(Error::InvalidProtocolVersion(protocol_version))
-        }
+        let transaction = match protocol_version.ledger_version()? {
+            LedgerVersion::V7 => {
+                let transaction = tagged_deserialize_v7_0_0(&mut transaction.as_ref())
+                    .map_err(|error| Error::Deserialize("LedgerTransactionV7_0_0", error))?;
+                Self::V7_0_0(transaction)
+            }
+        };
+
+        Ok(transaction)
     }
 
     /// Get the hash.
@@ -240,13 +242,15 @@ impl SystemTransaction {
         transaction: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-            let transaction = tagged_deserialize_v7_0_0(&mut transaction.as_ref())
-                .map_err(|error| Error::Deserialize("LedgerSystemTransactionV7_0_0", error))?;
-            Ok(Self::V7_0_0(transaction))
-        } else {
-            Err(Error::InvalidProtocolVersion(protocol_version))
-        }
+        let transaction = match protocol_version.ledger_version()? {
+            LedgerVersion::V7 => {
+                let transaction = tagged_deserialize_v7_0_0(&mut transaction.as_ref())
+                    .map_err(|error| Error::Deserialize("LedgerSystemTransactionV7_0_0", error))?;
+                Self::V7_0_0(transaction)
+            }
+        };
+
+        Ok(transaction)
     }
 
     /// Get the hash.
@@ -283,7 +287,7 @@ fn can_decrypt_v7_0_0<D: DBV7_0_0>(
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{PROTOCOL_VERSION_000_020_000, ViewingKey, ledger::Transaction},
+        domain::{ViewingKey, ledger::Transaction},
         infra::{ledger_db, migrations, pool::postgres::PostgresPool},
     };
     use anyhow::Context;
@@ -331,7 +335,7 @@ mod tests {
 
         let transaction = fs::read(format!("{}/tests/tx_1_2_2.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(transaction, PROTOCOL_VERSION_000_020_000)
+        let transaction = Transaction::deserialize(transaction, 0_020_000.into())
             .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));
@@ -340,7 +344,7 @@ mod tests {
 
         let transaction = fs::read(format!("{}/tests/tx_1_2_3.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(transaction, PROTOCOL_VERSION_000_020_000)
+        let transaction = Transaction::deserialize(transaction, 0_020_000.into())
             .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));

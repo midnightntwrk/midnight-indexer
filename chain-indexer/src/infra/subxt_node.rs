@@ -26,8 +26,8 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{
-        BlockAuthor, BlockHash, ByteVec, ProtocolVersion, ScaleDecodeProtocolVersionError,
-        SerializedContractAddress,
+        BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion,
+        ScaleDecodeProtocolVersionError, SerializedContractAddress, UnsupportedProtocolVersion,
         ledger::{self, ZswapStateRoot},
     },
     error::BoxError,
@@ -62,7 +62,7 @@ const TRAVERSE_BACK_LOG_AFTER: u32 = 1_000;
 pub struct SubxtNode {
     rpc_client: RpcClient,
     default_online_client: OnlineClient<SubstrateConfig>,
-    compatible_online_client: Option<(ProtocolVersion, OnlineClient<SubstrateConfig>)>,
+    compatible_online_client: Option<(NodeVersion, OnlineClient<SubstrateConfig>)>,
     subscription_recovery_timeout: Duration,
 }
 
@@ -101,10 +101,11 @@ impl SubxtNode {
         protocol_version: ProtocolVersion,
         hash: BlockHash,
     ) -> Result<&OnlineClient<SubstrateConfig>, SubxtNodeError> {
+        let node_version = protocol_version.node_version()?;
         if !self
             .compatible_online_client
             .as_ref()
-            .map(|&(v, _)| protocol_version.is_compatible(v))
+            .map(|&(v, _)| v == node_version)
             .unwrap_or_default()
         {
             let genesis_hash = self.default_online_client.genesis_hash();
@@ -136,7 +137,7 @@ impl SubxtNode {
             )
             .map_err(|error| SubxtNodeError::MakeOnlineClient(error.into()))?;
 
-            self.compatible_online_client = Some((protocol_version, online_client));
+            self.compatible_online_client = Some((node_version, online_client));
         }
 
         let compatible_online_client = self
@@ -568,8 +569,8 @@ pub enum SubxtNodeError {
     #[error("block with hash {0} not found")]
     BlockNotFound(BlockHash),
 
-    #[error("invalid protocol version {0}")]
-    InvalidProtocolVersion(ProtocolVersion),
+    #[error(transparent)]
+    UnsupportedProtocolVersion(#[from] UnsupportedProtocolVersion),
 
     #[error("invalid DUST address length: expected 32 bytes, was {0}")]
     InvalidDustAddress(usize),

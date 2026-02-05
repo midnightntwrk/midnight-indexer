@@ -131,7 +131,7 @@ jobs:
 
       - name: Pre-pull Docker images
         run: |
-          NODE_VERSION=$(tr -d '\n' < NODE_VERSION)
+          NODE_VERSION=$(tail -n 1 NODE_VERSIONS)
           echo "Pre-pulling midnight-node:$NODE_VERSION..."
           docker pull "ghcr.io/midnight-ntwrk/midnight-node:$NODE_VERSION" || \
           docker pull "ghcr.io/midnight-ntwrk/midnight-node:$NODE_VERSION" || \
