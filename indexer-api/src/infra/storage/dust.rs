@@ -42,7 +42,7 @@ impl DustStorage for Storage {
             let registration_query = indoc! {"
                 SELECT dust_address, valid, utxo_tx_hash, utxo_output_index
                 FROM cnight_registrations
-                WHERE cardano_address = $1
+                WHERE cardano_stake_key = $1
                 AND removed_at IS NULL
                 ORDER BY registered_at DESC
                 LIMIT 1

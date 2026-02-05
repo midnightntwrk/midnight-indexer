@@ -199,21 +199,21 @@ async fn make_block_details_runtime_0_20(
             Event::CNightObservation(native_token_event) => match native_token_event {
                 CnightObservationEvent::Registration(event) => {
                     dust_registration_events.push(DustRegistrationEvent::Registration {
-                        cardano_address: event.cardano_reward_address.0.into(),
+                        cardano_stake_key: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                     });
                 }
 
                 CnightObservationEvent::Deregistration(event) => {
                     dust_registration_events.push(DustRegistrationEvent::Deregistration {
-                        cardano_address: event.cardano_reward_address.0.into(),
+                        cardano_stake_key: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                     });
                 }
 
                 CnightObservationEvent::MappingAdded(event) => {
                     dust_registration_events.push(DustRegistrationEvent::MappingAdded {
-                        cardano_address: event.cardano_reward_address.0.into(),
+                        cardano_stake_key: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                         utxo_id: event.utxo_tx_hash.0.as_ref().into(),
                         utxo_index: event.utxo_index.into(),
@@ -222,7 +222,7 @@ async fn make_block_details_runtime_0_20(
 
                 CnightObservationEvent::MappingRemoved(event) => {
                     dust_registration_events.push(DustRegistrationEvent::MappingRemoved {
-                        cardano_address: event.cardano_reward_address.0.into(),
+                        cardano_stake_key: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                         utxo_id: event.utxo_tx_hash.0.as_ref().into(),
                         utxo_index: event.utxo_index.into(),
