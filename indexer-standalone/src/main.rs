@@ -100,7 +100,9 @@ async fn run() -> anyhow::Result<()> {
 
     let pub_sub = pub_sub::in_mem::InMemPubSub::default();
 
-    ledger_db::init(ledger_db_config, pool.clone());
+    ledger_db::init(ledger_db_config)
+        .await
+        .context("initialize ledger db")?;
 
     let chain_indexer = task::spawn({
         let node = SubxtNode::new(node_config)

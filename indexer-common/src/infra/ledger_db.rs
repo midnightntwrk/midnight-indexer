@@ -28,16 +28,39 @@ pub fn init(config: Config, pool: crate::infra::pool::postgres::PostgresPool) {
 }
 
 #[cfg(feature = "standalone")]
-pub fn init(config: Config, pool: crate::infra::pool::sqlite::SqlitePool) {
-    let Config { cache_size } = config;
+pub async fn init(config: Config) -> Result<(), Error> {
+    use crate::infra::{migrations, pool::sqlite};
+
+    let Config {
+        cache_size,
+        cnn_url,
+    } = config;
+
+    let pool = sqlite::SqlitePool::new(sqlite::Config { cnn_url }).await?;
+    migrations::sqlite::run_for_ledger_db(&pool).await?;
 
     let db = v7_0_0::LedgerDb::new(pool);
     let _ = midnight_storage_v7_0_0::storage::set_default_storage(|| {
         midnight_storage_v7_0_0::Storage::new(cache_size, db)
     });
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub cache_size: usize,
+
+    #[cfg(feature = "standalone")]
+    pub cnn_url: String,
+}
+
+#[cfg(feature = "standalone")]
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("cannot create DB pool for SQLite")]
+    CreatePool(#[from] crate::infra::pool::sqlite::Error),
+
+    #[error("cannot run migrations for SQLite")]
+    RunMigrations(#[from] crate::infra::migrations::sqlite::Error),
 }

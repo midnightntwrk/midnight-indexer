@@ -17,6 +17,7 @@ infra:
 
   ledger_db:
     cache_size: 1024
+    cnn_url: /data/ledger-db.sqlite"
 
   node:
     url: "ws://localhost:9944"

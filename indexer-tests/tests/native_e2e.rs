@@ -362,6 +362,11 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
     let api_port = find_free_port()?;
     let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
     let sqlite_file = temp_dir.path().join("indexer.sqlite").display().to_string();
+    let sqlite_ledger_db_file = temp_dir
+        .path()
+        .join("ledger-db.sqlite")
+        .display()
+        .to_string();
 
     Command::new(format!("{}/debug/indexer-standalone", &*TARGET_DIR))
         .env(
@@ -376,6 +381,7 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
         .env("APP__INFRA__API__MAX_COMPLEXITY", "600")
         .env("APP__INFRA__NODE__URL", node_url)
         .env("APP__INFRA__STORAGE__CNN_URL", sqlite_file)
+        .env("APP__INFRA__LEDGER_DB__CNN_URL", sqlite_ledger_db_file)
         .env("APP__TELEMETRY__TRACING__ENABLED", "true")
         .spawn()
         .context("spawn indexer-standalone process")
