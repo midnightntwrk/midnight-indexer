@@ -28,7 +28,6 @@ infra:
     genesis_protocol_version: 16000
     reconnect_max_delay: "10s" # 10ms, 100ms, 1s, 10s
     reconnect_max_attempts: 30 # Roughly 5m
-    blockfrost_id: "" # provide via APP__INFRA__NODE__BLOCKFROST_ID env var
 
 telemetry:
   tracing:
