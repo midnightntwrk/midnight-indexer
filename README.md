@@ -93,10 +93,11 @@ For the full set of configuration options see [config.yaml](indexer-standalone/c
 
 ### Cloud Mode
 
-The Chain Indexer, Indexer API and Wallet Indexer can be run as separate executables, interacting with a PostgreSQL database and a NATS messaging system. Running PostgreSQL and NATS is out of scope of this document. The respective Docker images are:
+The Chain Indexer, Indexer API, Wallet Indexer and SPO Indexer can be run as separate executables, interacting with a PostgreSQL database and a NATS messaging system. Running PostgreSQL and NATS is out of scope of this document. The respective Docker images are:
 - [`chain-indexer`](https://hub.docker.com/r/midnightntwrk/chain-indexer)
 - [`indexer-api`](https://hub.docker.com/r/midnightntwrk/indexer-api)
 - [`wallet-indexer`](https://hub.docker.com/r/midnightntwrk/wallet-indexer)
+- [`spo-indexer`](https://hub.docker.com/r/midnightntwrk/spo-indexer)
 
 #### `chain-indexer` Configuration
 
@@ -148,6 +149,21 @@ For the full set of configuration options see [config.yaml](indexer-api/config.y
 
 For the full set of configuration options see [config.yaml](wallet-indexer/config.yaml).
 
+#### `spo-indexer` Configuration
+| Env Var | Meaning | Default |
+|---|---|---|
+| APP__APPLICATION__NETWORK_ID | Network ID | `undeployed` |
+| APP__INFRA__STORAGE__HOST | PostgreSQL host | `localhost` |
+| APP__INFRA__STORAGE__PORT | PostgreSQL port | `5432` |
+| APP__INFRA__STORAGE__DBNAME | PostgreSQL database name | `indexer` |
+| APP__INFRA__STORAGE__USER | PostgreSQL database user | `indexer` |
+| APP__INFRA__NODE__URL | WebSocket Endpoint of Midnight Node | `ws://localhost:9944` |
+| APP__INFRA__NODE__BLOCKFROST_ID | Blockfrost API key for Cardano stake queries | - |
+
+The Blockfrost API key is required for stake distribution queries against Cardano. Without it, spo-indexer will still index committee membership, epoch data, and D-parameter changes, but stake-related data (pool metadata, stake distribution) will not be available.
+
+For the full set of configuration options see [config.yaml](spo-indexer/config.yaml).
+
 ### Running Locally
 
 For development, you can use Docker Compose or run components manually:
@@ -188,6 +204,7 @@ export APP__INFRA__STORAGE__PASSWORD=postgres
 export APP__INFRA__PUB_SUB__PASSWORD=nats
 export APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD=nats
 export APP__INFRA__SECRET=303132333435363738393031323334353637383930313233343536373839303132
+# export APP__INFRA__NODE__BLOCKFROST_ID=<your-blockfrost-api-key>  # only required for spo-indexer
 ```
 
 ### Required Configuration for private Repositories
