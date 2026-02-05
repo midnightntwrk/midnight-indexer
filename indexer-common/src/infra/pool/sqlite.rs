@@ -31,7 +31,7 @@ impl SqlitePool {
         let connect_options = SqliteConnectOptions::try_from(config)
             .map_err(Error::ConvertConfig)?
             .journal_mode(SqliteJournalMode::Wal)
-            .busy_timeout(Duration::from_secs(15));
+            .busy_timeout(Duration::from_secs(30));
         let inner = SqlitePoolOptions::new()
             .max_connections(2)
             .connect_with(connect_options)

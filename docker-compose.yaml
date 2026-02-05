@@ -34,8 +34,6 @@ services:
       APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
       APP__INFRA__PUB_SUB__URL: "nats:4222"
       APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
-      APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: $APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD
-      APP__INFRA__LEDGER_STATE_STORAGE__URL: "nats:4222"
     healthcheck:
       test: ["CMD-SHELL", "cat /var/run/chain-indexer/running"]
       start_interval: "2s"
@@ -111,8 +109,6 @@ services:
       APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
       APP__INFRA__PUB_SUB__URL: "nats:4222"
       APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
-      APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: $APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD
-      APP__INFRA__LEDGER_STATE_STORAGE__URL: "nats:4222"
     healthcheck:
       test: ["CMD-SHELL", "cat /var/run/indexer-api/running"]
       start_interval: "2s"
