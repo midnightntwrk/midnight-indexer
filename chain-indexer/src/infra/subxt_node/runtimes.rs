@@ -337,6 +337,21 @@ async fn get_transaction_cost_runtime_0_20(
 use crate::domain::{DParameter, TermsAndConditions};
 use indexer_common::domain::TermsAndConditionsHash;
 
+/// Fetch protocol version at the given block via runtime API Core version.
+pub async fn protocol_version_at_block(
+    block_hash: BlockHash,
+    online_client: &OnlineClient<SubstrateConfig>,
+) -> Result<ProtocolVersion, SubxtNodeError> {
+    let version = online_client
+        .runtime_api()
+        .at(H256(block_hash.0))
+        .call(runtime_0_20::apis().core().version())
+        .await
+        .map_err(|error| SubxtNodeError::GetProtocolVersion(error.into()))?;
+
+    Ok(ProtocolVersion(version.spec_version))
+}
+
 /// Get D-Parameter depending on the given protocol version.
 pub async fn get_d_parameter(
     block_hash: BlockHash,

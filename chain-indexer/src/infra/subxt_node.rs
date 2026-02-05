@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod header;
 mod runtimes;
 
 use crate::{
@@ -19,15 +18,14 @@ use crate::{
         BlockRef, SystemParametersChange, TransactionFees,
         node::{Block, Node, RegularTransaction, SystemTransaction, Transaction},
     },
-    infra::subxt_node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
+    infra::subxt_node::runtimes::BlockDetails,
 };
 use async_stream::try_stream;
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{
-        BlockAuthor, BlockHash, ByteVec, ProtocolVersion, ScaleDecodeProtocolVersionError,
-        SerializedContractAddress,
+        BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedContractAddress,
         ledger::{self, ZswapStateRoot},
     },
     error::BoxError,
@@ -211,10 +209,8 @@ impl SubxtNode {
         let hash = block.hash().0.into();
         let height = block.number();
         let parent_hash = block.header().parent_hash.0.into();
-        let protocol_version = block
-            .header()
-            .protocol_version()?
-            .expect("protocol version header is present");
+        let protocol_version =
+            runtimes::protocol_version_at_block(hash, &self.default_online_client).await?;
 
         debug!(
             hash:%,
@@ -547,11 +543,11 @@ pub enum SubxtNodeError {
     #[error("cannot get runtime version")]
     GetRuntimeVersion(#[source] subxt::ext::subxt_rpcs::Error),
 
+    #[error("cannot get protocol version from runtime API")]
+    GetProtocolVersion(#[source] BoxError),
+
     #[error("cannot scale decode")]
     ScaleDecode(#[from] parity_scale_codec::Error),
-
-    #[error(transparent)]
-    DecodeProtocolVersion(#[from] ScaleDecodeProtocolVersionError),
 
     #[error(transparent)]
     Ledger(#[from] ledger::Error),
