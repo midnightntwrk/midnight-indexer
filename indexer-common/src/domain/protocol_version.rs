@@ -22,6 +22,8 @@ use thiserror::Error;
 
 #[allow(clippy::zero_prefixed_literal)]
 pub const PROTOCOL_VERSION_000_020_000: ProtocolVersion = ProtocolVersion(000_020_000);
+#[allow(clippy::zero_prefixed_literal)]
+pub const PROTOCOL_VERSION_000_021_000: ProtocolVersion = ProtocolVersion(000_021_000);
 
 /// The runtime specification version of the chain; defaults to 1, i.e. 0.0.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, From)]

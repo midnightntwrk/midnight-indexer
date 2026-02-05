@@ -34,7 +34,7 @@ pub use system_parameters::*;
 pub use transaction::*;
 pub use unshielded::*;
 
-use indexer_common::domain::{PROTOCOL_VERSION_000_020_000, ProtocolVersion};
+use indexer_common::domain::{PROTOCOL_VERSION_000_021_000, ProtocolVersion};
 
 /// This must always point to the latest (highest) supported version.
-pub const LATEST_PROTOCOL_VERSION: ProtocolVersion = PROTOCOL_VERSION_000_020_000;
+pub const LATEST_PROTOCOL_VERSION: ProtocolVersion = PROTOCOL_VERSION_000_021_000;

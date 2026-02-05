@@ -11,18 +11,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod v0_20_0;
+mod v0_21_0;
+
 // To see how this is generated, look in build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
 
-use crate::{domain::DustRegistrationEvent, infra::subxt_node::SubxtNodeError};
-use futures::{TryStreamExt, stream};
-use indexer_common::domain::{
-    BlockHash, ByteVec, DustPublicKey, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
-    SerializedContractAddress, SerializedContractState,
+use crate::{
+    domain::{DParameter, DustRegistrationEvent, TermsAndConditions},
+    infra::subxt_node::SubxtNodeError,
 };
-use itertools::Itertools;
-use parity_scale_codec::Decode;
-use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, utils::H256};
+use indexer_common::domain::{
+    BlockHash, ByteVec, PROTOCOL_VERSION_000_020_000, PROTOCOL_VERSION_000_021_000,
+    ProtocolVersion, SerializedContractAddress, SerializedContractState,
+};
+use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events};
 
 /// Runtime specific block details.
 pub struct BlockDetails {
@@ -46,7 +49,9 @@ pub async fn make_block_details(
 ) -> Result<BlockDetails, SubxtNodeError> {
     // TODO Replace this often repeated pattern with a macro?
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-        make_block_details_runtime_0_20(extrinsics, events, authorities).await
+        v0_20_0::make_block_details(extrinsics, events, authorities).await
+    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_021_000) {
+        v0_21_0::make_block_details(extrinsics, events, authorities).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -59,7 +64,9 @@ pub async fn fetch_authorities(
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<Vec<[u8; 32]>>, SubxtNodeError> {
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-        fetch_authorities_runtime_0_20(block_hash, online_client).await
+        v0_20_0::fetch_authorities(block_hash, online_client).await
+    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_021_000) {
+        v0_21_0::fetch_authorities(block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -68,7 +75,9 @@ pub async fn fetch_authorities(
 /// Decode slot depending on the given protocol version.
 pub fn decode_slot(slot: &[u8], protocol_version: ProtocolVersion) -> Result<u64, SubxtNodeError> {
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-        decode_slot_runtime_0_20(slot)
+        v0_20_0::decode_slot(slot)
+    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_021_000) {
+        v0_21_0::decode_slot(slot)
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -82,7 +91,9 @@ pub async fn get_contract_state(
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<SerializedContractState, SubxtNodeError> {
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-        get_contract_state_runtime_0_20(address, block_hash, online_client).await
+        v0_20_0::get_contract_state(address, block_hash, online_client).await
+    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_021_000) {
+        v0_21_0::get_contract_state(address, block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -94,7 +105,9 @@ pub async fn get_zswap_state_root(
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Vec<u8>, SubxtNodeError> {
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-        get_zswap_state_root_runtime_0_20(block_hash, online_client).await
+        v0_20_0::get_zswap_state_root(block_hash, online_client).await
+    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_021_000) {
+        v0_21_0::get_zswap_state_root(block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -110,232 +123,13 @@ pub async fn get_transaction_cost(
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<u128, SubxtNodeError> {
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-        get_transaction_cost_runtime_0_20(transaction.as_ref(), block_hash, online_client).await
+        v0_20_0::get_transaction_cost(transaction.as_ref(), block_hash, online_client).await
+    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_021_000) {
+        v0_21_0::get_transaction_cost(transaction.as_ref(), block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
 }
-
-async fn make_block_details_runtime_0_20(
-    extrinsics: Extrinsics<SubstrateConfig, OnlineClient<SubstrateConfig>>,
-    events: Events<SubstrateConfig>,
-    authorities: &mut Option<Vec<[u8; 32]>>,
-) -> Result<BlockDetails, SubxtNodeError> {
-    use self::runtime_0_20::{
-        Call, Event,
-        runtime_types::{
-            pallet_cnight_observation::pallet::Event as CnightObservationEvent,
-            pallet_midnight::pallet::Call::send_mn_transaction,
-            pallet_midnight_system::pallet::{
-                Call::send_mn_system_transaction, Event::SystemTransactionApplied,
-            },
-            pallet_partner_chains_session::pallet::Event::NewSession,
-        },
-        timestamp,
-    };
-
-    let calls = extrinsics
-        .iter()
-        .map(|extrinsic| {
-            let call = extrinsic
-                .as_root_extrinsic::<Call>()
-                .map_err(|error| SubxtNodeError::AsRootExtrinsic(error.into()))?;
-            Ok(call)
-        })
-        .filter_ok(|call| {
-            matches!(
-                call,
-                Call::Timestamp(_) | Call::Midnight(_) | Call::MidnightSystem(_)
-            )
-        })
-        .collect::<Result<Vec<_>, SubxtNodeError>>()?;
-
-    let timestamp = calls.iter().find_map(|call| match call {
-        Call::Timestamp(timestamp::Call::set { now }) => Some(*now),
-        _ => None,
-    });
-
-    let transactions = calls
-        .into_iter()
-        .filter_map(|call| match call {
-            Call::Midnight(send_mn_transaction { midnight_tx }) => {
-                Some(Transaction::Regular(midnight_tx.into()))
-            }
-
-            Call::MidnightSystem(send_mn_system_transaction { midnight_system_tx }) => {
-                Some(Transaction::System(midnight_system_tx.into()))
-            }
-
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-
-    let mut dust_registration_events = vec![];
-    let mut system_transactions_from_events = vec![];
-
-    for event_details in events.iter() {
-        let event_details =
-            event_details.map_err(|error| SubxtNodeError::GetNextEvent(error.into()))?;
-
-        let event = event_details
-            .as_root_event::<Event>()
-            .map_err(|error| SubxtNodeError::AsRootEvent(error.into()))?;
-
-        match event {
-            Event::Session(NewSession { .. }) => {
-                *authorities = None;
-            }
-
-            // System transaction created by the node (not from extrinsics).
-            // These come from inherents which execute BEFORE regular transactions,
-            // so they must be prepended to maintain correct execution order.
-            Event::MidnightSystem(SystemTransactionApplied(transaction_applied)) => {
-                system_transactions_from_events.push(Transaction::System(ByteVec::from(
-                    transaction_applied.serialized_system_transaction,
-                )));
-            }
-
-            // DUST registration events from NativeTokenObservation pallet.
-            Event::CNightObservation(native_token_event) => match native_token_event {
-                CnightObservationEvent::Registration(event) => {
-                    dust_registration_events.push(DustRegistrationEvent::Registration {
-                        cardano_address: event.cardano_reward_address.0.into(),
-                        dust_address: event.dust_public_key.0.0.into(),
-                    });
-                }
-
-                CnightObservationEvent::Deregistration(event) => {
-                    dust_registration_events.push(DustRegistrationEvent::Deregistration {
-                        cardano_address: event.cardano_reward_address.0.into(),
-                        dust_address: event.dust_public_key.0.0.into(),
-                    });
-                }
-
-                CnightObservationEvent::MappingAdded(event) => {
-                    dust_registration_events.push(DustRegistrationEvent::MappingAdded {
-                        cardano_address: event.cardano_reward_address.0.into(),
-                        dust_address: event.dust_public_key.0.0.into(),
-                        utxo_id: event.utxo_tx_hash.0.as_ref().into(),
-                        utxo_index: event.utxo_index.into(),
-                    });
-                }
-
-                CnightObservationEvent::MappingRemoved(event) => {
-                    dust_registration_events.push(DustRegistrationEvent::MappingRemoved {
-                        cardano_address: event.cardano_reward_address.0.into(),
-                        dust_address: event.dust_public_key.0.0.into(),
-                        utxo_id: event.utxo_tx_hash.0.as_ref().into(),
-                        utxo_index: event.utxo_index.into(),
-                    });
-                }
-
-                _ => {}
-            },
-
-            _ => {}
-        }
-    }
-
-    // Prepend system transactions from events (inherents) before regular transactions.
-    // In Substrate, inherents execute before regular transactions in a block.
-    system_transactions_from_events.extend(transactions);
-    let transactions = system_transactions_from_events;
-
-    Ok(BlockDetails {
-        timestamp,
-        transactions,
-        dust_registration_events,
-    })
-}
-
-async fn fetch_authorities_runtime_0_20(
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
-) -> Result<Option<Vec<[u8; 32]>>, SubxtNodeError> {
-    let authorities = online_client
-        .storage()
-        .at(H256(block_hash.0))
-        .fetch(&runtime_0_20::storage().aura().authorities())
-        .await
-        .map_err(|error| SubxtNodeError::FetchAuthorities(error.into()))?
-        .map(|authorities| authorities.0.into_iter().map(|public| public.0).collect());
-
-    Ok(authorities)
-}
-
-fn decode_slot_runtime_0_20(mut slot: &[u8]) -> Result<u64, SubxtNodeError> {
-    let slot =
-        runtime_0_20::runtime_types::sp_consensus_slots::Slot::decode(&mut slot).map(|x| x.0)?;
-    Ok(slot)
-}
-
-async fn get_contract_state_runtime_0_20(
-    address: SerializedContractAddress,
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
-) -> Result<SerializedContractState, SubxtNodeError> {
-    // This returns the serialized contract state.
-    let get_state = runtime_0_20::apis()
-        .midnight_runtime_api()
-        .get_contract_state(address.as_slice().into());
-
-    let state = online_client
-        .runtime_api()
-        .at(H256(block_hash.0))
-        .call(get_state)
-        .await
-        .map_err(|error| {
-            SubxtNodeError::GetContractState(address.clone(), block_hash, error.into())
-        })?
-        .map_err(|error| {
-            SubxtNodeError::GetContractState(address, block_hash, format!("{error:?}").into())
-        })?
-        .into();
-
-    Ok(state)
-}
-
-async fn get_zswap_state_root_runtime_0_20(
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
-) -> Result<Vec<u8>, SubxtNodeError> {
-    let get_zswap_state_root = runtime_0_20::apis()
-        .midnight_runtime_api()
-        .get_zswap_state_root();
-
-    let root = online_client
-        .runtime_api()
-        .at(H256(block_hash.0))
-        .call(get_zswap_state_root)
-        .await
-        .map_err(|error| SubxtNodeError::GetZswapStateRoot(error.into()))?
-        .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}").into()))?;
-
-    Ok(root)
-}
-
-async fn get_transaction_cost_runtime_0_20(
-    transaction: &[u8],
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
-) -> Result<u128, SubxtNodeError> {
-    let get_transaction_cost = runtime_0_20::apis()
-        .midnight_runtime_api()
-        .get_transaction_cost(transaction.to_owned());
-
-    let cost = online_client
-        .runtime_api()
-        .at(H256(block_hash.0))
-        .call(get_transaction_cost)
-        .await
-        .map_err(|error| SubxtNodeError::GetTransactionCost(error.into()))?
-        .map_err(|error| SubxtNodeError::GetTransactionCost(format!("{error:?}").into()))?;
-
-    Ok(cost as u128)
-}
-
-use crate::domain::{DParameter, TermsAndConditions};
-use indexer_common::domain::TermsAndConditionsHash;
 
 /// Get D-Parameter depending on the given protocol version.
 pub async fn get_d_parameter(
@@ -344,7 +138,26 @@ pub async fn get_d_parameter(
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<DParameter, SubxtNodeError> {
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-        get_d_parameter_runtime_0_20(block_hash, online_client).await
+        v0_20_0::get_d_parameter(block_hash, online_client).await
+    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_021_000) {
+        v0_21_0::get_d_parameter(block_hash, online_client).await
+    } else {
+        Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
+    }
+}
+
+/// Fetch genesis cNight registrations from pallet storage.
+/// At genesis, Substrate does not emit events (Parity PR #5463), so we query
+/// the cNightObservation.Mappings storage directly at block 0.
+pub async fn fetch_genesis_cnight_registrations(
+    block_hash: BlockHash,
+    protocol_version: ProtocolVersion,
+    online_client: &OnlineClient<SubstrateConfig>,
+) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
+    if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
+        v0_20_0::fetch_genesis_cnight_registrations(block_hash, online_client).await
+    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_021_000) {
+        v0_21_0::fetch_genesis_cnight_registrations(block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
@@ -357,113 +170,10 @@ pub async fn get_terms_and_conditions(
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
     if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-        get_terms_and_conditions_runtime_0_20(block_hash, online_client).await
+        v0_20_0::get_terms_and_conditions(block_hash, online_client).await
+    } else if protocol_version.is_compatible(PROTOCOL_VERSION_000_021_000) {
+        v0_21_0::get_terms_and_conditions(block_hash, online_client).await
     } else {
         Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
     }
-}
-
-async fn get_d_parameter_runtime_0_20(
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
-) -> Result<DParameter, SubxtNodeError> {
-    let get_d_param = runtime_0_20::apis()
-        .system_parameters_api()
-        .get_d_parameter();
-
-    let d_param = online_client
-        .runtime_api()
-        .at(H256(block_hash.0))
-        .call(get_d_param)
-        .await
-        .map_err(|error| SubxtNodeError::GetDParameter(error.into()))?;
-
-    Ok(DParameter {
-        num_permissioned_candidates: d_param.num_permissioned_candidates,
-        num_registered_candidates: d_param.num_registered_candidates,
-    })
-}
-
-/// Fetch genesis cNight registrations from pallet storage.
-/// At genesis, Substrate does not emit events (Parity PR #5463), so we query
-/// the cNightObservation.Mappings storage directly at block 0.
-pub async fn fetch_genesis_cnight_registrations(
-    block_hash: BlockHash,
-    protocol_version: ProtocolVersion,
-    online_client: &OnlineClient<SubstrateConfig>,
-) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
-    if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-        fetch_genesis_cnight_registrations_runtime_0_20(block_hash, online_client).await
-    } else {
-        Err(SubxtNodeError::InvalidProtocolVersion(protocol_version))
-    }
-}
-
-async fn fetch_genesis_cnight_registrations_runtime_0_20(
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
-) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
-    let query = runtime_0_20::storage()
-        .c_night_observation()
-        .mappings_iter();
-    let mappings = online_client
-        .storage()
-        .at(H256(block_hash.0))
-        .iter(query)
-        .await
-        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))?;
-
-    mappings
-        .map_ok(|kv| {
-            // A registration is valid only if there is exactly one mapping entry.
-            let events = if kv.value.len() == 1 {
-                let entry = &kv.value[0];
-                let cardano_address = entry.cardano_reward_address.0.into();
-                let dust_address = DustPublicKey::from(entry.dust_public_key.0.0.clone());
-                let utxo_id = entry.utxo_tx_hash.0.as_ref().into();
-                let utxo_index = entry.utxo_index.into();
-
-                vec![
-                    DustRegistrationEvent::Registration {
-                        cardano_address,
-                        dust_address: dust_address.clone(),
-                    },
-                    DustRegistrationEvent::MappingAdded {
-                        cardano_address,
-                        dust_address,
-                        utxo_id,
-                        utxo_index,
-                    },
-                ]
-            } else {
-                vec![]
-            };
-            stream::iter(events.into_iter().map(Ok::<_, subxt::Error>))
-        })
-        .try_flatten()
-        .try_collect()
-        .await
-        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))
-}
-
-async fn get_terms_and_conditions_runtime_0_20(
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
-) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
-    let get_tc = runtime_0_20::apis()
-        .system_parameters_api()
-        .get_terms_and_conditions();
-
-    let tc = online_client
-        .runtime_api()
-        .at(H256(block_hash.0))
-        .call(get_tc)
-        .await
-        .map_err(|error| SubxtNodeError::GetTermsAndConditions(error.into()))?;
-
-    Ok(tc.map(|response| {
-        let hash = TermsAndConditionsHash::from(response.hash.0);
-        let url = String::from_utf8_lossy(&response.url).to_string();
-        TermsAndConditions { hash, url }
-    }))
 }

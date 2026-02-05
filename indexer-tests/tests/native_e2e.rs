@@ -11,26 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(any(feature = "cloud", feature = "standalone"))]
 use anyhow::Context;
-#[cfg(any(feature = "cloud", feature = "standalone"))]
 use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
 };
-#[cfg(any(feature = "cloud", feature = "standalone"))]
-use std::process::{Child, Command};
-#[cfg(any(feature = "cloud", feature = "standalone"))]
 use std::{
     env, fs,
     net::TcpListener,
     path::Path,
+    process::{Child, Command},
     sync::LazyLock,
     time::{Duration, Instant},
 };
-#[cfg(any(feature = "cloud", feature = "standalone"))]
 use tempfile::TempDir;
-#[cfg(any(feature = "cloud", feature = "standalone"))]
 use testcontainers::{
     ContainerAsync, GenericImage, ImageExt,
     core::{Mount, WaitFor},
@@ -38,21 +32,28 @@ use testcontainers::{
 };
 #[cfg(feature = "cloud")]
 use testcontainers_modules::postgres::Postgres;
-#[cfg(any(feature = "cloud", feature = "standalone"))]
 use tokio::time::sleep;
-#[cfg(any(feature = "cloud", feature = "standalone"))]
 use walkdir::WalkDir;
 
-#[cfg(any(feature = "cloud", feature = "standalone"))]
 const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[cfg(any(feature = "cloud", feature = "standalone"))]
-const NODE_VERSION: &str = include_str!("../../NODE_VERSION");
+static LATEST_NODE_VERSION: LazyLock<String> = LazyLock::new(|| {
+    let node_versions_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../NODE_VERSIONS");
+    let node_versions = fs::read_to_string(&node_versions_path).unwrap_or_else(|error| {
+        panic!(
+            "cannot read node versions file at {}: {error}",
+            node_versions_path.display()
+        );
+    });
+    node_versions
+        .lines()
+        .last()
+        .expect("node versions must not be empty")
+        .to_string();
+    "0.20.0".to_string()
+});
 
-#[cfg(any(feature = "cloud", feature = "standalone"))]
 static WS_DIR: LazyLock<String> = LazyLock::new(|| format!("{}/..", env!("CARGO_MANIFEST_DIR")));
-
-#[cfg(any(feature = "cloud", feature = "standalone"))]
 static TARGET_DIR: LazyLock<String> = LazyLock::new(|| {
     env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| format!("{}/target", &*WS_DIR))
 });
@@ -175,7 +176,7 @@ async fn start_node() -> anyhow::Result<NodeHandle> {
     use fs_extra::dir::{CopyOptions, copy};
 
     let node_dir = Path::new(&format!("{}/../.node", env!("CARGO_MANIFEST_DIR")))
-        .join(NODE_VERSION.trim())
+        .join(LATEST_NODE_VERSION.trim())
         .canonicalize()
         .context("create path to node directory")?;
     let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
@@ -189,7 +190,10 @@ async fn start_node() -> anyhow::Result<NodeHandle> {
     {
         use std::os::unix::fs::PermissionsExt;
 
-        let chain_dir = temp_dir.path().join(NODE_VERSION.trim()).join("chain");
+        let chain_dir = temp_dir
+            .path()
+            .join(LATEST_NODE_VERSION.trim())
+            .join("chain");
         if chain_dir.exists() {
             fs::set_permissions(&chain_dir, fs::Permissions::from_mode(0o777))
                 .context("set permissions on chain directory")?;
@@ -207,19 +211,21 @@ async fn start_node() -> anyhow::Result<NodeHandle> {
 
     let node_path = temp_dir
         .path()
-        .join(NODE_VERSION.trim())
+        .join(LATEST_NODE_VERSION.trim())
         .display()
         .to_string();
 
-    let node_container =
-        GenericImage::new("ghcr.io/midnight-ntwrk/midnight-node", NODE_VERSION.trim())
-            .with_wait_for(WaitFor::message_on_stderr("9944"))
-            .with_mount(Mount::bind_mount(node_path, "/node"))
-            .with_env_var("SHOW_CONFIG", "false")
-            .with_env_var("CFG_PRESET", "dev")
-            .start()
-            .await
-            .context("start node container")?;
+    let node_container = GenericImage::new(
+        "ghcr.io/midnight-ntwrk/midnight-node",
+        LATEST_NODE_VERSION.trim(),
+    )
+    .with_wait_for(WaitFor::message_on_stderr("9944"))
+    .with_mount(Mount::bind_mount(node_path, "/node"))
+    .with_env_var("SHOW_CONFIG", "false")
+    .with_env_var("CFG_PRESET", "dev")
+    .start()
+    .await
+    .context("start node container")?;
 
     let node_port = node_container
         .get_host_port_ipv4(9944)
