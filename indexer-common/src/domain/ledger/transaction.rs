@@ -11,11 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{
-    ContractAction, ContractAttributes, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
-    SerializedContractAddress, SerializedContractState, SerializedTransactionIdentifier,
-    TransactionHash, TransactionStructure, ViewingKey,
-    ledger::{Error, SerializableV7_0_0Ext, TransactionV7_0_0},
+use crate::{
+    domain::{
+        ContractAction, ContractAttributes, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
+        SerializedContractAddress, SerializedContractState, SerializedTransactionIdentifier,
+        TransactionHash, TransactionStructure, ViewingKey,
+        ledger::{Error, SerializableV7_0_0Ext, TransactionV7_0_0},
+    },
+    infra::ledger_db::v7_0_0::LedgerDb as LedgerDbV7_0_0,
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
@@ -27,17 +30,16 @@ use midnight_ledger_v7_0_0::structure::{
     SystemTransaction as LedgerSystemTransactionV7_0_0,
 };
 use midnight_serialize_v7_0_0::tagged_deserialize as tagged_deserialize_v7_0_0;
-use midnight_storage_v7_0_0::DefaultDB as DefaultDBV7_0_0;
+use midnight_storage_v7_0_0::db::DB as DBV7_0_0;
 use midnight_transient_crypto_v7_0_0::{
     encryption::SecretKey as SecretKeyV7_0_0, proofs::Proof as ProofV7_0_0,
 };
 use midnight_zswap_v7_0_0::Offer as OfferV7_0_0;
 use std::error::Error as StdError;
 
-/// Facade for `Transaction` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum Transaction {
-    V7_0_0(TransactionV7_0_0),
+    V7_0_0(TransactionV7_0_0<LedgerDbV7_0_0>),
 }
 
 impl Transaction {
@@ -263,9 +265,9 @@ fn serialize_contract_address(
         .map_err(|error| Error::Serialize("ContractAddressV7_0_0", error))
 }
 
-fn can_decrypt_v7_0_0(
+fn can_decrypt_v7_0_0<D: DBV7_0_0>(
     key: &SecretKeyV7_0_0,
-    offer: &OfferV7_0_0<ProofV7_0_0, DefaultDBV7_0_0>,
+    offer: &OfferV7_0_0<ProofV7_0_0, D>,
 ) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
@@ -277,16 +279,56 @@ fn can_decrypt_v7_0_0(
     })
 }
 
+#[cfg(feature = "cloud")]
 #[cfg(test)]
 mod tests {
-    use crate::domain::{PROTOCOL_VERSION_000_020_000, ViewingKey, ledger::Transaction};
+    use crate::{
+        domain::{PROTOCOL_VERSION_000_020_000, ViewingKey, ledger::Transaction},
+        infra::{ledger_db, migrations, pool::postgres::PostgresPool},
+    };
+    use anyhow::Context;
     use bip32::{DerivationPath, XPrv};
     use midnight_zswap_v7_0_0::keys::{SecretKeys, Seed};
-    use std::{fs, str::FromStr};
+    use sqlx::postgres::PgSslMode;
+    use std::{error::Error as StdError, fs, str::FromStr, time::Duration};
+    use testcontainers::{ImageExt, runners::AsyncRunner};
+    use testcontainers_modules::postgres::Postgres;
 
     /// Notice: The raw test data is created with `generate_txs.sh`.
-    #[test]
-    fn test_deserialize_relevant() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_deserialize_relevant() -> Result<(), Box<dyn StdError>> {
+        let postgres_container = Postgres::default()
+            .with_db_name("indexer")
+            .with_user("indexer")
+            .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
+            .with_tag("17.1-alpine")
+            .start()
+            .await
+            .context("start Postgres container")?;
+        let postgres_port = postgres_container
+            .get_host_port_ipv4(5432)
+            .await
+            .context("get Postgres port")?;
+
+        let config = crate::infra::pool::postgres::Config {
+            host: "localhost".to_string(),
+            port: postgres_port,
+            dbname: "indexer".to_string(),
+            user: "indexer".to_string(),
+            password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
+            sslmode: PgSslMode::Prefer,
+            max_connections: 10,
+            idle_timeout: Duration::from_secs(60),
+            max_lifetime: Duration::from_secs(5 * 60),
+        };
+
+        let pool = PostgresPool::new(config).await.context("create pool")?;
+        migrations::postgres::run(&pool)
+            .await
+            .context("run migrations")?;
+
+        ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+
         let transaction = fs::read(format!("{}/tests/tx_1_2_2.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
         let transaction = Transaction::deserialize(transaction, PROTOCOL_VERSION_000_020_000)
@@ -304,6 +346,8 @@ mod tests {
         assert!(transaction.relevant(viewing_key(1)));
         assert!(!transaction.relevant(viewing_key(2)));
         assert!(transaction.relevant(viewing_key(3)));
+
+        Ok(())
     }
 
     fn viewing_key(n: u8) -> ViewingKey {

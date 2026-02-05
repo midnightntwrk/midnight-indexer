@@ -110,8 +110,6 @@ The Chain Indexer, Indexer API, Wallet Indexer and SPO Indexer can be run as sep
 | APP__INFRA__STORAGE__USER | PostgreSQL database user | `indexer` |
 | APP__INFRA__PUB_SUB__URL | NATS URL | `localhost:4222` |
 | APP__INFRA__PUB_SUB__USERNAME | NATS username | `indexer` |
-| APP__INFRA__LEDGER_STATE_STORAGE__URL | NATS URL | `localhost:4222` |
-| APP__INFRA__LEDGER_STATE_STORAGE__USERNAME | NATS username | `indexer` |
 | APP__INFRA__NODE__URL | WebSocket Endpoint of Midnight Node | `ws://localhost:9944` |
 
 For the full set of configuration options see [config.yaml](chain-indexer/config.yaml).
@@ -127,8 +125,6 @@ For the full set of configuration options see [config.yaml](chain-indexer/config
 | APP__INFRA__STORAGE__USER | PostgreSQL database user | `indexer` |
 | APP__INFRA__PUB_SUB__URL | NATS URL | `localhost:4222` |
 | APP__INFRA__PUB_SUB__USERNAME | NATS username | `indexer` |
-| APP__INFRA__LEDGER_STATE_STORAGE__URL | NATS URL | `localhost:4222` |
-| APP__INFRA__LEDGER_STATE_STORAGE__USERNAME | NATS username | `indexer` |
 | APP__INFRA__API__PORT | Port of the GraphQL API | `8088` |
 | APP__INFRA__SECRET | Hex-encoded 32-byte secret to encrypt stored sensitive data | - |
 
@@ -202,7 +198,6 @@ It is recommended to provide these environment variables via a `~/.midnight-inde
 ```bash
 export APP__INFRA__STORAGE__PASSWORD=postgres
 export APP__INFRA__PUB_SUB__PASSWORD=nats
-export APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD=nats
 export APP__INFRA__SECRET=303132333435363738393031323334353637383930313233343536373839303132
 # export APP__INFRA__NODE__BLOCKFROST_ID=<your-blockfrost-api-key>  # only required for spo-indexer
 ```

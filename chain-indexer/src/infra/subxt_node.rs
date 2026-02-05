@@ -16,8 +16,8 @@ mod runtimes;
 
 use crate::{
     domain::{
-        SystemParametersChange, TransactionFees,
-        node::{Block, BlockInfo, Node, RegularTransaction, SystemTransaction, Transaction},
+        BlockRef, SystemParametersChange, TransactionFees,
+        node::{Block, Node, RegularTransaction, SystemTransaction, Transaction},
     },
     infra::subxt_node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
 };
@@ -309,11 +309,11 @@ impl Node for SubxtNode {
 
     async fn highest_blocks(
         &self,
-    ) -> Result<impl Stream<Item = Result<BlockInfo, Self::Error>> + Send, Self::Error> {
+    ) -> Result<impl Stream<Item = Result<BlockRef, Self::Error>> + Send, Self::Error> {
         let highest_blocks = self
             .subscribe_finalized_blocks(None)
             .await?
-            .map_ok(|block| BlockInfo {
+            .map_ok(|block| BlockRef {
                 hash: block.hash().0.into(),
                 height: block.number(),
             });
@@ -323,10 +323,10 @@ impl Node for SubxtNode {
 
     fn finalized_blocks<'a>(
         &'a mut self,
-        after: Option<BlockInfo>,
+        after: Option<BlockRef>,
     ) -> impl Stream<Item = Result<Block, Self::Error>> + use<'a> {
         let (after_hash, after_height) = after
-            .map(|BlockInfo { hash, height }| (hash, height))
+            .map(|BlockRef { hash, height }| (hash, height))
             .unzip();
         debug!(
             after_hash:?,

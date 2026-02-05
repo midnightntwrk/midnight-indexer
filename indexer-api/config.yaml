@@ -14,16 +14,13 @@ infra:
     idle_timeout: "1m"
     max_lifetime: "5m"
 
+  ledger_db:
+    cache_size: 1024
+
   pub_sub:
     url: "localhost:4222"
     username: "indexer"
     max_reconnects: 4
-
-  ledger_state_storage:
-    url: "localhost:4222"
-    username: "indexer"
-    max_reconnects: 4
-    num_replicas: 1
 
   api:
     address: "0.0.0.0"

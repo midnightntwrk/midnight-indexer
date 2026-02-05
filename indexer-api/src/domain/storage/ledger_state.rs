@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{ProtocolVersion, SerializedLedgerState};
+use indexer_common::domain::{ProtocolVersion, SerializedLedgerStateKey};
 
 use crate::domain::storage::NoopStorage;
 
@@ -20,17 +20,17 @@ pub trait LedgerStateStorage
 where
     Self: Clone + Send + Sync + 'static,
 {
-    /// Get the ledger state and protocol version.
-    async fn get_ledger_state(
+    /// Get the ledger state key and protocol version.
+    async fn get_highest_ledger_state(
         &self,
-    ) -> Result<Option<(SerializedLedgerState, ProtocolVersion)>, sqlx::Error>;
+    ) -> Result<Option<(ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error>;
 }
 
 #[allow(unused_variables)]
 impl LedgerStateStorage for NoopStorage {
-    async fn get_ledger_state(
+    async fn get_highest_ledger_state(
         &self,
-    ) -> Result<Option<(SerializedLedgerState, ProtocolVersion)>, sqlx::Error> {
+    ) -> Result<Option<(ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
         unimplemented!()
     }
 }

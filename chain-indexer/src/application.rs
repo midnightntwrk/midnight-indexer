@@ -16,17 +16,16 @@ mod metrics;
 use crate::{
     application::metrics::Metrics,
     domain::{
-        Block, LedgerState, SystemParametersChange, Transaction,
-        node::{self, BlockInfo, Node},
+        Block, BlockRef, LedgerState, SystemParametersChange, Transaction,
+        node::{self, Node},
         storage::Storage,
     },
 };
 use anyhow::{Context, bail};
 use async_stream::stream;
-use byte_unit::{Byte, UnitType};
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
-use indexer_common::domain::{BlockIndexed, NetworkId, Publisher, UnshieldedUtxoIndexed, ledger};
+use indexer_common::domain::{BlockIndexed, NetworkId, Publisher, UnshieldedUtxoIndexed};
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use serde::Deserialize;
@@ -45,7 +44,6 @@ use tokio::{
 pub struct Config {
     pub network_id: NetworkId,
     pub blocks_buffer: usize,
-    pub save_ledger_state_after: u32,
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
 }
@@ -60,17 +58,21 @@ pub async fn run(
     let Config {
         network_id,
         blocks_buffer,
-        save_ledger_state_after,
         caught_up_max_distance,
         caught_up_leeway,
     } = config;
 
-    // Initialize highest block info.
-    let highest_block_info = storage
-        .get_highest_block_info()
+    // Get info from highest block.
+    let (highest_block_ref, highest_protocol_version_and_ledger_state_key) = match storage
+        .get_highest_block()
         .await
-        .context("get highest block")?;
-    let highest_block_height = highest_block_info.map(|info| info.height);
+        .context("get highest block")?
+    {
+        Some((r, v, k)) => (Some(r), Some((v, k))),
+        None => (None, None),
+    };
+
+    let highest_block_height = highest_block_ref.map(|info| info.height);
     info!(highest_block_height:?; "starting indexing");
 
     // Initialize metrics.
@@ -88,66 +90,14 @@ pub async fn run(
         contract_action_count,
     );
 
-    // Load ledger state.
-    let (mut ledger_state, mut ledger_state_block_height) = storage
-        .get_ledger_state()
-        .await
-        .context("load ledger state")?
-        .map(|(ledger_state, block_height, protocol_version)| {
-            let ledger_state = ledger::LedgerState::deserialize(&ledger_state, protocol_version)
-                .context("deserialize ledger state")?;
-            Ok::<_, anyhow::Error>((ledger_state.into(), Some(block_height)))
-        })
-        .transpose()?
-        .unwrap_or_else(|| (LedgerState::new(network_id.clone()), None));
-
-    // Reset ledger state if storage is behind ledger state storage (which should not happen during
-    // normal operations, but e.g. by a database reset).
-    if ledger_state_block_height > highest_block_height {
-        ledger_state_block_height = None;
-        ledger_state = LedgerState::new(network_id);
-    }
-
-    // Apply transactions to ledger state from saved ledger state block height (exclusively) to
-    // highest saved block height (inclusively); save ledger state thereafter.
-    if let Some(highest_block_height) = highest_block_height
-        && ledger_state_block_height < Some(highest_block_height)
-    {
-        debug!(ledger_state_block_height:?, highest_block_height; "updating ledger state");
-
-        // Start from zero (genesis) for None, else add one to start from the next block after
-        // the one for which the ledger state was saved.
-        let start_block_height = ledger_state_block_height.map(|n| n + 1).unwrap_or_default();
-        let mut protocol_version = None;
-
-        for block_height in start_block_height..=highest_block_height {
-            let block_transactions = storage
-                .get_block_transactions(block_height)
-                .await
-                .context("get block transactions")?;
-
-            ledger_state
-                .apply_stored_transactions(
-                    block_transactions.transactions.iter(),
-                    block_transactions.block_parent_hash,
-                    block_transactions.block_timestamp,
-                )
-                .with_context(|| {
-                    format!("apply transactions for block at height {block_height}")
-                })?;
-
-            if block_height == highest_block_height {
-                protocol_version = Some(block_transactions.protocol_version);
-            }
+    // Load/initialize ledger state.
+    let mut ledger_state = match highest_protocol_version_and_ledger_state_key {
+        Some((protocol_version, ledger_state_key)) => {
+            LedgerState::load(&ledger_state_key, protocol_version).context("load ledger state")?
         }
 
-        let ledger_state = ledger_state.serialize().context("serialize ledger state")?;
-        let protocol_version = protocol_version.expect("protocol version is defined");
-        storage
-            .save_ledger_state(&ledger_state, highest_block_height, protocol_version)
-            .await
-            .context("save ledger state")?;
-    }
+        None => LedgerState::new(network_id),
+    };
 
     let highest_block_on_node = Arc::new(RwLock::new(None));
 
@@ -188,14 +138,13 @@ pub async fn run(
         let node = node.clone();
 
         async move {
-            let blocks = blocks(highest_block_info, node.clone())
+            let blocks = node_blocks(highest_block_ref, node.clone())
                 .map(ready)
                 .buffered(blocks_buffer);
             let mut blocks = pin!(blocks);
             let mut caught_up = false;
 
             while let Some(next_ledger_state) = get_and_index_block(
-                save_ledger_state_after,
                 caught_up_max_distance,
                 caught_up_leeway,
                 &mut blocks,
@@ -237,10 +186,10 @@ pub async fn run(
     }
 }
 
-/// An infinite stream of [Block]s, neither with duplicates, nor with gaps or otherwise unexpected
-/// blocks.
-fn blocks<N>(
-    mut highest_block: Option<BlockInfo>,
+/// An infinite stream of node blocks, neither with duplicates, nor with gaps or otherwise
+/// unexpected blocks.
+fn node_blocks<N>(
+    mut highest_block: Option<BlockRef>,
     mut node: N,
 ) -> impl Stream<Item = Result<node::Block, N::Error>>
 where
@@ -255,7 +204,7 @@ where
                 if let Ok(block) = &block {
                     let parent_hash = block.parent_hash;
                     let (highest_hash, highest_height) = highest_block
-                        .map(|BlockInfo { hash, height }| (hash, height))
+                        .map(|BlockRef { hash, height }| (hash, height))
                         .unzip();
 
                     // In case of unexpected blocks, e.g. because of a gap or the node lagging
@@ -286,12 +235,11 @@ where
 #[allow(clippy::too_many_arguments)]
 #[trace]
 async fn get_and_index_block<E, N>(
-    save_ledger_state_after: u32,
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
     blocks: &mut (impl Stream<Item = Result<node::Block, E>> + Unpin),
     ledger_state: LedgerState,
-    highest_block_on_node: &Arc<RwLock<Option<BlockInfo>>>,
+    highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
@@ -309,7 +257,6 @@ where
     match block {
         Some(block) => {
             let ledger_state = index_block(
-                save_ledger_state_after,
                 caught_up_max_distance,
                 caught_up_leeway,
                 block,
@@ -340,12 +287,11 @@ async fn get_next_block<E>(
 #[allow(clippy::too_many_arguments)]
 #[trace]
 async fn index_block<N>(
-    save_ledger_state_after: u32,
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
     block: node::Block,
     mut ledger_state: LedgerState,
-    highest_block_on_node: &Arc<RwLock<Option<BlockInfo>>>,
+    highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
@@ -357,11 +303,14 @@ where
 {
     let (mut block, transactions) = block.into();
 
+    // Apply transactions.
     let (transactions, ledger_parameters) = ledger_state
-        .apply_node_transactions(transactions, block.parent_hash, block.timestamp)
+        .apply_transactions(transactions, block.parent_hash, block.timestamp)
         .context("apply node transactions to ledger state")?;
+    block.ledger_parameters = ledger_parameters.serialize()?;
     debug!(transactions:?; "transactions applied to ledger state");
 
+    // Validate ledger state.
     if ledger_state.zswap_merkle_tree_root() != block.zswap_state_root {
         bail!(
             "zswap state root mismatch for block {} at height {}",
@@ -370,46 +319,40 @@ where
         );
     }
 
-    block.ledger_parameters = ledger_parameters.serialize()?;
-
     // Determine whether caught up, also allowing to fall back a little in that state.
-    let node_block_height = highest_block_on_node
-        .read()
-        .map(|BlockInfo { height, .. }| height)
-        .unwrap_or_default();
-
     // Use saturating subtraction to handle the case where streams are temporarily out of order.
     // The two subscriptions (highest_blocks and finalized_blocks) are independent with no
     // ordering guarantee, so node_block_height < block.height may happen under certain rare
     // conditions. This will produce 0 when node_block_height < block.height, treating it as
     // caught up.
+    let node_block_height = highest_block_on_node
+        .read()
+        .map(|BlockRef { height, .. }| height)
+        .unwrap_or_default();
     let distance = node_block_height.saturating_sub(block.height);
     let max_distance = if *caught_up {
         caught_up_max_distance + caught_up_leeway
     } else {
         caught_up_max_distance
     };
-
     let old_caught_up = *caught_up;
     *caught_up = distance <= max_distance;
     if old_caught_up != *caught_up {
         info!(caught_up:%; "caught-up status changed")
     }
 
+    // Persist ledger state.
+    let (new_ledger_state, ledger_state_key) =
+        ledger_state.0.persist().context("persist ledger state")?;
+    ledger_state = new_ledger_state.into();
+
     // Save and update the block with its related data.
-    let save_ledger_state = *caught_up || block.height % save_ledger_state_after == 0;
-    let serialize_ledger_state = if save_ledger_state {
-        let ledger_state = ledger_state.serialize().context("serialize ledger state")?;
-        Some(ledger_state)
-    } else {
-        None
-    };
     let max_transaction_id = storage
         .save_block(
             &block,
             &transactions,
             &block.dust_registration_events,
-            serialize_ledger_state.as_ref(),
+            &ledger_state_key,
         )
         .await
         .context("save block")?;
@@ -418,27 +361,6 @@ where
     update_system_parameters(&block, storage, node)
         .await
         .context("update system parameters")?;
-
-    let ledger_state_size = serialize_ledger_state.map(|s| s.len());
-
-    info!(
-        hash:% = block.hash,
-        height = block.height,
-        parent_hash:% = block.parent_hash,
-        protocol_version:% = block.protocol_version,
-        distance,
-        caught_up = *caught_up,
-        ledger_state_size = ledger_state_size.map(format_bytes);
-        "block indexed"
-    );
-
-    metrics.update(
-        &block,
-        &transactions,
-        node_block_height,
-        *caught_up,
-        ledger_state_size,
-    );
 
     // Publish BlockIndexed.
     publisher
@@ -471,6 +393,19 @@ where
             .await
             .context("publish UnshieldedUtxoIndexed event")?;
     }
+
+    // Update metrics.
+    metrics.update(&block, &transactions, node_block_height, *caught_up);
+
+    info!(
+        hash:% = block.hash,
+        height = block.height,
+        parent_hash:% = block.parent_hash,
+        protocol_version:% = block.protocol_version,
+        distance,
+        caught_up = *caught_up;
+        "block indexed"
+    );
 
     Ok(ledger_state)
 }
@@ -557,22 +492,13 @@ where
     Ok(())
 }
 
-fn format_bytes(value: impl Into<Byte>) -> String {
-    let bytes = value.into().get_appropriate_unit(UnitType::Binary);
-
-    let value = bytes.get_value();
-    let unit = bytes.get_unit();
-
-    format!("{value:.3} {unit}")
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
-        application::blocks,
+        application::node_blocks,
         domain::{
-            SystemParametersChange,
-            node::{self, BlockInfo, Node},
+            BlockRef, SystemParametersChange,
+            node::{self, Node},
         },
     };
     use fake::{Fake, Faker};
@@ -585,7 +511,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blocks() -> Result<(), BoxError> {
-        let blocks = blocks(None, MockNode);
+        let blocks = node_blocks(None, MockNode);
         let heights = blocks
             .take(4)
             .map_ok(|block| block.height)
@@ -604,13 +530,13 @@ mod tests {
 
         async fn highest_blocks(
             &self,
-        ) -> Result<impl Stream<Item = Result<BlockInfo, Self::Error>>, Self::Error> {
+        ) -> Result<impl Stream<Item = Result<BlockRef, Self::Error>>, Self::Error> {
             Ok(stream::empty())
         }
 
         fn finalized_blocks(
             &mut self,
-            _highest_block: Option<BlockInfo>,
+            _highest_block: Option<BlockRef>,
         ) -> impl Stream<Item = Result<node::Block, Self::Error>> {
             stream::iter([&*BLOCK_0, &*BLOCK_1, &*BLOCK_2, &*BLOCK_3])
                 .map(|block| Ok(block.to_owned()))

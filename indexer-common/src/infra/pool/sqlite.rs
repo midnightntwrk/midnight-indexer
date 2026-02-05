@@ -28,7 +28,8 @@ pub struct SqlitePool(sqlx::SqlitePool);
 impl SqlitePool {
     /// Try to create a new [SqlitePool] with the given config.
     pub async fn new(config: Config) -> Result<Self, Error> {
-        let connect_options = config.try_into().map_err(Error::ConvertConfig)?;
+        let connect_options =
+            SqliteConnectOptions::try_from(config).map_err(Error::ConvertConfig)?;
         let inner = SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(connect_options)

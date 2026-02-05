@@ -8,16 +8,16 @@ application:
   caught_up_max_distance: 10
   caught_up_leeway: 5
   stake_refresh:
-    period_secs: 900   # every 15 minutes
-    page_size: 100     # scan this many pools per cycle
-    max_rps: 2         # throttle requests to avoid 402s
+    period_secs: 900 # every 15 minutes
+    page_size: 100 # scan this many pools per cycle
+    max_rps: 2 # throttle requests to avoid 402s
 
 infra:
   storage:
-    host: "localhost"         # use Docker service name inside Compose network
+    host: "localhost" # use Docker service name inside Compose network
     port: 5432
     dbname: "indexer"
-    user: "indexer"           # matches postgres service (POSTGRES_USER)
+    user: "indexer" # matches postgres service (POSTGRES_USER)
     sslmode: "prefer"
     max_connections: 10
     idle_timeout: "1m"
