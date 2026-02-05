@@ -150,7 +150,6 @@ For the full set of configuration options see [config.yaml](indexer-api/config.y
 For the full set of configuration options see [config.yaml](wallet-indexer/config.yaml).
 
 #### `spo-indexer` Configuration
-
 | Env Var | Meaning | Default |
 |---|---|---|
 | APP__APPLICATION__NETWORK_ID | Network ID | `undeployed` |
