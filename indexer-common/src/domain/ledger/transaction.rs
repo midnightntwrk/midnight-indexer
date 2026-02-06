@@ -287,7 +287,7 @@ fn can_decrypt_v7_0_0<D: DBV7_0_0>(
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{ViewingKey, ledger::Transaction},
+        domain::{ProtocolVersion, ViewingKey, ledger::Transaction},
         infra::{ledger_db, migrations, pool::postgres::PostgresPool},
     };
     use anyhow::Context;
@@ -335,7 +335,7 @@ mod tests {
 
         let transaction = fs::read(format!("{}/tests/tx_1_2_2.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(transaction, 0_020_000.into())
+        let transaction = Transaction::deserialize(transaction, ProtocolVersion::LATEST)
             .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));
@@ -344,7 +344,7 @@ mod tests {
 
         let transaction = fs::read(format!("{}/tests/tx_1_2_3.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(transaction, 0_020_000.into())
+        let transaction = Transaction::deserialize(transaction, ProtocolVersion::LATEST)
             .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));
