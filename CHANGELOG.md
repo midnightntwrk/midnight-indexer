@@ -4,22 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.1.0-alpha.3] - 2026-02-05
+## [3.1.0-rc.1] - 2026-02-06
 
 ### 🚀 Features
 
 - *(chain-indexer)* Fetch genesis cNight registrations from pallet storage (#733)
 - *(spo)* Integrate SPO indexer into midnight-indexer (#735)
+- Add support for node 0.21 (#761)
 
 ### 🐛 Bug Fixes
 
 - *(indexer-api)* Only stream relevant txs for active wallets (#743)
 - *(indexer-api)* Remove encode() call on varchar column in stakePoolOperators query (#753)
 
+### 🚜 Refactor
+
+- Use ledger storage for ledger state persistence (#694)
+
 ### ⚙️ Miscellaneous Tasks
 
 - *(indexer-api)* Include ledger parameters in block query (#745)
-- Use pre-built GHCR image for spo-indexer in docker-compose and remove unused NATS dependency (#752)
 - Add spo-indexer docs, clean up unused NATS config and misleading blockfrost placeholder (#754)
 
 ## [3.0.0] - 2026-01-28
