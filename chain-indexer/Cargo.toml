@@ -39,6 +39,10 @@ trait-variant      = { workspace = true }
 clap = { workspace = true, features = [ "derive" ] }
 fake = { workspace = true }
 
+[build-dependencies]
+anyhow    = { workspace = true }
+itertools = { workspace = true }
+
 [features]
 cloud      = [ "indexer-common/cloud" ]
 standalone = [ "indexer-common/standalone" ]

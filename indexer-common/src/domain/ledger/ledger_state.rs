@@ -14,7 +14,7 @@
 use crate::{
     domain::{
         ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, ByteArray, ByteVec,
-        IntentHash, LedgerEvent, NetworkId, Nonce, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
+        IntentHash, LedgerEvent, LedgerVersion, NetworkId, Nonce, ProtocolVersion,
         SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerStateKey,
         SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot, TokenType,
         TransactionResult, UnshieldedUtxo,
@@ -105,25 +105,27 @@ impl LedgerState {
         key: &SerializedLedgerStateKey,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-            let arena_key = TypedArenaKeyV7_0_0::<
-                LedgerStateV7_0_0<LedgerDbV7_0_0>,
-                <LedgerDbV7_0_0 as DBV7_0_0>::Hasher,
-            >::deserialize(&mut key.as_slice(), 0)
-            .map_err(|error| Error::Deserialize("TypedArenaKeyV7", error))?;
-            let ledger_state = default_storage_v7_0_0::<LedgerDbV7_0_0>()
-                .get(&arena_key)
-                .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
-            let ledger_state =
-                SpV7_0_0::into_inner(ledger_state).expect("loaded ledger state exists");
+        let ledger_state = match protocol_version.ledger_version()? {
+            LedgerVersion::V7 => {
+                let arena_key = TypedArenaKeyV7_0_0::<
+                    LedgerStateV7_0_0<LedgerDbV7_0_0>,
+                    <LedgerDbV7_0_0 as DBV7_0_0>::Hasher,
+                >::deserialize(&mut key.as_slice(), 0)
+                .map_err(|error| Error::Deserialize("TypedArenaKeyV7", error))?;
+                let ledger_state = default_storage_v7_0_0::<LedgerDbV7_0_0>()
+                    .get(&arena_key)
+                    .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
+                let ledger_state =
+                    SpV7_0_0::into_inner(ledger_state).expect("loaded ledger state exists");
 
-            Ok(Self::V7_0_0 {
-                ledger_state,
-                block_fullness: Default::default(),
-            })
-        } else {
-            Err(Error::InvalidProtocolVersion(protocol_version))
-        }
+                Self::V7_0_0 {
+                    ledger_state,
+                    block_fullness: Default::default(),
+                }
+            }
+        };
+
+        Ok(ledger_state)
     }
 
     pub fn persist(self) -> Result<(Self, SerializedLedgerStateKey), Error> {
@@ -413,13 +415,15 @@ impl ZswapStateRoot {
         zswap_state_root: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-            let digest = MerkleTreeDigestV7_0_0::deserialize(&mut zswap_state_root.as_ref(), 0)
-                .map_err(|error| Error::Deserialize("MerkleTreeDigestV7_0_0", error))?;
-            Ok(Self::V7_0_0(digest))
-        } else {
-            Err(Error::InvalidProtocolVersion(protocol_version))
-        }
+        let zswap_state_root = match protocol_version.ledger_version()? {
+            LedgerVersion::V7 => {
+                let digest = MerkleTreeDigestV7_0_0::deserialize(&mut zswap_state_root.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("MerkleTreeDigestV7_0_0", error))?;
+                Self::V7_0_0(digest)
+            }
+        };
+
+        Ok(zswap_state_root)
     }
 
     /// Serialize this zswap state root.

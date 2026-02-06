@@ -20,32 +20,48 @@ use std::{
 };
 use thiserror::Error;
 
-#[allow(clippy::zero_prefixed_literal)]
-pub const PROTOCOL_VERSION_000_020_000: ProtocolVersion = ProtocolVersion(000_020_000);
-
 /// The runtime specification version of the chain; defaults to 1, i.e. 0.0.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, From)]
 pub struct ProtocolVersion(pub u32);
 
 impl ProtocolVersion {
-    /// Get compatibility with given other [ProtocolVersion] based upon major and minor equality.
-    pub fn is_compatible(&self, other: ProtocolVersion) -> bool {
-        self.major() == other.major() && self.minor() == other.minor()
-    }
+    pub const LATEST: Self = Self(0_021_000);
 
     /// The major version, i.e. `1` in `1.2.3`.
-    pub fn major(&self) -> u32 {
+    pub fn major(self) -> u32 {
         self.0 / 1_000_000
     }
 
     /// The minor version, i.e. `2` in `1.2.3`.
-    pub fn minor(&self) -> u32 {
+    pub fn minor(self) -> u32 {
         self.0 / 1_000 % 1_000
     }
 
     /// The patch version, i.e. `3` in `1.2.3`.
-    pub fn patch(&self) -> u32 {
+    pub fn patch(self) -> u32 {
         self.0 % 1_000
+    }
+
+    pub fn ledger_version(self) -> Result<LedgerVersion, UnsupportedProtocolVersion> {
+        if self.is_compatible(0_020_000, 0_022_000) {
+            Ok(LedgerVersion::V7)
+        } else {
+            Err(UnsupportedProtocolVersion(self))
+        }
+    }
+
+    pub fn node_version(self) -> Result<NodeVersion, UnsupportedProtocolVersion> {
+        if self.is_compatible(0_020_000, 0_021_000) {
+            Ok(NodeVersion::V0_20)
+        } else if self.is_compatible(0_021_000, 0_022_000) {
+            Ok(NodeVersion::V0_21)
+        } else {
+            Err(UnsupportedProtocolVersion(self))
+        }
+    }
+
+    fn is_compatible(self, from: u32, to: u32) -> bool {
+        from <= self.0 && self.0 < to
     }
 }
 
@@ -77,10 +93,25 @@ impl Display for ProtocolVersion {
     }
 }
 
+#[derive(Debug, Error)]
+#[error("unsupported protocol version {0}")]
+pub struct UnsupportedProtocolVersion(ProtocolVersion);
+
 /// Error possibly returned by `ProtocolVersion::try_from<&[u8]>`.
 #[derive(Debug, Error)]
 #[error("cannot SCALE decode protocol version")]
 pub struct ScaleDecodeProtocolVersionError(#[from] parity_scale_codec::Error);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LedgerVersion {
+    V7,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeVersion {
+    V0_20,
+    V0_21,
+}
 
 #[cfg(test)]
 mod tests {

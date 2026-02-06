@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{LATEST_PROTOCOL_VERSION, storage::Storage},
+    domain::storage::Storage,
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
         v3::{
@@ -32,6 +32,7 @@ use crate::{
 };
 use async_graphql::{Context, Object};
 use fastrace::trace;
+use indexer_common::domain::ProtocolVersion;
 use std::marker::PhantomData;
 
 const DEFAULT_PERFORMANCE_LIMIT: i64 = 20;
@@ -234,7 +235,7 @@ where
             .map_err_into_client_error(|| "invalid Cardano reward address")?;
 
         let status_list = storage
-            .get_dust_generation_status(&address, LATEST_PROTOCOL_VERSION)
+            .get_dust_generation_status(&address, ProtocolVersion::LATEST)
             .await
             .map_err_into_server_error(|| "get DUST generation status")?;
 
