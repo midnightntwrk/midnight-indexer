@@ -60,7 +60,7 @@ use midnight_onchain_runtime_v7::context::BlockContext as BlockContextV7;
 use midnight_serialize_v7::{
     Deserializable as DeserializableV7, tagged_deserialize as tagged_deserialize_v7,
 };
-use midnight_storage_v7::{
+use midnight_storage_core_v7::{
     arena::{Sp as SpV7, TypedArenaKey as TypedArenaKeyV7},
     db::DB as DBV7,
     storage::default_storage as default_storage_v7,

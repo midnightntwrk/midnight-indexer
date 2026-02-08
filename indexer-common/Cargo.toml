@@ -34,9 +34,17 @@ midnight-coin-structure_v7   = { workspace = true }
 midnight-ledger_v7           = { workspace = true }
 midnight-onchain-runtime_v7  = { workspace = true }
 midnight-serialize_v7        = { workspace = true }
-midnight-storage_v7          = { workspace = true }
+midnight-storage-core_v7     = { workspace = true }
 midnight-transient-crypto_v7 = { workspace = true }
 midnight-zswap_v7            = { workspace = true }
+midnight-base-crypto_v8      = { workspace = true }
+midnight-coin-structure_v8   = { workspace = true }
+midnight-ledger_v8           = { workspace = true }
+midnight-onchain-runtime_v8  = { workspace = true }
+midnight-serialize_v8        = { workspace = true }
+midnight-storage-core_v8     = { workspace = true }
+midnight-transient-crypto_v8 = { workspace = true }
+midnight-zswap_v8            = { workspace = true }
 opentelemetry                = { workspace = true }
 opentelemetry_sdk            = { workspace = true }
 opentelemetry-otlp           = { workspace = true, features = [ "grpc-tonic" ] }
