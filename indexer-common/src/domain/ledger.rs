@@ -34,10 +34,15 @@ use midnight_ledger_v7::{
     dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V7,
     structure::ProofMarker as ProofMarkerV7,
 };
+use midnight_ledger_v8::{
+    dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V8,
+    structure::ProofMarker as ProofMarkerV8,
+};
 use midnight_serialize_v7::{
     Serializable as SerializableV7, Tagged as TaggedV7, tagged_serialize as tagged_serialize_v7,
 };
 use midnight_transient_crypto_v7::commitment::PureGeneratorPedersen as PureGeneratorPedersenV7;
+use midnight_transient_crypto_v8::commitment::PureGeneratorPedersen as PureGeneratorPedersenV8;
 use std::{io, string::FromUtf8Error};
 use thiserror::Error;
 
@@ -47,8 +52,17 @@ type TransactionV7<D> = midnight_ledger_v7::structure::Transaction<
     PureGeneratorPedersenV7,
     D,
 >;
+type TransactionV8<D> = midnight_ledger_v8::structure::Transaction<
+    SignatureV7,
+    ProofMarkerV8,
+    PureGeneratorPedersenV8,
+    D,
+>;
+
 type IntentV7<D> =
     midnight_ledger_v7::structure::Intent<SignatureV7, ProofMarkerV7, PureGeneratorPedersenV7, D>;
+type IntentV8<D> =
+    midnight_ledger_v8::structure::Intent<SignatureV7, ProofMarkerV8, PureGeneratorPedersenV8, D>;
 
 /// Ledger related errors.
 #[derive(Debug, Error)]
@@ -134,6 +148,12 @@ pub fn dust_parameters(protocol_version: ProtocolVersion) -> Result<DustParamete
             night_dust_ratio: INITIAL_DUST_PARAMETERS_V7.night_dust_ratio,
             generation_decay_rate: INITIAL_DUST_PARAMETERS_V7.generation_decay_rate,
             dust_grace_period: INITIAL_DUST_PARAMETERS_V7.dust_grace_period.as_seconds() as u64,
+        },
+
+        LedgerVersion::V8 => DustParameters {
+            night_dust_ratio: INITIAL_DUST_PARAMETERS_V8.night_dust_ratio,
+            generation_decay_rate: INITIAL_DUST_PARAMETERS_V8.generation_decay_rate,
+            dust_grace_period: INITIAL_DUST_PARAMETERS_V8.dust_grace_period.as_seconds() as u64,
         },
     };
 

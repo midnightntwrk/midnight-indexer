@@ -105,6 +105,7 @@ pub struct ScaleDecodeProtocolVersionError(#[from] parity_scale_codec::Error);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LedgerVersion {
     V7,
+    V8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

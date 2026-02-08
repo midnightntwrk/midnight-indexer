@@ -13,20 +13,18 @@
 
 use crate::domain::storage::Storage;
 use derive_more::derive::{Deref, From};
-use indexer_common::domain::{
-    ByteVec, NetworkId, ProtocolVersion, SerializedLedgerStateKey, ledger,
-};
+use indexer_common::domain::{ByteVec, ProtocolVersion, SerializedLedgerStateKey, ledger};
 use log::debug;
 use thiserror::Error;
 use tokio::sync::RwLock;
 
 #[derive(Debug)]
-pub struct LedgerStateCache(RwLock<LedgerState>);
+pub struct LedgerStateCache(RwLock<Option<LedgerState>>);
 
 impl LedgerStateCache {
     #[allow(missing_docs)]
-    pub fn new(network_id: NetworkId) -> Self {
-        Self(RwLock::new(LedgerState::new(network_id)))
+    pub fn new() -> Self {
+        Self(RwLock::new(None))
     }
 
     /// Create a collapsed update from the given start index to the given end index for the given
@@ -42,15 +40,22 @@ impl LedgerStateCache {
         let mut ledger_state_read = self.0.read().await;
 
         // Check if the current ledger state is stale and needs to be updated.
-        if end_index >= ledger_state_read.zswap_first_free() {
+        let first_free = ledger_state_read
+            .as_ref()
+            .map(|s| s.zswap_first_free())
+            .unwrap_or_default();
+        if end_index >= first_free {
             // Release the read lock and acquire a write lock.
             drop(ledger_state_read);
             let mut ledger_state_write = self.0.write().await;
 
             // Check if the ledger state has been updated in the meantime.
-            let first_free = ledger_state_write.zswap_first_free();
+            let first_free = ledger_state_write
+                .as_ref()
+                .map(|s| s.zswap_first_free())
+                .unwrap_or_default();
             if end_index >= first_free {
-                debug!(end_index, first_free; "stale ledger state, loading from storage");
+                debug!(end_index, first_free; "outdated ledger state, loading from storage");
 
                 let Some((protocol_version, ledger_state_key)) =
                     storage.get_highest_ledger_state().await?
@@ -59,7 +64,7 @@ impl LedgerStateCache {
                 };
 
                 let ledger_state = LedgerState::load(protocol_version, &ledger_state_key)?;
-                *ledger_state_write = ledger_state;
+                *ledger_state_write = Some(ledger_state);
             }
 
             ledger_state_read = ledger_state_write.downgrade();
@@ -67,8 +72,10 @@ impl LedgerStateCache {
 
         debug!(start_index, end_index; "creating collapsed update");
 
-        let collapsed_update =
-            ledger_state_read.collapsed_update(start_index, end_index, protocol_version)?;
+        let collapsed_update = ledger_state_read
+            .as_ref()
+            .expect("ledger_state is some")
+            .collapsed_update(start_index, end_index, protocol_version)?;
 
         Ok(collapsed_update)
     }
@@ -91,10 +98,6 @@ pub enum LedgerStateCacheError {
 pub struct LedgerState(ledger::LedgerState);
 
 impl LedgerState {
-    pub fn new(network_id: NetworkId) -> Self {
-        Self(ledger::LedgerState::new(network_id))
-    }
-
     pub fn load(
         protocol_version: ProtocolVersion,
         key: &SerializedLedgerStateKey,

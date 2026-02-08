@@ -25,7 +25,9 @@ use anyhow::{Context, bail};
 use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
-use indexer_common::domain::{BlockIndexed, NetworkId, Publisher, UnshieldedUtxoIndexed};
+use indexer_common::domain::{
+    BlockIndexed, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxoIndexed,
+};
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use serde::Deserialize;
@@ -96,7 +98,9 @@ pub async fn run(
             LedgerState::load(&ledger_state_key, protocol_version).context("load ledger state")?
         }
 
-        None => LedgerState::new(network_id),
+        None => {
+            LedgerState::new(network_id, ProtocolVersion::LATEST).context("create ledger state")?
+        }
     };
 
     let highest_block_on_node = Arc::new(RwLock::new(None));
@@ -143,6 +147,7 @@ pub async fn run(
                 .buffered(blocks_buffer);
             let mut blocks = pin!(blocks);
             let mut caught_up = false;
+            let mut parent_block_timestamp = 0;
 
             while let Some(next_ledger_state) = get_and_index_block(
                 caught_up_max_distance,
@@ -151,6 +156,7 @@ pub async fn run(
                 ledger_state,
                 &highest_block_on_node,
                 &mut caught_up,
+                &mut parent_block_timestamp,
                 &mut storage,
                 &publisher,
                 &metrics,
@@ -241,6 +247,7 @@ async fn get_and_index_block<E, N>(
     ledger_state: LedgerState,
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
+    parent_block_timestamp: &mut u64,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
@@ -263,6 +270,7 @@ where
                 ledger_state,
                 highest_block_on_node,
                 caught_up,
+                parent_block_timestamp,
                 storage,
                 publisher,
                 metrics,
@@ -293,6 +301,7 @@ async fn index_block<N>(
     mut ledger_state: LedgerState,
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
+    parent_block_timestamp: &mut u64,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
@@ -305,8 +314,14 @@ where
 
     // Apply transactions.
     let (transactions, ledger_parameters) = ledger_state
-        .apply_transactions(transactions, block.parent_hash, block.timestamp)
+        .apply_transactions(
+            transactions,
+            block.parent_hash,
+            block.timestamp,
+            *parent_block_timestamp,
+        )
         .context("apply node transactions to ledger state")?;
+    *parent_block_timestamp = block.timestamp;
     block.ledger_parameters = ledger_parameters.serialize()?;
     debug!(transactions:?; "transactions applied to ledger state");
 

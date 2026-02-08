@@ -15,11 +15,13 @@ use crate::domain::{ByteArray, LedgerVersion, ProtocolVersion, VIEWING_KEY_LEN, 
 use fastrace::trace;
 use midnight_serialize_v7::Deserializable as DeserializableV7;
 use midnight_transient_crypto_v7::encryption::SecretKey as SecretKeyV7;
+use midnight_transient_crypto_v8::encryption::SecretKey as SecretKeyV8;
 
 /// Facade for `SecretKey` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum SecretKey {
     V7(SecretKeyV7),
+    V8(SecretKeyV8),
 }
 
 impl SecretKey {
@@ -35,6 +37,12 @@ impl SecretKey {
                     .map_err(|error| Error::Deserialize("SecretKeyV7", error))?;
                 Self::V7(secret_key)
             }
+
+            LedgerVersion::V8 => {
+                let secret_key = SecretKeyV8::deserialize(&mut secret_key.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("SecretKeyV8", error))?;
+                Self::V8(secret_key)
+            }
         };
 
         Ok(key)
@@ -44,6 +52,7 @@ impl SecretKey {
     pub fn expose_secret(&self) -> ByteArray<VIEWING_KEY_LEN> {
         match self {
             Self::V7(secret_key) => secret_key.repr().into(),
+            Self::V8(secret_key) => secret_key.repr().into(),
         }
     }
 }
