@@ -3085,9 +3085,7 @@ dependencies = [
  "midnight-onchain-runtime 2.0.1",
  "midnight-onchain-runtime 3.0.0-rc.1",
  "midnight-serialize 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
- "midnight-serialize 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.0.0-rc.1)",
- "midnight-storage-core 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
- "midnight-storage-core 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.0.0-rc.1)",
+ "midnight-storage-core",
  "midnight-transient-crypto 2.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
  "midnight-transient-crypto 2.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.0.0-rc.1)",
  "midnight-zswap 7.0.1",
@@ -4285,7 +4283,7 @@ dependencies = [
  "derive-where",
  "midnight-base-crypto 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
  "midnight-serialize 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
- "midnight-storage-core 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
+ "midnight-storage-core",
  "parking_lot",
  "rand 0.8.5",
  "serde",
@@ -4302,7 +4300,7 @@ dependencies = [
  "derive-where",
  "midnight-base-crypto 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
  "midnight-serialize 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
- "midnight-storage-core 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
+ "midnight-storage-core",
  "parking_lot",
  "rand 0.8.5",
  "serde",
@@ -4325,31 +4323,7 @@ dependencies = [
  "lru 0.16.3",
  "midnight-base-crypto 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
  "midnight-serialize 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
- "midnight-storage-macros 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
- "parking_lot",
- "rand 0.8.5",
- "serde",
- "sha2 0.10.9",
- "sysinfo",
- "tempfile",
-]
-
-[[package]]
-name = "midnight-storage-core"
-version = "1.0.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.0.0-rc.1#2add56ccd1117a104c2cb99a54a0423fdd209860"
-dependencies = [
- "archery",
- "crypto",
- "derive-where",
- "fake",
- "hex",
- "itertools 0.14.0",
- "konst",
- "lru 0.16.3",
- "midnight-base-crypto 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.0.0-rc.1)",
- "midnight-serialize 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.0.0-rc.1)",
- "midnight-storage-macros 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.0.0-rc.1)",
+ "midnight-storage-macros",
  "parking_lot",
  "rand 0.8.5",
  "serde",
@@ -4364,17 +4338,6 @@ version = "1.0.0"
 source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1#ab570e9d37751534d4787f0d1e47d2a5b4b13d3f"
 dependencies = [
  "midnight-serialize-macros 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
- "proc-macro2",
- "quote 1.0.44",
- "syn 2.0.114",
-]
-
-[[package]]
-name = "midnight-storage-macros"
-version = "1.0.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.0.0-rc.1#2add56ccd1117a104c2cb99a54a0423fdd209860"
-dependencies = [
- "midnight-serialize-macros 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.0.0-rc.1)",
  "proc-macro2",
  "quote 1.0.44",
  "syn 2.0.114",

@@ -18,8 +18,8 @@ use crate::domain::{
 use fastrace::trace;
 use midnight_coin_structure_v7::coin::TokenType as TokenTypeV7;
 use midnight_onchain_runtime_v7::state::ContractState as ContractStateV7;
-use midnight_serialize_v7::tagged_deserialize as tagged_deserialize_v7;
-use midnight_storage_core_v7::{DefaultDB as DefaultDBV7, arena::Sp as SpV7};
+use midnight_serialize_v7_8::tagged_deserialize as tagged_deserialize_v7;
+use midnight_storage_core_v7_8::{DefaultDB as DefaultDBV7, arena::Sp as SpV7};
 
 /// Facade for `ContractState` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]

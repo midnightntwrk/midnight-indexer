@@ -34,7 +34,7 @@ use midnight_ledger_v7::{
     dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V7,
     structure::ProofMarker as ProofMarkerV7,
 };
-use midnight_serialize_v7::{
+use midnight_serialize_v7_8::{
     Serializable as SerializableV7, Tagged as TaggedV7, tagged_serialize as tagged_serialize_v7,
 };
 use midnight_transient_crypto_v7::commitment::PureGeneratorPedersen as PureGeneratorPedersenV7;

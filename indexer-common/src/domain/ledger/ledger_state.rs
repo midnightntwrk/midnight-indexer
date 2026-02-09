@@ -58,10 +58,10 @@ use midnight_ledger_v7::{
     verify::WellFormedStrictness as WellFormedStrictnessV7,
 };
 use midnight_onchain_runtime_v7::context::BlockContext as BlockContextV7;
-use midnight_serialize_v7::{
+use midnight_serialize_v7_8::{
     Deserializable as DeserializableV7, tagged_deserialize as tagged_deserialize_v7,
 };
-use midnight_storage_core_v7::{
+use midnight_storage_core_v7_8::{
     arena::{Sp as SpV7, TypedArenaKey as TypedArenaKeyV7},
     db::DB as DBV7,
     storage::default_storage as default_storage_v7,
@@ -104,10 +104,10 @@ use midnight_ledger_v8::{
     verify::WellFormedStrictness as WellFormedStrictnessV8,
 };
 use midnight_onchain_runtime_v8::context::BlockContext as BlockContextV8;
-use midnight_serialize_v8::{
+use midnight_serialize_v7_8::{
     Deserializable as DeserializableV8, tagged_deserialize as tagged_deserialize_v8,
 };
-use midnight_storage_core_v8::{
+use midnight_storage_core_v7_8::{
     arena::{Sp as SpV8, TypedArenaKey as TypedArenaKeyV8},
     db::DB as DBV8,
     storage::default_storage as default_storage_v8,

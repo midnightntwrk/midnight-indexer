@@ -29,8 +29,8 @@ use midnight_ledger_v7::structure::{
     ContractAction as ContractActionV7, StandardTransaction as StandardTransactionV7,
     SystemTransaction as LedgerSystemTransactionV7,
 };
-use midnight_serialize_v7::tagged_deserialize as tagged_deserialize_v7;
-use midnight_storage_core_v7::db::DB as DBV7;
+use midnight_serialize_v7_8::tagged_deserialize as tagged_deserialize_v7;
+use midnight_storage_core_v7_8::db::DB as DBV7;
 use midnight_transient_crypto_v7::{
     encryption::SecretKey as SecretKeyV7, proofs::Proof as ProofV7,
 };
