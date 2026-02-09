@@ -22,6 +22,7 @@ use crate::{
         ledger::{Error, IntentV7, SerializableV7Ext, TaggedSerializableV7Ext, TransactionV7},
     },
     infra::ledger_db::v7::LedgerDb as LedgerDbV7,
+    infra::ledger_db::v8::LedgerDb as LedgerDbV8,
 };
 use fastrace::trace;
 use itertools::Itertools;
@@ -70,6 +71,53 @@ use midnight_transient_crypto_v7::merkle_tree::{
     MerkleTreeDigest as MerkleTreeDigestV7, TreeInsertionPath as TreeInsertionPathV7,
 };
 use midnight_zswap_v7::ledger::State as ZswapStateV7;
+
+use midnight_base_crypto_v8::{
+    cost_model::{
+        FixedPoint as FixedPointV8, NormalizedCost as NormalizedCostV8,
+        SyntheticCost as SyntheticCostV8,
+    },
+    hash::{HashOutput as HashOutputV8, persistent_commit as persistent_commit_v8},
+    time::Timestamp as TimestampV8,
+};
+use midnight_coin_structure_v8::{
+    coin::{
+        NIGHT as NIGHTV8, UnshieldedTokenType as UnshieldedTokenTypeV8,
+        UserAddress as UserAddressV8,
+    },
+    contract::ContractAddress as ContractAddressV8,
+};
+use midnight_ledger_v8::{
+    dust::{
+        DustGenerationInfo as DustGenerationInfoV8, InitialNonce as InitialNonceV8,
+        QualifiedDustOutput as QualifiedDustOutputV8,
+    },
+    events::{Event as EventV8, EventDetails as EventDetailsV8},
+    semantics::{
+        TransactionContext as TransactionContextV8, TransactionResult as TransactionResultV8,
+    },
+    structure::{
+        LedgerParameters as LedgerParametersV8, LedgerState as LedgerStateV8,
+        OutputInstructionUnshielded as OutputInstructionUnshieldedV8,
+        SystemTransaction as SystemTransactionV8, Utxo as UtxoV8,
+    },
+    verify::WellFormedStrictness as WellFormedStrictnessV8,
+};
+use midnight_onchain_runtime_v8::context::BlockContext as BlockContextV8;
+use midnight_serialize_v8::{
+    Deserializable as DeserializableV8, tagged_deserialize as tagged_deserialize_v8,
+};
+use midnight_storage_core_v8::{
+    arena::{Sp as SpV8, TypedArenaKey as TypedArenaKeyV8},
+    db::DB as DBV8,
+    storage::default_storage as default_storage_v8,
+};
+use midnight_transient_crypto_v8::merkle_tree::{
+    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV8,
+    MerkleTreeDigest as MerkleTreeDigestV8, TreeInsertionPath as TreeInsertionPathV8,
+};
+use midnight_zswap_v8::ledger::State as ZswapStateV8;
+
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 const OUTPUT_INDEX_ZERO: u32 = 0;
@@ -86,15 +134,24 @@ pub enum LedgerState {
         ledger_state: LedgerStateV7<LedgerDbV7>,
         block_fullness: SyntheticCostV7,
     },
+
+    V8 {
+        ledger_state: LedgerStateV8<LedgerDbV8>,
+        block_fullness: SyntheticCostV8,
+    },
 }
 
 impl LedgerState {
     #[allow(missing_docs)]
-    pub fn new(network_id: NetworkId) -> Self {
-        Self::V7 {
-            ledger_state: LedgerStateV7::new(network_id),
-            block_fullness: Default::default(),
-        }
+    pub fn new(network_id: NetworkId, protocol_version: ProtocolVersion) -> Result<Self, Error> {
+        let ledger_state = match protocol_version.ledger_version()? {
+            LedgerVersion::V7 => Self::V7 {
+                ledger_state: LedgerStateV7::new(network_id),
+                block_fullness: Default::default(),
+            },
+        };
+
+        Ok(ledger_state)
     }
 
     pub fn load(
@@ -141,6 +198,28 @@ impl LedgerState {
 
                 let ledger_state = SpV7::into_inner(ledger_state).expect("ledger state exists");
                 let ledger_state = LedgerState::V7 {
+                    ledger_state,
+                    block_fullness,
+                };
+
+                Ok((ledger_state, key))
+            }
+
+            LedgerState::V8 {
+                ledger_state,
+                block_fullness,
+            } => {
+                let mut ledger_state = SpV8::new(ledger_state);
+                ledger_state.persist();
+                default_storage_v8::<LedgerDbV8>().with_backend(|b| b.flush_all_changes_to_db());
+
+                let key = ledger_state
+                    .as_typed_key()
+                    .serialize_v8()
+                    .map_err(|error| Error::Serialize("TypedArenaKeyV8", error))?;
+
+                let ledger_state = SpV8::into_inner(ledger_state).expect("ledger state exists");
+                let ledger_state = LedgerState::V8 {
                     ledger_state,
                     block_fullness,
                 };

@@ -25,7 +25,9 @@ use anyhow::{Context, bail};
 use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
-use indexer_common::domain::{BlockIndexed, NetworkId, Publisher, UnshieldedUtxoIndexed};
+use indexer_common::domain::{
+    BlockIndexed, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxoIndexed,
+};
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use serde::Deserialize;
@@ -96,7 +98,9 @@ pub async fn run(
             LedgerState::load(&ledger_state_key, protocol_version).context("load ledger state")?
         }
 
-        None => LedgerState::new(network_id),
+        None => {
+            LedgerState::new(network_id, ProtocolVersion::LATEST).context("create ledger state")?
+        }
     };
 
     let highest_block_on_node = Arc::new(RwLock::new(None));

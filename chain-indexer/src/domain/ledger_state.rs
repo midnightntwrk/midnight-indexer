@@ -33,8 +33,10 @@ impl DerefMut for LedgerState {
 }
 
 impl LedgerState {
-    pub fn new(network_id: NetworkId) -> Self {
-        Self(indexer_common::domain::ledger::LedgerState::new(network_id))
+    pub fn new(network_id: NetworkId, protocol_version: ProtocolVersion) -> Result<Self, Error> {
+        indexer_common::domain::ledger::LedgerState::new(network_id, protocol_version)
+            .map_err(Error::Create)
+            .map(Into::into)
     }
 
     pub fn load(
@@ -178,6 +180,9 @@ impl LedgerState {
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error(transparent)]
+    Create(indexer_common::domain::ledger::Error),
+
     #[error(transparent)]
     Load(indexer_common::domain::ledger::Error),
 

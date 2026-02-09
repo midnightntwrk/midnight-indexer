@@ -163,7 +163,7 @@ where
     S: Storage,
     B: Subscriber,
 {
-    let zswap_state_cache = LedgerStateCache::new(network_id.clone());
+    let zswap_state_cache = LedgerStateCache::new();
 
     let v3_app = v3::make_app(
         network_id,
