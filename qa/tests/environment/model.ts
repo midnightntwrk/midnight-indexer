@@ -22,6 +22,7 @@ export enum EnvironmentName {
   NODEDEV01 = 'node-dev-01',
   DEVNET = 'devnet',
   QANET = 'qanet',
+  QANET_DEV = 'qanet.dev',
   PREVIEW = 'preview',
   PREPROD = 'preprod',
   TESTNET = 'testnet',
@@ -46,14 +47,14 @@ type HostConfig = {
 
 type HostEntry =
   | {
-      env: EnvironmentName;
-      indexerHost: string;
-      nodeHost: string;
-    }
+    env: EnvironmentName;
+    indexerHost: string;
+    nodeHost: string;
+  }
   | {
-      env: EnvironmentName;
-      domain: string;
-    };
+    env: EnvironmentName;
+    domain: string;
+  };
 
 const hostEntries: HostEntry[] = [
   {
@@ -61,7 +62,8 @@ const hostEntries: HostEntry[] = [
     indexerHost: 'localhost:8088',
     nodeHost: 'localhost:9944',
   },
-  { env: EnvironmentName.QANET, domain: 'qanet.dev.midnight.network' },
+  { env: EnvironmentName.QANET, domain: 'qanet.midnight.network' },
+  { env: EnvironmentName.QANET_DEV, domain: 'qanet.dev.midnight.network' },
   { env: EnvironmentName.NODEDEV01, domain: 'node-dev-01.dev.midnight.network' },
   { env: EnvironmentName.DEVNET, domain: 'devnet.midnight.network' },
   { env: EnvironmentName.PREVIEW, domain: 'preview.midnight.network' },
@@ -88,6 +90,41 @@ const hostConfigByEnvName: Record<EnvironmentName, HostConfig> = hostEntries.red
   {} as Record<EnvironmentName, HostConfig>,
 );
 
+/**
+ * Resolves the supported node version for the current environment.
+ *
+ * This supports both NODE_VERSIONS (new, multi-version format) and
+ * NODE_VERSION (legacy, single-version format), as different environments
+ * still use different files.
+ *
+ * NOTE: Once all indexer environments are on >= 3.1.0-rc.1, support for
+ * NODE_VERSION can be removed and this helper simplified.
+ */
+function readSupportedNodeVersion(): string {
+  const versionsPath = '../../NODE_VERSIONS';
+  const versionPath = '../../NODE_VERSION';
+
+  if (fs.existsSync(versionsPath)) {
+    const versions = fs
+      .readFileSync(versionsPath, 'utf8')
+      .split('\n')
+      .map((v) => v.trim())
+      .filter(Boolean);
+
+    if (versions.length === 0) {
+      throw new Error('NODE_VERSIONS file exists but is empty');
+    }
+
+    return versions[1]; // stable choice
+  }
+
+  if (fs.existsSync(versionPath)) {
+    return fs.readFileSync(versionPath, 'utf8').trim();
+  }
+
+  throw new Error('Neither NODE_VERSIONS nor NODE_VERSION file found');
+}
+
 export class Environment {
   private readonly envName: EnvironmentName;
   private readonly isUndeployed: boolean;
@@ -107,7 +144,7 @@ export class Environment {
     if (!rawEnv || !validEnvNames.includes(rawEnv as EnvironmentName)) {
       throw new Error(
         `Invalid or missing TARGET_ENV: "${rawEnv}". ` +
-          `Expected one of: \n  ${validEnvNames.map((name) => `"${name}"`).join(',\n  ')}`,
+        `Expected one of: \n  ${validEnvNames.map((name) => `"${name}"`).join(',\n  ')}`,
       );
     }
     this.envName = rawEnv as EnvironmentName;
@@ -133,7 +170,7 @@ export class Environment {
     // we read the NODE_VERSION file and use the version from the file.
     // 2. If the NODE_TOOLKIT_VERSION is specified as an environment variable, use it. otherwise
     // we use the same version as the NODE_TAG.
-    const supportedNodeVersion = fs.readFileSync('../../NODE_VERSION', 'utf8').trim();
+    const supportedNodeVersion = readSupportedNodeVersion();
     this.nodeTag = process.env.NODE_TAG || supportedNodeVersion;
     this.nodeToolkitTag = process.env.NODE_TOOLKIT_TAG || supportedNodeVersion;
     log.debug(`Using NODE_TAG: ${this.nodeTag}`);
@@ -164,6 +201,7 @@ export class Environment {
       case EnvironmentName.PREVIEW:
       case EnvironmentName.NODEDEV01:
       case EnvironmentName.QANET:
+      case EnvironmentName.QANET_DEV:
         return CardanoNetwork.PREVIEW;
       default:
         throw new Error(`Unsupported environment name: ${this.envName}`);
