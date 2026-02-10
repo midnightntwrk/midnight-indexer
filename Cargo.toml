@@ -78,7 +78,7 @@ sha2                         = { version = "0.10" }
 sqlx                         = { version = "0.8" }
 stream-cancel                = { version = "0.8" }
 subxt                        = { version = "0.44" }
-tempfile                     = { version = "3.24" }
+tempfile                     = { version = "3.25" }
 testcontainers               = { version = "0.26" }
 testcontainers-modules       = { version = "0.14" }
 thiserror                    = { version = "2.0" }
