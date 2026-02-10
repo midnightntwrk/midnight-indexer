@@ -172,11 +172,11 @@ actions themselves so that they can assert on the outcome of those actions.
 
 
 ```bash
-# Start Toolkit Postgres before running E2E tests
-bash qa/scripts/start-toolkit-postgres.sh
-
 # Startup a local environment from genesis block, without test data
 bash qa/scripts/startup-localenv-from-genesis.sh
+
+# Start Toolkit Postgres before running E2E tests
+bash qa/scripts/start-toolkit-postgres.sh
 cd qa/tests
 TARGET_ENV=undeployed yarn test:e2e
 ```

@@ -45,7 +45,7 @@ async fn run() -> anyhow::Result<()> {
     use indexer_common::{
         cipher::make_cipher,
         config::ConfigExt,
-        infra::{ledger_state_storage, migrations, pool, pub_sub},
+        infra::{ledger_db, migrations, pool, pub_sub},
         telemetry,
     };
     use log::info;
@@ -80,10 +80,11 @@ async fn run() -> anyhow::Result<()> {
     );
 
     let InfraConfig {
-        secret,
-        node_config,
         storage_config,
+        ledger_db_config,
+        node_config,
         api_config,
+        secret,
     } = infra_config;
 
     let pool = pool::sqlite::SqlitePool::new(storage_config)
@@ -97,16 +98,18 @@ async fn run() -> anyhow::Result<()> {
 
     let cipher = make_cipher(secret).context("make cipher")?;
 
-    let ledger_state_storage = ledger_state_storage::in_mem::InMemLedgerStateStorage::default();
-
     let pub_sub = pub_sub::in_mem::InMemPubSub::default();
+
+    ledger_db::init(ledger_db_config)
+        .await
+        .context("initialize ledger db")?;
 
     let chain_indexer = task::spawn({
         let node = SubxtNode::new(node_config)
             .await
             .context("create SubxtNode")?;
-        let storage =
-            chain_indexer::infra::storage::Storage::new(pool.clone(), ledger_state_storage.clone());
+        let storage = chain_indexer::infra::storage::Storage::new(pool.clone());
+
         let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
         chain_indexer::application::run(
@@ -120,11 +123,7 @@ async fn run() -> anyhow::Result<()> {
 
     let indexer_api = task::spawn({
         let subscriber = pub_sub.subscriber();
-        let storage = indexer_api::infra::storage::Storage::new(
-            cipher.clone(),
-            pool.clone(),
-            ledger_state_storage.clone(),
-        );
+        let storage = indexer_api::infra::storage::Storage::new(cipher.clone(), pool.clone());
         let api = AxumApi::new(api_config, storage, subscriber.clone());
 
         indexer_api::application::run(application_config.clone().into(), api, subscriber)

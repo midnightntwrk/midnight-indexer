@@ -22,6 +22,9 @@ pub struct Config {
     #[serde(rename = "storage")]
     pub storage_config: indexer_common::infra::pool::postgres::Config,
 
+    #[serde(rename = "ledger_db")]
+    pub ledger_db_config: indexer_common::infra::ledger_db::Config,
+
     #[cfg(feature = "cloud")]
     #[serde(rename = "pub_sub")]
     pub pub_sub_config: indexer_common::infra::pub_sub::nats::Config,

@@ -11,7 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "standalone")]
-pub mod in_mem;
-#[cfg(feature = "cloud")]
-pub mod nats;
+#[cfg_attr(docsrs, doc(cfg(feature = "cloud")))]
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct Config {
+    #[serde(rename = "storage")]
+    pub storage_config: indexer_common::infra::pool::postgres::Config,
+
+    #[serde(rename = "node")]
+    pub node_config: crate::infra::subtx_node::Config,
+}

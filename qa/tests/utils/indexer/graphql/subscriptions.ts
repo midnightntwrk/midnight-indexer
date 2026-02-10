@@ -73,6 +73,9 @@ const UNSHIELDED_TX_SUBSCRIPTION_FRAGMENT = `    ... on UnshieldedTransaction {
           value
           tokenType
           outputIndex
+          ctime
+          initialNonce
+          registeredForDustGeneration
           createdAtTransaction{
               hash
               ... on RegularTransaction {

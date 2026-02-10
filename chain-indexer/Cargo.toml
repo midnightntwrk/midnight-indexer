@@ -17,7 +17,6 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 [dependencies]
 anyhow             = { workspace = true }
 async-stream       = { workspace = true }
-byte-unit          = { workspace = true }
 derive_more        = { workspace = true, features = [ "from" ] }
 fastrace           = { workspace = true, features = [ "enable" ] }
 futures            = { workspace = true }
@@ -39,6 +38,10 @@ trait-variant      = { workspace = true }
 [dev-dependencies]
 clap = { workspace = true, features = [ "derive" ] }
 fake = { workspace = true }
+
+[build-dependencies]
+anyhow    = { workspace = true }
+itertools = { workspace = true }
 
 [features]
 cloud      = [ "indexer-common/cloud" ]

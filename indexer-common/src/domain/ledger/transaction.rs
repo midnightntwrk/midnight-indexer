@@ -11,33 +11,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{
-    ContractAction, ContractAttributes, PROTOCOL_VERSION_000_020_000, ProtocolVersion,
-    SerializedContractAddress, SerializedContractState, SerializedTransactionIdentifier,
-    TransactionHash, TransactionStructure, ViewingKey,
-    ledger::{Error, SerializableV7_0_0Ext, TransactionV7_0_0},
+use crate::{
+    domain::{
+        ContractAction, ContractAttributes, LedgerVersion, ProtocolVersion,
+        SerializedContractAddress, SerializedContractState, SerializedTransactionIdentifier,
+        TransactionHash, TransactionStructure, ViewingKey,
+        ledger::{Error, SerializableV7Ext, TransactionV7},
+    },
+    infra::ledger_db::v7::LedgerDb as LedgerDbV7,
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
-use midnight_coin_structure_v7_0_0::{
-    coin::Info as InfoV7_0_0, contract::ContractAddress as ContractAddressV7_0_0,
+use midnight_coin_structure_v7::{
+    coin::Info as InfoV7, contract::ContractAddress as ContractAddressV7,
 };
-use midnight_ledger_v7_0_0::structure::{
-    ContractAction as ContractActionV7_0_0, StandardTransaction as StandardTransactionV7_0_0,
-    SystemTransaction as LedgerSystemTransactionV7_0_0,
+use midnight_ledger_v7::structure::{
+    ContractAction as ContractActionV7, StandardTransaction as StandardTransactionV7,
+    SystemTransaction as LedgerSystemTransactionV7,
 };
-use midnight_serialize_v7_0_0::tagged_deserialize as tagged_deserialize_v7_0_0;
-use midnight_storage_v7_0_0::DefaultDB as DefaultDBV7_0_0;
-use midnight_transient_crypto_v7_0_0::{
-    encryption::SecretKey as SecretKeyV7_0_0, proofs::Proof as ProofV7_0_0,
+use midnight_serialize_v7::tagged_deserialize as tagged_deserialize_v7;
+use midnight_storage_v7::db::DB as DBV7;
+use midnight_transient_crypto_v7::{
+    encryption::SecretKey as SecretKeyV7, proofs::Proof as ProofV7,
 };
-use midnight_zswap_v7_0_0::Offer as OfferV7_0_0;
+use midnight_zswap_v7::Offer as OfferV7;
 use std::error::Error as StdError;
 
-/// Facade for `Transaction` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum Transaction {
-    V7_0_0(TransactionV7_0_0),
+    V7(TransactionV7<LedgerDbV7>),
 }
 
 impl Transaction {
@@ -47,31 +49,33 @@ impl Transaction {
         transaction: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-            let transaction = tagged_deserialize_v7_0_0(&mut transaction.as_ref())
-                .map_err(|error| Error::Deserialize("LedgerTransactionV7_0_0", error))?;
-            Ok(Self::V7_0_0(transaction))
-        } else {
-            Err(Error::InvalidProtocolVersion(protocol_version))
-        }
+        let transaction = match protocol_version.ledger_version()? {
+            LedgerVersion::V7 => {
+                let transaction = tagged_deserialize_v7(&mut transaction.as_ref())
+                    .map_err(|error| Error::Deserialize("LedgerTransactionV7", error))?;
+                Self::V7(transaction)
+            }
+        };
+
+        Ok(transaction)
     }
 
     /// Get the hash.
     pub fn hash(&self) -> TransactionHash {
         match self {
-            Self::V7_0_0(transaction) => transaction.transaction_hash().0.0.into(),
+            Self::V7(transaction) => transaction.transaction_hash().0.0.into(),
         }
     }
 
     /// Get the identifiers.
     pub fn identifiers(&self) -> Result<Vec<SerializedTransactionIdentifier>, Error> {
         match self {
-            Self::V7_0_0(transaction) => transaction
+            Self::V7(transaction) => transaction
                 .identifiers()
                 .map(|identifier| {
                     let identifier = identifier
-                        .serialize_v7_0_0()
-                        .map_err(|error| Error::Serialize("TransactionIdentifierV7_0_0", error))?;
+                        .serialize_v7()
+                        .map_err(|error| Error::Serialize("TransactionIdentifierV7", error))?;
                     Ok(identifier)
                 })
                 .collect(),
@@ -89,12 +93,12 @@ impl Transaction {
         F: Future<Output = Result<SerializedContractState, E>>,
     {
         match self {
-            Self::V7_0_0(transaction) => match transaction {
-                TransactionV7_0_0::Standard(standard_transaction) => {
+            Self::V7(transaction) => match transaction {
+                TransactionV7::Standard(standard_transaction) => {
                     let contract_actions = futures::stream::iter(standard_transaction.actions())
                         .then(|(_, contract_action)| async {
                             match contract_action {
-                                ContractActionV7_0_0::Deploy(deploy) => {
+                                ContractActionV7::Deploy(deploy) => {
                                     let address = serialize_contract_address(deploy.address())?;
                                     let state = get_contract_state(address.clone()).await.map_err(
                                         |error| {
@@ -109,7 +113,7 @@ impl Transaction {
                                     })
                                 }
 
-                                ContractActionV7_0_0::Call(call) => {
+                                ContractActionV7::Call(call) => {
                                     let address = serialize_contract_address(call.address)?;
                                     let state = get_contract_state(address.clone()).await.map_err(
                                         |error| {
@@ -119,7 +123,7 @@ impl Transaction {
                                     let entry_point =
                                         String::from_utf8(call.entry_point.as_ref().to_owned())
                                             .map_err(|error| {
-                                                Error::FromUtf8("EntryPointBufV7_0_0", error)
+                                                Error::FromUtf8("EntryPointBufV7", error)
                                             })?;
 
                                     Ok(ContractAction {
@@ -129,7 +133,7 @@ impl Transaction {
                                     })
                                 }
 
-                                ContractActionV7_0_0::Maintain(update) => {
+                                ContractActionV7::Maintain(update) => {
                                     let address = serialize_contract_address(update.address)?;
                                     let state = get_contract_state(address.clone()).await.map_err(
                                         |error| {
@@ -151,7 +155,7 @@ impl Transaction {
                     Ok(contract_actions)
                 }
 
-                TransactionV7_0_0::ClaimRewards(_) => Ok(vec![]),
+                TransactionV7::ClaimRewards(_) => Ok(vec![]),
             },
         }
     }
@@ -159,8 +163,8 @@ impl Transaction {
     /// Get the structure of this transaction for fees calculation.
     pub fn structure(&self, size: usize) -> TransactionStructure {
         match self {
-            Self::V7_0_0(transaction) => match transaction {
-                TransactionV7_0_0::Standard(standard_transaction) => {
+            Self::V7(transaction) => match transaction {
+                TransactionV7::Standard(standard_transaction) => {
                     let contract_action_count = standard_transaction.actions().count();
                     let identifier_count = transaction.identifiers().count();
 
@@ -182,7 +186,7 @@ impl Transaction {
                     }
                 }
 
-                TransactionV7_0_0::ClaimRewards(_) => TransactionStructure {
+                TransactionV7::ClaimRewards(_) => TransactionStructure {
                     segment_count: 1,
                     estimated_input_count: 1,
                     estimated_output_count: 1,
@@ -196,30 +200,30 @@ impl Transaction {
     // Check if this transaction belongs to the given viewing key.
     pub fn relevant(&self, viewing_key: ViewingKey) -> bool {
         match self {
-            Self::V7_0_0(transaction) => match transaction {
-                TransactionV7_0_0::Standard(StandardTransactionV7_0_0 {
+            Self::V7(transaction) => match transaction {
+                TransactionV7::Standard(StandardTransactionV7 {
                     guaranteed_coins,
                     fallible_coins,
                     ..
                 }) => {
-                    let secret_key = SecretKeyV7_0_0::from_repr(&viewing_key.expose_secret().0)
-                        .expect("SecretKeyV7_0_0 can be created from repr");
+                    let secret_key = SecretKeyV7::from_repr(&viewing_key.expose_secret().0)
+                        .expect("SecretKeyV7 can be created from repr");
 
                     let can_decrypt_guaranteed_coins = guaranteed_coins
                         .as_ref()
-                        .map(|guaranteed_coins| can_decrypt_v7_0_0(&secret_key, guaranteed_coins))
+                        .map(|guaranteed_coins| can_decrypt_v7(&secret_key, guaranteed_coins))
                         .unwrap_or_default();
 
                     let can_decrypt_fallible_coins = || {
                         fallible_coins
                             .values()
-                            .any(|fallible_coins| can_decrypt_v7_0_0(&secret_key, &fallible_coins))
+                            .any(|fallible_coins| can_decrypt_v7(&secret_key, &fallible_coins))
                     };
 
                     can_decrypt_guaranteed_coins || can_decrypt_fallible_coins()
                 }
 
-                TransactionV7_0_0::ClaimRewards(_) => false,
+                TransactionV7::ClaimRewards(_) => false,
             },
         }
     }
@@ -228,7 +232,7 @@ impl Transaction {
 /// Facade for `SystemTransaction` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum SystemTransaction {
-    V7_0_0(LedgerSystemTransactionV7_0_0),
+    V7(LedgerSystemTransactionV7),
 }
 
 impl SystemTransaction {
@@ -238,58 +242,97 @@ impl SystemTransaction {
         transaction: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
-        if protocol_version.is_compatible(PROTOCOL_VERSION_000_020_000) {
-            let transaction = tagged_deserialize_v7_0_0(&mut transaction.as_ref())
-                .map_err(|error| Error::Deserialize("LedgerSystemTransactionV7_0_0", error))?;
-            Ok(Self::V7_0_0(transaction))
-        } else {
-            Err(Error::InvalidProtocolVersion(protocol_version))
-        }
+        let transaction = match protocol_version.ledger_version()? {
+            LedgerVersion::V7 => {
+                let transaction = tagged_deserialize_v7(&mut transaction.as_ref())
+                    .map_err(|error| Error::Deserialize("LedgerSystemTransactionV7", error))?;
+                Self::V7(transaction)
+            }
+        };
+
+        Ok(transaction)
     }
 
     /// Get the hash.
     pub fn hash(&self) -> TransactionHash {
         match self {
-            Self::V7_0_0(transaction) => transaction.transaction_hash().0.0.into(),
+            Self::V7(transaction) => transaction.transaction_hash().0.0.into(),
         }
     }
 }
 
 fn serialize_contract_address(
-    address: ContractAddressV7_0_0,
+    address: ContractAddressV7,
 ) -> Result<SerializedContractAddress, Error> {
     address
-        .serialize_v7_0_0()
-        .map_err(|error| Error::Serialize("ContractAddressV7_0_0", error))
+        .serialize_v7()
+        .map_err(|error| Error::Serialize("ContractAddressV7", error))
 }
 
-fn can_decrypt_v7_0_0(
-    key: &SecretKeyV7_0_0,
-    offer: &OfferV7_0_0<ProofV7_0_0, DefaultDBV7_0_0>,
-) -> bool {
+fn can_decrypt_v7<D: DBV7>(key: &SecretKeyV7, offer: &OfferV7<ProofV7, D>) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
     let mut ciphertexts = outputs.chain(transient);
 
     ciphertexts.any(|ciphertext| {
-        key.decrypt::<InfoV7_0_0>(&(*ciphertext).to_owned().into())
+        key.decrypt::<InfoV7>(&(*ciphertext).to_owned().into())
             .is_some()
     })
 }
 
+#[cfg(feature = "cloud")]
 #[cfg(test)]
 mod tests {
-    use crate::domain::{PROTOCOL_VERSION_000_020_000, ViewingKey, ledger::Transaction};
+    use crate::{
+        domain::{ProtocolVersion, ViewingKey, ledger::Transaction},
+        infra::{ledger_db, migrations, pool::postgres::PostgresPool},
+    };
+    use anyhow::Context;
     use bip32::{DerivationPath, XPrv};
-    use midnight_zswap_v7_0_0::keys::{SecretKeys, Seed};
-    use std::{fs, str::FromStr};
+    use midnight_zswap_v7::keys::{SecretKeys, Seed};
+    use sqlx::postgres::PgSslMode;
+    use std::{error::Error as StdError, fs, str::FromStr, time::Duration};
+    use testcontainers::{ImageExt, runners::AsyncRunner};
+    use testcontainers_modules::postgres::Postgres;
 
     /// Notice: The raw test data is created with `generate_txs.sh`.
-    #[test]
-    fn test_deserialize_relevant() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_deserialize_relevant() -> Result<(), Box<dyn StdError>> {
+        let postgres_container = Postgres::default()
+            .with_db_name("indexer")
+            .with_user("indexer")
+            .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
+            .with_tag("17.1-alpine")
+            .start()
+            .await
+            .context("start Postgres container")?;
+        let postgres_port = postgres_container
+            .get_host_port_ipv4(5432)
+            .await
+            .context("get Postgres port")?;
+
+        let config = crate::infra::pool::postgres::Config {
+            host: "localhost".to_string(),
+            port: postgres_port,
+            dbname: "indexer".to_string(),
+            user: "indexer".to_string(),
+            password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
+            sslmode: PgSslMode::Prefer,
+            max_connections: 10,
+            idle_timeout: Duration::from_secs(60),
+            max_lifetime: Duration::from_secs(5 * 60),
+        };
+
+        let pool = PostgresPool::new(config).await.context("create pool")?;
+        migrations::postgres::run(&pool)
+            .await
+            .context("run migrations")?;
+
+        ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+
         let transaction = fs::read(format!("{}/tests/tx_1_2_2.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(transaction, PROTOCOL_VERSION_000_020_000)
+        let transaction = Transaction::deserialize(transaction, ProtocolVersion::LATEST)
             .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));
@@ -298,12 +341,14 @@ mod tests {
 
         let transaction = fs::read(format!("{}/tests/tx_1_2_3.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(transaction, PROTOCOL_VERSION_000_020_000)
+        let transaction = Transaction::deserialize(transaction, ProtocolVersion::LATEST)
             .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));
         assert!(!transaction.relevant(viewing_key(2)));
         assert!(transaction.relevant(viewing_key(3)));
+
+        Ok(())
     }
 
     fn viewing_key(n: u8) -> ViewingKey {

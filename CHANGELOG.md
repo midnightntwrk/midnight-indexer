@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0-rc.1] - 2026-02-06
+
+### 🚀 Features
+
+- *(chain-indexer)* Fetch genesis cNight registrations from pallet storage (#733)
+- *(spo)* Integrate SPO indexer into midnight-indexer (#735)
+- Add support for node 0.21 (#761)
+
+### 🐛 Bug Fixes
+
+- *(indexer-api)* Only stream relevant txs for active wallets (#743)
+- *(indexer-api)* Remove encode() call on varchar column in stakePoolOperators query (#753)
+
+### 🚜 Refactor
+
+- Use ledger storage for ledger state persistence (#694)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(indexer-api)* Include ledger parameters in block query (#745)
+- Add spo-indexer docs, clean up unused NATS config and misleading blockfrost placeholder (#754)
+
 ## [3.0.0] - 2026-01-28
 
 ### 🚀 Features
@@ -53,6 +75,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - *(nats)* Add num_replicas config for JetStream stream replication (#626)
 - *(api)* Validate Cardano reward address network against Midnight network (#620)
 - Add governance system parameters (D-Parameter and T&C) to GraphQL API (#637)
+- Support ledger v7.0.0 (#717)
+- Support node v0.20.0 (#720)
 
 ### 🐛 Bug Fixes
 

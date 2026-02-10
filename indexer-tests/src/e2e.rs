@@ -40,7 +40,7 @@ use anyhow::{Context, bail};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::infra::api::v3::{HexEncodable, viewing_key::ViewingKey};
-use indexer_common::domain::{NetworkId, PROTOCOL_VERSION_000_020_000};
+use indexer_common::domain::{NetworkId, ProtocolVersion};
 use itertools::Itertools;
 use reqwest::Client;
 use serde::Serialize;
@@ -783,7 +783,7 @@ async fn test_shielded_transactions_subscription(
     network_id: &NetworkId,
 ) -> anyhow::Result<()> {
     let session_id = ViewingKey::from(viewing_key(network_id))
-        .try_into_domain(network_id, PROTOCOL_VERSION_000_020_000)?
+        .try_into_domain(network_id, ProtocolVersion::LATEST)?
         .to_session_id()
         .hex_encode();
 

@@ -27,6 +27,7 @@ jobs:
     permissions:
       packages: write
     strategy:
+      fail-fast: false
       matrix:
         include:
           - name: chain-indexer
@@ -37,6 +38,8 @@ jobs:
             description: Midnight Wallet Indexer
           - name: indexer-standalone
             description: Midnight Indexer
+          - name: spo-indexer
+            description: Midnight SPO Indexer
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -51,13 +54,13 @@ jobs:
           echo "version=$version" | tee -a "$GITHUB_ENV"
 
       - name: Login to DockerHub
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
           password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
 
       - name: Login to GHCR
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: MidnightCI
@@ -123,6 +126,11 @@ jobs:
           docker version
           docker compose version
 
+      - name: Set toolchain
+        run: |
+          toolchain=$(grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/')
+          echo "RUST_VERSION=$toolchain" | tee -a "$GITHUB_ENV"
+
       - name: Validate Docker Compose syntax
         run: |
           echo "Validating Docker Compose syntax for ${{ matrix.profile }} profile..."
@@ -137,7 +145,7 @@ jobs:
           echo "version=$version" | tee -a "$GITHUB_ENV"
 
       - name: Login to GHCR
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: MidnightCI
@@ -157,27 +165,29 @@ jobs:
       - name: Set up Indexer Tag to target
         run: |
           echo "Raw tags output: ${{ steps.meta.outputs.tags }}"
-          tag_count=$(echo "${{ steps.meta.outputs.tags }}" | grep -c .)
-
-          if [ "$tag_count" -ne 1 ]; then
-            echo "Expected exactly one Docker tag, but got $tag_count:"
+          
+          # Filter "latest" for release tags
+          INDEXER_TAG=$(echo "${{ steps.meta.outputs.tags }}" | grep -v '^$' | grep -v '^latest$' | head -n1)
+          
+          if [ -z "$INDEXER_TAG" ]; then
+            echo "Failed to extract INDEXER_TAG from tags output"
+            echo "Available tags:"
+            echo "${{ steps.meta.outputs.tags }}"
             exit 1
           fi
-
-          # Extract the single tag
-          INDEXER_TAG=$(echo "${{ steps.meta.outputs.tags }}" | cut -d ':' -f2)
+          
           echo "Using INDEXER_TAG=$INDEXER_TAG"
           echo "INDEXER_TAG=$INDEXER_TAG" >> "$GITHUB_ENV"
 
       - name: Set up Node Tag to target
         run: |
-          # Use workflow dispatch input if provided, otherwise read from NODE_VERSION file
+          # Use workflow dispatch input if provided, otherwise read from NODE_VERSIONS file
           if [ -n "${{ github.event.inputs.node_tag }}" ]; then
             echo "Using node tag from workflow dispatch: ${{ github.event.inputs.node_tag }}"
             echo "NODE_TAG=${{ github.event.inputs.node_tag }}" >> "$GITHUB_ENV"
           else
-            echo "Reading node tag from NODE_VERSION file..."
-            node_tag=$(cat NODE_VERSION)
+            echo "Reading node tag from NODE_VERSIONS file..."
+            node_tag=$(tail -n 1 NODE_VERSIONS)
             echo "Using node tag: $node_tag"
             echo "NODE_TAG=$node_tag" >> "$GITHUB_ENV"
           fi

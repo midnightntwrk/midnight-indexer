@@ -11,39 +11,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io;
-
 use crate::{domain::storage::ledger_state::LedgerStateStorage, infra::storage::Storage};
-use indexer_common::domain::{
-    ABSelector, LedgerStateStorage as _, ProtocolVersion, SerializedLedgerState,
-};
+use indexer_common::domain::{ProtocolVersion, SerializedLedgerStateKey};
 use indoc::indoc;
 
 impl LedgerStateStorage for Storage {
-    async fn get_ledger_state(
+    async fn get_highest_ledger_state(
         &self,
-    ) -> Result<Option<(SerializedLedgerState, ProtocolVersion)>, sqlx::Error> {
+    ) -> Result<Option<(ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
         let query = indoc! {"
-            SELECT
-                protocol_version,
-                ab_selector
-            FROM ledger_state
-            WHERE id = 0
+            SELECT protocol_version, ledger_state_key
+            FROM blocks
+            ORDER BY height DESC
+            LIMIT 1
         "};
 
-        let Some((protocol_version, ab_selector)) = sqlx::query_as::<_, (i64, ABSelector)>(query)
+        sqlx::query_as::<_, (i64, SerializedLedgerStateKey)>(query)
             .fetch_optional(&*self.pool)
             .await?
-        else {
-            return Ok(None);
-        };
-
-        let ledger_state = self
-            .ledger_state_storage
-            .load(ab_selector.as_str())
-            .await
-            .map_err(|error| sqlx::Error::Io(io::Error::other(error)))?;
-
-        Ok(Some((ledger_state, (protocol_version as u32).into())))
+            .map(|(protocol_version, key)| Ok(((protocol_version as u32).into(), key)))
+            .transpose()
     }
 }

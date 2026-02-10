@@ -5,7 +5,7 @@ feature := "cloud"
 packages := "indexer-common chain-indexer wallet-indexer indexer-api indexer-standalone indexer-tests"
 rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/'`
 nightly := "nightly-2026-01-19"
-node_version := `cat NODE_VERSION`
+latest_node_version := `tail -n 1 NODE_VERSIONS`
 
 check:
     for package in {{packages}}; do \
@@ -51,7 +51,7 @@ test:
     fi
 
 doc:
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p indexer-common --no-deps --all-features
+    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p indexer-common --no-deps --features {{feature}}
     RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p chain-indexer  --no-deps --features {{feature}}
     RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p wallet-indexer --no-deps --features {{feature}}
     RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p indexer-api    --no-deps --features {{feature}}
@@ -72,6 +72,10 @@ generate-indexer-api-schema:
     cargo run -p indexer-api --bin indexer-api-cli print-api-schema-v3 > \
         indexer-api/graphql/schema-v3.graphql
 
+generate-spo-api-schema:
+    cargo run -p spo-api --features cloud --bin spo-api-cli print-api-schema-v1 > \
+        spo-api/graphql/schema-v1.graphql
+
 build-docker-image package profile="dev":
     tag=$(git rev-parse --short=8 HEAD) && \
     docker build \
@@ -84,7 +88,7 @@ build-docker-image package profile="dev":
 
 run-chain-indexer node="ws://localhost:9944" network_id="undeployed":
     docker compose up -d --wait postgres nats
-    RUST_LOG=chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,tracing::span=off,midnight_ledger=warn,info \
+    RUST_LOG=chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,tracing::span=off,midnight_ledger=warn,midnight_zswap=warn,info \
         CONFIG_FILE=chain-indexer/config.yaml \
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         APP__INFRA__NODE__URL={{node}} \
@@ -104,6 +108,14 @@ run-indexer-api network_id="undeployed":
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         cargo run -p indexer-api --bin indexer-api --features {{feature}}
 
+run-spo-indexer node="ws://localhost:9944" network_id="undeployed":
+    docker compose up -d --wait postgres
+    RUST_LOG=spo_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
+        CONFIG_FILE=spo-indexer/config.yaml \
+        APP__APPLICATION__NETWORK_ID={{network_id}} \
+        APP__INFRA__NODE__URL={{node}} \
+        cargo run -p spo-indexer --features {{feature}}
+
 run-indexer-standalone node="ws://localhost:9944" network_id="undeployed":
     mkdir -p target/data
     RUST_LOG=indexer=debug,chain_indexer=debug,wallet_indexer=debug,indexer_api=debug,indexer_common=debug,fastrace_opentelemetry=off,info \
@@ -116,18 +128,18 @@ run-indexer-standalone node="ws://localhost:9944" network_id="undeployed":
 update-node: generate-node-data get-node-metadata
 
 generate-node-data:
-    ./generate_node_data.sh {{node_version}}
+    ./generate_node_data.sh {{latest_node_version}}
 
 get-node-metadata:
-    ./get_node_metadata.sh {{node_version}}
+    ./get_node_metadata.sh {{latest_node_version}}
 
 generate-txs:
-    ./generate_txs.sh {{node_version}}
+    ./generate_txs.sh {{latest_node_version}}
 
 run-node:
     #!/usr/bin/env bash
     node_dir=$(mktemp -d)
-    cp -r ./.node/{{node_version}}/ $node_dir
+    cp -r ./.node/{{latest_node_version}}/ $node_dir
     # SIDECHAIN_BLOCK_BENEFICIARY specifies the wallet that receives block rewards and transaction fees (DUST).
     # This hex value is a public key that matches the one used in toolkit-e2e.sh.
     docker run \
@@ -137,4 +149,4 @@ run-node:
         -e CFG_PRESET=dev \
         -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
         -v $node_dir:/node \
-        ghcr.io/midnight-ntwrk/midnight-node:{{node_version}}
+        ghcr.io/midnight-ntwrk/midnight-node:{{latest_node_version}}

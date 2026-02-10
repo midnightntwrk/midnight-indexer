@@ -18,10 +18,7 @@ use crate::{
 use async_stream::try_stream;
 use fastrace::trace;
 use futures::Stream;
-use indexer_common::{
-    domain::{BlockHash, ByteVec, SerializedLedgerParameters},
-    stream::flatten_chunks,
-};
+use indexer_common::{domain::BlockHash, stream::flatten_chunks};
 use indoc::indoc;
 use std::num::NonZeroU32;
 
@@ -36,7 +33,8 @@ impl BlockStorage for Storage {
                 protocol_version,
                 parent_hash,
                 author,
-                timestamp
+                timestamp,
+                ledger_parameters
             FROM blocks
             ORDER BY height DESC
             LIMIT 1
@@ -55,7 +53,8 @@ impl BlockStorage for Storage {
                 protocol_version,
                 parent_hash,
                 author,
-                timestamp
+                timestamp,
+                ledger_parameters
             FROM blocks
             WHERE hash = $1
             LIMIT 1
@@ -77,7 +76,8 @@ impl BlockStorage for Storage {
                 protocol_version,
                 parent_hash,
                 author,
-                timestamp
+                timestamp,
+                ledger_parameters
             FROM blocks
             WHERE height = $1
             LIMIT 1
@@ -109,25 +109,6 @@ impl BlockStorage for Storage {
 
         flatten_chunks(chunks)
     }
-
-    #[trace(properties = { "block_id": "{block_id}" })]
-    async fn get_ledger_parameters(
-        &self,
-        block_id: u64,
-    ) -> Result<Option<SerializedLedgerParameters>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT ledger_parameters
-            FROM blocks
-            WHERE id = $1
-        "};
-
-        let parameters = sqlx::query_as::<_, (ByteVec,)>(query)
-            .bind(block_id as i64)
-            .fetch_optional(&*self.pool)
-            .await?;
-
-        Ok(parameters.map(|(p,)| p))
-    }
 }
 
 impl Storage {
@@ -145,7 +126,8 @@ impl Storage {
                 protocol_version,
                 parent_hash,
                 author,
-                timestamp
+                timestamp,
+                ledger_parameters
             FROM blocks
             WHERE height >= $1
             ORDER BY height

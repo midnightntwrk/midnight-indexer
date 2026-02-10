@@ -21,6 +21,14 @@ pub async fn run(pool: &SqlitePool) -> Result<(), Error> {
     Ok(())
 }
 
+/// Run the database migrations for SQLite for the ledger DB.
+pub async fn run_for_ledger_db(pool: &SqlitePool) -> Result<(), Error> {
+    sqlx::migrate!("migrations/sqlite-ledger-db")
+        .run(&**pool)
+        .await?;
+    Ok(())
+}
+
 /// Error possibly returned by [run].
 #[derive(Debug, Error)]
 #[error("cannot run migrations for sqlite")]

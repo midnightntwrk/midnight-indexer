@@ -16,8 +16,8 @@ mod runtimes;
 
 use crate::{
     domain::{
-        SystemParametersChange, TransactionFees,
-        node::{Block, BlockInfo, Node, RegularTransaction, SystemTransaction, Transaction},
+        BlockRef, SystemParametersChange, TransactionFees,
+        node::{Block, Node, RegularTransaction, SystemTransaction, Transaction},
     },
     infra::subxt_node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
 };
@@ -26,8 +26,8 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{
-        BlockAuthor, BlockHash, ByteVec, ProtocolVersion, ScaleDecodeProtocolVersionError,
-        SerializedContractAddress,
+        BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion,
+        ScaleDecodeProtocolVersionError, SerializedContractAddress, UnsupportedProtocolVersion,
         ledger::{self, ZswapStateRoot},
     },
     error::BoxError,
@@ -62,7 +62,7 @@ const TRAVERSE_BACK_LOG_AFTER: u32 = 1_000;
 pub struct SubxtNode {
     rpc_client: RpcClient,
     default_online_client: OnlineClient<SubstrateConfig>,
-    compatible_online_client: Option<(ProtocolVersion, OnlineClient<SubstrateConfig>)>,
+    compatible_online_client: Option<(NodeVersion, OnlineClient<SubstrateConfig>)>,
     subscription_recovery_timeout: Duration,
 }
 
@@ -101,10 +101,11 @@ impl SubxtNode {
         protocol_version: ProtocolVersion,
         hash: BlockHash,
     ) -> Result<&OnlineClient<SubstrateConfig>, SubxtNodeError> {
+        let node_version = protocol_version.node_version()?;
         if !self
             .compatible_online_client
             .as_ref()
-            .map(|&(v, _)| protocol_version.is_compatible(v))
+            .map(|&(v, _)| v == node_version)
             .unwrap_or_default()
         {
             let genesis_hash = self.default_online_client.genesis_hash();
@@ -136,7 +137,7 @@ impl SubxtNode {
             )
             .map_err(|error| SubxtNodeError::MakeOnlineClient(error.into()))?;
 
-            self.compatible_online_client = Some((protocol_version, online_client));
+            self.compatible_online_client = Some((node_version, online_client));
         }
 
         let compatible_online_client = self
@@ -254,8 +255,17 @@ impl SubxtNode {
         let BlockDetails {
             timestamp,
             transactions,
-            dust_registration_events,
+            mut dust_registration_events,
         } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
+
+        // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
+        // registrations from pallet storage instead.
+        if height == 0 {
+            let genesis_registrations =
+                runtimes::fetch_genesis_cnight_registrations(hash, protocol_version, online_client)
+                    .await?;
+            dust_registration_events.extend(genesis_registrations);
+        }
 
         let transactions = stream::iter(transactions)
             .then(|t| make_transaction(t, hash, protocol_version, online_client))
@@ -300,11 +310,11 @@ impl Node for SubxtNode {
 
     async fn highest_blocks(
         &self,
-    ) -> Result<impl Stream<Item = Result<BlockInfo, Self::Error>> + Send, Self::Error> {
+    ) -> Result<impl Stream<Item = Result<BlockRef, Self::Error>> + Send, Self::Error> {
         let highest_blocks = self
             .subscribe_finalized_blocks(None)
             .await?
-            .map_ok(|block| BlockInfo {
+            .map_ok(|block| BlockRef {
                 hash: block.hash().0.into(),
                 height: block.number(),
             });
@@ -314,10 +324,10 @@ impl Node for SubxtNode {
 
     fn finalized_blocks<'a>(
         &'a mut self,
-        after: Option<BlockInfo>,
+        after: Option<BlockRef>,
     ) -> impl Stream<Item = Result<Block, Self::Error>> + use<'a> {
         let (after_hash, after_height) = after
-            .map(|BlockInfo { hash, height }| (hash, height))
+            .map(|BlockRef { hash, height }| (hash, height))
             .unzip();
         debug!(
             after_hash:?,
@@ -559,8 +569,8 @@ pub enum SubxtNodeError {
     #[error("block with hash {0} not found")]
     BlockNotFound(BlockHash),
 
-    #[error("invalid protocol version {0}")]
-    InvalidProtocolVersion(ProtocolVersion),
+    #[error(transparent)]
+    UnsupportedProtocolVersion(#[from] UnsupportedProtocolVersion),
 
     #[error("invalid DUST address length: expected 32 bytes, was {0}")]
     InvalidDustAddress(usize),
@@ -570,6 +580,9 @@ pub enum SubxtNodeError {
 
     #[error("cannot get Terms and Conditions")]
     GetTermsAndConditions(#[source] BoxError),
+
+    #[error("cannot fetch genesis cNight registrations")]
+    FetchGenesisCnightRegistrations(#[source] BoxError),
 }
 
 #[trace]

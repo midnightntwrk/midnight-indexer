@@ -11,11 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{ProtocolVersion, SerializedLedgerState};
+use indexer_common::domain::{ProtocolVersion, SerializedLedgerStateKey};
 
 use crate::domain::{
-    Block, BlockTransactions, DParameter, DustRegistrationEvent, SystemParametersChange,
-    TermsAndConditions, Transaction, node::BlockInfo,
+    Block, BlockRef, DParameter, DustRegistrationEvent, SystemParametersChange, TermsAndConditions,
+    Transaction,
 };
 
 /// Storage abstraction.
@@ -24,42 +24,31 @@ pub trait Storage
 where
     Self: Clone + Send + Sync + 'static,
 {
-    /// Get the hash and height of the highest stored block.
-    async fn get_highest_block_info(&self) -> Result<Option<BlockInfo>, sqlx::Error>;
-
-    /// Get the number of stored transactions.
-    async fn get_transaction_count(&self) -> Result<u64, sqlx::Error>;
-
-    /// Get the number of stored contract actions: deploys, calls, updates.
-    async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error>;
-
-    /// Get all transactions with additional block data for the given block height.
-    async fn get_block_transactions(
-        &self,
-        block_height: u32,
-    ) -> Result<BlockTransactions, sqlx::Error>;
-
-    /// Get the ledger state, block height and protocol version.
-    async fn get_ledger_state(
-        &self,
-    ) -> Result<Option<(SerializedLedgerState, u32, ProtocolVersion)>, sqlx::Error>;
-
     /// Save the given block with parameters and return the max regular transaction ID.
     async fn save_block(
         &mut self,
         block: &Block,
         transactions: &[Transaction],
         dust_registration_events: &[DustRegistrationEvent],
-        ledger_state: Option<&SerializedLedgerState>,
+        ledger_state_key: &SerializedLedgerStateKey,
     ) -> Result<Option<u64>, sqlx::Error>;
 
-    /// Save the given serialized ledger state with its metadata.
-    async fn save_ledger_state(
-        &mut self,
-        ledger_state: &SerializedLedgerState,
-        block_height: u32,
-        protocol_version: ProtocolVersion,
+    /// Save system parameters change.
+    async fn save_system_parameters_change(
+        &self,
+        change: &SystemParametersChange,
     ) -> Result<(), sqlx::Error>;
+
+    /// Get the block ref, ledger state key and protocol version of the highest stored block.
+    async fn get_highest_block(
+        &self,
+    ) -> Result<Option<(BlockRef, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error>;
+
+    /// Get the number of stored transactions.
+    async fn get_transaction_count(&self) -> Result<u64, sqlx::Error>;
+
+    /// Get the number of stored contract actions: deploys, calls, updates.
+    async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error>;
 
     /// Get the latest D-Parameter.
     async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error>;
@@ -68,10 +57,4 @@ where
     async fn get_latest_terms_and_conditions(
         &self,
     ) -> Result<Option<TermsAndConditions>, sqlx::Error>;
-
-    /// Save system parameters change.
-    async fn save_system_parameters_change(
-        &self,
-        change: &SystemParametersChange,
-    ) -> Result<(), sqlx::Error>;
 }

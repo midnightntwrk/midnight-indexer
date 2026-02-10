@@ -44,7 +44,7 @@ async fn run() -> anyhow::Result<()> {
     use indexer_common::{
         cipher::make_cipher,
         config::ConfigExt,
-        infra::{ledger_state_storage, migrations, pool, pub_sub},
+        infra::{ledger_db, migrations, pool, pub_sub},
         telemetry,
     };
     use log::info;
@@ -68,11 +68,11 @@ async fn run() -> anyhow::Result<()> {
     telemetry::init_metrics(metrics_config);
 
     let infra::Config {
-        secret,
-        api_config,
         storage_config,
-        ledger_state_storage_config,
+        ledger_db_config,
         pub_sub_config,
+        api_config,
+        secret,
     } = infra_config;
 
     let pool = pool::postgres::PostgresPool::new(storage_config)
@@ -85,12 +85,9 @@ async fn run() -> anyhow::Result<()> {
     }
     let cipher = make_cipher(secret).context("make cipher")?;
 
-    let ledger_state_storage =
-        ledger_state_storage::nats::NatsLedgerStateStorage::new(ledger_state_storage_config)
-            .await
-            .context("create NatsZswapStateStorage")?;
+    let storage = infra::storage::Storage::new(cipher, pool.clone());
 
-    let storage = infra::storage::Storage::new(cipher, pool, ledger_state_storage);
+    ledger_db::init(ledger_db_config, pool);
 
     let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config).await?;
 
