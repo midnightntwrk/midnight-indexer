@@ -20,7 +20,7 @@ use crate::{
         TransactionResult, UnshieldedUtxo,
         dust::{self},
         ledger::{
-            Error, IntentV7, IntentV8, SerializableExt, TaggedSerializableV7Ext, TransactionV7,
+            Error, IntentV7, IntentV8, SerializableExt, TaggedSerializableExt, TransactionV7,
             TransactionV8,
         },
     },
@@ -326,7 +326,7 @@ impl LedgerState {
             } => {
                 let transaction =
                     tagged_deserialize::<TransactionV8<LedgerDb>>(&mut transaction.as_ref())
-                        .map_err(|error| Error::Deserialize("LedgerTransactionV7", error))?;
+                        .map_err(|error| Error::Deserialize("LedgerTransactionV8", error))?;
 
                 let cx = TransactionContextV8 {
                     ref_state: ledger_state.clone(),
@@ -513,7 +513,7 @@ impl LedgerState {
                 contract_zswap_state.coin_coms = ledger_state.zswap.filter(&[address]);
 
                 contract_zswap_state
-                    .tagged_serialize_v7()
+                    .tagged_serialize()
                     .map_err(|error| Error::Serialize("ZswapStateV7", error))
             }
 
@@ -525,7 +525,7 @@ impl LedgerState {
                 contract_zswap_state.coin_coms = ledger_state.zswap.filter(&[address]);
 
                 contract_zswap_state
-                    .tagged_serialize_v7()
+                    .tagged_serialize()
                     .map_err(|error| Error::Serialize("ZswapStateV8", error))
             }
         }
@@ -540,7 +540,7 @@ impl LedgerState {
                 end_index,
             )
             .map_err(|error| Error::InvalidUpdate(error.into()))?
-            .tagged_serialize_v7()
+            .tagged_serialize()
             .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdateV7", error)),
 
             Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdateV8::new(
@@ -549,7 +549,7 @@ impl LedgerState {
                 end_index,
             )
             .map_err(|error| Error::InvalidUpdate(error.into()))?
-            .tagged_serialize_v7()
+            .tagged_serialize()
             .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdateV8", error)),
         }
     }
@@ -648,11 +648,11 @@ impl LedgerParameters {
     pub fn serialize(&self) -> Result<SerializedLedgerParameters, Error> {
         match self {
             Self::V7(parameters) => parameters
-                .tagged_serialize_v7()
+                .tagged_serialize()
                 .map_err(|error| Error::Serialize("SerializedLedgerParametersV7", error)),
 
             Self::V8(parameters) => parameters
-                .tagged_serialize_v7()
+                .tagged_serialize()
                 .map_err(|error| Error::Serialize("SerializedLedgerParametersV8", error)),
         }
     }
@@ -716,7 +716,7 @@ where
         .into_iter()
         .map(|event| {
             let raw = event
-                .tagged_serialize_v7()
+                .tagged_serialize()
                 .map_err(|error| Error::Serialize("EventV7", error))?;
             Ok::<_, Error>((event, raw))
         })
@@ -765,7 +765,7 @@ where
         .into_iter()
         .map(|event| {
             let raw = event
-                .tagged_serialize_v7()
+                .tagged_serialize()
                 .map_err(|error| Error::Serialize("EventV8", error))?;
             Ok::<_, Error>((event, raw))
         })
@@ -873,7 +873,7 @@ fn make_dust_initial_utxo_v8(
     let owner = generation
         .owner
         .serialize()
-        .map_err(|error| Error::Serialize("DustPublicKeyV7", error))?;
+        .map_err(|error| Error::Serialize("DustPublicKeyV8", error))?;
 
     let generation_info = dust::DustGenerationInfo {
         night_utxo_hash: output.backing_night.0.0.into(),
@@ -1406,7 +1406,7 @@ fn extend_unshielded_utxos_v8<D>(
         .enumerate()
         .map(|(output_index, output)| {
             let output_index = output_index as u32;
-            let initial_nonce = make_initial_nonce_v7(output_index, intent_hash);
+            let initial_nonce = make_initial_nonce_v8(output_index, intent_hash);
             let registered_for_dust_generation =
                 registered_for_dust_generation_v8(output_index, intent_hash, ledger_state);
             let utxo = UtxoV8 {
@@ -1437,7 +1437,7 @@ fn extend_unshielded_utxos_v8<D>(
     };
     let intent_inputs = intent_inputs.into_iter().map(|spend| {
         let intent_hash = spend.intent_hash.0.0.into();
-        let initial_nonce = make_initial_nonce_v7(spend.output_no, intent_hash);
+        let initial_nonce = make_initial_nonce_v8(spend.output_no, intent_hash);
         let registered_for_dust_generation =
             registered_for_dust_generation_v8(spend.output_no, intent_hash, ledger_state);
         let utxo = UtxoV8 {

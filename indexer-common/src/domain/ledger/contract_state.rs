@@ -13,7 +13,7 @@
 
 use crate::domain::{
     ContractBalance, LedgerVersion, ProtocolVersion, TokenType,
-    ledger::{Error, TaggedSerializableV7Ext},
+    ledger::{Error, TaggedSerializableExt},
 };
 use fastrace::trace;
 use midnight_coin_structure_v7::coin::TokenType as TokenTypeV7;
@@ -79,7 +79,7 @@ impl ContractState {
                             // For other tokens we serialize the type.
                             _ => {
                                 let token_type = token_type
-                                    .tagged_serialize_v7()
+                                    .tagged_serialize()
                                     .map_err(|error| Error::Serialize("TokenTypeV7", error))?;
 
                                 let token_type = TokenType::try_from(token_type.as_ref())
@@ -114,8 +114,8 @@ impl ContractState {
                             // For other tokens we serialize the type.
                             _ => {
                                 let token_type = token_type
-                                    .tagged_serialize_v7()
-                                    .map_err(|error| Error::Serialize("TokenTypeV7", error))?;
+                                    .tagged_serialize()
+                                    .map_err(|error| Error::Serialize("TokenTypeV8", error))?;
 
                                 let token_type = TokenType::try_from(token_type.as_ref())
                                     .map_err(Error::ByteArrayLen)?;

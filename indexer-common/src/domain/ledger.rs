@@ -119,20 +119,20 @@ where
 impl<T> SerializableExt for T where T: Serializable {}
 
 /// Extension methods for `Serializable + Tagged` implementations.
-pub trait TaggedSerializableV7Ext
+pub trait TaggedSerializableExt
 where
     Self: Serializable + Tagged + Sized,
 {
     /// Serialize this `Serializable + Tagged` implementation.
     #[trace]
-    fn tagged_serialize_v7(&self) -> Result<ByteVec, io::Error> {
+    fn tagged_serialize(&self) -> Result<ByteVec, io::Error> {
         let mut bytes = Vec::with_capacity(self.serialized_size() + 32);
         tagged_serialize(self, &mut bytes)?;
         Ok(bytes.into())
     }
 }
 
-impl<T> TaggedSerializableV7Ext for T where T: Serializable + Tagged {}
+impl<T> TaggedSerializableExt for T where T: Serializable + Tagged {}
 
 /// Get DUST parameters for the given protocol version.
 /// Returns the initial DUST parameters from the ledger specification.

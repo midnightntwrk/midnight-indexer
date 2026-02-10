@@ -217,7 +217,7 @@ impl Transaction {
                                     let entry_point =
                                         String::from_utf8(call.entry_point.as_ref().to_owned())
                                             .map_err(|error| {
-                                                Error::FromUtf8("EntryPointBufV7", error)
+                                                Error::FromUtf8("EntryPointBufV8", error)
                                             })?;
 
                                     Ok(ContractAction {
@@ -359,7 +359,7 @@ impl Transaction {
                     ..
                 }) => {
                     let secret_key = SecretKeyV8::from_repr(&viewing_key.expose_secret().0)
-                        .expect("SecretKeyV7 can be created from repr");
+                        .expect("SecretKeyV8 can be created from repr");
 
                     let can_decrypt_guaranteed_coins = guaranteed_coins
                         .as_ref()
