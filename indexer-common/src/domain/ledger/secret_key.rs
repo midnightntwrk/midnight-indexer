@@ -13,7 +13,7 @@
 
 use crate::domain::{ByteArray, LedgerVersion, ProtocolVersion, VIEWING_KEY_LEN, ledger::Error};
 use fastrace::trace;
-use midnight_serialize_v7::Deserializable as DeserializableV7;
+use midnight_serialize::Deserializable;
 use midnight_transient_crypto_v7::encryption::SecretKey as SecretKeyV7;
 use midnight_transient_crypto_v8::encryption::SecretKey as SecretKeyV8;
 

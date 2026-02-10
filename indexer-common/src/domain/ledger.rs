@@ -29,7 +29,7 @@ use crate::{
     error::BoxError,
 };
 use fastrace::trace;
-use midnight_base_crypto_v7::signatures::Signature as SignatureV7;
+use midnight_base_crypto::signatures::Signature as SignatureV7;
 use midnight_ledger_v7::{
     dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V7,
     structure::ProofMarker as ProofMarkerV7,
@@ -38,9 +38,7 @@ use midnight_ledger_v8::{
     dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V8,
     structure::ProofMarker as ProofMarkerV8,
 };
-use midnight_serialize_v7::{
-    Serializable as SerializableV7, Tagged as TaggedV7, tagged_serialize as tagged_serialize_v7,
-};
+use midnight_serialize::{Serializable, Tagged, tagged_serialize};
 use midnight_transient_crypto_v7::commitment::PureGeneratorPedersen as PureGeneratorPedersenV7;
 use midnight_transient_crypto_v8::commitment::PureGeneratorPedersen as PureGeneratorPedersenV8;
 use std::{io, string::FromUtf8Error};
@@ -105,36 +103,36 @@ pub enum Error {
 }
 
 /// Extension methods for `Serializable` implementations.
-pub trait SerializableV7Ext
+pub trait SerializableExt
 where
-    Self: SerializableV7,
+    Self: Serializable,
 {
     /// Serialize this `Serializable` implementation.
     #[trace]
-    fn serialize_v7(&self) -> Result<ByteVec, io::Error> {
+    fn serialize(&self) -> Result<ByteVec, io::Error> {
         let mut bytes = Vec::with_capacity(self.serialized_size());
-        SerializableV7::serialize(self, &mut bytes)?;
+        Serializable::serialize(self, &mut bytes)?;
         Ok(bytes.into())
     }
 }
 
-impl<T> SerializableV7Ext for T where T: SerializableV7 {}
+impl<T> SerializableExt for T where T: Serializable {}
 
 /// Extension methods for `Serializable + Tagged` implementations.
 pub trait TaggedSerializableV7Ext
 where
-    Self: SerializableV7 + TaggedV7 + Sized,
+    Self: Serializable + Tagged + Sized,
 {
     /// Serialize this `Serializable + Tagged` implementation.
     #[trace]
     fn tagged_serialize_v7(&self) -> Result<ByteVec, io::Error> {
         let mut bytes = Vec::with_capacity(self.serialized_size() + 32);
-        tagged_serialize_v7(self, &mut bytes)?;
+        tagged_serialize(self, &mut bytes)?;
         Ok(bytes.into())
     }
 }
 
-impl<T> TaggedSerializableV7Ext for T where T: SerializableV7 + TaggedV7 {}
+impl<T> TaggedSerializableV7Ext for T where T: Serializable + Tagged {}
 
 /// Get DUST parameters for the given protocol version.
 /// Returns the initial DUST parameters from the ledger specification.

@@ -20,21 +20,18 @@ use crate::{
         TransactionResult, UnshieldedUtxo,
         dust::{self},
         ledger::{
-            Error, IntentV7, IntentV8, SerializableV7Ext, TaggedSerializableV7Ext, TransactionV7,
+            Error, IntentV7, IntentV8, SerializableExt, TaggedSerializableV7Ext, TransactionV7,
             TransactionV8,
         },
     },
-    infra::ledger_db::{v7::LedgerDb as LedgerDbV7, v8::LedgerDb as LedgerDbV8},
+    infra::ledger_db::LedgerDb,
 };
 use fastrace::trace;
 use itertools::Itertools;
-use midnight_base_crypto_v7::{
-    cost_model::{
-        FixedPoint as FixedPointV7, NormalizedCost as NormalizedCostV7,
-        SyntheticCost as SyntheticCostV7,
-    },
-    hash::{HashOutput as HashOutputV7, persistent_commit as persistent_commit_v7},
-    time::Timestamp as TimestampV7,
+use midnight_base_crypto::{
+    cost_model::{FixedPoint, NormalizedCost, SyntheticCost},
+    hash::{HashOutput, persistent_commit},
+    time::Timestamp,
 };
 use midnight_coin_structure_v7::{
     coin::{
@@ -84,13 +81,11 @@ use midnight_ledger_v8::{
 };
 use midnight_onchain_runtime_v7::context::BlockContext as BlockContextV7;
 use midnight_onchain_runtime_v8::context::BlockContext as BlockContextV8;
-use midnight_serialize_v7::{
-    Deserializable as DeserializableV7, tagged_deserialize as tagged_deserialize_v7,
-};
-use midnight_storage_core_v7::{
-    arena::{Sp as SpV7, TypedArenaKey as TypedArenaKeyV7},
-    db::DB as DBV7,
-    storage::default_storage as default_storage_v7,
+use midnight_serialize::{Deserializable, tagged_deserialize};
+use midnight_storage_core::{
+    arena::{Sp, TypedArenaKey},
+    db::DB,
+    storage::default_storage,
 };
 use midnight_transient_crypto_v7::merkle_tree::{
     MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV7,
@@ -121,13 +116,13 @@ static STRICTNESS_V8: LazyLock<WellFormedStrictnessV8> = LazyLock::new(|| {
 #[derive(Debug, Clone)]
 pub enum LedgerState {
     V7 {
-        ledger_state: LedgerStateV7<LedgerDbV7>,
-        block_fullness: SyntheticCostV7,
+        ledger_state: LedgerStateV7<LedgerDb>,
+        block_fullness: SyntheticCost,
     },
 
     V8 {
-        ledger_state: LedgerStateV8<LedgerDbV7>,
-        block_fullness: SyntheticCostV7,
+        ledger_state: LedgerStateV8<LedgerDb>,
+        block_fullness: SyntheticCost,
     },
 }
 
@@ -155,16 +150,16 @@ impl LedgerState {
     ) -> Result<Self, Error> {
         let ledger_state = match protocol_version.ledger_version()? {
             LedgerVersion::V7 => {
-                let arena_key = TypedArenaKeyV7::<
-                    LedgerStateV7<LedgerDbV7>,
-                    <LedgerDbV7 as DBV7>::Hasher,
+                let arena_key = TypedArenaKey::<
+                    LedgerStateV7<LedgerDb>,
+                    <LedgerDb as DB>::Hasher,
                 >::deserialize(&mut key.as_slice(), 0)
                 .map_err(|error| Error::Deserialize("TypedArenaKeyV7", error))?;
-                let ledger_state = default_storage_v7::<LedgerDbV7>()
+                let ledger_state = default_storage::<LedgerDb>()
                     .get(&arena_key)
                     .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
                 let ledger_state =
-                    SpV7::into_inner(ledger_state).expect("loaded ledger state exists");
+                    Sp::into_inner(ledger_state).expect("loaded ledger state exists");
 
                 Self::V7 {
                     ledger_state,
@@ -173,16 +168,16 @@ impl LedgerState {
             }
 
             LedgerVersion::V8 => {
-                let arena_key = TypedArenaKeyV7::<
-                    LedgerStateV8<LedgerDbV7>,
-                    <LedgerDbV7 as DBV7>::Hasher,
+                let arena_key = TypedArenaKey::<
+                    LedgerStateV8<LedgerDb>,
+                    <LedgerDb as DB>::Hasher,
                 >::deserialize(&mut key.as_slice(), 0)
                 .map_err(|error| Error::Deserialize("TypedArenaKeyV8", error))?;
-                let ledger_state = default_storage_v7::<LedgerDbV7>()
+                let ledger_state = default_storage::<LedgerDb>()
                     .get(&arena_key)
                     .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
                 let ledger_state =
-                    SpV7::into_inner(ledger_state).expect("loaded ledger state exists");
+                    Sp::into_inner(ledger_state).expect("loaded ledger state exists");
 
                 Self::V8 {
                     ledger_state,
@@ -200,16 +195,16 @@ impl LedgerState {
                 ledger_state,
                 block_fullness,
             } => {
-                let mut ledger_state = SpV7::new(ledger_state);
+                let mut ledger_state = Sp::new(ledger_state);
                 ledger_state.persist();
-                default_storage_v7::<LedgerDbV7>().with_backend(|b| b.flush_all_changes_to_db());
+                default_storage::<LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
 
                 let key = ledger_state
                     .as_typed_key()
-                    .serialize_v7()
+                    .serialize()
                     .map_err(|error| Error::Serialize("TypedArenaKeyV7", error))?;
 
-                let ledger_state = SpV7::into_inner(ledger_state).expect("ledger state exists");
+                let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
                 let ledger_state = LedgerState::V7 {
                     ledger_state,
                     block_fullness,
@@ -222,16 +217,16 @@ impl LedgerState {
                 ledger_state,
                 block_fullness,
             } => {
-                let mut ledger_state = SpV7::new(ledger_state);
+                let mut ledger_state = Sp::new(ledger_state);
                 ledger_state.persist();
-                default_storage_v7::<LedgerDbV8>().with_backend(|b| b.flush_all_changes_to_db());
+                default_storage::<LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
 
                 let key = ledger_state
                     .as_typed_key()
-                    .serialize_v7()
+                    .serialize()
                     .map_err(|error| Error::Serialize("TypedArenaKeyV8", error))?;
 
-                let ledger_state = SpV7::into_inner(ledger_state).expect("ledger state exists");
+                let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
                 let ledger_state = LedgerState::V8 {
                     ledger_state,
                     block_fullness,
@@ -258,15 +253,15 @@ impl LedgerState {
                 block_fullness,
             } => {
                 let transaction =
-                    tagged_deserialize_v7::<TransactionV7<LedgerDbV7>>(&mut transaction.as_ref())
+                    tagged_deserialize::<TransactionV7<LedgerDb>>(&mut transaction.as_ref())
                         .map_err(|error| Error::Deserialize("LedgerTransactionV7", error))?;
 
                 let cx = TransactionContextV7 {
                     ref_state: ledger_state.clone(),
                     block_context: BlockContextV7 {
-                        tblock: timestamp_v7(block_timestamp),
+                        tblock: timestamp(block_timestamp),
                         tblock_err: 30,
-                        parent_block_hash: HashOutputV7(parent_block_hash.0),
+                        parent_block_hash: HashOutput(parent_block_hash.0),
                     },
                     whitelist: None,
                 };
@@ -330,16 +325,16 @@ impl LedgerState {
                 block_fullness,
             } => {
                 let transaction =
-                    tagged_deserialize_v7::<TransactionV8<LedgerDbV7>>(&mut transaction.as_ref())
+                    tagged_deserialize::<TransactionV8<LedgerDb>>(&mut transaction.as_ref())
                         .map_err(|error| Error::Deserialize("LedgerTransactionV7", error))?;
 
                 let cx = TransactionContextV8 {
                     ref_state: ledger_state.clone(),
                     block_context: BlockContextV8 {
-                        tblock: timestamp_v7(block_timestamp),
+                        tblock: timestamp(block_timestamp),
                         tblock_err: 30,
-                        parent_block_hash: HashOutputV7(parent_block_hash.0),
-                        last_block_time: timestamp_v7(parent_block_timestamp),
+                        parent_block_hash: HashOutput(parent_block_hash.0),
+                        last_block_time: timestamp(parent_block_timestamp),
                     },
                     whitelist: None,
                 };
@@ -413,12 +408,12 @@ impl LedgerState {
                 block_fullness,
             } => {
                 let transaction =
-                    tagged_deserialize_v7::<SystemTransactionV7>(&mut transaction.as_ref())
+                    tagged_deserialize::<SystemTransactionV7>(&mut transaction.as_ref())
                         .map_err(|error| Error::Deserialize("SystemTransactionV7", error))?;
 
                 let cost = transaction.cost(&ledger_state.parameters);
                 let (ledger_state, events) = ledger_state
-                    .apply_system_tx(&transaction, timestamp_v7(block_timestamp))
+                    .apply_system_tx(&transaction, timestamp(block_timestamp))
                     .map_err(|error| Error::SystemTransaction(error.into()))?;
                 let block_fullness = *block_fullness + cost;
 
@@ -443,12 +438,12 @@ impl LedgerState {
                 block_fullness,
             } => {
                 let transaction =
-                    tagged_deserialize_v7::<SystemTransactionV8>(&mut transaction.as_ref())
+                    tagged_deserialize::<SystemTransactionV8>(&mut transaction.as_ref())
                         .map_err(|error| Error::Deserialize("SystemTransactionV8", error))?;
 
                 let cost = transaction.cost(&ledger_state.parameters);
                 let (ledger_state, events) = ledger_state
-                    .apply_system_tx(&transaction, timestamp_v7(block_timestamp))
+                    .apply_system_tx(&transaction, timestamp(block_timestamp))
                     .map_err(|error| Error::SystemTransaction(error.into()))?;
                 let block_fullness = *block_fullness + cost;
 
@@ -569,19 +564,19 @@ impl LedgerState {
                 ledger_state,
                 block_fullness,
             } => {
-                let timestamp = timestamp_v7(block_timestamp);
+                let timestamp = timestamp(block_timestamp);
                 let normalized_fullness = block_fullness
                     .normalize(ledger_state.parameters.limits.block_limits)
-                    .unwrap_or(NormalizedCostV7::ZERO);
-                let overall_fullness = FixedPointV7::max(
-                    FixedPointV7::max(
-                        FixedPointV7::max(
+                    .unwrap_or(NormalizedCost::ZERO);
+                let overall_fullness = FixedPoint::max(
+                    FixedPoint::max(
+                        FixedPoint::max(
                             normalized_fullness.read_time,
                             normalized_fullness.compute_time,
                         ),
                         normalized_fullness.block_usage,
                     ),
-                    FixedPointV7::max(
+                    FixedPoint::max(
                         normalized_fullness.bytes_written,
                         normalized_fullness.bytes_churned,
                     ),
@@ -605,19 +600,19 @@ impl LedgerState {
                 ledger_state,
                 block_fullness,
             } => {
-                let timestamp = timestamp_v7(block_timestamp);
+                let timestamp = timestamp(block_timestamp);
                 let normalized_fullness = block_fullness
                     .normalize(ledger_state.parameters.limits.block_limits)
-                    .unwrap_or(NormalizedCostV7::ZERO);
-                let overall_fullness = FixedPointV7::max(
-                    FixedPointV7::max(
-                        FixedPointV7::max(
+                    .unwrap_or(NormalizedCost::ZERO);
+                let overall_fullness = FixedPoint::max(
+                    FixedPoint::max(
+                        FixedPoint::max(
                             normalized_fullness.read_time,
                             normalized_fullness.compute_time,
                         ),
                         normalized_fullness.block_usage,
                     ),
-                    FixedPointV7::max(
+                    FixedPoint::max(
                         normalized_fullness.bytes_written,
                         normalized_fullness.bytes_churned,
                     ),
@@ -686,7 +681,7 @@ impl ZswapStateRoot {
 
             LedgerVersion::V8 => {
                 let digest = MerkleTreeDigestV8::deserialize(&mut zswap_state_root.as_ref(), 0)
-                    .map_err(|error| Error::Deserialize("MerkleTreeDigestV7", error))?;
+                    .map_err(|error| Error::Deserialize("MerkleTreeDigestV8", error))?;
                 Self::V8(digest)
             }
         };
@@ -699,23 +694,23 @@ impl ZswapStateRoot {
     pub fn serialize(&self) -> Result<SerializedZswapStateRoot, Error> {
         match self {
             Self::V7(digest) => digest
-                .serialize_v7()
+                .serialize()
                 .map_err(|error| Error::Serialize("MerkleTreeDigestV7", error)),
 
             Self::V8(digest) => digest
-                .serialize_v7()
+                .serialize()
                 .map_err(|error| Error::Serialize("MerkleTreeDigestV8", error)),
         }
     }
 }
 
-fn timestamp_v7(block_timestamp: u64) -> TimestampV7 {
-    TimestampV7::from_secs(block_timestamp / 1000)
+fn timestamp(block_timestamp: u64) -> Timestamp {
+    Timestamp::from_secs(block_timestamp / 1000)
 }
 
 fn make_ledger_events_v7<D>(events: Vec<EventV7<D>>) -> Result<Vec<LedgerEvent>, Error>
 where
-    D: DBV7,
+    D: DB,
 {
     events
         .into_iter()
@@ -764,7 +759,7 @@ where
 
 fn make_ledger_events_v8<D>(events: Vec<EventV8<D>>) -> Result<Vec<LedgerEvent>, Error>
 where
-    D: DBV7,
+    D: DB,
 {
     events
         .into_iter()
@@ -805,7 +800,7 @@ where
                 Some(Ok(LedgerEvent::dust_spend_processed(raw)))
             }
 
-            other => panic!("unexpected EventDetailsV7 variant {other:?}"),
+            other => panic!("unexpected EventDetailsV8 variant {other:?}"),
         })
         .flatten()
         .collect::<Result<_, _>>()
@@ -819,7 +814,7 @@ fn make_dust_initial_utxo_v7(
 ) -> Result<LedgerEvent, Error> {
     let owner = output
         .owner
-        .serialize_v7()
+        .serialize()
         .map_err(|error| Error::Serialize("DustPublicKeyV7", error))?;
 
     let qualified_output = dust::QualifiedDustOutput {
@@ -834,7 +829,7 @@ fn make_dust_initial_utxo_v7(
 
     let owner = generation
         .owner
-        .serialize_v7()
+        .serialize()
         .map_err(|error| Error::Serialize("DustPublicKeyV7", error))?;
 
     let generation_info = dust::DustGenerationInfo {
@@ -862,7 +857,7 @@ fn make_dust_initial_utxo_v8(
 ) -> Result<LedgerEvent, Error> {
     let owner = output
         .owner
-        .serialize_v7()
+        .serialize()
         .map_err(|error| Error::Serialize("DustPublicKeyV8", error))?;
 
     let qualified_output = dust::QualifiedDustOutput {
@@ -877,7 +872,7 @@ fn make_dust_initial_utxo_v8(
 
     let owner = generation
         .owner
-        .serialize_v7()
+        .serialize()
         .map_err(|error| Error::Serialize("DustPublicKeyV7", error))?;
 
     let generation_info = dust::DustGenerationInfo {
@@ -905,7 +900,7 @@ fn make_dust_generation_dtime_update_v7(
 
     let owner = generation
         .owner
-        .serialize_v7()
+        .serialize()
         .map_err(|error| Error::Serialize("DustPublicKeyV7", error))?;
 
     let generation_info = dust::DustGenerationInfo {
@@ -955,7 +950,7 @@ fn make_dust_generation_dtime_update_v8(
 
     let owner = generation
         .owner
-        .serialize_v7()
+        .serialize()
         .map_err(|error| Error::Serialize("DustPublicKeyV8", error))?;
 
     let generation_info = dust::DustGenerationInfo {
@@ -1003,7 +998,7 @@ fn make_unshielded_utxos_for_regular_transaction_v7<D>(
     ledger_state: &LedgerStateV7<D>,
 ) -> (Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>)
 where
-    D: DBV7,
+    D: DB,
 {
     // Skip UTXO creation entirely for failed transactions, because no state changes occurred on the
     // ledger.
@@ -1107,7 +1102,7 @@ fn make_unshielded_utxos_for_regular_transaction_v8<D>(
     ledger_state: &LedgerStateV8<D>,
 ) -> (Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>)
 where
-    D: DBV7,
+    D: DB,
 {
     // Skip UTXO creation entirely for failed transactions, because no state changes occurred on the
     // ledger.
@@ -1210,7 +1205,7 @@ fn make_unshielded_utxos_for_system_transaction_v7<D>(
     ledger_state: &LedgerStateV7<D>,
 ) -> Vec<UnshieldedUtxo>
 where
-    D: DBV7,
+    D: DB,
 {
     match transaction {
         SystemTransactionV7::PayFromTreasuryUnshielded {
@@ -1259,7 +1254,7 @@ fn make_unshielded_utxos_for_system_transaction_v8<D>(
     ledger_state: &LedgerStateV8<D>,
 ) -> Vec<UnshieldedUtxo>
 where
-    D: DBV7,
+    D: DB,
 {
     match transaction {
         SystemTransactionV8::PayFromTreasuryUnshielded {
@@ -1311,7 +1306,7 @@ fn extend_unshielded_utxos_v7<D>(
     guaranteed: bool,
     ledger_state: &LedgerStateV7<D>,
 ) where
-    D: DBV7,
+    D: DB,
 {
     let ledger_intent_hash = intent
         .erase_proofs()
@@ -1393,7 +1388,7 @@ fn extend_unshielded_utxos_v8<D>(
     guaranteed: bool,
     ledger_state: &LedgerStateV8<D>,
 ) where
-    D: DBV7,
+    D: DB,
 {
     let ledger_intent_hash = intent
         .erase_proofs()
@@ -1468,14 +1463,14 @@ fn extend_unshielded_utxos_v8<D>(
 }
 
 fn make_initial_nonce_v7(output_index: u32, intent_hash: IntentHash) -> Nonce {
-    let intent_hash = HashOutputV7(intent_hash.0);
-    let initial_nonce = InitialNonceV7(persistent_commit_v7(&output_index, intent_hash));
+    let intent_hash = HashOutput(intent_hash.0);
+    let initial_nonce = InitialNonceV7(persistent_commit(&output_index, intent_hash));
     ByteArray(initial_nonce.0.0)
 }
 
 fn make_initial_nonce_v8(output_index: u32, intent_hash: IntentHash) -> Nonce {
-    let intent_hash = HashOutputV7(intent_hash.0);
-    let initial_nonce = InitialNonceV8(persistent_commit_v7(&output_index, intent_hash));
+    let intent_hash = HashOutput(intent_hash.0);
+    let initial_nonce = InitialNonceV8(persistent_commit(&output_index, intent_hash));
     ByteArray(initial_nonce.0.0)
 }
 
@@ -1485,10 +1480,10 @@ fn registered_for_dust_generation_v7<D>(
     ledger_state: &LedgerStateV7<D>,
 ) -> bool
 where
-    D: DBV7,
+    D: DB,
 {
-    let intent_hash_v7 = HashOutputV7(intent_hash.0);
-    let initial_nonce = InitialNonceV7(persistent_commit_v7(&output_index, intent_hash_v7));
+    let intent_hash_v7 = HashOutput(intent_hash.0);
+    let initial_nonce = InitialNonceV7(persistent_commit(&output_index, intent_hash_v7));
     ledger_state
         .dust
         .generation
@@ -1502,10 +1497,10 @@ fn registered_for_dust_generation_v8<D>(
     ledger_state: &LedgerStateV8<D>,
 ) -> bool
 where
-    D: DBV7,
+    D: DB,
 {
-    let intent_hash = HashOutputV7(intent_hash.0);
-    let initial_nonce = InitialNonceV8(persistent_commit_v7(&output_index, intent_hash));
+    let intent_hash = HashOutput(intent_hash.0);
+    let initial_nonce = InitialNonceV8(persistent_commit(&output_index, intent_hash));
     ledger_state
         .dust
         .generation
@@ -1515,7 +1510,7 @@ where
 
 fn ctime_v7<D>(utxo: &UtxoV7, ledger_state: &LedgerStateV7<D>) -> Option<u64>
 where
-    D: DBV7,
+    D: DB,
 {
     ledger_state
         .utxo
@@ -1526,7 +1521,7 @@ where
 
 fn ctime_v8<D>(utxo: &UtxoV8, ledger_state: &LedgerStateV8<D>) -> Option<u64>
 where
-    D: DBV7,
+    D: DB,
 {
     ledger_state
         .utxo

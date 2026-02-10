@@ -16,9 +16,9 @@ use crate::{
         ContractAction, ContractAttributes, LedgerVersion, ProtocolVersion,
         SerializedContractAddress, SerializedContractState, SerializedTransactionIdentifier,
         TransactionHash, TransactionStructure, ViewingKey,
-        ledger::{Error, SerializableV7Ext, TransactionV7, TransactionV8},
+        ledger::{Error, SerializableExt, TransactionV7, TransactionV8},
     },
-    infra::ledger_db::v7::LedgerDb as LedgerDbV7,
+    infra::ledger_db::LedgerDb,
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
@@ -36,8 +36,8 @@ use midnight_ledger_v8::structure::{
     ContractAction as ContractActionV8, StandardTransaction as StandardTransactionV8,
     SystemTransaction as LedgerSystemTransactionV8,
 };
-use midnight_serialize_v7::tagged_deserialize as tagged_deserialize_v7;
-use midnight_storage_core_v7::db::DB as DBV7;
+use midnight_serialize::tagged_deserialize;
+use midnight_storage_core::db::DB;
 use midnight_transient_crypto_v7::{
     encryption::SecretKey as SecretKeyV7, proofs::Proof as ProofV7,
 };
@@ -50,8 +50,8 @@ use std::error::Error as StdError;
 
 #[derive(Debug, Clone)]
 pub enum Transaction {
-    V7(TransactionV7<LedgerDbV7>),
-    V8(TransactionV8<LedgerDbV7>),
+    V7(TransactionV7<LedgerDb>),
+    V8(TransactionV8<LedgerDb>),
 }
 
 impl Transaction {
@@ -63,13 +63,13 @@ impl Transaction {
     ) -> Result<Self, Error> {
         let transaction = match protocol_version.ledger_version()? {
             LedgerVersion::V7 => {
-                let transaction = tagged_deserialize_v7(&mut transaction.as_ref())
+                let transaction = tagged_deserialize(&mut transaction.as_ref())
                     .map_err(|error| Error::Deserialize("LedgerTransactionV7", error))?;
                 Self::V7(transaction)
             }
 
             LedgerVersion::V8 => {
-                let transaction = tagged_deserialize_v7(&mut transaction.as_ref())
+                let transaction = tagged_deserialize(&mut transaction.as_ref())
                     .map_err(|error| Error::Deserialize("LedgerTransactionV8", error))?;
                 Self::V8(transaction)
             }
@@ -93,7 +93,7 @@ impl Transaction {
                 .identifiers()
                 .map(|identifier| {
                     let identifier = identifier
-                        .serialize_v7()
+                        .serialize()
                         .map_err(|error| Error::Serialize("TransactionIdentifierV7", error))?;
                     Ok(identifier)
                 })
@@ -103,7 +103,7 @@ impl Transaction {
                 .identifiers()
                 .map(|identifier| {
                     let identifier = identifier
-                        .serialize_v7()
+                        .serialize()
                         .map_err(|error| Error::Serialize("TransactionIdentifierV8", error))?;
                     Ok(identifier)
                 })
@@ -397,13 +397,13 @@ impl SystemTransaction {
     ) -> Result<Self, Error> {
         let transaction = match protocol_version.ledger_version()? {
             LedgerVersion::V7 => {
-                let transaction = tagged_deserialize_v7(&mut transaction.as_ref())
+                let transaction = tagged_deserialize(&mut transaction.as_ref())
                     .map_err(|error| Error::Deserialize("LedgerSystemTransactionV7", error))?;
                 Self::V7(transaction)
             }
 
             LedgerVersion::V8 => {
-                let transaction = tagged_deserialize_v7(&mut transaction.as_ref())
+                let transaction = tagged_deserialize(&mut transaction.as_ref())
                     .map_err(|error| Error::Deserialize("LedgerSystemTransactionV8", error))?;
                 Self::V8(transaction)
             }
@@ -425,7 +425,7 @@ fn serialize_contract_address_v7(
     address: ContractAddressV7,
 ) -> Result<SerializedContractAddress, Error> {
     address
-        .serialize_v7()
+        .serialize()
         .map_err(|error| Error::Serialize("ContractAddressV7", error))
 }
 
@@ -433,11 +433,11 @@ fn serialize_contract_address_v8(
     address: ContractAddressV8,
 ) -> Result<SerializedContractAddress, Error> {
     address
-        .serialize_v7()
+        .serialize()
         .map_err(|error| Error::Serialize("ContractAddressV8", error))
 }
 
-fn can_decrypt_v7<D: DBV7>(key: &SecretKeyV7, offer: &OfferV7<ProofV7, D>) -> bool {
+fn can_decrypt_v7<D: DB>(key: &SecretKeyV7, offer: &OfferV7<ProofV7, D>) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
     let mut ciphertexts = outputs.chain(transient);
@@ -448,7 +448,7 @@ fn can_decrypt_v7<D: DBV7>(key: &SecretKeyV7, offer: &OfferV7<ProofV7, D>) -> bo
     })
 }
 
-fn can_decrypt_v8<D: DBV7>(key: &SecretKeyV8, offer: &OfferV8<ProofV8, D>) -> bool {
+fn can_decrypt_v8<D: DB>(key: &SecretKeyV8, offer: &OfferV8<ProofV8, D>) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
     let mut ciphertexts = outputs.chain(transient);

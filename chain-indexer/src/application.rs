@@ -313,6 +313,9 @@ where
     let (mut block, transactions) = block.into();
 
     // Apply transactions.
+    if *parent_block_timestamp == 0 {
+        *parent_block_timestamp = block.timestamp;
+    };
     let (transactions, ledger_parameters) = ledger_state
         .apply_transactions(
             transactions,
