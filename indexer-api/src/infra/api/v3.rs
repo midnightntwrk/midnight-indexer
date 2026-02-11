@@ -343,7 +343,7 @@ pub fn export_schema() -> String {
 
 pub fn make_app<S, B>(
     network_id: NetworkId,
-    zswap_state_cache: LedgerStateCache,
+    ledger_state_cache: LedgerStateCache,
     storage: S,
     subscriber: B,
     max_complexity: usize,
@@ -357,7 +357,7 @@ where
 
     let schema = schema_builder::<S, B>()
         .data(network_id)
-        .data(zswap_state_cache)
+        .data(ledger_state_cache)
         .data(storage)
         .data(subscriber)
         .data(metrics)

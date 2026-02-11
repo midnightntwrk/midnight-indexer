@@ -83,7 +83,7 @@ use midnight_onchain_runtime_v7::context::BlockContext as BlockContextV7;
 use midnight_onchain_runtime_v8::context::BlockContext as BlockContextV8;
 use midnight_serialize::{Deserializable, tagged_deserialize};
 use midnight_storage_core::{
-    arena::{Sp, TypedArenaKey},
+    arena::{ArenaKey, Sp, TypedArenaKey},
     db::DB,
     storage::default_storage,
 };
@@ -113,7 +113,7 @@ static STRICTNESS_V8: LazyLock<WellFormedStrictnessV8> = LazyLock::new(|| {
     strictness
 });
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LedgerState {
     V7 {
         ledger_state: LedgerStateV7<LedgerDb>,
@@ -187,6 +187,50 @@ impl LedgerState {
         };
 
         Ok(ledger_state)
+    }
+
+    pub fn translate(self, ledger_version: LedgerVersion) -> Result<Self, Error> {
+        match (self, ledger_version) {
+            (s @ LedgerState::V7 { .. }, LedgerVersion::V7) => Ok(s),
+
+            (
+                LedgerState::V7 {
+                    ledger_state,
+                    block_fullness,
+                },
+                LedgerVersion::V8,
+            ) => {
+                let mut ledger_state = Sp::new(ledger_state);
+                ledger_state.persist();
+
+                let key = ArenaKey::from(ledger_state.as_typed_key());
+                let key =
+                    TypedArenaKey::<LedgerStateV8<LedgerDb>, <LedgerDb as DB>::Hasher>::from(key);
+
+                let ledger_state = default_storage::<LedgerDb>().get(&key).map_err(|error| {
+                    Error::LedgerStateTranslation(LedgerVersion::V7, ledger_version, error)
+                })?;
+                let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
+
+                Ok(LedgerState::V8 {
+                    ledger_state,
+                    block_fullness,
+                })
+            }
+
+            (s @ LedgerState::V8 { .. }, LedgerVersion::V7) => Err(
+                Error::BackwardsLedgerStateTranslation(s.ledger_version(), ledger_version),
+            ),
+
+            (s @ LedgerState::V8 { .. }, LedgerVersion::V8) => Ok(s),
+        }
+    }
+
+    pub fn ledger_version(&self) -> LedgerVersion {
+        match self {
+            LedgerState::V7 { .. } => LedgerVersion::V7,
+            LedgerState::V8 { .. } => LedgerVersion::V8,
+        }
     }
 
     pub fn persist(self) -> Result<(Self, SerializedLedgerStateKey), Error> {
@@ -1528,4 +1572,113 @@ where
         .utxos
         .get(utxo)
         .map(|meta| meta.ctime.to_secs())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        domain::{LedgerVersion, ProtocolVersion, ledger::LedgerState},
+        error::BoxError,
+    };
+    use anyhow::Context;
+
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_translate() -> Result<(), BoxError> {
+        #[cfg(feature = "cloud")]
+        let _postgres_container = {
+            use crate::infra::{ledger_db, migrations, pool::postgres::PostgresPool};
+            use sqlx::postgres::PgSslMode;
+            use std::time::Duration;
+            use testcontainers::{ImageExt, runners::AsyncRunner};
+            use testcontainers_modules::postgres::Postgres;
+
+            let postgres_container = Postgres::default()
+                .with_db_name("indexer")
+                .with_user("indexer")
+                .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
+                .with_tag("17.1-alpine")
+                .start()
+                .await
+                .context("start Postgres container")?;
+            let postgres_port = postgres_container
+                .get_host_port_ipv4(5432)
+                .await
+                .context("get Postgres port")?;
+
+            let config = crate::infra::pool::postgres::Config {
+                host: "localhost".to_string(),
+                port: postgres_port,
+                dbname: "indexer".to_string(),
+                user: "indexer".to_string(),
+                password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
+                sslmode: PgSslMode::Prefer,
+                max_connections: 10,
+                idle_timeout: Duration::from_secs(60),
+                max_lifetime: Duration::from_secs(5 * 60),
+            };
+
+            let pool = PostgresPool::new(config).await.context("create pool")?;
+            migrations::postgres::run(&pool)
+                .await
+                .context("run migrations")?;
+
+            ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+
+            postgres_container
+        };
+
+        #[cfg(feature = "standalone")]
+        {
+            use crate::infra::{
+                ledger_db, migrations,
+                pool::{self, sqlite::SqlitePool},
+            };
+
+            let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
+            let sqlite_file = temp_dir.path().join("indexer.sqlite").display().to_string();
+            let sqlite_ledger_db_file = temp_dir
+                .path()
+                .join("ledger-db.sqlite")
+                .display()
+                .to_string();
+
+            let pool = SqlitePool::new(pool::sqlite::Config {
+                cnn_url: sqlite_file,
+            })
+            .await
+            .context("create pool")?;
+            migrations::sqlite::run(&pool)
+                .await
+                .context("run migrations")?;
+
+            ledger_db::init(ledger_db::Config {
+                cache_size: 1_024,
+                cnn_url: sqlite_ledger_db_file,
+            })
+            .await
+            .expect("ledger DB can be initialized");
+        }
+
+        let ledger_state = LedgerState::new("undeployed".try_into()?, ProtocolVersion::OLDEST)
+            .expect("ledger state can be constructed");
+        assert_eq!(ledger_state.ledger_version(), LedgerVersion::V7);
+
+        let new_ledger_state = ledger_state
+            .clone()
+            .translate(LedgerVersion::V7)
+            .expect("ledger state v7 can be translated to v7");
+        assert_eq!(new_ledger_state, ledger_state);
+
+        let new_ledger_state = ledger_state
+            .clone()
+            .translate(LedgerVersion::V8)
+            .expect("ledger state v7 can be translated to v8");
+        assert_ne!(new_ledger_state, ledger_state);
+
+        let result = new_ledger_state.translate(LedgerVersion::V7);
+        assert!(result.is_err());
+
+        Ok(())
+    }
 }

@@ -100,6 +100,15 @@ pub enum Error {
 
     #[error("cannot calculate transaction cost")]
     TransactionCost(#[source] BoxError),
+
+    #[error("cannot translate ledger state {0} to old {1}")]
+    BackwardsLedgerStateTranslation(LedgerVersion, LedgerVersion),
+
+    #[error("translating ledger state from {0} to {1} not yet supported")]
+    UnsupportedLedgerStateTranslation(LedgerVersion, LedgerVersion),
+
+    #[error("cannot translate ledger state from {0} to {1}")]
+    LedgerStateTranslation(LedgerVersion, LedgerVersion, #[source] io::Error),
 }
 
 /// Extension methods for `Serializable` implementations.

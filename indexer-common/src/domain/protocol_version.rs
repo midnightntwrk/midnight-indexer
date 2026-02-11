@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use derive_more::From;
+use derive_more::{Display, From};
 use parity_scale_codec::Decode;
 use serde::Deserialize;
 use std::{
@@ -25,6 +25,8 @@ use thiserror::Error;
 pub struct ProtocolVersion(pub u32);
 
 impl ProtocolVersion {
+    pub const OLDEST: Self = Self(0_020_000);
+
     pub const LATEST: Self = Self(0_022_000);
 
     /// The major version, i.e. `1` in `1.2.3`.
@@ -106,7 +108,7 @@ pub struct UnsupportedProtocolVersion(ProtocolVersion);
 #[error("cannot SCALE decode protocol version")]
 pub struct ScaleDecodeProtocolVersionError(#[from] parity_scale_codec::Error);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LedgerVersion {
     V7,
     V8,
