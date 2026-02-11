@@ -25,7 +25,7 @@ use thiserror::Error;
 pub struct ProtocolVersion(pub u32);
 
 impl ProtocolVersion {
-    pub const LATEST: Self = Self(0_021_000);
+    pub const LATEST: Self = Self(0_022_000);
 
     /// The major version, i.e. `1` in `1.2.3`.
     pub fn major(self) -> u32 {
@@ -45,6 +45,8 @@ impl ProtocolVersion {
     pub fn ledger_version(self) -> Result<LedgerVersion, UnsupportedProtocolVersion> {
         if self.is_compatible(0_020_000, 0_022_000) {
             Ok(LedgerVersion::V7)
+        } else if self.is_compatible(0_022_000, 0_023_000) {
+            Ok(LedgerVersion::V8)
         } else {
             Err(UnsupportedProtocolVersion(self))
         }
@@ -55,6 +57,8 @@ impl ProtocolVersion {
             Ok(NodeVersion::V0_20)
         } else if self.is_compatible(0_021_000, 0_022_000) {
             Ok(NodeVersion::V0_21)
+        } else if self.is_compatible(0_022_000, 0_023_000) {
+            Ok(NodeVersion::V0_22)
         } else {
             Err(UnsupportedProtocolVersion(self))
         }
@@ -112,6 +116,7 @@ pub enum LedgerVersion {
 pub enum NodeVersion {
     V0_20,
     V0_21,
+    V0_22,
 }
 
 #[cfg(test)]

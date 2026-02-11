@@ -13,6 +13,7 @@
 
 mod v0_20_0;
 mod v0_21_0;
+mod v0_22_0;
 
 // To see how this is generated, look in build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
@@ -51,6 +52,7 @@ pub async fn make_block_details(
     match protocol_version.node_version()? {
         NodeVersion::V0_20 => v0_20_0::make_block_details(extrinsics, events, authorities).await,
         NodeVersion::V0_21 => v0_21_0::make_block_details(extrinsics, events, authorities).await,
+        NodeVersion::V0_22 => v0_22_0::make_block_details(extrinsics, events, authorities).await,
     }
 }
 
@@ -63,6 +65,7 @@ pub async fn fetch_authorities(
     match protocol_version.node_version()? {
         NodeVersion::V0_20 => v0_20_0::fetch_authorities(block_hash, online_client).await,
         NodeVersion::V0_21 => v0_21_0::fetch_authorities(block_hash, online_client).await,
+        NodeVersion::V0_22 => v0_22_0::fetch_authorities(block_hash, online_client).await,
     }
 }
 
@@ -71,6 +74,7 @@ pub fn decode_slot(slot: &[u8], protocol_version: ProtocolVersion) -> Result<u64
     match protocol_version.node_version()? {
         NodeVersion::V0_20 => v0_20_0::decode_slot(slot),
         NodeVersion::V0_21 => v0_21_0::decode_slot(slot),
+        NodeVersion::V0_22 => v0_22_0::decode_slot(slot),
     }
 }
 
@@ -84,6 +88,7 @@ pub async fn get_contract_state(
     match protocol_version.node_version()? {
         NodeVersion::V0_20 => v0_20_0::get_contract_state(address, block_hash, online_client).await,
         NodeVersion::V0_21 => v0_21_0::get_contract_state(address, block_hash, online_client).await,
+        NodeVersion::V0_22 => v0_22_0::get_contract_state(address, block_hash, online_client).await,
     }
 }
 
@@ -95,6 +100,7 @@ pub async fn get_zswap_state_root(
     match protocol_version.node_version()? {
         NodeVersion::V0_20 => v0_20_0::get_zswap_state_root(block_hash, online_client).await,
         NodeVersion::V0_21 => v0_21_0::get_zswap_state_root(block_hash, online_client).await,
+        NodeVersion::V0_22 => v0_22_0::get_zswap_state_root(block_hash, online_client).await,
     }
 }
 
@@ -111,8 +117,13 @@ pub async fn get_transaction_cost(
         NodeVersion::V0_20 => {
             v0_20_0::get_transaction_cost(transaction.as_ref(), block_hash, online_client).await
         }
+
         NodeVersion::V0_21 => {
             v0_21_0::get_transaction_cost(transaction.as_ref(), block_hash, online_client).await
+        }
+
+        NodeVersion::V0_22 => {
+            v0_22_0::get_transaction_cost(transaction.as_ref(), block_hash, online_client).await
         }
     }
 }
@@ -126,6 +137,7 @@ pub async fn get_d_parameter(
     match protocol_version.node_version()? {
         NodeVersion::V0_20 => v0_20_0::get_d_parameter(block_hash, online_client).await,
         NodeVersion::V0_21 => v0_21_0::get_d_parameter(block_hash, online_client).await,
+        NodeVersion::V0_22 => v0_22_0::get_d_parameter(block_hash, online_client).await,
     }
 }
 
@@ -141,8 +153,13 @@ pub async fn fetch_genesis_cnight_registrations(
         NodeVersion::V0_20 => {
             v0_20_0::fetch_genesis_cnight_registrations(block_hash, online_client).await
         }
+
         NodeVersion::V0_21 => {
             v0_21_0::fetch_genesis_cnight_registrations(block_hash, online_client).await
+        }
+
+        NodeVersion::V0_22 => {
+            v0_22_0::fetch_genesis_cnight_registrations(block_hash, online_client).await
         }
     }
 }
@@ -156,5 +173,6 @@ pub async fn get_terms_and_conditions(
     match protocol_version.node_version()? {
         NodeVersion::V0_20 => v0_20_0::get_terms_and_conditions(block_hash, online_client).await,
         NodeVersion::V0_21 => v0_21_0::get_terms_and_conditions(block_hash, online_client).await,
+        NodeVersion::V0_22 => v0_22_0::get_terms_and_conditions(block_hash, online_client).await,
     }
 }
