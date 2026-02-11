@@ -15,8 +15,9 @@ use crate::domain::{RegularTransaction, SystemTransaction, Transaction, node};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
-    ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, NetworkId,
-    ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey, TransactionHash,
+    ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, GenesisSettings,
+    NetworkId, ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey,
+    TransactionHash,
     ledger::{self, LedgerParameters},
 };
 use std::ops::DerefMut;
@@ -33,10 +34,18 @@ impl DerefMut for LedgerState {
 }
 
 impl LedgerState {
-    pub fn new(network_id: NetworkId, protocol_version: ProtocolVersion) -> Result<Self, Error> {
-        indexer_common::domain::ledger::LedgerState::new(network_id, protocol_version)
-            .map_err(Error::Create)
-            .map(Into::into)
+    pub fn new(
+        network_id: NetworkId,
+        protocol_version: ProtocolVersion,
+        genesis_settings: Option<GenesisSettings>,
+    ) -> Result<Self, Error> {
+        indexer_common::domain::ledger::LedgerState::new(
+            network_id,
+            protocol_version,
+            genesis_settings,
+        )
+        .map_err(Error::Create)
+        .map(Into::into)
     }
 
     pub fn load(

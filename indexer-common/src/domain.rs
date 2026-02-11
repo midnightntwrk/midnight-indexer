@@ -60,6 +60,18 @@ pub type SerializedLedgerParameters = ByteVec;
 pub type SerializedTransaction = ByteVec;
 pub type SerializedZswapState = ByteVec;
 
+/// Genesis pool configuration from the chain spec.
+///
+/// When the genesis tool uses `LedgerState::with_genesis_settings` (Ledger 8 RC2+), pool values
+/// are set via the constructor instead of system transactions. The indexer reads these values from
+/// the chain spec's `system_properties` and passes them to `LedgerState::new`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GenesisSettings {
+    pub locked_pool: u128,
+    pub reserve_pool: u128,
+    pub treasury: u128,
+}
+
 /// Network identifier.
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Deref, Into, Deserialize)]
 #[deref(forward)]

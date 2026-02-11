@@ -16,7 +16,7 @@ use crate::domain::{
 };
 use futures::Stream;
 use indexer_common::domain::{
-    BlockAuthor, BlockHash, ProtocolVersion, SerializedTransaction,
+    BlockAuthor, BlockHash, GenesisSettings, ProtocolVersion, SerializedTransaction,
     SerializedTransactionIdentifier, TransactionHash, ledger::ZswapStateRoot,
 };
 use std::{error::Error as StdError, fmt::Debug};
@@ -50,6 +50,9 @@ where
         timestamp: u64,
         protocol_version: ProtocolVersion,
     ) -> Result<SystemParametersChange, Self::Error>;
+
+    /// Fetch genesis pool settings from the chain spec's system properties.
+    async fn fetch_genesis_settings(&self) -> Result<Option<GenesisSettings>, Self::Error>;
 }
 
 #[derive(Debug, Clone)]

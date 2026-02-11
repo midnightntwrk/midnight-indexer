@@ -92,15 +92,24 @@ pub async fn run(
         contract_action_count,
     );
 
+    // Fetch genesis settings from chain spec (for pool value initialization).
+    let genesis_settings = node
+        .fetch_genesis_settings()
+        .await
+        .context("fetch genesis settings")?;
+
     // Load/initialize ledger state.
     let mut ledger_state = match highest_protocol_version_and_ledger_state_key {
         Some((protocol_version, ledger_state_key)) => {
             LedgerState::load(&ledger_state_key, protocol_version).context("load ledger state")?
         }
 
-        None => {
-            LedgerState::new(network_id, ProtocolVersion::LATEST).context("create ledger state")?
-        }
+        None => LedgerState::new(
+            network_id,
+            ProtocolVersion::LATEST,
+            genesis_settings.clone(),
+        )
+        .context("create ledger state")?,
     };
 
     let highest_block_on_node = Arc::new(RwLock::new(None));
@@ -140,6 +149,7 @@ pub async fn run(
     // Spawn task to index blocks.
     let index_blocks_task = task::spawn({
         let node = node.clone();
+        let genesis_settings = genesis_settings.clone();
 
         async move {
             let blocks = node_blocks(highest_block_ref, node.clone())
@@ -161,6 +171,7 @@ pub async fn run(
                 &publisher,
                 &metrics,
                 &node,
+                &genesis_settings,
             )
             .in_span(Span::root("get-and-index-block", SpanContext::random()))
             .await?
@@ -252,6 +263,7 @@ async fn get_and_index_block<E, N>(
     publisher: &impl Publisher,
     metrics: &Metrics,
     node: &N,
+    genesis_settings: &Option<indexer_common::domain::GenesisSettings>,
 ) -> Result<Option<LedgerState>, anyhow::Error>
 where
     E: StdError + Send + Sync + 'static,
@@ -275,6 +287,7 @@ where
                 publisher,
                 metrics,
                 node,
+                genesis_settings,
             )
             .await?;
 
@@ -306,6 +319,7 @@ async fn index_block<N>(
     publisher: &impl Publisher,
     metrics: &Metrics,
     node: &N,
+    genesis_settings: &Option<indexer_common::domain::GenesisSettings>,
 ) -> Result<LedgerState, anyhow::Error>
 where
     N: Node,
@@ -335,6 +349,28 @@ where
             block.hash,
             block.height
         );
+    }
+
+    // Validate pool values against chain spec at genesis (block 0).
+    if block.height == 0
+        && let Some(settings) = genesis_settings
+    {
+        if ledger_state.locked_pool() != settings.locked_pool
+            || ledger_state.reserve_pool() != settings.reserve_pool
+            || ledger_state.treasury_night() != settings.treasury
+        {
+            warn!(
+                indexer_locked_pool = ledger_state.locked_pool(),
+                chain_spec_locked_pool = settings.locked_pool,
+                indexer_reserve_pool = ledger_state.reserve_pool(),
+                chain_spec_reserve_pool = settings.reserve_pool,
+                indexer_treasury = ledger_state.treasury_night(),
+                chain_spec_treasury = settings.treasury;
+                "genesis pool value mismatch between indexer and chain spec"
+            );
+        } else {
+            info!("genesis pool values match chain spec");
+        }
     }
 
     // Determine whether caught up, also allowing to fall back a little in that state.
@@ -522,7 +558,7 @@ mod tests {
     use fake::{Fake, Faker};
     use futures::{Stream, StreamExt, TryStreamExt, stream};
     use indexer_common::{
-        domain::{BlockHash, ByteArray, ProtocolVersion, ledger::ZswapStateRoot},
+        domain::{BlockHash, ByteArray, GenesisSettings, ProtocolVersion, ledger::ZswapStateRoot},
         error::BoxError,
     };
     use std::{convert::Infallible, sync::LazyLock};
@@ -574,6 +610,10 @@ mod tests {
                 d_parameter: None,
                 terms_and_conditions: None,
             })
+        }
+
+        async fn fetch_genesis_settings(&self) -> Result<Option<GenesisSettings>, Self::Error> {
+            Ok(None)
         }
     }
 
