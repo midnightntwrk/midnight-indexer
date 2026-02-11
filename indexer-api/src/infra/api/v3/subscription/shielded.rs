@@ -182,7 +182,7 @@ where
         // there are no new transactions.
         let storage = cx.get_storage::<S>();
         let set_wallet_active = IntervalStream::new(interval(ACTIVATE_WALLET_INTERVAL))
-            .then(move |_| async move { storage.set_wallet_active(session_id).await })
+            .then(move |_| async move { storage.keep_wallet_active(session_id).await })
             .map_err(|error| {
                 ApiError::Server(InnerApiError(
                     "set wallet active".to_string(),
