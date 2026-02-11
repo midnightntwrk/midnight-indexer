@@ -36,7 +36,7 @@ use midnight_base_crypto::{
 };
 use midnight_coin_structure_v7::{
     coin::{
-        NIGHT as NIGHTV7, TokenType as TokenTypeV7, UnshieldedTokenType as UnshieldedTokenTypeV7,
+        NIGHT as NIGHTV7, UnshieldedTokenType as UnshieldedTokenTypeV7,
         UserAddress as UserAddressV7,
     },
     contract::ContractAddress as ContractAddressV7,
@@ -98,7 +98,7 @@ use midnight_transient_crypto_v8::merkle_tree::{
 };
 use midnight_zswap_v7::ledger::State as ZswapStateV7;
 use midnight_zswap_v8::ledger::State as ZswapStateV8;
-use std::{collections::HashSet, ops::Deref, sync::LazyLock};
+use std::{collections::HashSet, io, ops::Deref, sync::LazyLock};
 
 const OUTPUT_INDEX_ZERO: u32 = 0;
 
@@ -129,37 +129,68 @@ pub enum LedgerState {
 
 impl LedgerState {
     #[allow(missing_docs)]
-    pub fn new(
-        network_id: NetworkId,
-        protocol_version: ProtocolVersion,
-        genesis_settings: Option<crate::domain::GenesisSettings>,
-    ) -> Result<Self, Error> {
+    pub fn new(network_id: NetworkId, protocol_version: ProtocolVersion) -> Result<Self, Error> {
         let ledger_state = match protocol_version.ledger_version()? {
             LedgerVersion::V7 => Self::V7 {
                 ledger_state: LedgerStateV7::new(network_id),
                 block_fullness: Default::default(),
             },
 
-            LedgerVersion::V8 => {
-                // TODO(ledger-8-rc2): Use LedgerStateV8::with_genesis_settings() when available.
-                // For now, log the genesis settings for visibility. The pool values from the chain
-                // spec will be used once the ledger dependency is bumped to RC2.
-                if let Some(ref settings) = genesis_settings {
-                    info!(
-                        locked_pool = settings.locked_pool,
-                        reserve_pool = settings.reserve_pool,
-                        treasury = settings.treasury;
-                        "genesis settings from chain spec (not yet applied, pending ledger RC2)"
-                    );
-                }
-                Self::V8 {
-                    ledger_state: LedgerStateV8::new(network_id),
-                    block_fullness: Default::default(),
-                }
-            }
+            LedgerVersion::V8 => Self::V8 {
+                ledger_state: LedgerStateV8::new(network_id),
+                block_fullness: Default::default(),
+            },
         };
 
         Ok(ledger_state)
+    }
+
+    /// Create a [LedgerState] from the serialized genesis state in the chain spec.
+    ///
+    /// Deserializes the full genesis `LedgerState` from `system_properties` RPC and uses it
+    /// directly as the starting state. This is the agreed approach for Ledger 8 RC2+:
+    /// the indexer reads the complete genesis state rather than reconstructing from parts.
+    ///
+    /// Block 0 transaction replay still happens for cNight registrations, DistributeNight, etc.
+    /// — just not for pool/parameter initialization.
+    pub fn from_genesis(raw: &[u8], protocol_version: ProtocolVersion) -> Result<Self, Error> {
+        match protocol_version.ledger_version()? {
+            LedgerVersion::V7 => Err(Error::Deserialize(
+                "GenesisLedgerStateV7",
+                io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "genesis state from chain spec is not supported for V7",
+                ),
+            )),
+
+            LedgerVersion::V8 => {
+                // TODO(ledger-8-rc2): Verify that the deserialized state produces the correct
+                // zswap_state_root at block 0 and is usable for transaction application.
+                // If arena/storage constraints prevent direct use, fall back to:
+                //   LedgerStateV8::with_genesis_settings(network_id, params, locked, reserve,
+                // treasury)
+                let ledger_state = tagged_deserialize::<LedgerStateV8<LedgerDb>>(&mut &*raw)
+                    .map_err(|error| Error::Deserialize("GenesisLedgerStateV8", error))?;
+
+                let treasury_night = ledger_state
+                    .treasury
+                    .get(&TokenTypeV8::Unshielded(NIGHTV8))
+                    .copied()
+                    .unwrap_or(0);
+
+                info!(
+                    locked_pool = ledger_state.locked_pool,
+                    reserve_pool = ledger_state.reserve_pool,
+                    treasury_night;
+                    "genesis ledger state deserialized from chain spec"
+                );
+
+                Ok(Self::V8 {
+                    ledger_state,
+                    block_fullness: Default::default(),
+                })
+            }
+        }
     }
 
     pub fn load(
@@ -252,56 +283,6 @@ impl LedgerState {
 
                 Ok((ledger_state, key))
             }
-        }
-    }
-
-    /// Extract genesis pool settings from raw serialized genesis state bytes.
-    pub fn extract_genesis_settings(raw: &[u8]) -> Result<crate::domain::GenesisSettings, Error> {
-        let ledger_state = tagged_deserialize::<LedgerStateV8<LedgerDb>>(&mut &*raw)
-            .map_err(|error| Error::Deserialize("GenesisLedgerStateV8", error))?;
-
-        let treasury = ledger_state
-            .treasury
-            .get(&TokenTypeV8::Unshielded(NIGHTV8))
-            .copied()
-            .unwrap_or(0);
-
-        Ok(crate::domain::GenesisSettings {
-            locked_pool: ledger_state.locked_pool,
-            reserve_pool: ledger_state.reserve_pool,
-            treasury,
-        })
-    }
-
-    /// Get the locked pool value.
-    pub fn locked_pool(&self) -> u128 {
-        match self {
-            Self::V7 { ledger_state, .. } => ledger_state.locked_pool,
-            Self::V8 { ledger_state, .. } => ledger_state.locked_pool,
-        }
-    }
-
-    /// Get the reserve pool value.
-    pub fn reserve_pool(&self) -> u128 {
-        match self {
-            Self::V7 { ledger_state, .. } => ledger_state.reserve_pool,
-            Self::V8 { ledger_state, .. } => ledger_state.reserve_pool,
-        }
-    }
-
-    /// Get the NIGHT treasury value.
-    pub fn treasury_night(&self) -> u128 {
-        match self {
-            Self::V7 { ledger_state, .. } => ledger_state
-                .treasury
-                .get(&TokenTypeV7::Unshielded(NIGHTV7))
-                .copied()
-                .unwrap_or(0),
-            Self::V8 { ledger_state, .. } => ledger_state
-                .treasury
-                .get(&TokenTypeV8::Unshielded(NIGHTV8))
-                .copied()
-                .unwrap_or(0),
         }
     }
 

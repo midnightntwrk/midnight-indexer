@@ -26,7 +26,7 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{
-        BlockAuthor, BlockHash, ByteVec, GenesisSettings, NodeVersion, ProtocolVersion,
+        BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion,
         ScaleDecodeProtocolVersionError, SerializedContractAddress, UnsupportedProtocolVersion,
         ledger::{self, ZswapStateRoot},
     },
@@ -474,13 +474,13 @@ impl Node for SubxtNode {
         })
     }
 
-    async fn fetch_genesis_settings(&self) -> Result<Option<GenesisSettings>, Self::Error> {
+    async fn fetch_genesis_state(&self) -> Result<Option<ByteVec>, Self::Error> {
         let legacy_rpc_methods =
             LegacyRpcMethods::<SubstrateConfig>::new(self.rpc_client.to_owned().into());
         let properties = legacy_rpc_methods
             .system_properties()
             .await
-            .map_err(|error| SubxtNodeError::FetchGenesisSettings(error.into()))?;
+            .map_err(|error| SubxtNodeError::FetchGenesisState(error.into()))?;
 
         let Some(genesis_state_value) = properties.get("genesis_state") else {
             debug!("no genesis_state in system properties");
@@ -494,7 +494,7 @@ impl Node for SubxtNode {
 
         let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
         let bytes = const_hex::decode(hex_str).map_err(|error| {
-            SubxtNodeError::FetchGenesisSettings(
+            SubxtNodeError::FetchGenesisState(
                 format!("cannot hex-decode genesis_state: {error}").into(),
             )
         })?;
@@ -504,21 +504,7 @@ impl Node for SubxtNode {
             "fetched genesis state from chain spec system properties"
         );
 
-        match ledger::LedgerState::extract_genesis_settings(&bytes) {
-            Ok(settings) => {
-                info!(
-                    locked_pool = settings.locked_pool,
-                    reserve_pool = settings.reserve_pool,
-                    treasury = settings.treasury;
-                    "extracted genesis settings from chain spec"
-                );
-                Ok(Some(settings))
-            }
-            Err(error) => {
-                warn!(error:%; "cannot extract genesis settings from chain spec, ignoring");
-                Ok(None)
-            }
-        }
+        Ok(Some(bytes.into()))
     }
 }
 
@@ -631,8 +617,8 @@ pub enum SubxtNodeError {
     #[error("cannot fetch genesis cNight registrations")]
     FetchGenesisCnightRegistrations(#[source] BoxError),
 
-    #[error("cannot fetch genesis settings")]
-    FetchGenesisSettings(#[source] BoxError),
+    #[error("cannot fetch genesis state")]
+    FetchGenesisState(#[source] BoxError),
 }
 
 #[trace]
