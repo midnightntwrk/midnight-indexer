@@ -459,55 +459,95 @@ fn can_decrypt_v8<D: DB>(key: &SecretKeyV8, offer: &OfferV8<ProofV8, D>) -> bool
     })
 }
 
-#[cfg(feature = "cloud")]
 #[cfg(test)]
 mod tests {
     use crate::{
         domain::{ProtocolVersion, ViewingKey, ledger::Transaction},
-        infra::{ledger_db, migrations, pool::postgres::PostgresPool},
+        error::BoxError,
     };
     use anyhow::Context;
     use bip32::{DerivationPath, XPrv};
     use midnight_zswap_v7::keys::{SecretKeys, Seed};
-    use sqlx::postgres::PgSslMode;
-    use std::{error::Error as StdError, fs, str::FromStr, time::Duration};
-    use testcontainers::{ImageExt, runners::AsyncRunner};
-    use testcontainers_modules::postgres::Postgres;
+    use std::{fs, str::FromStr};
 
     /// Notice: The raw test data is created with `generate_txs.sh`.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_deserialize_relevant() -> Result<(), Box<dyn StdError>> {
-        let postgres_container = Postgres::default()
-            .with_db_name("indexer")
-            .with_user("indexer")
-            .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
-            .with_tag("17.1-alpine")
-            .start()
-            .await
-            .context("start Postgres container")?;
-        let postgres_port = postgres_container
-            .get_host_port_ipv4(5432)
-            .await
-            .context("get Postgres port")?;
+    async fn test_deserialize_relevant() -> Result<(), BoxError> {
+        #[cfg(feature = "cloud")]
+        let _postgres_container = {
+            use crate::infra::{ledger_db, migrations, pool::postgres::PostgresPool};
+            use sqlx::postgres::PgSslMode;
+            use std::time::Duration;
+            use testcontainers::{ImageExt, runners::AsyncRunner};
+            use testcontainers_modules::postgres::Postgres;
 
-        let config = crate::infra::pool::postgres::Config {
-            host: "localhost".to_string(),
-            port: postgres_port,
-            dbname: "indexer".to_string(),
-            user: "indexer".to_string(),
-            password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
-            sslmode: PgSslMode::Prefer,
-            max_connections: 10,
-            idle_timeout: Duration::from_secs(60),
-            max_lifetime: Duration::from_secs(5 * 60),
+            let postgres_container = Postgres::default()
+                .with_db_name("indexer")
+                .with_user("indexer")
+                .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
+                .with_tag("17.1-alpine")
+                .start()
+                .await
+                .context("start Postgres container")?;
+            let postgres_port = postgres_container
+                .get_host_port_ipv4(5432)
+                .await
+                .context("get Postgres port")?;
+
+            let config = crate::infra::pool::postgres::Config {
+                host: "localhost".to_string(),
+                port: postgres_port,
+                dbname: "indexer".to_string(),
+                user: "indexer".to_string(),
+                password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
+                sslmode: PgSslMode::Prefer,
+                max_connections: 10,
+                idle_timeout: Duration::from_secs(60),
+                max_lifetime: Duration::from_secs(5 * 60),
+            };
+
+            let pool = PostgresPool::new(config).await.context("create pool")?;
+            migrations::postgres::run(&pool)
+                .await
+                .context("run migrations")?;
+
+            ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+
+            postgres_container
         };
 
-        let pool = PostgresPool::new(config).await.context("create pool")?;
-        migrations::postgres::run(&pool)
-            .await
-            .context("run migrations")?;
+        #[cfg(feature = "standalone")]
+        {
+            use crate::infra::{
+                ledger_db, migrations,
+                pool::{self, sqlite::SqlitePool},
+            };
 
-        ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+            let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
+            let sqlite_file = temp_dir.path().join("indexer.sqlite").display().to_string();
+            let sqlite_ledger_db_file = temp_dir
+                .path()
+                .join("ledger-db.sqlite")
+                .display()
+                .to_string();
+
+            let pool = SqlitePool::new(pool::sqlite::Config {
+                cnn_url: sqlite_file,
+            })
+            .await
+            .context("create pool")?;
+            migrations::sqlite::run(&pool)
+                .await
+                .context("run migrations")?;
+
+            ledger_db::init(ledger_db::Config {
+                cache_size: 1_024,
+                cnn_url: sqlite_ledger_db_file,
+            })
+            .await
+            .expect("ledger DB can be initialized");
+        }
 
         let transaction = fs::read(format!("{}/tests/tx_1_2_2.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");

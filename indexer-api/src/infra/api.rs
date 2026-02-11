@@ -163,11 +163,11 @@ where
     S: Storage,
     B: Subscriber,
 {
-    let zswap_state_cache = LedgerStateCache::new();
+    let ledger_state_cache = LedgerStateCache::default();
 
     let v3_app = v3::make_app(
         network_id,
-        zswap_state_cache,
+        ledger_state_cache,
         storage,
         subscriber,
         max_complexity,

@@ -18,15 +18,10 @@ use log::debug;
 use thiserror::Error;
 use tokio::sync::RwLock;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct LedgerStateCache(RwLock<Option<LedgerState>>);
 
 impl LedgerStateCache {
-    #[allow(missing_docs)]
-    pub fn new() -> Self {
-        Self(RwLock::new(None))
-    }
-
     /// Create a collapsed update from the given start index to the given end index for the given
     /// protocol version.
     pub async fn collapsed_update(
