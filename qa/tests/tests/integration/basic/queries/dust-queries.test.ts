@@ -171,7 +171,7 @@ describe('dust generation status queries', () => {
       expect(dustGenerationStatus?.dustAddress).not.toBeNull();
 
       // The DUST destination address should have hrp prefix for the target network
-      const dustAddressHrpPrefix = 'mn_dust_' + env.getCurrentEnvironmentName();
+      const dustAddressHrpPrefix = 'mn_dust_' + env.getNetworkId();
       expect(dustGenerationStatus?.dustAddress).toMatch(new RegExp(`^${dustAddressHrpPrefix}`));
     });
 

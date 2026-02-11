@@ -15,7 +15,7 @@
 
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
-import { env } from 'environment/model';
+import { env, EnvironmentName } from 'environment/model';
 import dataProvider from 'utils/testdata-provider';
 import { GraphQLError } from 'graphql/error/GraphQLError';
 import {
@@ -343,12 +343,27 @@ describe('unshielded transaction subscriptions', async () => {
      */
     test('should return an error message, given the address provided is for another network', async () => {
       const currentEnvironment = env.getCurrentEnvironmentName();
+      const currentNetworkId = env.getNetworkId();
+
       for (const environment of env.getAllEnvironmentNames()) {
-        if (environment == currentEnvironment) {
+        if (environment === currentEnvironment) {
           // We don't want to test the current environment because the address HRP
           // should be accepted in this case
           log.info(
             `Skipping test for environment ${environment} because it is the current environment`,
+          );
+          continue;
+        }
+
+        // Environments can share the same underlying network id (e.g. qanet and qanet.dev both map
+        // to the "qanet" network id). In those cases, an address for that environment should be
+        // accepted, so we skip the check here as well.
+        const environmentNetworkId =
+          environment === EnvironmentName.QANET_DEV ? 'qanet' : environment;
+
+        if (environmentNetworkId === currentNetworkId) {
+          log.info(
+            `Skipping test for environment ${environment} because it shares the same network id as ${currentEnvironment}`,
           );
           continue;
         }
