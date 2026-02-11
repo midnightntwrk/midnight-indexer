@@ -108,7 +108,7 @@ pub enum Error {
     UnsupportedLedgerStateTranslation(LedgerVersion, LedgerVersion),
 
     #[error("cannot translate ledger state from {0} to {1}")]
-    LedgerStateTranslation(#[source] io::Error, LedgerVersion, LedgerVersion),
+    LedgerStateTranslation(LedgerVersion, LedgerVersion, #[source] io::Error),
 }
 
 /// Extension methods for `Serializable` implementations.

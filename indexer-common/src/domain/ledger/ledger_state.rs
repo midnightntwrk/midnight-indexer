@@ -190,17 +190,6 @@ impl LedgerState {
     }
 
     pub fn translate(self, ledger_version: LedgerVersion) -> Result<Self, Error> {
-        if ledger_version < self.ledger_version() {
-            return Err(Error::BackwardsLedgerStateTranslation(
-                self.ledger_version(),
-                ledger_version,
-            ));
-        }
-
-        if ledger_version == self.ledger_version() {
-            return Ok(self);
-        }
-
         match (self, ledger_version) {
             (s @ LedgerState::V7 { .. }, LedgerVersion::V7) => Ok(s),
 
@@ -209,7 +198,7 @@ impl LedgerState {
                     ledger_state,
                     block_fullness,
                 },
-                ledger_version @ LedgerVersion::V8,
+                LedgerVersion::V8,
             ) => {
                 let mut ledger_state = Sp::new(ledger_state);
                 ledger_state.persist();
@@ -219,7 +208,7 @@ impl LedgerState {
                     TypedArenaKey::<LedgerStateV8<LedgerDb>, <LedgerDb as DB>::Hasher>::from(key);
 
                 let ledger_state = default_storage::<LedgerDb>().get(&key).map_err(|error| {
-                    Error::LedgerStateTranslation(error, LedgerVersion::V7, ledger_version)
+                    Error::LedgerStateTranslation(LedgerVersion::V7, ledger_version, error)
                 })?;
                 let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
 
@@ -229,10 +218,11 @@ impl LedgerState {
                 })
             }
 
-            (s @ LedgerState::V8 { .. }, _) => Err(Error::UnsupportedLedgerStateTranslation(
-                s.ledger_version(),
-                ledger_version,
-            )),
+            (s @ LedgerState::V8 { .. }, LedgerVersion::V7) => Err(
+                Error::BackwardsLedgerStateTranslation(s.ledger_version(), ledger_version),
+            ),
+
+            (s @ LedgerState::V8 { .. }, LedgerVersion::V8) => Ok(s),
         }
     }
 
@@ -1594,7 +1584,7 @@ mod tests {
 
     #[cfg(any(feature = "cloud", feature = "standalone"))]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test() -> Result<(), BoxError> {
+    async fn test_translate() -> Result<(), BoxError> {
         #[cfg(feature = "cloud")]
         let _postgres_container = {
             use crate::infra::{ledger_db, migrations, pool::postgres::PostgresPool};
