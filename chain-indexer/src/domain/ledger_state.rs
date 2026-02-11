@@ -94,11 +94,8 @@ impl LedgerState {
         Ok((transactions, ledger_parameters))
     }
 
-    /// Convert node transactions to domain transactions without applying them to the ledger state.
-    ///
-    /// Used when the ledger state was initialized from the genesis chain spec, which already
-    /// includes block 0 transactions. Returns domain transactions with default applied fields
-    /// (empty UTXOs, etc.) and the current ledger parameters.
+    /// Convert node transactions to domain transactions without applying to the ledger state.
+    /// Used when genesis state from chain spec already includes block 0 transactions.
     pub fn skip_block_transactions(
         &self,
         transactions: impl IntoIterator<Item = node::Transaction>,

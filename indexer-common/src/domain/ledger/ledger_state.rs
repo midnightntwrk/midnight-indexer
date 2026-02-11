@@ -74,8 +74,8 @@ use midnight_ledger_v8::{
         TransactionContext as TransactionContextV8, TransactionResult as TransactionResultV8,
     },
     structure::{
-        LedgerParameters as LedgerParametersV8, LedgerState as LedgerStateV8,
-        OutputInstructionUnshielded as OutputInstructionUnshieldedV8,
+        INITIAL_PARAMETERS as INITIAL_PARAMETERS_V8, LedgerParameters as LedgerParametersV8,
+        LedgerState as LedgerStateV8, OutputInstructionUnshielded as OutputInstructionUnshieldedV8,
         SystemTransaction as SystemTransactionV8, Utxo as UtxoV8,
     },
     verify::WellFormedStrictness as WellFormedStrictnessV8,
@@ -145,14 +145,9 @@ impl LedgerState {
         Ok(ledger_state)
     }
 
-    /// Create a [LedgerState] from the serialized genesis state in the chain spec.
-    ///
-    /// Deserializes the full genesis `LedgerState` from `system_properties` RPC and uses it
-    /// directly as the starting state. This is the agreed approach for Ledger 8 RC2+:
-    /// the indexer reads the complete genesis state rather than reconstructing from parts.
-    ///
-    /// The genesis state already includes block 0 transactions (applied by the genesis tool),
-    /// so block 0 transaction replay must be skipped to avoid replay protection violations.
+    /// Create a [LedgerState] by deserializing the genesis state from chain spec. The
+    /// deserialized state already includes block 0 transactions, so block 0 transaction
+    /// application must be skipped.
     pub fn from_genesis(raw: &[u8], protocol_version: ProtocolVersion) -> Result<Self, Error> {
         match protocol_version.ledger_version()? {
             LedgerVersion::V7 => Err(Error::Deserialize(
@@ -164,11 +159,6 @@ impl LedgerState {
             )),
 
             LedgerVersion::V8 => {
-                // TODO(ledger-8-rc2): Verify that the deserialized state produces the correct
-                // zswap_state_root at block 0 and is usable for transaction application.
-                // If arena/storage constraints prevent direct use, fall back to:
-                //   LedgerStateV8::with_genesis_settings(network_id, params, locked, reserve,
-                // treasury)
                 let ledger_state = tagged_deserialize::<LedgerStateV8<LedgerDb>>(&mut &*raw)
                     .map_err(|error| Error::Deserialize("GenesisLedgerStateV8", error))?;
 
@@ -183,6 +173,50 @@ impl LedgerState {
                     reserve_pool = ledger_state.reserve_pool,
                     treasury_night;
                     "genesis ledger state deserialized from chain spec"
+                );
+
+                Ok(Self::V8 {
+                    ledger_state,
+                    block_fullness: Default::default(),
+                })
+            }
+        }
+    }
+
+    /// Create a [LedgerState] with genesis pool settings. Unlike
+    /// [`from_genesis`](Self::from_genesis), this creates a pre-block-0 state, so block 0
+    /// transactions must be applied normally.
+    pub fn with_genesis_settings(
+        network_id: NetworkId,
+        protocol_version: ProtocolVersion,
+        locked_pool: u128,
+        reserve_pool: u128,
+        treasury: u128,
+    ) -> Result<Self, Error> {
+        match protocol_version.ledger_version()? {
+            LedgerVersion::V7 => Err(Error::Deserialize(
+                "GenesisSettingsV7",
+                io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "genesis settings are not supported for V7",
+                ),
+            )),
+
+            LedgerVersion::V8 => {
+                let ledger_state = LedgerStateV8::with_genesis_settings(
+                    network_id.to_string(),
+                    INITIAL_PARAMETERS_V8,
+                    locked_pool,
+                    reserve_pool,
+                    treasury,
+                )
+                .map_err(|error| Error::GenesisSettings(error.to_string().into()))?;
+
+                info!(
+                    locked_pool,
+                    reserve_pool,
+                    treasury;
+                    "genesis ledger state created with genesis settings"
                 );
 
                 Ok(Self::V8 {
