@@ -44,7 +44,7 @@ const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
 const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(3);
 
 // TODO: Make configurable!
-const ACTIVATE_WALLET_INTERVAL: Duration = Duration::from_secs(60);
+const KEEP_WALLET_ACTIVE_INTERVAL: Duration = Duration::from_secs(60);
 
 /// An event of the shielded transactions subscription.
 #[derive(Debug, Union)]
@@ -178,18 +178,18 @@ where
 
         let events = tokio_stream::StreamExt::merge(relevant_transactions, progress);
 
-        // As long as the subscription is alive, the wallet is periodically set active, even if
+        // As long as the subscription is alive, the wallet is periodically kept active, even if
         // there are no new transactions.
         let storage = cx.get_storage::<S>();
-        let set_wallet_active = IntervalStream::new(interval(ACTIVATE_WALLET_INTERVAL))
+        let keep_wallet_active = IntervalStream::new(interval(KEEP_WALLET_ACTIVE_INTERVAL))
             .then(move |_| async move { storage.keep_wallet_active(session_id).await })
             .map_err(|error| {
                 ApiError::Server(InnerApiError(
-                    "set wallet active".to_string(),
+                    "keep wallet active".to_string(),
                     Some(Arc::new(error)),
                 ))
             });
-        let events = stream::select(events.map_ok(Some), set_wallet_active.map_ok(|_| None))
+        let events = stream::select(events.map_ok(Some), keep_wallet_active.map_ok(|_| None))
             .try_filter_map(ok)
             .on_drop(move || {
                 cx.get_metrics().wallets_connected.decrement(1);
