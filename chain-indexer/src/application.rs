@@ -93,13 +93,26 @@ pub async fn run(
     );
 
     // Load/initialize ledger state.
+    let mut genesis_from_chain_spec = false;
     let mut ledger_state = match highest_protocol_version_and_ledger_state_key {
         Some((protocol_version, ledger_state_key)) => {
             LedgerState::load(&ledger_state_key, protocol_version).context("load ledger state")?
         }
 
         None => {
-            LedgerState::new(network_id, ProtocolVersion::OLDEST).context("create ledger state")?
+            let genesis_state = node
+                .fetch_genesis_state()
+                .await
+                .context("fetch genesis state")?;
+            match genesis_state {
+                Some(raw) => {
+                    genesis_from_chain_spec = true;
+                    LedgerState::from_genesis(&raw, ProtocolVersion::LATEST)
+                        .context("create ledger state from genesis")?
+                }
+                None => LedgerState::new(network_id, ProtocolVersion::OLDEST)
+                    .context("create ledger state")?,
+            }
         }
     };
 
@@ -157,6 +170,7 @@ pub async fn run(
                 &highest_block_on_node,
                 &mut caught_up,
                 &mut parent_block_timestamp,
+                &mut genesis_from_chain_spec,
                 &mut storage,
                 &publisher,
                 &metrics,
@@ -248,6 +262,7 @@ async fn get_and_index_block<E, N>(
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
+    genesis_from_chain_spec: &mut bool,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
@@ -271,6 +286,7 @@ where
                 highest_block_on_node,
                 caught_up,
                 parent_block_timestamp,
+                genesis_from_chain_spec,
                 storage,
                 publisher,
                 metrics,
@@ -302,6 +318,7 @@ async fn index_block<N>(
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
+    genesis_from_chain_spec: &mut bool,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
@@ -322,14 +339,22 @@ where
     if *parent_block_timestamp == 0 {
         *parent_block_timestamp = block.timestamp;
     };
-    let (transactions, ledger_parameters) = ledger_state
-        .apply_transactions(
-            transactions,
-            block.parent_hash,
-            block.timestamp,
-            *parent_block_timestamp,
-        )
-        .context("apply node transactions to ledger state")?;
+    // When genesis state from chain spec was used, block 0 transactions are already reflected
+    // in the deserialized state. Skip application to avoid replay protection violations.
+    let (transactions, ledger_parameters) = if *genesis_from_chain_spec && block.height == 0 {
+        *genesis_from_chain_spec = false;
+        info!("skipping block 0 transaction application (genesis state from chain spec)");
+        ledger_state.skip_block_transactions(transactions)
+    } else {
+        ledger_state
+            .apply_transactions(
+                transactions,
+                block.parent_hash,
+                block.timestamp,
+                *parent_block_timestamp,
+            )
+            .context("apply node transactions to ledger state")?
+    };
     *parent_block_timestamp = block.timestamp;
     block.ledger_parameters = ledger_parameters.serialize()?;
     debug!(transactions:?; "transactions applied to ledger state");
@@ -530,7 +555,7 @@ mod tests {
     use fake::{Fake, Faker};
     use futures::{Stream, StreamExt, TryStreamExt, stream};
     use indexer_common::{
-        domain::{BlockHash, ByteArray, ProtocolVersion, ledger::ZswapStateRoot},
+        domain::{BlockHash, ByteArray, ByteVec, ProtocolVersion, ledger::ZswapStateRoot},
         error::BoxError,
     };
     use std::{convert::Infallible, sync::LazyLock};
@@ -582,6 +607,10 @@ mod tests {
                 d_parameter: None,
                 terms_and_conditions: None,
             })
+        }
+
+        async fn fetch_genesis_state(&self) -> Result<Option<ByteVec>, Self::Error> {
+            Ok(None)
         }
     }
 

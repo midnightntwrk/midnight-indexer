@@ -28,6 +28,7 @@ use crate::{
 };
 use fastrace::trace;
 use itertools::Itertools;
+use log::info;
 use midnight_base_crypto::{
     cost_model::{FixedPoint, NormalizedCost, SyntheticCost},
     hash::{HashOutput, persistent_commit},
@@ -42,7 +43,7 @@ use midnight_coin_structure_v7::{
 };
 use midnight_coin_structure_v8::{
     coin::{
-        NIGHT as NIGHTV8, UnshieldedTokenType as UnshieldedTokenTypeV8,
+        NIGHT as NIGHTV8, TokenType as TokenTypeV8, UnshieldedTokenType as UnshieldedTokenTypeV8,
         UserAddress as UserAddressV8,
     },
     contract::ContractAddress as ContractAddressV8,
@@ -97,7 +98,7 @@ use midnight_transient_crypto_v8::merkle_tree::{
 };
 use midnight_zswap_v7::ledger::State as ZswapStateV7;
 use midnight_zswap_v8::ledger::State as ZswapStateV8;
-use std::{collections::HashSet, ops::Deref, sync::LazyLock};
+use std::{collections::HashSet, io, ops::Deref, sync::LazyLock};
 
 const OUTPUT_INDEX_ZERO: u32 = 0;
 
@@ -142,6 +143,66 @@ impl LedgerState {
         };
 
         Ok(ledger_state)
+    }
+
+    /// Create a [LedgerState] from the serialized genesis state in the chain spec.
+    ///
+    /// Deserializes the full genesis `LedgerState` from `system_properties` RPC and uses it
+    /// directly as the starting state. This is the agreed approach for Ledger 8 RC2+:
+    /// the indexer reads the complete genesis state rather than reconstructing from parts.
+    ///
+    /// The genesis state already includes block 0 transactions (applied by the genesis tool),
+    /// so block 0 transaction replay must be skipped to avoid replay protection violations.
+    pub fn from_genesis(raw: &[u8], protocol_version: ProtocolVersion) -> Result<Self, Error> {
+        match protocol_version.ledger_version()? {
+            LedgerVersion::V7 => Err(Error::Deserialize(
+                "GenesisLedgerStateV7",
+                io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "genesis state from chain spec is not supported for V7",
+                ),
+            )),
+
+            LedgerVersion::V8 => {
+                // TODO(ledger-8-rc2): Verify that the deserialized state produces the correct
+                // zswap_state_root at block 0 and is usable for transaction application.
+                // If arena/storage constraints prevent direct use, fall back to:
+                //   LedgerStateV8::with_genesis_settings(network_id, params, locked, reserve,
+                // treasury)
+                let ledger_state = tagged_deserialize::<LedgerStateV8<LedgerDb>>(&mut &*raw)
+                    .map_err(|error| Error::Deserialize("GenesisLedgerStateV8", error))?;
+
+                let treasury_night = ledger_state
+                    .treasury
+                    .get(&TokenTypeV8::Unshielded(NIGHTV8))
+                    .copied()
+                    .unwrap_or(0);
+
+                info!(
+                    locked_pool = ledger_state.locked_pool,
+                    reserve_pool = ledger_state.reserve_pool,
+                    treasury_night;
+                    "genesis ledger state deserialized from chain spec"
+                );
+
+                Ok(Self::V8 {
+                    ledger_state,
+                    block_fullness: Default::default(),
+                })
+            }
+        }
+    }
+
+    /// Get the current ledger parameters without mutation.
+    pub fn ledger_parameters(&self) -> LedgerParameters {
+        match self {
+            Self::V7 { ledger_state, .. } => {
+                LedgerParameters::V7(ledger_state.parameters.deref().to_owned())
+            }
+            Self::V8 { ledger_state, .. } => {
+                LedgerParameters::V8(ledger_state.parameters.deref().to_owned())
+            }
+        }
     }
 
     pub fn load(

@@ -17,6 +17,7 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 [dependencies]
 anyhow             = { workspace = true }
 async-stream       = { workspace = true }
+const-hex          = { workspace = true }
 derive_more        = { workspace = true, features = [ "from" ] }
 fastrace           = { workspace = true, features = [ "enable" ] }
 futures            = { workspace = true }

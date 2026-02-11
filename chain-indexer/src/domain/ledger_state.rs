@@ -40,6 +40,12 @@ impl LedgerState {
             .map(Into::into)
     }
 
+    pub fn from_genesis(raw: &[u8], protocol_version: ProtocolVersion) -> Result<Self, Error> {
+        indexer_common::domain::ledger::LedgerState::from_genesis(raw, protocol_version)
+            .map_err(Error::Create)
+            .map(Into::into)
+    }
+
     pub fn load(
         key: &SerializedLedgerStateKey,
         protocol_version: ProtocolVersion,
@@ -86,6 +92,20 @@ impl LedgerState {
             .map_err(Error::PostApplyTransactions)?;
 
         Ok((transactions, ledger_parameters))
+    }
+
+    /// Convert node transactions to domain transactions without applying them to the ledger state.
+    ///
+    /// Used when the ledger state was initialized from the genesis chain spec, which already
+    /// includes block 0 transactions. Returns domain transactions with default applied fields
+    /// (empty UTXOs, etc.) and the current ledger parameters.
+    pub fn skip_block_transactions(
+        &self,
+        transactions: impl IntoIterator<Item = node::Transaction>,
+    ) -> (Vec<Transaction>, LedgerParameters) {
+        let transactions = transactions.into_iter().map(Transaction::from).collect();
+        let ledger_parameters = self.0.ledger_parameters();
+        (transactions, ledger_parameters)
     }
 
     /// The highest used zswap state index or none.

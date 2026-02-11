@@ -473,6 +473,39 @@ impl Node for SubxtNode {
             terms_and_conditions,
         })
     }
+
+    async fn fetch_genesis_state(&self) -> Result<Option<ByteVec>, Self::Error> {
+        let legacy_rpc_methods =
+            LegacyRpcMethods::<SubstrateConfig>::new(self.rpc_client.to_owned().into());
+        let properties = legacy_rpc_methods
+            .system_properties()
+            .await
+            .map_err(|error| SubxtNodeError::FetchGenesisState(error.into()))?;
+
+        let Some(genesis_state_value) = properties.get("genesis_state") else {
+            debug!("no genesis_state in system properties");
+            return Ok(None);
+        };
+
+        let Some(hex_str) = genesis_state_value.as_str() else {
+            warn!("genesis_state in system properties is not a string");
+            return Ok(None);
+        };
+
+        let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
+        let bytes = const_hex::decode(hex_str).map_err(|error| {
+            SubxtNodeError::FetchGenesisState(
+                format!("cannot hex-decode genesis_state: {error}").into(),
+            )
+        })?;
+
+        info!(
+            genesis_state_bytes = bytes.len();
+            "fetched genesis state from chain spec system properties"
+        );
+
+        Ok(Some(bytes.into()))
+    }
 }
 
 /// Config for node connection.
@@ -583,6 +616,9 @@ pub enum SubxtNodeError {
 
     #[error("cannot fetch genesis cNight registrations")]
     FetchGenesisCnightRegistrations(#[source] BoxError),
+
+    #[error("cannot fetch genesis state")]
+    FetchGenesisState(#[source] BoxError),
 }
 
 #[trace]
