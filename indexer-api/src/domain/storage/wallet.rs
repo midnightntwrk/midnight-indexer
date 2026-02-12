@@ -26,7 +26,7 @@ where
     async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error>;
 
     /// Set the wallet active at the current timestamp to avoid timing out.
-    async fn set_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error>;
+    async fn keep_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error>;
 }
 
 #[allow(unused_variables)]
@@ -39,7 +39,7 @@ impl WalletStorage for NoopStorage {
         unimplemented!()
     }
 
-    async fn set_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
+    async fn keep_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
         unimplemented!()
     }
 }

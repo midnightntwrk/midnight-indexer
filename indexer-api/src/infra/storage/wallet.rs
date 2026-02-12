@@ -67,16 +67,17 @@ impl WalletStorage for Storage {
     }
 
     #[trace(properties = { "session_id": "{session_id}" })]
-    async fn set_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
+    async fn keep_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
         let query = indoc! {"
             UPDATE wallets
-            SET active = TRUE, last_active = $2
-            WHERE session_id = $1
+            SET last_active = $1
+            WHERE session_id = $2
+            AND active = TRUE
         "};
 
         let result = sqlx::query(query)
-            .bind(session_id.as_ref())
             .bind(OffsetDateTime::now_utc())
+            .bind(session_id.as_ref())
             .execute(&*self.pool)
             .map_ok(|_| ())
             .await;
