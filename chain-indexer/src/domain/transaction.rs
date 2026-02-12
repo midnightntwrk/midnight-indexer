@@ -80,19 +80,14 @@ pub struct RegularTransaction {
     pub identifiers: Vec<SerializedTransactionIdentifier>,
     #[debug(skip)]
     pub contract_actions: Vec<ContractAction>,
-    #[debug(skip)]
     pub paid_fees: u128,
-    #[debug(skip)]
     pub estimated_fees: u128,
 
     // These fields are set after applying the transaction to the ledger state.
-    #[debug(skip)]
     pub transaction_result: TransactionResult,
     #[debug(skip)]
     pub merkle_tree_root: SerializedZswapStateRoot,
-    #[debug(skip)]
     pub start_index: u64,
-    #[debug(skip)]
     pub end_index: u64,
     #[debug(skip)]
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
