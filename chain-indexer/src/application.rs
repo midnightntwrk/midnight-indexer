@@ -349,10 +349,12 @@ where
     // ordering guarantee, so node_block_height < block.height may happen under certain rare
     // conditions. This will produce 0 when node_block_height < block.height, treating it as
     // caught up.
+    // Using u32::MAX when node_block_height initially is None obviously results in "not caught up"
+    // and hence prevents from prematurely signaling readiness.
     let node_block_height = highest_block_on_node
         .read()
         .map(|BlockRef { height, .. }| height)
-        .unwrap_or_default();
+        .unwrap_or(u32::MAX);
     let distance = node_block_height.saturating_sub(block.height);
     let max_distance = if *caught_up {
         caught_up_max_distance + caught_up_leeway
