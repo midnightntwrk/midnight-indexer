@@ -99,7 +99,7 @@ pub async fn run(
         }
 
         None => {
-            LedgerState::new(network_id, ProtocolVersion::LATEST).context("create ledger state")?
+            LedgerState::new(network_id, ProtocolVersion::OLDEST).context("create ledger state")?
         }
     };
 
@@ -311,6 +311,12 @@ where
     N: Node,
 {
     let (mut block, transactions) = block.into();
+
+    // Translate ledger state
+    let ledger_version = block.protocol_version.ledger_version()?;
+    ledger_state = ledger_state
+        .translate(ledger_version)
+        .context("translate ledger state")?;
 
     // Apply transactions.
     if *parent_block_timestamp == 0 {
