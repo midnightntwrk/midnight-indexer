@@ -33,7 +33,7 @@ use parking_lot::RwLock;
 use serde::Deserialize;
 use std::{
     collections::HashSet, error::Error as StdError, future::ready, pin::pin, sync::Arc,
-    time::Duration, u32,
+    time::Duration,
 };
 use tokio::{
     select,
