@@ -441,7 +441,7 @@ impl TransactionStorage for Storage {
                     .await?;
 
                 match transactions.last() {
-                    Some(transaction) => index = transaction.end_index + 1,
+                    Some(transaction) => index = transaction.end_index,
                     None => break,
                 }
 
