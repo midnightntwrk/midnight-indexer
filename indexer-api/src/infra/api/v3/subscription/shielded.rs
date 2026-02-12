@@ -285,7 +285,7 @@ async fn make_relevant_transaction<S>(
     index: u64,
     transaction: domain::RegularTransaction,
     storage: &S,
-    zswap_state_cache: &LedgerStateCache,
+    ledger_state_cache: &LedgerStateCache,
 ) -> ApiResult<RelevantTransaction<S>>
 where
     S: Storage,
@@ -296,7 +296,7 @@ where
     {
         None
     } else {
-        let collapsed_merkle_tree = zswap_state_cache
+        let collapsed_merkle_tree = ledger_state_cache
             .collapsed_update(
                 index,
                 transaction.start_index - 1,

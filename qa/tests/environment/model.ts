@@ -47,14 +47,14 @@ type HostConfig = {
 
 type HostEntry =
   | {
-    env: EnvironmentName;
-    indexerHost: string;
-    nodeHost: string;
-  }
+      env: EnvironmentName;
+      indexerHost: string;
+      nodeHost: string;
+    }
   | {
-    env: EnvironmentName;
-    domain: string;
-  };
+      env: EnvironmentName;
+      domain: string;
+    };
 
 const hostEntries: HostEntry[] = [
   {
@@ -144,7 +144,7 @@ export class Environment {
     if (!rawEnv || !validEnvNames.includes(rawEnv as EnvironmentName)) {
       throw new Error(
         `Invalid or missing TARGET_ENV: "${rawEnv}". ` +
-        `Expected one of: \n  ${validEnvNames.map((name) => `"${name}"`).join(',\n  ')}`,
+          `Expected one of: \n  ${validEnvNames.map((name) => `"${name}"`).join(',\n  ')}`,
       );
     }
     this.envName = rawEnv as EnvironmentName;
@@ -228,6 +228,10 @@ export class Environment {
   }
 
   getNetworkId(): string {
+    // This check will have to be removed once we sunset the old qanet environment.
+    if (this.envName === EnvironmentName.QANET_DEV) {
+      return 'qanet';
+    }
     return this.networkId;
   }
 

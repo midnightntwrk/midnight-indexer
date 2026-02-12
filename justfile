@@ -123,6 +123,7 @@ run-indexer-standalone node="ws://localhost:9944" network_id="undeployed":
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         APP__INFRA__NODE__URL={{node}} \
         APP__INFRA__STORAGE__CNN_URL=target/data/indexer.sqlite \
+        APP__INFRA__LEDGER_DB__CNN_URL=target/data/ledger-db.sqlite \
         cargo run -p indexer-standalone --features standalone
 
 update-node: generate-node-data get-node-metadata
@@ -136,10 +137,10 @@ get-node-metadata:
 generate-txs:
     ./generate_txs.sh {{latest_node_version}}
 
-run-node:
+run-node node_version=latest_node_version:
     #!/usr/bin/env bash
     node_dir=$(mktemp -d)
-    cp -r ./.node/{{latest_node_version}}/ $node_dir
+    cp -r ./.node/{{node_version}}/ $node_dir
     # SIDECHAIN_BLOCK_BENEFICIARY specifies the wallet that receives block rewards and transaction fees (DUST).
     # This hex value is a public key that matches the one used in toolkit-e2e.sh.
     docker run \
@@ -149,4 +150,4 @@ run-node:
         -e CFG_PRESET=dev \
         -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
         -v $node_dir:/node \
-        ghcr.io/midnight-ntwrk/midnight-node:{{latest_node_version}}
+        ghcr.io/midnight-ntwrk/midnight-node:{{node_version}}

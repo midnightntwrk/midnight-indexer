@@ -46,7 +46,7 @@ describe('key material derivation validation', () => {
       log.info(`Shielded address: ${address}`);
 
       // Mainnet addresses do not have a network ID prefix
-      const networkId = env.getCurrentEnvironmentName();
+      const networkId = env.getNetworkId();
       const addressPrefix =
         networkId === 'mainnet' ? `mn_shield-addr` : `mn_shield-addr_${networkId}`;
       expect(address).toMatch(new RegExp(`^${addressPrefix}`));
@@ -60,13 +60,14 @@ describe('key material derivation validation', () => {
      * @then the address should start with the expected prefix
      */
     test('should show with the expected prefix for all network IDs', async () => {
-      // For all known networks check if the right prefix is present
-      const networkIds = env.getAllEnvironmentNames();
-      for (const networkId of networkIds) {
-        const address = (await toolkit.showAddress(seed, networkId)).shielded;
+      // For all known environments check if the right prefix is present (prefix uses network ID)
+      const environmentNames = env.getAllEnvironmentNames();
+      for (const envName of environmentNames) {
+        const address = (await toolkit.showAddress(seed, envName)).shielded;
         log.info(`Shielded address: ${address}`);
 
-        // Mainnet addresses do not have a network ID prefix
+        // Address prefix uses network ID (e.g. qanet.dev env uses network ID "qanet")
+        const networkId = envName === 'qanet.dev' ? 'qanet' : envName;
         const addressPrefix =
           networkId === 'mainnet' ? `mn_shield-addr` : `mn_shield-addr_${networkId}`;
         expect(address).toMatch(new RegExp(`^${addressPrefix}`));
@@ -88,7 +89,7 @@ describe('key material derivation validation', () => {
       log.info(`Unshielded address: ${address}`);
 
       // Mainnet addresses do not have a network ID prefix
-      const networkId = env.getCurrentEnvironmentName();
+      const networkId = env.getNetworkId();
       const addressPrefix = networkId === 'mainnet' ? `mn_addr` : `mn_addr_${networkId}`;
       expect(address).toMatch(new RegExp(`^${addressPrefix}`));
     });
@@ -101,13 +102,14 @@ describe('key material derivation validation', () => {
      * @then the address should start with the expected prefix
      */
     test('should show with the expected prefix for all network IDs', async () => {
-      // For all known networks check if the right prefix is present
-      const networkIds = env.getAllEnvironmentNames();
-      for (const networkId of networkIds) {
-        const address = (await toolkit.showAddress(seed, networkId)).unshielded;
+      // For all known environments check if the right prefix is present (prefix uses network ID)
+      const environmentNames = env.getAllEnvironmentNames();
+      for (const envName of environmentNames) {
+        const address = (await toolkit.showAddress(seed, envName)).unshielded;
         log.info(`Unshielded address: ${address}`);
 
-        // Mainnet addresses do not have a network ID prefix
+        // Address prefix uses network ID (e.g. qanet.dev env uses network ID "qanet")
+        const networkId = envName === 'qanet.dev' ? 'qanet' : envName;
         const addressPrefix = networkId === 'mainnet' ? `mn_addr` : `mn_addr_${networkId}`;
         expect(address).toMatch(new RegExp(`^${addressPrefix}`));
       }
@@ -139,13 +141,14 @@ describe('key material derivation validation', () => {
      * @then the viewing key should start with the expected prefix
      */
     test('should show with the expected prefix for all network IDs', async () => {
-      // For all known networks check if the right prefix is present
-      const networkIds = env.getAllEnvironmentNames();
-      for (const networkId of networkIds) {
-        const address = await toolkit.showViewingKey(seed, networkId);
-        log.info(`Viewing key for ${networkId}: ${address}`);
+      // For all known environments check if the right prefix is present (prefix uses network ID)
+      const environmentNames = env.getAllEnvironmentNames();
+      for (const envName of environmentNames) {
+        const address = await toolkit.showViewingKey(seed, envName);
+        log.info(`Viewing key for ${envName}: ${address}`);
 
-        // Mainnet addresses do not have a network ID prefix
+        // Viewing key prefix uses network ID (e.g. qanet.dev env uses network ID "qanet")
+        const networkId = envName === 'qanet.dev' ? 'qanet' : envName;
         const addressPrefix =
           networkId === 'mainnet' ? `mn_shield-esk` : `mn_shield-esk_${networkId}`;
         expect(address).toMatch(new RegExp(`^${addressPrefix}`));

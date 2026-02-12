@@ -20,7 +20,7 @@ const INDEXER_BASE_URL: Record<string, string> = {
   preview: "indexer.preview.midnight.network",
   preprod: "indexer.preprod.midnight.network",
   qanet: "indexer.qanet.midnight.network",
-  qanet_dev: "indexer.qanet.dev.midnight.network",
+  "qanet.dev": "indexer.qanet.dev.midnight.network",
   testnet02: "indexer.testnet-02.midnight.network",
 };
 
