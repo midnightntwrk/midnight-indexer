@@ -12,12 +12,12 @@
 // limitations under the License.
 
 use crate::domain::{ContractAction, node};
+use derive_more::Debug;
 use indexer_common::domain::{
     LedgerEvent, ProtocolVersion, SerializedTransaction, SerializedTransactionIdentifier,
     SerializedZswapStateRoot, TransactionHash, TransactionResult, TransactionVariant,
     UnshieldedUtxo,
 };
-use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Transaction {
@@ -74,19 +74,31 @@ pub struct RegularTransaction {
     // These fields come from the node.
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
+    #[debug(skip)]
     pub raw: SerializedTransaction,
+    #[debug(skip)]
     pub identifiers: Vec<SerializedTransactionIdentifier>,
+    #[debug(skip)]
     pub contract_actions: Vec<ContractAction>,
+    #[debug(skip)]
     pub paid_fees: u128,
+    #[debug(skip)]
     pub estimated_fees: u128,
 
     // These fields are set after applying the transaction to the ledger state.
+    #[debug(skip)]
     pub transaction_result: TransactionResult,
+    #[debug(skip)]
     pub merkle_tree_root: SerializedZswapStateRoot,
+    #[debug(skip)]
     pub start_index: u64,
+    #[debug(skip)]
     pub end_index: u64,
+    #[debug(skip)]
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
+    #[debug(skip)]
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
+    #[debug(skip)]
     pub ledger_events: Vec<LedgerEvent>,
 }
 
@@ -116,10 +128,13 @@ pub struct SystemTransaction {
     // These fields come from the node.
     pub hash: TransactionHash,
     pub protocol_version: ProtocolVersion,
+    #[debug(skip)]
     pub raw: SerializedTransaction,
 
     // These fields are set after applying the transaction to the ledger state.
+    #[debug(skip)]
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
+    #[debug(skip)]
     pub ledger_events: Vec<LedgerEvent>,
 }
 
