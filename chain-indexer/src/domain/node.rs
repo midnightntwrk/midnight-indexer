@@ -16,7 +16,7 @@ use crate::domain::{
 };
 use futures::Stream;
 use indexer_common::domain::{
-    BlockAuthor, BlockHash, ProtocolVersion, SerializedTransaction,
+    BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedTransaction,
     SerializedTransactionIdentifier, TransactionHash, ledger::ZswapStateRoot,
 };
 use std::{error::Error as StdError, fmt::Debug};
@@ -61,6 +61,7 @@ pub struct Block {
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
     pub zswap_state_root: ZswapStateRoot,
+    pub ledger_state_root: ByteVec,
     pub transactions: Vec<Transaction>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
 }
@@ -76,6 +77,7 @@ impl From<Block> for (domain::Block, Vec<Transaction>) {
             author: block.author,
             timestamp: block.timestamp,
             zswap_state_root: block.zswap_state_root,
+            ledger_state_root: block.ledger_state_root,
             dust_registration_events: block.dust_registration_events,
             ledger_parameters: Default::default(),
         };

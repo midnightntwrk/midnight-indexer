@@ -176,3 +176,15 @@ pub async fn get_terms_and_conditions(
         NodeVersion::V0_22 => v0_22_0::get_terms_and_conditions(block_hash, online_client).await,
     }
 }
+
+pub async fn get_ledger_state_root(
+    block_hash: BlockHash,
+    protocol_version: ProtocolVersion,
+    online_client: &OnlineClient<SubstrateConfig>,
+) -> Result<Option<ByteVec>, SubxtNodeError> {
+    match protocol_version.node_version()? {
+        NodeVersion::V0_20 => v0_20_0::get_ledger_state_root(block_hash, online_client).await,
+        NodeVersion::V0_21 => v0_21_0::get_ledger_state_root(block_hash, online_client).await,
+        NodeVersion::V0_22 => v0_22_0::get_ledger_state_root(block_hash, online_client).await,
+    }
+}

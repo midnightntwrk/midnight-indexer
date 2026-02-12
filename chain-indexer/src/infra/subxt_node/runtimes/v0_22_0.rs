@@ -334,3 +334,20 @@ pub async fn get_terms_and_conditions(
         TermsAndConditions { hash, url }
     }))
 }
+
+pub async fn get_ledger_state_root(
+    block_hash: BlockHash,
+    online_client: &OnlineClient<SubstrateConfig>,
+) -> Result<Option<ByteVec>, SubxtNodeError> {
+    let address = super::runtime_0_22_0::storage().midnight().state_key();
+
+    let state_key = online_client
+        .storage()
+        .at(H256(block_hash.0))
+        .fetch(&address)
+        .await
+        .map_err(|error| SubxtNodeError::FetchStateKey(error.into()))?
+        .map(|state_key| state_key.0.into());
+
+    Ok(state_key)
+}

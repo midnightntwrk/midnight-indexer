@@ -244,6 +244,12 @@ impl SubxtNode {
             runtimes::get_zswap_state_root(hash, protocol_version, online_client).await?;
         let zswap_state_root = ZswapStateRoot::deserialize(zswap_state_root, protocol_version)?;
 
+        let ledger_state_root =
+            runtimes::get_ledger_state_root(hash, protocol_version, online_client)
+                .await?
+                .map(Ok)
+                .unwrap_or_else(|| Err(SubxtNodeError::LedgerStateNotFound(hash)))?;
+
         let extrinsics = block
             .extrinsics()
             .await
@@ -280,6 +286,7 @@ impl SubxtNode {
             author,
             timestamp: timestamp.unwrap_or(0),
             zswap_state_root,
+            ledger_state_root,
             transactions,
             dust_registration_events,
         };
@@ -542,6 +549,9 @@ pub enum SubxtNodeError {
     #[error("cannot fetch authorities")]
     FetchAuthorities(#[source] Box<subxt::Error>),
 
+    #[error("cannot fetch state key")]
+    FetchStateKey(#[source] Box<subxt::Error>),
+
     #[error("cannot use extrinsic as root extrinsic")]
     AsRootExtrinsic(#[source] Box<subxt::Error>),
 
@@ -568,6 +578,9 @@ pub enum SubxtNodeError {
 
     #[error("block with hash {0} not found")]
     BlockNotFound(BlockHash),
+
+    #[error("sedger state for block with hash {0} not found")]
+    LedgerStateNotFound(BlockHash),
 
     #[error(transparent)]
     UnsupportedProtocolVersion(#[from] UnsupportedProtocolVersion),
