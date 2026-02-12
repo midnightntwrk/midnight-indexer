@@ -312,7 +312,7 @@ where
 {
     let (mut block, transactions) = block.into();
 
-    // Translate ledger state
+    // Translate ledger state.
     let ledger_version = block.protocol_version.ledger_version()?;
     ledger_state = ledger_state
         .translate(ledger_version)
