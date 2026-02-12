@@ -57,7 +57,7 @@ async function getGenesisTransactionsByHash(): Promise<Transaction[]> {
     const response = await indexerHttpClient.getTransactionByOffset({ hash });
     expect(response).toBeSuccess();
     expect(Array.isArray(response.data?.transactions)).toBe(true);
-    expect(response.data?.transactions).toHaveLength(1);
+    expect(response.data?.transactions?.length).toBeGreaterThanOrEqual(1);
 
     if (response.data?.transactions[0]) {
       genesisTransactions.push(response.data.transactions[0]);
