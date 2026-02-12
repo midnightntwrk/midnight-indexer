@@ -65,6 +65,7 @@ pub struct Block {
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
     pub zswap_state_root: ZswapStateRoot,
+    pub node_state_key: Option<Vec<u8>>,
     pub transactions: Vec<Transaction>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
 }
@@ -80,6 +81,7 @@ impl From<Block> for (domain::Block, Vec<Transaction>) {
             author: block.author,
             timestamp: block.timestamp,
             zswap_state_root: block.zswap_state_root,
+            node_state_key: block.node_state_key,
             dust_registration_events: block.dust_registration_events,
             ledger_parameters: Default::default(),
         };

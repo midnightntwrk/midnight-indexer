@@ -313,6 +313,14 @@ pub async fn fetch_genesis_cnight_registrations(
         .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))
 }
 
+pub async fn fetch_state_key(
+    _block_hash: BlockHash,
+    _online_client: &OnlineClient<SubstrateConfig>,
+) -> Result<Option<Vec<u8>>, SubxtNodeError> {
+    // StateKey storage does not exist in v0.21 runtime.
+    Ok(None)
+}
+
 pub async fn get_terms_and_conditions(
     block_hash: BlockHash,
     online_client: &OnlineClient<SubstrateConfig>,

@@ -339,19 +339,25 @@ where
     if *parent_block_timestamp == 0 {
         *parent_block_timestamp = block.timestamp;
     };
-    // When genesis state from chain spec is post-block-0 (zswap_first_free > 0), block 0
-    // transactions are already reflected in the deserialized state. Skip application to avoid
-    // replay protection violations. Pre-block-0 genesis states (RC2+) apply block 0 normally.
-    let (transactions, ledger_parameters) =
-        if *genesis_from_chain_spec && block.height == 0 && ledger_state.zswap_first_free() > 0 {
-            *genesis_from_chain_spec = false;
-            info!("skipping block 0 transaction application (post-block-0 genesis state)");
+    // When the genesis state's full ledger state root matches the node's state key at block 0,
+    // block 0 transactions are already reflected in the deserialized state. Skip application to
+    // avoid replay protection violations. Otherwise apply block 0 transactions normally.
+    let (transactions, ledger_parameters) = if *genesis_from_chain_spec && block.height == 0 {
+        *genesis_from_chain_spec = false;
+        let genesis_state_root = ledger_state
+            .compute_state_root()
+            .context("compute genesis state root")?;
+        if block.node_state_key.as_deref() == Some(genesis_state_root.as_ref()) {
+            info!(
+                "skipping block 0 transaction application \
+                 (genesis state root matches node state key at block 0)"
+            );
             ledger_state.skip_block_transactions(transactions)
         } else {
-            if *genesis_from_chain_spec && block.height == 0 {
-                *genesis_from_chain_spec = false;
-                info!("applying block 0 transactions to pre-block-0 genesis state");
-            }
+            info!(
+                "applying block 0 transactions \
+                 (genesis state root does not match node state key at block 0)"
+            );
             ledger_state
                 .apply_transactions(
                     transactions,
@@ -360,7 +366,17 @@ where
                     *parent_block_timestamp,
                 )
                 .context("apply node transactions to ledger state")?
-        };
+        }
+    } else {
+        ledger_state
+            .apply_transactions(
+                transactions,
+                block.parent_hash,
+                block.timestamp,
+                *parent_block_timestamp,
+            )
+            .context("apply node transactions to ledger state")?
+    };
     *parent_block_timestamp = block.timestamp;
     block.ledger_parameters = ledger_parameters.serialize()?;
     debug!(transactions:?; "transactions applied to ledger state");
@@ -628,6 +644,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        node_state_key: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -640,6 +657,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        node_state_key: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -652,6 +670,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        node_state_key: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -664,6 +683,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        node_state_key: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });

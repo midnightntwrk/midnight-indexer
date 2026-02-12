@@ -313,6 +313,20 @@ pub async fn fetch_genesis_cnight_registrations(
         .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))
 }
 
+pub async fn fetch_state_key(
+    block_hash: BlockHash,
+    online_client: &OnlineClient<SubstrateConfig>,
+) -> Result<Option<Vec<u8>>, SubxtNodeError> {
+    let state_key = online_client
+        .storage()
+        .at(H256(block_hash.0))
+        .fetch(&super::runtime_0_22_0::storage().midnight().state_key())
+        .await
+        .map_err(|error| SubxtNodeError::FetchStateKey(error.into()))?
+        .map(|bounded| bounded.0);
+    Ok(state_key)
+}
+
 pub async fn get_terms_and_conditions(
     block_hash: BlockHash,
     online_client: &OnlineClient<SubstrateConfig>,
