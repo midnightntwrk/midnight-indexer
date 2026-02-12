@@ -15,8 +15,9 @@ use crate::domain::{RegularTransaction, SystemTransaction, Transaction, node};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
-    ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, NetworkId,
-    ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey, TransactionHash,
+    ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerVersion,
+    NetworkId, ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey,
+    TransactionHash,
     ledger::{self, LedgerParameters},
 };
 use std::ops::DerefMut;
@@ -45,6 +46,13 @@ impl LedgerState {
     ) -> Result<Self, Error> {
         indexer_common::domain::ledger::LedgerState::load(key, protocol_version)
             .map_err(Error::Load)
+            .map(Into::into)
+    }
+
+    pub fn translate(self, ledger_version: LedgerVersion) -> Result<Self, Error> {
+        self.0
+            .translate(ledger_version)
+            .map_err(Error::Translate)
             .map(Into::into)
     }
 
@@ -195,6 +203,9 @@ pub enum Error {
 
     #[error(transparent)]
     Load(indexer_common::domain::ledger::Error),
+
+    #[error(transparent)]
+    Translate(indexer_common::domain::ledger::Error),
 
     #[error("cannot apply regular transaction {hash}", hash = stringify_hash(.0))]
     ApplyRegularTransaction(
