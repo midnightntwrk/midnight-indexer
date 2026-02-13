@@ -35,8 +35,8 @@ use crate::{
     },
 };
 use async_graphql::{Schema, SchemaBuilder, scalar};
-use async_graphql_axum::{GraphQL, GraphQLSubscription};
-use axum::{Router, routing::post_service};
+use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
+use axum::{Extension, Router, routing::post};
 use bech32::{Bech32, Bech32m, Hrp};
 use const_hex::FromHexError;
 use derive_more::{AsRef, Debug, Display};
@@ -367,8 +367,21 @@ where
         .finish();
 
     Router::new()
-        .route("/graphql", post_service(GraphQL::new(schema.clone())))
-        .route_service("/graphql/ws", GraphQLSubscription::new(schema))
+        .route("/graphql", post(graphql_no_batch::<S, B>))
+        .route_service("/graphql/ws", GraphQLSubscription::new(schema.clone()))
+        .layer(Extension(schema))
+}
+
+// This prevents batch requests, because `GraphQLRequest` only accepts single requests.
+async fn graphql_no_batch<S, B>(
+    Extension(schema): Extension<Schema<Query<S>, Mutation<S>, Subscription<S, B>>>,
+    request: GraphQLRequest,
+) -> GraphQLResponse
+where
+    S: Storage,
+    B: Subscriber,
+{
+    schema.execute(request.into_inner()).await.into()
 }
 
 fn schema_builder<S, B>() -> SchemaBuilder<Query<S>, Mutation<S>, Subscription<S, B>>
