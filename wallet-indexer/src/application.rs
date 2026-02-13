@@ -74,11 +74,17 @@ pub async fn run(
 
             block_indexed_stream
                 .try_for_each(|block_indexed| {
-                    if let Some(id) = block_indexed.max_transaction_id
-                        && id > max_transaction_id.load(Ordering::Acquire)
-                    {
-                        max_transaction_id.store(id, Ordering::Release);
+                    if let Some(id) = block_indexed.max_transaction_id {
+                        let max_id = max_transaction_id.load(Ordering::Acquire);
+
+                        // Above we initially set max_transaction_id to u64::MAX so
+                        // index_wallets_task will always index on startup. This inital value needs
+                        // to be replaced unconditionally with the first received value.
+                        if max_id == u64::MAX || max_id < id {
+                            max_transaction_id.store(id, Ordering::Release);
+                        }
                     }
+
                     ok(())
                 })
                 .await
