@@ -332,11 +332,13 @@ impl LedgerState {
         match self {
             Self::V7 { ledger_state, .. } => default_storage::<LedgerDb>()
                 .alloc(ledger_state.to_owned())
+                .as_typed_key()
                 .serialize()
                 .map_err(|error| Error::Serialize("LedgerStateV7", error)),
 
             Self::V8 { ledger_state, .. } => default_storage::<LedgerDb>()
                 .alloc(ledger_state.to_owned())
+                .as_typed_key()
                 .serialize()
                 .map_err(|error| Error::Serialize("LedgerStateV8", error)),
         }
