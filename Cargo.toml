@@ -27,11 +27,11 @@ midnight-ledger_v7           = { git = "https://github.com/midnightntwrk/midnigh
 midnight-onchain-runtime_v7  = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-onchain-runtime", tag = "ledger-7.0.1" }
 midnight-transient-crypto_v7 = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-transient-crypto", tag = "ledger-7.0.1" }
 midnight-zswap_v7            = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-zswap", tag = "ledger-7.0.1" }
-midnight-coin-structure_v8   = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-coin-structure", tag = "ledger-8.0.0-rc.1" }
-midnight-ledger_v8           = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-ledger", tag = "ledger-8.0.0-rc.1" }
-midnight-onchain-runtime_v8  = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-onchain-runtime", tag = "ledger-8.0.0-rc.1" }
-midnight-transient-crypto_v8 = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-transient-crypto", tag = "ledger-8.0.0-rc.1" }
-midnight-zswap_v8            = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-zswap", tag = "ledger-8.0.0-rc.1" }
+midnight-coin-structure_v8   = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-coin-structure", tag = "ledger-8.0.0-rc.2" }
+midnight-ledger_v8           = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-ledger", tag = "ledger-8.0.0-rc.2" }
+midnight-onchain-runtime_v8  = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-onchain-runtime", tag = "ledger-8.0.0-rc.2" }
+midnight-transient-crypto_v8 = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-transient-crypto", tag = "ledger-8.0.0-rc.2" }
+midnight-zswap_v8            = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-zswap", tag = "ledger-8.0.0-rc.2" }
 # These ledger crates are only depended upon once (for v7).
 midnight-base-crypto  = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-base-crypto", tag = "ledger-7.0.1" }
 midnight-serialize    = { git = "https://github.com/midnightntwrk/midnight-ledger", package = "midnight-serialize", tag = "ledger-7.0.1" }
