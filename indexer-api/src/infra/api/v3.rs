@@ -373,6 +373,7 @@ where
 }
 
 // This prevents batch requests, because `GraphQLRequest` only accepts single requests.
+#[allow(clippy::type_complexity)]
 async fn graphql_no_batch<S, B>(
     Extension(schema): Extension<Schema<Query<S>, Mutation<S>, Subscription<S, B>>>,
     request: GraphQLRequest,
