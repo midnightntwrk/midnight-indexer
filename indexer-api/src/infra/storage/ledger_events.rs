@@ -52,14 +52,16 @@ impl LedgerEventStorage for Storage {
     ) -> Result<Vec<LedgerEvent>, sqlx::Error> {
         let query = indoc! {"
             SELECT
-                id,
-                raw,
-                attributes,
-                MAX(id) OVER (PARTITION BY grouping) AS max_id
+                ledger_events.id,
+                ledger_events.raw,
+                ledger_events.attributes,
+                MAX(ledger_events.id) OVER (PARTITION BY ledger_events.grouping) AS max_id,
+                transactions.protocol_version
             FROM ledger_events
-            WHERE grouping = $1
-            AND transaction_id = $2
-            ORDER BY id
+            INNER JOIN transactions ON transactions.id = ledger_events.transaction_id
+            WHERE ledger_events.grouping = $1
+            AND ledger_events.transaction_id = $2
+            ORDER BY ledger_events.id
         "};
 
         sqlx::query_as(query)
@@ -84,14 +86,16 @@ impl Storage {
     ) -> Result<Vec<LedgerEvent>, sqlx::Error> {
         let query = indoc! {"
             SELECT
-                id,
-                raw,
-                attributes,
-                MAX(id) OVER (PARTITION BY grouping) AS max_id
+                ledger_events.id,
+                ledger_events.raw,
+                ledger_events.attributes,
+                MAX(ledger_events.id) OVER (PARTITION BY ledger_events.grouping) AS max_id,
+                transactions.protocol_version
             FROM ledger_events
-            WHERE grouping = $1
-            AND id >= $2
-            ORDER BY id
+            INNER JOIN transactions ON transactions.id = ledger_events.transaction_id
+            WHERE ledger_events.grouping = $1
+            AND ledger_events.id >= $2
+            ORDER BY ledger_events.id
             LIMIT $3
         "};
 
