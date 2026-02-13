@@ -313,18 +313,23 @@ pub async fn fetch_genesis_cnight_registrations(
         .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))
 }
 
-pub async fn fetch_state_key(
+pub async fn get_ledger_state_root(
     block_hash: BlockHash,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<Vec<u8>>, SubxtNodeError> {
-    let state_key = online_client
-        .storage()
+    let get_ledger_state_root = super::runtime_0_22_0::apis()
+        .midnight_runtime_api()
+        .get_ledger_state_root();
+
+    let root = online_client
+        .runtime_api()
         .at(H256(block_hash.0))
-        .fetch(&super::runtime_0_22_0::storage().midnight().state_key())
+        .call(get_ledger_state_root)
         .await
-        .map_err(|error| SubxtNodeError::FetchStateKey(error.into()))?
-        .map(|bounded| bounded.0);
-    Ok(state_key)
+        .map_err(|error| SubxtNodeError::GetLedgerStateRoot(error.into()))?
+        .map_err(|error| SubxtNodeError::GetLedgerStateRoot(format!("{error:?}").into()))?;
+
+    Ok(Some(root))
 }
 
 pub async fn get_terms_and_conditions(

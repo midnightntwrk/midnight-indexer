@@ -339,7 +339,7 @@ where
     if *parent_block_timestamp == 0 {
         *parent_block_timestamp = block.timestamp;
     };
-    // When the genesis state's full ledger state root matches the node's state key at block 0,
+    // When the genesis state's ledger state root matches the node's ledger state root at block 0,
     // block 0 transactions are already reflected in the deserialized state. Skip application to
     // avoid replay protection violations. Otherwise apply block 0 transactions normally.
     let (transactions, ledger_parameters) = if *genesis_from_chain_spec && block.height == 0 {
@@ -347,16 +347,16 @@ where
         let genesis_state_root = ledger_state
             .compute_state_root()
             .context("compute genesis state root")?;
-        if block.node_state_key.as_deref() == Some(genesis_state_root.as_ref()) {
+        if block.node_ledger_state_root.as_deref() == Some(genesis_state_root.as_ref()) {
             info!(
                 "skipping block 0 transaction application \
-                 (genesis state root matches node state key at block 0)"
+                 (genesis ledger state root matches node ledger state root at block 0)"
             );
             ledger_state.skip_block_transactions(transactions)
         } else {
             info!(
                 "applying block 0 transactions \
-                 (genesis state root does not match node state key at block 0)"
+                 (genesis ledger state root does not match node ledger state root at block 0)"
             );
             ledger_state
                 .apply_transactions(
@@ -644,7 +644,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
-        node_state_key: None,
+        node_ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -657,7 +657,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
-        node_state_key: None,
+        node_ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -670,7 +670,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
-        node_state_key: None,
+        node_ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -683,7 +683,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
-        node_state_key: None,
+        node_ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });

@@ -313,11 +313,11 @@ pub async fn fetch_genesis_cnight_registrations(
         .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))
 }
 
-pub async fn fetch_state_key(
+pub async fn get_ledger_state_root(
     _block_hash: BlockHash,
     _online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<Vec<u8>>, SubxtNodeError> {
-    // StateKey storage does not exist in v0.20 runtime.
+    // get_ledger_state_root runtime API does not exist in v0.20.
     Ok(None)
 }
 
