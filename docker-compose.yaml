@@ -143,6 +143,9 @@ services:
       - cloud
     image: "postgres:17.1-alpine"
     restart: "always"
+    # Run as the host user to avoid permission issues with mounted volumes.
+    # This ensures the postgres data directory is accessible by the host user.
+    user: "${UID:-1000}:${GID:-1000}"
     ports:
       - "5432:5432"
     volumes:
@@ -164,6 +167,8 @@ services:
       - cloud
     image: "nats:2.12.3"
     restart: "always"
+    # Run as the host user to avoid permission issues with mounted volumes.
+    user: "${UID:-1000}:${GID:-1000}"
     command:
       ["--user", "indexer", "--pass", $APP__INFRA__PUB_SUB__PASSWORD, "-js"]
     ports:
