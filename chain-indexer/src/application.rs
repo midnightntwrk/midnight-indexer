@@ -93,9 +93,10 @@ pub async fn run(
     );
 
     // Load/initialize ledger state.
-    let mut genesis_from_chain_spec = false;
+    let genesis_from_chain_spec;
     let mut ledger_state = match highest_protocol_version_and_ledger_state_key {
         Some((protocol_version, ledger_state_key)) => {
+            genesis_from_chain_spec = false;
             LedgerState::load(&ledger_state_key, protocol_version).context("load ledger state")?
         }
 
@@ -110,8 +111,11 @@ pub async fn run(
                     LedgerState::from_genesis(&raw, ProtocolVersion::LATEST)
                         .context("create ledger state from genesis")?
                 }
-                None => LedgerState::new(network_id.clone(), ProtocolVersion::OLDEST)
-                    .context("create ledger state")?,
+                None => {
+                    genesis_from_chain_spec = false;
+                    LedgerState::new(network_id.clone(), ProtocolVersion::OLDEST)
+                        .context("create ledger state")?
+                }
             }
         }
     };
@@ -171,7 +175,7 @@ pub async fn run(
                 &highest_block_on_node,
                 &mut caught_up,
                 &mut parent_block_timestamp,
-                &mut genesis_from_chain_spec,
+                genesis_from_chain_spec,
                 &mut storage,
                 &publisher,
                 &metrics,
@@ -264,7 +268,7 @@ async fn get_and_index_block<E, N>(
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
-    genesis_from_chain_spec: &mut bool,
+    genesis_from_chain_spec: bool,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
@@ -322,7 +326,7 @@ async fn index_block<N>(
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
-    genesis_from_chain_spec: &mut bool,
+    genesis_from_chain_spec: bool,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
@@ -346,18 +350,14 @@ where
     // When the genesis state's ledger state root matches the node's ledger state root at block 0,
     // block 0 transactions are already reflected in the deserialized state. Skip application to
     // avoid replay protection violations. Otherwise apply block 0 transactions normally.
-    let (transactions, ledger_parameters) = if *genesis_from_chain_spec && block.height == 0 {
-        *genesis_from_chain_spec = false;
+    let (transactions, ledger_parameters) = if genesis_from_chain_spec && block.height == 0 {
         let genesis_state_root = ledger_state.root().context("get ledger state root")?;
         debug!(
             genesis_root = const_hex::encode(&genesis_state_root),
-            node_root = block.ledger_state_root.as_deref().map(const_hex::encode);
-            "comparing ledger state roots at block 0"
-        );
-        debug!(
             genesis_root_len = genesis_state_root.len(),
+            node_root = block.ledger_state_root.as_deref().map(const_hex::encode),
             node_root_len = block.ledger_state_root.as_ref().map(|r| r.len());
-            "ledger state root lengths"
+            "comparing ledger state roots at block 0"
         );
         if block.ledger_state_root.as_deref() == Some(genesis_state_root.as_ref()) {
             info!(

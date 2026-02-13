@@ -94,17 +94,6 @@ impl LedgerState {
         Ok((transactions, ledger_parameters))
     }
 
-    /// Convert node transactions to domain transactions without applying to the ledger state.
-    /// Used when genesis state from chain spec already includes block 0 transactions.
-    pub fn skip_block_transactions(
-        &self,
-        transactions: impl IntoIterator<Item = node::Transaction>,
-    ) -> (Vec<Transaction>, LedgerParameters) {
-        let transactions = transactions.into_iter().map(Transaction::from).collect();
-        let ledger_parameters = self.0.ledger_parameters();
-        (transactions, ledger_parameters)
-    }
-
     /// The highest used zswap state index or none.
     pub fn highest_zswap_state_index(&self) -> Option<u64> {
         (self.zswap_first_free() != 0).then(|| self.zswap_first_free() - 1)
