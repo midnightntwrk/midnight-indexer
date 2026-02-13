@@ -542,6 +542,20 @@ impl LedgerState {
         }
     }
 
+    pub fn root(&self) -> Result<ByteVec, Error> {
+        match self {
+            Self::V7 { ledger_state, .. } => default_storage::<LedgerDb>()
+                .alloc(ledger_state.to_owned())
+                .serialize()
+                .map_err(|error| Error::Serialize("LedgerStateV7", error)),
+
+            Self::V8 { ledger_state, .. } => default_storage::<LedgerDb>()
+                .alloc(ledger_state.to_owned())
+                .serialize()
+                .map_err(|error| Error::Serialize("LedgerStateV8", error)),
+        }
+    }
+
     /// Extract the zswap state for the given contract address.
     #[trace(properties = { "address": "{address}" })]
     pub fn extract_contract_zswap_state(

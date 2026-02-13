@@ -343,6 +343,15 @@ where
         );
     }
 
+    let ledger_state_root = ledger_state.root().context("get ledger state root")?;
+    if ledger_state_root != block.ledger_state_root {
+        bail!(
+            "ledger state root mismatch for block {} at height {}",
+            block.hash,
+            block.height
+        );
+    }
+
     // Determine whether caught up, also allowing to fall back a little in that state.
     // Use saturating subtraction to handle the case where streams are temporarily out of order.
     // The two subscriptions (highest_blocks and finalized_blocks) are independent with no
@@ -593,6 +602,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        ledger_state_root: Default::default(),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -605,6 +615,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        ledger_state_root: Default::default(),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -617,6 +628,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        ledger_state_root: Default::default(),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -629,6 +641,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        ledger_state_root: Default::default(),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
