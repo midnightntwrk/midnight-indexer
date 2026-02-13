@@ -13,7 +13,8 @@
 
 use crate::domain::DustRegistrationEvent;
 use indexer_common::domain::{
-    BlockAuthor, BlockHash, ProtocolVersion, SerializedLedgerParameters, ledger::ZswapStateRoot,
+    BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedLedgerParameters,
+    ledger::ZswapStateRoot,
 };
 use std::fmt::Debug;
 
@@ -27,7 +28,7 @@ pub struct Block {
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
     pub zswap_state_root: ZswapStateRoot,
-    pub ledger_state_root: Option<Vec<u8>>,
+    pub ledger_state_root: Option<ByteVec>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
 
     // These fields are set after applying all transactions of this block to the ledger state.

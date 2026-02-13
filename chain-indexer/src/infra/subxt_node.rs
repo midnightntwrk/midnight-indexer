@@ -266,7 +266,9 @@ impl SubxtNode {
                 runtimes::fetch_genesis_cnight_registrations(hash, protocol_version, online_client)
                     .await?;
             dust_registration_events.extend(genesis_registrations);
-            runtimes::get_ledger_state_root(hash, protocol_version, online_client).await?
+            runtimes::get_ledger_state_root(hash, protocol_version, online_client)
+                .await?
+                .map(ByteVec::from)
         } else {
             None
         };
@@ -492,13 +494,13 @@ impl Node for SubxtNode {
             return Ok(None);
         };
 
-        let Some(hex_str) = genesis_state_value.as_str() else {
+        let Some(genesis_state) = genesis_state_value.as_str() else {
             warn!("genesis_state in system properties is not a string");
             return Ok(None);
         };
 
-        let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
-        let bytes = const_hex::decode(hex_str).map_err(|error| {
+        let genesis_state = genesis_state.strip_prefix("0x").unwrap_or(genesis_state);
+        let bytes = const_hex::decode(genesis_state).map_err(|error| {
             SubxtNodeError::FetchGenesisState(
                 format!("cannot hex-decode genesis_state: {error}").into(),
             )

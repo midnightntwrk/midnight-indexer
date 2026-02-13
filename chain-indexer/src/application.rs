@@ -26,7 +26,7 @@ use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{
-    BlockIndexed, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxoIndexed,
+    BlockIndexed, ByteVec, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxoIndexed,
 };
 use log::{debug, info, warn};
 use parking_lot::RwLock;
@@ -93,30 +93,21 @@ pub async fn run(
     );
 
     // Load/initialize ledger state.
-    let genesis_from_chain_spec;
+    // Genesis state raw bytes are stored but not deserialized here; deserialization is
+    // deferred to block 0 where block.protocol_version provides the correct version.
+    let mut genesis_raw = None;
     let mut ledger_state = match highest_protocol_version_and_ledger_state_key {
         Some((protocol_version, ledger_state_key)) => {
-            genesis_from_chain_spec = false;
             LedgerState::load(&ledger_state_key, protocol_version).context("load ledger state")?
         }
 
         None => {
-            let genesis_state = node
+            genesis_raw = node
                 .fetch_genesis_state()
                 .await
                 .context("fetch genesis state")?;
-            match genesis_state {
-                Some(raw) => {
-                    genesis_from_chain_spec = true;
-                    LedgerState::from_genesis(&raw, ProtocolVersion::LATEST)
-                        .context("create ledger state from genesis")?
-                }
-                None => {
-                    genesis_from_chain_spec = false;
-                    LedgerState::new(network_id.clone(), ProtocolVersion::OLDEST)
-                        .context("create ledger state")?
-                }
-            }
+            LedgerState::new(network_id.clone(), ProtocolVersion::OLDEST)
+                .context("create ledger state")?
         }
     };
 
@@ -169,13 +160,12 @@ pub async fn run(
             while let Some(next_ledger_state) = get_and_index_block(
                 caught_up_max_distance,
                 caught_up_leeway,
-                &network_id,
                 &mut blocks,
                 ledger_state,
                 &highest_block_on_node,
                 &mut caught_up,
                 &mut parent_block_timestamp,
-                genesis_from_chain_spec,
+                &mut genesis_raw,
                 &mut storage,
                 &publisher,
                 &metrics,
@@ -262,13 +252,12 @@ where
 async fn get_and_index_block<E, N>(
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
-    network_id: &NetworkId,
     blocks: &mut (impl Stream<Item = Result<node::Block, E>> + Unpin),
     ledger_state: LedgerState,
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
-    genesis_from_chain_spec: bool,
+    genesis_raw: &mut Option<ByteVec>,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
@@ -287,13 +276,12 @@ where
             let ledger_state = index_block(
                 caught_up_max_distance,
                 caught_up_leeway,
-                network_id,
                 block,
                 ledger_state,
                 highest_block_on_node,
                 caught_up,
                 parent_block_timestamp,
-                genesis_from_chain_spec,
+                genesis_raw,
                 storage,
                 publisher,
                 metrics,
@@ -320,13 +308,12 @@ async fn get_next_block<E>(
 async fn index_block<N>(
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
-    network_id: &NetworkId,
     block: node::Block,
     mut ledger_state: LedgerState,
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
-    genesis_from_chain_spec: bool,
+    genesis_raw: &mut Option<ByteVec>,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
@@ -347,31 +334,28 @@ where
     if *parent_block_timestamp == 0 {
         *parent_block_timestamp = block.timestamp;
     };
-    // When the genesis state's ledger state root matches the node's ledger state root at block 0,
-    // block 0 transactions are already reflected in the deserialized state. Skip application to
-    // avoid replay protection violations. Otherwise apply block 0 transactions normally.
-    let (transactions, ledger_parameters) = if genesis_from_chain_spec && block.height == 0 {
-        let genesis_state_root = ledger_state.root().context("get ledger state root")?;
+    // At block 0 with genesis state from chain spec, deserialize and compare roots to detect
+    // whether the genesis state already includes block 0 transactions (post-block-0 genesis).
+    let (transactions, ledger_parameters) = if block.height == 0 && genesis_raw.is_some() {
+        let raw = genesis_raw.take().expect("genesis_raw is Some");
+        let genesis_state = LedgerState::from_genesis(&raw, block.protocol_version)
+            .context("deserialize genesis state")?;
+        let genesis_root = genesis_state.root().context("compute genesis state root")?;
         debug!(
-            genesis_root = const_hex::encode(&genesis_state_root),
-            genesis_root_len = genesis_state_root.len(),
+            genesis_root = const_hex::encode(&genesis_root),
+            genesis_root_len = genesis_root.len(),
             node_root = block.ledger_state_root.as_deref().map(const_hex::encode),
             node_root_len = block.ledger_state_root.as_ref().map(|r| r.len());
             "comparing ledger state roots at block 0"
         );
-        if block.ledger_state_root.as_deref() == Some(genesis_state_root.as_ref()) {
-            info!(
-                "genesis ledger state root matches node ledger state root at block 0, \
-                 applying block 0 transactions to fresh state"
-            );
-            // Apply block 0 transactions to a fresh state to get transaction outcomes
-            // (UTXOs, events, etc.) for storage. The genesis state validated correctness
-            // but cannot be used directly due to replay protection.
-            ledger_state = LedgerState::new(network_id.clone(), ProtocolVersion::OLDEST)
-                .context("create fresh ledger state for block 0")?;
-            ledger_state = ledger_state
-                .translate(ledger_version)
-                .context("translate fresh ledger state")?;
+        if block
+            .ledger_state_root
+            .as_ref()
+            .is_some_and(|r| r.0 == genesis_root.0)
+        {
+            // Roots match: genesis state already includes block 0 outcomes.
+            // Apply block 0 transactions to the current (fresh) state for DB outcomes.
+            info!("genesis state root matches node at block 0, applying to fresh state");
             ledger_state
                 .apply_transactions(
                     transactions,
@@ -381,10 +365,12 @@ where
                 )
                 .context("apply block 0 transactions to fresh state")?
         } else {
-            info!(
-                "applying block 0 transactions \
-                 (genesis ledger state root does not match node ledger state root at block 0)"
-            );
+            // Roots don't match: genesis state is the pre-block-0 starting point.
+            info!("genesis state root does not match node at block 0, using genesis state");
+            ledger_state = genesis_state;
+            ledger_state = ledger_state
+                .translate(ledger_version)
+                .context("translate genesis state")?;
             ledger_state
                 .apply_transactions(
                     transactions,
@@ -392,7 +378,7 @@ where
                     block.timestamp,
                     *parent_block_timestamp,
                 )
-                .context("apply node transactions to ledger state")?
+                .context("apply block 0 transactions to genesis state")?
         }
     } else {
         ledger_state
