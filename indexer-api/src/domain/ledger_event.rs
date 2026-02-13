@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{LedgerEventAttributes, SerializedLedgerEvent};
+use indexer_common::domain::{LedgerEventAttributes, ProtocolVersion, SerializedLedgerEvent};
 use sqlx::prelude::FromRow;
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
@@ -26,4 +26,7 @@ pub struct LedgerEvent {
 
     #[sqlx(try_from = "i64")]
     pub max_id: u64,
+
+    #[sqlx(try_from = "i64")]
+    pub protocol_version: ProtocolVersion,
 }

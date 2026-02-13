@@ -69,7 +69,7 @@ coverage:
     ./coverage.sh {{nightly}}
 
 generate-indexer-api-schema:
-    cargo run -p indexer-api --bin indexer-api-cli print-api-schema-v3 > \
+    cargo run -p indexer-api --features {{feature}} --bin indexer-api-cli print-api-schema-v3 > \
         indexer-api/graphql/schema-v3.graphql
 
 generate-spo-api-schema:

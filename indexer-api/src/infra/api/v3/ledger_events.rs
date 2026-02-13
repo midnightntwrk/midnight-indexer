@@ -30,6 +30,9 @@ pub struct ZswapLedgerEvent {
 
     /// The maximum ID of all zswap ledger events.
     max_id: u64,
+
+    /// The protocol version.
+    protocol_version: u32,
 }
 
 impl TryFrom<LedgerEvent> for ZswapLedgerEvent {
@@ -41,6 +44,7 @@ impl TryFrom<LedgerEvent> for ZswapLedgerEvent {
                 id: ledger_event.id,
                 raw: ledger_event.raw.hex_encode(),
                 max_id: ledger_event.max_id,
+                protocol_version: ledger_event.protocol_version.0,
             }),
 
             other => Err(UnexpectedLedgerEvent(other)),
@@ -54,7 +58,8 @@ impl TryFrom<LedgerEvent> for ZswapLedgerEvent {
 #[graphql(
     field(name = "id", ty = "&u64"),
     field(name = "raw", ty = "&HexEncoded"),
-    field(name = "max_id", ty = "&u64")
+    field(name = "max_id", ty = "&u64"),
+    field(name = "protocol_version", ty = "&u32")
 )]
 pub enum DustLedgerEvent {
     // A general parameter change; possibly conveys modified dust related parameters like
@@ -80,6 +85,7 @@ impl TryFrom<LedgerEvent> for DustLedgerEvent {
                 id: ledger_event.id,
                 raw: ledger_event.raw.hex_encode(),
                 max_id: ledger_event.max_id,
+                protocol_version: ledger_event.protocol_version.0,
             })),
 
             LedgerEventAttributes::DustInitialUtxo { output, .. } => {
@@ -87,6 +93,7 @@ impl TryFrom<LedgerEvent> for DustLedgerEvent {
                     id: ledger_event.id,
                     raw: ledger_event.raw.hex_encode(),
                     max_id: ledger_event.max_id,
+                    protocol_version: ledger_event.protocol_version.0,
                     output: DustOutput {
                         nonce: output.nonce.hex_encode(),
                     },
@@ -98,6 +105,7 @@ impl TryFrom<LedgerEvent> for DustLedgerEvent {
                     id: ledger_event.id,
                     raw: ledger_event.raw.hex_encode(),
                     max_id: ledger_event.max_id,
+                    protocol_version: ledger_event.protocol_version.0,
                 }),
             ),
 
@@ -106,6 +114,7 @@ impl TryFrom<LedgerEvent> for DustLedgerEvent {
                     id: ledger_event.id,
                     raw: ledger_event.raw.hex_encode(),
                     max_id: ledger_event.max_id,
+                    protocol_version: ledger_event.protocol_version.0,
                 }))
             }
 
@@ -130,6 +139,9 @@ pub struct ParamChange {
 
     /// The maximum ID of all dust ledger events.
     max_id: u64,
+
+    /// The protocol version.
+    protocol_version: u32,
 }
 
 // An initial dust UTXO.
@@ -143,6 +155,9 @@ pub struct DustInitialUtxo {
 
     /// The maximum ID of all dust ledger events.
     max_id: u64,
+
+    /// The protocol version.
+    protocol_version: u32,
 
     /// The dust output.
     output: DustOutput,
@@ -159,6 +174,9 @@ pub struct DustGenerationDtimeUpdate {
 
     /// The maximum ID of all dust ledger events.
     max_id: u64,
+
+    /// The protocol version.
+    protocol_version: u32,
 }
 
 // A processed dust spend.
@@ -172,6 +190,9 @@ pub struct DustSpendProcessed {
 
     /// The maximum ID of all dust ledger events.
     max_id: u64,
+
+    /// The protocol version.
+    protocol_version: u32,
 }
 
 /// A dust output.

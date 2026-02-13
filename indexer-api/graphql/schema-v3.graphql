@@ -270,6 +270,10 @@ type DustGenerationDtimeUpdate implements DustLedgerEvent {
 	The maximum ID of all dust ledger events.
 	"""
 	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
 }
 
 """
@@ -328,6 +332,10 @@ type DustInitialUtxo implements DustLedgerEvent {
 	"""
 	maxId: Int!
 	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
 	The dust output.
 	"""
 	output: DustOutput!
@@ -340,6 +348,7 @@ interface DustLedgerEvent {
 	id: Int!
 	raw: HexEncoded!
 	maxId: Int!
+	protocolVersion: Int!
 }
 
 """
@@ -365,6 +374,10 @@ type DustSpendProcessed implements DustLedgerEvent {
 	The maximum ID of all dust ledger events.
 	"""
 	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
 }
 
 """
@@ -424,6 +437,10 @@ type ParamChange implements DustLedgerEvent {
 	The maximum ID of all dust ledger events.
 	"""
 	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
 }
 
 """
@@ -1090,6 +1107,10 @@ type ZswapLedgerEvent {
 	The maximum ID of all zswap ledger events.
 	"""
 	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
 }
 
 """
