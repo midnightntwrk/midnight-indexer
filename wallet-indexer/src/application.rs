@@ -78,7 +78,7 @@ pub async fn run(
                         let max_id = max_transaction_id.load(Ordering::Acquire);
 
                         // Above we initially set max_transaction_id to u64::MAX so
-                        // index_wallets_task will always index on startup. This inital value needs
+                        // index_wallets_task will always index on startup. This initial value needs
                         // to be replaced unconditionally with the first received value.
                         if max_id == u64::MAX || max_id < id {
                             max_transaction_id.store(id, Ordering::Release);
