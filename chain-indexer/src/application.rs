@@ -344,10 +344,8 @@ where
     // avoid replay protection violations. Otherwise apply block 0 transactions normally.
     let (transactions, ledger_parameters) = if *genesis_from_chain_spec && block.height == 0 {
         *genesis_from_chain_spec = false;
-        let genesis_state_root = ledger_state
-            .compute_state_root()
-            .context("compute genesis state root")?;
-        if block.node_ledger_state_root.as_deref() == Some(genesis_state_root.as_ref()) {
+        let genesis_state_root = ledger_state.root().context("get ledger state root")?;
+        if block.ledger_state_root.as_deref() == Some(genesis_state_root.as_ref()) {
             info!(
                 "skipping block 0 transaction application \
                  (genesis ledger state root matches node ledger state root at block 0)"
@@ -644,7 +642,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
-        node_ledger_state_root: None,
+        ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -657,7 +655,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
-        node_ledger_state_root: None,
+        ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -670,7 +668,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
-        node_ledger_state_root: None,
+        ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -683,7 +681,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
-        node_ledger_state_root: None,
+        ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });

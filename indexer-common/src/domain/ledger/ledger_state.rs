@@ -328,25 +328,17 @@ impl LedgerState {
         }
     }
 
-    /// Compute the full ledger state root key without persisting or flushing to the database.
-    /// This produces the same bytes as `persist()` for the state key, but without side effects.
-    pub fn compute_state_root(&self) -> Result<SerializedLedgerStateKey, Error> {
+    pub fn root(&self) -> Result<ByteVec, Error> {
         match self {
-            LedgerState::V7 { ledger_state, .. } => {
-                let ledger_state = Sp::new(ledger_state.clone());
-                ledger_state
-                    .as_typed_key()
-                    .serialize()
-                    .map_err(|error| Error::Serialize("StateRootV7", error))
-            }
+            Self::V7 { ledger_state, .. } => default_storage::<LedgerDb>()
+                .alloc(ledger_state.to_owned())
+                .serialize()
+                .map_err(|error| Error::Serialize("LedgerStateV7", error)),
 
-            LedgerState::V8 { ledger_state, .. } => {
-                let ledger_state = Sp::new(ledger_state.clone());
-                ledger_state
-                    .as_typed_key()
-                    .serialize()
-                    .map_err(|error| Error::Serialize("StateRootV8", error))
-            }
+            Self::V8 { ledger_state, .. } => default_storage::<LedgerDb>()
+                .alloc(ledger_state.to_owned())
+                .serialize()
+                .map_err(|error| Error::Serialize("LedgerStateV8", error)),
         }
     }
 
