@@ -109,9 +109,6 @@ pub enum Error {
 
     #[error("cannot translate ledger state from {0} to {1}")]
     LedgerStateTranslation(LedgerVersion, LedgerVersion, #[source] io::Error),
-
-    #[error("cannot create ledger state with genesis settings")]
-    GenesisSettings(#[source] BoxError),
 }
 
 /// Extension methods for `Serializable` implementations.

@@ -74,8 +74,8 @@ use midnight_ledger_v8::{
         TransactionContext as TransactionContextV8, TransactionResult as TransactionResultV8,
     },
     structure::{
-        INITIAL_PARAMETERS as INITIAL_PARAMETERS_V8, LedgerParameters as LedgerParametersV8,
-        LedgerState as LedgerStateV8, OutputInstructionUnshielded as OutputInstructionUnshieldedV8,
+        LedgerParameters as LedgerParametersV8, LedgerState as LedgerStateV8,
+        OutputInstructionUnshielded as OutputInstructionUnshieldedV8,
         SystemTransaction as SystemTransactionV8, Utxo as UtxoV8,
     },
     verify::WellFormedStrictness as WellFormedStrictnessV8,
@@ -145,21 +145,24 @@ impl LedgerState {
         Ok(ledger_state)
     }
 
-    /// Create a [LedgerState] by deserializing the genesis state from chain spec. The
+    /// Create a [LedgerState] by deserializing the genesis ledger state from chain spec. The
     /// deserialized state already includes block 0 transactions, so block 0 transaction
     /// application must be skipped.
-    pub fn from_genesis(raw: &[u8], protocol_version: ProtocolVersion) -> Result<Self, Error> {
+    pub fn from_genesis(
+        raw: impl AsRef<[u8]>,
+        protocol_version: ProtocolVersion,
+    ) -> Result<Self, Error> {
         match protocol_version.ledger_version()? {
             LedgerVersion::V7 => Err(Error::Deserialize(
                 "GenesisLedgerStateV7",
                 io::Error::new(
                     io::ErrorKind::Unsupported,
-                    "genesis state from chain spec is not supported for V7",
+                    "genesis ledger state from chain spec is not supported for V7",
                 ),
             )),
 
             LedgerVersion::V8 => {
-                let ledger_state = tagged_deserialize::<LedgerStateV8<LedgerDb>>(&mut &*raw)
+                let ledger_state = tagged_deserialize::<LedgerStateV8<LedgerDb>>(&mut raw.as_ref())
                     .map_err(|error| Error::Deserialize("GenesisLedgerStateV8", error))?;
 
                 let treasury_night = ledger_state
@@ -183,56 +186,12 @@ impl LedgerState {
         }
     }
 
-    /// Create a [LedgerState] with genesis pool settings. Unlike
-    /// [`from_genesis`](Self::from_genesis), this creates a pre-block-0 state, so block 0
-    /// transactions must be applied normally.
-    pub fn with_genesis_settings(
-        network_id: NetworkId,
-        protocol_version: ProtocolVersion,
-        locked_pool: u128,
-        reserve_pool: u128,
-        treasury: u128,
-    ) -> Result<Self, Error> {
-        match protocol_version.ledger_version()? {
-            LedgerVersion::V7 => Err(Error::Deserialize(
-                "GenesisSettingsV7",
-                io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    "genesis settings are not supported for V7",
-                ),
-            )),
-
-            LedgerVersion::V8 => {
-                let ledger_state = LedgerStateV8::with_genesis_settings(
-                    network_id.to_string(),
-                    INITIAL_PARAMETERS_V8,
-                    locked_pool,
-                    reserve_pool,
-                    treasury,
-                )
-                .map_err(|error| Error::GenesisSettings(error.to_string().into()))?;
-
-                info!(
-                    locked_pool,
-                    reserve_pool,
-                    treasury;
-                    "genesis ledger state created with genesis settings"
-                );
-
-                Ok(Self::V8 {
-                    ledger_state,
-                    block_fullness: Default::default(),
-                })
-            }
-        }
-    }
-
-    /// Get the current ledger parameters without mutation.
     pub fn ledger_parameters(&self) -> LedgerParameters {
         match self {
             Self::V7 { ledger_state, .. } => {
                 LedgerParameters::V7(ledger_state.parameters.deref().to_owned())
             }
+
             Self::V8 { ledger_state, .. } => {
                 LedgerParameters::V8(ledger_state.parameters.deref().to_owned())
             }
