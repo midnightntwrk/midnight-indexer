@@ -28,6 +28,7 @@ use crate::{
 };
 use fastrace::trace;
 use itertools::Itertools;
+use log::info;
 use midnight_base_crypto::{
     cost_model::{FixedPoint, NormalizedCost, SyntheticCost},
     hash::{HashOutput, persistent_commit},
@@ -42,7 +43,7 @@ use midnight_coin_structure_v7::{
 };
 use midnight_coin_structure_v8::{
     coin::{
-        NIGHT as NIGHTV8, UnshieldedTokenType as UnshieldedTokenTypeV8,
+        NIGHT as NIGHTV8, TokenType as TokenTypeV8, UnshieldedTokenType as UnshieldedTokenTypeV8,
         UserAddress as UserAddressV8,
     },
     contract::ContractAddress as ContractAddressV8,
@@ -97,7 +98,7 @@ use midnight_transient_crypto_v8::merkle_tree::{
 };
 use midnight_zswap_v7::ledger::State as ZswapStateV7;
 use midnight_zswap_v8::ledger::State as ZswapStateV8;
-use std::{collections::HashSet, ops::Deref, sync::LazyLock};
+use std::{collections::HashSet, io, ops::Deref, sync::LazyLock};
 
 const OUTPUT_INDEX_ZERO: u32 = 0;
 
@@ -142,6 +143,59 @@ impl LedgerState {
         };
 
         Ok(ledger_state)
+    }
+
+    /// Create a [LedgerState] by deserializing the genesis ledger state from chain spec. The
+    /// deserialized state already includes block 0 transactions, so block 0 transaction
+    /// application must be skipped.
+    pub fn from_genesis(
+        raw: impl AsRef<[u8]>,
+        protocol_version: ProtocolVersion,
+    ) -> Result<Self, Error> {
+        match protocol_version.ledger_version()? {
+            LedgerVersion::V7 => Err(Error::Deserialize(
+                "GenesisLedgerStateV7",
+                io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "genesis ledger state from chain spec is not supported for V7",
+                ),
+            )),
+
+            LedgerVersion::V8 => {
+                let ledger_state = tagged_deserialize::<LedgerStateV8<LedgerDb>>(&mut raw.as_ref())
+                    .map_err(|error| Error::Deserialize("GenesisLedgerStateV8", error))?;
+
+                let treasury_night = ledger_state
+                    .treasury
+                    .get(&TokenTypeV8::Unshielded(NIGHTV8))
+                    .copied()
+                    .unwrap_or(0);
+
+                info!(
+                    locked_pool = ledger_state.locked_pool,
+                    reserve_pool = ledger_state.reserve_pool,
+                    treasury_night;
+                    "genesis ledger state deserialized from chain spec"
+                );
+
+                Ok(Self::V8 {
+                    ledger_state,
+                    block_fullness: Default::default(),
+                })
+            }
+        }
+    }
+
+    pub fn ledger_parameters(&self) -> LedgerParameters {
+        match self {
+            Self::V7 { ledger_state, .. } => {
+                LedgerParameters::V7(ledger_state.parameters.deref().to_owned())
+            }
+
+            Self::V8 { ledger_state, .. } => {
+                LedgerParameters::V8(ledger_state.parameters.deref().to_owned())
+            }
+        }
     }
 
     pub fn load(
@@ -230,6 +284,22 @@ impl LedgerState {
         match self {
             LedgerState::V7 { .. } => LedgerVersion::V7,
             LedgerState::V8 { .. } => LedgerVersion::V8,
+        }
+    }
+
+    pub fn root(&self) -> Result<ByteVec, Error> {
+        match self {
+            Self::V7 { ledger_state, .. } => default_storage::<LedgerDb>()
+                .alloc(ledger_state.to_owned())
+                .as_typed_key()
+                .serialize()
+                .map_err(|error| Error::Serialize("LedgerStateV7", error)),
+
+            Self::V8 { ledger_state, .. } => default_storage::<LedgerDb>()
+                .alloc(ledger_state.to_owned())
+                .as_typed_key()
+                .serialize()
+                .map_err(|error| Error::Serialize("LedgerStateV8", error)),
         }
     }
 

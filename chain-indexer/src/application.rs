@@ -26,7 +26,7 @@ use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{
-    BlockIndexed, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxoIndexed,
+    BlockIndexed, ByteVec, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxoIndexed,
 };
 use log::{debug, info, warn};
 use parking_lot::RwLock;
@@ -93,15 +93,30 @@ pub async fn run(
     );
 
     // Load/initialize ledger state.
-    let mut ledger_state = match highest_protocol_version_and_ledger_state_key {
-        Some((protocol_version, ledger_state_key)) => {
-            LedgerState::load(&ledger_state_key, protocol_version).context("load ledger state")?
-        }
+    // Genesis state raw bytes are stored but not deserialized here; deserialization is
+    // deferred to block 0 where block.protocol_version provides the correct version.
+    let (mut ledger_state, genesis_ledger_state) =
+        match highest_protocol_version_and_ledger_state_key {
+            Some((protocol_version, ledger_state_key)) => {
+                let ledger_state = LedgerState::load(&ledger_state_key, protocol_version)
+                    .context("load ledger state")?;
 
-        None => {
-            LedgerState::new(network_id, ProtocolVersion::OLDEST).context("create ledger state")?
-        }
-    };
+                (ledger_state, None)
+            }
+
+            None => {
+                let genesis_ledger_state = node
+                    .fetch_genesis_ledger_state()
+                    .await
+                    .context("fetch genesis ledger state")?;
+                debug!(is_some = genesis_ledger_state.is_some(); "fetched genesis ledger state");
+
+                let ledger_state = LedgerState::new(network_id.clone(), ProtocolVersion::OLDEST)
+                    .context("create ledger state")?;
+
+                (ledger_state, genesis_ledger_state)
+            }
+        };
 
     let highest_block_on_node = Arc::new(RwLock::new(None));
 
@@ -157,6 +172,7 @@ pub async fn run(
                 &highest_block_on_node,
                 &mut caught_up,
                 &mut parent_block_timestamp,
+                genesis_ledger_state.as_ref(),
                 &mut storage,
                 &publisher,
                 &metrics,
@@ -248,6 +264,7 @@ async fn get_and_index_block<E, N>(
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
+    genesis_ledger_state: Option<&ByteVec>,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
@@ -271,6 +288,7 @@ where
                 highest_block_on_node,
                 caught_up,
                 parent_block_timestamp,
+                genesis_ledger_state,
                 storage,
                 publisher,
                 metrics,
@@ -302,6 +320,7 @@ async fn index_block<N>(
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
+    genesis_ledger_state: Option<&ByteVec>,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
@@ -312,16 +331,53 @@ where
 {
     let (mut block, transactions) = block.into();
 
-    // Translate ledger state.
-    let ledger_version = block.protocol_version.ledger_version()?;
-    ledger_state = ledger_state
-        .translate(ledger_version)
-        .context("translate ledger state")?;
+    // At block 0 with genesis ledger state from chain spec, deserialize and compare roots to detect
+    // whether the genesis ledger state already includes block 0 transactions (post-block-0 genesis).
+    if let Some(genesis_ledger_state) = genesis_ledger_state
+        && block.height == 0
+    {
+        let genesis_ledger_state =
+            LedgerState::from_genesis(genesis_ledger_state, block.protocol_version)
+                .context("create ledger state from genesis")?;
+        let genesis_ledger_state_root = genesis_ledger_state
+            .root()
+            .context("compute genesis ledger state root")?;
 
-    // Apply transactions.
+        debug!(
+            genesis_ledger_state_root = const_hex::encode(&genesis_ledger_state_root),
+            genesis_ledger_root_len = genesis_ledger_state_root.len(),
+            node_ledger_state_root = block.ledger_state_root.as_deref().map(const_hex::encode),
+            node_ledger_state_root_len = block.ledger_state_root.as_ref().map(|r| r.len());
+            "comparing ledger state roots at block 0"
+        );
+
+        if block
+            .ledger_state_root
+            .as_ref()
+            .is_some_and(|root| root.0 == genesis_ledger_state_root.0)
+        {
+            // Roots match: genesis ledger state already includes block 0 outcomes.
+            // Apply block 0 transactions to the current (fresh) state for DB outcomes.
+            info!("genesis ledger state root matches node at block 0, using fresh ledger state");
+        } else {
+            // Roots don't match: genesis ledger state is the pre-block-0 starting point.
+            info!(
+                "genesis ledter state root does not match node at block 0, using genesis ledger state"
+            );
+
+            ledger_state = genesis_ledger_state;
+        }
+    }
+
     if *parent_block_timestamp == 0 {
         *parent_block_timestamp = block.timestamp;
     };
+
+    let ledger_version = block.protocol_version.ledger_version()?;
+    ledger_state = ledger_state
+        .translate(ledger_version)
+        .context("translate genesis ledger state")?;
+
     let (transactions, ledger_parameters) = ledger_state
         .apply_transactions(
             transactions,
@@ -329,10 +385,11 @@ where
             block.timestamp,
             *parent_block_timestamp,
         )
-        .context("apply node transactions to ledger state")?;
+        .context("apply transactions to ledger state")?;
+    debug!(transactions:?; "transactions applied to ledger state");
+
     *parent_block_timestamp = block.timestamp;
     block.ledger_parameters = ledger_parameters.serialize()?;
-    debug!(transactions:?; "transactions applied to ledger state");
 
     // Validate ledger state.
     if ledger_state.zswap_merkle_tree_root() != block.zswap_state_root {
@@ -530,7 +587,7 @@ mod tests {
     use fake::{Fake, Faker};
     use futures::{Stream, StreamExt, TryStreamExt, stream};
     use indexer_common::{
-        domain::{BlockHash, ByteArray, ProtocolVersion, ledger::ZswapStateRoot},
+        domain::{BlockHash, ByteArray, ByteVec, ProtocolVersion, ledger::ZswapStateRoot},
         error::BoxError,
     };
     use std::{convert::Infallible, sync::LazyLock};
@@ -583,6 +640,10 @@ mod tests {
                 terms_and_conditions: None,
             })
         }
+
+        async fn fetch_genesis_ledger_state(&self) -> Result<Option<ByteVec>, Self::Error> {
+            Ok(None)
+        }
     }
 
     static BLOCK_0: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -593,6 +654,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -605,6 +667,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -617,6 +680,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -629,6 +693,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });

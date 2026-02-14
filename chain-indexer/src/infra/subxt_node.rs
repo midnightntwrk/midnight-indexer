@@ -260,12 +260,19 @@ impl SubxtNode {
 
         // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
         // registrations from pallet storage instead.
-        if height == 0 {
+        // Also fetch the ledger state root for genesis ledger state detection.
+        let ledger_state_root = if height == 0 {
             let genesis_registrations =
                 runtimes::fetch_genesis_cnight_registrations(hash, protocol_version, online_client)
                     .await?;
             dust_registration_events.extend(genesis_registrations);
-        }
+
+            runtimes::get_ledger_state_root(hash, protocol_version, online_client)
+                .await?
+                .map(Into::into)
+        } else {
+            None
+        };
 
         let transactions = stream::iter(transactions)
             .then(|t| make_transaction(t, hash, protocol_version, online_client))
@@ -280,6 +287,7 @@ impl SubxtNode {
             author,
             timestamp: timestamp.unwrap_or(0),
             zswap_state_root,
+            ledger_state_root,
             transactions,
             dust_registration_events,
         };
@@ -473,6 +481,42 @@ impl Node for SubxtNode {
             terms_and_conditions,
         })
     }
+
+    async fn fetch_genesis_ledger_state(&self) -> Result<Option<ByteVec>, Self::Error> {
+        let legacy_rpc_methods =
+            LegacyRpcMethods::<SubstrateConfig>::new(self.rpc_client.to_owned().into());
+        let properties = legacy_rpc_methods
+            .system_properties()
+            .await
+            .map_err(|error| SubxtNodeError::FetchGenesisState(error.into()))?;
+
+        let Some(genesis_ledger_state) = properties.get("genesis_state") else {
+            warn!("no genesis_ledger_state in system properties");
+            return Ok(None);
+        };
+
+        let Some(genesis_ledger_state) = genesis_ledger_state.as_str() else {
+            warn!("genesis_state in system properties is not a string");
+            return Ok(None);
+        };
+
+        let genesis_ledger_state = genesis_ledger_state
+            .strip_prefix("0x")
+            .unwrap_or(genesis_ledger_state);
+        let genesis_ledger_state = const_hex::decode(genesis_ledger_state).map_err(|error| {
+            SubxtNodeError::FetchGenesisState(
+                format!("cannot hex-decode genesis_ledger_state: {error}").into(),
+            )
+        })?;
+        let genesis_ledger_state = ByteVec::from(genesis_ledger_state);
+
+        info!(
+            genesis_ledger_state_len = genesis_ledger_state.len();
+            "fetched genesis ledger state from chain spec system properties"
+        );
+
+        Ok(Some(genesis_ledger_state))
+    }
 }
 
 /// Config for node connection.
@@ -583,6 +627,12 @@ pub enum SubxtNodeError {
 
     #[error("cannot fetch genesis cNight registrations")]
     FetchGenesisCnightRegistrations(#[source] BoxError),
+
+    #[error("cannot fetch genesis ledger state")]
+    FetchGenesisState(#[source] BoxError),
+
+    #[error("cannot get ledger state root")]
+    GetLedgerStateRoot(#[source] BoxError),
 }
 
 #[trace]

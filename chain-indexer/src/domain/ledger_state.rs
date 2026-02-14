@@ -40,6 +40,15 @@ impl LedgerState {
             .map(Into::into)
     }
 
+    pub fn from_genesis(
+        raw: impl AsRef<[u8]>,
+        protocol_version: ProtocolVersion,
+    ) -> Result<Self, Error> {
+        indexer_common::domain::ledger::LedgerState::from_genesis(raw, protocol_version)
+            .map_err(Error::Create)
+            .map(Into::into)
+    }
+
     pub fn load(
         key: &SerializedLedgerStateKey,
         protocol_version: ProtocolVersion,
