@@ -164,29 +164,26 @@ pub async fn run(
             let mut caught_up = false;
             let mut parent_block_timestamp = 0;
 
-            while let Some(next_ledger_state) = get_and_index_block(
-                caught_up_max_distance,
-                caught_up_leeway,
-                &mut blocks,
-                ledger_state,
-                &highest_block_on_node,
-                &mut caught_up,
-                &mut parent_block_timestamp,
-                genesis_ledger_state.as_ref(),
-                &mut storage,
-                &publisher,
-                &metrics,
-                &node,
-            )
-            .in_span(Span::root("get-and-index-block", SpanContext::random()))
-            .await?
-            {
-                ledger_state = next_ledger_state
+            loop {
+                let next_ledger_state = get_and_index_block(
+                    caught_up_max_distance,
+                    caught_up_leeway,
+                    &mut blocks,
+                    ledger_state,
+                    &highest_block_on_node,
+                    &mut caught_up,
+                    &mut parent_block_timestamp,
+                    genesis_ledger_state.as_ref(),
+                    &mut storage,
+                    &publisher,
+                    &metrics,
+                    &node,
+                )
+                .in_span(Span::root("get-and-index-block", SpanContext::random()))
+                .await?;
+
+                ledger_state = next_ledger_state;
             }
-
-            warn!("index_blocks_task completed");
-
-            Ok::<_, anyhow::Error>(())
         }
     });
 
@@ -199,7 +196,7 @@ pub async fn run(
 
         result = index_blocks_task => result
             .context("index_blocks_task panicked")
-            .and_then(|r| r.context("index_blocks_task failed")),
+            .and_then(|r: anyhow::Result<()>| r.context("index_blocks_task failed")),
 
         _ = sigterm.recv() => {
             warn!("SIGTERM received");
@@ -269,45 +266,44 @@ async fn get_and_index_block<E, N>(
     publisher: &impl Publisher,
     metrics: &Metrics,
     node: &N,
-) -> Result<Option<LedgerState>, anyhow::Error>
+) -> anyhow::Result<LedgerState>
 where
     E: StdError + Send + Sync + 'static,
     N: Node,
 {
-    let block = get_next_block(blocks)
-        .await
-        .context("get next block for indexing")?;
+    let block = get_next_block(blocks).await?;
 
-    match block {
-        Some(block) => {
-            let ledger_state = index_block(
-                caught_up_max_distance,
-                caught_up_leeway,
-                block,
-                ledger_state,
-                highest_block_on_node,
-                caught_up,
-                parent_block_timestamp,
-                genesis_ledger_state,
-                storage,
-                publisher,
-                metrics,
-                node,
-            )
-            .await?;
+    let ledger_state = index_block(
+        caught_up_max_distance,
+        caught_up_leeway,
+        block,
+        ledger_state,
+        highest_block_on_node,
+        caught_up,
+        parent_block_timestamp,
+        genesis_ledger_state,
+        storage,
+        publisher,
+        metrics,
+        node,
+    )
+    .await?;
 
-            Ok(Some(ledger_state))
-        }
-
-        None => Ok(None),
-    }
+    Ok(ledger_state)
 }
 
 #[trace]
 async fn get_next_block<E>(
     blocks: &mut (impl Stream<Item = Result<node::Block, E>> + Unpin),
-) -> Result<Option<node::Block>, E> {
-    blocks.try_next().await
+) -> anyhow::Result<node::Block>
+where
+    E: StdError + Send + Sync + 'static,
+{
+    blocks
+        .try_next()
+        .await
+        .context("get next block from node")
+        .and_then(|o| o.context("no more block from node"))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -325,7 +321,7 @@ async fn index_block<N>(
     publisher: &impl Publisher,
     metrics: &Metrics,
     node: &N,
-) -> Result<LedgerState, anyhow::Error>
+) -> anyhow::Result<LedgerState>
 where
     N: Node,
 {
