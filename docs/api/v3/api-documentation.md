@@ -4,8 +4,6 @@ The Midnight Indexer API exposes a GraphQL API that enables clients to query and
 
 **Version Information:**
 - Current API version: v4
-- Previous version v1 redirects to v4 automatically
-- Version v2 was skipped during migration
 
 **Disclaimer:**
 The examples provided here are illustrative and may need updating if the API changes. Always consider [`indexer-api/graphql/schema-v4.graphql`](../../../indexer-api/graphql/schema-v4.graphql) as the primary source of truth. Adjust queries as necessary to match the latest schema.
