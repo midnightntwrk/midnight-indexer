@@ -15,7 +15,7 @@ use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, InnerApiError, ResultExt,
-        v3::{HexEncodable, HexEncoded, decode_session_id, transaction::RegularTransaction},
+        v4::{HexEncodable, HexEncoded, decode_session_id, transaction::RegularTransaction},
     },
 };
 use async_graphql::{Context, SimpleObject, Subscription, Union};

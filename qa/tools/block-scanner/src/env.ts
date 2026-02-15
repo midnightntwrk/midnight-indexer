@@ -38,8 +38,8 @@ if (Bun.env.TARGET_ENV === undefined || Bun.env.TARGET_ENV === "") {
 
 export const INDEXER_WS_URL: string =
   TARGET_ENV === "undeployed"
-    ? `ws://${INDEXER_BASE_URL[TARGET_ENV]}/api/v3/graphql/ws`
-    : `wss://${INDEXER_BASE_URL[TARGET_ENV]}/api/v3/graphql/ws`;
+    ? `ws://${INDEXER_BASE_URL[TARGET_ENV]}/api/v4/graphql/ws`
+    : `wss://${INDEXER_BASE_URL[TARGET_ENV]}/api/v4/graphql/ws`;
 
 export const INDEXER_HTTP_URL: string =
   TARGET_ENV === "undeployed"

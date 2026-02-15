@@ -51,7 +51,7 @@ import { GET_DUST_GENERATION_STATUS } from './graphql/dust-queries';
  */
 export class IndexerHttpClient {
   private client: GraphQLClient;
-  private readonly graphqlAPIEndpoint: string = '/api/v3/graphql';
+  private readonly graphqlAPIEndpoint: string = '/api/v4/graphql';
   private targetUrl: string;
 
   /**

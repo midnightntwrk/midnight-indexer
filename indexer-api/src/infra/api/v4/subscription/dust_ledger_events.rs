@@ -13,7 +13,7 @@
 
 use crate::{
     domain::{LedgerEvent, storage::Storage},
-    infra::api::{ApiResult, ContextExt, ResultExt, v3::ledger_events::ZswapLedgerEvent},
+    infra::api::{ApiResult, ContextExt, ResultExt, v4::ledger_events::DustLedgerEvent},
 };
 use async_graphql::{Context, Subscription};
 use async_stream::try_stream;
@@ -26,12 +26,12 @@ use std::{marker::PhantomData, num::NonZeroU32, pin::pin};
 // TODO: Make configurable!
 const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
 
-pub struct ZswapLedgerEventsSubscription<S, B> {
+pub struct DustLedgerEventsSubscription<S, B> {
     _s: PhantomData<S>,
     _b: PhantomData<B>,
 }
 
-impl<S, B> Default for ZswapLedgerEventsSubscription<S, B> {
+impl<S, B> Default for DustLedgerEventsSubscription<S, B> {
     fn default() -> Self {
         Self {
             _s: PhantomData,
@@ -41,17 +41,17 @@ impl<S, B> Default for ZswapLedgerEventsSubscription<S, B> {
 }
 
 #[Subscription]
-impl<S, B> ZswapLedgerEventsSubscription<S, B>
+impl<S, B> DustLedgerEventsSubscription<S, B>
 where
     S: Storage,
     B: Subscriber,
 {
-    /// Subscribe to zswap ledger events starting at the given ID or at the very start if omitted.
-    async fn zswap_ledger_events<'a>(
+    /// Subscribe to dust ledger events starting at the given ID or at the very start if omitted.
+    async fn dust_ledger_events<'a>(
         &self,
         cx: &'a Context<'a>,
         id: Option<u64>,
-    ) -> impl Stream<Item = ApiResult<ZswapLedgerEvent>> {
+    ) -> impl Stream<Item = ApiResult<DustLedgerEvent>> {
         let mut id = id.unwrap_or(1);
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
@@ -62,7 +62,7 @@ where
             debug!(id; "streaming existing events");
 
             let ledger_events = storage
-                .get_ledger_events(LedgerEventGrouping::Zswap, id, BATCH_SIZE)
+                .get_ledger_events(LedgerEventGrouping::Dust, id, BATCH_SIZE)
                 .await;
             let mut ledger_events = pin!(ledger_events);
             while let Some(ledger_event) = get_next_ledger_event(&mut ledger_events)
@@ -72,8 +72,8 @@ where
                 let ledger_event_id = ledger_event.id;
                 id = ledger_event_id + 1;
                 yield ledger_event.try_into().map_err_into_server_error(|| {
-                    format!("unexpected zswap ledger event with ID {ledger_event_id}")
-                })?
+                    format!("unexpected dust ledger event with ID {ledger_event_id}")
+                })?;
             }
 
             debug!(id; "streaming live events");
@@ -87,7 +87,7 @@ where
                 debug!(id; "streaming next events");
 
                 let ledger_events = storage
-                    .get_ledger_events(LedgerEventGrouping::Zswap, id, BATCH_SIZE)
+                    .get_ledger_events(LedgerEventGrouping::Dust, id, BATCH_SIZE)
                     .await;
                 let mut ledger_events = pin!(ledger_events);
                 while let Some(ledger_event) = get_next_ledger_event(&mut ledger_events)
@@ -97,8 +97,8 @@ where
                     let ledger_event_id = ledger_event.id;
                     id = ledger_event_id + 1;
                     yield ledger_event.try_into().map_err_into_server_error(|| {
-                        format!("unexpected zswap ledger event with ID {ledger_event_id}")
-                    })?
+                        format!("unexpected dust ledger event with ID {ledger_event_id}")
+                    })?;
                 }
             }
 
@@ -113,7 +113,7 @@ async fn get_next_ledger_event<E>(
     ledger_events
         .try_next()
         .in_span(Span::root(
-            "subscription.zswap-ledger-events.get-next-ledger-event",
+            "subscription.dust-ledger-events.get-next-ledger-event",
             SpanContext::random(),
         ))
         .await

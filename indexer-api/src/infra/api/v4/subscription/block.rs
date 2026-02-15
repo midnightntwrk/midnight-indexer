@@ -15,7 +15,7 @@ use crate::{
     domain::{self, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
-        v3::{
+        v4::{
             block::{Block, BlockOffset},
             resolve_height,
         },

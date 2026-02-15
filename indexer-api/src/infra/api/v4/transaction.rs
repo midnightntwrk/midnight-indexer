@@ -15,7 +15,7 @@ use crate::{
     domain::{self, storage::Storage},
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
-        v3::{
+        v4::{
             HexEncodable, HexEncoded,
             block::Block,
             contract_action::ContractAction,

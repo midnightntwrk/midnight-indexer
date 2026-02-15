@@ -37,7 +37,7 @@ bun run src/scanner.ts <path/to/test/data/folder>
 
 ### Available Environments (these might change in future)
 
-- `undeployed` - Local development (ws://localhost:8088/api/v3/graphql/ws)
+- `undeployed` - Local development (ws://localhost:8088/api/v4/graphql/ws)
 - `nodedev01` - Node dev environment
 - `devnet` - Development network
 - `qanet` - QA network
