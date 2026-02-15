@@ -1,18 +1,16 @@
-# Midnight Indexer API Documentation v3
+# Midnight Indexer API Documentation v4
 
 The Midnight Indexer API exposes a GraphQL API that enables clients to query and subscribe to blockchain data—blocks, transactions, contracts, DUST generation, and shielded/unshielded transaction events—indexed from the Midnight blockchain. These capabilities facilitate both historical lookups and real-time monitoring.
 
 **Version Information:**
-- Current API version: v3
-- Previous version v1 redirects to v3 automatically
-- Version v2 was skipped during migration
+- Current API version: v4
 
 **Disclaimer:**
-The examples provided here are illustrative and may need updating if the API changes. Always consider [`indexer-api/graphql/schema-v3.graphql`](../../../indexer-api/graphql/schema-v3.graphql) as the primary source of truth. Adjust queries as necessary to match the latest schema.
+The examples provided here are illustrative and may need updating if the API changes. Always consider [`indexer-api/graphql/schema-v4.graphql`](../../../indexer-api/graphql/schema-v4.graphql) as the primary source of truth. Adjust queries as necessary to match the latest schema.
 
 ## GraphQL Schema
 
-The GraphQL schema is defined in [`indexer-api/graphql/schema-v3.graphql`](../../../indexer-api/graphql/schema-v3.graphql). It specifies all queries, mutations, subscriptions, and their types, including arguments and return structures.
+The GraphQL schema is defined in [`indexer-api/graphql/schema-v4.graphql`](../../../indexer-api/graphql/schema-v4.graphql). It specifies all queries, mutations, subscriptions, and their types, including arguments and return structures.
 
 ## Overview of Operations
 
@@ -40,13 +38,13 @@ The GraphQL schema is defined in [`indexer-api/graphql/schema-v3.graphql`](../..
 
 **HTTP (Queries & Mutations):**
 ```
-POST https://<host>:<port>/api/v3/graphql
+POST https://<host>:<port>/api/v4/graphql
 Content-Type: application/json
 ```
 
 **WebSocket (Subscriptions):**
 ```
-wss://<host>:<port>/api/v3/graphql/ws
+wss://<host>:<port>/api/v4/graphql/ws
 Sec-WebSocket-Protocol: graphql-transport-ws
 ```
 
@@ -674,7 +672,7 @@ This ensures the schema file stays aligned with code changes.
 ## Migration from v1
 
 If migrating from API v1:
-1. Update endpoint URLs from `/v1/graphql` to `/v3/graphql` (though v1 redirects automatically)
+1. Update endpoint URLs from `/v1/graphql` to `/v4/graphql` (though v1 redirects automatically)
 2. Review field name changes (e.g., `chainState` → `zswapState` in contract actions)
 3. Test thoroughly as some response structures may have evolved
 

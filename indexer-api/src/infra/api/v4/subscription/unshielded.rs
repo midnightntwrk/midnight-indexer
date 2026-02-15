@@ -15,7 +15,7 @@ use crate::{
     domain::{self, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
-        v3::{
+        v4::{
             transaction::Transaction,
             unshielded::{UnshieldedAddress, UnshieldedUtxo},
         },

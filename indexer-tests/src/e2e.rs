@@ -39,7 +39,7 @@ use crate::{
 use anyhow::{Context, bail};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
-use indexer_api::infra::api::v3::{HexEncodable, viewing_key::ViewingKey};
+use indexer_api::infra::api::v4::{HexEncodable, viewing_key::ViewingKey};
 use indexer_common::domain::{NetworkId, ProtocolVersion};
 use itertools::Itertools;
 use reqwest::Client;
@@ -61,7 +61,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     println!("Starting e2e testing");
 
     let (api_url, ws_api_url) = {
-        let core = format!("{host}:{port}/api/v3/graphql");
+        let core = format!("{host}:{port}/api/v4/graphql");
 
         if secure {
             (format!("https://{core}"), format!("wss://{core}/ws"))
@@ -989,14 +989,14 @@ fn viewing_key(network_id: &NetworkId) -> &'static str {
 
 mod graphql {
     use graphql_client::GraphQLQuery;
-    use indexer_api::infra::api::v3::{
+    use indexer_api::infra::api::v4::{
         CardanoRewardAddress, HexEncoded, dust::DustAddress, mutation::Unit,
         unshielded::UnshieldedAddress, viewing_key::ViewingKey,
     };
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -1004,7 +1004,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -1012,7 +1012,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -1020,7 +1020,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -1028,7 +1028,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -1036,7 +1036,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -1044,7 +1044,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -1052,7 +1052,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -1060,7 +1060,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -1068,7 +1068,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -1076,7 +1076,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -1084,7 +1084,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -1092,7 +1092,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]
@@ -1100,7 +1100,7 @@ mod graphql {
 
     #[derive(GraphQLQuery)]
     #[graphql(
-        schema_path = "../indexer-api/graphql/schema-v3.graphql",
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
         query_path = "./e2e.graphql",
         response_derives = "Debug, Clone, Serialize"
     )]

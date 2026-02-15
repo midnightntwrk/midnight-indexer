@@ -18,7 +18,7 @@
 
 use crate::{
     domain,
-    infra::api::v3::{
+    infra::api::v4::{
         AddressType, CardanoNetworkId, CardanoRewardAddress, HexEncodable, HexEncoded,
         encode_address, encode_cardano_reward_address,
     },

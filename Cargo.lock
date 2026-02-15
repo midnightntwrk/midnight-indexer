@@ -1082,7 +1082,7 @@ dependencies = [
 
 [[package]]
 name = "chain-indexer"
-version = "3.1.0"
+version = "4.0.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3021,7 +3021,7 @@ dependencies = [
 
 [[package]]
 name = "indexer-api"
-version = "3.1.0"
+version = "4.0.0"
 dependencies = [
  "anyhow",
  "async-graphql",
@@ -6804,7 +6804,7 @@ dependencies = [
 
 [[package]]
 name = "spo-indexer"
-version = "3.1.0"
+version = "4.0.0"
 dependencies = [
  "anyhow",
  "blake2",
@@ -8290,7 +8290,7 @@ dependencies = [
 
 [[package]]
 name = "wallet-indexer"
-version = "3.1.0"
+version = "4.0.0"
 dependencies = [
  "anyhow",
  "async-stream",

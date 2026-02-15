@@ -18,7 +18,7 @@ use indexer_common::domain::{NetworkId, ProtocolVersion, ledger};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::infra::api::v3::{AddressType, DecodeAddressError, decode_address};
+use crate::infra::api::v4::{AddressType, DecodeAddressError, decode_address};
 
 /// Bech32m-encoded viewing key.
 #[derive(Debug, Display, Clone, PartialEq, Eq, Serialize, Deserialize, From)]
@@ -63,7 +63,7 @@ pub enum ViewingKeyFormatError {
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::api::v3::viewing_key::ViewingKey;
+    use crate::infra::api::v4::viewing_key::ViewingKey;
     use indexer_common::domain::ProtocolVersion;
 
     #[test]

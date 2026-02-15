@@ -15,7 +15,7 @@ use crate::{
     domain::{self, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
-        v3::{HexEncoded, block::BlockOffset, contract_action::ContractAction, resolve_height},
+        v4::{HexEncoded, block::BlockOffset, contract_action::ContractAction, resolve_height},
     },
 };
 use async_graphql::{Context, Subscription};
