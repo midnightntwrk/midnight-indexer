@@ -332,7 +332,8 @@ where
     let (mut block, transactions) = block.into();
 
     // At block 0 with genesis ledger state from chain spec, deserialize and compare roots to detect
-    // whether the genesis ledger state already includes block 0 transactions (post-block-0 genesis).
+    // whether the genesis ledger state already includes block 0 transactions (post-block-0
+    // genesis).
     if let Some(genesis_ledger_state) = genesis_ledger_state
         && block.height == 0
     {
