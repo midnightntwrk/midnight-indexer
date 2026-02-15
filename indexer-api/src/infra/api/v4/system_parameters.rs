@@ -13,7 +13,7 @@
 
 use crate::{
     domain::system_parameters as domain,
-    infra::api::v3::{HexEncodable, HexEncoded},
+    infra::api::v4::{HexEncodable, HexEncoded},
 };
 use async_graphql::SimpleObject;
 

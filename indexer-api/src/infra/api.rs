@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod v3;
+pub mod v4;
 
 use crate::domain::{Api, LedgerStateCache, storage::Storage};
 use async_graphql::Context;
@@ -165,7 +165,7 @@ where
 {
     let ledger_state_cache = LedgerStateCache::default();
 
-    let v3_app = v3::make_app(
+    let v4_app = v4::make_app(
         network_id,
         ledger_state_cache,
         storage,
@@ -178,8 +178,7 @@ where
     // Builder, so we layer FastraceLayer first.
     Router::new()
         .route("/ready", get(ready))
-        .nest("/api/v3", v3_app)
-        .route("/api/v1/{*rest}", any(redirect_api_v1_to_latest))
+        .nest("/api/v4", v4_app)
         .route("/api/{*rest}", any(redirect_api_to_latest))
         .with_state(caught_up)
         .layer(FastraceLayer)
@@ -207,12 +206,8 @@ async fn redirect_api_to_latest(OriginalUri(uri): OriginalUri) -> Redirect {
     redirect_to_latest(uri, "/api")
 }
 
-async fn redirect_api_v1_to_latest(OriginalUri(uri): OriginalUri) -> Redirect {
-    redirect_to_latest(uri, "/api/v1")
-}
-
 fn redirect_to_latest(uri: Uri, target: &str) -> Redirect {
-    let mut path = uri.path().replacen(target, "/api/v3", 1);
+    let mut path = uri.path().replacen(target, "/api/v4", 1);
 
     if let Some(query) = uri.query() {
         path.push('?');

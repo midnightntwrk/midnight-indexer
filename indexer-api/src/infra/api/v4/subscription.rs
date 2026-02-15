@@ -20,7 +20,7 @@ mod zswap_ledger_events;
 
 use crate::{
     domain::storage::Storage,
-    infra::api::v3::subscription::{
+    infra::api::v4::subscription::{
         block::BlockSubscription, contract_action::ContractActionSubscription,
         dust_ledger_events::DustLedgerEventsSubscription,
         shielded::ShieldedTransactionsSubscription, unshielded::UnshieldedTransactionsSubscription,

@@ -150,7 +150,7 @@ export class IndexerWsClient {
   private ws: WebSocket | null = null;
 
   /** The endpoint where to send graphql subscriptions */
-  private readonly graphqlAPIEndpoint: string = '/api/v3/graphql/ws';
+  private readonly graphqlAPIEndpoint: string = '/api/v4/graphql/ws';
 
   /** WebSocket URL; set in constructor */
   private readonly targetUrl: string;

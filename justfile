@@ -44,10 +44,10 @@ test:
     fi
     cargo nextest run --workspace --exclude indexer-standalone --features {{feature}}
     # Check indexer-api schema:
-    cargo run -p indexer-api --features {{feature}} --bin indexer-api-cli print-api-schema-v3 > \
-        indexer-api/graphql/schema-v3.graphql.check
-    @if ! cmp -s indexer-api/graphql/schema-v3.graphql indexer-api/graphql/schema-v3.graphql.check; then \
-        echo "schema-v3.graphql has changes!"; exit 1; \
+    cargo run -p indexer-api --features {{feature}} --bin indexer-api-cli print-api-schema-v4 > \
+        indexer-api/graphql/schema-v4.graphql.check
+    @if ! cmp -s indexer-api/graphql/schema-v4.graphql indexer-api/graphql/schema-v4.graphql.check; then \
+        echo "schema-v4.graphql has changes!"; exit 1; \
     fi
 
 doc:
@@ -69,8 +69,8 @@ coverage:
     ./coverage.sh {{nightly}}
 
 generate-indexer-api-schema:
-    cargo run -p indexer-api --features {{feature}} --bin indexer-api-cli print-api-schema-v3 > \
-        indexer-api/graphql/schema-v3.graphql
+    cargo run -p indexer-api --features {{feature}} --bin indexer-api-cli print-api-schema-v4 > \
+        indexer-api/graphql/schema-v4.graphql
 
 generate-spo-api-schema:
     cargo run -p spo-api --features cloud --bin spo-api-cli print-api-schema-v1 > \
