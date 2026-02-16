@@ -422,21 +422,22 @@ where
         ledger_state.0.persist().context("persist ledger state")?;
     ledger_state = new_ledger_state.into();
 
-    // Save and update the block with its related data.
+    // Determine system parameters change if any.
+    let system_parameters_change = determine_system_parameters_change(&block, storage, node)
+        .await
+        .context("determine system parameters change")?;
+
+    // Save the block with its related data and system parameters atomically.
     let max_transaction_id = storage
         .save_block(
             &block,
             &transactions,
             &block.dust_registration_events,
             &ledger_state_key,
+            system_parameters_change.as_ref(),
         )
         .await
         .context("save block")?;
-
-    // Fetch and store system parameters if changed.
-    update_system_parameters(&block, storage, node)
-        .await
-        .context("update system parameters")?;
 
     // Publish BlockIndexed.
     publisher
@@ -486,13 +487,13 @@ where
     Ok(ledger_state)
 }
 
-/// Fetch system parameters from the node and store if changed.
+/// Fetch system parameters from the node and determine if they changed.
 #[trace]
-async fn update_system_parameters<N>(
+async fn determine_system_parameters_change<N>(
     block: &Block,
     storage: &mut impl Storage,
     node: &N,
-) -> anyhow::Result<()>
+) -> anyhow::Result<Option<SystemParametersChange>>
 where
     N: Node,
 {
@@ -534,7 +535,6 @@ where
         (None, None) => false,
     };
 
-    // Store changes if any.
     if d_param_changed || tc_changed {
         let change = SystemParametersChange {
             block_height: block.height,
@@ -552,20 +552,17 @@ where
             },
         };
 
-        storage
-            .save_system_parameters_change(&change)
-            .await
-            .context("save system parameters change")?;
-
         debug!(
             block_height = block.height,
             d_param_changed,
             tc_changed;
-            "system parameters updated"
+            "system parameters changed"
         );
-    }
 
-    Ok(())
+        Ok(Some(change))
+    } else {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

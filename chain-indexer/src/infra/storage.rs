@@ -69,6 +69,7 @@ impl domain::storage::Storage for Storage {
         transactions: &[Transaction],
         dust_registration_events: &[DustRegistrationEvent],
         ledger_state_key: &SerializedLedgerStateKey,
+        system_parameters_change: Option<&SystemParametersChange>,
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
@@ -81,62 +82,13 @@ impl domain::storage::Storage for Storage {
         )
         .await?;
 
+        if let Some(change) = system_parameters_change {
+            save_system_parameters_change(change, &mut tx).await?;
+        }
+
         tx.commit().await?;
 
         Ok(max_transaction_id)
-    }
-
-    /// Save all system parameters from a change event.
-    #[trace(properties = { "change": "{change:?}" })]
-    async fn save_system_parameters_change(
-        &self,
-        change: &SystemParametersChange,
-    ) -> Result<(), sqlx::Error> {
-        if let Some(ref d_parameter) = change.d_parameter {
-            let query = indoc! {"
-                INSERT INTO system_parameters_d (
-                    block_height,
-                    block_hash,
-                    timestamp,
-                    num_permissioned_candidates,
-                    num_registered_candidates
-                )
-                VALUES ($1, $2, $3, $4, $5)
-            "};
-
-            sqlx::query(query)
-                .bind(change.block_height as i64)
-                .bind(change.block_hash.as_ref())
-                .bind(change.timestamp as i64)
-                .bind(d_parameter.num_permissioned_candidates as i32)
-                .bind(d_parameter.num_registered_candidates as i32)
-                .execute(&*self.pool)
-                .await?;
-        }
-
-        if let Some(ref terms_and_conditions) = change.terms_and_conditions {
-            let query = indoc! {"
-                INSERT INTO system_parameters_terms_and_conditions (
-                    block_height,
-                    block_hash,
-                    timestamp,
-                    hash,
-                    url
-                )
-                VALUES ($1, $2, $3, $4, $5)
-            "};
-
-            sqlx::query(query)
-                .bind(change.block_height as i64)
-                .bind(change.block_hash.as_ref())
-                .bind(change.timestamp as i64)
-                .bind(terms_and_conditions.hash.as_ref())
-                .bind(&terms_and_conditions.url)
-                .execute(&*self.pool)
-                .await?;
-        }
-
-        Ok(())
     }
 
     #[trace]
@@ -948,6 +900,58 @@ async fn save_dust_registration_events(
                     .await?;
             }
         }
+    }
+
+    Ok(())
+}
+
+#[trace(properties = { "change": "{change:?}" })]
+async fn save_system_parameters_change(
+    change: &SystemParametersChange,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    if let Some(ref d_parameter) = change.d_parameter {
+        let query = indoc! {"
+            INSERT INTO system_parameters_d (
+                block_height,
+                block_hash,
+                timestamp,
+                num_permissioned_candidates,
+                num_registered_candidates
+            )
+            VALUES ($1, $2, $3, $4, $5)
+        "};
+
+        sqlx::query(query)
+            .bind(change.block_height as i64)
+            .bind(change.block_hash.as_ref())
+            .bind(change.timestamp as i64)
+            .bind(d_parameter.num_permissioned_candidates as i32)
+            .bind(d_parameter.num_registered_candidates as i32)
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    if let Some(ref terms_and_conditions) = change.terms_and_conditions {
+        let query = indoc! {"
+            INSERT INTO system_parameters_terms_and_conditions (
+                block_height,
+                block_hash,
+                timestamp,
+                hash,
+                url
+            )
+            VALUES ($1, $2, $3, $4, $5)
+        "};
+
+        sqlx::query(query)
+            .bind(change.block_height as i64)
+            .bind(change.block_hash.as_ref())
+            .bind(change.timestamp as i64)
+            .bind(terms_and_conditions.hash.as_ref())
+            .bind(&terms_and_conditions.url)
+            .execute(&mut **tx)
+            .await?;
     }
 
     Ok(())
