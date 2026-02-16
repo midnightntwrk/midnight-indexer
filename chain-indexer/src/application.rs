@@ -98,9 +98,8 @@ pub async fn run(
             LedgerState::load(&ledger_state_key, protocol_version).context("load ledger state")?
         }
 
-        None => {
-            LedgerState::new(network_id, ProtocolVersion::OLDEST).context("create ledger state")?
-        }
+        None => LedgerState::new(network_id.clone(), ProtocolVersion::OLDEST)
+            .context("create ledger state")?,
     };
 
     let highest_block_on_node = Arc::new(RwLock::new(None));
@@ -149,28 +148,25 @@ pub async fn run(
             let mut caught_up = false;
             let mut parent_block_timestamp = 0;
 
-            while let Some(next_ledger_state) = get_and_index_block(
-                caught_up_max_distance,
-                caught_up_leeway,
-                &mut blocks,
-                ledger_state,
-                &highest_block_on_node,
-                &mut caught_up,
-                &mut parent_block_timestamp,
-                &mut storage,
-                &publisher,
-                &metrics,
-                &node,
-            )
-            .in_span(Span::root("get-and-index-block", SpanContext::random()))
-            .await?
-            {
-                ledger_state = next_ledger_state
+            loop {
+                let next_ledger_state = get_and_index_block(
+                    caught_up_max_distance,
+                    caught_up_leeway,
+                    &mut blocks,
+                    ledger_state,
+                    &highest_block_on_node,
+                    &mut caught_up,
+                    &mut parent_block_timestamp,
+                    &mut storage,
+                    &publisher,
+                    &metrics,
+                    &node,
+                )
+                .in_span(Span::root("get-and-index-block", SpanContext::random()))
+                .await?;
+
+                ledger_state = next_ledger_state;
             }
-
-            warn!("index_blocks_task completed");
-
-            Ok::<_, anyhow::Error>(())
         }
     });
 
@@ -183,7 +179,7 @@ pub async fn run(
 
         result = index_blocks_task => result
             .context("index_blocks_task panicked")
-            .and_then(|r| r.context("index_blocks_task failed")),
+            .and_then(|r: anyhow::Result<()>| r.context("index_blocks_task failed")),
 
         _ = sigterm.recv() => {
             warn!("SIGTERM received");
@@ -252,44 +248,43 @@ async fn get_and_index_block<E, N>(
     publisher: &impl Publisher,
     metrics: &Metrics,
     node: &N,
-) -> Result<Option<LedgerState>, anyhow::Error>
+) -> anyhow::Result<LedgerState>
 where
     E: StdError + Send + Sync + 'static,
     N: Node,
 {
-    let block = get_next_block(blocks)
-        .await
-        .context("get next block for indexing")?;
+    let block = get_next_block(blocks).await?;
 
-    match block {
-        Some(block) => {
-            let ledger_state = index_block(
-                caught_up_max_distance,
-                caught_up_leeway,
-                block,
-                ledger_state,
-                highest_block_on_node,
-                caught_up,
-                parent_block_timestamp,
-                storage,
-                publisher,
-                metrics,
-                node,
-            )
-            .await?;
+    let ledger_state = index_block(
+        caught_up_max_distance,
+        caught_up_leeway,
+        block,
+        ledger_state,
+        highest_block_on_node,
+        caught_up,
+        parent_block_timestamp,
+        storage,
+        publisher,
+        metrics,
+        node,
+    )
+    .await?;
 
-            Ok(Some(ledger_state))
-        }
-
-        None => Ok(None),
-    }
+    Ok(ledger_state)
 }
 
 #[trace]
 async fn get_next_block<E>(
     blocks: &mut (impl Stream<Item = Result<node::Block, E>> + Unpin),
-) -> Result<Option<node::Block>, E> {
-    blocks.try_next().await
+) -> anyhow::Result<node::Block>
+where
+    E: StdError + Send + Sync + 'static,
+{
+    blocks
+        .try_next()
+        .await
+        .context("get next block from node")
+        .and_then(|o| o.context("no more block from node"))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -306,35 +301,90 @@ async fn index_block<N>(
     publisher: &impl Publisher,
     metrics: &Metrics,
     node: &N,
-) -> Result<LedgerState, anyhow::Error>
+) -> anyhow::Result<LedgerState>
 where
     N: Node,
 {
     let (mut block, transactions) = block.into();
 
-    // Translate ledger state.
     let ledger_version = block.protocol_version.ledger_version()?;
     ledger_state = ledger_state
         .translate(ledger_version)
         .context("translate ledger state")?;
 
-    // Apply transactions.
     if *parent_block_timestamp == 0 {
         *parent_block_timestamp = block.timestamp;
     };
-    let (transactions, ledger_parameters) = ledger_state
-        .apply_transactions(
-            transactions,
-            block.parent_hash,
-            block.timestamp,
-            *parent_block_timestamp,
-        )
-        .context("apply node transactions to ledger state")?;
-    *parent_block_timestamp = block.timestamp;
-    block.ledger_parameters = ledger_parameters.serialize()?;
+
+    let apply_transactions = |ledger_state: &mut LedgerState| {
+        ledger_state
+            .apply_transactions(
+                transactions,
+                block.parent_hash,
+                block.timestamp,
+                *parent_block_timestamp,
+            )
+            .context("apply transactions to ledger state")
+    };
+
+    // Apply transactions to ledger state with special handling for genesis block.
+    let (transactions, ledger_parameters) = if block.height == 0 {
+        // At genesis compare ledger state roots of genesis and block from node to detect whether
+        // genesis already includes transactions (post-block-0) or not (pre-block-0).
+
+        if let Some(ledger_state_root) = block.ledger_state_root.as_ref() {
+            let genesis_ledger_state = node
+                .fetch_genesis_ledger_state()
+                .await
+                .context("fetch genesis ledger state")?;
+            let genesis_ledger_state =
+                LedgerState::from_genesis(genesis_ledger_state, block.protocol_version)
+                    .context("create ledger state from genesis")?;
+            let genesis_ledger_state_root = genesis_ledger_state
+                .root()
+                .context("compute genesis ledger state root")?;
+
+            if *ledger_state_root == genesis_ledger_state_root {
+                info!("post-block-0: applying transactions to fresh state, then use genesis state");
+
+                let transactions_ledger_parameters = apply_transactions(&mut ledger_state)?;
+                ledger_state = genesis_ledger_state;
+
+                transactions_ledger_parameters
+            } else {
+                info!("pre-block-0: applying transactions to genesis state");
+
+                ledger_state = genesis_ledger_state;
+                apply_transactions(&mut ledger_state)?
+            }
+        } else {
+            // TODO: Remove once support for Node < 0.22 is dropped!
+            // Pre Node 0.22: no ledger_state_root RPC! Ignore genesis state.
+            apply_transactions(&mut ledger_state)?
+        }
+    } else {
+        // All other blocks, i.e. height > 0.
+        apply_transactions(&mut ledger_state)?
+    };
     debug!(transactions:?; "transactions applied to ledger state");
 
+    *parent_block_timestamp = block.timestamp;
+    block.ledger_parameters = ledger_parameters.serialize()?;
+
     // Validate ledger state.
+    // TODO: Only use ledger state root comparison once support for Node < 0.22 is dropped!
+    let ledger_state_root = ledger_state.root().context("get ledger state root")?;
+    if block
+        .ledger_state_root
+        .as_ref()
+        .is_some_and(|root| *root != ledger_state_root)
+    {
+        bail!(
+            "ledger state root mismatch for block {} at height {}",
+            block.hash,
+            block.height
+        );
+    }
     if ledger_state.zswap_merkle_tree_root() != block.zswap_state_root {
         bail!(
             "zswap state root mismatch for block {} at height {}",
@@ -530,7 +580,7 @@ mod tests {
     use fake::{Fake, Faker};
     use futures::{Stream, StreamExt, TryStreamExt, stream};
     use indexer_common::{
-        domain::{BlockHash, ByteArray, ProtocolVersion, ledger::ZswapStateRoot},
+        domain::{BlockHash, ByteArray, ByteVec, ProtocolVersion, ledger::ZswapStateRoot},
         error::BoxError,
     };
     use std::{convert::Infallible, sync::LazyLock};
@@ -583,6 +633,10 @@ mod tests {
                 terms_and_conditions: None,
             })
         }
+
+        async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
+            Ok(Default::default())
+        }
     }
 
     static BLOCK_0: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -593,6 +647,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -605,6 +660,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -617,6 +673,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
@@ -629,6 +686,7 @@ mod tests {
         author: Default::default(),
         timestamp: Default::default(),
         zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
     });
