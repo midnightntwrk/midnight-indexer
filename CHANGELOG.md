@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0-alpha.1] - 2026-02-16
+
+### 🚀 Features
+
+- Support ledger v8.0.0 (#766)
+- Support node v0.22.0 (#770)
+- Add ledger state translation (#773)
+- *(indexer-api)* Add protocolVersion to ledger event types (#784)
+- Bump API and package version to v4 (#788)
+- Read genesis ledger state from chain spec (#772)
+
+### 🐛 Bug Fixes
+
+- *(chain-indexer)* Create ledger state for oldest version and translate (#780)
+- *(indexer-api)* Only keep active wallets active (#775)
+- *(indexer-api)* Correctly set next index for loading relevant transactions (#777)
+- *(chain-indexer)* Treat unknown highest block on node as not caught up (#778)
+- *(wallet-indexer)* Correctly set max_transaction_id (#783)
+- *(indexer-api)* Prevent batch requests (#786)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(chain-indexer)* Less verbose debug level logging (#779)
+- Remove obsolete schema-v3.graphql (#789)
+
 ## [3.1.0-rc.1] - 2026-02-06
 
 ### 🚀 Features
