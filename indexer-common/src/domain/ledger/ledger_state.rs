@@ -1031,7 +1031,7 @@ fn make_dust_generation_dtime_update_v7(
         .map_err(|error| Error::Serialize("DustPublicKeyV7", error))?;
 
     let generation_info = dust::DustGenerationInfo {
-        night_utxo_hash: update.leaf.0.0.into(),
+        night_utxo_hash: generation.nonce.0.0.into(),
         value: generation.value,
         owner,
         nonce: generation.nonce.0.0.into(),
@@ -1081,7 +1081,7 @@ fn make_dust_generation_dtime_update_v8(
         .map_err(|error| Error::Serialize("DustPublicKeyV8", error))?;
 
     let generation_info = dust::DustGenerationInfo {
-        night_utxo_hash: update.leaf.0.0.into(),
+        night_utxo_hash: generation.nonce.0.0.into(),
         value: generation.value,
         owner,
         nonce: generation.nonce.0.0.into(),
