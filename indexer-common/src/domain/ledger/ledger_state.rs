@@ -36,7 +36,7 @@ use midnight_base_crypto::{
 };
 use midnight_coin_structure_v7::{
     coin::{
-        NIGHT as NIGHTV7, UnshieldedTokenType as UnshieldedTokenTypeV7,
+        NIGHT as NIGHTV7, TokenType as TokenTypeV7, UnshieldedTokenType as UnshieldedTokenTypeV7,
         UserAddress as UserAddressV7,
     },
     contract::ContractAddress as ContractAddressV7,
@@ -98,7 +98,7 @@ use midnight_transient_crypto_v8::merkle_tree::{
 };
 use midnight_zswap_v7::ledger::State as ZswapStateV7;
 use midnight_zswap_v8::ledger::State as ZswapStateV8;
-use std::{collections::HashSet, io, ops::Deref, sync::LazyLock};
+use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 const OUTPUT_INDEX_ZERO: u32 = 0;
 
@@ -153,13 +153,28 @@ impl LedgerState {
         protocol_version: ProtocolVersion,
     ) -> Result<Self, Error> {
         match protocol_version.ledger_version()? {
-            LedgerVersion::V7 => Err(Error::Deserialize(
-                "GenesisLedgerStateV7",
-                io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    "genesis ledger state from chain spec is not supported for V7",
-                ),
-            )),
+            LedgerVersion::V7 => {
+                let ledger_state = tagged_deserialize::<LedgerStateV7<LedgerDb>>(&mut raw.as_ref())
+                    .map_err(|error| Error::Deserialize("GenesisLedgerStateV7", error))?;
+
+                let treasury_night = ledger_state
+                    .treasury
+                    .get(&TokenTypeV7::Unshielded(NIGHTV7))
+                    .copied()
+                    .unwrap_or(0);
+
+                info!(
+                    locked_pool = ledger_state.locked_pool,
+                    reserve_pool = ledger_state.reserve_pool,
+                    treasury_night;
+                    "deserialized genesis ledger state"
+                );
+
+                Ok(Self::V7 {
+                    ledger_state,
+                    block_fullness: Default::default(),
+                })
+            }
 
             LedgerVersion::V8 => {
                 let ledger_state = tagged_deserialize::<LedgerStateV8<LedgerDb>>(&mut raw.as_ref())
@@ -175,7 +190,7 @@ impl LedgerState {
                     locked_pool = ledger_state.locked_pool,
                     reserve_pool = ledger_state.reserve_pool,
                     treasury_night;
-                    "genesis ledger state deserialized from chain spec"
+                    "deserialized genesis ledger state"
                 );
 
                 Ok(Self::V8 {
