@@ -145,9 +145,7 @@ impl LedgerState {
         Ok(ledger_state)
     }
 
-    /// Create a [LedgerState] by deserializing the genesis ledger state from chain spec. The
-    /// deserialized state already includes block 0 transactions, so block 0 transaction
-    /// application must be skipped.
+    /// Create a [LedgerState] by deserializing the genesis ledger state from system properties.
     pub fn from_genesis(
         raw: impl AsRef<[u8]>,
         protocol_version: ProtocolVersion,

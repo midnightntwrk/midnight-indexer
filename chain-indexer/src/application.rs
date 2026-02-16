@@ -332,18 +332,18 @@ where
         // At genesis compare ledger state roots of genesis and block from node to detect whether
         // genesis already includes transactions (post-block-0) or not (pre-block-0).
 
-        let genesis_ledger_state = node
-            .fetch_genesis_ledger_state()
-            .await
-            .context("fetch genesis ledger state")?;
-        let genesis_ledger_state =
-            LedgerState::from_genesis(genesis_ledger_state, block.protocol_version)
-                .context("create ledger state from genesis")?;
-        let genesis_ledger_state_root = genesis_ledger_state
-            .root()
-            .context("compute genesis ledger state root")?;
-
         if let Some(ledger_state_root) = block.ledger_state_root.as_ref() {
+            let genesis_ledger_state = node
+                .fetch_genesis_ledger_state()
+                .await
+                .context("fetch genesis ledger state")?;
+            let genesis_ledger_state =
+                LedgerState::from_genesis(genesis_ledger_state, block.protocol_version)
+                    .context("create ledger state from genesis")?;
+            let genesis_ledger_state_root = genesis_ledger_state
+                .root()
+                .context("compute genesis ledger state root")?;
+
             if *ledger_state_root == genesis_ledger_state_root {
                 info!("post-block-0: applying transactions to fresh state, then use genesis state");
 
