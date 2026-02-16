@@ -137,6 +137,16 @@ Note: if you need to match a particular toolkit version:
 export NODE_TOOLKIT_TAG=0.17.0-rc.4
 ```
 
+#### Indexer API Version
+
+The GraphQL API version used by the HTTP and WebSocket clients defaults to `v4`. If the target environment uses a different API version, you can override it with the `INDEXER_API_VERSION` environment variable:
+
+```bash
+export INDEXER_API_VERSION=v3
+```
+
+This controls the version segment in the API endpoint paths (e.g. `/api/v3/graphql` and `/api/v3/graphql/ws`). If not set, the clients will use `/api/v4/graphql` and `/api/v4/graphql/ws`.
+
 For full instructions on updating the Node version, see the [Updating Node Version Guide](../../docs/updating-node-version.md)
 
 ## Running Test Projects on undeployed/local environment 
@@ -218,6 +228,12 @@ To execute the tests against these environments just change the TARGET_ENV varia
 ```bash
 TARGET_ENV=devnet yarn test       # devnet
 TARGET_ENV=qanet yarn test    # qanet
+```
+
+If the target environment uses a different indexer API version than the default (`v4`), set `INDEXER_API_VERSION` accordingly:
+
+```bash
+TARGET_ENV=preprod INDEXER_API_VERSION=v3 yarn test:integration
 ```
 
 ## ✨ Features
