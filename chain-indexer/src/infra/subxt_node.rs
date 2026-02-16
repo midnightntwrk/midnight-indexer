@@ -22,6 +22,7 @@ use crate::{
     infra::subxt_node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
 };
 use async_stream::try_stream;
+use const_hex::FromHexError;
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
@@ -482,40 +483,33 @@ impl Node for SubxtNode {
         })
     }
 
-    async fn fetch_genesis_ledger_state(&self) -> Result<Option<ByteVec>, Self::Error> {
+    async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
         let legacy_rpc_methods =
             LegacyRpcMethods::<SubstrateConfig>::new(self.rpc_client.to_owned().into());
         let properties = legacy_rpc_methods
             .system_properties()
             .await
-            .map_err(|error| SubxtNodeError::FetchGenesisState(error.into()))?;
+            .map_err(|error| SubxtNodeError::FetchSystemProperties(error.into()))?;
 
-        let Some(genesis_ledger_state) = properties.get("genesis_state") else {
-            warn!("no genesis_ledger_state in system properties");
-            return Ok(None);
-        };
-
-        let Some(genesis_ledger_state) = genesis_ledger_state.as_str() else {
-            warn!("genesis_state in system properties is not a string");
-            return Ok(None);
-        };
+        let genesis_ledger_state = properties
+            .get("genesis_state")
+            .and_then(|value| value.as_str())
+            .map(Ok)
+            .unwrap_or_else(|| Err(SubxtNodeError::GenesisLedgerStateNotFound))?;
 
         let genesis_ledger_state = genesis_ledger_state
             .strip_prefix("0x")
             .unwrap_or(genesis_ledger_state);
-        let genesis_ledger_state = const_hex::decode(genesis_ledger_state).map_err(|error| {
-            SubxtNodeError::FetchGenesisState(
-                format!("cannot hex-decode genesis_ledger_state: {error}").into(),
-            )
-        })?;
+        let genesis_ledger_state = const_hex::decode(genesis_ledger_state)
+            .map_err(SubxtNodeError::HexDecodeGenesisLedgerState)?;
         let genesis_ledger_state = ByteVec::from(genesis_ledger_state);
 
         info!(
             genesis_ledger_state_len = genesis_ledger_state.len();
-            "fetched genesis ledger state from chain spec system properties"
+            "fetched genesis ledger state from system properties"
         );
 
-        Ok(Some(genesis_ledger_state))
+        Ok(genesis_ledger_state)
     }
 }
 
@@ -628,8 +622,14 @@ pub enum SubxtNodeError {
     #[error("cannot fetch genesis cNight registrations")]
     FetchGenesisCnightRegistrations(#[source] BoxError),
 
-    #[error("cannot fetch genesis ledger state")]
-    FetchGenesisState(#[source] BoxError),
+    #[error("cannot fetch system properties")]
+    FetchSystemProperties(#[source] BoxError),
+
+    #[error("cannot hex decode genesis ledger state")]
+    HexDecodeGenesisLedgerState(#[source] FromHexError),
+
+    #[error("no genesis ledger state of String type in system parameters")]
+    GenesisLedgerStateNotFound,
 
     #[error("cannot get ledger state root")]
     GetLedgerStateRoot(#[source] BoxError),

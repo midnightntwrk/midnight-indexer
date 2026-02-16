@@ -109,12 +109,11 @@ pub async fn run(
                     .fetch_genesis_ledger_state()
                     .await
                     .context("fetch genesis ledger state")?;
-                debug!(is_some = genesis_ledger_state.is_some(); "fetched genesis ledger state");
 
                 let ledger_state = LedgerState::new(network_id.clone(), ProtocolVersion::OLDEST)
                     .context("create ledger state")?;
 
-                (ledger_state, genesis_ledger_state)
+                (ledger_state, Some(genesis_ledger_state))
             }
         };
 
@@ -638,8 +637,8 @@ mod tests {
             })
         }
 
-        async fn fetch_genesis_ledger_state(&self) -> Result<Option<ByteVec>, Self::Error> {
-            Ok(None)
+        async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
+            Ok(Default::default())
         }
     }
 

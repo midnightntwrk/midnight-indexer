@@ -52,8 +52,8 @@ where
     ) -> Result<SystemParametersChange, Self::Error>;
 
     /// Fetch serialized genesis ledger state from the chain spec's system properties.
-    /// Returns the raw bytes of the genesis `LedgerState`, or `None` if unavailable.
-    async fn fetch_genesis_ledger_state(&self) -> Result<Option<ByteVec>, Self::Error>;
+    /// Returns the raw bytes of the genesis `LedgerState`, errs if unavailable.
+    async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error>;
 }
 
 #[derive(Debug, Clone)]

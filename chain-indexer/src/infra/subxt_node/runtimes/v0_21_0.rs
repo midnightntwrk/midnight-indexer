@@ -253,7 +253,7 @@ pub async fn get_d_parameter(
         .system_parameters_api()
         .get_d_parameter();
 
-    let d_param = online_client
+    let d_parameter = online_client
         .runtime_api()
         .at(H256(block_hash.0))
         .call(get_d_param)
@@ -261,8 +261,8 @@ pub async fn get_d_parameter(
         .map_err(|error| SubxtNodeError::GetDParameter(error.into()))?;
 
     Ok(DParameter {
-        num_permissioned_candidates: d_param.num_permissioned_candidates,
-        num_registered_candidates: d_param.num_registered_candidates,
+        num_permissioned_candidates: d_parameter.num_permissioned_candidates,
+        num_registered_candidates: d_parameter.num_registered_candidates,
     })
 }
 
