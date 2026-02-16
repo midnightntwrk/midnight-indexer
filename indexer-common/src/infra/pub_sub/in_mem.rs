@@ -56,28 +56,52 @@ impl Default for InMemPubSub {
 
         task::spawn(async move {
             loop {
-                if let Err(RecvError::Lagged(_)) = block_indexed_receiver.recv().await {
-                    error!("cannot drain block_indexed_receiver");
-                    break;
-                };
+                match block_indexed_receiver.recv().await {
+                    Ok(_) => continue,
+
+                    Err(RecvError::Lagged(_)) => {
+                        error!("cannot drain block_indexed_receiver");
+                        break;
+                    }
+
+                    Err(RecvError::Closed) => {
+                        break;
+                    }
+                }
             }
         });
 
         task::spawn(async move {
             loop {
-                if let Err(RecvError::Lagged(_)) = wallet_indexed_receiver.recv().await {
-                    error!("cannot drain wallet_indexed_receiver");
-                    break;
-                };
+                match wallet_indexed_receiver.recv().await {
+                    Ok(_) => continue,
+
+                    Err(RecvError::Lagged(_)) => {
+                        error!("cannot drain wallet_indexed_receiver");
+                        break;
+                    }
+
+                    Err(RecvError::Closed) => {
+                        break;
+                    }
+                }
             }
         });
 
         task::spawn(async move {
             loop {
-                if let Err(RecvError::Lagged(_)) = unshielded_utxo_receiver.recv().await {
-                    error!("cannot drain unshielded_utxo_receiver");
-                    break;
-                };
+                match unshielded_utxo_receiver.recv().await {
+                    Ok(_) => continue,
+
+                    Err(RecvError::Lagged(_)) => {
+                        error!("cannot drain unshielded_utxo_receiver");
+                        break;
+                    }
+
+                    Err(RecvError::Closed) => {
+                        break;
+                    }
+                }
             }
         });
 
