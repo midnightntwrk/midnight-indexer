@@ -31,13 +31,8 @@ where
         transactions: &[Transaction],
         dust_registration_events: &[DustRegistrationEvent],
         ledger_state_key: &SerializedLedgerStateKey,
+        system_parameters_change: Option<&SystemParametersChange>,
     ) -> Result<Option<u64>, sqlx::Error>;
-
-    /// Save system parameters change.
-    async fn save_system_parameters_change(
-        &self,
-        change: &SystemParametersChange,
-    ) -> Result<(), sqlx::Error>;
 
     /// Get the block ref, ledger state key and protocol version of the highest stored block.
     async fn get_highest_block(
