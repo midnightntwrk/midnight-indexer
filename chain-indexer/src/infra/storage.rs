@@ -235,15 +235,15 @@ impl domain::storage::Storage for Storage {
             LIMIT 1
         "};
 
-        let result = sqlx::query_as::<_, (ByteVec, String)>(query)
+        sqlx::query_as::<_, (ByteVec, String)>(query)
             .fetch_optional(&*self.pool)
-            .await?;
-
-        Ok(result.map(|(hash_bytes, url)| {
-            let hash =
-                TermsAndConditionsHash::try_from(hash_bytes).expect("hash should be 32 bytes");
-            TermsAndConditions { hash, url }
-        }))
+            .await?
+            .map(|(hash_bytes, url)| {
+                let hash = TermsAndConditionsHash::try_from(hash_bytes)
+                    .map_err(|error| sqlx::Error::Decode(error.into()))?;
+                Ok(TermsAndConditions { hash, url })
+            })
+            .transpose()
     }
 }
 
