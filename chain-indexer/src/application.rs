@@ -372,6 +372,19 @@ where
     block.ledger_parameters = ledger_parameters.serialize()?;
 
     // Validate ledger state.
+    // TODO: Only use ledger state root comparison once support for Node < 0.22 is dropped!
+    let ledger_state_root = ledger_state.root().context("get ledger state root")?;
+    if block
+        .ledger_state_root
+        .as_ref()
+        .is_some_and(|root| *root != ledger_state_root)
+    {
+        bail!(
+            "ledger state root mismatch for block {} at height {}",
+            block.hash,
+            block.height
+        );
+    }
     if ledger_state.zswap_merkle_tree_root() != block.zswap_state_root {
         bail!(
             "zswap state root mismatch for block {} at height {}",

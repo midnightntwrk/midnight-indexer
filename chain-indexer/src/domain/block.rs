@@ -28,6 +28,7 @@ pub struct Block {
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
     pub zswap_state_root: ZswapStateRoot,
+    // TODO: Remove Option once support for Node < 0.22 is dropped!
     pub ledger_state_root: Option<ByteVec>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
 
