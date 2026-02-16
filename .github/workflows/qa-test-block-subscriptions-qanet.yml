@@ -12,3 +12,4 @@ jobs:
     uses: ./.github/workflows/qa-test-block-subscription-base-workflow.yml
     with:
       target_env: qanet
+      indexer_api_version: v3

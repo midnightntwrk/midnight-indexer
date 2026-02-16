@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: '22'
+      indexer_api_version:
+        description: 'Indexer API version (e.g. v3, v4)'
+        required: false
+        type: string
+        default: 'v4'
 
 jobs:
   test:
@@ -28,6 +33,7 @@ jobs:
         working-directory: qa/tests
     env:
       TARGET_ENV: ${{ inputs.target_env }}
+      INDEXER_API_VERSION: ${{ inputs.indexer_api_version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
