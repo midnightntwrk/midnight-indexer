@@ -16,7 +16,7 @@ use crate::domain::{
 };
 use futures::Stream;
 use indexer_common::domain::{
-    BlockAuthor, BlockHash, ProtocolVersion, SerializedTransaction,
+    BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedTransaction,
     SerializedTransactionIdentifier, TransactionHash, ledger::ZswapStateRoot,
 };
 use std::{error::Error as StdError, fmt::Debug};
@@ -50,6 +50,10 @@ where
         timestamp: u64,
         protocol_version: ProtocolVersion,
     ) -> Result<SystemParametersChange, Self::Error>;
+
+    /// Fetch serialized genesis ledger state from the chain spec's system properties.
+    /// Returns the raw bytes of the genesis `LedgerState`, errs if unavailable.
+    async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error>;
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +65,7 @@ pub struct Block {
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
     pub zswap_state_root: ZswapStateRoot,
+    pub ledger_state_root: Option<ByteVec>,
     pub transactions: Vec<Transaction>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
 }
@@ -76,6 +81,7 @@ impl From<Block> for (domain::Block, Vec<Transaction>) {
             author: block.author,
             timestamp: block.timestamp,
             zswap_state_root: block.zswap_state_root,
+            ledger_state_root: block.ledger_state_root,
             dust_registration_events: block.dust_registration_events,
             ledger_parameters: Default::default(),
         };
