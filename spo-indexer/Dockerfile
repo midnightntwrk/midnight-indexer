@@ -19,7 +19,7 @@ RUN cargo build -p spo-indexer --locked --features cloud --profile $PROFILE && \
     mkdir -p /runtime/opt/spo-indexer && \
     mv /build/spo-indexer/config.yaml /runtime/opt/spo-indexer
 
-FROM debian:trixie-slim@sha256:66b37a5078a77098bfc80175fb5eb881a3196809242fd295b25502854e12cbec AS runtime
+FROM debian:trixie-slim@sha256:f6e2cfac5cf956ea044b4bd75e6397b4372ad88fe00908045e9a0d21712ae3ba AS runtime
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates=20250419 && \
     rm -rf /var/lib/apt/lists/*
