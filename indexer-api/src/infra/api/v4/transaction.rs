@@ -194,7 +194,7 @@ where
         Self {
             id,
             hash: hash.hex_encode(),
-            protocol_version: protocol_version.0,
+            protocol_version: protocol_version.into(),
             raw: raw.hex_encode(),
             block_hash,
             transaction_result: transaction_result.into(),
@@ -300,7 +300,7 @@ where
         Self {
             id,
             hash: hash.hex_encode(),
-            protocol_version: protocol_version.0,
+            protocol_version: protocol_version.into(),
             raw: raw.hex_encode(),
             block_hash,
             _s: PhantomData,

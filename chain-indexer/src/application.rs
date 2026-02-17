@@ -26,7 +26,7 @@ use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{
-    BlockIndexed, NetworkId, ProtocolVersion, Publisher, UnshieldedUtxoIndexed,
+    BlockIndexed, LedgerVersion, NetworkId, Publisher, UnshieldedUtxoIndexed,
 };
 use log::{debug, info, warn};
 use parking_lot::RwLock;
@@ -95,10 +95,11 @@ pub async fn run(
     // Load/initialize ledger state.
     let mut ledger_state = match highest_protocol_version_and_ledger_state_key {
         Some((protocol_version, ledger_state_key)) => {
-            LedgerState::load(&ledger_state_key, protocol_version).context("load ledger state")?
+            LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
+                .context("load ledger state")?
         }
 
-        None => LedgerState::new(network_id.clone(), ProtocolVersion::OLDEST)
+        None => LedgerState::new(network_id.clone(), LedgerVersion::OLDEST)
             .context("create ledger state")?,
     };
 
@@ -307,7 +308,7 @@ where
 {
     let (mut block, transactions) = block.into();
 
-    let ledger_version = block.protocol_version.ledger_version()?;
+    let ledger_version = block.protocol_version.ledger_version();
     ledger_state = ledger_state
         .translate(ledger_version)
         .context("translate ledger state")?;
@@ -337,9 +338,11 @@ where
                 .fetch_genesis_ledger_state()
                 .await
                 .context("fetch genesis ledger state")?;
-            let genesis_ledger_state =
-                LedgerState::from_genesis(genesis_ledger_state, block.protocol_version)
-                    .context("create ledger state from genesis")?;
+            let genesis_ledger_state = LedgerState::from_genesis(
+                genesis_ledger_state,
+                block.protocol_version.ledger_version(),
+            )
+            .context("create ledger state from genesis")?;
             let genesis_ledger_state_root = genesis_ledger_state
                 .root()
                 .context("compute genesis ledger state root")?;
@@ -478,7 +481,7 @@ where
         hash:% = block.hash,
         height = block.height,
         parent_hash:% = block.parent_hash,
-        protocol_version:% = block.protocol_version,
+        protocol_version:? = block.protocol_version,
         distance,
         caught_up = *caught_up;
         "block indexed"
@@ -503,7 +506,7 @@ where
             block.hash,
             block.height,
             block.timestamp,
-            block.protocol_version,
+            block.protocol_version.node_version(),
         )
         .await
         .map_err(|error| anyhow::anyhow!("fetch system parameters: {error}"))?;
@@ -577,7 +580,9 @@ mod tests {
     use fake::{Fake, Faker};
     use futures::{Stream, StreamExt, TryStreamExt, stream};
     use indexer_common::{
-        domain::{BlockHash, ByteArray, ByteVec, ProtocolVersion, ledger::ZswapStateRoot},
+        domain::{
+            BlockHash, ByteArray, ByteVec, NodeVersion, ProtocolVersion, ledger::ZswapStateRoot,
+        },
         error::BoxError,
     };
     use std::{convert::Infallible, sync::LazyLock};
@@ -620,7 +625,7 @@ mod tests {
             block_hash: BlockHash,
             block_height: u32,
             timestamp: u64,
-            _protocol_version: ProtocolVersion,
+            _node_version: NodeVersion,
         ) -> Result<SystemParametersChange, Self::Error> {
             Ok(SystemParametersChange {
                 block_height,
@@ -639,7 +644,7 @@ mod tests {
     static BLOCK_0: LazyLock<node::Block> = LazyLock::new(|| node::Block {
         hash: BLOCK_0_HASH,
         height: 0,
-        protocol_version: PROTOCOL_VERSION,
+        protocol_version: *PROTOCOL_VERSION,
         parent_hash: ZERO_HASH,
         author: Default::default(),
         timestamp: Default::default(),
@@ -652,7 +657,7 @@ mod tests {
     static BLOCK_1: LazyLock<node::Block> = LazyLock::new(|| node::Block {
         hash: BLOCK_1_HASH,
         height: 1,
-        protocol_version: PROTOCOL_VERSION,
+        protocol_version: *PROTOCOL_VERSION,
         parent_hash: BLOCK_0_HASH,
         author: Default::default(),
         timestamp: Default::default(),
@@ -665,7 +670,7 @@ mod tests {
     static BLOCK_2: LazyLock<node::Block> = LazyLock::new(|| node::Block {
         hash: BLOCK_2_HASH,
         height: 2,
-        protocol_version: PROTOCOL_VERSION,
+        protocol_version: *PROTOCOL_VERSION,
         parent_hash: BLOCK_1_HASH,
         author: Default::default(),
         timestamp: Default::default(),
@@ -678,7 +683,7 @@ mod tests {
     static BLOCK_3: LazyLock<node::Block> = LazyLock::new(|| node::Block {
         hash: BLOCK_3_HASH,
         height: 3,
-        protocol_version: PROTOCOL_VERSION,
+        protocol_version: *PROTOCOL_VERSION,
         parent_hash: BLOCK_2_HASH,
         author: Default::default(),
         timestamp: Default::default(),
@@ -688,12 +693,14 @@ mod tests {
         dust_registration_events: Default::default(),
     });
 
-    pub const ZERO_HASH: BlockHash = ByteArray([0; 32]);
+    const ZERO_HASH: BlockHash = ByteArray([0; 32]);
 
-    pub const BLOCK_0_HASH: BlockHash = ByteArray([1; 32]);
-    pub const BLOCK_1_HASH: BlockHash = ByteArray([2; 32]);
-    pub const BLOCK_2_HASH: BlockHash = ByteArray([3; 32]);
-    pub const BLOCK_3_HASH: BlockHash = ByteArray([3; 32]);
+    const BLOCK_0_HASH: BlockHash = ByteArray([1; 32]);
+    const BLOCK_1_HASH: BlockHash = ByteArray([2; 32]);
+    const BLOCK_2_HASH: BlockHash = ByteArray([3; 32]);
+    const BLOCK_3_HASH: BlockHash = ByteArray([3; 32]);
 
-    pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion(1_000);
+    #[allow(clippy::zero_prefixed_literal)]
+    static PROTOCOL_VERSION: LazyLock<ProtocolVersion> =
+        LazyLock::new(|| 0_022_000_u32.try_into().unwrap());
 }

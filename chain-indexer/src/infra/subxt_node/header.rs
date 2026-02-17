@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{ProtocolVersion, ScaleDecodeProtocolVersionError};
+use indexer_common::domain::{ProtocolVersion, ProtocolVersionError};
 use subxt::config::{
     Hasher,
     polkadot::U256,
@@ -23,13 +23,13 @@ const VERSION_ID: ConsensusEngineId = *b"MNSV";
 /// Extension methods for Substrate block headers.
 pub trait SubstrateHeaderExt<N> {
     /// Try to decode the [ProtocolVersion] from this Substrate block header.
-    fn protocol_version(&self) -> Result<Option<ProtocolVersion>, ScaleDecodeProtocolVersionError>;
+    fn protocol_version(&self) -> Result<Option<ProtocolVersion>, ProtocolVersionError>;
 }
 
 impl<N: Copy + Into<U256> + TryFrom<U256>, H: Hasher> SubstrateHeaderExt<N>
     for SubstrateHeader<N, H>
 {
-    fn protocol_version(&self) -> Result<Option<ProtocolVersion>, ScaleDecodeProtocolVersionError> {
+    fn protocol_version(&self) -> Result<Option<ProtocolVersion>, ProtocolVersionError> {
         self.digest
             .logs
             .iter()

@@ -29,7 +29,11 @@ impl LedgerStateStorage for Storage {
         sqlx::query_as::<_, (i64, SerializedLedgerStateKey)>(query)
             .fetch_optional(&*self.pool)
             .await?
-            .map(|(protocol_version, key)| Ok(((protocol_version as u32).into(), key)))
+            .map(|(protocol_version, key)| {
+                let protocol_version = ProtocolVersion::try_from(protocol_version)
+                    .map_err(|error| sqlx::Error::Decode(error.into()))?;
+                Ok((protocol_version, key))
+            })
             .transpose()
     }
 }

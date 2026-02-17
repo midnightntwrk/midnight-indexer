@@ -23,8 +23,7 @@ use crate::{
     infra::subxt_node::SubxtNodeError,
 };
 use indexer_common::domain::{
-    BlockHash, ByteVec, NodeVersion, ProtocolVersion, SerializedContractAddress,
-    SerializedContractState,
+    BlockHash, ByteVec, NodeVersion, SerializedContractAddress, SerializedContractState,
 };
 use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events};
 
@@ -46,10 +45,10 @@ pub async fn make_block_details(
     extrinsics: Extrinsics<SubstrateConfig, OnlineClient<SubstrateConfig>>,
     events: Events<SubstrateConfig>,
     authorities: &mut Option<Vec<[u8; 32]>>,
-    protocol_version: ProtocolVersion,
+    node_version: NodeVersion,
 ) -> Result<BlockDetails, SubxtNodeError> {
     // TODO Replace this often repeated pattern with a macro?
-    match protocol_version.node_version()? {
+    match node_version {
         NodeVersion::V0_20 => v0_20_0::make_block_details(extrinsics, events, authorities).await,
         NodeVersion::V0_21 => v0_21_0::make_block_details(extrinsics, events, authorities).await,
         NodeVersion::V0_22 => v0_22_0::make_block_details(extrinsics, events, authorities).await,
@@ -59,10 +58,10 @@ pub async fn make_block_details(
 /// Fetch authorities depending on the given protocol version.
 pub async fn fetch_authorities(
     block_hash: BlockHash,
-    protocol_version: ProtocolVersion,
+    node_version: NodeVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<Vec<[u8; 32]>>, SubxtNodeError> {
-    match protocol_version.node_version()? {
+    match node_version {
         NodeVersion::V0_20 => v0_20_0::fetch_authorities(block_hash, online_client).await,
         NodeVersion::V0_21 => v0_21_0::fetch_authorities(block_hash, online_client).await,
         NodeVersion::V0_22 => v0_22_0::fetch_authorities(block_hash, online_client).await,
@@ -70,8 +69,8 @@ pub async fn fetch_authorities(
 }
 
 /// Decode slot depending on the given protocol version.
-pub fn decode_slot(slot: &[u8], protocol_version: ProtocolVersion) -> Result<u64, SubxtNodeError> {
-    match protocol_version.node_version()? {
+pub fn decode_slot(slot: &[u8], node_version: NodeVersion) -> Result<u64, SubxtNodeError> {
+    match node_version {
         NodeVersion::V0_20 => v0_20_0::decode_slot(slot),
         NodeVersion::V0_21 => v0_21_0::decode_slot(slot),
         NodeVersion::V0_22 => v0_22_0::decode_slot(slot),
@@ -82,10 +81,10 @@ pub fn decode_slot(slot: &[u8], protocol_version: ProtocolVersion) -> Result<u64
 pub async fn get_contract_state(
     address: SerializedContractAddress,
     block_hash: BlockHash,
-    protocol_version: ProtocolVersion,
+    node_version: NodeVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<SerializedContractState, SubxtNodeError> {
-    match protocol_version.node_version()? {
+    match node_version {
         NodeVersion::V0_20 => v0_20_0::get_contract_state(address, block_hash, online_client).await,
         NodeVersion::V0_21 => v0_21_0::get_contract_state(address, block_hash, online_client).await,
         NodeVersion::V0_22 => v0_22_0::get_contract_state(address, block_hash, online_client).await,
@@ -94,10 +93,10 @@ pub async fn get_contract_state(
 
 pub async fn get_zswap_state_root(
     block_hash: BlockHash,
-    protocol_version: ProtocolVersion,
+    node_version: NodeVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Vec<u8>, SubxtNodeError> {
-    match protocol_version.node_version()? {
+    match node_version {
         NodeVersion::V0_20 => v0_20_0::get_zswap_state_root(block_hash, online_client).await,
         NodeVersion::V0_21 => v0_21_0::get_zswap_state_root(block_hash, online_client).await,
         NodeVersion::V0_22 => v0_22_0::get_zswap_state_root(block_hash, online_client).await,
@@ -107,10 +106,10 @@ pub async fn get_zswap_state_root(
 /// Get the pure ledger state root (without StorableLedgerState wrapping) at the given block.
 pub async fn get_ledger_state_root(
     block_hash: BlockHash,
-    protocol_version: ProtocolVersion,
+    node_version: NodeVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<Vec<u8>>, SubxtNodeError> {
-    match protocol_version.node_version()? {
+    match node_version {
         NodeVersion::V0_20 => v0_20_0::get_ledger_state_root(block_hash, online_client).await,
         NodeVersion::V0_21 => v0_21_0::get_ledger_state_root(block_hash, online_client).await,
         NodeVersion::V0_22 => v0_22_0::get_ledger_state_root(block_hash, online_client).await,
@@ -123,10 +122,10 @@ pub async fn get_ledger_state_root(
 pub async fn get_transaction_cost(
     transaction: impl AsRef<[u8]>,
     block_hash: BlockHash,
-    protocol_version: ProtocolVersion,
+    node_version: NodeVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<u128, SubxtNodeError> {
-    match protocol_version.node_version()? {
+    match node_version {
         NodeVersion::V0_20 => {
             v0_20_0::get_transaction_cost(transaction.as_ref(), block_hash, online_client).await
         }
@@ -144,10 +143,10 @@ pub async fn get_transaction_cost(
 /// Get D-Parameter depending on the given protocol version.
 pub async fn get_d_parameter(
     block_hash: BlockHash,
-    protocol_version: ProtocolVersion,
+    node_version: NodeVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<DParameter, SubxtNodeError> {
-    match protocol_version.node_version()? {
+    match node_version {
         NodeVersion::V0_20 => v0_20_0::get_d_parameter(block_hash, online_client).await,
         NodeVersion::V0_21 => v0_21_0::get_d_parameter(block_hash, online_client).await,
         NodeVersion::V0_22 => v0_22_0::get_d_parameter(block_hash, online_client).await,
@@ -159,10 +158,10 @@ pub async fn get_d_parameter(
 /// the cNightObservation.Mappings storage directly at block 0.
 pub async fn fetch_genesis_cnight_registrations(
     block_hash: BlockHash,
-    protocol_version: ProtocolVersion,
+    node_version: NodeVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
-    match protocol_version.node_version()? {
+    match node_version {
         NodeVersion::V0_20 => {
             v0_20_0::fetch_genesis_cnight_registrations(block_hash, online_client).await
         }
@@ -180,10 +179,10 @@ pub async fn fetch_genesis_cnight_registrations(
 /// Get Terms and Conditions depending on the given protocol version.
 pub async fn get_terms_and_conditions(
     block_hash: BlockHash,
-    protocol_version: ProtocolVersion,
+    node_version: NodeVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
-    match protocol_version.node_version()? {
+    match node_version {
         NodeVersion::V0_20 => v0_20_0::get_terms_and_conditions(block_hash, online_client).await,
         NodeVersion::V0_21 => v0_21_0::get_terms_and_conditions(block_hash, online_client).await,
         NodeVersion::V0_22 => v0_22_0::get_terms_and_conditions(block_hash, online_client).await,

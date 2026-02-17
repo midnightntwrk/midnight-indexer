@@ -40,7 +40,8 @@ impl Transaction {
     /// Check the relevance of this transaction for the given wallet.
     #[trace]
     pub fn relevant(&self, wallet: &Wallet) -> Result<bool, ledger::Error> {
-        let transaction = ledger::Transaction::deserialize(&self.raw, self.protocol_version)?;
+        let transaction =
+            ledger::Transaction::deserialize(&self.raw, self.protocol_version.ledger_version())?;
         Ok(transaction.relevant(wallet.viewing_key))
     }
 }

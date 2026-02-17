@@ -13,7 +13,9 @@
 
 use crate::domain::storage::Storage;
 use derive_more::derive::{Deref, From};
-use indexer_common::domain::{ByteVec, ProtocolVersion, SerializedLedgerStateKey, ledger};
+use indexer_common::domain::{
+    ByteVec, LedgerVersion, ProtocolVersion, SerializedLedgerStateKey, ledger,
+};
 use log::debug;
 use thiserror::Error;
 use tokio::sync::RwLock;
@@ -58,7 +60,8 @@ impl LedgerStateCache {
                     return Err(LedgerStateCacheError::NotFound);
                 };
 
-                let ledger_state = LedgerState::load(protocol_version, &ledger_state_key)?;
+                let ledger_state =
+                    LedgerState::load(&ledger_state_key, protocol_version.ledger_version())?;
                 *ledger_state_write = Some(ledger_state);
             }
 
@@ -94,10 +97,10 @@ pub struct LedgerState(ledger::LedgerState);
 
 impl LedgerState {
     pub fn load(
-        protocol_version: ProtocolVersion,
         key: &SerializedLedgerStateKey,
+        ledger_version: LedgerVersion,
     ) -> Result<Self, indexer_common::domain::ledger::Error> {
-        indexer_common::domain::ledger::LedgerState::load(key, protocol_version).map(Into::into)
+        indexer_common::domain::ledger::LedgerState::load(key, ledger_version).map(Into::into)
     }
 
     /// Produce a collapsed Merkle Tree from this ledger state.

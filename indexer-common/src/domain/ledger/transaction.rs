@@ -13,9 +13,9 @@
 
 use crate::{
     domain::{
-        ContractAction, ContractAttributes, LedgerVersion, ProtocolVersion,
-        SerializedContractAddress, SerializedContractState, SerializedTransactionIdentifier,
-        TransactionHash, TransactionStructure, ViewingKey,
+        ContractAction, ContractAttributes, LedgerVersion, SerializedContractAddress,
+        SerializedContractState, SerializedTransactionIdentifier, TransactionHash,
+        TransactionStructure, ViewingKey,
         ledger::{Error, SerializableExt, TransactionV7, TransactionV8},
     },
     infra::ledger_db::LedgerDb,
@@ -55,13 +55,12 @@ pub enum Transaction {
 }
 
 impl Transaction {
-    /// Deserialize the given serialized transaction using the given protocol version.
-    #[trace(properties = { "protocol_version": "{protocol_version}" })]
+    #[trace(properties = { "ledger_version": "{ledger_version}" })]
     pub fn deserialize(
         transaction: impl AsRef<[u8]>,
-        protocol_version: ProtocolVersion,
+        ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
-        let transaction = match protocol_version.ledger_version()? {
+        let transaction = match ledger_version {
             LedgerVersion::V7 => {
                 let transaction = tagged_deserialize(&mut transaction.as_ref())
                     .map_err(|error| Error::Deserialize("LedgerTransactionV7", error))?;
@@ -389,13 +388,12 @@ pub enum SystemTransaction {
 }
 
 impl SystemTransaction {
-    /// Deserialize the given serialized transaction using the given protocol version.
-    #[trace(properties = { "protocol_version": "{protocol_version}" })]
+    #[trace(properties = { "ledger_version": "{ledger_version}" })]
     pub fn deserialize(
         transaction: impl AsRef<[u8]>,
-        protocol_version: ProtocolVersion,
+        ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
-        let transaction = match protocol_version.ledger_version()? {
+        let transaction = match ledger_version {
             LedgerVersion::V7 => {
                 let transaction = tagged_deserialize(&mut transaction.as_ref())
                     .map_err(|error| Error::Deserialize("LedgerSystemTransactionV7", error))?;
@@ -462,7 +460,7 @@ fn can_decrypt_v8<D: DB>(key: &SecretKeyV8, offer: &OfferV8<ProofV8, D>) -> bool
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{ProtocolVersion, ViewingKey, ledger::Transaction},
+        domain::{LedgerVersion, ViewingKey, ledger::Transaction},
         error::BoxError,
     };
     use anyhow::Context;
@@ -551,7 +549,7 @@ mod tests {
 
         let transaction = fs::read(format!("{}/tests/tx_1_2_2.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(transaction, ProtocolVersion::LATEST)
+        let transaction = Transaction::deserialize(transaction, LedgerVersion::V8)
             .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));
@@ -560,7 +558,7 @@ mod tests {
 
         let transaction = fs::read(format!("{}/tests/tx_1_2_3.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(transaction, ProtocolVersion::LATEST)
+        let transaction = Transaction::deserialize(transaction, LedgerVersion::V8)
             .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));

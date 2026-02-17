@@ -23,8 +23,8 @@ pub use transaction::*;
 
 use crate::{
     domain::{
-        ByteArrayLenError, ByteVec, LedgerVersion, ProtocolVersion, SerializedContractAddress,
-        SerializedLedgerStateKey, UnsupportedProtocolVersion, dust::DustParameters,
+        ByteArrayLenError, ByteVec, LedgerVersion, SerializedContractAddress,
+        SerializedLedgerStateKey, dust::DustParameters,
     },
     error::BoxError,
 };
@@ -76,9 +76,6 @@ pub enum Error {
 
     #[error("cannot convert {0} to UTF-8 string")]
     FromUtf8(&'static str, #[source] FromUtf8Error),
-
-    #[error(transparent)]
-    UnsupportedProtocolVersion(#[from] UnsupportedProtocolVersion),
 
     #[error("cannot get contract state from node for address {0}")]
     GetContractState(SerializedContractAddress, #[source] BoxError),
@@ -149,8 +146,8 @@ impl<T> TaggedSerializableExt for T where T: Serializable + Tagged {}
 /// - `night_dust_ratio`: Maximum DUST capacity per NIGHT (5 DUST per NIGHT).
 /// - `generation_decay_rate`: Rate of DUST generation (~1 week to reach max).
 /// - `dust_grace_period`: Maximum time window for DUST spends (3 hours).
-pub fn dust_parameters(protocol_version: ProtocolVersion) -> Result<DustParameters, Error> {
-    let parameters = match protocol_version.ledger_version()? {
+pub fn dust_parameters(ledger_version: LedgerVersion) -> Result<DustParameters, Error> {
+    let parameters = match ledger_version {
         LedgerVersion::V7 => DustParameters {
             night_dust_ratio: INITIAL_DUST_PARAMETERS_V7.night_dust_ratio,
             generation_decay_rate: INITIAL_DUST_PARAMETERS_V7.generation_decay_rate,

@@ -16,8 +16,7 @@ use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerVersion,
-    NetworkId, ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey,
-    TransactionHash,
+    NetworkId, SerializedContractAddress, SerializedLedgerStateKey, TransactionHash,
     ledger::{self, LedgerParameters},
 };
 use std::ops::DerefMut;
@@ -34,26 +33,26 @@ impl DerefMut for LedgerState {
 }
 
 impl LedgerState {
-    pub fn new(network_id: NetworkId, protocol_version: ProtocolVersion) -> Result<Self, Error> {
-        indexer_common::domain::ledger::LedgerState::new(network_id, protocol_version)
+    pub fn new(network_id: NetworkId, ledger_version: LedgerVersion) -> Result<Self, Error> {
+        indexer_common::domain::ledger::LedgerState::new(network_id, ledger_version)
             .map_err(Error::Create)
             .map(Into::into)
     }
 
     pub fn from_genesis(
         raw: impl AsRef<[u8]>,
-        protocol_version: ProtocolVersion,
+        ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
-        indexer_common::domain::ledger::LedgerState::from_genesis(raw, protocol_version)
+        indexer_common::domain::ledger::LedgerState::from_genesis(raw, ledger_version)
             .map_err(Error::Create)
             .map(Into::into)
     }
 
     pub fn load(
         key: &SerializedLedgerStateKey,
-        protocol_version: ProtocolVersion,
+        ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
-        indexer_common::domain::ledger::LedgerState::load(key, protocol_version)
+        indexer_common::domain::ledger::LedgerState::load(key, ledger_version)
             .map_err(Error::Load)
             .map(Into::into)
     }
@@ -155,7 +154,7 @@ impl LedgerState {
             if !contract_action.state.is_empty() {
                 let contract_state = ledger::ContractState::deserialize(
                     &contract_action.state,
-                    transaction.protocol_version,
+                    transaction.protocol_version.ledger_version(),
                 )
                 .map_err(|error| {
                     Error::DeserializeContractState(

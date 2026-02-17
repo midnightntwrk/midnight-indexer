@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ByteArray, LedgerVersion, ProtocolVersion, VIEWING_KEY_LEN, ledger::Error};
+use crate::domain::{ByteArray, LedgerVersion, VIEWING_KEY_LEN, ledger::Error};
 use fastrace::trace;
 use midnight_serialize::Deserializable;
 use midnight_transient_crypto_v7::encryption::SecretKey as SecretKeyV7;
@@ -25,13 +25,12 @@ pub enum SecretKey {
 }
 
 impl SecretKey {
-    /// Untagged deserialize the given serialized secret key using the given protocol version.
-    #[trace(properties = { "protocol_version": "{protocol_version}" })]
+    #[trace(properties = { "ledger_version": "{ledger_version}" })]
     pub fn deserialize(
         secret_key: impl AsRef<[u8]>,
-        protocol_version: ProtocolVersion,
+        ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
-        let key = match protocol_version.ledger_version()? {
+        let key = match ledger_version {
             LedgerVersion::V7 => {
                 let secret_key = SecretKeyV7::deserialize(&mut secret_key.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("SecretKeyV7", error))?;
