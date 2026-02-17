@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::TryFromIntError;
+
 use derive_more::Display;
 use parity_scale_codec::Decode;
 use thiserror::Error;
@@ -83,7 +85,9 @@ impl TryFrom<i64> for ProtocolVersion {
     type Error = ProtocolVersionError;
 
     fn try_from(version: i64) -> Result<Self, Self::Error> {
-        (version as u32).try_into()
+        u32::try_from(version)
+            .map_err(|error| ProtocolVersionError::TryFromI64(version, error))?
+            .try_into()
     }
 }
 
@@ -94,91 +98,10 @@ pub enum ProtocolVersionError {
 
     #[error("unsupported protocol version {0}")]
     Unsupported(u32),
+
+    #[error("invalid i64 protocol version {0}")]
+    TryFromI64(i64, #[source] TryFromIntError),
 }
-
-// /// The runtime specification version of the chain.
-// #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, From)]
-// pub struct ProtocolVersion(pub u32);
-
-// impl ProtocolVersion {
-//     /// The major version, i.e. `1` in `1.2.3`.
-//     pub fn major(self) -> u32 {
-//         self.0 / 1_000_000
-//     }
-
-//     /// The minor version, i.e. `2` in `1.2.3`.
-//     pub fn minor(self) -> u32 {
-//         self.0 / 1_000 % 1_000
-//     }
-
-//     /// The patch version, i.e. `3` in `1.2.3`.
-//     pub fn patch(self) -> u32 {
-//         self.0 % 1_000
-//     }
-
-//     pub fn ledger_version(self) -> Result<LedgerVersion, UnsupportedProtocolVersion> {
-//         if self.is_compatible(0_020_000, 0_022_000) {
-//             Ok(LedgerVersion::V7)
-//         } else if self.is_compatible(0_022_000, 0_023_000) {
-//             Ok(LedgerVersion::V8)
-//         } else {
-//             Err(UnsupportedProtocolVersion(self))
-//         }
-//     }
-
-//     pub fn node_version(self) -> Result<NodeVersion, UnsupportedProtocolVersion> {
-//         if self.is_compatible(0_020_000, 0_021_000) {
-//             Ok(NodeVersion::V0_20)
-//         } else if self.is_compatible(0_021_000, 0_022_000) {
-//             Ok(NodeVersion::V0_21)
-//         } else if self.is_compatible(0_022_000, 0_023_000) {
-//             Ok(NodeVersion::V0_22)
-//         } else {
-//             Err(UnsupportedProtocolVersion(self))
-//         }
-//     }
-
-//     fn is_compatible(self, from: u32, to: u32) -> bool {
-//         from <= self.0 && self.0 < to
-//     }
-// }
-
-// impl TryFrom<&[u8]> for ProtocolVersion {
-//     type Error = ScaleDecodeProtocolVersionError;
-
-//     /// Used to SCALE decode the `ProtocolVersion` from a block header from the node.
-//     fn try_from(mut value: &[u8]) -> Result<Self, Self::Error> {
-//         let value = u32::decode(&mut value)?;
-//         Ok(Self(value))
-//     }
-// }
-
-// impl TryFrom<i64> for ProtocolVersion {
-//     type Error = TryFromIntError;
-
-//     fn try_from(value: i64) -> Result<Self, Self::Error> {
-//         let value = u32::try_from(value)?;
-//         Ok(Self(value))
-//     }
-// }
-
-// impl Display for ProtocolVersion {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         let major = self.major();
-//         let minor = self.minor();
-//         let patch = self.patch();
-//         write!(f, "{major}.{minor}.{patch}")
-//     }
-// }
-
-// #[derive(Debug, Error)]
-// #[error("unsupported protocol version {0}")]
-// pub struct UnsupportedProtocolVersion(ProtocolVersion);
-
-// /// Error possibly returned by `ProtocolVersion::try_from<&[u8]>`.
-// #[derive(Debug, Error)]
-// #[error("cannot SCALE decode protocol version")]
-// pub struct ScaleDecodeProtocolVersionError(#[from] parity_scale_codec::Error);
 
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LedgerVersion {
@@ -188,7 +111,6 @@ pub enum LedgerVersion {
 
 impl LedgerVersion {
     pub const OLDEST: Self = Self::V7;
-
     pub const LATEST: Self = Self::V8;
 }
 
