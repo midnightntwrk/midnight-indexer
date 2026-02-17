@@ -117,7 +117,7 @@ impl From<domain::MerkleTreeCollapsedUpdate> for CollapsedMerkleTree {
             start_index,
             end_index,
             update: update.hex_encode(),
-            protocol_version: protocol_version.0,
+            protocol_version: protocol_version.into(),
         }
     }
 }

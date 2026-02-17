@@ -32,7 +32,7 @@ use crate::{
 };
 use async_graphql::{Context, Object};
 use fastrace::trace;
-use indexer_common::domain::ProtocolVersion;
+use indexer_common::domain::LedgerVersion;
 use std::marker::PhantomData;
 
 const DEFAULT_PERFORMANCE_LIMIT: i64 = 20;
@@ -235,7 +235,7 @@ where
             .map_err_into_client_error(|| "invalid Cardano reward address")?;
 
         let status_list = storage
-            .get_dust_generation_status(&address, ProtocolVersion::LATEST)
+            .get_dust_generation_status(&address, LedgerVersion::LATEST)
             .await
             .map_err_into_server_error(|| "get DUST generation status")?;
 

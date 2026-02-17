@@ -14,10 +14,10 @@
 use crate::{
     domain::{
         ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, ByteArray, ByteVec,
-        IntentHash, LedgerEvent, LedgerVersion, NetworkId, Nonce, ProtocolVersion,
-        SerializedContractAddress, SerializedLedgerParameters, SerializedLedgerStateKey,
-        SerializedTransaction, SerializedZswapState, SerializedZswapStateRoot, TokenType,
-        TransactionResult, UnshieldedUtxo,
+        IntentHash, LedgerEvent, LedgerVersion, NetworkId, Nonce, SerializedContractAddress,
+        SerializedLedgerParameters, SerializedLedgerStateKey, SerializedTransaction,
+        SerializedZswapState, SerializedZswapStateRoot, TokenType, TransactionResult,
+        UnshieldedUtxo,
         dust::{self},
         ledger::{
             Error, IntentV7, IntentV8, SerializableExt, TaggedSerializableExt, TransactionV7,
@@ -129,8 +129,8 @@ pub enum LedgerState {
 
 impl LedgerState {
     #[allow(missing_docs)]
-    pub fn new(network_id: NetworkId, protocol_version: ProtocolVersion) -> Result<Self, Error> {
-        let ledger_state = match protocol_version.ledger_version()? {
+    pub fn new(network_id: NetworkId, ledger_version: LedgerVersion) -> Result<Self, Error> {
+        let ledger_state = match ledger_version {
             LedgerVersion::V7 => Self::V7 {
                 ledger_state: LedgerStateV7::new(network_id),
                 block_fullness: Default::default(),
@@ -148,9 +148,9 @@ impl LedgerState {
     /// Create a [LedgerState] by deserializing the genesis ledger state from system properties.
     pub fn from_genesis(
         raw: impl AsRef<[u8]>,
-        protocol_version: ProtocolVersion,
+        ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
-        match protocol_version.ledger_version()? {
+        match ledger_version {
             LedgerVersion::V7 => {
                 let ledger_state = tagged_deserialize::<LedgerStateV7<LedgerDb>>(&mut raw.as_ref())
                     .map_err(|error| Error::Deserialize("GenesisLedgerStateV7", error))?;
@@ -213,9 +213,9 @@ impl LedgerState {
 
     pub fn load(
         key: &SerializedLedgerStateKey,
-        protocol_version: ProtocolVersion,
+        ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
-        let ledger_state = match protocol_version.ledger_version()? {
+        let ledger_state = match ledger_version {
             LedgerVersion::V7 => {
                 let arena_key = TypedArenaKey::<
                     LedgerStateV7<LedgerDb>,
@@ -794,12 +794,12 @@ pub enum ZswapStateRoot {
 
 impl ZswapStateRoot {
     /// Untagged deserialize the given serialized zswap state root using the given protocol version.
-    #[trace(properties = { "protocol_version": "{protocol_version}" })]
+    #[trace(properties = { "ledger_version": "{ledger_version}" })]
     pub fn deserialize(
         zswap_state_root: impl AsRef<[u8]>,
-        protocol_version: ProtocolVersion,
+        ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
-        let zswap_state_root = match protocol_version.ledger_version()? {
+        let zswap_state_root = match ledger_version {
             LedgerVersion::V7 => {
                 let digest = MerkleTreeDigestV7::deserialize(&mut zswap_state_root.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("MerkleTreeDigestV7", error))?;
@@ -1660,7 +1660,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{LedgerVersion, ProtocolVersion, ledger::LedgerState},
+        domain::{LedgerVersion, ledger::LedgerState},
         error::BoxError,
     };
     use anyhow::Context;
@@ -1743,7 +1743,7 @@ mod tests {
             .expect("ledger DB can be initialized");
         }
 
-        let ledger_state = LedgerState::new("undeployed".try_into()?, ProtocolVersion::OLDEST)
+        let ledger_state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V7)
             .expect("ledger state can be constructed");
         assert_eq!(ledger_state.ledger_version(), LedgerVersion::V7);
 

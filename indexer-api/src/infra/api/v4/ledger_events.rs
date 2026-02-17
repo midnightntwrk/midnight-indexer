@@ -44,7 +44,7 @@ impl TryFrom<LedgerEvent> for ZswapLedgerEvent {
                 id: ledger_event.id,
                 raw: ledger_event.raw.hex_encode(),
                 max_id: ledger_event.max_id,
-                protocol_version: ledger_event.protocol_version.0,
+                protocol_version: ledger_event.protocol_version.into(),
             }),
 
             other => Err(UnexpectedLedgerEvent(other)),
@@ -85,7 +85,7 @@ impl TryFrom<LedgerEvent> for DustLedgerEvent {
                 id: ledger_event.id,
                 raw: ledger_event.raw.hex_encode(),
                 max_id: ledger_event.max_id,
-                protocol_version: ledger_event.protocol_version.0,
+                protocol_version: ledger_event.protocol_version.into(),
             })),
 
             LedgerEventAttributes::DustInitialUtxo { output, .. } => {
@@ -93,7 +93,7 @@ impl TryFrom<LedgerEvent> for DustLedgerEvent {
                     id: ledger_event.id,
                     raw: ledger_event.raw.hex_encode(),
                     max_id: ledger_event.max_id,
-                    protocol_version: ledger_event.protocol_version.0,
+                    protocol_version: ledger_event.protocol_version.into(),
                     output: DustOutput {
                         nonce: output.nonce.hex_encode(),
                     },
@@ -105,7 +105,7 @@ impl TryFrom<LedgerEvent> for DustLedgerEvent {
                     id: ledger_event.id,
                     raw: ledger_event.raw.hex_encode(),
                     max_id: ledger_event.max_id,
-                    protocol_version: ledger_event.protocol_version.0,
+                    protocol_version: ledger_event.protocol_version.into(),
                 }),
             ),
 
@@ -114,7 +114,7 @@ impl TryFrom<LedgerEvent> for DustLedgerEvent {
                     id: ledger_event.id,
                     raw: ledger_event.raw.hex_encode(),
                     max_id: ledger_event.max_id,
-                    protocol_version: ledger_event.protocol_version.0,
+                    protocol_version: ledger_event.protocol_version.into(),
                 }))
             }
 

@@ -27,8 +27,8 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{
-        BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion,
-        ScaleDecodeProtocolVersionError, SerializedContractAddress, UnsupportedProtocolVersion,
+        BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, ProtocolVersionError,
+        SerializedContractAddress,
         ledger::{self, ZswapStateRoot},
     },
     error::BoxError,
@@ -99,10 +99,9 @@ impl SubxtNode {
 
     async fn compatible_online_client(
         &mut self,
-        protocol_version: ProtocolVersion,
         hash: BlockHash,
+        node_version: NodeVersion,
     ) -> Result<&OnlineClient<SubstrateConfig>, SubxtNodeError> {
-        let node_version = protocol_version.node_version()?;
         if !self
             .compatible_online_client
             .as_ref()
@@ -217,33 +216,34 @@ impl SubxtNode {
             .header()
             .protocol_version()?
             .expect("protocol version header is present");
+        let node_version = protocol_version.node_version();
+        let ledger_version = protocol_version.ledger_version();
 
         debug!(
             hash:%,
             height,
             parent_hash:%,
-            protocol_version:%;
+            protocol_version:?,
+            node_version:%,
+            ledger_version:%;
             "making block"
         );
 
-        let online_client = self
-            .compatible_online_client(protocol_version, hash)
-            .await?;
+        let online_client = self.compatible_online_client(hash, node_version).await?;
 
         // Fetch authorities if `None`, either initially or because of a `NewSession` event (below).
         if authorities.is_none() {
-            *authorities =
-                runtimes::fetch_authorities(hash, protocol_version, online_client).await?;
+            *authorities = runtimes::fetch_authorities(hash, node_version, online_client).await?;
         }
         let author = authorities
             .as_ref()
-            .map(|authorities| extract_block_author(block.header(), authorities, protocol_version))
+            .map(|authorities| extract_block_author(block.header(), authorities, node_version))
             .transpose()?
             .flatten();
 
         let zswap_state_root =
-            runtimes::get_zswap_state_root(hash, protocol_version, online_client).await?;
-        let zswap_state_root = ZswapStateRoot::deserialize(zswap_state_root, protocol_version)?;
+            runtimes::get_zswap_state_root(hash, node_version, online_client).await?;
+        let zswap_state_root = ZswapStateRoot::deserialize(zswap_state_root, ledger_version)?;
 
         let extrinsics = block
             .extrinsics()
@@ -257,18 +257,18 @@ impl SubxtNode {
             timestamp,
             transactions,
             mut dust_registration_events,
-        } = runtimes::make_block_details(extrinsics, events, authorities, protocol_version).await?;
+        } = runtimes::make_block_details(extrinsics, events, authorities, node_version).await?;
 
         // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
         // registrations from pallet storage instead.
         // Also fetch the ledger state root for genesis ledger state detection.
         let ledger_state_root = if height == 0 {
             let genesis_registrations =
-                runtimes::fetch_genesis_cnight_registrations(hash, protocol_version, online_client)
+                runtimes::fetch_genesis_cnight_registrations(hash, node_version, online_client)
                     .await?;
             dust_registration_events.extend(genesis_registrations);
 
-            runtimes::get_ledger_state_root(hash, protocol_version, online_client)
+            runtimes::get_ledger_state_root(hash, node_version, online_client)
                 .await?
                 .map(Into::into)
         } else {
@@ -463,13 +463,13 @@ impl Node for SubxtNode {
         block_hash: BlockHash,
         block_height: u32,
         timestamp: u64,
-        protocol_version: ProtocolVersion,
+        node_version: NodeVersion,
     ) -> Result<SystemParametersChange, Self::Error> {
         let (d_parameter, terms_and_conditions) = tokio::try_join!(
-            runtimes::get_d_parameter(block_hash, protocol_version, &self.default_online_client),
+            runtimes::get_d_parameter(block_hash, node_version, &self.default_online_client),
             runtimes::get_terms_and_conditions(
                 block_hash,
-                protocol_version,
+                node_version,
                 &self.default_online_client
             ),
         )?;
@@ -590,9 +590,6 @@ pub enum SubxtNodeError {
     ScaleDecode(#[from] parity_scale_codec::Error),
 
     #[error(transparent)]
-    DecodeProtocolVersion(#[from] ScaleDecodeProtocolVersionError),
-
-    #[error(transparent)]
     Ledger(#[from] ledger::Error),
 
     #[error("cannot get contract state for address {0} at block {1}")]
@@ -608,7 +605,7 @@ pub enum SubxtNodeError {
     BlockNotFound(BlockHash),
 
     #[error(transparent)]
-    UnsupportedProtocolVersion(#[from] UnsupportedProtocolVersion),
+    ProtocolVersion(#[from] ProtocolVersionError),
 
     #[error("invalid DUST address length: expected 32 bytes, was {0}")]
     InvalidDustAddress(usize),
@@ -647,7 +644,7 @@ async fn receive_block(
 fn extract_block_author<H>(
     header: &SubstrateHeader<u32, H>,
     authorities: &[[u8; 32]],
-    protocol_version: ProtocolVersion,
+    node_version: NodeVersion,
 ) -> Result<Option<BlockAuthor>, SubxtNodeError>
 where
     H: Hasher,
@@ -664,7 +661,7 @@ where
             DigestItem::PreRuntime(AURA_ENGINE_ID, inner) => Some(inner.as_slice()),
             _ => None,
         })
-        .map(|slot| runtimes::decode_slot(slot, protocol_version))
+        .map(|slot| runtimes::decode_slot(slot, node_version))
         .transpose()?
         .and_then(|slot| {
             let index = slot % authorities.len() as u64;
@@ -697,7 +694,10 @@ async fn make_regular_transaction(
     protocol_version: ProtocolVersion,
     online_client: &OnlineClient<SubstrateConfig>,
 ) -> Result<Transaction, SubxtNodeError> {
-    let ledger_transaction = ledger::Transaction::deserialize(&transaction, protocol_version)?;
+    let node_version = protocol_version.node_version();
+
+    let ledger_transaction =
+        ledger::Transaction::deserialize(&transaction, protocol_version.ledger_version())?;
 
     let hash = ledger_transaction.hash();
 
@@ -705,34 +705,30 @@ async fn make_regular_transaction(
 
     let contract_actions = ledger_transaction
         .contract_actions(|address| async move {
-            runtimes::get_contract_state(address, block_hash, protocol_version, online_client).await
+            runtimes::get_contract_state(address, block_hash, node_version, online_client).await
         })
         .await?
         .into_iter()
         .map(Into::into)
         .collect();
 
-    let fees = match runtimes::get_transaction_cost(
-        &transaction,
-        block_hash,
-        protocol_version,
-        online_client,
-    )
-    .await
-    {
-        Ok(fees) => TransactionFees {
-            paid_fees: fees,
-            estimated_fees: fees,
-        },
+    let fees =
+        match runtimes::get_transaction_cost(&transaction, block_hash, node_version, online_client)
+            .await
+        {
+            Ok(fees) => TransactionFees {
+                paid_fees: fees,
+                estimated_fees: fees,
+            },
 
-        Err(error) => {
-            warn!(
-                error:%, block_hash:%, transaction_size = transaction.len();
-                "cannot get runtime API fees, using fallback"
-            );
-            TransactionFees::from_ledger_transaction(&ledger_transaction, transaction.len())
-        }
-    };
+            Err(error) => {
+                warn!(
+                    error:%, block_hash:%, transaction_size = transaction.len();
+                    "cannot get runtime API fees, using fallback"
+                );
+                TransactionFees::from_ledger_transaction(&ledger_transaction, transaction.len())
+            }
+        };
 
     let transaction = RegularTransaction {
         hash,
@@ -752,7 +748,7 @@ async fn make_system_transaction(
     protocol_version: ProtocolVersion,
 ) -> Result<Transaction, SubxtNodeError> {
     let ledger_transaction =
-        ledger::SystemTransaction::deserialize(&transaction, protocol_version)?;
+        ledger::SystemTransaction::deserialize(&transaction, protocol_version.ledger_version())?;
 
     let hash = ledger_transaction.hash();
 

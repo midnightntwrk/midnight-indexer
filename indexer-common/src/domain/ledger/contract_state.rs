@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{
-    ContractBalance, LedgerVersion, ProtocolVersion, TokenType,
+    ContractBalance, LedgerVersion, TokenType,
     ledger::{Error, TaggedSerializableExt},
 };
 use fastrace::trace;
@@ -32,12 +32,12 @@ pub enum ContractState {
 
 impl ContractState {
     /// Deserialize the given serialized contract state using the given protocol version.
-    #[trace(properties = { "protocol_version": "{protocol_version}" })]
+    #[trace(properties = { "ledger_version": "{ledger_version}" })]
     pub fn deserialize(
         contract_state: impl AsRef<[u8]>,
-        protocol_version: ProtocolVersion,
+        ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
-        let contract_state = match protocol_version.ledger_version()? {
+        let contract_state = match ledger_version {
             LedgerVersion::V7 => {
                 let contract_state = tagged_deserialize(&mut contract_state.as_ref())
                     .map_err(|error| Error::Deserialize("ContractStateV7", error))?;

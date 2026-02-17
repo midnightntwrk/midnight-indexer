@@ -24,7 +24,7 @@ use crate::{
 };
 use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject};
 use derive_more::Debug;
-use indexer_common::domain::{BlockHash, ProtocolVersion};
+use indexer_common::domain::BlockHash;
 use std::marker::PhantomData;
 
 /// A block with its relevant data.
@@ -127,7 +127,7 @@ where
             id,
             hash,
             height,
-            protocol_version: ProtocolVersion(protocol_version),
+            protocol_version,
             author,
             timestamp,
             parent_hash,
@@ -137,7 +137,7 @@ where
         Block {
             hash: hash.hex_encode(),
             height,
-            protocol_version,
+            protocol_version: protocol_version.into(),
             author: author.map(|author| author.hex_encode()),
             ledger_parameters: ledger_parameters.hex_encode(),
             timestamp,

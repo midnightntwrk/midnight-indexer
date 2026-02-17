@@ -20,7 +20,7 @@ use crate::{
 };
 use async_graphql::{Context, Object, scalar};
 use fastrace::trace;
-use indexer_common::domain::ProtocolVersion;
+use indexer_common::domain::LedgerVersion;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -44,7 +44,7 @@ where
     #[trace]
     async fn connect(&self, cx: &Context<'_>, viewing_key: ViewingKey) -> ApiResult<HexEncoded> {
         let viewing_key = viewing_key
-            .try_into_domain(cx.get_network_id(), ProtocolVersion::LATEST)
+            .try_into_domain(cx.get_network_id(), LedgerVersion::LATEST)
             .map_err_into_client_error(|| "invalid viewing key")?;
 
         cx.get_storage::<S>()

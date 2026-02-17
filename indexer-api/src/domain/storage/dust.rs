@@ -15,7 +15,7 @@ use crate::domain::{
     dust::DustGenerationStatus,
     storage::{BlockStorage, NoopStorage},
 };
-use indexer_common::domain::{CardanoRewardAddress, ProtocolVersion};
+use indexer_common::domain::{CardanoRewardAddress, LedgerVersion};
 
 /// DUST storage abstraction.
 /// NOTE: This is a minimal cherry-pick for dustGenerationStatus query only.
@@ -26,7 +26,7 @@ pub trait DustStorage: BlockStorage {
     async fn get_dust_generation_status(
         &self,
         cardano_reward_addresses: &[CardanoRewardAddress],
-        protocol_version: ProtocolVersion,
+        ledger_version: LedgerVersion,
     ) -> Result<Vec<DustGenerationStatus>, sqlx::Error>;
 }
 
@@ -35,7 +35,7 @@ impl DustStorage for NoopStorage {
     async fn get_dust_generation_status(
         &self,
         cardano_reward_addresses: &[CardanoRewardAddress],
-        protocol_version: ProtocolVersion,
+        ledger_version: LedgerVersion,
     ) -> Result<Vec<DustGenerationStatus>, sqlx::Error> {
         Ok(vec![])
     }

@@ -114,7 +114,10 @@ impl domain::storage::Storage for Storage {
                     height: height as u32,
                 };
 
-                Ok((block_ref, (protocol_version as u32).into(), key))
+                let protocol_version = ProtocolVersion::try_from(protocol_version)
+                    .map_err(|error| sqlx::Error::Decode(error.into()))?;
+
+                Ok((block_ref, protocol_version, key))
             })
             .transpose()
     }
@@ -279,7 +282,7 @@ async fn save_block(
 
             q.push_bind(hash.as_ref())
                 .push_bind(*height as i64)
-                .push_bind(protocol_version.0 as i64)
+                .push_bind(protocol_version.into_i64())
                 .push_bind(parent_hash.as_ref())
                 .push_bind(author.as_ref().map(|a| a.as_ref()))
                 .push_bind(*timestamp as i64)
@@ -324,7 +327,7 @@ async fn save_transactions(
                 q.push_bind(block_id)
                     .push_bind(transaction.variant())
                     .push_bind(hash.as_ref())
-                    .push_bind(transaction.protocol_version().0 as i64)
+                    .push_bind(transaction.protocol_version().into_i64())
                     .push_bind(transaction.raw());
             })
             .push(" RETURNING id")

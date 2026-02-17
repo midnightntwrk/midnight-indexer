@@ -16,7 +16,7 @@ use crate::domain::{
 };
 use futures::Stream;
 use indexer_common::domain::{
-    BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedTransaction,
+    BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, SerializedTransaction,
     SerializedTransactionIdentifier, TransactionHash, ledger::ZswapStateRoot,
 };
 use std::{error::Error as StdError, fmt::Debug};
@@ -48,7 +48,7 @@ where
         block_hash: BlockHash,
         block_height: u32,
         timestamp: u64,
-        protocol_version: ProtocolVersion,
+        node_version: NodeVersion,
     ) -> Result<SystemParametersChange, Self::Error>;
 
     /// Fetch serialized genesis ledger state from the chain spec's system properties.

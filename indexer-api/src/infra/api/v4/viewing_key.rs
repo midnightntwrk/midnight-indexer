@@ -14,7 +14,7 @@
 use async_graphql::scalar;
 use derive_more::{Display, derive::From};
 use fastrace::trace;
-use indexer_common::domain::{NetworkId, ProtocolVersion, ledger};
+use indexer_common::domain::{LedgerVersion, NetworkId, ledger};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -37,15 +37,15 @@ impl ViewingKey {
     ///   any non-empty alphanumeric string (e.g., "undeployed", "preview", "qanet", "preprod")
     #[trace(properties = {
         "network_id": "{network_id}",
-        "protocol_version": "{protocol_version}"
+        "ledger_version": "{ledger_version}"
     })]
     pub fn try_into_domain(
         self,
         network_id: &NetworkId,
-        protocol_version: ProtocolVersion,
+        ledger_version: LedgerVersion,
     ) -> Result<indexer_common::domain::ViewingKey, ViewingKeyFormatError> {
         let bytes = decode_address(&self.0, AddressType::SecretEncryptionKey, network_id)?;
-        let secret_key = ledger::SecretKey::deserialize(bytes, protocol_version)?;
+        let secret_key = ledger::SecretKey::deserialize(bytes, ledger_version)?;
         let viewing_key = secret_key.expose_secret().into();
 
         Ok(viewing_key)
@@ -64,7 +64,7 @@ pub enum ViewingKeyFormatError {
 #[cfg(test)]
 mod tests {
     use crate::infra::api::v4::viewing_key::ViewingKey;
-    use indexer_common::domain::ProtocolVersion;
+    use indexer_common::domain::LedgerVersion;
 
     #[test]
     fn test_try_into_domain() {
@@ -72,7 +72,7 @@ mod tests {
             "mn_shield-esk_undeployed1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs9ete5h",
         );
         let domain_viewing_key =
-            viewing_key.try_into_domain(&"undeployed".try_into().unwrap(), ProtocolVersion::LATEST);
+            viewing_key.try_into_domain(&"undeployed".try_into().unwrap(), LedgerVersion::V8);
         println!("{domain_viewing_key:?}");
         assert!(domain_viewing_key.is_ok());
     }
