@@ -619,9 +619,10 @@ async fn save_spent_unshielded_utxos(
             .rows_affected();
     }
 
-    if rows_affected == 0 {
+    if rows_affected != utxos.len() as u64 {
         return Err(sqlx::Error::Protocol(format!(
-            "invalid spent UTXOs: {utxos:?}"
+            "expected {} spent UTXOs but updated {rows_affected}: {utxos:?}",
+            utxos.len()
         )));
     }
 
