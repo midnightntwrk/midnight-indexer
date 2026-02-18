@@ -42,7 +42,7 @@ use const_hex::FromHexError;
 use derive_more::{AsRef, Debug, Display};
 use indexer_common::domain::{
     ByteArrayLenError, ByteVec, CardanoRewardAddress as DomainCardanoRewardAddress, NetworkId,
-    NoopSubscriber, SessionId, Subscriber,
+    NoopSubscriber, SessionToken, Subscriber,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -399,10 +399,10 @@ where
     )
 }
 
-fn decode_session_id(session_id: HexEncoded) -> Result<SessionId, DecodeSessionIdError> {
-    let session_id = session_id.hex_decode::<Vec<u8>>()?;
-    let session_id = SessionId::try_from(session_id.as_slice())?;
-    Ok(session_id)
+fn decode_session_id(session_id: HexEncoded) -> Result<SessionToken, DecodeSessionIdError> {
+    let token = session_id.hex_decode::<Vec<u8>>()?;
+    let token = SessionToken::try_from(token.as_slice())?;
+    Ok(token)
 }
 
 #[derive(Debug, Error)]

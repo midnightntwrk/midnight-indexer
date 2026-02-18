@@ -130,13 +130,13 @@ CREATE INDEX contract_balances_action_token_idx ON contract_balances (contract_a
 --------------------------------------------------------------------------------
 CREATE TABLE wallets (
   id BLOB PRIMARY KEY, -- UUID
-  session_id BLOB NOT NULL UNIQUE,
+  viewing_key_hash BLOB NOT NULL UNIQUE,
   viewing_key BLOB NOT NULL, -- Ciphertext with nonce, no longer unique!
   last_indexed_transaction_id INTEGER NOT NULL DEFAULT 0,
-  active BOOLEAN NOT NULL DEFAULT TRUE,
-  last_active INTEGER NOT NULL
+  last_active INTEGER NOT NULL,
+  token BLOB UNIQUE -- Random per-session token for API authentication, NULL when disconnected.
 );
-CREATE INDEX wallets_session_id_idx ON wallets (session_id);
+CREATE INDEX wallets_viewing_key_hash_idx ON wallets (viewing_key_hash);
 CREATE INDEX wallets_last_indexed_transaction_id_idx ON wallets (last_indexed_transaction_id DESC);
 --------------------------------------------------------------------------------
 -- relevant_transactions

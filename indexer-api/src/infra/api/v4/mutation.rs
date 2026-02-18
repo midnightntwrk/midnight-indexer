@@ -46,31 +46,33 @@ where
             .try_into_domain(cx.get_network_id())
             .map_err_into_client_error(|| "invalid viewing key")?;
 
-        cx.get_storage::<S>()
+        let token = cx
+            .get_storage::<S>()
             .connect_wallet(&viewing_key)
             .await
             .map_err_into_server_error(|| "connect wallet")?;
 
-        let session_id = viewing_key.to_session_id();
-        debug!(session_id:%; "wallet connected");
+        debug!("wallet connected");
 
-        Ok(session_id.hex_encode())
+        Ok(token.hex_encode())
     }
 
     /// Disconnect the wallet with the given session ID.
-    #[trace(properties = { "session_id": "{session_id}" })]
-    async fn disconnect(&self, cx: &Context<'_>, session_id: HexEncoded) -> ApiResult<Unit> {
-        let session_id =
+    #[trace]
+    async fn disconnect(
+        &self,
+        cx: &Context<'_>,
+        #[graphql(name = "sessionId")] session_id: HexEncoded,
+    ) -> ApiResult<Unit> {
+        let token =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
 
         cx.get_storage::<S>()
-            .disconnect_wallet(session_id)
+            .disconnect_wallet(token)
             .await
-            .map_err_into_server_error(|| {
-                format!("disconnect wallet with session ID {session_id}")
-            })?;
+            .map_err_into_server_error(|| "disconnect wallet")?;
 
-        debug!(session_id:%; "wallet disconnected");
+        debug!("wallet disconnected");
 
         Ok(Unit)
     }

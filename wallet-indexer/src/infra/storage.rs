@@ -140,7 +140,7 @@ impl domain::storage::Storage for Storage {
         tx: &mut SqlxTransaction<Self::Database>,
     ) -> Result<(), sqlx::Error> {
         let id = Uuid::now_v7();
-        let session_id = viewing_key.to_session_id();
+        let viewing_key_hash = viewing_key.to_viewing_key_hash();
         let viewing_key = viewing_key
             .encrypt(id, &self.cipher)
             .map_err(|error| sqlx::Error::Encode(error.into()))?;
@@ -148,20 +148,20 @@ impl domain::storage::Storage for Storage {
         let query = indoc! {"
             INSERT INTO wallets (
                 id,
-                session_id,
+                viewing_key_hash,
                 viewing_key,
                 last_indexed_transaction_id,
                 last_active
             )
             VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (session_id)
+            ON CONFLICT (viewing_key_hash)
             DO UPDATE SET last_indexed_transaction_id = $4
             RETURNING id
         "};
 
         let wallet_id = sqlx::query(query)
             .bind(id)
-            .bind(session_id.as_ref())
+            .bind(viewing_key_hash.as_ref())
             .bind(viewing_key)
             .bind(last_indexed_transaction_id as i64)
             .bind(OffsetDateTime::now_utc())
@@ -196,7 +196,7 @@ impl domain::storage::Storage for Storage {
                 id,
                 last_active
             FROM wallets
-            WHERE active = TRUE
+            WHERE token IS NOT NULL
         "};
 
         let wallets = sqlx::query_as::<_, (Uuid, OffsetDateTime)>(query)
@@ -218,14 +218,14 @@ impl domain::storage::Storage for Storage {
 
                 let query = indoc! {"
                     UPDATE wallets
-                    SET active = FALSE
+                    SET token = NULL
                     WHERE id = ANY($1)
                     AND last_active < $2
                 "};
 
-                // This could cause a "deadlock_detected" error when the indexer-api sets a wallet
-                // active at the same time. These errors can be ignored, because this operation will
-                // be executed "very soon" again.
+                // This could cause a "deadlock_detected" error when the indexer-api updates a
+                // wallet token at the same time. These errors can be ignored, because this
+                // operation will be executed "very soon" again.
                 sqlx::query(query)
                     .bind(outdated_ids)
                     .bind(min_last_active)
@@ -241,7 +241,7 @@ impl domain::storage::Storage for Storage {
             for id in outdated_ids {
                 let query = indoc! {"
                     UPDATE wallets
-                    SET active = FALSE
+                    SET token = NULL
                     WHERE id = $1
                     AND last_active < $2
                 "};

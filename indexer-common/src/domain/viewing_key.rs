@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ByteArray, ByteArrayLenError, ByteVec, SessionId};
+use crate::domain::{ByteArray, ByteArrayLenError, ByteVec, ViewingKeyHash};
 use chacha20poly1305::{
     AeadCore, ChaCha20Poly1305,
     aead::{Aead, OsRng, Payload},
@@ -77,13 +77,13 @@ impl ViewingKey {
         Ok(nonce_and_ciphertext.into())
     }
 
-    /// Return the session ID (Sha256 hash) for this viewing key.
-    pub fn to_session_id(&self) -> SessionId {
+    /// Return the viewing key hash (Sha256) for deduplication.
+    pub fn to_viewing_key_hash(&self) -> ViewingKeyHash {
         let mut hasher = Sha256::new();
         hasher.update(self.0);
-        let session_id = hasher.finalize();
+        let hash = hasher.finalize();
 
-        <[u8; 32]>::from(session_id).into()
+        <[u8; 32]>::from(hash).into()
     }
 }
 

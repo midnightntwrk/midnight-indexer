@@ -13,9 +13,8 @@
 
 use crate::domain::{RegularTransaction, Transaction, storage::NoopStorage};
 use futures::{Stream, stream};
-use indexer_common::domain::{
-    SerializedTransactionIdentifier, SessionId, TransactionHash, UnshieldedAddress,
-};
+use indexer_common::domain::{SerializedTransactionIdentifier, TransactionHash, UnshieldedAddress};
+use sqlx::types::Uuid;
 use std::num::NonZeroU32;
 
 #[trait_variant::make(Send)]
@@ -44,10 +43,10 @@ where
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
     /// Get a stream of all regular transactions which are relevant for a wallet with the given
-    /// session ID, starting at the given index, ordered by transaction ID.
+    /// wallet ID, starting at the given index, ordered by transaction ID.
     fn get_relevant_transactions(
         &self,
-        session_id: SessionId,
+        wallet_id: Uuid,
         index: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<RegularTransaction, sqlx::Error>> + Send;
@@ -71,10 +70,10 @@ where
     /// - the highest zswap state end index of all transactions,
     /// - the highest zswap state end index of all transactions checked for relevance and
     /// - the highest zswap state end index of all relevant transactions for the wallet identified
-    ///   by the given session ID.
+    ///   by the given wallet ID.
     async fn get_highest_end_indices(
         &self,
-        session_id: SessionId,
+        wallet_id: Uuid,
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error>;
 }
 
@@ -104,7 +103,7 @@ impl TransactionStorage for NoopStorage {
 
     fn get_relevant_transactions(
         &self,
-        session_id: SessionId,
+        wallet_id: Uuid,
         index: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<RegularTransaction, sqlx::Error>> + Send {
@@ -129,7 +128,7 @@ impl TransactionStorage for NoopStorage {
 
     async fn get_highest_end_indices(
         &self,
-        session_id: SessionId,
+        wallet_id: Uuid,
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error> {
         unimplemented!()
     }
