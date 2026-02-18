@@ -202,6 +202,7 @@ export class Environment {
       case EnvironmentName.NODEDEV01:
       case EnvironmentName.QANET:
       case EnvironmentName.QANET_DEV:
+      case EnvironmentName.DEVNET:
         return CardanoNetwork.PREVIEW;
       default:
         throw new Error(`Unsupported environment name: ${this.envName}`);
