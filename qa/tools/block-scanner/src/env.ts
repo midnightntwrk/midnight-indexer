@@ -25,6 +25,7 @@ const INDEXER_BASE_URL: Record<string, string> = {
 };
 
 export let TARGET_ENV: string;
+export let INDEXER_API_VERSION: string;
 
 if (Bun.env.TARGET_ENV === undefined || Bun.env.TARGET_ENV === "") {
   console.warn(
@@ -36,10 +37,23 @@ if (Bun.env.TARGET_ENV === undefined || Bun.env.TARGET_ENV === "") {
   console.info(`[INFO ] - Target environment: ${TARGET_ENV}`);
 }
 
+if (
+  Bun.env.INDEXER_API_VERSION === undefined ||
+  Bun.env.INDEXER_API_VERSION === ""
+) {
+  console.warn(
+    "[WARN ] - INDEXER_API_VERSION not set explicitly, default to v4",
+  );
+  INDEXER_API_VERSION = "v4";
+} else {
+  INDEXER_API_VERSION = Bun.env.INDEXER_API_VERSION;
+  console.info(`[INFO ] - Indexer API version: ${INDEXER_API_VERSION}`);
+}
+
 export const INDEXER_WS_URL: string =
   TARGET_ENV === "undeployed"
-    ? `ws://${INDEXER_BASE_URL[TARGET_ENV]}/api/v4/graphql/ws`
-    : `wss://${INDEXER_BASE_URL[TARGET_ENV]}/api/v4/graphql/ws`;
+    ? `ws://${INDEXER_BASE_URL[TARGET_ENV]}/api/${INDEXER_API_VERSION}/graphql/ws`
+    : `wss://${INDEXER_BASE_URL[TARGET_ENV]}/api/${INDEXER_API_VERSION}/graphql/ws`;
 
 export const INDEXER_HTTP_URL: string =
   TARGET_ENV === "undeployed"
