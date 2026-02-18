@@ -34,19 +34,13 @@ use midnight_base_crypto::{
     hash::{HashOutput, persistent_commit},
     time::Timestamp,
 };
-use midnight_coin_structure_v7::{
+use midnight_coin_structure::{
     coin::{
-        NIGHT as NIGHTV7, TokenType as TokenTypeV7, UnshieldedTokenType as UnshieldedTokenTypeV7,
-        UserAddress as UserAddressV7,
+        NIGHT as NIGHTV7, NIGHT as NIGHTV8, TokenType as TokenTypeV7, TokenType as TokenTypeV8,
+        UnshieldedTokenType as UnshieldedTokenTypeV7, UnshieldedTokenType as UnshieldedTokenTypeV8,
+        UserAddress as UserAddressV7, UserAddress as UserAddressV8,
     },
-    contract::ContractAddress as ContractAddressV7,
-};
-use midnight_coin_structure_v8::{
-    coin::{
-        NIGHT as NIGHTV8, TokenType as TokenTypeV8, UnshieldedTokenType as UnshieldedTokenTypeV8,
-        UserAddress as UserAddressV8,
-    },
-    contract::ContractAddress as ContractAddressV8,
+    contract::{ContractAddress as ContractAddressV7, ContractAddress as ContractAddressV8},
 };
 use midnight_ledger_v7::{
     dust::{
@@ -80,21 +74,16 @@ use midnight_ledger_v8::{
     },
     verify::WellFormedStrictness as WellFormedStrictnessV8,
 };
-use midnight_onchain_runtime_v7::context::BlockContext as BlockContextV7;
-use midnight_onchain_runtime_v8::context::BlockContext as BlockContextV8;
+use midnight_onchain_runtime_v2::context::BlockContext as BlockContextV7;
+use midnight_onchain_runtime_v3::context::BlockContext as BlockContextV8;
 use midnight_serialize::{Deserializable, tagged_deserialize};
 use midnight_storage_core::{
     arena::{ArenaKey, Sp, TypedArenaKey},
     db::DB,
     storage::default_storage,
 };
-use midnight_transient_crypto_v7::merkle_tree::{
-    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV7,
-    MerkleTreeDigest as MerkleTreeDigestV7, TreeInsertionPath as TreeInsertionPathV7,
-};
-use midnight_transient_crypto_v8::merkle_tree::{
-    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV8,
-    MerkleTreeDigest as MerkleTreeDigestV8, TreeInsertionPath as TreeInsertionPathV8,
+use midnight_transient_crypto::merkle_tree::{
+    MerkleTreeCollapsedUpdate, MerkleTreeDigest, TreeInsertionPath,
 };
 use midnight_zswap_v7::ledger::State as ZswapStateV7;
 use midnight_zswap_v8::ledger::State as ZswapStateV8;
@@ -661,23 +650,23 @@ impl LedgerState {
     /// Get the serialized merkle-tree collapsed update for the given indices.
     pub fn collapsed_update(&self, start_index: u64, end_index: u64) -> Result<ByteVec, Error> {
         match self {
-            Self::V7 { ledger_state, .. } => MerkleTreeCollapsedUpdateV7::new(
+            Self::V7 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
                 &ledger_state.zswap.coin_coms,
                 start_index,
                 end_index,
             )
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
-            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdateV7", error)),
+            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdate", error)),
 
-            Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdateV8::new(
+            Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
                 &ledger_state.zswap.coin_coms,
                 start_index,
                 end_index,
             )
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
-            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdateV8", error)),
+            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdate", error)),
         }
     }
 
@@ -788,8 +777,8 @@ impl LedgerParameters {
 /// Facade for zswap state root across supported (protocol) versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZswapStateRoot {
-    V7(MerkleTreeDigestV7),
-    V8(MerkleTreeDigestV8),
+    V7(MerkleTreeDigest),
+    V8(MerkleTreeDigest),
 }
 
 impl ZswapStateRoot {
@@ -801,13 +790,13 @@ impl ZswapStateRoot {
     ) -> Result<Self, Error> {
         let zswap_state_root = match ledger_version {
             LedgerVersion::V7 => {
-                let digest = MerkleTreeDigestV7::deserialize(&mut zswap_state_root.as_ref(), 0)
+                let digest = MerkleTreeDigest::deserialize(&mut zswap_state_root.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("MerkleTreeDigestV7", error))?;
                 Self::V7(digest)
             }
 
             LedgerVersion::V8 => {
-                let digest = MerkleTreeDigestV8::deserialize(&mut zswap_state_root.as_ref(), 0)
+                let digest = MerkleTreeDigest::deserialize(&mut zswap_state_root.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("MerkleTreeDigestV8", error))?;
                 Self::V8(digest)
             }
@@ -1020,7 +1009,7 @@ fn make_dust_initial_utxo_v8(
 }
 
 fn make_dust_generation_dtime_update_v7(
-    update: TreeInsertionPathV7<DustGenerationInfoV7>,
+    update: TreeInsertionPath<DustGenerationInfoV7>,
     raw: ByteVec,
 ) -> Result<LedgerEvent, Error> {
     let generation = &update.leaf.1;
@@ -1070,7 +1059,7 @@ fn make_dust_generation_dtime_update_v7(
 }
 
 fn make_dust_generation_dtime_update_v8(
-    update: TreeInsertionPathV8<DustGenerationInfoV8>,
+    update: TreeInsertionPath<DustGenerationInfoV8>,
     raw: ByteVec,
 ) -> Result<LedgerEvent, Error> {
     let generation = &update.leaf.1;

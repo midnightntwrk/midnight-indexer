@@ -11,47 +11,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ByteArray, LedgerVersion, VIEWING_KEY_LEN, ledger::Error};
+use crate::domain::{ByteArray, VIEWING_KEY_LEN, ledger::Error};
 use fastrace::trace;
 use midnight_serialize::Deserializable;
-use midnight_transient_crypto_v7::encryption::SecretKey as SecretKeyV7;
-use midnight_transient_crypto_v8::encryption::SecretKey as SecretKeyV8;
 
-/// Facade for `SecretKey` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
-pub enum SecretKey {
-    V7(SecretKeyV7),
-    V8(SecretKeyV8),
-}
+pub struct SecretKey(midnight_transient_crypto::encryption::SecretKey);
 
 impl SecretKey {
-    #[trace(properties = { "ledger_version": "{ledger_version}" })]
-    pub fn deserialize(
-        secret_key: impl AsRef<[u8]>,
-        ledger_version: LedgerVersion,
-    ) -> Result<Self, Error> {
-        let key = match ledger_version {
-            LedgerVersion::V7 => {
-                let secret_key = SecretKeyV7::deserialize(&mut secret_key.as_ref(), 0)
-                    .map_err(|error| Error::Deserialize("SecretKeyV7", error))?;
-                Self::V7(secret_key)
-            }
-
-            LedgerVersion::V8 => {
-                let secret_key = SecretKeyV8::deserialize(&mut secret_key.as_ref(), 0)
-                    .map_err(|error| Error::Deserialize("SecretKeyV8", error))?;
-                Self::V8(secret_key)
-            }
-        };
-
-        Ok(key)
+    #[trace]
+    pub fn deserialize(secret_key: impl AsRef<[u8]>) -> Result<Self, Error> {
+        let inner = midnight_transient_crypto::encryption::SecretKey::deserialize(
+            &mut secret_key.as_ref(),
+            0,
+        )
+        .map_err(|error| Error::Deserialize("SecretKeyV7", error))?;
+        Ok(Self(inner))
     }
 
     /// Get the repr of this secret key.
     pub fn expose_secret(&self) -> ByteArray<VIEWING_KEY_LEN> {
-        match self {
-            Self::V7(secret_key) => secret_key.repr().into(),
-            Self::V8(secret_key) => secret_key.repr().into(),
-        }
+        self.0.repr().into()
     }
 }

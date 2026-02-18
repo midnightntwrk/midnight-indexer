@@ -22,12 +22,7 @@ use crate::{
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
-use midnight_coin_structure_v7::{
-    coin::Info as InfoV7, contract::ContractAddress as ContractAddressV7,
-};
-use midnight_coin_structure_v8::{
-    coin::Info as InfoV8, contract::ContractAddress as ContractAddressV8,
-};
+use midnight_coin_structure::{coin::Info, contract::ContractAddress};
 use midnight_ledger_v7::structure::{
     ContractAction as ContractActionV7, StandardTransaction as StandardTransactionV7,
     SystemTransaction as LedgerSystemTransactionV7,
@@ -38,12 +33,7 @@ use midnight_ledger_v8::structure::{
 };
 use midnight_serialize::tagged_deserialize;
 use midnight_storage_core::db::DB;
-use midnight_transient_crypto_v7::{
-    encryption::SecretKey as SecretKeyV7, proofs::Proof as ProofV7,
-};
-use midnight_transient_crypto_v8::{
-    encryption::SecretKey as SecretKeyV8, proofs::Proof as ProofV8,
-};
+use midnight_transient_crypto::{encryption::SecretKey, proofs::Proof};
 use midnight_zswap_v7::Offer as OfferV7;
 use midnight_zswap_v8::Offer as OfferV8;
 use std::error::Error as StdError;
@@ -127,7 +117,7 @@ impl Transaction {
                         .then(|(_, contract_action)| async {
                             match contract_action {
                                 ContractActionV7::Deploy(deploy) => {
-                                    let address = serialize_contract_address_v7(deploy.address())?;
+                                    let address = serialize_contract_address(deploy.address())?;
                                     let state = get_contract_state(address.clone()).await.map_err(
                                         |error| {
                                             Error::GetContractState(address.clone(), error.into())
@@ -142,7 +132,7 @@ impl Transaction {
                                 }
 
                                 ContractActionV7::Call(call) => {
-                                    let address = serialize_contract_address_v7(call.address)?;
+                                    let address = serialize_contract_address(call.address)?;
                                     let state = get_contract_state(address.clone()).await.map_err(
                                         |error| {
                                             Error::GetContractState(address.clone(), error.into())
@@ -162,7 +152,7 @@ impl Transaction {
                                 }
 
                                 ContractActionV7::Maintain(update) => {
-                                    let address = serialize_contract_address_v7(update.address)?;
+                                    let address = serialize_contract_address(update.address)?;
                                     let state = get_contract_state(address.clone()).await.map_err(
                                         |error| {
                                             Error::GetContractState(address.clone(), error.into())
@@ -192,7 +182,7 @@ impl Transaction {
                         .then(|(_, contract_action)| async {
                             match contract_action {
                                 ContractActionV8::Deploy(deploy) => {
-                                    let address = serialize_contract_address_v8(deploy.address())?;
+                                    let address = serialize_contract_address(deploy.address())?;
                                     let state = get_contract_state(address.clone()).await.map_err(
                                         |error| {
                                             Error::GetContractState(address.clone(), error.into())
@@ -207,7 +197,7 @@ impl Transaction {
                                 }
 
                                 ContractActionV8::Call(call) => {
-                                    let address = serialize_contract_address_v8(call.address)?;
+                                    let address = serialize_contract_address(call.address)?;
                                     let state = get_contract_state(address.clone()).await.map_err(
                                         |error| {
                                             Error::GetContractState(address.clone(), error.into())
@@ -227,7 +217,7 @@ impl Transaction {
                                 }
 
                                 ContractActionV8::Maintain(update) => {
-                                    let address = serialize_contract_address_v8(update.address)?;
+                                    let address = serialize_contract_address(update.address)?;
                                     let state = get_contract_state(address.clone()).await.map_err(
                                         |error| {
                                             Error::GetContractState(address.clone(), error.into())
@@ -331,8 +321,8 @@ impl Transaction {
                     fallible_coins,
                     ..
                 }) => {
-                    let secret_key = SecretKeyV7::from_repr(&viewing_key.expose_secret().0)
-                        .expect("SecretKeyV7 can be created from repr");
+                    let secret_key = SecretKey::from_repr(&viewing_key.expose_secret().0)
+                        .expect("SecretKey can be created from repr");
 
                     let can_decrypt_guaranteed_coins = guaranteed_coins
                         .as_ref()
@@ -357,8 +347,8 @@ impl Transaction {
                     fallible_coins,
                     ..
                 }) => {
-                    let secret_key = SecretKeyV8::from_repr(&viewing_key.expose_secret().0)
-                        .expect("SecretKeyV8 can be created from repr");
+                    let secret_key = SecretKey::from_repr(&viewing_key.expose_secret().0)
+                        .expect("SecretKey can be created from repr");
 
                     let can_decrypt_guaranteed_coins = guaranteed_coins
                         .as_ref()
@@ -419,40 +409,32 @@ impl SystemTransaction {
     }
 }
 
-fn serialize_contract_address_v7(
-    address: ContractAddressV7,
+fn serialize_contract_address(
+    address: ContractAddress,
 ) -> Result<SerializedContractAddress, Error> {
     address
         .serialize()
-        .map_err(|error| Error::Serialize("ContractAddressV7", error))
+        .map_err(|error| Error::Serialize("ContractAddress", error))
 }
 
-fn serialize_contract_address_v8(
-    address: ContractAddressV8,
-) -> Result<SerializedContractAddress, Error> {
-    address
-        .serialize()
-        .map_err(|error| Error::Serialize("ContractAddressV8", error))
-}
-
-fn can_decrypt_v7<D: DB>(key: &SecretKeyV7, offer: &OfferV7<ProofV7, D>) -> bool {
+fn can_decrypt_v7<D: DB>(key: &SecretKey, offer: &OfferV7<Proof, D>) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
     let mut ciphertexts = outputs.chain(transient);
 
     ciphertexts.any(|ciphertext| {
-        key.decrypt::<InfoV7>(&(*ciphertext).to_owned().into())
+        key.decrypt::<Info>(&(*ciphertext).to_owned().into())
             .is_some()
     })
 }
 
-fn can_decrypt_v8<D: DB>(key: &SecretKeyV8, offer: &OfferV8<ProofV8, D>) -> bool {
+fn can_decrypt_v8<D: DB>(key: &SecretKey, offer: &OfferV8<Proof, D>) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
     let mut ciphertexts = outputs.chain(transient);
 
     ciphertexts.any(|ciphertext| {
-        key.decrypt::<InfoV8>(&(*ciphertext).to_owned().into())
+        key.decrypt::<Info>(&(*ciphertext).to_owned().into())
             .is_some()
     })
 }
