@@ -49,9 +49,6 @@ async fn run() -> anyhow::Result<()> {
     };
     use tokio::signal::unix::{SignalKind, signal};
 
-    // Register SIGTERM handler.
-    let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
-
     // Load configuration.
     let config = Config::load().context("load configuration")?;
     info!(config:?; "starting");
@@ -69,6 +66,8 @@ async fn run() -> anyhow::Result<()> {
     // Initialize tracing and metrics.
     telemetry::init_tracing(tracing_config);
     telemetry::init_metrics(metrics_config);
+
+    let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
     let node = SPOClient::new(infra_config.node_config)
         .await

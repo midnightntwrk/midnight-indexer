@@ -1,4 +1,4 @@
-run_migrations: true
+thread_stack_size: "24MiB"
 
 application:
   network_id: "undeployed"
@@ -12,11 +12,13 @@ application:
   # concurrency_limit:
 
 infra:
+  run_migrations: true
+
   storage:
     cnn_url: "/data/indexer.sqlite"
 
   ledger_db:
-    cache_size: 1024
+    cache_size: "1MiB"
     cnn_url: "/data/ledger-db.sqlite"
 
   node:

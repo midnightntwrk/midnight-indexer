@@ -246,7 +246,7 @@ async fn transform_lentgh_limit_exceeded(response: Response<Body>) -> Result<Res
 
 async fn shutdown_signal() {
     signal(SignalKind::terminate())
-        .expect("install SIGTERM handler")
+        .expect("SIGTERM handler can be registered")
         .recv()
         .await;
 }

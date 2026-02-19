@@ -20,6 +20,8 @@ pub mod subxt_node;
 #[cfg(feature = "cloud")]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
+    pub run_migrations: bool,
+
     #[serde(rename = "storage")]
     pub storage_config: indexer_common::infra::pool::postgres::Config,
 

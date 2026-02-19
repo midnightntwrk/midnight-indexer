@@ -15,7 +15,8 @@ use crate::{application, infra};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
-    pub run_migrations: bool,
+    #[serde(with = "byte_unit_serde")]
+    pub thread_stack_size: u64,
 
     #[serde(rename = "application")]
     pub application_config: application::Config,

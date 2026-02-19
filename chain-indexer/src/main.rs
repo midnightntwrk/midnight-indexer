@@ -12,8 +12,7 @@
 // limitations under the License.
 
 #[cfg(feature = "cloud")]
-#[tokio::main]
-async fn main() {
+fn main() {
     use indexer_common::telemetry;
     use log::error;
     use std::panic;
@@ -25,7 +24,7 @@ async fn main() {
     panic::set_hook(Box::new(|panic| error!(panic:%; "process panicked")));
 
     // Run and log any error.
-    if let Err(error) = run().await {
+    if let Err(error) = run() {
         let backtrace = error.backtrace();
         let error = format!("{error:#}");
         error!(error, backtrace:%; "process exited with ERROR");
@@ -34,7 +33,7 @@ async fn main() {
 }
 
 #[cfg(feature = "cloud")]
-async fn run() -> anyhow::Result<()> {
+fn run() -> anyhow::Result<()> {
     use anyhow::Context;
     use chain_indexer::{
         application,
@@ -50,16 +49,16 @@ async fn run() -> anyhow::Result<()> {
         telemetry,
     };
     use log::info;
-    use tokio::signal::unix::{SignalKind, signal};
-
-    // Register SIGTERM handler.
-    let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+    use tokio::{
+        runtime::Builder,
+        signal::unix::{SignalKind, signal},
+    };
 
     // Load configuration.
     let config = Config::load().context("load configuration")?;
     info!(config:?; "starting");
     let Config {
-        run_migrations,
+        thread_stack_size,
         application_config,
         infra_config,
         telemetry_config:
@@ -74,34 +73,45 @@ async fn run() -> anyhow::Result<()> {
     telemetry::init_metrics(metrics_config);
 
     let infra::Config {
+        run_migrations,
         storage_config,
         ledger_db_config,
         pub_sub_config,
         node_config,
     } = infra_config;
 
-    let node = SubxtNode::new(node_config)
-        .await
-        .context("create SubxtNode")?;
+    let runtime = Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(thread_stack_size as usize)
+        .build()
+        .context("build Tokio runtime")?;
 
-    let pool = pool::postgres::PostgresPool::new(storage_config)
-        .await
-        .context("create DB pool for Postgres")?;
-    if run_migrations {
-        migrations::postgres::run(&pool)
+    runtime.block_on(async {
+        let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+
+        let node = SubxtNode::new(node_config)
             .await
-            .context("run Postgres migrations")?;
-    }
+            .context("create SubxtNode")?;
 
-    let storage = infra::storage::Storage::new(pool.clone());
+        let pool = pool::postgres::PostgresPool::new(storage_config)
+            .await
+            .context("create DB pool for Postgres")?;
+        if run_migrations {
+            migrations::postgres::run(&pool)
+                .await
+                .context("run Postgres migrations")?;
+        }
 
-    ledger_db::init(ledger_db_config, pool);
+        let storage = infra::storage::Storage::new(pool.clone());
 
-    let publisher = pub_sub::nats::publisher::NatsPublisher::new(pub_sub_config)
-        .await
-        .context("create NatsPublisher")?;
+        ledger_db::init(ledger_db_config, pool);
 
-    application::run(application_config, node, storage, publisher, sigterm).await
+        let publisher = pub_sub::nats::publisher::NatsPublisher::new(pub_sub_config)
+            .await
+            .context("create NatsPublisher")?;
+
+        application::run(application_config, node, storage, publisher, sigterm).await
+    })
 }
 
 #[cfg(not(feature = "cloud"))]

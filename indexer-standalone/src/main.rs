@@ -15,8 +15,7 @@
 mod config;
 
 #[cfg(feature = "standalone")]
-#[tokio::main]
-async fn main() {
+fn main() {
     use indexer_common::telemetry;
     use log::error;
     use std::panic;
@@ -28,7 +27,7 @@ async fn main() {
     panic::set_hook(Box::new(|panic| error!(panic:%; "process panicked")));
 
     // Run and log any error.
-    if let Err(error) = run().await {
+    if let Err(error) = run() {
         let backtrace = error.backtrace();
         let error = format!("{error:#}");
         error!(error, backtrace:%; "process exited with ERROR");
@@ -37,7 +36,7 @@ async fn main() {
 }
 
 #[cfg(feature = "standalone")]
-async fn run() -> anyhow::Result<()> {
+fn run() -> anyhow::Result<()> {
     use crate::config::{Config, InfraConfig};
     use anyhow::Context;
     use chain_indexer::infra::subxt_node::SubxtNode;
@@ -51,6 +50,7 @@ async fn run() -> anyhow::Result<()> {
     use log::info;
     use std::panic;
     use tokio::{
+        runtime::Builder,
         select,
         signal::unix::{SignalKind, signal},
         task,
@@ -58,7 +58,7 @@ async fn run() -> anyhow::Result<()> {
 
     // Load configuration.
     let Config {
-        run_migrations,
+        thread_stack_size,
         application_config,
         infra_config,
         telemetry_config:
@@ -73,13 +73,13 @@ async fn run() -> anyhow::Result<()> {
     telemetry::init_metrics(metrics_config);
 
     info!(
-        run_migrations,
         application_config:?,
         infra_config:?;
         "starting"
     );
 
     let InfraConfig {
+        run_migrations,
         storage_config,
         ledger_db_config,
         node_config,
@@ -87,72 +87,82 @@ async fn run() -> anyhow::Result<()> {
         secret,
     } = infra_config;
 
-    let pool = pool::sqlite::SqlitePool::new(storage_config)
-        .await
-        .context("create DB pool for Sqlite")?;
-    if run_migrations {
-        migrations::sqlite::run(&pool)
+    let runtime = Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(thread_stack_size as usize)
+        .build()
+        .context("build Tokio runtime")?;
+
+    runtime.block_on(async {
+        let pool = pool::sqlite::SqlitePool::new(storage_config)
             .await
-            .context("run Sqlite migrations")?;
-    }
+            .context("create DB pool for Sqlite")?;
+        if run_migrations {
+            migrations::sqlite::run(&pool)
+                .await
+                .context("run Sqlite migrations")?;
+        }
 
-    let cipher = make_cipher(secret).context("make cipher")?;
+        let cipher = make_cipher(secret).context("make cipher")?;
 
-    let pub_sub = pub_sub::in_mem::InMemPubSub::default();
+        let pub_sub = pub_sub::in_mem::InMemPubSub::default();
 
-    ledger_db::init(ledger_db_config)
-        .await
-        .context("initialize ledger db")?;
-
-    let chain_indexer = task::spawn({
-        let node = SubxtNode::new(node_config)
+        ledger_db::init(ledger_db_config)
             .await
-            .context("create SubxtNode")?;
-        let storage = chain_indexer::infra::storage::Storage::new(pool.clone());
+            .context("initialize ledger db")?;
 
-        let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+        let chain_indexer = task::spawn({
+            let node = SubxtNode::new(node_config)
+                .await
+                .context("create SubxtNode")?;
+            let storage = chain_indexer::infra::storage::Storage::new(pool.clone());
 
-        chain_indexer::application::run(
-            application_config.clone().into(),
-            node,
-            storage,
-            pub_sub.publisher(),
-            sigterm,
-        )
-    });
+            let sigterm =
+                signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
-    let indexer_api = task::spawn({
-        let subscriber = pub_sub.subscriber();
-        let storage = indexer_api::infra::storage::Storage::new(cipher.clone(), pool.clone());
-        let api = AxumApi::new(api_config, storage, subscriber.clone());
+            chain_indexer::application::run(
+                application_config.clone().into(),
+                node,
+                storage,
+                pub_sub.publisher(),
+                sigterm,
+            )
+        });
 
-        indexer_api::application::run(application_config.clone().into(), api, subscriber)
-    });
+        let indexer_api = task::spawn({
+            let subscriber = pub_sub.subscriber();
+            let storage = indexer_api::infra::storage::Storage::new(cipher.clone(), pool.clone());
+            let api = AxumApi::new(api_config, storage, subscriber.clone());
 
-    let wallet_indexer = task::spawn({
-        let storage = wallet_indexer::infra::storage::Storage::new(cipher, pool);
-        let publisher = pub_sub.publisher();
-        let subscriber = pub_sub.subscriber();
-        let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+            indexer_api::application::run(application_config.clone().into(), api, subscriber)
+        });
 
-        wallet_indexer::application::run(
-            application_config.into(),
-            storage,
-            publisher,
-            subscriber,
-            sigterm,
-        )
-    });
+        let wallet_indexer = task::spawn({
+            let storage = wallet_indexer::infra::storage::Storage::new(cipher, pool);
+            let publisher = pub_sub.publisher();
+            let subscriber = pub_sub.subscriber();
+            let sigterm =
+                signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
-    select! {
-        result = chain_indexer => handle_exit("chain-indexer", result),
-        result = wallet_indexer => handle_exit("wallet-indexer", result),
-        result = indexer_api => handle_exit("indexer-api", result),
-    }
+            wallet_indexer::application::run(
+                application_config.into(),
+                storage,
+                publisher,
+                subscriber,
+                sigterm,
+            )
+        });
 
-    info!("indexer shutting down");
+        select! {
+            result = chain_indexer => handle_exit("chain-indexer", result),
+            result = wallet_indexer => handle_exit("wallet-indexer", result),
+            result = indexer_api => handle_exit("indexer-api", result),
+        }
 
-    std::process::exit(1);
+        info!("indexer shutting down");
+
+        std::process::exit(1);
+    })
 }
 
 #[cfg(feature = "standalone")]
@@ -177,7 +187,6 @@ fn handle_exit(task_name: &str, result: Result<anyhow::Result<()>, tokio::task::
 }
 
 #[cfg(not(feature = "standalone"))]
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     unimplemented!()
 }

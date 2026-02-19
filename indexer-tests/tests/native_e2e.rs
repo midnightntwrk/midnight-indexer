@@ -53,6 +53,7 @@ static LATEST_NODE_VERSION: LazyLock<String> = LazyLock::new(|| {
 });
 
 static WS_DIR: LazyLock<String> = LazyLock::new(|| format!("{}/..", env!("CARGO_MANIFEST_DIR")));
+
 static TARGET_DIR: LazyLock<String> = LazyLock::new(|| {
     env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| format!("{}/target", &*WS_DIR))
 });
