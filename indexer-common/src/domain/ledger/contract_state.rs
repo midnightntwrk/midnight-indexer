@@ -16,18 +16,17 @@ use crate::domain::{
     ledger::{Error, TaggedSerializableExt},
 };
 use fastrace::trace;
-use midnight_coin_structure_v7::coin::TokenType as TokenTypeV7;
-use midnight_coin_structure_v8::coin::TokenType as TokenTypeV8;
-use midnight_onchain_runtime_v7::state::ContractState as ContractStateV7;
-use midnight_onchain_runtime_v8::state::ContractState as ContractStateV8;
+use midnight_coin_structure::coin::TokenType as MidnightTokenType;
+use midnight_onchain_runtime_v2::state::ContractState as ContractStateV2;
+use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
 use midnight_serialize::tagged_deserialize;
 use midnight_storage_core::{DefaultDB, arena::Sp};
 
 /// Facade for `ContractState` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum ContractState {
-    V7(ContractStateV7<DefaultDB>),
-    V8(ContractStateV8<DefaultDB>),
+    V2(ContractStateV2<DefaultDB>),
+    V3(ContractStateV3<DefaultDB>),
 }
 
 impl ContractState {
@@ -41,13 +40,13 @@ impl ContractState {
             LedgerVersion::V7 => {
                 let contract_state = tagged_deserialize(&mut contract_state.as_ref())
                     .map_err(|error| Error::Deserialize("ContractStateV7", error))?;
-                Self::V7(contract_state)
+                Self::V2(contract_state)
             }
 
             LedgerVersion::V8 => {
                 let contract_state = tagged_deserialize(&mut contract_state.as_ref())
                     .map_err(|error| Error::Deserialize("ContractStateV8", error))?;
-                Self::V8(contract_state)
+                Self::V3(contract_state)
             }
         };
 
@@ -57,7 +56,7 @@ impl ContractState {
     /// Get the token balances for this contract.
     pub fn balances(&self) -> Result<Vec<ContractBalance>, Error> {
         match self {
-            Self::V7(contract_state) => {
+            Self::V2(contract_state) => {
                 contract_state
                     .balance
                     .iter()
@@ -71,7 +70,7 @@ impl ContractState {
                     .map(|(token_type, amount)| {
                         match token_type {
                             // For unshielded tokens extract the type directly.
-                            TokenTypeV7::Unshielded(unshielded) => Ok(ContractBalance {
+                            MidnightTokenType::Unshielded(unshielded) => Ok(ContractBalance {
                                 token_type: unshielded.0.0.into(),
                                 amount,
                             }),
@@ -92,7 +91,7 @@ impl ContractState {
                     .collect()
             }
 
-            Self::V8(contract_state) => {
+            Self::V3(contract_state) => {
                 contract_state
                     .balance
                     .iter()
@@ -106,7 +105,7 @@ impl ContractState {
                     .map(|(token_type, amount)| {
                         match token_type {
                             // For unshielded tokens extract the type directly.
-                            TokenTypeV8::Unshielded(unshielded) => Ok(ContractBalance {
+                            MidnightTokenType::Unshielded(unshielded) => Ok(ContractBalance {
                                 token_type: unshielded.0.0.into(),
                                 amount,
                             }),

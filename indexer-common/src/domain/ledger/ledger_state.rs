@@ -34,19 +34,9 @@ use midnight_base_crypto::{
     hash::{HashOutput, persistent_commit},
     time::Timestamp,
 };
-use midnight_coin_structure_v7::{
-    coin::{
-        NIGHT as NIGHTV7, TokenType as TokenTypeV7, UnshieldedTokenType as UnshieldedTokenTypeV7,
-        UserAddress as UserAddressV7,
-    },
-    contract::ContractAddress as ContractAddressV7,
-};
-use midnight_coin_structure_v8::{
-    coin::{
-        NIGHT as NIGHTV8, TokenType as TokenTypeV8, UnshieldedTokenType as UnshieldedTokenTypeV8,
-        UserAddress as UserAddressV8,
-    },
-    contract::ContractAddress as ContractAddressV8,
+use midnight_coin_structure::{
+    coin::{NIGHT, TokenType as LedgerTokenType, UnshieldedTokenType, UserAddress},
+    contract::{ContractAddress as ContractAddressV7, ContractAddress as ContractAddressV8},
 };
 use midnight_ledger_v7::{
     dust::{
@@ -80,21 +70,16 @@ use midnight_ledger_v8::{
     },
     verify::WellFormedStrictness as WellFormedStrictnessV8,
 };
-use midnight_onchain_runtime_v7::context::BlockContext as BlockContextV7;
-use midnight_onchain_runtime_v8::context::BlockContext as BlockContextV8;
+use midnight_onchain_runtime_v2::context::BlockContext as BlockContextV2;
+use midnight_onchain_runtime_v3::context::BlockContext as BlockContextV3;
 use midnight_serialize::{Deserializable, tagged_deserialize};
 use midnight_storage_core::{
     arena::{ArenaKey, Sp, TypedArenaKey},
     db::DB,
     storage::default_storage,
 };
-use midnight_transient_crypto_v7::merkle_tree::{
-    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV7,
-    MerkleTreeDigest as MerkleTreeDigestV7, TreeInsertionPath as TreeInsertionPathV7,
-};
-use midnight_transient_crypto_v8::merkle_tree::{
-    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV8,
-    MerkleTreeDigest as MerkleTreeDigestV8, TreeInsertionPath as TreeInsertionPathV8,
+use midnight_transient_crypto::merkle_tree::{
+    MerkleTreeCollapsedUpdate, MerkleTreeDigest, TreeInsertionPath,
 };
 use midnight_zswap_v7::ledger::State as ZswapStateV7;
 use midnight_zswap_v8::ledger::State as ZswapStateV8;
@@ -157,7 +142,7 @@ impl LedgerState {
 
                 let treasury_night = ledger_state
                     .treasury
-                    .get(&TokenTypeV7::Unshielded(NIGHTV7))
+                    .get(&LedgerTokenType::Unshielded(NIGHT))
                     .copied()
                     .unwrap_or(0);
 
@@ -180,7 +165,7 @@ impl LedgerState {
 
                 let treasury_night = ledger_state
                     .treasury
-                    .get(&TokenTypeV8::Unshielded(NIGHTV8))
+                    .get(&LedgerTokenType::Unshielded(NIGHT))
                     .copied()
                     .unwrap_or(0);
 
@@ -385,7 +370,7 @@ impl LedgerState {
 
                 let cx = TransactionContextV7 {
                     ref_state: ledger_state.clone(),
-                    block_context: BlockContextV7 {
+                    block_context: BlockContextV2 {
                         tblock: timestamp(block_timestamp),
                         tblock_err: 30,
                         parent_block_hash: HashOutput(parent_block_hash.0),
@@ -457,7 +442,7 @@ impl LedgerState {
 
                 let cx = TransactionContextV8 {
                     ref_state: ledger_state.clone(),
-                    block_context: BlockContextV8 {
+                    block_context: BlockContextV3 {
                         tblock: timestamp(block_timestamp),
                         tblock_err: 30,
                         parent_block_hash: HashOutput(parent_block_hash.0),
@@ -661,23 +646,23 @@ impl LedgerState {
     /// Get the serialized merkle-tree collapsed update for the given indices.
     pub fn collapsed_update(&self, start_index: u64, end_index: u64) -> Result<ByteVec, Error> {
         match self {
-            Self::V7 { ledger_state, .. } => MerkleTreeCollapsedUpdateV7::new(
+            Self::V7 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
                 &ledger_state.zswap.coin_coms,
                 start_index,
                 end_index,
             )
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
-            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdateV7", error)),
+            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdate", error)),
 
-            Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdateV8::new(
+            Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
                 &ledger_state.zswap.coin_coms,
                 start_index,
                 end_index,
             )
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
-            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdateV8", error)),
+            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdate", error)),
         }
     }
 
@@ -788,8 +773,8 @@ impl LedgerParameters {
 /// Facade for zswap state root across supported (protocol) versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZswapStateRoot {
-    V7(MerkleTreeDigestV7),
-    V8(MerkleTreeDigestV8),
+    V7(MerkleTreeDigest),
+    V8(MerkleTreeDigest),
 }
 
 impl ZswapStateRoot {
@@ -801,13 +786,13 @@ impl ZswapStateRoot {
     ) -> Result<Self, Error> {
         let zswap_state_root = match ledger_version {
             LedgerVersion::V7 => {
-                let digest = MerkleTreeDigestV7::deserialize(&mut zswap_state_root.as_ref(), 0)
+                let digest = MerkleTreeDigest::deserialize(&mut zswap_state_root.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("MerkleTreeDigestV7", error))?;
                 Self::V7(digest)
             }
 
             LedgerVersion::V8 => {
-                let digest = MerkleTreeDigestV8::deserialize(&mut zswap_state_root.as_ref(), 0)
+                let digest = MerkleTreeDigest::deserialize(&mut zswap_state_root.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("MerkleTreeDigestV8", error))?;
                 Self::V8(digest)
             }
@@ -1020,7 +1005,7 @@ fn make_dust_initial_utxo_v8(
 }
 
 fn make_dust_generation_dtime_update_v7(
-    update: TreeInsertionPathV7<DustGenerationInfoV7>,
+    update: TreeInsertionPath<DustGenerationInfoV7>,
     raw: ByteVec,
 ) -> Result<LedgerEvent, Error> {
     let generation = &update.leaf.1;
@@ -1070,7 +1055,7 @@ fn make_dust_generation_dtime_update_v7(
 }
 
 fn make_dust_generation_dtime_update_v8(
-    update: TreeInsertionPathV8<DustGenerationInfoV8>,
+    update: TreeInsertionPath<DustGenerationInfoV8>,
     raw: ByteVec,
 ) -> Result<LedgerEvent, Error> {
     let generation = &update.leaf.1;
@@ -1184,7 +1169,7 @@ where
 
         // ClaimRewards creates a single unshielded UTXO for the claimed amount.
         TransactionV7::ClaimRewards(claim) => {
-            let owner = UserAddressV7::from(claim.owner);
+            let owner = UserAddress::from(claim.owner);
             let ledger_intent_hash = {
                 // ClaimRewards don't have intents, but UTXOs need an intent hash. We compute this
                 // hash the same way that the ledger does internally.
@@ -1193,7 +1178,7 @@ where
                     target_address: owner,
                     nonce: claim.nonce,
                 };
-                output.mk_intent_hash(NIGHTV7)
+                output.mk_intent_hash(NIGHT)
             };
             let intent_hash = ledger_intent_hash.0.0.into();
             let initial_nonce = make_initial_nonce_v7(OUTPUT_INDEX_ZERO, intent_hash);
@@ -1202,7 +1187,7 @@ where
             let utxo = UtxoV7 {
                 value: claim.value,
                 owner,
-                type_: UnshieldedTokenTypeV7::default(),
+                type_: UnshieldedTokenType::default(),
                 intent_hash: ledger_intent_hash,
                 output_no: OUTPUT_INDEX_ZERO,
             };
@@ -1288,7 +1273,7 @@ where
 
         // ClaimRewards creates a single unshielded UTXO for the claimed amount.
         TransactionV8::ClaimRewards(claim) => {
-            let owner = UserAddressV8::from(claim.owner);
+            let owner = UserAddress::from(claim.owner);
             let ledger_intent_hash = {
                 // ClaimRewards don't have intents, but UTXOs need an intent hash. We compute this
                 // hash the same way that the ledger does internally.
@@ -1297,7 +1282,7 @@ where
                     target_address: owner,
                     nonce: claim.nonce,
                 };
-                output.mk_intent_hash(NIGHTV8)
+                output.mk_intent_hash(NIGHT)
             };
             let intent_hash = ledger_intent_hash.0.0.into();
             let initial_nonce = make_initial_nonce_v8(OUTPUT_INDEX_ZERO, intent_hash);
@@ -1306,7 +1291,7 @@ where
             let utxo = UtxoV8 {
                 value: claim.value,
                 owner,
-                type_: UnshieldedTokenTypeV8::default(),
+                type_: UnshieldedTokenType::default(),
                 intent_hash: ledger_intent_hash,
                 output_no: OUTPUT_INDEX_ZERO,
             };
@@ -1487,14 +1472,14 @@ fn extend_unshielded_utxos_v7<D>(
             registered_for_dust_generation_v7(spend.output_no, intent_hash, ledger_state);
         let utxo = UtxoV7 {
             value: spend.value,
-            owner: UserAddressV7::from(spend.owner.clone()),
+            owner: UserAddress::from(spend.owner.clone()),
             type_: spend.type_,
             intent_hash: spend.intent_hash,
             output_no: spend.output_no,
         };
 
         UnshieldedUtxo {
-            owner: UserAddressV7::from(spend.owner).0.0.into(),
+            owner: UserAddress::from(spend.owner).0.0.into(),
             token_type: spend.type_.0.0.into(),
             value: spend.value,
             intent_hash,
@@ -1569,14 +1554,14 @@ fn extend_unshielded_utxos_v8<D>(
             registered_for_dust_generation_v8(spend.output_no, intent_hash, ledger_state);
         let utxo = UtxoV8 {
             value: spend.value,
-            owner: UserAddressV8::from(spend.owner.clone()),
+            owner: UserAddress::from(spend.owner.clone()),
             type_: spend.type_,
             intent_hash: spend.intent_hash,
             output_no: spend.output_no,
         };
 
         UnshieldedUtxo {
-            owner: UserAddressV8::from(spend.owner).0.0.into(),
+            owner: UserAddress::from(spend.owner).0.0.into(),
             token_type: spend.type_.0.0.into(),
             value: spend.value,
             intent_hash,
