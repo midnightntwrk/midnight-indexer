@@ -289,5 +289,52 @@ describe('shielded transaction subscriptions', () => {
           ).toBe(true);
         });
     });
+
+    test('should NOT stream shielded transactions after logout', async () => {
+      const seedWithTransactions = dataProvider.getFundingSeed();
+      const viewingKey = await toolkit.showViewingKey(seedWithTransactions);
+
+      const sessionId = await indexerWsClient.openWalletSession(viewingKey);
+
+      const beforeLogoutEvents: ShieldedTxSubscriptionResponse[] = [];
+      const unsubscribeBefore = indexerWsClient.subscribeToShieldedTransactionEvents(
+        {
+          next: (payload) => {
+            log.debug(`Received event before logout: ${JSON.stringify(payload)}`);
+            beforeLogoutEvents.push(payload)
+          }
+        },
+        sessionId,
+      );
+      await new Promise((res) => setTimeout(res, 2000));
+      expect(beforeLogoutEvents.length).toBeGreaterThan(1);
+      unsubscribeBefore();
+
+      await indexerWsClient.closeWalletSession(sessionId);
+
+      await new Promise(res => setTimeout(res, 2000));
+
+      const afterLogoutEvents: ShieldedTxSubscriptionResponse[] = [];
+      const unsubscribeAfter = indexerWsClient.subscribeToShieldedTransactionEvents(
+        {
+          next: (payload) => {
+            log.debug(`Received event before logout: ${JSON.stringify(payload)}`);
+            afterLogoutEvents.push(payload)
+          }
+        },
+        sessionId,
+      );
+
+      await new Promise(res => setTimeout(res, 2000));
+      unsubscribeAfter();
+
+      const hasTypename = (messages: ShieldedTxSubscriptionResponse[], typename: string) =>
+        messages.some(
+          m => m.data?.shieldedTransactions?.__typename === typename
+        );
+
+      expect(hasTypename(afterLogoutEvents, 'RelevantTransaction')).toBe(false);
+      expect(hasTypename(afterLogoutEvents, 'ShieldedTransactionsProgress')).toBe(true);
+    });
   });
 });
