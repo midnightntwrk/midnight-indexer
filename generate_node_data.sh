@@ -155,4 +155,50 @@ docker run \
     --contract-address $(cat /tmp/contract_address.mn) \
     --new-authority-seed 1000000000000000000000000000000000000000000000000000000000000001
 
+# Wait for enough blocks to be finalized so that the pre-populated chain data
+# contains sufficient blocks for e2e tests (MAX_HEIGHT = 32 in e2e.rs).
+readonly min_finalized_height=40
+echo "Waiting for finalized height >= $min_finalized_height..."
+timeout=360
+start_time=$(date +%s)
+while true; do
+    sleep 6
+
+    if (( $(date +%s) - start_time > timeout )); then
+        echo "Timeout after ${timeout}s waiting for finalized height >= $min_finalized_height"
+        exit 1
+    fi
+
+    finalized_hash=$(curl -s -X POST http://localhost:9944 \
+        -H "Content-Type: application/json" \
+        -d '{
+            "jsonrpc":"2.0",
+            "id":1,
+            "method":"chain_getFinalizedHead",
+            "params":[]
+        }' | jq -r .result)
+    if [[ -z "$finalized_hash" || "$finalized_hash" == "null" ]]; then
+        continue
+    fi
+
+    finalized_number=$(curl -s -X POST http://localhost:9944 \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"jsonrpc\":\"2.0\",
+            \"id\":2,
+            \"method\":\"chain_getHeader\",
+            \"params\":[\"$finalized_hash\"]
+        }" | jq -r '.result.number')
+    if [[ -z "$finalized_number" || "$finalized_number" == "null" ]]; then
+        continue
+    fi
+
+    height=$((finalized_number))
+    echo "finalized height: $height"
+    if [[ $height -ge $min_finalized_height ]]; then
+        echo "Reached target finalized height: $height"
+        break
+    fi
+done
+
 echo "Successfully generated node data"
