@@ -63,10 +63,6 @@ fn run() -> anyhow::Result<()> {
             },
     } = config;
 
-    // Initialize tracing and metrics.
-    telemetry::init_tracing(tracing_config);
-    telemetry::init_metrics(metrics_config);
-
     let infra::Config {
         run_migrations,
         storage_config,
@@ -83,6 +79,9 @@ fn run() -> anyhow::Result<()> {
         .context("build Tokio runtime")?;
 
     runtime.block_on(async {
+        telemetry::init_tracing(tracing_config);
+        telemetry::init_metrics(metrics_config);
+
         let pool = pool::postgres::PostgresPool::new(storage_config)
             .await
             .context("create DB pool for Postgres")?;

@@ -68,10 +68,6 @@ fn run() -> anyhow::Result<()> {
             },
     } = config;
 
-    // Initialize tracing and metrics.
-    telemetry::init_tracing(tracing_config);
-    telemetry::init_metrics(metrics_config);
-
     let infra::Config {
         run_migrations,
         storage_config,
@@ -88,6 +84,9 @@ fn run() -> anyhow::Result<()> {
 
     runtime.block_on(async {
         let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+
+        telemetry::init_tracing(tracing_config);
+        telemetry::init_metrics(metrics_config);
 
         let node = SubxtNode::new(node_config)
             .await

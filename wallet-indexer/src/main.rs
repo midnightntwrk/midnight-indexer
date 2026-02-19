@@ -59,10 +59,6 @@ async fn run() -> anyhow::Result<()> {
             },
     } = config;
 
-    // Initialize tracing and metrics.
-    telemetry::init_tracing(tracing_config);
-    telemetry::init_metrics(metrics_config);
-
     let infra::Config {
         run_migrations,
         storage_config,
@@ -72,6 +68,9 @@ async fn run() -> anyhow::Result<()> {
     } = infra_config;
 
     let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+
+    telemetry::init_tracing(tracing_config);
+    telemetry::init_metrics(metrics_config);
 
     let pool = pool::postgres::PostgresPool::new(storage_config)
         .await
