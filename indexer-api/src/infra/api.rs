@@ -174,8 +174,8 @@ where
         max_depth,
     );
 
-    // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a Service
-    // Builder together, so we use `Router::layer` with the inverted (bottom to top) order.
+    // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a
+    // ServiceBuilder together, so we use `Router::layer` with the inverted (bottom to top) order.
     Router::new()
         .route("/ready", get(ready))
         .nest("/api/v3", v4_app.clone()) // v3 is an alias to v4 for backwards compatibility.
