@@ -33,6 +33,9 @@ TARGET_ENV=devnet bun run src/scanner.ts
 
 # Run to generate test data for the indexer tests
 bun run src/scanner.ts <path/to/test/data/folder>
+
+# Start scanning from a specific block height (must be less than latest)
+START_BLOCK_HEIGHT=1000 TARGET_ENV=devnet bun run src/scanner.ts
 ```
 
 ### Available Environments (these might change in future)
@@ -74,18 +77,32 @@ TARGET_ENV=undeployed bun run scan
 The scanner uses this information as configuration input:
 
 - Environment variables for target environment (`TARGET_ENV`, defaults to `undeployed`)
-
-other information are provided already, but could require future updates based on the midnight indexer and midnight network evolution
+- **START_BLOCK_HEIGHT** (optional) — Start scanning from this block height. Must be less than the latest block height. When set, overrides resume behavior and the blocks file is created/overwritten (not appended). Stats at end are still merged with any existing stats for that environment.
 - WebSocket URLs for different networks (automatically extracted from the target environment)
 - GraphQL subscription queries (available in a separate GraphQL file)
 
+### Resume behavior
+
+- **First run (no stats file for this environment):** The scanner performs a full sync from block 0 up to the latest block height. Block data is written to `tmp_scan/{TARGET_ENV}_blocks.jsonl`. At the end, stats are written to `stats/{TARGET_ENV}_stats.json`.
+- **Subsequent runs (stats file exists):** The scanner resumes from the last scanned block height stored in `stats/{TARGET_ENV}_stats.json` (i.e. from `lastScannedBlockHeight + 1`). New blocks are appended to `tmp_scan/{TARGET_ENV}_blocks.jsonl`. At the end, the new run’s counts are added to the existing stats and the file is updated. If the chain has no new blocks, the scanner exits without subscribing.
+
+Start height is chosen in this order: `START_BLOCK_HEIGHT` (if set) → resume from stats file → 0.
 
 ## Output
 
 The scanner creates:
-- `tmp_scan/` directory for temporary files
-- `{TARGET_ENV}_blocks.jsonl` - Raw block data stored for post processing
-- `*.jsonc` - A number of jsonc files created from the templates which are needed as Indexer test data
+- `tmp_scan/` directory for block data files
+- `tmp_scan/{TARGET_ENV}_blocks.jsonl` — Raw block data (overwritten on first run or when using `START_BLOCK_HEIGHT`; appended when resuming)
+- `stats/` directory for per-environment scan statistics
+- `stats/{TARGET_ENV}_stats.json` — Persisted stats used for resume and cumulative totals. Schema:
+  - `lastScannedBlockHeight` — Last block height received (used to resume from `lastScannedBlockHeight + 1`)
+  - `totalBlocksScanned` — Total blocks scanned (cumulative across runs when resuming)
+  - `blocksWithTransactions` — Number of blocks that had transactions
+  - `totalTransactionsFound` — Total transaction count
+  - `contractActionsFound` — Number of blocks with contract actions
+  - `totalScanDurationSeconds` — Cumulative scan duration in seconds
+  - `lastUpdated` — ISO timestamp of last update
+- `*.jsonc` — A number of jsonc files created from the templates which are needed as Indexer test data (when a test data folder path is provided)
 
 ## Troubleshooting
 
