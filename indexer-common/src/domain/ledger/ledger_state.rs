@@ -35,11 +35,7 @@ use midnight_base_crypto::{
     time::Timestamp,
 };
 use midnight_coin_structure::{
-    coin::{
-        NIGHT as NIGHTV7, NIGHT as NIGHTV8, TokenType as TokenTypeV7, TokenType as TokenTypeV8,
-        UnshieldedTokenType as UnshieldedTokenTypeV7, UnshieldedTokenType as UnshieldedTokenTypeV8,
-        UserAddress as UserAddressV7, UserAddress as UserAddressV8,
-    },
+    coin::{NIGHT, TokenType as LedgerTokenType, UnshieldedTokenType, UserAddress},
     contract::{ContractAddress as ContractAddressV7, ContractAddress as ContractAddressV8},
 };
 use midnight_ledger_v7::{
@@ -74,8 +70,8 @@ use midnight_ledger_v8::{
     },
     verify::WellFormedStrictness as WellFormedStrictnessV8,
 };
-use midnight_onchain_runtime_v2::context::BlockContext as BlockContextV7;
-use midnight_onchain_runtime_v3::context::BlockContext as BlockContextV8;
+use midnight_onchain_runtime_v2::context::BlockContext as BlockContextV2;
+use midnight_onchain_runtime_v3::context::BlockContext as BlockContextV3;
 use midnight_serialize::{Deserializable, tagged_deserialize};
 use midnight_storage_core::{
     arena::{ArenaKey, Sp, TypedArenaKey},
@@ -146,7 +142,7 @@ impl LedgerState {
 
                 let treasury_night = ledger_state
                     .treasury
-                    .get(&TokenTypeV7::Unshielded(NIGHTV7))
+                    .get(&LedgerTokenType::Unshielded(NIGHT))
                     .copied()
                     .unwrap_or(0);
 
@@ -169,7 +165,7 @@ impl LedgerState {
 
                 let treasury_night = ledger_state
                     .treasury
-                    .get(&TokenTypeV8::Unshielded(NIGHTV8))
+                    .get(&LedgerTokenType::Unshielded(NIGHT))
                     .copied()
                     .unwrap_or(0);
 
@@ -374,7 +370,7 @@ impl LedgerState {
 
                 let cx = TransactionContextV7 {
                     ref_state: ledger_state.clone(),
-                    block_context: BlockContextV7 {
+                    block_context: BlockContextV2 {
                         tblock: timestamp(block_timestamp),
                         tblock_err: 30,
                         parent_block_hash: HashOutput(parent_block_hash.0),
@@ -446,7 +442,7 @@ impl LedgerState {
 
                 let cx = TransactionContextV8 {
                     ref_state: ledger_state.clone(),
-                    block_context: BlockContextV8 {
+                    block_context: BlockContextV3 {
                         tblock: timestamp(block_timestamp),
                         tblock_err: 30,
                         parent_block_hash: HashOutput(parent_block_hash.0),
@@ -1173,7 +1169,7 @@ where
 
         // ClaimRewards creates a single unshielded UTXO for the claimed amount.
         TransactionV7::ClaimRewards(claim) => {
-            let owner = UserAddressV7::from(claim.owner);
+            let owner = UserAddress::from(claim.owner);
             let ledger_intent_hash = {
                 // ClaimRewards don't have intents, but UTXOs need an intent hash. We compute this
                 // hash the same way that the ledger does internally.
@@ -1182,7 +1178,7 @@ where
                     target_address: owner,
                     nonce: claim.nonce,
                 };
-                output.mk_intent_hash(NIGHTV7)
+                output.mk_intent_hash(NIGHT)
             };
             let intent_hash = ledger_intent_hash.0.0.into();
             let initial_nonce = make_initial_nonce_v7(OUTPUT_INDEX_ZERO, intent_hash);
@@ -1191,7 +1187,7 @@ where
             let utxo = UtxoV7 {
                 value: claim.value,
                 owner,
-                type_: UnshieldedTokenTypeV7::default(),
+                type_: UnshieldedTokenType::default(),
                 intent_hash: ledger_intent_hash,
                 output_no: OUTPUT_INDEX_ZERO,
             };
@@ -1277,7 +1273,7 @@ where
 
         // ClaimRewards creates a single unshielded UTXO for the claimed amount.
         TransactionV8::ClaimRewards(claim) => {
-            let owner = UserAddressV8::from(claim.owner);
+            let owner = UserAddress::from(claim.owner);
             let ledger_intent_hash = {
                 // ClaimRewards don't have intents, but UTXOs need an intent hash. We compute this
                 // hash the same way that the ledger does internally.
@@ -1286,7 +1282,7 @@ where
                     target_address: owner,
                     nonce: claim.nonce,
                 };
-                output.mk_intent_hash(NIGHTV8)
+                output.mk_intent_hash(NIGHT)
             };
             let intent_hash = ledger_intent_hash.0.0.into();
             let initial_nonce = make_initial_nonce_v8(OUTPUT_INDEX_ZERO, intent_hash);
@@ -1295,7 +1291,7 @@ where
             let utxo = UtxoV8 {
                 value: claim.value,
                 owner,
-                type_: UnshieldedTokenTypeV8::default(),
+                type_: UnshieldedTokenType::default(),
                 intent_hash: ledger_intent_hash,
                 output_no: OUTPUT_INDEX_ZERO,
             };
@@ -1476,14 +1472,14 @@ fn extend_unshielded_utxos_v7<D>(
             registered_for_dust_generation_v7(spend.output_no, intent_hash, ledger_state);
         let utxo = UtxoV7 {
             value: spend.value,
-            owner: UserAddressV7::from(spend.owner.clone()),
+            owner: UserAddress::from(spend.owner.clone()),
             type_: spend.type_,
             intent_hash: spend.intent_hash,
             output_no: spend.output_no,
         };
 
         UnshieldedUtxo {
-            owner: UserAddressV7::from(spend.owner).0.0.into(),
+            owner: UserAddress::from(spend.owner).0.0.into(),
             token_type: spend.type_.0.0.into(),
             value: spend.value,
             intent_hash,
@@ -1558,14 +1554,14 @@ fn extend_unshielded_utxos_v8<D>(
             registered_for_dust_generation_v8(spend.output_no, intent_hash, ledger_state);
         let utxo = UtxoV8 {
             value: spend.value,
-            owner: UserAddressV8::from(spend.owner.clone()),
+            owner: UserAddress::from(spend.owner.clone()),
             type_: spend.type_,
             intent_hash: spend.intent_hash,
             output_no: spend.output_no,
         };
 
         UnshieldedUtxo {
-            owner: UserAddressV8::from(spend.owner).0.0.into(),
+            owner: UserAddress::from(spend.owner).0.0.into(),
             token_type: spend.type_.0.0.into(),
             value: spend.value,
             intent_hash,

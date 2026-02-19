@@ -25,7 +25,7 @@ impl SecretKey {
             &mut secret_key.as_ref(),
             0,
         )
-        .map_err(|error| Error::Deserialize("SecretKeyV7", error))?;
+        .map_err(|error| Error::Deserialize("SecretKey", error))?;
         Ok(Self(inner))
     }
 
