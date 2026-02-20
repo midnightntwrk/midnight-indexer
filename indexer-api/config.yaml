@@ -1,9 +1,11 @@
-run_migrations: true
+thread_stack_size: "24MiB"
 
 application:
   network_id: "undeployed"
 
 infra:
+  run_migrations: true
+
   storage:
     host: "localhost"
     port: 5432
@@ -15,7 +17,7 @@ infra:
     max_lifetime: "5m"
 
   ledger_db:
-    cache_size: 1024
+    cache_size: "1kiB"
 
   pub_sub:
     url: "localhost:4222"
@@ -28,6 +30,22 @@ infra:
     request_body_limit: "1MiB"
     max_complexity: 200
     max_depth: 15
+    subscription:
+      blocks:
+        batch_size: 20
+      contract_actions:
+        batch_size: 20
+      dust_ledger_events:
+        batch_size: 20
+      shielded_transactions:
+        batch_size: 20
+        progress_update_interval: "30s"
+        keep_wallet_alive_interval: "1m"
+      unshielded_transactions:
+        batch_size: 20
+        progress_update_interval: "30s"
+      zswap_ledger_events:
+        batch_size: 20
 
 telemetry:
   tracing:

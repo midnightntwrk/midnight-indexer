@@ -46,14 +46,10 @@ async fn run() -> anyhow::Result<()> {
     use tokio::signal::unix::{SignalKind, signal};
     use wallet_indexer::{application, config::Config, infra};
 
-    // Register SIGTERM handler.
-    let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
-
     // Load configuration.
     let config = Config::load().context("load configuration")?;
     info!(config:?; "starting");
     let Config {
-        run_migrations,
         application_config,
         infra_config,
         telemetry_config:
@@ -63,16 +59,18 @@ async fn run() -> anyhow::Result<()> {
             },
     } = config;
 
-    // Initialize tracing and metrics.
-    telemetry::init_tracing(tracing_config);
-    telemetry::init_metrics(metrics_config);
-
     let infra::Config {
+        run_migrations,
         storage_config,
         ledger_db_config,
         pub_sub_config,
         secret,
     } = infra_config;
+
+    let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+
+    telemetry::init_tracing(tracing_config);
+    telemetry::init_metrics(metrics_config);
 
     let pool = pool::postgres::PostgresPool::new(storage_config)
         .await

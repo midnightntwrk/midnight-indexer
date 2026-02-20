@@ -30,6 +30,7 @@ derive_more        = { workspace = true, features = [ "debug", "display", "from"
 fastrace           = { workspace = true, features = [ "enable" ] }
 fastrace-axum      = { workspace = true }
 futures            = { workspace = true }
+humantime-serde    = { workspace = true }
 indexer-common     = { path = "../indexer-common" }
 indoc              = { workspace = true }
 log                = { workspace = true, features = [ "kv" ] }

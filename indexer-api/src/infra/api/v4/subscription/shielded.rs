@@ -30,21 +30,10 @@ use futures::{
 };
 use indexer_common::domain::{SessionId, Subscriber, WalletIndexed};
 use log::{debug, warn};
-use std::{
-    future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, sync::Arc, time::Duration,
-};
+use std::{future::ready, marker::PhantomData, pin::pin, sync::Arc};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
-
-// TODO: Make configurable!
-const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
-
-// TODO: Make configurable!
-const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(3);
-
-// TODO: Make configurable!
-const KEEP_WALLET_ACTIVE_INTERVAL: Duration = Duration::from_secs(60);
 
 /// An event of the shielded transactions subscription.
 #[derive(Debug, Union)]
@@ -181,7 +170,11 @@ where
         // As long as the subscription is alive, the wallet is periodically kept active, even if
         // there are no new transactions.
         let storage = cx.get_storage::<S>();
-        let keep_wallet_active = IntervalStream::new(interval(KEEP_WALLET_ACTIVE_INTERVAL))
+        let keep_wallet_alive_interval = cx
+            .get_subscription_config()
+            .shielded_transactions
+            .keep_wallet_alive_interval;
+        let keep_wallet_active = IntervalStream::new(interval(keep_wallet_alive_interval))
             .then(move |_| async move { storage.keep_wallet_active(session_id).await })
             .map_err(|error| {
                 ApiError::Server(InnerApiError(
@@ -213,6 +206,10 @@ where
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
     let ledger_state_cache = cx.get_ledger_state_cache();
+    let batch_size = cx
+        .get_subscription_config()
+        .shielded_transactions
+        .batch_size;
 
     let wallet_indexed_events = subscriber
         .subscribe::<WalletIndexed>()
@@ -222,7 +219,7 @@ where
         // Stream exiting transactions.
         debug!(session_id:%, index; "streaming existing transactions");
 
-        let transactions = storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
+        let transactions = storage.get_relevant_transactions(session_id, index, batch_size);
         let mut transactions = pin!(transactions);
         while let Some(transaction) = get_next_transaction(&mut transactions)
             .await
@@ -254,7 +251,7 @@ where
             debug!(index; "streaming next live transactions");
 
             let transactions =
-                storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
+                storage.get_relevant_transactions(session_id, index, batch_size);
             let mut transactions = pin!(transactions);
             while let Some(transaction) =  get_next_transaction(&mut transactions)
                 .await
@@ -325,8 +322,14 @@ fn make_progress<'a, S>(
 where
     S: Storage,
 {
-    let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
-    intervals.then(move |_| make_progress_update(session_id, cx.get_storage::<S>()))
+    let storage = cx.get_storage::<S>();
+    let progress_update_interval = cx
+        .get_subscription_config()
+        .shielded_transactions
+        .progress_update_interval;
+
+    let intervals = IntervalStream::new(interval(progress_update_interval));
+    intervals.then(move |_| make_progress_update(session_id, storage))
 }
 
 async fn make_progress_update<S>(

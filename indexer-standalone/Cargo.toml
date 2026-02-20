@@ -16,6 +16,7 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 
 [dependencies]
 anyhow          = { workspace = true }
+byte-unit-serde = { workspace = true }
 chain-indexer   = { path = "../chain-indexer", optional = true }
 humantime-serde = { workspace = true }
 indexer-api     = { path = "../indexer-api", optional = true }

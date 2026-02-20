@@ -15,8 +15,6 @@ use crate::{application, infra};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
-    pub run_migrations: bool,
-
     #[serde(rename = "application")]
     pub application_config: application::Config,
 

@@ -12,8 +12,7 @@
 // limitations under the License.
 
 #[cfg(feature = "cloud")]
-#[tokio::main]
-async fn main() {
+fn main() {
     use indexer_common::telemetry;
     use log::error;
     use std::panic;
@@ -25,7 +24,7 @@ async fn main() {
     panic::set_hook(Box::new(|panic| error!(panic:%; "process panicked")));
 
     // Run and log any error.
-    if let Err(error) = run().await {
+    if let Err(error) = run() {
         let backtrace = error.backtrace();
         let error = format!("{error:#}");
         error!(error, backtrace:%; "process exited with ERROR");
@@ -34,7 +33,7 @@ async fn main() {
 }
 
 #[cfg(feature = "cloud")]
-async fn run() -> anyhow::Result<()> {
+fn run() -> anyhow::Result<()> {
     use anyhow::Context;
     use indexer_api::{
         application,
@@ -48,12 +47,13 @@ async fn run() -> anyhow::Result<()> {
         telemetry,
     };
     use log::info;
+    use tokio::runtime::Builder;
 
     // Load configuration.
     let config = Config::load().context("load configuration")?;
     info!(config:?; "starting");
     let Config {
-        run_migrations,
+        thread_stack_size,
         application_config,
         infra_config,
         telemetry_config:
@@ -63,11 +63,8 @@ async fn run() -> anyhow::Result<()> {
             },
     } = config;
 
-    // Initialize tracing and metrics.
-    telemetry::init_tracing(tracing_config);
-    telemetry::init_metrics(metrics_config);
-
     let infra::Config {
+        run_migrations,
         storage_config,
         ledger_db_config,
         pub_sub_config,
@@ -75,27 +72,36 @@ async fn run() -> anyhow::Result<()> {
         secret,
     } = infra_config;
 
-    let pool = pool::postgres::PostgresPool::new(storage_config)
-        .await
-        .context("create DB pool for Postgres")?;
-    if run_migrations {
-        migrations::postgres::run(&pool)
+    let runtime = Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(thread_stack_size as usize)
+        .build()
+        .context("build Tokio runtime")?;
+
+    runtime.block_on(async {
+        telemetry::init_tracing(tracing_config);
+        telemetry::init_metrics(metrics_config);
+
+        let pool = pool::postgres::PostgresPool::new(storage_config)
             .await
-            .context("run Postgres migrations")?;
-    }
-    let cipher = make_cipher(secret).context("make cipher")?;
+            .context("create DB pool for Postgres")?;
+        if run_migrations {
+            migrations::postgres::run(&pool)
+                .await
+                .context("run Postgres migrations")?;
+        }
 
-    let storage = infra::storage::Storage::new(cipher, pool.clone());
+        let cipher = make_cipher(secret).context("make cipher")?;
+        let storage = infra::storage::Storage::new(cipher, pool.clone());
 
-    ledger_db::init(ledger_db_config, pool);
+        ledger_db::init(ledger_db_config, pool);
 
-    let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config).await?;
+        let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config).await?;
 
-    let api = AxumApi::new(api_config, storage, subscriber.clone());
+        let api = AxumApi::new(api_config, storage, subscriber.clone());
 
-    application::run(application_config, api, subscriber)
-        .await
-        .context("run indexer-API application")
+        application::run(application_config, api, subscriber).await
+    })
 }
 
 #[cfg(not(feature = "cloud"))]

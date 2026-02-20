@@ -24,10 +24,7 @@ use fastrace::{Span, future::FutureExt, prelude::SpanContext};
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};
 use log::{debug, warn};
-use std::{num::NonZeroU32, pin::pin};
-
-// TODO: Make configurable!
-const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
+use std::pin::pin;
 
 pub struct ContractActionSubscription<S, B> {
     _storage: std::marker::PhantomData<S>,
@@ -63,6 +60,7 @@ where
 
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
+        let batch_size = cx.get_subscription_config().contract_actions.batch_size;
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
         let height = resolve_height(offset, storage).await?;
@@ -81,7 +79,7 @@ where
             let contract_actions = storage.get_contract_actions_by_address(
                 &address,
                 contract_action_id,
-                BATCH_SIZE,
+                batch_size,
             );
             let mut contract_actions = pin!(contract_actions);
             while let Some(contract_action) = get_next_contract_action(&mut contract_actions)
@@ -107,7 +105,7 @@ where
                 let contract_actions = storage.get_contract_actions_by_address(
                     &address,
                     contract_action_id,
-                    BATCH_SIZE,
+                    batch_size,
                 );
                 let mut contract_actions = pin!(contract_actions);
 

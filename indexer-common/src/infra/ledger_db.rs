@@ -27,7 +27,7 @@ pub fn init(config: Config, pool: crate::infra::pool::postgres::PostgresPool) {
 
     let db = v7::LedgerDb::new(pool);
     let _ = midnight_storage_core::storage::set_default_storage(|| {
-        midnight_storage_core::Storage::new(cache_size, db)
+        midnight_storage_core::Storage::new(cache_size as usize, db)
     });
 }
 
@@ -45,7 +45,7 @@ pub async fn init(config: Config) -> Result<(), Error> {
 
     let db = v7::LedgerDb::new(pool);
     let _ = midnight_storage_core::storage::set_default_storage(|| {
-        midnight_storage_core::Storage::new(cache_size, db)
+        midnight_storage_core::Storage::new(cache_size as usize, db)
     });
 
     Ok(())
@@ -53,7 +53,8 @@ pub async fn init(config: Config) -> Result<(), Error> {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub cache_size: usize,
+    #[serde(with = "byte_unit_serde")]
+    pub cache_size: u64,
 
     #[cfg(feature = "standalone")]
     pub cnn_url: String,

@@ -17,7 +17,8 @@ use std::{num::NonZeroUsize, time::Duration};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub run_migrations: bool,
+    #[serde(with = "byte_unit_serde")]
+    pub thread_stack_size: u64,
 
     #[serde(rename = "application")]
     pub application_config: ApplicationConfig,
@@ -92,6 +93,8 @@ impl From<ApplicationConfig> for wallet_indexer::application::Config {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InfraConfig {
+    pub run_migrations: bool,
+
     #[serde(rename = "storage")]
     pub storage_config: pool::sqlite::Config,
 

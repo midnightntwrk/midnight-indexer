@@ -1086,6 +1086,7 @@ version = "4.0.0"
 dependencies = [
  "anyhow",
  "async-stream",
+ "byte-unit-serde",
  "clap",
  "const-hex",
  "derive_more 2.1.1",
@@ -3057,6 +3058,7 @@ dependencies = [
  "fastrace",
  "fastrace-axum",
  "futures",
+ "humantime-serde",
  "indexer-common",
  "indoc",
  "log",
@@ -3082,6 +3084,7 @@ dependencies = [
  "assert_matches",
  "async-nats",
  "bip32",
+ "byte-unit-serde",
  "chacha20poly1305",
  "const-hex",
  "derive_more 2.1.1",
@@ -3131,6 +3134,7 @@ name = "indexer-standalone"
 version = "1.0.1"
 dependencies = [
  "anyhow",
+ "byte-unit-serde",
  "chain-indexer",
  "humantime-serde",
  "indexer-api",

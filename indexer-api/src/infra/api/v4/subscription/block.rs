@@ -27,10 +27,7 @@ use fastrace::{Span, future::FutureExt, prelude::SpanContext};
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};
 use log::{debug, warn};
-use std::{marker::PhantomData, num::NonZeroU32, pin::pin};
-
-// TODO: Make configurable!
-const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
+use std::{marker::PhantomData, pin::pin};
 
 pub struct BlockSubscription<S, B> {
     _s: PhantomData<S>,
@@ -61,6 +58,7 @@ where
     ) -> Result<impl Stream<Item = ApiResult<Block<S>>> + use<'a, S, B>, ApiError> {
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
+        let batch_size = cx.get_subscription_config().blocks.batch_size;
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
         let mut height = resolve_height(offset, storage).await?;
@@ -69,7 +67,7 @@ where
             // Stream existing blocks.
             debug!(height; "streaming existing blocks");
 
-            let blocks = storage.get_blocks(height, BATCH_SIZE);
+            let blocks = storage.get_blocks(height, batch_size);
             let mut blocks = pin!(blocks);
             while let Some(block) = get_next_block(&mut blocks)
                 .await
@@ -90,7 +88,7 @@ where
             {
                 debug!(height; "streaming next blocks");
 
-                let blocks = storage.get_blocks(height, BATCH_SIZE);
+                let blocks = storage.get_blocks(height, batch_size);
                 let mut blocks = pin!(blocks);
                 while let Some(block) = get_next_block(&mut blocks)
                     .await

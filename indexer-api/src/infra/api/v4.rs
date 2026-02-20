@@ -30,7 +30,7 @@ use crate::{
         storage::{NoopStorage, Storage},
     },
     infra::api::{
-        ApiResult, Metrics, OptionExt, ResultExt,
+        ApiResult, Metrics, OptionExt, ResultExt, SubscriptionConfig,
         v4::{block::BlockOffset, mutation::Mutation, query::Query, subscription::Subscription},
     },
 };
@@ -348,6 +348,7 @@ pub fn make_app<S, B>(
     subscriber: B,
     max_complexity: usize,
     max_depth: usize,
+    subscription_config: SubscriptionConfig,
 ) -> Router<Arc<AtomicBool>>
 where
     S: Storage,
@@ -361,6 +362,7 @@ where
         .data(storage)
         .data(subscriber)
         .data(metrics)
+        .data(subscription_config)
         .limit_complexity(max_complexity)
         .limit_depth(max_depth)
         .limit_recursive_depth(max_depth)

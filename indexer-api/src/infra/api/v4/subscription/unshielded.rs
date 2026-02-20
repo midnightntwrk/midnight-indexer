@@ -28,16 +28,10 @@ use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::domain::{NetworkId, Subscriber, UnshieldedUtxoIndexed};
 use log::{debug, warn};
-use std::{future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, time::Duration};
+use std::{future::ready, marker::PhantomData, pin::pin};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
-
-// TODO: Make configurable!
-const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
-
-// TODO: Make configurable!
-const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(30);
 
 /// An event of the unshielded transactions subscription.
 #[derive(Debug, Union)]
@@ -142,6 +136,10 @@ where
     let network_id = cx.get_network_id();
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
+    let batch_size = cx
+        .get_subscription_config()
+        .unshielded_transactions
+        .batch_size;
 
     let utxo_indexed_events = subscriber
         .subscribe::<UnshieldedUtxoIndexed>()
@@ -152,7 +150,7 @@ where
         debug!(address:?, transaction_id; "streaming events for existing transactions");
 
         let transactions =
-            storage.get_transactions_by_unshielded_address(address, transaction_id, BATCH_SIZE);
+            storage.get_transactions_by_unshielded_address(address, transaction_id, batch_size);
         let mut transactions = pin!(transactions);
         while let Some(transaction) = get_next_transaction(&mut transactions)
             .await
@@ -181,7 +179,7 @@ where
             .is_some()
         {
             let transactions =
-                storage.get_transactions_by_unshielded_address(address, transaction_id, BATCH_SIZE);
+                storage.get_transactions_by_unshielded_address(address, transaction_id, batch_size);
             let mut transactions = pin!(transactions);
             while let Some(transaction) =
                 get_next_transaction(&mut transactions)
@@ -262,8 +260,14 @@ fn progress_updates<'a, S>(
 where
     S: Storage,
 {
-    let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
-    intervals.then(move |_| make_progress_update(address, cx.get_storage::<S>()))
+    let storage = cx.get_storage::<S>();
+    let progress_update_interval = cx
+        .get_subscription_config()
+        .unshielded_transactions
+        .progress_update_interval;
+
+    let intervals = IntervalStream::new(interval(progress_update_interval));
+    intervals.then(move |_| make_progress_update(address, storage))
 }
 
 async fn make_progress_update<S>(
