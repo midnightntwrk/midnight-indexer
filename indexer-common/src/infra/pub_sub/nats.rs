@@ -37,12 +37,13 @@ impl ToSubject for Topic {
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{Publisher, SessionId, Subscriber, WalletIndexed},
+        domain::{Publisher, Subscriber, WalletIndexed},
         error::BoxError,
         infra::pub_sub::nats::{Config, publisher::NatsPublisher, subscriber::NatsSubscriber},
     };
     use anyhow::Context;
     use futures::{StreamExt, TryStreamExt};
+    use sqlx::types::Uuid;
     use std::{
         sync::{
             Arc,
@@ -95,7 +96,9 @@ mod tests {
             .context("create NatsSubscriber")?;
         let wallet_indexed_messages = subscriber.subscribe::<WalletIndexed>();
 
-        let wallet_indexed = WalletIndexed::from(SessionId::from([0; 32]));
+        let wallet_indexed = WalletIndexed {
+            wallet_id: Uuid::nil(),
+        };
         let message_received = Arc::new(AtomicBool::new(false));
 
         task::spawn({

@@ -256,10 +256,8 @@ async fn index_wallet(
         tx.commit().await.context("commit database transaction")?;
 
         if !relevant_transactions.is_empty() {
-            let session_id = wallet.viewing_key.to_session_id();
-
             publisher
-                .publish(&WalletIndexed { session_id })
+                .publish(&WalletIndexed { wallet_id })
                 .await
                 .with_context(|| {
                     format!("publish WalletIndexed event for wallet ID {wallet_id}")

@@ -13,10 +13,11 @@
 
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-use crate::domain::{SessionId, UnshieldedAddress};
+use crate::domain::UnshieldedAddress;
 use derive_more::derive::From;
 use futures::{Stream, stream};
 use serde::{Deserialize, Serialize};
+use sqlx::types::Uuid;
 use std::{convert::Infallible, error::Error as StdError, fmt::Debug};
 
 macro_rules! message {
@@ -52,7 +53,7 @@ message!(BlockIndexed);
 /// Message/event signaling that a wallet has been indexed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, From)]
 pub struct WalletIndexed {
-    pub session_id: SessionId,
+    pub wallet_id: Uuid,
 }
 message!(WalletIndexed);
 

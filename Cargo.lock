@@ -3128,6 +3128,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "trait-variant",
+ "uuid",
 ]
 
 [[package]]
