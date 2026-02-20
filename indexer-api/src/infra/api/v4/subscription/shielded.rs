@@ -137,19 +137,19 @@ where
     async fn shielded_transactions<'a>(
         &self,
         cx: &'a Context<'a>,
-        #[graphql(name = "sessionId")] session_id: HexEncoded,
+        session_id: HexEncoded,
         index: Option<u64>,
     ) -> Result<impl Stream<Item = ApiResult<ShieldedTransactionsEvent<S>>> + use<'a, S, B>, ApiError>
     {
         cx.get_metrics().wallets_connected.increment(1);
 
-        let token =
+        let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
         let wallet_id = cx
             .get_storage::<S>()
-            .resolve_token(token)
+            .resolve_session_id(session_id)
             .await
-            .map_err_into_server_error(|| "resolve token")?
+            .map_err_into_server_error(|| "resolve session ID")?
             .some_or_client_error(|| "unknown or expired session ID")?;
         let index = index.unwrap_or_default();
 

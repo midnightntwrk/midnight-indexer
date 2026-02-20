@@ -78,7 +78,7 @@ impl ViewingKey {
     }
 
     /// Return the viewing key hash (Sha256) for deduplication.
-    pub fn to_viewing_key_hash(&self) -> ViewingKeyHash {
+    pub fn hash(&self) -> ViewingKeyHash {
         let mut hasher = Sha256::new();
         hasher.update(self.0);
         let hash = hasher.finalize();

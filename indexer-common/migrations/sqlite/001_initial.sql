@@ -134,7 +134,7 @@ CREATE TABLE wallets (
   viewing_key BLOB NOT NULL, -- Ciphertext with nonce, no longer unique!
   last_indexed_transaction_id INTEGER NOT NULL DEFAULT 0,
   last_active INTEGER NOT NULL,
-  token BLOB UNIQUE -- Random per-session token for API authentication, NULL when disconnected.
+  session_id BLOB UNIQUE -- Random per-session ID for API authentication, NULL when disconnected.
 );
 CREATE INDEX wallets_viewing_key_hash_idx ON wallets (viewing_key_hash);
 CREATE INDEX wallets_last_indexed_transaction_id_idx ON wallets (last_indexed_transaction_id DESC);

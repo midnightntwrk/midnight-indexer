@@ -46,7 +46,7 @@ where
             .try_into_domain(cx.get_network_id())
             .map_err_into_client_error(|| "invalid viewing key")?;
 
-        let token = cx
+        let session_id = cx
             .get_storage::<S>()
             .connect_wallet(&viewing_key)
             .await
@@ -54,21 +54,17 @@ where
 
         debug!("wallet connected");
 
-        Ok(token.hex_encode())
+        Ok(session_id.hex_encode())
     }
 
     /// Disconnect the wallet with the given session ID.
     #[trace]
-    async fn disconnect(
-        &self,
-        cx: &Context<'_>,
-        #[graphql(name = "sessionId")] session_id: HexEncoded,
-    ) -> ApiResult<Unit> {
-        let token =
+    async fn disconnect(&self, cx: &Context<'_>, session_id: HexEncoded) -> ApiResult<Unit> {
+        let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
 
         cx.get_storage::<S>()
-            .disconnect_wallet(token)
+            .disconnect_wallet(session_id)
             .await
             .map_err_into_server_error(|| "disconnect wallet")?;
 

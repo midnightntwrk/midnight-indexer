@@ -74,7 +74,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
 
     // Test mutations. This must come first to make the wallet indexer index the wallet that is
     // later used for the shielded transactions subscription.
-    let token = test_connect_mutation(&api_client, &api_url, &network_id)
+    let session_id = test_connect_mutation(&api_client, &api_url, &network_id)
         .await
         .context("test connect mutation query")?;
     test_disconnect_mutation(&api_client, &api_url)
@@ -107,7 +107,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_contract_actions_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test contract action subscription")?;
-    test_shielded_transactions_subscription(&ws_api_url, token.clone())
+    test_shielded_transactions_subscription(&ws_api_url, session_id.clone())
         .await
         .context("test shielded transactions subscription")?;
     test_unshielded_transactions_subscription(&indexer_data, &ws_api_url)
@@ -330,7 +330,7 @@ async fn test_connect_mutation(
     let viewing_key = ViewingKey::from(viewing_key(network_id));
     let variables = connect_mutation::Variables { viewing_key };
     let response = send_query::<ConnectMutation>(api_client, api_url, variables).await?;
-    let token = response.connect;
+    let session_id = response.connect;
 
     // Invalid viewing key.
     let variables = connect_mutation::Variables {
@@ -339,7 +339,7 @@ async fn test_connect_mutation(
     let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
     assert!(response.is_err());
 
-    Ok(token)
+    Ok(session_id)
 }
 
 /// Test the disconnect mutation.
@@ -778,7 +778,7 @@ async fn test_contract_actions_subscription(
 /// Test the shielded transactions subscription.
 async fn test_shielded_transactions_subscription(
     ws_api_url: &str,
-    token: HexEncoded,
+    session_id: HexEncoded,
 ) -> anyhow::Result<()> {
     // Collect relevant transactions.
     // We know that our test Node is set up with two relevant transactions for this wallet.
@@ -786,7 +786,7 @@ async fn test_shielded_transactions_subscription(
     // wallet has connected way earlier so the Wallet Indexer should have already indexed the
     // transatcions. Just in case we limit the time to some seconds to avoid the test hanging
     // forever. The below assert would then show the failure.
-    let variables = shielded_transactions_subscription::Variables { session_id: token };
+    let variables = shielded_transactions_subscription::Variables { session_id };
     let relevant_transactions =
         graphql_ws_client::subscribe::<ShieldedTransactionsSubscription>(ws_api_url, variables)
             .await

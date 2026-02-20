@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::storage::NoopStorage;
-use indexer_common::domain::{SessionToken, ViewingKey};
+use indexer_common::domain::{SessionId, ViewingKey};
 use sqlx::types::Uuid;
 
 #[trait_variant::make(Send)]
@@ -20,14 +20,14 @@ pub trait WalletStorage
 where
     Self: Clone + Send + Sync + 'static,
 {
-    /// Connect a wallet, i.e. add it to the active ones, and return a random session token.
-    async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<SessionToken, sqlx::Error>;
+    /// Connect a wallet, i.e. add it to the active ones, and return a random session ID.
+    async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<SessionId, sqlx::Error>;
 
     /// Disconnect a wallet, i.e. remove it from the active ones.
-    async fn disconnect_wallet(&self, token: SessionToken) -> Result<(), sqlx::Error>;
+    async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error>;
 
-    /// Resolve a session token to the corresponding wallet ID.
-    async fn resolve_token(&self, token: SessionToken) -> Result<Option<Uuid>, sqlx::Error>;
+    /// Resolve a session ID to the corresponding wallet ID.
+    async fn resolve_session_id(&self, session_id: SessionId) -> Result<Option<Uuid>, sqlx::Error>;
 
     /// Refresh the wallet's last active timestamp to avoid timing out.
     async fn keep_wallet_active(&self, wallet_id: Uuid) -> Result<(), sqlx::Error>;
@@ -35,15 +35,15 @@ where
 
 #[allow(unused_variables)]
 impl WalletStorage for NoopStorage {
-    async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<SessionToken, sqlx::Error> {
+    async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<SessionId, sqlx::Error> {
         unimplemented!()
     }
 
-    async fn disconnect_wallet(&self, token: SessionToken) -> Result<(), sqlx::Error> {
+    async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
         unimplemented!()
     }
 
-    async fn resolve_token(&self, token: SessionToken) -> Result<Option<Uuid>, sqlx::Error> {
+    async fn resolve_session_id(&self, session_id: SessionId) -> Result<Option<Uuid>, sqlx::Error> {
         unimplemented!()
     }
 

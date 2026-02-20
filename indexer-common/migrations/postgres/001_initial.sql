@@ -133,7 +133,7 @@ CREATE TABLE wallets (
   viewing_key BYTEA NOT NULL, -- Ciphertext with nonce, no longer unique!
   last_indexed_transaction_id BIGINT NOT NULL DEFAULT 0,
   last_active TIMESTAMPTZ NOT NULL,
-  token BYTEA UNIQUE -- Random per-session token for API authentication, NULL when disconnected.
+  session_id BYTEA UNIQUE -- Random per-session ID for API authentication, NULL when disconnected.
 );
 CREATE INDEX ON wallets (viewing_key_hash);
 CREATE INDEX ON wallets (last_indexed_transaction_id DESC);
