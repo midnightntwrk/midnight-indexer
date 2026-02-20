@@ -25,6 +25,7 @@ use async_stream::try_stream;
 use const_hex::FromHexError;
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
+use http::header::{InvalidHeaderValue, USER_AGENT};
 use indexer_common::{
     domain::{
         BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, ProtocolVersionError,
@@ -80,13 +81,8 @@ impl SubxtNode {
         let retry_policy = ExponentialBackoff::from_millis(10)
             .max_delay(retry_max_delay)
             .take(retry_max_attempts);
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "user-agent",
-            concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"))
-                .parse()
-                .expect("valid header value"),
-        );
+        let user_agent = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).parse()?;
+        let headers = HeaderMap::from_iter([(USER_AGENT, user_agent)]);
         let rpc_client = RpcClient::builder()
             .set_headers(headers)
             .retry_policy(retry_policy)
@@ -553,6 +549,9 @@ pub enum Error {
 
     #[error("cannot create subxt online client")]
     OnlineClient(#[from] subxt::Error),
+
+    #[error("cannot create HTTP header")]
+    InvalidHeaderValue(#[from] InvalidHeaderValue),
 }
 
 /// Error possibly returned by each item of the [Block]s stream.

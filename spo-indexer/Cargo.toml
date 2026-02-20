@@ -20,6 +20,7 @@ blake2          = { workspace = true }
 blockfrost      = { workspace = true }
 fastrace        = { workspace = true, features = [ "enable" ] }
 hex             = { workspace = true }
+http            = { workspace = true }
 humantime-serde = { workspace = true }
 indexer-common  = { path = "../indexer-common" }
 indoc           = { workspace = true }
