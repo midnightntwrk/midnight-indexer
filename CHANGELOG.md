@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0-rc.1] - 2026-02-20
+
+### 🚀 Features
+
+- *(indexer-api)* /api/v3 alias for /api/v4 for backwards compatibility (#815)
+
+### 🐛 Bug Fixes
+
+- Prevent standalone pub-sub from busy spinning (#792)
+- Use InitialNonce instead of HashOutput for night_utxo_hash in dtime update (#795)
+- *(chain-indexer)* Fold system parameters update into save_block transaction (#793)
+- *(chain-indexer)* Check all spent UTXOs are updated in save_spent_unshielded_utxos (#799)
+
+### 🚜 Refactor
+
+- Make protocol version an enum (#800)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(chain-indexer)* Replace panic with result in storage impl (#791)
+- Update debian trixie-slim base image to resolve CVE-2025-15467 (#801)
+
 ## [4.0.0-alpha.1] - 2026-02-16
 
 ### 🚀 Features
