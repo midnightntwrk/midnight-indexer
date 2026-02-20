@@ -22,6 +22,7 @@ import { updateTestDataFiles } from "./test-data-handler.js";
 // Configuration constants
 const CONFIG = {
   TMP_DIR: "tmp_scan",
+  STATS_DIR: "stats",
   TIMEOUT_MS: 600_000,
   QUERY_TIMEOUT_MS: 10_000,
   CONNECTION_TIMEOUT_MS: 2_000,
@@ -54,6 +55,62 @@ export interface SubscriptionPayload<T> {
 interface BlockOffset {
   hash?: string;
   height?: number;
+}
+
+/**
+ * Persisted scan statistics per environment (stored in stats/${TARGET_ENV}_stats.json).
+ * Used for resume and cumulative totals across runs.
+ */
+interface ScanStats {
+  lastScannedBlockHeight: number;
+  totalBlocksScanned: number;
+  blocksWithTransactions: number;
+  totalTransactionsFound: number;
+  contractActionsFound: number;
+  totalScanDurationSeconds: number;
+  lastUpdated: string;
+}
+
+function getStatsPath(): string {
+  return path.join(CONFIG.STATS_DIR, `${TARGET_ENV}_stats.json`);
+}
+
+function ensureStatsDir(): void {
+  if (!fs.existsSync(CONFIG.STATS_DIR)) fs.mkdirSync(CONFIG.STATS_DIR);
+}
+
+function loadStats(): ScanStats | null {
+  const statsPath = getStatsPath();
+  if (!fs.existsSync(statsPath)) return null;
+  try {
+    const raw = fs.readFileSync(statsPath, "utf-8");
+    const data = JSON.parse(raw) as unknown;
+    if (
+      data &&
+      typeof data === "object" &&
+      "lastScannedBlockHeight" in data &&
+      typeof (data as ScanStats).lastScannedBlockHeight === "number"
+    ) {
+      const s = data as ScanStats;
+      return {
+        lastScannedBlockHeight: s.lastScannedBlockHeight,
+        totalBlocksScanned: Number(s.totalBlocksScanned) || 0,
+        blocksWithTransactions: Number(s.blocksWithTransactions) || 0,
+        totalTransactionsFound: Number(s.totalTransactionsFound) || 0,
+        contractActionsFound: Number(s.contractActionsFound) || 0,
+        totalScanDurationSeconds: Number(s.totalScanDurationSeconds) || 0,
+        lastUpdated: typeof s.lastUpdated === "string" ? s.lastUpdated : "",
+      };
+    }
+  } catch {
+    // Invalid or missing file: treat as no previous stats
+  }
+  return null;
+}
+
+function writeStats(stats: ScanStats): void {
+  ensureStatsDir();
+  fs.writeFileSync(getStatsPath(), JSON.stringify(stats, null, 2), "utf-8");
 }
 
 /**
@@ -396,14 +453,16 @@ function subscribeToBlockEvents(
   };
 }
 
+function parseStartBlockHeight(): number | undefined {
+  const raw = process.env.START_BLOCK_HEIGHT ?? Bun.env.START_BLOCK_HEIGHT;
+  if (raw === undefined || raw === "") return undefined;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
 async function main(): Promise<boolean> {
   // Record start time for duration calculation
   const startTime = Date.now();
-
-  //Create a temporary file to store the blocks
-  const blocksFile = fs.createWriteStream(
-    path.join(CONFIG.TMP_DIR, `${TARGET_ENV}_blocks.jsonl`),
-  );
 
   // Checking indexer is up and running on http ready endpoint
   console.info(
@@ -534,12 +593,56 @@ async function main(): Promise<boolean> {
     },
   };
 
-  // Determine target height, then subscribe and wait until we reach it or timeout
+  // Determine target height, then compute start height (START_BLOCK_HEIGHT > stats file > 0)
   const targetHeight = await getLatestBlockHeight(indexerWs).catch(() => 0);
   console.debug(
     `[DEBUG] - The selected environment has ${targetHeight} blocks`,
   );
   const TIMEOUT_MS = CONFIG.TIMEOUT_MS;
+
+  const startBlockHeightEnv = parseStartBlockHeight();
+  const previousStats = loadStats();
+  const startHeight =
+    startBlockHeightEnv !== undefined
+      ? startBlockHeightEnv
+      : previousStats !== null
+        ? previousStats.lastScannedBlockHeight + 1
+        : 0;
+
+  if (startHeight > targetHeight) {
+    console.info(
+      "[INFO ] - Already caught up: start height exceeds latest block height; nothing to scan.",
+    );
+    if (previousStats !== null) {
+      writeStats({
+        ...previousStats,
+        lastUpdated: new Date().toISOString(),
+      });
+    }
+    await cleanupResources(indexerWs, handlersMap);
+    return true;
+  }
+  if (startBlockHeightEnv !== undefined && startHeight >= targetHeight) {
+    console.error(
+      `[ERROR] - START_BLOCK_HEIGHT (${startBlockHeightEnv}) must be less than latest block height (${targetHeight})`,
+    );
+    await cleanupResources(indexerWs, handlersMap);
+    return false;
+  }
+  if (startHeight < 0) {
+    console.error("[ERROR] - Start height must be non-negative");
+    await cleanupResources(indexerWs, handlersMap);
+    return false;
+  }
+
+  const isResume = startBlockHeightEnv === undefined && previousStats !== null;
+  const blocksFilePath = path.join(
+    CONFIG.TMP_DIR,
+    `${TARGET_ENV}_blocks.jsonl`,
+  );
+  const blocksFile = fs.createWriteStream(blocksFilePath, {
+    flags: isResume ? "a" : "w",
+  });
 
   // Create scan manager for handling subscription logic
   const scanManager = new BlockScanManager(
@@ -552,15 +655,17 @@ async function main(): Promise<boolean> {
   const reachedPromise = scanManager.createReachedPromise();
   const errorPromise = scanManager.createErrorPromise();
 
+  const blockOffset: BlockOffset = { height: startHeight };
   const unsubscribe = subscribeToBlockEvents(
     indexerWs,
-    { height: 0 },
+    blockOffset,
     scanManager.getWrappedHandler(),
   );
 
+  const blocksToStream = targetHeight - startHeight + 1;
   console.info("[INFO ] - Subscribed to block updates!");
   console.info(
-    `[INFO ] - Streaming ${targetHeight} blocks (or ${TIMEOUT_MS / 1000}s timeout) ...`,
+    `[INFO ] - Streaming ${blocksToStream} blocks (from height ${startHeight} to ${targetHeight}, or ${TIMEOUT_MS / 1000}s timeout) ...`,
   );
   console.info(`[INFO ] - ... this might take a while`);
 
@@ -598,7 +703,11 @@ async function main(): Promise<boolean> {
 
   // Calculate scan duration
   const endTime = Date.now();
-  const scanDuration = Math.round((endTime - startTime) / 1000);
+  const scanDurationSeconds = Math.round((endTime - startTime) / 1000);
+  const lastScannedBlockHeight =
+    receivedBlocks.length > 0
+      ? Number(receivedBlocks[receivedBlocks.length - 1].height)
+      : startHeight - 1;
 
   console.info("[INFO ] - Block fetching completed!");
   console.info(`[INFO ] - Summary report:
@@ -606,7 +715,39 @@ async function main(): Promise<boolean> {
     - Blocks with txs        : ${blocksWithTransactions}
     - Total txs found        : ${transactionsFound}
     - Contract actions found : ${contractActionsFound}
-    - Scan duration          : ${scanDuration} seconds`);
+    - Scan duration          : ${scanDurationSeconds} seconds`);
+
+  const runStats: ScanStats = {
+    lastScannedBlockHeight,
+    totalBlocksScanned: receivedBlocks.length,
+    blocksWithTransactions,
+    totalTransactionsFound: transactionsFound,
+    contractActionsFound,
+    totalScanDurationSeconds: scanDurationSeconds,
+    lastUpdated: new Date().toISOString(),
+  };
+  const mergedStats: ScanStats =
+    previousStats !== null
+      ? {
+          lastScannedBlockHeight: runStats.lastScannedBlockHeight,
+          totalBlocksScanned:
+            previousStats.totalBlocksScanned + runStats.totalBlocksScanned,
+          blocksWithTransactions:
+            previousStats.blocksWithTransactions +
+            runStats.blocksWithTransactions,
+          totalTransactionsFound:
+            previousStats.totalTransactionsFound +
+            runStats.totalTransactionsFound,
+          contractActionsFound:
+            previousStats.contractActionsFound + runStats.contractActionsFound,
+          totalScanDurationSeconds:
+            previousStats.totalScanDurationSeconds +
+            runStats.totalScanDurationSeconds,
+          lastUpdated: runStats.lastUpdated,
+        }
+      : runStats;
+  writeStats(mergedStats);
+  console.info(`[INFO ] - Stats written to ${getStatsPath()}`);
 
   // Update test data files if folder path was provided
   if (testDataFolder) {
