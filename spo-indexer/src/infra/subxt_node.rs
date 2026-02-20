@@ -19,7 +19,7 @@ use crate::{
     utils::remove_hex_prefix,
 };
 use blockfrost::{BlockfrostAPI, BlockfrostError};
-use http::header::USER_AGENT;
+use http::header::{InvalidHeaderValue, USER_AGENT};
 use indexer_common::error::BoxError;
 use reqwest::Client as HttpClient;
 use secrecy::{ExposeSecret, SecretString};
