@@ -28,7 +28,7 @@ use subxt::{
     PolkadotConfig,
     backend::{
         legacy::LegacyRpcMethods,
-        rpc::reconnecting_rpc_client::{ExponentialBackoff, RpcClient},
+        rpc::reconnecting_rpc_client::{ExponentialBackoff, HeaderMap, RpcClient},
     },
 };
 use thiserror::Error;
@@ -68,7 +68,15 @@ impl SPOClient {
         let retry_policy = ExponentialBackoff::from_millis(10)
             .max_delay(config.reconnect_max_delay)
             .take(config.reconnect_max_attempts);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "user-agent",
+            concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"))
+                .parse()
+                .expect("valid header value"),
+        );
         let rpc_client = RpcClient::builder()
+            .set_headers(headers)
             .retry_policy(retry_policy)
             .build(&config.url)
             .await

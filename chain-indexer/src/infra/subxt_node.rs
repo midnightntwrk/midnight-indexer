@@ -41,7 +41,7 @@ use subxt::{
     backend::{
         BackendExt,
         legacy::LegacyRpcMethods,
-        rpc::reconnecting_rpc_client::{ExponentialBackoff, RpcClient},
+        rpc::reconnecting_rpc_client::{ExponentialBackoff, HeaderMap, RpcClient},
     },
     config::{
         Hasher,
@@ -80,7 +80,15 @@ impl SubxtNode {
         let retry_policy = ExponentialBackoff::from_millis(10)
             .max_delay(retry_max_delay)
             .take(retry_max_attempts);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "user-agent",
+            concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"))
+                .parse()
+                .expect("valid header value"),
+        );
         let rpc_client = RpcClient::builder()
+            .set_headers(headers)
             .retry_policy(retry_policy)
             .build(&url)
             .await
