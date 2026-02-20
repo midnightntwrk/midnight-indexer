@@ -17,7 +17,7 @@ infra:
     max_lifetime: "5m"
 
   ledger_db:
-    cache_size: "1MiB"
+    cache_size: "1kiB"
 
   pub_sub:
     url: "localhost:4222"

@@ -18,7 +18,7 @@ infra:
     cnn_url: "/data/indexer.sqlite"
 
   ledger_db:
-    cache_size: "1MiB"
+    cache_size: "1kiB"
     cnn_url: "/data/ledger-db.sqlite"
 
   node:

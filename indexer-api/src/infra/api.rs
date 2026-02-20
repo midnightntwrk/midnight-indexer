@@ -137,7 +137,7 @@ pub struct Config {
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct SubscriptionConfig {
-    blocks: BocksSubscriptionConfig,
+    blocks: BlocksSubscriptionConfig,
     contract_actions: ContractActionsSubscriptionConfig,
     dust_ledger_events: DustLedgerEventsSubscriptionConfig,
     shielded_transactions: ShieldedTransactionsSubscriptionConfig,
@@ -146,7 +146,7 @@ pub struct SubscriptionConfig {
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
-pub struct BocksSubscriptionConfig {
+pub struct BlocksSubscriptionConfig {
     batch_size: NonZeroU32,
 }
 
