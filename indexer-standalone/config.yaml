@@ -33,6 +33,22 @@ infra:
     request_body_limit: "1MiB"
     max_complexity: 200
     max_depth: 15
+    subscription:
+      blocks:
+        batch_size: 20
+      contract_actions:
+        batch_size: 20
+      dust_ledger_events:
+        batch_size: 20
+      shielded_transactions:
+        batch_size: 20
+        progress_update_interval: "30s"
+        keep_wallet_alive_interval: "1m"
+      unshielded_transactions:
+        batch_size: 20
+        progress_update_interval: "30s"
+      zswap_ledger_events:
+        batch_size: 20
 
 telemetry:
   tracing:

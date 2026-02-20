@@ -3058,6 +3058,7 @@ dependencies = [
  "fastrace",
  "fastrace-axum",
  "futures",
+ "humantime-serde",
  "indexer-common",
  "indoc",
  "log",

@@ -38,10 +38,12 @@ use std::{
     fmt::{self, Display},
     io,
     net::IpAddr,
+    num::NonZeroU32,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 use thiserror::Error;
 use tokio::{
@@ -91,6 +93,7 @@ where
             request_body_limit,
             max_complexity,
             max_depth,
+            subscription_config,
         } = self.config;
 
         let app = make_app(
@@ -98,9 +101,10 @@ where
             network_id,
             self.storage,
             self.subscriber,
+            request_body_limit as usize,
             max_complexity,
             max_depth,
-            request_body_limit as usize,
+            subscription_config,
         );
 
         let listener = TcpListener::bind((address, port))
@@ -115,14 +119,69 @@ where
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct Config {
     pub address: IpAddr,
+
     pub port: u16,
     #[serde(with = "byte_unit_serde")]
     pub request_body_limit: u64,
+
     pub max_complexity: usize,
+
     pub max_depth: usize,
+
+    #[serde(rename = "subscription")]
+    pub subscription_config: SubscriptionConfig,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct SubscriptionConfig {
+    blocks: BocksSubscriptionConfig,
+    contract_actions: ContractActionsSubscriptionConfig,
+    dust_ledger_events: DustLedgerEventsSubscriptionConfig,
+    shielded_transactions: ShieldedTransactionsSubscriptionConfig,
+    unshielded_transactions: UnshieldedTransactionsSubscriptionConfig,
+    zswap_ledger_events: ZswapLedgerEventsSubscriptionConfig,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct BocksSubscriptionConfig {
+    batch_size: NonZeroU32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ContractActionsSubscriptionConfig {
+    batch_size: NonZeroU32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct DustLedgerEventsSubscriptionConfig {
+    batch_size: NonZeroU32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ShieldedTransactionsSubscriptionConfig {
+    batch_size: NonZeroU32,
+
+    #[serde(with = "humantime_serde")]
+    progress_update_interval: Duration,
+
+    #[serde(with = "humantime_serde")]
+    keep_wallet_alive_interval: Duration,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct UnshieldedTransactionsSubscriptionConfig {
+    batch_size: NonZeroU32,
+
+    #[serde(with = "humantime_serde")]
+    progress_update_interval: Duration,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ZswapLedgerEventsSubscriptionConfig {
+    batch_size: NonZeroU32,
 }
 
 #[derive(Debug, Error)]
@@ -155,9 +214,10 @@ fn make_app<S, B>(
     network_id: NetworkId,
     storage: S,
     subscriber: B,
+    request_body_limit: usize,
     max_complexity: usize,
     max_depth: usize,
-    request_body_limit: usize,
+    subscription_config: SubscriptionConfig,
 ) -> Router
 where
     S: Storage,
@@ -172,6 +232,7 @@ where
         subscriber,
         max_complexity,
         max_depth,
+        subscription_config,
     );
 
     // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a
@@ -265,6 +326,8 @@ trait ContextExt {
     fn get_ledger_state_cache(&self) -> &LedgerStateCache;
 
     fn get_metrics(&self) -> &Metrics;
+
+    fn get_subscription_config(&self) -> &SubscriptionConfig;
 }
 
 impl ContextExt for Context<'_> {
@@ -295,6 +358,11 @@ impl ContextExt for Context<'_> {
     fn get_metrics(&self) -> &Metrics {
         self.data::<Metrics>()
             .expect("Metrics is stored in Context")
+    }
+
+    fn get_subscription_config(&self) -> &SubscriptionConfig {
+        self.data::<SubscriptionConfig>()
+            .expect("SubscriptionConfig is stored in Context")
     }
 }
 
