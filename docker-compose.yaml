@@ -25,7 +25,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/chain-indexer:${INDEXER_TAG:-latest}"
+    image: "midnightntwrk/chain-indexer:${INDEXER_TAG:-latest}"
     restart: "no"
     environment:
       RUST_LOG: "chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
@@ -50,7 +50,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/wallet-indexer:${INDEXER_TAG:-latest}"
+    image: "midnightntwrk/wallet-indexer:${INDEXER_TAG:-latest}"
     restart: "no"
     environment:
       RUST_LOG: "wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
@@ -73,7 +73,7 @@ services:
     depends_on:
       postgres:
         condition: "service_healthy"
-    image: "ghcr.io/midnight-ntwrk/spo-indexer:${INDEXER_TAG:-latest}"
+    image: "midnightntwrk/spo-indexer:${INDEXER_TAG:-latest}"
     restart: "no"
     environment:
       RUST_LOG: "spo_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
@@ -98,7 +98,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "ghcr.io/midnight-ntwrk/indexer-api:${INDEXER_TAG:-latest}"
+    image: "midnightntwrk/indexer-api:${INDEXER_TAG:-latest}"
     restart: "no"
     ports:
       - "8088:8088"
@@ -122,7 +122,7 @@ services:
       - standalone
     depends_on:
       - node
-    image: "ghcr.io/midnight-ntwrk/indexer-standalone:${INDEXER_TAG:-latest}"
+    image: "midnightntwrk/indexer-standalone:${INDEXER_TAG:-latest}"
     restart: "no"
     ports:
       - "8088:8088"
@@ -175,7 +175,7 @@ services:
 
   node:
     profiles: [cloud, standalone]
-    image: "ghcr.io/midnight-ntwrk/midnight-node:${NODE_TAG:-latest}"
+    image: "midnightntwrk/midnight-node:${NODE_TAG:-latest}"
     restart: "always"
     ports:
       - "9944:9944"

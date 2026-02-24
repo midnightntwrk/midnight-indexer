@@ -16,7 +16,7 @@ if [ -z "$1" ]; then
     exit 1
 fi
 readonly node_version="$1"
-readonly toolkit_image="ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version"
+readonly toolkit_image="midnightntwrk/midnight-node-toolkit:$node_version"
 readonly rng_seed="0000000000000000000000000000000000000000000000000000000000000037"
 readonly node_dir="$(pwd)/.node/$node_version"
 
@@ -36,7 +36,7 @@ docker run \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
     -e THRESHOLD=0 \
     -v $node_dir:/node \
-    ghcr.io/midnight-ntwrk/midnight-node:$node_version
+    midnightntwrk/midnight-node:$node_version
 
 # Wait for node to be ready.
 echo "Waiting for node to be ready..."
