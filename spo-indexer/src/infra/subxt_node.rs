@@ -323,8 +323,8 @@ impl PoolStakeData {
 
 async fn get_epoch_duration(rpc_client: &RpcClient) -> Result<(u32, u32), SPOClientError> {
     let legacy_rpc = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client.clone().into());
-    let storage_key =
-        hex::decode(SLOT_PER_EPOCH_KEY).expect("SLOT_PER_EPOCH_KEY constant should be valid hex");
+    let storage_key = const_hex::decode(SLOT_PER_EPOCH_KEY)
+        .expect("SLOT_PER_EPOCH_KEY constant should be valid hex");
 
     let res = legacy_rpc
         .state_get_storage(&storage_key, None)

@@ -243,7 +243,7 @@ where
         .nest("/api/v4", v4_app)
         .route("/api/{*rest}", any(redirect_api_to_latest))
         .with_state(caught_up)
-        .layer(FastraceLayer)
+        .layer(FastraceLayer::default())
         .layer(
             ServiceBuilder::new()
                 .layer(RequestBodyLimitLayer::new(request_body_limit))
@@ -429,7 +429,7 @@ type ApiResult<T> = Result<T, ApiError>;
 
 /// The error type all API handlers must return.
 #[derive(Debug, Clone)]
-enum ApiError {
+pub enum ApiError {
     /// A client error, caused by invalid input.
     Client(InnerApiError),
 
@@ -456,4 +456,4 @@ impl StdError for ApiError {}
 
 #[derive(Debug, Clone, Error)]
 #[error("{0}")]
-struct InnerApiError(String, #[source] Option<Arc<dyn StdError + Send + Sync>>);
+pub struct InnerApiError(String, #[source] Option<Arc<dyn StdError + Send + Sync>>);

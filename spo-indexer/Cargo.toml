@@ -18,8 +18,8 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 anyhow          = { workspace = true }
 blake2          = { workspace = true }
 blockfrost      = { workspace = true }
+const-hex       = { workspace = true }
 fastrace        = { workspace = true, features = [ "enable" ] }
-hex             = { workspace = true }
 http            = { workspace = true }
 humantime-serde = { workspace = true }
 indexer-common  = { path = "../indexer-common" }
