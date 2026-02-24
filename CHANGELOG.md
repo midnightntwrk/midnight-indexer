@@ -4,15 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.1.0-rc.3] - 2026-02-18
-
-## [3.1.0-rc.2] - 2026-02-18
-
-### ⚙️ Miscellaneous Tasks
-
-- Update debian trixie-slim base image to resolve CVE-2025-15467 (#801)
-
-## [3.1.0-rc.1] - 2026-02-06
+## [3.1.0] - 2026-02-24
 
 ### 🚀 Features
 
@@ -32,7 +24,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### ⚙️ Miscellaneous Tasks
 
 - *(indexer-api)* Include ledger parameters in block query (#745)
+- Use pre-built GHCR image for spo-indexer in docker-compose and remove unused NATS dependency (#752)
 - Add spo-indexer docs, clean up unused NATS config and misleading blockfrost placeholder (#754)
+- Update debian trixie-slim base image to resolve CVE-2025-15467 (#801)
 
 ## [3.0.0] - 2026-01-28
 
