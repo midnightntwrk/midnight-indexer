@@ -74,6 +74,7 @@ where
     -> Result<Vec<String>, sqlx::Error>;
 
     /// Upsert latest stake snapshot for a pool.
+    #[allow(clippy::too_many_arguments)]
     async fn save_stake_snapshot(
         &self,
         pool_id: &str,
@@ -87,6 +88,7 @@ where
     ) -> Result<(), sqlx::Error>;
 
     /// Append a history row for stake.
+    #[allow(clippy::too_many_arguments)]
     async fn insert_stake_history(
         &self,
         pool_id: &str,

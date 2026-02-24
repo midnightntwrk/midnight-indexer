@@ -57,12 +57,12 @@ impl domain::storage::Storage for Storage {
 
     async fn get_latest_epoch(&self) -> Result<Option<Epoch>, sqlx::Error> {
         let query = indoc! {"
-            SELECT 
-                epoch_no, 
-                starts_at, 
-                ends_at 
-            FROM epochs 
-            ORDER BY epoch_no 
+            SELECT
+                epoch_no,
+                starts_at,
+                ends_at
+            FROM epochs
+            ORDER BY epoch_no
             DESC LIMIT 1
         "};
 
@@ -93,14 +93,14 @@ impl domain::storage::Storage for Storage {
                 epoch.starts_at / 1000,
                 ((epoch.starts_at % 1000) * 1_000_000) as u32,
             )
-            .unwrap_or(DateTime::<Utc>::default()),
+            .unwrap_or_default(),
         )
         .bind(
             DateTime::from_timestamp(
                 epoch.ends_at / 1000,
                 ((epoch.ends_at % 1000) * 1_000_000) as u32,
             )
-            .unwrap_or(DateTime::<Utc>::default()),
+            .unwrap_or_default(),
         )
         .execute(&mut **tx)
         .await?;
@@ -393,6 +393,7 @@ impl domain::storage::Storage for Storage {
 
 impl Storage {
     /// Optional upsert for stake snapshot (DB-first; can be wired to external data later).
+    #[allow(clippy::too_many_arguments)]
     pub async fn save_stake_snapshot(
         &self,
         pool_id: &str,
