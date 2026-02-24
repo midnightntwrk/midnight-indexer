@@ -23,13 +23,12 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{
     domain::{
-        SerializedTransactionIdentifier, SessionId, TransactionHash, TransactionVariant,
-        UnshieldedAddress,
+        SerializedTransactionIdentifier, TransactionHash, TransactionVariant, UnshieldedAddress,
     },
     stream::flatten_chunks,
 };
 use indoc::indoc;
-use sqlx::{FromRow, Row};
+use sqlx::{FromRow, Row, types::Uuid};
 use std::num::NonZeroU32;
 
 impl TransactionStorage for Storage {
@@ -430,14 +429,14 @@ impl TransactionStorage for Storage {
 
     fn get_relevant_transactions(
         &self,
-        session_id: SessionId,
+        wallet_id: Uuid,
         mut index: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<RegularTransaction, sqlx::Error>> + Send {
         let chunks = try_stream! {
             loop {
                 let transactions = self
-                    .get_relevant_transactions(session_id, index, batch_size)
+                    .get_relevant_transactions(wallet_id, index, batch_size)
                     .await?;
 
                 match transactions.last() {
@@ -499,10 +498,10 @@ impl TransactionStorage for Storage {
     }
 
     #[allow(clippy::type_complexity)]
-    #[trace(properties = { "session_id": "{session_id}" })]
+    #[trace(properties = { "wallet_id": "{wallet_id}" })]
     async fn get_highest_end_indices(
         &self,
-        session_id: SessionId,
+        wallet_id: Uuid,
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error> {
         let query = indoc! {"
             SELECT (
@@ -522,8 +521,8 @@ impl TransactionStorage for Storage {
                 FROM regular_transactions
                 INNER JOIN relevant_transactions ON regular_transactions.id = relevant_transactions.transaction_id
                 INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
-                WHERE wallets.session_id = $1
-                AND wallets.active = TRUE
+                WHERE wallets.id = $1
+                AND wallets.session_id IS NOT NULL
                 ORDER BY end_index DESC
                 LIMIT 1
             )
@@ -531,7 +530,7 @@ impl TransactionStorage for Storage {
 
         let (highest_end_index, highest_checked_end_index, highest_relevant_end_index) =
             sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(query)
-                .bind(session_id.as_ref())
+                .bind(wallet_id)
                 .fetch_one(&*self.pool)
                 .await?;
 
@@ -545,13 +544,13 @@ impl TransactionStorage for Storage {
 
 impl Storage {
     #[trace(properties = {
-        "session_id": "{session_id}",
+        "wallet_id": "{wallet_id}",
         "index": "{index}",
         "batch_size": "{batch_size}"
     })]
     async fn get_relevant_transactions(
         &self,
-        session_id: SessionId,
+        wallet_id: Uuid,
         index: u64,
         batch_size: NonZeroU32,
     ) -> Result<Vec<RegularTransaction>, sqlx::Error> {
@@ -575,8 +574,8 @@ impl Storage {
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
             INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
-            WHERE wallets.session_id = $1
-            AND wallets.active = TRUE
+            WHERE wallets.id = $1
+            AND wallets.session_id IS NOT NULL
             AND regular_transactions.start_index >= $2
             ORDER BY transactions.id
             LIMIT $3
@@ -601,8 +600,8 @@ impl Storage {
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
             INNER JOIN relevant_transactions ON transactions.id = relevant_transactions.transaction_id
             INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
-            WHERE wallets.session_id = $1
-            AND wallets.active = TRUE
+            WHERE wallets.id = $1
+            AND wallets.session_id IS NOT NULL
             AND regular_transactions.start_index >= $2
             ORDER BY transactions.id
             LIMIT $3
@@ -610,7 +609,7 @@ impl Storage {
 
         #[cfg_attr(feature = "cloud", allow(unused_mut))]
         let mut transactions = sqlx::query_as::<_, RegularTransaction>(query)
-            .bind(session_id.as_ref())
+            .bind(wallet_id)
             .bind(index as i64)
             .bind(batch_size.get() as i64)
             .fetch(&*self.pool)

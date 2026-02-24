@@ -39,7 +39,7 @@ use crate::{
 use anyhow::{Context, bail};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
-use indexer_api::infra::api::v4::{HexEncodable, viewing_key::ViewingKey};
+use indexer_api::infra::api::v4::{HexEncodable, HexEncoded, viewing_key::ViewingKey};
 use indexer_common::domain::NetworkId;
 use itertools::Itertools;
 use reqwest::Client;
@@ -74,7 +74,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
 
     // Test mutations. This must come first to make the wallet indexer index the wallet that is
     // later used for the shielded transactions subscription.
-    test_connect_mutation(&api_client, &api_url, &network_id)
+    let session_id = test_connect_mutation(&api_client, &api_url, &network_id)
         .await
         .context("test connect mutation query")?;
     test_disconnect_mutation(&api_client, &api_url)
@@ -107,7 +107,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_contract_actions_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test contract action subscription")?;
-    test_shielded_transactions_subscription(&ws_api_url, &network_id)
+    test_shielded_transactions_subscription(&ws_api_url, session_id.clone())
         .await
         .context("test shielded transactions subscription")?;
     test_unshielded_transactions_subscription(&indexer_data, &ws_api_url)
@@ -325,12 +325,12 @@ async fn test_connect_mutation(
     api_client: &Client,
     api_url: &str,
     network_id: &NetworkId,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<HexEncoded> {
     // Valid viewing key.
     let viewing_key = ViewingKey::from(viewing_key(network_id));
     let variables = connect_mutation::Variables { viewing_key };
-    let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
-    assert!(response.is_ok());
+    let response = send_query::<ConnectMutation>(api_client, api_url, variables).await?;
+    let session_id = response.connect;
 
     // Invalid viewing key.
     let variables = connect_mutation::Variables {
@@ -339,20 +339,18 @@ async fn test_connect_mutation(
     let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
     assert!(response.is_err());
 
-    Ok(())
+    Ok(session_id)
 }
 
 /// Test the disconnect mutation.
 async fn test_disconnect_mutation(api_client: &Client, api_url: &str) -> anyhow::Result<()> {
-    // Valid session ID.
-    let session_id = indexer_common::domain::ViewingKey::from([0; 32])
-        .to_session_id()
-        .hex_encode();
+    // Valid session ID (use a random 32-byte value; disconnect silently succeeds even if unknown).
+    let session_id = [0u8; 32].hex_encode();
     let variables = disconnect_mutation::Variables { session_id };
     let response = send_query::<DisconnectMutation>(api_client, api_url, variables).await;
     assert!(response.is_ok());
 
-    // Invalid viewing key.
+    // Invalid session ID (wrong length).
     let variables = disconnect_mutation::Variables {
         session_id: [42; 1].hex_encode(),
     };
@@ -780,15 +778,10 @@ async fn test_contract_actions_subscription(
 /// Test the shielded transactions subscription.
 async fn test_shielded_transactions_subscription(
     ws_api_url: &str,
-    network_id: &NetworkId,
+    session_id: HexEncoded,
 ) -> anyhow::Result<()> {
-    let session_id = ViewingKey::from(viewing_key(network_id))
-        .try_into_domain(network_id)?
-        .to_session_id()
-        .hex_encode();
-
     // Collect relevant transactions.
-    // We know that our test Node is set up with two relevant transactions for this session ID.
+    // We know that our test Node is set up with two relevant transactions for this wallet.
     // Therefore we `take(2)` below, which should happen almost immediately because the respecive
     // wallet has connected way earlier so the Wallet Indexer should have already indexed the
     // transatcions. Just in case we limit the time to some seconds to avoid the test hanging

@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use crate::{domain::storage::wallet::WalletStorage, infra::storage::Storage};
+use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
 use fastrace::trace;
 use futures::TryFutureExt;
 use indexer_common::domain::{SessionId, ViewingKey};
@@ -20,9 +21,10 @@ use sqlx::types::{Uuid, time::OffsetDateTime};
 
 impl WalletStorage for Storage {
     #[trace]
-    async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<(), sqlx::Error> {
+    async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<SessionId, sqlx::Error> {
         let id = Uuid::now_v7();
-        let session_id = viewing_key.to_session_id();
+        let viewing_key_hash = viewing_key.hash();
+        let session_id = generate_session_id();
         let viewing_key = viewing_key
             .encrypt(id, &self.cipher)
             .map_err(|error| sqlx::Error::Encode(error.into()))?;
@@ -30,31 +32,33 @@ impl WalletStorage for Storage {
         let query = indoc! {"
             INSERT INTO wallets (
                 id,
-                session_id,
+                viewing_key_hash,
                 viewing_key,
-                last_active
+                last_active,
+                session_id
             )
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (session_id)
-            DO UPDATE SET active = TRUE, last_active = $4
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (viewing_key_hash)
+            DO UPDATE SET last_active = $4, session_id = $5
         "};
 
         sqlx::query(query)
             .bind(id)
-            .bind(session_id.as_ref())
+            .bind(viewing_key_hash.as_ref())
             .bind(&viewing_key)
             .bind(OffsetDateTime::now_utc())
+            .bind(session_id.as_ref())
             .execute(&*self.pool)
             .await?;
 
-        Ok(())
+        Ok(session_id)
     }
 
-    #[trace(properties = { "session_id": "{session_id}" })]
+    #[trace]
     async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
         let query = indoc! {"
             UPDATE wallets
-            SET active = FALSE
+            SET session_id = NULL
             WHERE session_id = $1
         "};
 
@@ -66,18 +70,32 @@ impl WalletStorage for Storage {
         Ok(())
     }
 
-    #[trace(properties = { "session_id": "{session_id}" })]
-    async fn keep_wallet_active(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
+    #[trace]
+    async fn resolve_session_id(&self, session_id: SessionId) -> Result<Option<Uuid>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT id
+            FROM wallets
+            WHERE session_id = $1
+        "};
+
+        sqlx::query_scalar::<_, Uuid>(query)
+            .bind(session_id.as_ref())
+            .fetch_optional(&*self.pool)
+            .await
+    }
+
+    #[trace(properties = { "wallet_id": "{wallet_id}" })]
+    async fn keep_wallet_active(&self, wallet_id: Uuid) -> Result<(), sqlx::Error> {
         let query = indoc! {"
             UPDATE wallets
             SET last_active = $1
-            WHERE session_id = $2
-            AND active = TRUE
+            WHERE id = $2
+            AND session_id IS NOT NULL
         "};
 
         let result = sqlx::query(query)
             .bind(OffsetDateTime::now_utc())
-            .bind(session_id.as_ref())
+            .bind(wallet_id)
             .execute(&*self.pool)
             .map_ok(|_| ())
             .await;
@@ -89,4 +107,10 @@ impl WalletStorage for Storage {
 
         result
     }
+}
+
+fn generate_session_id() -> SessionId {
+    let mut session_id = [0u8; 32];
+    OsRng.fill_bytes(&mut session_id);
+    session_id.into()
 }

@@ -36,6 +36,7 @@ pub type BlockHash = ByteArray<32>;
 pub type IntentHash = ByteArray<32>;
 pub type Nonce = ByteArray<32>;
 pub type SessionId = ByteArray<32>;
+pub type ViewingKeyHash = ByteArray<32>;
 pub type TermsAndConditionsHash = ByteArray<32>;
 pub type TokenType = ByteArray<32>;
 pub type TransactionHash = ByteArray<32>;

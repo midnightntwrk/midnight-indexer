@@ -55,6 +55,7 @@ thiserror                   = { workspace = true }
 tokio                       = { workspace = true, features = [ "time" ] }
 tokio-stream                = { workspace = true, features = [ "sync" ] }
 trait-variant               = { workspace = true }
+uuid                        = { workspace = true }
 
 [dev-dependencies]
 anyhow                 = { workspace = true }

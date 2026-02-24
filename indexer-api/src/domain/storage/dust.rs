@@ -17,9 +17,7 @@ use crate::domain::{
 };
 use indexer_common::domain::{CardanoRewardAddress, LedgerVersion};
 
-/// DUST storage abstraction.
-/// NOTE: This is a minimal cherry-pick for dustGenerationStatus query only.
-/// Other DUST-related methods will be added when the full DUST system is integrated.
+/// DUST storage abstraction. Currently only supports the dustGenerationStatus query.
 #[trait_variant::make(Send)]
 pub trait DustStorage: BlockStorage {
     /// Get DUST generation status for specific Cardano reward addresses.

@@ -117,6 +117,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use futures::StreamExt;
+    use sqlx::types::Uuid;
     use std::{error::Error as StdError, time::Duration};
     use tokio::time::sleep;
 
@@ -138,7 +139,7 @@ mod tests {
         let mut messages = subscriber.subscribe::<WalletIndexed>();
 
         let wallet_indexed = WalletIndexed {
-            session_id: [0; 32].into(),
+            wallet_id: Uuid::nil(),
         };
         pub_sub.publisher().publish(&wallet_indexed).await?;
 
