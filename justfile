@@ -81,8 +81,8 @@ build-docker-image package profile="dev":
     docker build \
         --build-arg "RUST_VERSION={{rust_version}}" \
         --build-arg "PROFILE={{profile}}" \
-        -t ghcr.io/midnight-ntwrk/{{package}}:${tag} \
-        -t ghcr.io/midnight-ntwrk/{{package}}:latest \
+        -t midnightntwrk/{{package}}:${tag} \
+        -t midnightntwrk/{{package}}:latest \
         -f {{package}}/Dockerfile \
         .
 
@@ -150,4 +150,4 @@ run-node node_version=latest_node_version:
         -e CFG_PRESET=dev \
         -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
         -v $node_dir:/node \
-        ghcr.io/midnight-ntwrk/midnight-node:{{node_version}}
+        midnightntwrk/midnight-node:{{node_version}}
