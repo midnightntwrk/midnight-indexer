@@ -173,17 +173,22 @@ pub async fn run(
 
     // Handle task completion or SIGTERM termination. "Successful" completion of the tasks is
     // unexpected, hence the above `error!` invocations.
+    let mut highest_block_on_node_task = highest_block_on_node_task;
+    let mut index_blocks_task = index_blocks_task;
+
     select! {
-        result = highest_block_on_node_task => result
+        result = &mut highest_block_on_node_task => result
             .context("highest_block_on_node_task panicked")
             .and_then(|r| r.context("highest_block_on_node_task failed")),
 
-        result = index_blocks_task => result
+        result = &mut index_blocks_task => result
             .context("index_blocks_task panicked")
             .and_then(|r: anyhow::Result<()>| r.context("index_blocks_task failed")),
 
         _ = sigterm.recv() => {
             warn!("SIGTERM received");
+            highest_block_on_node_task.abort();
+            index_blocks_task.abort();
             Ok(())
         }
     }
