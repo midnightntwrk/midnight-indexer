@@ -53,7 +53,6 @@ static LATEST_NODE_VERSION: LazyLock<String> = LazyLock::new(|| {
 });
 
 static WS_DIR: LazyLock<String> = LazyLock::new(|| format!("{}/..", env!("CARGO_MANIFEST_DIR")));
-
 static TARGET_DIR: LazyLock<String> = LazyLock::new(|| {
     env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| format!("{}/target", &*WS_DIR))
 });
@@ -215,17 +214,15 @@ async fn start_node() -> anyhow::Result<NodeHandle> {
         .display()
         .to_string();
 
-    let node_container = GenericImage::new(
-        "ghcr.io/midnight-ntwrk/midnight-node",
-        LATEST_NODE_VERSION.trim(),
-    )
-    .with_wait_for(WaitFor::message_on_stderr("9944"))
-    .with_mount(Mount::bind_mount(node_path, "/node"))
-    .with_env_var("SHOW_CONFIG", "false")
-    .with_env_var("CFG_PRESET", "dev")
-    .start()
-    .await
-    .context("start node container")?;
+    let node_container =
+        GenericImage::new("midnightntwrk/midnight-node", LATEST_NODE_VERSION.trim())
+            .with_wait_for(WaitFor::message_on_stderr("9944"))
+            .with_mount(Mount::bind_mount(node_path, "/node"))
+            .with_env_var("SHOW_CONFIG", "false")
+            .with_env_var("CFG_PRESET", "dev")
+            .start()
+            .await
+            .context("start node container")?;
 
     let node_port = node_container
         .get_host_port_ipv4(9944)
