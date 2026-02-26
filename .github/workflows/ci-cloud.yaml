@@ -129,20 +129,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Login to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: MidnightCI
-          password: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
-
       - name: Pre-pull Docker images
         run: |
           NODE_VERSION=$(tail -n 1 NODE_VERSIONS)
           echo "Pre-pulling midnight-node:$NODE_VERSION..."
-          docker pull "ghcr.io/midnight-ntwrk/midnight-node:$NODE_VERSION" || \
-          docker pull "ghcr.io/midnight-ntwrk/midnight-node:$NODE_VERSION" || \
-          docker pull "ghcr.io/midnight-ntwrk/midnight-node:$NODE_VERSION"
+          docker pull "midnightntwrk/midnight-node:$NODE_VERSION" || \
+          docker pull "midnightntwrk/midnight-node:$NODE_VERSION" || \
+          docker pull "midnightntwrk/midnight-node:$NODE_VERSION"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master

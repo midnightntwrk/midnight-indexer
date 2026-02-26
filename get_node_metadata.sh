@@ -46,7 +46,7 @@ docker run \
     -e SHOW_CONFIG=false \
     -e CFG_PRESET=dev \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
-    ghcr.io/midnight-ntwrk/midnight-node:$node_version
+    midnightntwrk/midnight-node:$node_version
 
 # Wait for port to be available (max 30 seconds)
 echo "Waiting for node to be ready..."
