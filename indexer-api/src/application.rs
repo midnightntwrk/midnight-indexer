@@ -33,7 +33,7 @@ pub async fn run(config: Config, api: impl Api, subscriber: impl Subscriber) -> 
 
     let caught_up = Arc::new(AtomicBool::new(false));
 
-    let block_indexed_task = task::spawn({
+    let mut block_indexed_task = task::spawn({
         let subscriber = subscriber.clone();
         let caught_up = caught_up.clone();
 
@@ -55,7 +55,7 @@ pub async fn run(config: Config, api: impl Api, subscriber: impl Subscriber) -> 
         }
     });
 
-    let serve_api_task = {
+    let mut serve_api_task = {
         task::spawn(async move {
             api.serve(network_id, caught_up)
                 .await
@@ -68,12 +68,20 @@ pub async fn run(config: Config, api: impl Api, subscriber: impl Subscriber) -> 
     };
 
     select! {
-        result = block_indexed_task => result
-            .context("block_indexed_task panicked")
-            .and_then(|r| r.context("block_indexed_task failed")),
+        result = &mut block_indexed_task => {
+            let result = result
+                .context("block_indexed_task panicked")
+                .and_then(|r| r.context("block_indexed_task failed"));
+            serve_api_task.abort();
+            result
+        },
 
-        result = serve_api_task => result
-            .context("serve_api_task panicked")
-            .and_then(|r| r.context("serve_api_task failed")),
+        result = &mut serve_api_task => {
+            let result = result
+                .context("serve_api_task panicked")
+                .and_then(|r| r.context("serve_api_task failed"));
+            block_indexed_task.abort();
+            result
+        },
     }
 }
