@@ -106,7 +106,7 @@ pub async fn run(
     let highest_block_on_node = Arc::new(RwLock::new(None));
 
     // Spawn task to set info for highest block on node.
-    let highest_block_on_node_task = task::spawn({
+    let mut highest_block_on_node_task = task::spawn({
         let node = node.clone();
         let highest_block_on_node = highest_block_on_node.clone();
 
@@ -138,7 +138,7 @@ pub async fn run(
     });
 
     // Spawn task to index blocks.
-    let index_blocks_task = task::spawn({
+    let mut index_blocks_task = task::spawn({
         let node = node.clone();
 
         async move {
@@ -171,19 +171,22 @@ pub async fn run(
         }
     });
 
-    // Handle task completion or SIGTERM termination. "Successful" completion of the tasks is
-    // unexpected, hence the above `error!` invocations.
-    let mut highest_block_on_node_task = highest_block_on_node_task;
-    let mut index_blocks_task = index_blocks_task;
-
     select! {
-        result = &mut highest_block_on_node_task => result
-            .context("highest_block_on_node_task panicked")
-            .and_then(|r| r.context("highest_block_on_node_task failed")),
+        result = &mut highest_block_on_node_task => {
+            let result = result
+                .context("highest_block_on_node_task panicked")
+                .and_then(|r| r.context("highest_block_on_node_task failed"));
+            index_blocks_task.abort();
+            result
+        },
 
-        result = &mut index_blocks_task => result
-            .context("index_blocks_task panicked")
-            .and_then(|r: anyhow::Result<()>| r.context("index_blocks_task failed")),
+        result = &mut index_blocks_task => {
+            let result = result
+                .context("index_blocks_task panicked")
+                .and_then(|r: anyhow::Result<()>| r.context("index_blocks_task failed"));
+            highest_block_on_node_task.abort();
+            result
+        },
 
         _ = sigterm.recv() => {
             warn!("SIGTERM received");
