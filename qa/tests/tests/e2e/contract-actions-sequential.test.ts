@@ -16,6 +16,7 @@
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
+import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
 import {
@@ -29,15 +30,23 @@ const TOOLKIT_WRAPPER_TIMEOUT = 60_000; // 1 minute
 const CONTRACT_ACTION_TIMEOUT = 150_000; // 2.5 minutes
 const TEST_TIMEOUT = 10_000; // 10 seconds
 
+/** Normalize hash for comparison (indexer may return with or without 0x prefix). */
+function sameHash(a: string | undefined, b: string | undefined): boolean {
+  const n = (h: string | undefined) => (h ?? '').trim().toLowerCase().replace(/^0x/, '');
+  return n(a) === n(b);
+}
+
 describe.sequential('contract actions', () => {
   let indexerHttpClient: IndexerHttpClient;
   let toolkit: ToolkitWrapper;
+  let fundingSeed: string;
   let contractDeployResult: DeployContractResult;
   let contractCallResult: ToolkitTransactionResult;
+  let contractUpdateResult: ToolkitTransactionResult;
 
   beforeAll(async () => {
     indexerHttpClient = new IndexerHttpClient();
-
+    fundingSeed = dataProvider.getFundingSeed();
     toolkit = new ToolkitWrapper({});
     await toolkit.start();
   }, TOOLKIT_WRAPPER_TIMEOUT);
@@ -48,7 +57,7 @@ describe.sequential('contract actions', () => {
 
   describe('a transaction to deploy a smart contract', () => {
     beforeAll(async () => {
-      contractDeployResult = await toolkit.deployContract();
+      contractDeployResult = await toolkit.deployContract(fundingSeed);
     }, CONTRACT_ACTION_TIMEOUT);
 
     /**
@@ -74,13 +83,11 @@ describe.sequential('contract actions', () => {
         expect(transactionResponse?.data?.transactions).toBeDefined();
         expect(transactionResponse?.data?.transactions?.length).toBeGreaterThan(0);
 
-        // Find our specific transaction by hash
-        const foundTransaction = transactionResponse.data?.transactions?.find(
-          (tx: Transaction) => tx.hash === deployTxHash,
+        const foundTransaction = transactionResponse.data?.transactions?.find((tx: Transaction) =>
+          sameHash(tx.hash, deployTxHash),
         );
-
         expect(foundTransaction).toBeDefined();
-        expect(foundTransaction?.hash).toBe(deployTxHash);
+        expect(sameHash(foundTransaction?.hash, deployTxHash)).toBe(true);
       },
       TEST_TIMEOUT,
     );
@@ -110,13 +117,11 @@ describe.sequential('contract actions', () => {
         expect(blockResponse?.data?.block?.transactions).toBeDefined();
         expect(blockResponse?.data?.block?.transactions?.length).toBeGreaterThan(0);
 
-        // Find our specific transaction in the block
-        const foundTransaction = blockResponse.data?.block?.transactions?.find(
-          (tx: Transaction) => tx.hash === deployTxHash,
+        const foundTransaction = blockResponse.data?.block?.transactions?.find((tx: Transaction) =>
+          sameHash(tx.hash, deployTxHash),
         );
-
-        expect(foundTransaction?.hash).toBe(deployTxHash);
-        expect(blockResponse.data?.block?.hash).toBe(deployBlockHash);
+        expect(sameHash(foundTransaction?.hash, deployTxHash)).toBe(true);
+        expect(sameHash(blockResponse.data?.block?.hash, deployBlockHash)).toBe(true);
       },
       TEST_TIMEOUT,
     );
@@ -147,10 +152,9 @@ describe.sequential('contract actions', () => {
         const contractAction = contractActionResponse.data?.contractAction;
         expect(contractAction?.__typename).toBe('ContractDeploy');
 
-        // Verify it has ContractDeploy-specific fields
         if (contractAction?.__typename === 'ContractDeploy') {
           expect(contractAction.address).toBeDefined();
-          expect(contractAction.address).toBe(contractDeployResult['contract-address-untagged']);
+          expect(sameHash(contractAction.address, contractDeployResult['contract-address-untagged'])).toBe(true);
 
           const zswapState = contractAction.zswapState;
           log.debug(`zswapState (Deploy): length ${zswapState?.length ?? 0}`);
@@ -168,12 +172,10 @@ describe.sequential('contract actions', () => {
     let contractCallTransactionHash: string;
 
     beforeAll(async () => {
-      contractCallResult = await toolkit.callContract('store', contractDeployResult);
+      contractCallResult = await toolkit.callContract('store', contractDeployResult, undefined, fundingSeed);
 
       expect(contractCallResult.status).toBe('confirmed');
-      log.debug(`Raw output: ${JSON.stringify(contractCallResult.rawOutput, null, 2)}`);
-      log.debug(`Transaction hash: ${contractCallResult.txHash}`);
-      log.debug(`Block hash: ${contractCallResult.blockHash}`);
+      log.debug(`Call tx hash: ${contractCallResult.txHash}, block: ${contractCallResult.blockHash}`);
 
       contractCallBlockHash = contractCallResult.blockHash;
       contractCallTransactionHash = contractCallResult.txHash;
@@ -198,17 +200,15 @@ describe.sequential('contract actions', () => {
           contractCallTransactionHash,
         );
 
-        // Verify the transaction appears in the response
+        expect(transactionResponse).toBeSuccess();
         expect(transactionResponse?.data?.transactions).toBeDefined();
         expect(transactionResponse?.data?.transactions?.length).toBeGreaterThan(0);
 
-        // Find our specific transaction by hash
-        const foundTransaction = transactionResponse.data?.transactions?.find(
-          (tx: Transaction) => tx.hash === contractCallTransactionHash,
+        const foundTransaction = transactionResponse.data?.transactions?.find((tx: Transaction) =>
+          sameHash(tx.hash, contractCallTransactionHash),
         );
-
         expect(foundTransaction).toBeDefined();
-        expect(foundTransaction?.hash).toBe(contractCallTransactionHash);
+        expect(sameHash(foundTransaction?.hash, contractCallTransactionHash)).toBe(true);
       },
       TEST_TIMEOUT,
     );
@@ -230,10 +230,9 @@ describe.sequential('contract actions', () => {
 
         const blockResponse = await getBlockByHashWithRetry(contractCallBlockHash);
 
-        // Verify the block appears in the response
         expect(blockResponse).toBeSuccess();
         expect(blockResponse.data?.block).toBeDefined();
-        expect(blockResponse.data?.block?.hash).toBe(contractCallBlockHash);
+        expect(sameHash(blockResponse.data?.block?.hash, contractCallBlockHash)).toBe(true);
       },
       TEST_TIMEOUT,
     );
@@ -266,7 +265,7 @@ describe.sequential('contract actions', () => {
 
         if (contractAction?.__typename === 'ContractCall') {
           expect(contractAction.address).toBeDefined();
-          expect(contractAction.address).toBe(contractDeployResult['contract-address-untagged']);
+          expect(sameHash(contractAction.address, contractDeployResult['contract-address-untagged'])).toBe(true);
           expect(contractAction.entryPoint).toBeDefined();
           expect(contractAction.deploy).toBeDefined();
           expect(contractAction.deploy?.address).toBeDefined();
@@ -277,50 +276,114 @@ describe.sequential('contract actions', () => {
   });
 
   describe('a transaction to update a smart contract', () => {
+    let contractUpdateBlockHash: string;
+    let contractUpdateTransactionHash: string;
+
     beforeAll(async () => {
-      // TODO: updateContract method is not yet implemented in ToolkitWrapper
-      // This section is empty for now until updateContract is implemented
-    });
+      // Allow call to finalize before running maintenance (update)
+      await new Promise((resolve) => setTimeout(resolve, 15000));
+      contractUpdateResult = await toolkit.updateContract(contractDeployResult, fundingSeed);
+
+      expect(contractUpdateResult.status).toBe('confirmed');
+
+      contractUpdateBlockHash = contractUpdateResult.blockHash;
+      contractUpdateTransactionHash = contractUpdateResult.txHash;
+    }, CONTRACT_ACTION_TIMEOUT);
 
     /**
-     * Once a contract update transaction has been submitted to node and confirmed, the indexer should report
-     * that transaction through a query by transaction hash, using the transaction hash reported by the toolkit.
+     * Once a contract update (maintenance) transaction has been submitted and confirmed, the indexer
+     * should report that transaction via a transaction query by hash.
      *
      * @given a confirmed contract update transaction
-     * @when we query the indexer with a transaction query by hash, using the transaction hash reported by the toolkit
-     * @then the transaction should be found and reported correctly
+     * @when we query the indexer by transaction hash (from the toolkit)
+     * @then the indexer returns the update transaction
      */
-    test.todo(
+    test(
       'should be reported by the indexer through a transaction query by hash',
-      async () => {},
+      async (context: TestContext) => {
+        context.task!.meta.custom = {
+          labels: ['Query', 'Transaction', 'ByHash', 'ContractUpdate'],
+        };
+
+        const transactionResponse = await getTransactionByHashWithRetry(contractUpdateTransactionHash);
+
+        expect(transactionResponse).toBeSuccess();
+        expect(transactionResponse?.data?.transactions).toBeDefined();
+        expect(transactionResponse?.data?.transactions?.length).toBeGreaterThan(0);
+
+        const foundTransaction = transactionResponse.data?.transactions?.find((tx: Transaction) =>
+          sameHash(tx.hash, contractUpdateTransactionHash),
+        );
+
+        expect(foundTransaction).toBeDefined();
+        expect(sameHash(foundTransaction?.hash, contractUpdateTransactionHash)).toBe(true);
+      },
       TEST_TIMEOUT,
     );
 
     /**
-     * Once a contract update transaction has been submitted to node and confirmed, the indexer should report
-     * that transaction in the block through a block query by hash, using the block hash reported by the toolkit.
+     * Once a contract update (maintenance) transaction has been submitted and confirmed, the indexer
+     * should report that transaction in the block via a block query by hash.
      *
      * @given a confirmed contract update transaction
-     * @when we query the indexer with a block query by hash, using the block hash reported by the toolkit
-     * @then the block should contain the contract update transaction
+     * @when we query the indexer by block hash (from the toolkit)
+     * @then the block contains the update transaction
      */
-    test.todo(
+    test(
       'should be reported by the indexer through a block query by hash',
-      async () => {},
+      async (context: TestContext) => {
+        context.task!.meta.custom = {
+          labels: ['Query', 'Block', 'ByHash', 'ContractUpdate'],
+        };
+
+        const blockResponse = await getBlockByHashWithRetry(contractUpdateBlockHash);
+
+        expect(blockResponse).toBeSuccess();
+        expect(blockResponse?.data?.block).toBeDefined();
+        expect(sameHash(blockResponse?.data?.block?.hash, contractUpdateBlockHash)).toBe(true);
+        expect(blockResponse?.data?.block?.transactions).toBeDefined();
+        expect(blockResponse?.data?.block?.transactions?.length).toBeGreaterThan(0);
+
+        const foundUpdateTx = blockResponse.data?.block?.transactions?.find((tx: Transaction) =>
+          sameHash(tx.hash, contractUpdateTransactionHash),
+        );
+        expect(foundUpdateTx).toBeDefined();
+        expect(sameHash(foundUpdateTx?.hash, contractUpdateTransactionHash)).toBe(true);
+      },
       TEST_TIMEOUT,
     );
 
     /**
-     * Once a contract update transaction has been submitted to node and confirmed, the indexer should report
-     * the contract action with the correct type when queried by contract address.
+     * Once a contract update (maintenance) has been submitted and confirmed, the indexer should
+     * report the latest contract action as ContractUpdate when queried by contract address.
      *
      * @given a confirmed contract update transaction
-     * @when we query the indexer with a contract action query by address
-     * @then the contract action should be found with __typename 'ContractUpdate'
+     * @when we query the indexer for contract action by address
+     * @then the contract action has __typename 'ContractUpdate'
      */
-    test.todo(
+    test(
       'should be reported by the indexer through a contract action query by address',
-      async () => {},
+      async (context: TestContext) => {
+        context.task!.meta.custom = {
+          labels: ['Query', 'ContractAction', 'ByAddress', 'ContractUpdate'],
+        };
+
+        const contractActionResponse = await indexerHttpClient.getContractAction(
+          contractDeployResult['contract-address-untagged'],
+        );
+
+        expect(contractActionResponse?.data?.contractAction).toBeDefined();
+
+        const contractAction = contractActionResponse.data?.contractAction;
+        expect(contractAction?.__typename).toBe('ContractUpdate');
+
+        if (contractAction?.__typename === 'ContractUpdate') {
+          expect(contractAction.address).toBeDefined();
+          expect(sameHash(contractAction.address, contractDeployResult['contract-address-untagged'])).toBe(true);
+          expect(contractAction.transaction).toBeDefined();
+          expect(sameHash(contractAction.transaction?.hash, contractUpdateTransactionHash)).toBe(true);
+        }
+      },
       TEST_TIMEOUT,
     );
   });

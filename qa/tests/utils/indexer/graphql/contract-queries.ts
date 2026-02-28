@@ -32,6 +32,13 @@ export const CONTRACT_ACTION_LIGHT_BODY = `
         }
     }
     ... on ContractUpdate {
+        transaction {
+            hash
+            block {
+                hash
+                height
+            }
+        }
         unshieldedBalances {
             tokenType
             amount
