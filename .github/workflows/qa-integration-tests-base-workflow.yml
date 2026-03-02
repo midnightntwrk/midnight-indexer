@@ -122,7 +122,6 @@ jobs:
           APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}
           APP__INFRA__STORAGE__PASSWORD: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
           APP__INFRA__PUB_SUB__PASSWORD: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}
-          APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: ${{ secrets.APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD }}
         run: |
           . ./.envrc
           echo "NODE_TAG: $NODE_TAG"
