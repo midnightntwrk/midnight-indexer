@@ -3098,15 +3098,15 @@ dependencies = [
  "metrics-exporter-prometheus",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-ledger 7.0.2",
- "midnight-ledger 8.0.0-rc.4",
+ "midnight-ledger 7.0.3-rc.1",
+ "midnight-ledger 8.0.0-rc.5",
  "midnight-onchain-runtime 2.0.1",
  "midnight-onchain-runtime 3.0.0-rc.1",
  "midnight-serialize",
  "midnight-storage-core",
  "midnight-transient-crypto",
- "midnight-zswap 7.0.2",
- "midnight-zswap 8.0.0-rc.4",
+ "midnight-zswap 7.0.3-rc.1",
+ "midnight-zswap 8.0.0-rc.5",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -3972,9 +3972,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "7.0.2"
+version = "7.0.3-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f34403e752e720efa330d53c5751d8f24a922cdc10917b75ccd685d4f25fc62"
+checksum = "e21a49f0b61b9279443f9a67f6758dbaf384a13a3ee692f6754c69f8622506b9"
 dependencies = [
  "anyhow",
  "derive-where",
@@ -3992,7 +3992,7 @@ dependencies = [
  "midnight-serialize",
  "midnight-storage 1.1.1",
  "midnight-transient-crypto",
- "midnight-zswap 7.0.2",
+ "midnight-zswap 7.0.3-rc.1",
  "rand 0.8.5",
  "rayon",
  "serde",
@@ -4005,9 +4005,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "8.0.0-rc.4"
+version = "8.0.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab61fc4adc53b2d6ae670e4b01d27429c1f85ea2f6502b6d0e136166a85d8686"
+checksum = "cec1fd38285eb239972dfcec605b89d71ad156d31b341dfd33e3d8e04f072b4f"
 dependencies = [
  "anyhow",
  "derive-where",
@@ -4025,7 +4025,7 @@ dependencies = [
  "midnight-serialize",
  "midnight-storage 2.0.1",
  "midnight-transient-crypto",
- "midnight-zswap 8.0.0-rc.4",
+ "midnight-zswap 8.0.0-rc.5",
  "rand 0.8.5",
  "rayon",
  "serde",
@@ -4360,9 +4360,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "7.0.2"
+version = "7.0.3-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d492e8c69ab118450e20ce62467b7f4a143c81958d98da2004b4f457d15de52"
+checksum = "a62d99e3ef07c77584ce9846b9bed1a81a10b90a4d95778c7f5e84a7d7669c70"
 dependencies = [
  "derive-where",
  "fake",
@@ -4385,9 +4385,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "8.0.0-rc.4"
+version = "8.0.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee1389b3809027c4f8a0f6f3e7c368ae18ae392bb09de3c6442bc9df6bc39d4d"
+checksum = "512bb01b3fffd1bf3b9deee7ef77183609c829a2e22f3638d1ed5b54bdef43cd"
 dependencies = [
  "derive-where",
  "fake",
