@@ -111,7 +111,7 @@ docker run \
     --network host \
     -v toolkit_out:/out \
     $toolkit_image \
-    generate-txs --dest-file /out/contract_tx_1_deploy.mn --to-bytes \
+    generate-txs --dest-file /out/contract_tx_1_deploy.mn \
     contract-simple \
     deploy \
     --rng-seed $rng_seed
