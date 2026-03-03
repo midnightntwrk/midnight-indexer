@@ -1,12 +1,7 @@
 --------------------------------------------------------------------------------
 -- ledger_db_nodes
 --------------------------------------------------------------------------------
-CREATE TABLE ledger_db_nodes (
-  key BLOB PRIMARY KEY,
-  object BLOB NOT NULL,
-  ref_count INTEGER NOT NULL
-);
-CREATE INDEX ledger_db_nodes_ref_count_idx ON ledger_db_nodes (ref_count);
+CREATE TABLE ledger_db_nodes (key BLOB PRIMARY KEY, object BLOB NOT NULL);
 --------------------------------------------------------------------------------
 -- ledger_db_roots
 --------------------------------------------------------------------------------

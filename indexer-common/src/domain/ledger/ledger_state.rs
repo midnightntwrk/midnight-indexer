@@ -24,7 +24,7 @@ use crate::{
             TransactionV8,
         },
     },
-    infra::ledger_db::LedgerDb,
+    infra::ledger_db::v1_1,
 };
 use fastrace::trace;
 use itertools::Itertools;
@@ -102,12 +102,12 @@ static STRICTNESS_V8: LazyLock<WellFormedStrictnessV8> = LazyLock::new(|| {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LedgerState {
     V7 {
-        ledger_state: LedgerStateV7<LedgerDb>,
+        ledger_state: LedgerStateV7<v1_1::LedgerDb>,
         block_fullness: SyntheticCost,
     },
 
     V8 {
-        ledger_state: LedgerStateV8<LedgerDb>,
+        ledger_state: LedgerStateV8<v1_1::LedgerDb>,
         block_fullness: SyntheticCost,
     },
 }
@@ -137,8 +137,9 @@ impl LedgerState {
     ) -> Result<Self, Error> {
         match ledger_version {
             LedgerVersion::V7 => {
-                let ledger_state = tagged_deserialize::<LedgerStateV7<LedgerDb>>(&mut raw.as_ref())
-                    .map_err(|error| Error::Deserialize("GenesisLedgerStateV7", error))?;
+                let ledger_state =
+                    tagged_deserialize::<LedgerStateV7<v1_1::LedgerDb>>(&mut raw.as_ref())
+                        .map_err(|error| Error::Deserialize("GenesisLedgerStateV7", error))?;
 
                 let treasury_night = ledger_state
                     .treasury
@@ -160,8 +161,9 @@ impl LedgerState {
             }
 
             LedgerVersion::V8 => {
-                let ledger_state = tagged_deserialize::<LedgerStateV8<LedgerDb>>(&mut raw.as_ref())
-                    .map_err(|error| Error::Deserialize("GenesisLedgerStateV8", error))?;
+                let ledger_state =
+                    tagged_deserialize::<LedgerStateV8<v1_1::LedgerDb>>(&mut raw.as_ref())
+                        .map_err(|error| Error::Deserialize("GenesisLedgerStateV8", error))?;
 
                 let treasury_night = ledger_state
                     .treasury
@@ -203,11 +205,11 @@ impl LedgerState {
         let ledger_state = match ledger_version {
             LedgerVersion::V7 => {
                 let arena_key = TypedArenaKey::<
-                    LedgerStateV7<LedgerDb>,
-                    <LedgerDb as DB>::Hasher,
+                    LedgerStateV7<v1_1::LedgerDb>,
+                    <v1_1::LedgerDb as DB>::Hasher,
                 >::deserialize(&mut key.as_slice(), 0)
                 .map_err(|error| Error::Deserialize("TypedArenaKeyV7", error))?;
-                let ledger_state = default_storage::<LedgerDb>()
+                let ledger_state = default_storage::<v1_1::LedgerDb>()
                     .get(&arena_key)
                     .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
                 let ledger_state =
@@ -221,11 +223,11 @@ impl LedgerState {
 
             LedgerVersion::V8 => {
                 let arena_key = TypedArenaKey::<
-                    LedgerStateV8<LedgerDb>,
-                    <LedgerDb as DB>::Hasher,
+                    LedgerStateV8<v1_1::LedgerDb>,
+                    <v1_1::LedgerDb as DB>::Hasher,
                 >::deserialize(&mut key.as_slice(), 0)
                 .map_err(|error| Error::Deserialize("TypedArenaKeyV8", error))?;
-                let ledger_state = default_storage::<LedgerDb>()
+                let ledger_state = default_storage::<v1_1::LedgerDb>()
                     .get(&arena_key)
                     .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
                 let ledger_state =
@@ -256,12 +258,17 @@ impl LedgerState {
                 ledger_state.persist();
 
                 let key = ArenaKey::from(ledger_state.as_typed_key());
-                let key =
-                    TypedArenaKey::<LedgerStateV8<LedgerDb>, <LedgerDb as DB>::Hasher>::from(key);
+                let key = TypedArenaKey::<
+                    LedgerStateV8<v1_1::LedgerDb>,
+                    <v1_1::LedgerDb as DB>::Hasher,
+                >::from(key);
 
-                let ledger_state = default_storage::<LedgerDb>().get(&key).map_err(|error| {
-                    Error::LedgerStateTranslation(LedgerVersion::V7, ledger_version, error)
-                })?;
+                let ledger_state =
+                    default_storage::<v1_1::LedgerDb>()
+                        .get(&key)
+                        .map_err(|error| {
+                            Error::LedgerStateTranslation(LedgerVersion::V7, ledger_version, error)
+                        })?;
                 let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
 
                 Ok(LedgerState::V8 {
@@ -287,13 +294,13 @@ impl LedgerState {
 
     pub fn root(&self) -> Result<ByteVec, Error> {
         match self {
-            Self::V7 { ledger_state, .. } => default_storage::<LedgerDb>()
+            Self::V7 { ledger_state, .. } => default_storage::<v1_1::LedgerDb>()
                 .alloc(ledger_state.to_owned())
                 .as_typed_key()
                 .serialize()
                 .map_err(|error| Error::Serialize("LedgerStateV7", error)),
 
-            Self::V8 { ledger_state, .. } => default_storage::<LedgerDb>()
+            Self::V8 { ledger_state, .. } => default_storage::<v1_1::LedgerDb>()
                 .alloc(ledger_state.to_owned())
                 .as_typed_key()
                 .serialize()
@@ -309,7 +316,7 @@ impl LedgerState {
             } => {
                 let mut ledger_state = Sp::new(ledger_state);
                 ledger_state.persist();
-                default_storage::<LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
+                default_storage::<v1_1::LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
 
                 let key = ledger_state
                     .as_typed_key()
@@ -331,7 +338,7 @@ impl LedgerState {
             } => {
                 let mut ledger_state = Sp::new(ledger_state);
                 ledger_state.persist();
-                default_storage::<LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
+                default_storage::<v1_1::LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
 
                 let key = ledger_state
                     .as_typed_key()
@@ -365,7 +372,7 @@ impl LedgerState {
                 block_fullness,
             } => {
                 let transaction =
-                    tagged_deserialize::<TransactionV7<LedgerDb>>(&mut transaction.as_ref())
+                    tagged_deserialize::<TransactionV7<v1_1::LedgerDb>>(&mut transaction.as_ref())
                         .map_err(|error| Error::Deserialize("LedgerTransactionV7", error))?;
 
                 let cx = TransactionContextV7 {
@@ -437,7 +444,7 @@ impl LedgerState {
                 block_fullness,
             } => {
                 let transaction =
-                    tagged_deserialize::<TransactionV8<LedgerDb>>(&mut transaction.as_ref())
+                    tagged_deserialize::<TransactionV8<v1_1::LedgerDb>>(&mut transaction.as_ref())
                         .map_err(|error| Error::Deserialize("LedgerTransactionV8", error))?;
 
                 let cx = TransactionContextV8 {

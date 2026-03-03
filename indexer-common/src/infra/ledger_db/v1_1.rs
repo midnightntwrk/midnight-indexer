@@ -78,30 +78,6 @@ impl DB for LedgerDb {
         })
     }
 
-    fn get_unreachable_keys(&self) -> Vec<ArenaHash<Self::Hasher>> {
-        block_in_place(|| {
-            Handle::current().block_on(async {
-                let query = indoc! {"
-                    SELECT key
-                    FROM ledger_db_nodes
-                    WHERE key NOT IN (SELECT key FROM ledger_db_roots)
-                    AND ref_count = 0
-                "};
-
-                sqlx::query_as::<_, (Vec<u8>,)>(query)
-                    .fetch(&*self.pool)
-                    .and_then(|(key,)| {
-                        let key = ArenaHash::<Self::Hasher>::deserialize(&mut key.as_slice(), 0)
-                            .map_err(|error| sqlx::Error::Decode(error.into()));
-                        ready(key)
-                    })
-                    .try_collect::<Vec<_>>()
-                    .await
-                    .unwrap_or_panic("cannot get unreachable keys")
-            })
-        })
-    }
-
     fn insert_node(&mut self, key: ArenaHash<Self::Hasher>, object: OnDiskObject<Self::Hasher>) {
         block_in_place(|| {
             Handle::current().block_on(async {
@@ -376,24 +352,19 @@ where
     let query = indoc! {"
         INSERT INTO ledger_db_nodes (
             key,
-            object,
-            ref_count
+            object
         )
         VALUES (
             $1,
-            $2,
-            $3
+            $2
         )
         ON CONFLICT (key) DO UPDATE
-        SET
-            object = EXCLUDED.object,
-            ref_count = EXCLUDED.ref_count
+        SET object = EXCLUDED.object
     "};
 
     sqlx::query(query)
         .bind(key.0.as_slice())
         .bind(ser_object.as_slice())
-        .bind(object.ref_count as i64)
         .execute(&mut **tx)
         .await
         .unwrap_or_panic("cannot insert node");

@@ -4264,9 +4264,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-core"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05289baff9df43480fe331adb13de504faa27019047f2ef1f4b10b634619c7fd"
+version = "1.1.0"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=storage-core-1.1.0-rc.1#99e7c010b6bc2db4061398e239a5e52f3acca6e4"
 dependencies = [
  "archery",
  "crypto",
