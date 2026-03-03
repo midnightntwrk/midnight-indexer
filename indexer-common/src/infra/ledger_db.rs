@@ -13,11 +13,7 @@
 
 #[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
 #[cfg(any(feature = "cloud", feature = "standalone"))]
-mod v7;
-
-#[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
-#[cfg(any(feature = "cloud", feature = "standalone"))]
-pub use v7::LedgerDb;
+pub mod v1_1;
 
 use serde::Deserialize;
 
@@ -25,7 +21,7 @@ use serde::Deserialize;
 pub fn init(config: Config, pool: crate::infra::pool::postgres::PostgresPool) {
     let Config { cache_size } = config;
 
-    let db = v7::LedgerDb::new(pool);
+    let db = v1_1::LedgerDb::new(pool);
     let _ = midnight_storage_core::storage::set_default_storage(|| {
         midnight_storage_core::Storage::new(cache_size as usize, db)
     });
@@ -43,7 +39,7 @@ pub async fn init(config: Config) -> Result<(), Error> {
     let pool = sqlite::SqlitePool::new(sqlite::Config { cnn_url }).await?;
     migrations::sqlite::run_for_ledger_db(&pool).await?;
 
-    let db = v7::LedgerDb::new(pool);
+    let db = v1_1::LedgerDb::new(pool);
     let _ = midnight_storage_core::storage::set_default_storage(|| {
         midnight_storage_core::Storage::new(cache_size as usize, db)
     });

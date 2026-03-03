@@ -18,7 +18,7 @@ use crate::{
         TransactionStructure, ViewingKey,
         ledger::{Error, SerializableExt, TransactionV7, TransactionV8},
     },
-    infra::ledger_db::LedgerDb,
+    infra::ledger_db::v1_1,
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
@@ -40,8 +40,8 @@ use std::error::Error as StdError;
 
 #[derive(Debug, Clone)]
 pub enum Transaction {
-    V7(TransactionV7<LedgerDb>),
-    V8(TransactionV8<LedgerDb>),
+    V7(TransactionV7<v1_1::LedgerDb>),
+    V8(TransactionV8<v1_1::LedgerDb>),
 }
 
 impl Transaction {
