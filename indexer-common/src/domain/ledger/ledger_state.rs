@@ -210,10 +210,9 @@ impl LedgerState {
                 >::deserialize(&mut key.as_slice(), 0)
                 .map_err(|error| Error::Deserialize("TypedArenaKeyV7", error))?;
                 let ledger_state = default_storage::<v1_1::LedgerDb>()
-                    .get(&arena_key)
+                    .get_lazy(&arena_key)
                     .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
-                let ledger_state =
-                    Sp::into_inner(ledger_state).expect("loaded ledger state exists");
+                let ledger_state = (*ledger_state).clone();
 
                 Self::V7 {
                     ledger_state,
@@ -228,10 +227,9 @@ impl LedgerState {
                 >::deserialize(&mut key.as_slice(), 0)
                 .map_err(|error| Error::Deserialize("TypedArenaKeyV8", error))?;
                 let ledger_state = default_storage::<v1_1::LedgerDb>()
-                    .get(&arena_key)
+                    .get_lazy(&arena_key)
                     .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
-                let ledger_state =
-                    Sp::into_inner(ledger_state).expect("loaded ledger state exists");
+                let ledger_state = (*ledger_state).clone();
 
                 Self::V8 {
                     ledger_state,
@@ -265,11 +263,11 @@ impl LedgerState {
 
                 let ledger_state =
                     default_storage::<v1_1::LedgerDb>()
-                        .get(&key)
+                        .get_lazy(&key)
                         .map_err(|error| {
                             Error::LedgerStateTranslation(LedgerVersion::V7, ledger_version, error)
                         })?;
-                let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
+                let ledger_state = (*ledger_state).clone();
 
                 Ok(LedgerState::V8 {
                     ledger_state,
