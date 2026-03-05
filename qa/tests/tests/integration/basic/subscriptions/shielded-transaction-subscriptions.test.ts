@@ -290,7 +290,15 @@ describe('shielded transaction subscriptions', () => {
         });
     });
 
-    test('should NOT stream shielded transactions after logout', async () => {
+    /**
+    * Ensures that a shielded transaction subscription cannot use a session ID
+    * after the wallet session has been disconnected.
+    *
+    * @given a valid viewing key and an open wallet session
+    * @when the wallet session is disconnected
+    * @then subscriptions using the old session ID should fail with "unknown or expired session ID"
+    */
+    test('should reject shieldedTransactions subscription when using expired session ID', async () => {
       const seedWithTransactions = dataProvider.getFundingSeed();
       const viewingKey = await toolkit.showViewingKey(seedWithTransactions);
 
@@ -328,13 +336,16 @@ describe('shielded transaction subscriptions', () => {
       await new Promise(res => setTimeout(res, 2000));
       unsubscribeAfter();
 
-      const hasTypename = (messages: ShieldedTxSubscriptionResponse[], typename: string) =>
-        messages.some(
-          m => m.data?.shieldedTransactions?.__typename === typename
-        );
+      expect(afterLogoutEvents.length).toBeGreaterThanOrEqual(1);
 
-      expect(hasTypename(afterLogoutEvents, 'RelevantTransaction')).toBe(false);
-      expect(hasTypename(afterLogoutEvents, 'ShieldedTransactionsProgress')).toBe(true);
+      const hasSessionError = afterLogoutEvents.some(
+        (event) =>
+          event.errors?.some((e) =>
+            e.message.includes('unknown or expired session ID')
+          )
+      );
+
+      expect(hasSessionError).toBe(true);
     });
   });
 });
