@@ -129,7 +129,6 @@ class ToolkitWrapper {
       this.getRpcUrl(),
       '--dest-file',
       destFile,
-      '--to-bytes',
       CONTRACT_SIMPLE,
       subcommand,
     ];

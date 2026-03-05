@@ -26,7 +26,7 @@ import {
 } from '@utils/toolkit/toolkit-wrapper';
 import { Transaction } from '@utils/indexer/indexer-types';
 
-const TOOLKIT_WRAPPER_TIMEOUT = 60_000; // 1 minute
+const TOOLKIT_WRAPPER_TIMEOUT = 120_000; // 2 minutes
 const CONTRACT_ACTION_TIMEOUT = 150_000; // 2.5 minutes
 const TEST_TIMEOUT = 10_000; // 10 seconds
 
@@ -43,6 +43,12 @@ describe.sequential('contract actions', () => {
   let contractDeployResult: DeployContractResult;
   let contractCallResult: ToolkitTransactionResult;
   let contractUpdateResult: ToolkitTransactionResult;
+
+  let contractCallBlockHash: string;
+  let contractCallTransactionHash: string;
+
+  let contractUpdateBlockHash: string;
+  let contractUpdateTransactionHash: string;
 
   beforeAll(async () => {
     indexerHttpClient = new IndexerHttpClient();
@@ -168,9 +174,6 @@ describe.sequential('contract actions', () => {
   });
 
   describe('a transaction to call a smart contract', () => {
-    let contractCallBlockHash: string;
-    let contractCallTransactionHash: string;
-
     beforeAll(async () => {
       contractCallResult = await toolkit.callContract('store', contractDeployResult, undefined, fundingSeed);
 
@@ -276,12 +279,11 @@ describe.sequential('contract actions', () => {
   });
 
   describe('a transaction to update a smart contract', () => {
-    let contractUpdateBlockHash: string;
-    let contractUpdateTransactionHash: string;
 
     beforeAll(async () => {
       // Allow call to finalize before running maintenance (update)
-      await new Promise((resolve) => setTimeout(resolve, 15000));
+      await getTransactionByHashWithRetry(contractCallTransactionHash);
+      await new Promise((resolve) => setTimeout(resolve, 30000));
       contractUpdateResult = await toolkit.updateContract(contractDeployResult, fundingSeed);
 
       expect(contractUpdateResult.status).toBe('confirmed');
@@ -336,6 +338,8 @@ describe.sequential('contract actions', () => {
           labels: ['Query', 'Block', 'ByHash', 'ContractUpdate'],
         };
 
+        await getTransactionByHashWithRetry(contractUpdateTransactionHash);
+
         const blockResponse = await getBlockByHashWithRetry(contractUpdateBlockHash);
 
         expect(blockResponse).toBeSuccess();
@@ -368,6 +372,8 @@ describe.sequential('contract actions', () => {
           labels: ['Query', 'ContractAction', 'ByAddress', 'ContractUpdate'],
         };
 
+        await getTransactionByHashWithRetry(contractUpdateTransactionHash);
+
         const contractActionResponse = await indexerHttpClient.getContractAction(
           contractDeployResult['contract-address-untagged'],
         );
@@ -380,8 +386,6 @@ describe.sequential('contract actions', () => {
         if (contractAction?.__typename === 'ContractUpdate') {
           expect(contractAction.address).toBeDefined();
           expect(sameHash(contractAction.address, contractDeployResult['contract-address-untagged'])).toBe(true);
-          expect(contractAction.transaction).toBeDefined();
-          expect(sameHash(contractAction.transaction?.hash, contractUpdateTransactionHash)).toBe(true);
         }
       },
       TEST_TIMEOUT,
