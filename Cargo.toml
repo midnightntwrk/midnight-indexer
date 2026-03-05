@@ -28,7 +28,7 @@ midnight-ledger_v8          = { package = "midnight-ledger", version = "8.0.0-rc
 midnight-onchain-runtime_v2 = { package = "midnight-onchain-runtime", version = "2.0" }
 midnight-onchain-runtime_v3 = { package = "midnight-onchain-runtime", version = "3.0.0-rc.1" }
 midnight-serialize          = { version = "1.0" }
-midnight-storage-core       = { version = "1.1", features = [ "layout-v2" ] }
+midnight-storage-core       = { version = "1.1.1" }
 midnight-transient-crypto   = { version = "2.0" }
 midnight-zswap_v7           = { package = "midnight-zswap", version = "7.0.3-rc.1" }
 midnight-zswap_v8           = { package = "midnight-zswap", version = "8.0.0-rc.5" }
@@ -96,4 +96,4 @@ uuid                        = { version = "1.21", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }
 
 [patch.crates-io]
-midnight-storage-core = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "storage-core-1.1.0-rc.1" }
+midnight-storage-core = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "storage-core-1.1.1-alpha.1" }

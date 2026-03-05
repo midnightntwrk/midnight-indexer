@@ -302,6 +302,10 @@ impl DB for LedgerDb {
         })
     }
 
+    fn get_unreachable_keys(&self) -> Vec<ArenaHash<Self::Hasher>> {
+        vec![]
+    }
+
     fn size(&self) -> usize {
         block_in_place(|| {
             Handle::current().block_on(async {
