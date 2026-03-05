@@ -97,3 +97,4 @@ walkdir                     = { version = "2.5" }
 
 [patch.crates-io]
 midnight-storage-core = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "storage-core-1.1.1-alpha.1" }
+midnight-serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", branch = "tkerber/tmp/recursion-limit-backtrace" }

@@ -4203,8 +4203,7 @@ dependencies = [
 [[package]]
 name = "midnight-serialize"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cf09a5e7e71e9cda92d6a401448cccaf6147ecb2b473bda2bb0afcccebdfd12"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftmp%2Frecursion-limit-backtrace#72ba6856e88c2c2033e17dcae08f7478bc70ddc6"
 dependencies = [
  "crypto",
  "konst",
