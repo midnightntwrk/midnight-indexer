@@ -47,6 +47,7 @@ fn run() -> anyhow::Result<()> {
         telemetry,
     };
     use log::info;
+    use std::time::Duration;
     use tokio::runtime::Builder;
 
     // Load configuration.
@@ -103,8 +104,9 @@ fn run() -> anyhow::Result<()> {
         application::run(application_config, api, subscriber).await
     });
 
-    // Explicit shutdown with timeout to avoid hanging on block_in_place calls.
-    runtime.shutdown_timeout(std::time::Duration::from_secs(5));
+    // The implicit runtime drop hangs indefinitely when spawned tasks are inside
+    // block_in_place calls (e.g. ledger DB) that cannot be cancelled by abort().
+    runtime.shutdown_timeout(Duration::from_secs(5));
 
     result
 }
