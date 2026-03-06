@@ -49,6 +49,7 @@ fn run() -> anyhow::Result<()> {
         telemetry,
     };
     use log::info;
+    use std::time::Duration;
     use tokio::{
         runtime::Builder,
         signal::unix::{SignalKind, signal},
@@ -82,7 +83,7 @@ fn run() -> anyhow::Result<()> {
         .build()
         .context("build Tokio runtime")?;
 
-    runtime.block_on(async {
+    let result = runtime.block_on(async {
         let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
         telemetry::init_tracing(tracing_config);
@@ -110,7 +111,13 @@ fn run() -> anyhow::Result<()> {
             .context("create NatsPublisher")?;
 
         application::run(application_config, node, storage, publisher, sigterm).await
-    })
+    });
+
+    // The implicit runtime drop hangs indefinitely when spawned tasks are inside
+    // block_in_place calls (e.g. ledger DB) that cannot be cancelled by abort().
+    runtime.shutdown_timeout(Duration::from_secs(5));
+
+    result
 }
 
 #[cfg(not(feature = "cloud"))]
