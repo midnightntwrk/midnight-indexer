@@ -78,7 +78,7 @@ fn run() -> anyhow::Result<()> {
         .build()
         .context("build Tokio runtime")?;
 
-    runtime.block_on(async {
+    let result = runtime.block_on(async {
         telemetry::init_tracing(tracing_config);
         telemetry::init_metrics(metrics_config);
 
@@ -101,7 +101,12 @@ fn run() -> anyhow::Result<()> {
         let api = AxumApi::new(api_config, storage, subscriber.clone());
 
         application::run(application_config, api, subscriber).await
-    })
+    });
+
+    // Explicit shutdown with timeout to avoid hanging on block_in_place calls.
+    runtime.shutdown_timeout(std::time::Duration::from_secs(5));
+
+    result
 }
 
 #[cfg(not(feature = "cloud"))]

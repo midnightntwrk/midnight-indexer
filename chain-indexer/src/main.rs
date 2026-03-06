@@ -82,7 +82,7 @@ fn run() -> anyhow::Result<()> {
         .build()
         .context("build Tokio runtime")?;
 
-    runtime.block_on(async {
+    let result = runtime.block_on(async {
         let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
         telemetry::init_tracing(tracing_config);
@@ -110,7 +110,12 @@ fn run() -> anyhow::Result<()> {
             .context("create NatsPublisher")?;
 
         application::run(application_config, node, storage, publisher, sigterm).await
-    })
+    });
+
+    // Explicit shutdown with timeout to avoid hanging on block_in_place calls.
+    runtime.shutdown_timeout(std::time::Duration::from_secs(5));
+
+    result
 }
 
 #[cfg(not(feature = "cloud"))]
