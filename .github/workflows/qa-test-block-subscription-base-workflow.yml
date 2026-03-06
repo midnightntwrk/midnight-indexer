@@ -19,6 +19,10 @@ on:
         type: string
         default: 'v4'
 
+# no top level default permissions for security reasons
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test - block-subscriptions

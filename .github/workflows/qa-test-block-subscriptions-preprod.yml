@@ -6,6 +6,10 @@ on:
     # Every 10 minutes on workdays (Mon-Fri), covering UK and US working hours (07:00-21:00 UTC)
     - cron: '*/10 7-21 * * 1-5'
 
+# no top level default permissions for security reasons
+permissions:
+  contents: read
+
 jobs:
   test-block-subscriptions:
     name: Test Block Subscriptions

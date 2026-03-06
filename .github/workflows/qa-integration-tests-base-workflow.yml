@@ -66,8 +66,20 @@ on:
         required: false
         default: latest
     secrets:
-      MIDNIGHTCI_PACKAGES_WRITE:
+      MIDNIGHTCI_PACKAGES_READ:
         required: true
+      APP__INFRA__SECRET:
+        required: false
+      APP__INFRA__STORAGE__PASSWORD:
+        required: false
+      APP__INFRA__PUB_SUB__PASSWORD:
+        required: false
+      APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD:
+        required: false
+      XRAY_CLIENT_ID:
+        required: false
+      XRAY_CLIENT_SECRET:
+        required: false
 
 concurrency:
   group: ${{github.workflow}}-${{github.head_ref || github.run_id}}
