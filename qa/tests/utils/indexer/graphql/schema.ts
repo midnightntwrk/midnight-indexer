@@ -258,6 +258,8 @@ export const DustGenerationStatusSchema = z.object({
   generationRate: z.string().regex(/^\d+$/),
   maxCapacity: z.string().regex(/^\d+$/),
   currentCapacity: z.string().regex(/^\d+$/),
+  utxoTxHash: z.string().nullable(),
+  utxoOutputIndex: z.number().int().nullable(),
 });
 
 // Simplified version used in subscription responses

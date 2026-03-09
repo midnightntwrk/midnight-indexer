@@ -225,6 +225,8 @@ export interface DustGenerationStatus {
   generationRate: string;
   currentCapacity: string;
   maxCapacity: string;
+  utxoTxHash: string | null;
+  utxoOutputIndex: number | null;
 }
 
 export interface ZswapLedgerEvent {
