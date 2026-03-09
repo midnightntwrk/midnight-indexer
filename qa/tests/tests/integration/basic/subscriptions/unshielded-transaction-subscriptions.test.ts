@@ -109,7 +109,7 @@ describe('unshielded transaction subscriptions', async () => {
     if (toolkit) {
       await toolkit.start();
     }
-  });
+  }, 120000);
 
   afterAll(async () => {
     await indexerWsClient.connectionClose();

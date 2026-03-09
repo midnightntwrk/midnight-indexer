@@ -150,7 +150,7 @@ describe('contract queries', () => {
       let existingContractAddress: string;
       let contractUpdateBlockHash: string;
       try {
-        existingContractAddress = dataProvider.getKnownContractAddress() as string;
+        existingContractAddress = dataProvider.getContractAddressForActionType('ContractUpdate');
         contractUpdateBlockHash = await dataProvider.getContractUpdateBlockHash();
       } catch (error) {
         log.warn(error);
@@ -255,7 +255,7 @@ describe('contract queries', () => {
       let existingContractAddress: string;
       let contractUpdateHeight: number;
       try {
-        existingContractAddress = dataProvider.getKnownContractAddress() as string;
+        existingContractAddress = dataProvider.getContractAddressForActionType('ContractUpdate');
         contractUpdateHeight = await dataProvider.getContractUpdateBlockHeight();
       } catch (error) {
         log.warn(error);

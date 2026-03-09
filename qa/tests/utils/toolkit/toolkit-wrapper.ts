@@ -110,7 +110,10 @@ class ToolkitWrapper {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
-    const result = await this.startedContainer.exec(args);
+    // Inject --log-json after the binary name so structured JSON logs are always emitted,
+    // regardless of the toolkit's default pretty-printing mode.
+    const [bin, ...rest] = args;
+    const result = await this.startedContainer.exec([bin, '--log-json', ...rest]);
     if (result.exitCode !== 0) {
       const msg = result.stderr || result.output || 'Unknown error';
       throw new Error(`${errorContext}: ${msg}`);
@@ -343,7 +346,7 @@ class ToolkitWrapper {
     log.debug(`Toolkit sync cache dir : ${this.config.syncCacheDir}`);
 
     this.container = new GenericContainer(
-      `midnightntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`,
+      `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`,
     )
       .withName(this.config.containerName)
       .withNetworkMode('host') // equivalent to --network host
@@ -612,6 +615,7 @@ class ToolkitWrapper {
 
     const result = await this.startedContainer.exec([
       TOOLKIT_BIN,
+      '--log-json',
       'dust-balance',
       '--src-url',
       env.getNodeWebsocketBaseURL(),
@@ -692,6 +696,7 @@ class ToolkitWrapper {
 
     const result = await this.startedContainer.exec([
       TOOLKIT_BIN,
+      '--log-json',
       'generate-txs',
       '--src-url',
       env.getNodeWebsocketBaseURL(),

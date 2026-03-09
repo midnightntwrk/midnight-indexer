@@ -304,48 +304,59 @@ describe('shielded transaction subscriptions', () => {
 
       const sessionId = await indexerWsClient.openWalletSession(viewingKey);
 
+      // Confirm the session is alive by waiting for the first RelevantTransaction event.
+      // We don't need the full transaction history — one relevant event is sufficient
+      // proof that the session is working.
       const beforeLogoutEvents: ShieldedTxSubscriptionResponse[] = [];
-      const unsubscribeBefore = indexerWsClient.subscribeToShieldedTransactionEvents(
-        {
-          next: (payload) => {
-            log.debug(`Received event before logout: ${JSON.stringify(payload)}`);
-            beforeLogoutEvents.push(payload)
-          }
-        },
-        sessionId,
-      );
-      await new Promise((res) => setTimeout(res, 2000));
-      expect(beforeLogoutEvents.length).toBeGreaterThan(1);
-      unsubscribeBefore();
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error(
+            `Timed out waiting for a shielded event before logout. ` +
+            `Received ${beforeLogoutEvents.length} event(s): ${JSON.stringify(beforeLogoutEvents)}`,
+          ));
+        }, 30_000);
+        const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
+          {
+            next: (payload) => {
+              beforeLogoutEvents.push(payload);
+              log.debug(`Received event before logout: ${JSON.stringify(payload)}`);
+              if (payload.data?.shieldedTransactions?.__typename !== 'ShieldedTransactionsProgress') {
+                clearTimeout(timeout);
+                unsubscribe();
+                resolve();
+              }
+            },
+          },
+          sessionId,
+        );
+      });
 
       await indexerWsClient.closeWalletSession(sessionId);
 
-      await new Promise(res => setTimeout(res, 2000));
-
+      // After logout, subscribing with the expired session ID must produce an error event.
       const afterLogoutEvents: ShieldedTxSubscriptionResponse[] = [];
-      const unsubscribeAfter = indexerWsClient.subscribeToShieldedTransactionEvents(
-        {
-          next: (payload) => {
-            log.debug(`Received event before logout: ${JSON.stringify(payload)}`);
-            afterLogoutEvents.push(payload)
-          }
-        },
-        sessionId,
-      );
-
-      await new Promise(res => setTimeout(res, 2000));
-      unsubscribeAfter();
-
-      expect(afterLogoutEvents.length).toBeGreaterThanOrEqual(1);
-
-      const hasSessionError = afterLogoutEvents.some(
-        (event) =>
-          event.errors?.some((e) =>
-            e.message.includes('unknown or expired session ID')
-          )
-      );
-
-      expect(hasSessionError).toBe(true);
-    });
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error(
+            `Timed out waiting for expired-session error event. ` +
+            `Received ${afterLogoutEvents.length} event(s): ${JSON.stringify(afterLogoutEvents)}`,
+          ));
+        }, 10_000);
+        const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
+          {
+            next: (payload) => {
+              afterLogoutEvents.push(payload);
+              log.debug(`Received event after logout: ${JSON.stringify(payload)}`);
+              if (payload.errors?.some((e) => e.message.includes('unknown or expired session ID'))) {
+                clearTimeout(timeout);
+                unsubscribe();
+                resolve();
+              }
+            },
+          },
+          sessionId,
+        );
+      });
+    }, 45_000);
   });
 });
