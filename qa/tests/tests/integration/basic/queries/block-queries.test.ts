@@ -48,8 +48,7 @@ async function getLatestBlockByHash(): Promise<Block> {
   expect(blockByHashResponse.data?.block?.hash).toBeDefined();
   expect(blockByHashResponse.data?.block?.hash).toBe(latestBlockHash);
 
-  expect(blockByHashResponse.data?.block?.ledgerParameters).toBeDefined();
-  expect(blockByHashResponse.data?.block?.ledgerParameters).not.toBeNull();
+  expect(blockByHashResponse.data?.block?.ledgerParameters).toBeTruthy();
 
   return blockByHashResponse.data?.block as Block;
 }
@@ -74,8 +73,7 @@ async function getLatestBlockByHeight(): Promise<Block> {
   expect(blockByHashResponse.data?.block?.height).toBeDefined();
   expect(blockByHashResponse.data?.block?.height).toBe(latestBlockHeight);
 
-  expect(blockByHashResponse.data?.block?.ledgerParameters).toBeDefined();
-  expect(blockByHashResponse.data?.block?.ledgerParameters).not.toBeNull();
+  expect(blockByHashResponse.data?.block?.ledgerParameters).toBeTruthy();
 
   return blockByHashResponse.data?.block as Block;
 }
