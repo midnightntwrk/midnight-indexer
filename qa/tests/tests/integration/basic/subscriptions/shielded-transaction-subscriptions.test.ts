@@ -289,5 +289,74 @@ describe('shielded transaction subscriptions', () => {
           ).toBe(true);
         });
     });
+
+    /**
+    * Ensures that a shielded transaction subscription cannot use a session ID
+    * after the wallet session has been disconnected.
+    *
+    * @given a valid viewing key and an open wallet session
+    * @when the wallet session is disconnected
+    * @then subscriptions using the old session ID should fail with "unknown or expired session ID"
+    */
+    test('should reject shieldedTransactions subscription when using expired session ID', async () => {
+      const seedWithTransactions = dataProvider.getFundingSeed();
+      const viewingKey = await toolkit.showViewingKey(seedWithTransactions);
+
+      const sessionId = await indexerWsClient.openWalletSession(viewingKey);
+
+      // Confirm the session is alive by waiting for the first RelevantTransaction event.
+      // We don't need the full transaction history — one relevant event is sufficient
+      // proof that the session is working.
+      const beforeLogoutEvents: ShieldedTxSubscriptionResponse[] = [];
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error(
+            `Timed out waiting for a shielded event before logout. ` +
+            `Received ${beforeLogoutEvents.length} event(s): ${JSON.stringify(beforeLogoutEvents)}`,
+          ));
+        }, 30_000);
+        const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
+          {
+            next: (payload) => {
+              beforeLogoutEvents.push(payload);
+              log.debug(`Received event before logout: ${JSON.stringify(payload)}`);
+              if (payload.data?.shieldedTransactions?.__typename !== 'ShieldedTransactionsProgress') {
+                clearTimeout(timeout);
+                unsubscribe();
+                resolve();
+              }
+            },
+          },
+          sessionId,
+        );
+      });
+
+      await indexerWsClient.closeWalletSession(sessionId);
+
+      // After logout, subscribing with the expired session ID must produce an error event.
+      const afterLogoutEvents: ShieldedTxSubscriptionResponse[] = [];
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error(
+            `Timed out waiting for expired-session error event. ` +
+            `Received ${afterLogoutEvents.length} event(s): ${JSON.stringify(afterLogoutEvents)}`,
+          ));
+        }, 10_000);
+        const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
+          {
+            next: (payload) => {
+              afterLogoutEvents.push(payload);
+              log.debug(`Received event after logout: ${JSON.stringify(payload)}`);
+              if (payload.errors?.some((e) => e.message.includes('unknown or expired session ID'))) {
+                clearTimeout(timeout);
+                unsubscribe();
+                resolve();
+              }
+            },
+          },
+          sessionId,
+        );
+      });
+    }, 45_000);
   });
 });

@@ -48,6 +48,8 @@ async function getLatestBlockByHash(): Promise<Block> {
   expect(blockByHashResponse.data?.block?.hash).toBeDefined();
   expect(blockByHashResponse.data?.block?.hash).toBe(latestBlockHash);
 
+  expect(blockByHashResponse.data?.block?.ledgerParameters).toBeTruthy();
+
   return blockByHashResponse.data?.block as Block;
 }
 
@@ -70,6 +72,8 @@ async function getLatestBlockByHeight(): Promise<Block> {
   expect(blockByHashResponse.data?.block).toBeDefined();
   expect(blockByHashResponse.data?.block?.height).toBeDefined();
   expect(blockByHashResponse.data?.block?.height).toBe(latestBlockHeight);
+
+  expect(blockByHashResponse.data?.block?.ledgerParameters).toBeTruthy();
 
   return blockByHashResponse.data?.block as Block;
 }
@@ -401,6 +405,7 @@ describe(`genesis block`, () => {
     expect(blockQueryResponse.data?.block).toBeDefined();
 
     genesisBlock = blockQueryResponse.data?.block as Block;
+    expect(genesisBlock.ledgerParameters).toBeTruthy();
   });
 
   describe(`a block query to the genesis block`, async () => {
