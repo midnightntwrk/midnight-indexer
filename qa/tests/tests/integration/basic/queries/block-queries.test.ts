@@ -405,8 +405,7 @@ describe(`genesis block`, () => {
     expect(blockQueryResponse.data?.block).toBeDefined();
 
     genesisBlock = blockQueryResponse.data?.block as Block;
-    expect(genesisBlock.ledgerParameters).toBeDefined();
-    expect(genesisBlock.ledgerParameters).not.toBeNull();
+    expect(genesisBlock.ledgerParameters).toBeTruthy();
   });
 
   describe(`a block query to the genesis block`, async () => {
