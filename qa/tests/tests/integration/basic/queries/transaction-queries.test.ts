@@ -21,6 +21,7 @@ import { IndexerHttpClient } from '@utils/indexer/http-client';
 import type {
   BlockResponse,
   RegularTransaction,
+  SystemTransaction,
   Transaction,
   TransactionOffset,
   TransactionResponse,
@@ -72,6 +73,12 @@ function getRegularTransactions(transactions: Transaction[]): RegularTransaction
   return transactions.filter(
     (tx) => tx.__typename === 'RegularTransaction',
   ) as RegularTransaction[];
+}
+
+function getSystemTransactions(transactions: Transaction[]): SystemTransaction[] {
+  return transactions.filter(
+    (tx) => tx.__typename === 'SystemTransaction',
+  ) as SystemTransaction[];
 }
 
 function extractUtxos(transactions: Transaction[]): UnshieldedUtxo[] {
@@ -344,6 +351,55 @@ describe(`genesis transactions`, () => {
         expect(utxos[i].outputIndex).toBeGreaterThanOrEqual(utxos[i - 1].outputIndex);
       }
     });
+
+    /**
+     * System transactions should be individually queryable by their hash,
+     * the same way regular transactions are.
+     *
+     * @given a system transaction hash from the genesis block
+     * @when we query the transaction by hash
+     * @then the indexer should return the system transaction with matching hash and type
+     */
+    test('should return system transactions when queried by hash', async () => {
+      const systemTxs = getSystemTransactions(genesisTransactions);
+      expect(systemTxs.length).toBeGreaterThanOrEqual(1);
+
+      for (const tx of systemTxs) {
+        const response: TransactionResponse = await indexerHttpClient.getTransactionByOffset({
+          hash: tx.hash!,
+        });
+
+        expect(response).toBeSuccess();
+        expect(response.data?.transactions.length).toBeGreaterThanOrEqual(1);
+
+        const queriedTx = response.data!.transactions[0];
+        expect(queriedTx.__typename).toBe('SystemTransaction');
+        expect(queriedTx.hash).toBe(tx.hash);
+
+        log.debug(`Successfully queried system tx by hash: ${tx.hash}`);
+      }
+    });
+
+    /**
+     * SystemTransactions should not have RegularTransaction-specific fields like
+     * merkleTreeRoot, identifiers, fees, or transactionResult.
+     *
+     * @given system transactions are fetched from the genesis block
+     * @when we inspect their fields
+     * @then RegularTransaction-specific fields should not be present
+     */
+    test('should not contain RegularTransaction-specific fields on system transactions', async () => {
+      const systemTxs = getSystemTransactions(genesisTransactions);
+      expect(systemTxs.length).toBeGreaterThanOrEqual(1);
+
+      for (const tx of systemTxs) {
+        const txAny = tx as unknown as Record<string, unknown>;
+        expect(txAny['merkleTreeRoot']).toBeUndefined();
+        expect(txAny['identifiers']).toBeUndefined();
+        expect(txAny['fees']).toBeUndefined();
+        expect(txAny['transactionResult']).toBeUndefined();
+      }
+    });
   });
 
   describe('schema validation', () => {
@@ -390,6 +446,23 @@ describe(`genesis transactions`, () => {
           `SystemTransaction schema validation failed for tx ${tx.hash}: ${JSON.stringify(result.error?.format?.(), null, 2)}`,
         ).toBe(true);
       }
+    });
+
+    /**
+     * The genesis block should contain both RegularTransaction and SystemTransaction types,
+     * verifying that SystemTransactionApplied events are captured by the indexer
+     * and system transactions appear alongside regular transactions in GraphQL queries.
+     *
+     * @given the genesis block has been indexed
+     * @when we query the genesis block transactions
+     * @then both RegularTransaction and SystemTransaction types should be present
+     */
+    test('should contain both regular and system transactions', async () => {
+      const typenames = new Set(genesisTransactions.map((tx) => tx.__typename));
+
+      log.debug(`Transaction types found in genesis: ${[...typenames].join(', ')}`);
+      expect(typenames).toContain('RegularTransaction');
+      expect(typenames).toContain('SystemTransaction');
     });
 
     /**
