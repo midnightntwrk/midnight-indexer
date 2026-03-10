@@ -284,6 +284,7 @@ export const DUST_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT = `
       id
       raw
       maxId
+      protocolVersion
       ... on DustInitialUtxo {
         output {
           nonce
@@ -300,6 +301,7 @@ export const DUST_LEDGER_EVENTS_SUBSCRIPTION_FROM_OFFSET = `
       id
       raw
       maxId
+      protocolVersion
       ... on DustInitialUtxo {
         output {
           nonce
