@@ -192,11 +192,13 @@ export const BLOCKS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription BlocksSubs
         id
         raw
         maxId
+        protocolVersion
       }
       dustLedgerEvents {
         id
         raw
         maxId
+        protocolVersion
       }
       ... on RegularTransaction {
         merkleTreeRoot
