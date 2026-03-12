@@ -6,10 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [4.0.0-rc.6] - 2026-03-12
 
-### 🐛 Bug Fixes
-
-- Migrate dispatch input interpolation to env: block (PM-22118) (#870)
-
 ## [4.0.0-rc.5] - 2026-03-06
 
 ### 🐛 Bug Fixes
