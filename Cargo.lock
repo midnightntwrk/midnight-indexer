@@ -3099,7 +3099,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-ledger 7.0.3",
- "midnight-ledger 8.0.0",
+ "midnight-ledger 8.0.2",
  "midnight-onchain-runtime 2.0.1",
  "midnight-onchain-runtime 3.0.0",
  "midnight-serialize",
@@ -4005,9 +4005,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "8.0.0"
+version = "8.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8327e2f2afd0f82bc61f8c1e29a0b0a67f07f777c8b6f8ec0622e6ab5bee8c59"
+checksum = "3369683ca196d2be00c6819b35ea45d0b468b5f6096a294fb0f79299860811c0"
 dependencies = [
  "anyhow",
  "derive-where",
