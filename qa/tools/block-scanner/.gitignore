@@ -13,6 +13,7 @@ logs/
 # Runtime data
 tmp_scan/
 *.jsonl
+qanet_stats.json
 
 # Environment variables
 .env

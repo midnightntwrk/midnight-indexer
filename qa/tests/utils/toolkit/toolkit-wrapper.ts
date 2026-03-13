@@ -537,6 +537,7 @@ class ToolkitWrapper {
 
     const result = await this.startedContainer.exec([
       TOOLKIT_BIN,
+      '--log-json',
       'show-wallet',
       '--src-url',
       env.getNodeWebsocketBaseURL(),

@@ -137,6 +137,10 @@ describe('dust generation status queries', () => {
       expect(BigInt(registeredStatus?.generationRate)).toBeGreaterThan(0n);
       expect(BigInt(registeredStatus?.currentCapacity)).toBeGreaterThan(0n);
       expect(BigInt(registeredStatus?.maxCapacity)).toBeGreaterThan(0n);
+      expect(registeredStatus?.utxoTxHash).not.toBeNull();
+      expect(registeredStatus?.utxoTxHash).toMatch(/^[a-f0-9]{64}$/);
+      expect(registeredStatus?.utxoOutputIndex).not.toBeNull();
+      expect(registeredStatus?.utxoOutputIndex).toBeGreaterThanOrEqual(0);
     });
 
     /**
@@ -209,6 +213,8 @@ describe('dust generation status queries', () => {
       expect(registeredStatus?.generationRate).toBe('0');
       expect(registeredStatus?.currentCapacity).toBe('0');
       expect(registeredStatus?.maxCapacity).toBe('0');
+      expect(registeredStatus?.utxoTxHash).toBeNull();
+      expect(registeredStatus?.utxoOutputIndex).toBeNull();
     });
 
     /**
@@ -360,6 +366,10 @@ describe('dust generation status queries', () => {
       expect(status?.generationRate).toBe('0');
       expect(status?.currentCapacity).toBe('0');
       expect(status?.maxCapacity).toBe('0');
+
+      // MappingRemoved clears the stored UTXO reference
+      expect(status?.utxoTxHash).toBeNull();
+      expect(status?.utxoOutputIndex).toBeNull();
     });
   });
 

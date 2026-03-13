@@ -72,12 +72,14 @@ export const ZswapLedgerEventSchema = z.object({
   id: z.number(),
   raw: z.string(),
   maxId: z.number(),
+  protocolVersion: z.number(),
 });
 
 export const DustLedgerEventSchema = z.object({
   id: z.number(),
   raw: z.string(),
   maxId: z.number(),
+  protocolVersion: z.number(),
 });
 
 export const DustParamChangeSchema = z.object({
@@ -85,6 +87,7 @@ export const DustParamChangeSchema = z.object({
   id: z.number(),
   raw: z.string(),
   maxId: z.number(),
+  protocolVersion: z.number(),
 });
 
 export const DustInitialUtxoSchema = z.object({
@@ -92,6 +95,7 @@ export const DustInitialUtxoSchema = z.object({
   id: z.number(),
   raw: z.string(),
   maxId: z.number(),
+  protocolVersion: z.number(),
   output: z.object({
     nonce: z
       .string()
@@ -105,6 +109,7 @@ export const DustGenerationDtimeUpdateSchema = z.object({
   id: z.number(),
   raw: z.string(),
   maxId: z.number(),
+  protocolVersion: z.number(),
 });
 
 export const DustSpendProcessedSchema = z.object({
@@ -112,6 +117,7 @@ export const DustSpendProcessedSchema = z.object({
   id: z.number(),
   raw: z.string(),
   maxId: z.number(),
+  protocolVersion: z.number(),
 });
 
 export const DustLedgerEventsUnionSchema = z.discriminatedUnion('__typename', [
@@ -258,6 +264,8 @@ export const DustGenerationStatusSchema = z.object({
   generationRate: z.string().regex(/^\d+$/),
   maxCapacity: z.string().regex(/^\d+$/),
   currentCapacity: z.string().regex(/^\d+$/),
+  utxoTxHash: z.string().nullable(),
+  utxoOutputIndex: z.number().int().nullable(),
 });
 
 // Simplified version used in subscription responses
