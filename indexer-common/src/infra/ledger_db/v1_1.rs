@@ -26,6 +26,8 @@ use sqlx::QueryBuilder;
 use std::{collections::HashMap, future::ready};
 use tokio::{runtime::Handle, task::block_in_place};
 
+const BATCH_INSERT_SIZE: usize = 1_000;
+
 #[cfg(feature = "cloud")]
 type SqlxTransaction = sqlx::Transaction<'static, sqlx::Postgres>;
 
@@ -88,7 +90,29 @@ impl DB for LedgerDb {
                     .await
                     .unwrap_or_panic("begin transaction for insert node");
 
-                insert_node(&mut tx, key, object).await;
+                let mut ser_object = Vec::with_capacity(object.serialized_size());
+                Serializable::serialize(&object, &mut ser_object)
+                    .unwrap_or_panic("cannot serialize object");
+
+                let query = indoc! {"
+                    INSERT INTO ledger_db_nodes (
+                        key,
+                        object
+                    )
+                    VALUES (
+                        $1,
+                        $2
+                    )
+                    ON CONFLICT (key) DO UPDATE
+                    SET object = EXCLUDED.object
+                "};
+
+                sqlx::query(query)
+                    .bind(key.0.as_slice())
+                    .bind(ser_object.as_slice())
+                    .execute(&mut *tx)
+                    .await
+                    .unwrap_or_panic("cannot insert node");
 
                 tx.commit()
                     .await
@@ -127,24 +151,30 @@ impl DB for LedgerDb {
                     .await
                     .unwrap_or_panic("begin transaction for batch update");
 
-                let mut insert_keys: Vec<Vec<u8>> = Vec::new();
-                let mut insert_objects: Vec<Vec<u8>> = Vec::new();
+                let mut nodes = Vec::new();
 
                 for (key, update) in updates {
                     match update {
-                        Update::InsertNode(object) => {
-                            let mut ser_object = Vec::with_capacity(object.serialized_size());
-                            Serializable::serialize(&object, &mut ser_object)
-                                .unwrap_or_panic("cannot serialize object");
-                            insert_keys.push(key.0.as_slice().to_vec());
-                            insert_objects.push(ser_object);
-                        }
+                        Update::InsertNode(object) => nodes.push((key, object)),
                         Update::DeleteNode => delete_node(&mut tx, &key).await,
                         Update::SetRootCount(count) => set_root_count(&mut tx, key, count).await,
                     }
                 }
 
-                batch_insert_nodes(&mut tx, &insert_keys, &insert_objects).await;
+                for chunk in nodes.chunks(BATCH_INSERT_SIZE) {
+                    QueryBuilder::new("INSERT INTO ledger_db_nodes (key, object) ")
+                        .push_values(chunk, |mut q, (key, object)| {
+                            let mut ser_object = Vec::with_capacity(object.serialized_size());
+                            Serializable::serialize(&object, &mut ser_object)
+                                .unwrap_or_panic("cannot serialize object");
+                            q.push_bind(key.0.as_slice()).push_bind(ser_object);
+                        })
+                        .push(" ON CONFLICT (key) DO UPDATE SET object = EXCLUDED.object")
+                        .build()
+                        .execute(&mut *tx)
+                        .await
+                        .unwrap_or_panic("cannot batch insert nodes");
+                }
 
                 tx.commit()
                     .await
@@ -352,65 +382,6 @@ where
     fn unwrap_or_panic(self, msg: &'static str) -> T {
         self.unwrap_or_else(|error| panic!("{msg}: {}", error.as_chain()))
     }
-}
-
-const BATCH_INSERT_SIZE: usize = 500;
-
-async fn batch_insert_nodes(tx: &mut SqlxTransaction, keys: &[Vec<u8>], objects: &[Vec<u8>]) {
-    for (key_chunk, object_chunk) in keys
-        .chunks(BATCH_INSERT_SIZE)
-        .zip(objects.chunks(BATCH_INSERT_SIZE))
-    {
-        let mut query_builder =
-            QueryBuilder::new("INSERT INTO ledger_db_nodes (key, object) VALUES ");
-
-        for (i, (key, object)) in key_chunk.iter().zip(object_chunk.iter()).enumerate() {
-            if i > 0 {
-                query_builder.push(", ");
-            }
-            query_builder.push("(");
-            query_builder.push_bind(key.as_slice());
-            query_builder.push(", ");
-            query_builder.push_bind(object.as_slice());
-            query_builder.push(")");
-        }
-
-        query_builder.push(" ON CONFLICT (key) DO UPDATE SET object = EXCLUDED.object");
-
-        query_builder
-            .build()
-            .execute(&mut **tx)
-            .await
-            .unwrap_or_panic("cannot batch insert nodes");
-    }
-}
-
-async fn insert_node<H>(tx: &mut SqlxTransaction, key: ArenaHash<H>, object: OnDiskObject<H>)
-where
-    H: WellBehavedHasher,
-{
-    let mut ser_object = Vec::with_capacity(object.serialized_size());
-    Serializable::serialize(&object, &mut ser_object).unwrap_or_panic("cannot serialize object");
-
-    let query = indoc! {"
-        INSERT INTO ledger_db_nodes (
-            key,
-            object
-        )
-        VALUES (
-            $1,
-            $2
-        )
-        ON CONFLICT (key) DO UPDATE
-        SET object = EXCLUDED.object
-    "};
-
-    sqlx::query(query)
-        .bind(key.0.as_slice())
-        .bind(ser_object.as_slice())
-        .execute(&mut **tx)
-        .await
-        .unwrap_or_panic("cannot insert node");
 }
 
 async fn delete_node<H>(tx: &mut SqlxTransaction, key: &ArenaHash<H>)
