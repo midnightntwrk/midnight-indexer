@@ -77,7 +77,7 @@ describe('dust ledger event subscriptions', () => {
     test('streams events in ledger order starting from the specified ID', async () => {
       const firstEvent = await collectValidDustLedgerEvents(indexerWsClient, eventCoordinator, 2);
       const latestId = firstEvent[0].data!.dustLedgerEvents.maxId;
-      const startId = Math.max(latestId - 1, 0);
+      const startId = Math.max(latestId - 20, 0);
       const received = await collectValidDustLedgerEvents(
         indexerWsClient,
         eventCoordinator,
@@ -105,7 +105,7 @@ describe('dust ledger event subscriptions', () => {
       const firstEvent = await collectValidDustLedgerEvents(indexerWsClient, eventCoordinator, 3);
       const latestId = firstEvent[0].data!.dustLedgerEvents.maxId;
 
-      const fromId = Math.max(latestId - 3, 0);
+      const fromId = Math.max(latestId - 20, 0);
       const received = await collectValidDustLedgerEvents(
         indexerWsClient,
         eventCoordinator,
