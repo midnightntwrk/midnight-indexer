@@ -166,7 +166,7 @@ CREATE INDEX ON dust_generation_info (night_utxo_hash);
 -- cNIGHT registration tracking
 CREATE TABLE cnight_registrations (
   id BIGSERIAL PRIMARY KEY,
-  cardano_address BYTEA NOT NULL,
+  cardano_stake_key BYTEA NOT NULL,
   dust_address BYTEA NOT NULL,
   valid BOOLEAN NOT NULL,
   registered_at BIGINT NOT NULL,
@@ -174,9 +174,9 @@ CREATE TABLE cnight_registrations (
   block_id BIGINT REFERENCES blocks (id),
   utxo_tx_hash BYTEA,
   utxo_output_index BIGINT,
-  UNIQUE (cardano_address, dust_address)
+  UNIQUE (cardano_stake_key, dust_address)
 );
-CREATE INDEX ON cnight_registrations (cardano_address);
+CREATE INDEX ON cnight_registrations (cardano_stake_key);
 CREATE INDEX ON cnight_registrations (dust_address);
 CREATE INDEX ON cnight_registrations (block_id);
 CREATE TABLE system_parameters_terms_and_conditions (
