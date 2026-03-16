@@ -235,14 +235,12 @@ describe.sequential('wallet event subscriptions', { timeout: 200_000 }, () => {
       // Wait for B1's UnshieldedTransaction matching the submitted tx hash
       const latestB1Tx = await retrySimple(async () => {
         const events = getEventsOfType(destinationAddressEvents, 'UnshieldedTransaction');
-        log.debug('this is events for destination address ' + destinationAddress + ': ' + JSON.stringify(events));
         return events.find((e) => e.transaction.hash === b1TxResult.txHash) ?? null;
       });
 
       // Wait for source event matching the same tx hash
       const latestSourceTx = await retrySimple(async () => {
         const events = getEventsOfType(sourceAddressEvents, 'UnshieldedTransaction');
-        log.debug('this is events for source address ' + sourceAddress + ': ' + JSON.stringify(events));
         return events.find((e) => e.transaction.hash === b1TxResult.txHash) ?? null;
       });
 
