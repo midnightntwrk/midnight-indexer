@@ -151,30 +151,23 @@ impl DB for LedgerDb {
                     .await
                     .unwrap_or_panic("begin transaction for batch update");
 
-                let mut nodes = Vec::new();
+                let mut inserts = Vec::new();
 
                 for (key, update) in updates {
                     match update {
-                        Update::InsertNode(object) => nodes.push((key, object)),
-                        Update::DeleteNode => delete_node(&mut tx, &key).await,
-                        Update::SetRootCount(count) => set_root_count(&mut tx, key, count).await,
+                        Update::InsertNode(object) => inserts.push((key, object)),
+                        Update::DeleteNode => {
+                            flush_inserts(&mut tx, &mut inserts).await;
+                            delete_node(&mut tx, &key).await;
+                        }
+                        Update::SetRootCount(count) => {
+                            flush_inserts(&mut tx, &mut inserts).await;
+                            set_root_count(&mut tx, key, count).await;
+                        }
                     }
                 }
 
-                for chunk in nodes.chunks(BATCH_INSERT_SIZE) {
-                    QueryBuilder::new("INSERT INTO ledger_db_nodes (key, object) ")
-                        .push_values(chunk, |mut q, (key, object)| {
-                            let mut ser_object = Vec::with_capacity(object.serialized_size());
-                            Serializable::serialize(&object, &mut ser_object)
-                                .unwrap_or_panic("cannot serialize object");
-                            q.push_bind(key.0.as_slice()).push_bind(ser_object);
-                        })
-                        .push(" ON CONFLICT (key) DO UPDATE SET object = EXCLUDED.object")
-                        .build()
-                        .execute(&mut *tx)
-                        .await
-                        .unwrap_or_panic("cannot batch insert nodes");
-                }
+                flush_inserts(&mut tx, &mut inserts).await;
 
                 tx.commit()
                     .await
@@ -382,6 +375,34 @@ where
     fn unwrap_or_panic(self, msg: &'static str) -> T {
         self.unwrap_or_else(|error| panic!("{msg}: {}", error.as_chain()))
     }
+}
+
+async fn flush_inserts<H>(
+    tx: &mut SqlxTransaction,
+    inserts: &mut Vec<(ArenaHash<H>, OnDiskObject<H>)>,
+) where
+    H: WellBehavedHasher,
+{
+    if inserts.is_empty() {
+        return;
+    }
+
+    for chunk in inserts.chunks(BATCH_INSERT_SIZE) {
+        QueryBuilder::new("INSERT INTO ledger_db_nodes (key, object) ")
+            .push_values(chunk, |mut q, (key, object)| {
+                let mut ser_object = Vec::with_capacity(object.serialized_size());
+                Serializable::serialize(object, &mut ser_object)
+                    .unwrap_or_panic("cannot serialize object");
+                q.push_bind(key.0.as_slice()).push_bind(ser_object);
+            })
+            .push(" ON CONFLICT (key) DO UPDATE SET object = EXCLUDED.object")
+            .build()
+            .execute(&mut **tx)
+            .await
+            .unwrap_or_panic("cannot batch insert nodes");
+    }
+
+    inserts.clear();
 }
 
 async fn delete_node<H>(tx: &mut SqlxTransaction, key: &ArenaHash<H>)
