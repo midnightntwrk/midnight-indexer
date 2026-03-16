@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0-rc.9] - 2026-03-16
+
+### 🚜 Refactor
+
+- Rename cardano_address DB column to cardano_stake_key for clarity (#902)
+
 ## [4.0.0-rc.8] - 2026-03-16
 
 ### 🚜 Refactor
