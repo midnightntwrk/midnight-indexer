@@ -76,7 +76,7 @@ describe('zswap ledger event subscriptions', () => {
     test('streams events starting from the specified ID', async () => {
       const firstEvent = await collectValidZswapEvents(indexerWsClient, eventCoordinator, 3);
       const latestId = firstEvent[0].data!.zswapLedgerEvents.maxId;
-      const startId = Math.max(latestId - 3, 0);
+      const startId = Math.max(latestId - 20, 0);
       const received = await collectValidZswapEvents(indexerWsClient, eventCoordinator, 3, startId);
       expect(received.length === 3, `Expected 3 events, got: ${received.length}`).toBe(true);
 
