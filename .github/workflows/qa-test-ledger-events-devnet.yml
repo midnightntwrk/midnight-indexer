@@ -1,4 +1,4 @@
-name: Indexer QA Ledger Event Test (Devnet)
+name: Indexer QA Ledger Event Subscription Test (Devnet)
 
 on:
   workflow_dispatch:

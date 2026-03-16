@@ -1,4 +1,4 @@
-name: Indexer QA Ledger Event Test (QAnet)
+name: Indexer QA Ledger Event Subscription Test (QAnet)
 
 on:
   workflow_dispatch:

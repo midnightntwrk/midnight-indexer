@@ -1,4 +1,4 @@
-name: Indexer QA Ledger Event Test (Preprod)
+name: Indexer QA Ledger Event Subscription Test (Preprod)
 
 on:
   workflow_dispatch:
