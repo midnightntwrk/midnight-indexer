@@ -151,23 +151,23 @@ impl DB for LedgerDb {
                     .await
                     .unwrap_or_panic("begin transaction for batch update");
 
-                let mut pending_inserts = Vec::new();
+                let mut inserts = Vec::new();
 
                 for (key, update) in updates {
                     match update {
-                        Update::InsertNode(object) => pending_inserts.push((key, object)),
+                        Update::InsertNode(object) => inserts.push((key, object)),
                         Update::DeleteNode => {
-                            flush_inserts(&mut tx, &mut pending_inserts).await;
+                            flush_inserts(&mut tx, &mut inserts).await;
                             delete_node(&mut tx, &key).await;
                         }
                         Update::SetRootCount(count) => {
-                            flush_inserts(&mut tx, &mut pending_inserts).await;
+                            flush_inserts(&mut tx, &mut inserts).await;
                             set_root_count(&mut tx, key, count).await;
                         }
                     }
                 }
 
-                flush_inserts(&mut tx, &mut pending_inserts).await;
+                flush_inserts(&mut tx, &mut inserts).await;
 
                 tx.commit()
                     .await
@@ -379,15 +379,15 @@ where
 
 async fn flush_inserts<H>(
     tx: &mut SqlxTransaction,
-    pending: &mut Vec<(ArenaHash<H>, OnDiskObject<H>)>,
+    inserts: &mut Vec<(ArenaHash<H>, OnDiskObject<H>)>,
 ) where
     H: WellBehavedHasher,
 {
-    if pending.is_empty() {
+    if inserts.is_empty() {
         return;
     }
 
-    for chunk in pending.chunks(BATCH_INSERT_SIZE) {
+    for chunk in inserts.chunks(BATCH_INSERT_SIZE) {
         QueryBuilder::new("INSERT INTO ledger_db_nodes (key, object) ")
             .push_values(chunk, |mut q, (key, object)| {
                 let mut ser_object = Vec::with_capacity(object.serialized_size());
@@ -402,7 +402,7 @@ async fn flush_inserts<H>(
             .unwrap_or_panic("cannot batch insert nodes");
     }
 
-    pending.clear();
+    inserts.clear();
 }
 
 async fn delete_node<H>(tx: &mut SqlxTransaction, key: &ArenaHash<H>)
