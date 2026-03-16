@@ -193,11 +193,18 @@ jobs:
             echo "NODE_TAG=$node_tag" >> "$GITHUB_ENV"
           fi
 
+      - name: Set image registry
+        run: |
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            echo "IMAGE_REGISTRY=ghcr.io/midnight-ntwrk" >> "$GITHUB_ENV"
+          fi
+
       - name: Docker Compose Up
         run: |
           echo "Compose up with:"
           echo "- Indexer tag: $INDEXER_TAG"
           echo "- Node tag   : $NODE_TAG"
+          echo "- Registry   : ${IMAGE_REGISTRY:-midnightntwrk}"
           docker compose --profile "${{ matrix.profile }}" up -d
 
       - name: Show running containers
