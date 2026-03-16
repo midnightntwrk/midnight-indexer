@@ -1061,7 +1061,18 @@ checksum = "c3613f74bd2eac03dad61bd53dbe620703d4371614fe0bc3b9f04dd36fe4e818"
 dependencies = [
  "cfg-if",
  "cipher",
- "cpufeatures",
+ "cpufeatures 0.2.17",
+]
+
+[[package]]
+name = "chacha20"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f8d983286843e49675a4b7a2d174efe136dc93a18d69130dd18198a6c167601"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.0",
+ "rand_core 0.10.0",
 ]
 
 [[package]]
@@ -1071,7 +1082,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10cd79432192d1c0f4e1a0fef9527696cc039165d729fb41b3f4f4f354c2dc35"
 dependencies = [
  "aead",
- "chacha20",
+ "chacha20 0.9.1",
  "cipher",
  "poly1305",
  "zeroize",
@@ -1087,7 +1098,7 @@ dependencies = [
  "clap",
  "const-hex",
  "derive_more 2.1.1",
- "fake",
+ "fake 5.1.0",
  "fastrace",
  "futures",
  "http",
@@ -1220,7 +1231,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "531185e432bb31db1ecda541e9e7ab21468d4d844ad7505e0546a49b4945d49b"
 dependencies = [
  "cfg-if",
- "cpufeatures",
+ "cpufeatures 0.2.17",
  "proptest",
  "serde_core",
 ]
@@ -1312,6 +1323,15 @@ name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "cpufeatures"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
 dependencies = [
  "libc",
 ]
@@ -1430,7 +1450,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be"
 dependencies = [
  "cfg-if",
- "cpufeatures",
+ "cpufeatures 0.2.17",
  "curve25519-dalek-derive",
  "digest 0.10.7",
  "fiat-crypto",
@@ -1932,6 +1952,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fake"
+version = "5.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea6be833b323a56361118a747470a45a1bcd5c52a2ec9b1e40c83dafe687e453"
+dependencies = [
+ "deunicode",
+ "either",
+ "rand 0.10.0",
+]
+
+[[package]]
 name = "fast_chemail"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2359,6 +2390,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "r-efi",
+ "rand_core 0.10.0",
  "wasip2",
  "wasip3",
 ]
@@ -3440,7 +3472,7 @@ version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb26cec98cce3a3d96cbb7bced3c4b16e3d13f27ec56dbd62cbc8f39cfb9d653"
 dependencies = [
- "cpufeatures",
+ "cpufeatures 0.2.17",
 ]
 
 [[package]]
@@ -3835,7 +3867,7 @@ dependencies = [
  "atomic-write-file",
  "const-hex",
  "ethnum",
- "fake",
+ "fake 2.10.0",
  "ff",
  "flate2",
  "futures",
@@ -3897,7 +3929,7 @@ version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "295ff7814b0288a9f0cbfea0cf13e5bfaa9a631f0525fd43175d572ca9af03ce"
 dependencies = [
- "fake",
+ "fake 2.10.0",
  "lazy_static",
  "midnight-base-crypto",
  "midnight-serialize",
@@ -3943,7 +3975,7 @@ checksum = "4fc8b6b6c9d55af6c8852092eb76e72a52d227be435bfa1bd0be158bc2ac7b28"
 dependencies = [
  "anyhow",
  "derive-where",
- "fake",
+ "fake 2.10.0",
  "futures",
  "introspection",
  "introspection-derive",
@@ -3976,7 +4008,7 @@ checksum = "3369683ca196d2be00c6819b35ea45d0b468b5f6096a294fb0f79299860811c0"
 dependencies = [
  "anyhow",
  "derive-where",
- "fake",
+ "fake 2.10.0",
  "futures",
  "introspection",
  "introspection-derive",
@@ -4020,7 +4052,7 @@ dependencies = [
  "derive-where",
  "enum_index",
  "enum_index_derive",
- "fake",
+ "fake 2.10.0",
  "hex",
  "konst",
  "lazy_static",
@@ -4046,7 +4078,7 @@ dependencies = [
  "derive-where",
  "enum_index",
  "enum_index_derive",
- "fake",
+ "fake 2.10.0",
  "hex",
  "konst",
  "lazy_static",
@@ -4070,7 +4102,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e153e26062e19ad07a065f8b4466243a6964e5fce5820d371fc9f4b036666ee7"
 dependencies = [
  "derive-where",
- "fake",
+ "fake 2.10.0",
  "hex",
  "midnight-base-crypto",
  "midnight-coin-structure",
@@ -4089,7 +4121,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6cf32b5175d303251d7051fb30532d4fdef3c19c7e36c5831c002a27e8440163"
 dependencies = [
  "derive-where",
- "fake",
+ "fake 2.10.0",
  "hex",
  "midnight-base-crypto",
  "midnight-coin-structure",
@@ -4108,7 +4140,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f737f8a5d227d07683d0c5829e1de02bdf297e39ab8ef954a3d4f49072f973f"
 dependencies = [
  "derive-where",
- "fake",
+ "fake 2.10.0",
  "hex",
  "konst",
  "midnight-base-crypto",
@@ -4130,7 +4162,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fe2080991c8f6063cb204480db6b5db4072fb6fe7cb807ef77371ea7f0bbc62"
 dependencies = [
  "derive-where",
- "fake",
+ "fake 2.10.0",
  "hex",
  "konst",
  "midnight-base-crypto",
@@ -4236,7 +4268,7 @@ dependencies = [
  "archery",
  "crypto",
  "derive-where",
- "fake",
+ "fake 2.10.0",
  "hex",
  "itertools 0.14.0",
  "konst",
@@ -4274,7 +4306,7 @@ dependencies = [
  "blake2b_simd",
  "const-hex",
  "derive-where",
- "fake",
+ "fake 2.10.0",
  "ff",
  "flate2",
  "futures",
@@ -4330,7 +4362,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56bc2635ed2de0cb18c8ca3aafcbb4910d42cd50cc7c73b5ae7dd31a6f5b5b1f"
 dependencies = [
  "derive-where",
- "fake",
+ "fake 2.10.0",
  "futures",
  "is_sorted",
  "itertools 0.14.0",
@@ -4355,7 +4387,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00b601ab95418e0471fd7d82d6f7b022d825292b90d917f929a0952d3817cf19"
 dependencies = [
  "derive-where",
- "fake",
+ "fake 2.10.0",
  "futures",
  "is_sorted",
  "itertools 0.14.0",
@@ -5099,7 +5131,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8159bd90725d2df49889a078b54f4f79e87f1f8a8444194cdca81d38f5393abf"
 dependencies = [
- "cpufeatures",
+ "cpufeatures 0.2.17",
  "opaque-debug",
  "universal-hash",
 ]
@@ -5417,6 +5449,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc266eb313df6c5c09c1c7b1fbe2510961e5bcd3add930c1e31f7ed9da0feff8"
+dependencies = [
+ "chacha20 0.10.0",
+ "getrandom 0.4.1",
+ "rand_core 0.10.0",
+]
+
+[[package]]
 name = "rand_chacha"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5453,6 +5496,12 @@ checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
 ]
+
+[[package]]
+name = "rand_core"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c8d0fd677905edcbeedbf2edb6494d676f0e98d54d5cf9bda0b061cb8fb8aba"
 
 [[package]]
 name = "rand_xorshift"
@@ -6445,7 +6494,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
 dependencies = [
  "cfg-if",
- "cpufeatures",
+ "cpufeatures 0.2.17",
  "digest 0.10.7",
 ]
 
@@ -6457,7 +6506,7 @@ checksum = "4d58a1e1bf39749807d89cf2d98ac2dfa0ff1cb3faa38fbb64dd88ac8013d800"
 dependencies = [
  "block-buffer 0.9.0",
  "cfg-if",
- "cpufeatures",
+ "cpufeatures 0.2.17",
  "digest 0.9.0",
  "opaque-debug",
 ]
@@ -6469,7 +6518,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
 dependencies = [
  "cfg-if",
- "cpufeatures",
+ "cpufeatures 0.2.17",
  "digest 0.10.7",
 ]
 
@@ -6619,7 +6668,7 @@ dependencies = [
  "bip39",
  "blake2-rfc",
  "bs58",
- "chacha20",
+ "chacha20 0.9.1",
  "crossbeam-queue",
  "derive_more 2.1.1",
  "ed25519-zebra",
