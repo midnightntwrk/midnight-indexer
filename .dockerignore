@@ -11,5 +11,5 @@ target
 # Additional files.
 .git
 .github
-.node
+.node/**/chain
 qa
