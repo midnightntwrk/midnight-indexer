@@ -5,7 +5,7 @@
   // A cardano address that is registered for dust production but has no cNIGHT balance
   // Expected status: registered=true, dustAddress not null, nightBalance="0", generationRate="0", currentCapacity="0"
   // Note: No dust is generated because there is no cNIGHT to generate from
-  "registered-without-dust": "stake_test1uqq4wx2p5zr58zrte2e89tp0gqtjg5zhws97zyr0he5y7uqatzymz",
+  "registered-without-dust": "stake_test1upqhex5hpc6nh9dxtqfuz9sxf3wmzk7g3k0e9qxu6cvh52qmf2vmk",
   // A cardano address that has never been registered for dust production
   // Expected status: registered=false, dustAddress=null, nightBalance="0", generationRate="0", currentCapacity="0"
   "non-registered": "stake_test1uqg287q4tjltwaz55f3em78su32zn4as3n8sudhmelzyaws82w6gd",

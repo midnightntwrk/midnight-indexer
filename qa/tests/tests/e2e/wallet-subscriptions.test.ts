@@ -26,7 +26,6 @@ import {
 } from './test-utils';
 import dataProvider from '@utils/testdata-provider';
 import type { TestContext } from 'vitest';
-import { IndexerHttpClient } from '@utils/indexer/http-client';
 
 /**
  * This function validates that unshielded transactions emitted for two wallets are consistent across both event streams.
@@ -51,6 +50,9 @@ function validateCrossWalletTransaction(
 ) {
   const validSrcTxs = srcTxs.filter(isUnshieldedTransaction);
   const validDestTxs = destTxs.filter(isUnshieldedTransaction);
+
+  log.debug(validSrcTxs, `Source transactions for ${srcAddr}`);
+  log.debug(validDestTxs, `Destination transactions for ${destAddr}`);
 
   if (!validDestTxs.length) {
     throw new Error(`No UnshieldedTransaction events for ${destAddr} — expected at least one.`);
@@ -95,13 +97,12 @@ function validateCrossWalletTransaction(
       const calculatedDestValue = BigInt(spent.value) - BigInt(srcUtxo.value);
       expect(BigInt(destUtxo.value)).toBe(calculatedDestValue);
     }
-    log.debug(`Validation complete for ${destAddr} (hash=${destTx.transaction.hash})`);
+    log.debug(`Validation complete for hash=${destTx.transaction.hash}`);
   });
 }
 
 describe.sequential('wallet event subscriptions', { timeout: 200_000 }, () => {
   let indexerWsClient: IndexerWsClient;
-  let indexerHttpClient: IndexerHttpClient;
 
   // Toolkit instance for generating and submitting transactions
   let toolkit: ToolkitWrapper;
@@ -123,7 +124,6 @@ describe.sequential('wallet event subscriptions', { timeout: 200_000 }, () => {
 
   beforeAll(async () => {
     indexerWsClient = new IndexerWsClient();
-    indexerHttpClient = new IndexerHttpClient();
     await indexerWsClient.connectionInit();
     toolkit = new ToolkitWrapper({});
     await toolkit.start();
@@ -230,20 +230,20 @@ describe.sequential('wallet event subscriptions', { timeout: 200_000 }, () => {
       secondDestinationAddressEvents.length = 0;
 
       // First transaction: A > B1
-      await toolkit.generateSingleTx(sourceSeed, 'unshielded', destinationAddress, 3);
+      const b1TxResult = await toolkit.generateSingleTx(sourceSeed, 'unshielded', destinationAddress, 3);
 
-      // Wait for B1's UnshieldedTransaction
+      // Wait for B1's UnshieldedTransaction matching the submitted tx hash
       const latestB1Tx = await retrySimple(async () => {
         const events = getEventsOfType(destinationAddressEvents, 'UnshieldedTransaction');
-        return events.find((e) => e.createdUtxos[0]?.value === '3') ?? null;
+        log.debug('this is events for destination address ' + destinationAddress + ': ' + JSON.stringify(events));
+        return events.find((e) => e.transaction.hash === b1TxResult.txHash) ?? null;
       });
 
-      const expectedHash = latestB1Tx.transaction.hash;
-
-      // Wait for source event
+      // Wait for source event matching the same tx hash
       const latestSourceTx = await retrySimple(async () => {
         const events = getEventsOfType(sourceAddressEvents, 'UnshieldedTransaction');
-        return events.find((e) => e.transaction.hash === expectedHash) ?? null;
+        log.debug('this is events for source address ' + sourceAddress + ': ' + JSON.stringify(events));
+        return events.find((e) => e.transaction.hash === b1TxResult.txHash) ?? null;
       });
 
       // Wait for B2 progress
@@ -283,15 +283,13 @@ describe.sequential('wallet event subscriptions', { timeout: 200_000 }, () => {
       ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'A→B2'] };
 
       // Generate A > B2 transaction
-      await toolkit.generateSingleTx(sourceSeed, 'unshielded', secondDestinationAddress!, 1);
+      const b2TxResult = await toolkit.generateSingleTx(sourceSeed, 'unshielded', secondDestinationAddress!, 1);
 
-      // B2 UnshieldedTransaction
+      // Wait for B2's UnshieldedTransaction matching the submitted tx hash
       const latestB2Tx = await retrySimple(async () => {
         const b2Events = getEventsOfType(secondDestinationAddressEvents, 'UnshieldedTransaction');
-        return b2Events.find((e) => e.createdUtxos[0]?.value === '1') ?? null;
+        return b2Events.find((e) => e.transaction.hash === b2TxResult.txHash) ?? null;
       });
-
-      const expectedHash = latestB2Tx.transaction.hash;
 
       // B1 UnshieldedTransaction (should NOT match B2)
       const latestB1Tx = await retrySimple(async () => {
@@ -299,10 +297,10 @@ describe.sequential('wallet event subscriptions', { timeout: 200_000 }, () => {
         return b1Events.at(-1) ?? null;
       });
 
-      // Source event
+      // Source event matching the same tx hash
       const latestSourceTx = await retrySimple(async () => {
         const srcEvents = getEventsOfType(sourceAddressEvents, 'UnshieldedTransaction');
-        return srcEvents.find((e) => e.transaction.hash === expectedHash) ?? null;
+        return srcEvents.find((e) => e.transaction.hash === b2TxResult.txHash) ?? null;
       });
 
       // Validate cross-wallet consistency for A > B2
