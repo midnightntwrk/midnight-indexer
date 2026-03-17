@@ -110,10 +110,7 @@ class ToolkitWrapper {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
-    // Inject --log-json after the binary name so structured JSON logs are always emitted,
-    // regardless of the toolkit's default pretty-printing mode.
-    const [bin, ...rest] = args;
-    const result = await this.startedContainer.exec([bin, '--log-json', ...rest]);
+    const result = await this.startedContainer.exec(args);
     if (result.exitCode !== 0) {
       const msg = result.stderr || result.output || 'Unknown error';
       throw new Error(`${errorContext}: ${msg}`);
@@ -615,7 +612,6 @@ class ToolkitWrapper {
 
     const result = await this.startedContainer.exec([
       TOOLKIT_BIN,
-      '--log-json',
       'dust-balance',
       '--src-url',
       env.getNodeWebsocketBaseURL(),
@@ -696,7 +692,6 @@ class ToolkitWrapper {
 
     const result = await this.startedContainer.exec([
       TOOLKIT_BIN,
-      '--log-json',
       'generate-txs',
       '--src-url',
       env.getNodeWebsocketBaseURL(),

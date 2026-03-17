@@ -21,6 +21,8 @@ export const DUST_GENERATION_STATUS_BODY_FRAGMENT = `
   generationRate
   currentCapacity
   maxCapacity
+  utxoTxHash
+  utxoOutputIndex
 `;
 
 export const GET_DUST_GENERATION_STATUS = `

@@ -225,12 +225,15 @@ export interface DustGenerationStatus {
   generationRate: string;
   currentCapacity: string;
   maxCapacity: string;
+  utxoTxHash: string | null;
+  utxoOutputIndex: number | null;
 }
 
 export interface ZswapLedgerEvent {
   id: number;
   raw: string;
   maxId: number;
+  protocolVersion: number;
 }
 
 export type DustLedgerEvent =
@@ -239,12 +242,14 @@ export type DustLedgerEvent =
     id: number;
     raw: string;
     maxId: number;
+    protocolVersion: number;
   }
   | {
     __typename: 'DustInitialUtxo';
     id: number;
     raw: string;
     maxId: number;
+    protocolVersion: number;
     output: {
       nonce: string;
     };
@@ -254,12 +259,14 @@ export type DustLedgerEvent =
     id: number;
     raw: string;
     maxId: number;
+    protocolVersion: number;
   }
   | {
     __typename: 'DustSpendProcessed';
     id: number;
     raw: string;
     maxId: number;
+    protocolVersion: number;
   };
 
 export type ViewingKey = string & { __brand: 'ViewingKey' };

@@ -58,11 +58,13 @@ export const BASE_TRANSACTION_FRAGMENT = `   id
       id
       raw
       maxId
+      protocolVersion
     }
     dustLedgerEvents {
       id
       raw
       maxId
+      protocolVersion
     }`;
 
 export const REGULAR_TRANSACTION_FRAGMENT = `   ... on RegularTransaction {
