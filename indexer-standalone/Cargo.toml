@@ -1,7 +1,7 @@
 [package]
 name          = "indexer-standalone"
-version       = "1.0.1"
-description   = "Consolidated Indexer for standalone execution"
+description   = "Standalone Indexer"
+version       = { workspace = true }
 edition       = { workspace = true }
 license       = { workspace = true }
 readme        = { workspace = true }
