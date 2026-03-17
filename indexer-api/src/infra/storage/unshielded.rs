@@ -18,7 +18,6 @@ use crate::{
 use fastrace::trace;
 use indexer_common::domain::UnshieldedAddress;
 use indoc::indoc;
-use serde_json;
 
 impl UnshieldedUtxoStorage for Storage {
     #[trace(properties = { "address": "{address}" })]

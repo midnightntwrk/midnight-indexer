@@ -20,7 +20,6 @@ use fastrace::trace;
 use futures::Stream;
 use indexer_common::{domain::LedgerEventGrouping, stream::flatten_chunks};
 use indoc::indoc;
-use serde_json;
 use std::num::NonZeroU32;
 
 impl LedgerEventStorage for Storage {

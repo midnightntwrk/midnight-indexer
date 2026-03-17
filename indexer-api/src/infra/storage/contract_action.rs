@@ -26,7 +26,6 @@ use indexer_common::{
     stream::flatten_chunks,
 };
 use indoc::indoc;
-use serde_json;
 use std::num::NonZeroU32;
 
 impl ContractActionStorage for Storage {

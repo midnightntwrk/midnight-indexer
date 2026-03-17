@@ -1138,7 +1138,7 @@ impl Storage {
         "};
 
         #[cfg(feature = "cloud")]
-        let mut transactions = sqlx::query(query)
+        let transactions = sqlx::query(query)
             .bind(hashes)
             .fetch(&*self.pool)
             .map_ok(make_transaction)
