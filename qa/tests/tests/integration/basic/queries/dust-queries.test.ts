@@ -29,6 +29,12 @@ import type { DustGenerationStatusResponse } from '@utils/indexer/indexer-types'
 const GENERATION_DECAY_RATE = 8267;
 const MAX_SPECK_PER_STAR = 5n * 10n ** 9n; // Same as saying 5 DUST per NIGHT
 
+// Unit conversion constants
+const STAR_PER_NIGHT = 1_000_000n; // 1 NIGHT = 10^6 STAR
+const SPECK_PER_DUST = 10n ** 15n; // 1 DUST = 10^15 SPECK
+// Minimum expected maxCapacity for 1 NIGHT = 5 DUST = 5 * 10^15 SPECK
+const MIN_MAX_CAPACITY_FOR_ONE_NIGHT = 5n * SPECK_PER_DUST;
+
 const indexerHttpClient = new IndexerHttpClient();
 
 type AcceptedRewardAddressHrpPrefix = 'stake' | 'stake_test';
@@ -133,10 +139,13 @@ describe('dust generation status queries', () => {
       const registeredStatus = dustGenerationStatus![0];
       expect(registeredStatus?.registered).toBe(true);
       expect(registeredStatus?.dustAddress).toBeDefined();
-      expect(BigInt(registeredStatus?.nightBalance)).toBeGreaterThan(0n);
+      // nightBalance is in STAR (1 NIGHT = 10^6 STAR), so any real cNIGHT holder must have >= 1_000_000
+      expect(BigInt(registeredStatus?.nightBalance)).toBeGreaterThanOrEqual(STAR_PER_NIGHT);
       expect(BigInt(registeredStatus?.generationRate)).toBeGreaterThan(0n);
-      expect(BigInt(registeredStatus?.currentCapacity)).toBeGreaterThan(0n);
-      expect(BigInt(registeredStatus?.maxCapacity)).toBeGreaterThan(0n);
+      // currentCapacity is in SPECK — for any address generating for more than a few minutes, expect at least 1 DUST
+      expect(BigInt(registeredStatus?.currentCapacity)).toBeGreaterThanOrEqual(SPECK_PER_DUST);
+      // maxCapacity is in SPECK (1 DUST = 10^15 SPECK), for 1 NIGHT the cap is 5 DUST = 5 * 10^15 SPECK
+      expect(BigInt(registeredStatus?.maxCapacity)).toBeGreaterThanOrEqual(MIN_MAX_CAPACITY_FOR_ONE_NIGHT);
       expect(registeredStatus?.utxoTxHash).not.toBeNull();
       expect(registeredStatus?.utxoTxHash).toMatch(/^[a-f0-9]{64}$/);
       expect(registeredStatus?.utxoOutputIndex).not.toBeNull();
@@ -307,9 +316,10 @@ describe('dust generation status queries', () => {
       expect(status?.dustAddress).not.toBeNull();
       expect(status?.dustAddress).toBeDefined();
 
-      // Has cNIGHT balance
+      // Has cNIGHT balance — nightBalance is in STAR (1 NIGHT = 10^6 STAR)
+      // Any registered address with real cNIGHT must have at least 1 NIGHT = 1_000_000 STAR
       const nightBalanceInStars = BigInt(status?.nightBalance);
-      expect(nightBalanceInStars).toBeGreaterThan(0n);
+      expect(nightBalanceInStars).toBeGreaterThanOrEqual(STAR_PER_NIGHT);
 
       // Generation rate should equal nightBalance * GENERATION_DECAY_RATE
       const expectedGenerationRate = nightBalanceInStars * BigInt(GENERATION_DECAY_RATE);
