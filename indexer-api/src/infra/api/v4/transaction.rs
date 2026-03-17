@@ -295,6 +295,7 @@ where
             protocol_version,
             raw,
             block_hash,
+            ..
         } = transaction;
 
         Self {

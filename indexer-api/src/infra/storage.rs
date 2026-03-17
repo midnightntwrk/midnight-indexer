@@ -12,7 +12,9 @@
 // limitations under the License.
 
 mod block;
+pub mod caching;
 mod contract_action;
+pub mod dataloaders;
 mod dust;
 mod ledger_events;
 mod ledger_state;

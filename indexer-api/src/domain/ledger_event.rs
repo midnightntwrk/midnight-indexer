@@ -19,6 +19,9 @@ pub struct LedgerEvent {
     #[sqlx(try_from = "i64")]
     pub id: u64,
 
+    #[sqlx(try_from = "i64")]
+    pub transaction_id: u64,
+
     pub raw: SerializedLedgerEvent,
 
     #[sqlx(json)]

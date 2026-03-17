@@ -112,6 +112,84 @@ impl BlockStorage for Storage {
 }
 
 impl Storage {
+    #[trace(properties = { "hashes": "{hashes:?}" })]
+    pub(super) async fn get_blocks_by_hashes(&self, hashes: &[BlockHash]) -> Result<Vec<Block>, sqlx::Error> {
+        let hashes = hashes.iter().map(|h| h.as_ref()).collect::<Vec<_>>();
+
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            SELECT
+                id, hash, height, protocol_version, parent_hash, author, timestamp, ledger_parameters
+            FROM blocks
+            WHERE hash = ANY($1)
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            SELECT
+                blocks.id, blocks.hash, blocks.height, blocks.protocol_version,
+                blocks.parent_hash, blocks.author, blocks.timestamp, blocks.ledger_parameters
+            FROM blocks
+            INNER JOIN json_each($1) ON hash = json_each.value
+        "};
+
+        #[cfg(feature = "cloud")]
+        {
+            sqlx::query_as(query)
+                .bind(hashes)
+                .fetch_all(&*self.pool)
+                .await
+        }
+
+        #[cfg(feature = "standalone")]
+        {
+            let hashes_json = serde_json::to_string(&hashes).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+            sqlx::query_as(query)
+                .bind(hashes_json)
+                .fetch_all(&*self.pool)
+                .await
+        }
+    }
+
+    #[trace(properties = { "heights": "{heights:?}" })]
+    pub(super) async fn get_blocks_by_heights(&self, heights: &[u32]) -> Result<Vec<Block>, sqlx::Error> {
+        let heights = heights.iter().map(|&h| h as i64).collect::<Vec<_>>();
+
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            SELECT
+                id, hash, height, protocol_version, parent_hash, author, timestamp, ledger_parameters
+            FROM blocks
+            WHERE height = ANY($1)
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            SELECT
+                blocks.id, blocks.hash, blocks.height, blocks.protocol_version,
+                blocks.parent_hash, blocks.author, blocks.timestamp, blocks.ledger_parameters
+            FROM blocks
+            INNER JOIN json_each($1) ON height = json_each.value
+        "};
+
+        #[cfg(feature = "cloud")]
+        {
+            sqlx::query_as(query)
+                .bind(heights)
+                .fetch_all(&*self.pool)
+                .await
+        }
+
+        #[cfg(feature = "standalone")]
+        {
+            let heights_json = serde_json::to_string(&heights).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+            sqlx::query_as(query)
+                .bind(heights_json)
+                .fetch_all(&*self.pool)
+                .await
+        }
+    }
+
     #[trace(properties = { "height": "{height}", "batch_size": "{batch_size}" })]
     async fn get_blocks(
         &self,

@@ -12,7 +12,9 @@
 // limitations under the License.
 
 pub mod block;
+pub mod broadcast;
 pub mod contract_action;
+pub mod dataloaders;
 pub mod dust;
 pub mod ledger_events;
 pub mod mutation;
@@ -355,6 +357,7 @@ where
     B: Subscriber,
 {
     let metrics = Metrics::default();
+    let block_broadcast = broadcast::BlockBroadcast::new(storage.clone(), subscriber.clone());
 
     let schema = schema_builder::<S, B>()
         .data(network_id)
@@ -363,6 +366,7 @@ where
         .data(subscriber)
         .data(metrics)
         .data(subscription_config)
+        .data(block_broadcast)
         .limit_complexity(max_complexity)
         .limit_depth(max_depth)
         .limit_recursive_depth(max_depth)

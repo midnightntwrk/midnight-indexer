@@ -26,6 +26,7 @@ use indexer_common::{
     stream::flatten_chunks,
 };
 use indoc::indoc;
+use serde_json;
 use std::num::NonZeroU32;
 
 impl ContractActionStorage for Storage {
@@ -250,6 +251,7 @@ impl ContractActionStorage for Storage {
             .await
     }
 
+
     fn get_contract_actions_by_address(
         &self,
         address: &SerializedContractAddress,
@@ -316,6 +318,49 @@ impl ContractActionStorage for Storage {
 }
 
 impl Storage {
+    pub(crate) async fn get_contract_actions_by_transaction_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+        let ids = ids.iter().map(|&id| id as i64).collect::<Vec<_>>();
+
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            SELECT
+                id, address, state, attributes, zswap_state, transaction_id
+            FROM contract_actions
+            WHERE transaction_id = ANY($1)
+            ORDER BY id
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            SELECT
+                contract_actions.id, address, state, attributes, zswap_state, transaction_id
+            FROM contract_actions
+            INNER JOIN json_each($1) as batch_ids ON transaction_id = batch_ids.value
+            ORDER BY contract_actions.id
+        "};
+
+        #[cfg(feature = "cloud")]
+        {
+            sqlx::query_as(query)
+                .bind(ids)
+                .fetch_all(&*self.pool)
+                .await
+        }
+
+        #[cfg(feature = "standalone")]
+        {
+            let ids_json = serde_json::to_string(&ids)
+                .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+            sqlx::query_as(query)
+                .bind(ids_json)
+                .fetch_all(&*self.pool)
+                .await
+        }
+    }
+
     #[trace(properties = {
         "address": "{address}",
         "contract_action_id": "{contract_action_id}",

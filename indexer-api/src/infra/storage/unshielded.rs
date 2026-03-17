@@ -18,6 +18,7 @@ use crate::{
 use fastrace::trace;
 use indexer_common::domain::UnshieldedAddress;
 use indoc::indoc;
+use serde_json;
 
 impl UnshieldedUtxoStorage for Storage {
     #[trace(properties = { "address": "{address}" })]
@@ -147,7 +148,6 @@ impl UnshieldedUtxoStorage for Storage {
         Ok(utxos)
     }
 
-    #[trace(properties = { "address": "{address}", "transaction_id": "{transaction_id}" })]
     async fn get_unshielded_utxos_by_address_spent_by_transaction(
         &self,
         address: UnshieldedAddress,
@@ -180,4 +180,100 @@ impl UnshieldedUtxoStorage for Storage {
 
         Ok(utxos)
     }
+
 }
+
+impl Storage {
+    pub(crate) async fn get_unshielded_utxos_created_by_transaction_ids(
+        &self,
+        transaction_ids: &[u64],
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
+        let ids = transaction_ids.iter().map(|&id| id as i64).collect::<Vec<_>>();
+
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            SELECT
+                id, creating_transaction_id, spending_transaction_id, owner, token_type, value,
+                intent_hash, output_index, ctime, initial_nonce, registered_for_dust_generation
+            FROM unshielded_utxos
+            WHERE creating_transaction_id = ANY($1)
+            ORDER BY creating_transaction_id, output_index
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            SELECT
+                unshielded_utxos.id, creating_transaction_id, spending_transaction_id, owner,
+                token_type, value, intent_hash, output_index, ctime, initial_nonce,
+                registered_for_dust_generation
+            FROM unshielded_utxos
+            INNER JOIN json_each($1) as batch_ids ON creating_transaction_id = batch_ids.value
+            ORDER BY creating_transaction_id, output_index
+        "};
+
+        #[cfg(feature = "cloud")]
+        {
+            sqlx::query_as(query)
+                .bind(ids)
+                .fetch_all(&*self.pool)
+                .await
+        }
+
+        #[cfg(feature = "standalone")]
+        {
+            let ids_json = serde_json::to_string(&ids)
+                .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+            sqlx::query_as(query)
+                .bind(ids_json)
+                .fetch_all(&*self.pool)
+                .await
+        }
+    }
+
+    pub(crate) async fn get_unshielded_utxos_spent_by_transaction_ids(
+        &self,
+        transaction_ids: &[u64],
+    ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
+        let ids = transaction_ids.iter().map(|&id| id as i64).collect::<Vec<_>>();
+
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            SELECT
+                id, creating_transaction_id, spending_transaction_id, owner, token_type, value,
+                intent_hash, output_index, ctime, initial_nonce, registered_for_dust_generation
+            FROM unshielded_utxos
+            WHERE spending_transaction_id = ANY($1)
+            ORDER BY spending_transaction_id, output_index
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            SELECT
+                unshielded_utxos.id, creating_transaction_id, spending_transaction_id, owner,
+                token_type, value, intent_hash, output_index, ctime, initial_nonce,
+                registered_for_dust_generation
+            FROM unshielded_utxos
+            INNER JOIN json_each($1) as batch_ids ON spending_transaction_id = batch_ids.value
+            ORDER BY spending_transaction_id, output_index
+        "};
+
+        #[cfg(feature = "cloud")]
+        {
+            sqlx::query_as(query)
+                .bind(ids)
+                .fetch_all(&*self.pool)
+                .await
+        }
+
+        #[cfg(feature = "standalone")]
+        {
+            let ids_json = serde_json::to_string(&ids)
+                .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+            sqlx::query_as(query)
+                .bind(ids_json)
+                .fetch_all(&*self.pool)
+                .await
+        }
+    }
+}
+

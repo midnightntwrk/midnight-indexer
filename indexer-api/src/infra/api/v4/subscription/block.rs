@@ -16,7 +16,7 @@ use crate::{
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
         v4::{
-            block::{Block, BlockOffset},
+            block::{Block as ApiBlock, BlockOffset},
             resolve_height,
         },
     },
@@ -25,8 +25,8 @@ use async_graphql::{Context, Subscription};
 use async_stream::try_stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext};
 use futures::{Stream, TryStreamExt};
-use indexer_common::domain::{BlockIndexed, Subscriber};
-use log::{debug, warn};
+use indexer_common::domain::Subscriber;
+use log::{debug, error, warn};
 use std::{marker::PhantomData, pin::pin};
 
 pub struct BlockSubscription<S, B> {
@@ -55,51 +55,79 @@ where
         &self,
         cx: &'a Context<'a>,
         offset: Option<BlockOffset>,
-    ) -> Result<impl Stream<Item = ApiResult<Block<S>>> + use<'a, S, B>, ApiError> {
+    ) -> Result<impl Stream<Item = ApiResult<ApiBlock<S>>> + use<'a, S, B>, ApiError> {
         let storage = cx.get_storage::<S>();
-        let subscriber = cx.get_subscriber::<B>();
+        let _subscriber = cx.get_subscriber::<B>();
         let batch_size = cx.get_subscription_config().blocks.batch_size;
 
-        let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
+        let block_broadcast = cx
+            .data::<std::sync::Arc<crate::infra::api::v4::broadcast::BlockBroadcast<S>>>()
+            .map_err(|e| {
+                ApiError::Server(crate::infra::api::InnerApiError(
+                    "block broadcast service not found".to_string(),
+                    Some(std::sync::Arc::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("{:?}", e),
+                    ))),
+                ))
+            })?;
+        let mut broadcast_rx = block_broadcast.subscribe();
         let mut height = resolve_height(offset, storage).await?;
 
         let blocks = try_stream! {
-            // Stream existing blocks.
-            debug!(height; "streaming existing blocks");
+            // 1. Stream existing blocks from DB to catch up.
+            debug!(height; "streaming existing blocks (catch-up)");
 
-            let blocks = storage.get_blocks(height, batch_size);
-            let mut blocks = pin!(blocks);
-            while let Some(block) = get_next_block(&mut blocks)
-                .await
-                .map_err_into_server_error(|| format!("get next block at height {height}"))?
-            {
-                height = block.height + 1;
-                yield block.into();
-            }
-
-            // Stream live blocks.
-            debug!(height; "streaming live blocks");
-            let mut block_indexed_stream = pin!(block_indexed_stream);
-            while block_indexed_stream
-                .try_next()
-                .await
-                .map_err_into_server_error(|| "get next BlockIndexed event")?
-                .is_some()
-            {
-                debug!(height; "streaming next blocks");
-
+            loop {
                 let blocks = storage.get_blocks(height, batch_size);
                 let mut blocks = pin!(blocks);
+                let mut found = false;
                 while let Some(block) = get_next_block(&mut blocks)
                     .await
                     .map_err_into_server_error(|| format!("get next block at height {height}"))?
                 {
                     height = block.height + 1;
                     yield block.into();
+                    found = true;
+                }
+                
+                if !found {
+                    break;
                 }
             }
 
-            warn!("stream of BlockIndexed events completed unexpectedly");
+            // 2. Switch to live blocks via broadcast.
+            debug!(height; "switching to live block broadcast");
+            loop {
+                match broadcast_rx.recv().await {
+                    Ok(block) => {
+                        if block.height >= height {
+                            debug!("received live block via broadcast at height {}", block.height);
+                            height = block.height + 1;
+                            yield block.into();
+                        } else {
+                            debug!("skipping stale block from broadcast at height {}", block.height);
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("subscription lagged broadcast by {n} messages, catching up from DB");
+                        // Catch up logic: fetch from DB until we reach the tip again
+                        let blocks = storage.get_blocks(height, batch_size);
+                        let mut blocks = pin!(blocks);
+                        while let Some(block) = get_next_block(&mut blocks)
+                            .await
+                            .map_err_into_server_error(|| format!("catch up next block at height {height}"))?
+                        {
+                            height = block.height + 1;
+                            yield block.into();
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        error!("block broadcast channel closed unexpectedly");
+                        break;
+                    }
+                }
+            }
         };
 
         Ok(blocks)

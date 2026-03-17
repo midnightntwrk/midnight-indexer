@@ -93,7 +93,8 @@ fn run() -> anyhow::Result<()> {
         }
 
         let cipher = make_cipher(secret).context("make cipher")?;
-        let storage = infra::storage::Storage::new(cipher, pool.clone());
+        let raw_storage = infra::storage::Storage::new(cipher, pool.clone());
+        let storage = infra::storage::caching::CachingStorage::new(raw_storage);
 
         ledger_db::init(ledger_db_config, pool);
 

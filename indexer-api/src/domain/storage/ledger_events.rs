@@ -23,7 +23,7 @@ where
 {
     /// Get a stream of ledger events for the given grouping starting at the given ID, ordered by
     /// ID.
-    async fn get_ledger_events(
+    fn get_ledger_events(
         &self,
         grouping: LedgerEventGrouping,
         id: u64,
@@ -36,11 +36,12 @@ where
         grouping: LedgerEventGrouping,
         transaction_id: u64,
     ) -> Result<Vec<LedgerEvent>, sqlx::Error>;
+
 }
 
 #[allow(unused_variables)]
 impl LedgerEventStorage for NoopStorage {
-    async fn get_ledger_events(
+    fn get_ledger_events(
         &self,
         grouping: LedgerEventGrouping,
         id: u64,
@@ -56,4 +57,5 @@ impl LedgerEventStorage for NoopStorage {
     ) -> Result<Vec<LedgerEvent>, sqlx::Error> {
         unimplemented!()
     }
+
 }

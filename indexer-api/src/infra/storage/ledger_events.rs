@@ -20,21 +20,23 @@ use fastrace::trace;
 use futures::Stream;
 use indexer_common::{domain::LedgerEventGrouping, stream::flatten_chunks};
 use indoc::indoc;
+use serde_json;
 use std::num::NonZeroU32;
 
 impl LedgerEventStorage for Storage {
-    async fn get_ledger_events(
+    fn get_ledger_events(
         &self,
         grouping: LedgerEventGrouping,
-        mut id: u64,
+        id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<LedgerEvent, sqlx::Error>> + Send {
+        let mut next_id = id;
         let chunks = try_stream! {
             loop {
-                let ledger_events = self.get_ledger_events(grouping, id, batch_size).await?;
+                let ledger_events = self.get_ledger_events(grouping, next_id, batch_size).await?;
 
                 match ledger_events.last() {
-                    Some(ledger_event) => id = ledger_event.id + 1,
+                    Some(ledger_event) => next_id = ledger_event.id + 1,
                     None => break,
                 }
 
@@ -53,6 +55,7 @@ impl LedgerEventStorage for Storage {
         let query = indoc! {"
             SELECT
                 ledger_events.id,
+                ledger_events.transaction_id,
                 ledger_events.raw,
                 ledger_events.attributes,
                 (SELECT MAX(id) FROM ledger_events WHERE grouping = $1) AS max_id,
@@ -70,9 +73,69 @@ impl LedgerEventStorage for Storage {
             .fetch_all(&*self.pool)
             .await
     }
+
 }
 
 impl Storage {
+    pub(crate) async fn get_ledger_events_by_transaction_ids(
+        &self,
+        grouping: LedgerEventGrouping,
+        transaction_ids: &[u64],
+    ) -> Result<Vec<LedgerEvent>, sqlx::Error> {
+        let ids = transaction_ids.iter().map(|&id| id as i64).collect::<Vec<_>>();
+
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            SELECT
+                ledger_events.id,
+                ledger_events.transaction_id,
+                ledger_events.raw,
+                ledger_events.attributes,
+                (SELECT MAX(id) FROM ledger_events WHERE grouping = $1) AS max_id,
+                transactions.protocol_version
+            FROM ledger_events
+            INNER JOIN transactions ON transactions.id = ledger_events.transaction_id
+            WHERE ledger_events.grouping = $1
+            AND ledger_events.transaction_id = ANY($2)
+            ORDER BY ledger_events.id
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            SELECT
+                ledger_events.id,
+                ledger_events.raw,
+                ledger_events.attributes,
+                (SELECT MAX(id) FROM ledger_events WHERE grouping = $1) AS max_id,
+                transactions.protocol_version
+            FROM ledger_events
+            INNER JOIN transactions ON transactions.id = ledger_events.transaction_id
+            INNER JOIN json_each($2) as batch_ids ON ledger_events.transaction_id = batch_ids.value
+            WHERE ledger_events.grouping = $1
+            ORDER BY ledger_events.id
+        "};
+
+        #[cfg(feature = "cloud")]
+        {
+            sqlx::query_as(query)
+                .bind(grouping)
+                .bind(ids)
+                .fetch_all(&*self.pool)
+                .await
+        }
+
+        #[cfg(feature = "standalone")]
+        {
+            let ids_json = serde_json::to_string(&ids)
+                .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+            sqlx::query_as(query)
+                .bind(grouping)
+                .bind(ids_json)
+                .fetch_all(&*self.pool)
+                .await
+        }
+    }
+
     #[trace(properties = {
         "grouping": "{grouping:?}",
         "id": "{id}",

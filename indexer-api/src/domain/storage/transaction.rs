@@ -25,7 +25,7 @@ where
     /// Get a transaction for the given ID.
     async fn get_transaction_by_id(&self, id: u64) -> Result<Option<Transaction>, sqlx::Error>;
 
-    /// Get the transactions for the block with the given ID, ordered by transaction ID.
+    /// Get transactions for the block with the given ID, ordered by transaction ID.
     async fn get_transactions_by_block_id(&self, id: u64) -> Result<Vec<Transaction>, sqlx::Error>;
 
     /// Get transactions for the given hash, ordered descendingly by transaction ID. Transaction

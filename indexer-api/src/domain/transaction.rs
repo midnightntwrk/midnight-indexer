@@ -34,12 +34,29 @@ impl Transaction {
             Transaction::System(t) => t.id,
         }
     }
+
+    pub fn block_id(&self) -> u64 {
+        match self {
+            Transaction::Regular(t) => t.block_id,
+            Transaction::System(t) => t.block_id,
+        }
+    }
+
+    pub fn hash(&self) -> &TransactionHash {
+        match self {
+            Transaction::Regular(t) => &t.hash,
+            Transaction::System(t) => &t.hash,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct RegularTransaction {
     #[sqlx(try_from = "i64")]
     pub id: u64,
+
+    #[sqlx(try_from = "i64")]
+    pub block_id: u64,
 
     pub hash: TransactionHash,
 
@@ -78,6 +95,9 @@ pub struct RegularTransaction {
 pub struct SystemTransaction {
     #[sqlx(try_from = "i64")]
     pub id: u64,
+
+    #[sqlx(try_from = "i64")]
+    pub block_id: u64,
 
     pub hash: TransactionHash,
 
