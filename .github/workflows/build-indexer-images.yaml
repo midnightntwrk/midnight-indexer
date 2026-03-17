@@ -179,6 +179,16 @@ jobs:
           echo "Using INDEXER_TAG=$INDEXER_TAG"
           echo "INDEXER_TAG=$INDEXER_TAG" >> "$GITHUB_ENV"
 
+      - name: Validate node_tag format
+        if: github.event.inputs.node_tag != ''
+        env:
+          NODE_TAG_INPUT: ${{ github.event.inputs.node_tag }}
+        run: |
+          if ! echo "$NODE_TAG_INPUT" | grep -qE '^[a-zA-Z0-9][a-zA-Z0-9._-]*$'; then
+            echo "::error::Invalid node_tag format: $NODE_TAG_INPUT"
+            exit 1
+          fi
+
       - name: Set up Node Tag to target
         run: |
           # Use workflow dispatch input if provided, otherwise read from NODE_VERSIONS file
