@@ -2,7 +2,7 @@ set shell := ["bash", "-uc"]
 
 # Can be overridden on the command line: `just feature=standalone`.
 feature := "cloud"
-packages := "indexer-common chain-indexer wallet-indexer indexer-api indexer-standalone indexer-tests"
+packages := "indexer-common chain-indexer wallet-indexer indexer-api spo-indexer indexer-standalone indexer-tests"
 rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/'`
 nightly := "nightly-2026-01-19"
 latest_node_version := `tail -n 1 NODE_VERSIONS`
