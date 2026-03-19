@@ -27,7 +27,7 @@ pub struct Metrics {
 
 impl Metrics {
     pub fn new(
-        block_height: Option<u32>,
+        block_height: Option<u64>,
         transaction_count: u64,
         (contract_deploy_count, contract_call_count, contract_update_count): (u64, u64, u64),
     ) -> Self {
@@ -42,7 +42,7 @@ impl Metrics {
         };
 
         if let Some(block_height) = block_height {
-            metrics.block_height.absolute(block_height as u64);
+            metrics.block_height.absolute(block_height);
         }
         metrics.transaction_count.absolute(transaction_count);
         metrics
@@ -60,12 +60,12 @@ impl Metrics {
         &self,
         block: &Block,
         transactions: &[Transaction],
-        node_block_height: u32,
+        node_block_height: u64,
         caught_up: bool,
     ) {
-        self.block_height.absolute(block.height as u64);
+        self.block_height.absolute(block.height);
 
-        self.node_block_height.absolute(node_block_height as u64);
+        self.node_block_height.absolute(node_block_height);
 
         self.caught_up.set(f64::from(caught_up));
 

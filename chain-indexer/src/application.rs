@@ -415,7 +415,7 @@ where
     let node_block_height = highest_block_on_node
         .read()
         .map(|BlockRef { height, .. }| height)
-        .unwrap_or(u32::MAX);
+        .unwrap_or(u64::MAX);
     let distance = node_block_height.saturating_sub(block.height);
     let max_distance = if *caught_up {
         caught_up_max_distance + caught_up_leeway
@@ -423,7 +423,7 @@ where
         caught_up_max_distance
     };
     let old_caught_up = *caught_up;
-    *caught_up = distance <= max_distance;
+    *caught_up = distance <= max_distance as u64;
     if old_caught_up != *caught_up {
         info!(caught_up:%; "caught-up status changed")
     }
@@ -631,7 +631,7 @@ mod tests {
         async fn fetch_system_parameters(
             &self,
             block_hash: BlockHash,
-            block_height: u32,
+            block_height: u64,
             timestamp: u64,
             _node_version: NodeVersion,
         ) -> Result<SystemParametersChange, Self::Error> {

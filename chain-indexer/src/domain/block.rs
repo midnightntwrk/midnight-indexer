@@ -22,7 +22,7 @@ use std::fmt::Debug;
 pub struct Block {
     // These fields come from the node.
     pub hash: BlockHash,
-    pub height: u32,
+    pub height: u64,
     pub protocol_version: ProtocolVersion,
     pub parent_hash: BlockHash,
     pub author: Option<BlockAuthor>,
@@ -39,5 +39,5 @@ pub struct Block {
 #[derive(Debug, Clone, Copy)]
 pub struct BlockRef {
     pub hash: BlockHash,
-    pub height: u32,
+    pub height: u64,
 }
