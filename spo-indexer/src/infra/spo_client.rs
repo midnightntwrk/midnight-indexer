@@ -356,7 +356,7 @@ pub enum SPOClientError {
     #[error("cannot create reconnecting subxt RPC client")]
     Subtx(#[source] BoxError),
 
-    #[error("cannot make rpc call {0}. Error: {1}")]
+    #[error("cannot make rpc call {0}")]
     RpcCall(
         String,
         #[source] subxt::rpcs::client::reconnecting_rpc_client::Error,
