@@ -17,7 +17,7 @@ use crate::{
         SPOStatus, Validator, ValidatorMembership,
         storage::{SqlxTransaction, Storage},
     },
-    infra::subxt_node::{SLOT_DURATION, SPOClient},
+    infra::spo_client::{SLOT_DURATION, SPOClient},
     utils::{hex_to_bytes, remove_hex_prefix},
 };
 use blake2::{
