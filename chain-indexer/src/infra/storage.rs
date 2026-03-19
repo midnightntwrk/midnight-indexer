@@ -111,7 +111,7 @@ impl domain::storage::Storage for Storage {
 
                 let block_ref = BlockRef {
                     hash,
-                    height: height as u32,
+                    height: height as u64,
                 };
 
                 let protocol_version = ProtocolVersion::try_from(protocol_version)

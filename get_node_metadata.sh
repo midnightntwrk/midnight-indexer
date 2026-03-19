@@ -68,3 +68,4 @@ subxt metadata \
     -f bytes \
     --url ws://localhost:9944 > \
     ./.node/$node_version/metadata.scale
+echo "Written node metadata to .node/$node_version/metadata.scale"
