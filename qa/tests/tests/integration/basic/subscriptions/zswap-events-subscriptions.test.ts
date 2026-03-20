@@ -1,5 +1,5 @@
 // This file is part of midnightntwrk/midnight-indexer
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -75,8 +75,8 @@ describe('zswap ledger event subscriptions', () => {
      */
     test('streams events starting from the specified ID', async () => {
       const firstEvent = await collectValidZswapEvents(indexerWsClient, eventCoordinator, 3);
-      const latestId = firstEvent[0].data!.zswapLedgerEvents.maxId;
-      const startId = Math.max(latestId - 20, 0);
+      const firstZswapId = firstEvent[0].data!.zswapLedgerEvents.id;
+      const startId = Math.max(firstZswapId - 1, 0);
       const received = await collectValidZswapEvents(indexerWsClient, eventCoordinator, 3, startId);
       expect(received.length === 3, `Expected 3 events, got: ${received.length}`).toBe(true);
 

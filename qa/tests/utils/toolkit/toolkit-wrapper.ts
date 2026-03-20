@@ -171,6 +171,22 @@ class ToolkitWrapper {
       }
     }
 
+    // Fallback: parse key=value structured log lines (newer toolkit format)
+    if (!txHash) {
+      for (const line of lines) {
+        const txMatch = line.match(/midnight_tx_hash=(\S+)/);
+        if (txMatch) {
+          txHash = txMatch[1];
+        }
+
+        const blockMatch = line.match(/block_hash=(\S+)/);
+        if (blockMatch && line.includes('FINALIZED')) {
+          blockHash = blockMatch[1];
+          status = 'confirmed';
+        }
+      }
+    }
+
     if (!txHash) {
       throw new Error('Could not extract transaction hash from toolkit output');
     }
@@ -355,7 +371,7 @@ class ToolkitWrapper {
         },
         {
           source: this.config.syncCacheDir,
-          target: `/.cache/sync`,
+          target: `/.cache`,
         },
       ])
       .withEnvironment({

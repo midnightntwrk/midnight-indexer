@@ -319,6 +319,7 @@ export const ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT = `
       id
       raw
       maxId
+      protocolVersion
     }
   }
 `;
@@ -329,6 +330,7 @@ export const ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID = `
       id
       raw
       maxId
+      protocolVersion
     }
   }
 `;

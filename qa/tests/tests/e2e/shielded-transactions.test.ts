@@ -30,7 +30,7 @@ import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
 describe('shielded transactions', () => {
   let indexerWsClient: IndexerWsClient;
   let indexerEventCoordinator: EventCoordinator;
-  let previousMaxZswapId: number;
+  let previousMaxLedgerId: number;
   let toolkit: ToolkitWrapper;
   let transactionResult: ToolkitTransactionResult;
 
@@ -52,13 +52,13 @@ describe('shielded transactions', () => {
     // Derive shielded addresses from seeds
     destinationAddress = (await toolkit.showAddress(destinationSeed)).shielded;
 
-    const beforeZswapEvents = await collectValidZswapEvents(
+    const beforeDustEvents = await collectValidDustLedgerEvents(
       indexerWsClient,
       indexerEventCoordinator,
       1,
     );
-    previousMaxZswapId = beforeZswapEvents[0].data!.zswapLedgerEvents.maxId;
-    log.debug(`Previous max zswap ledger ID before tx = ${previousMaxZswapId}`);
+    previousMaxLedgerId = beforeDustEvents[0].data!.dustLedgerEvents.maxId;
+    log.debug(`Previous max ledger ID before tx = ${previousMaxLedgerId}`);
 
     // Submit one shielded->shielded transfer (1 STAR)
     transactionResult = await toolkit.generateSingleTx(
@@ -154,9 +154,9 @@ describe('shielded transactions', () => {
       expect(regularTx.unshieldedCreatedOutputs).toEqual([]);
       expect(regularTx.unshieldedSpentOutputs).toEqual([]);
 
-      // Shielded transactions do NOT expose fees
-      expect(regularTx.fees.paidFees).toBe('0');
-      expect(regularTx.fees.estimatedFees).toBe('0');
+      // Fees are Substrate weight values (not actual DUST fees) until PM-20972/PM-20973
+      expect(BigInt(regularTx.fees.paidFees)).toBeGreaterThanOrEqual(0n);
+      expect(BigInt(regularTx.fees.estimatedFees)).toBeGreaterThanOrEqual(0n);
     });
 
     /**
@@ -168,12 +168,17 @@ describe('shielded transactions', () => {
      * @then the Zswap events are delivered in order
      * @and the following event is DustSpendProcessed
      */
-    test('should stream Zswap events followed by DustSpendProcessed after a shielded transaction', async () => {
+    test('should stream Zswap events followed by DustSpendProcessed after a shielded transaction', { timeout: 90_000 }, async () => {
+      // Reconnect WS client - the connection may have gone stale during the long toolkit transaction
+      await indexerWsClient.connectionClose();
+      await indexerWsClient.connectionInit();
+
       const received = await collectValidZswapEvents(
         indexerWsClient,
         indexerEventCoordinator,
         3,
-        previousMaxZswapId + 1,
+        previousMaxLedgerId + 1,
+        30_000,
       );
       expect(received).toHaveLength(3);
 
@@ -202,6 +207,7 @@ describe('shielded transactions', () => {
         indexerEventCoordinator,
         1,
         lastZswapMaxId + 1,
+        30_000,
       );
       expect(dustEvents).toHaveLength(1);
       const dust = dustEvents[0].data!.dustLedgerEvents;
