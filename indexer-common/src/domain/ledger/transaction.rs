@@ -11,25 +11,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{
-    domain::{
-        ContractAction, ContractAttributes, LedgerVersion, SerializedContractAddress,
-        SerializedContractState, SerializedTransactionIdentifier, TransactionHash,
-        TransactionStructure, ViewingKey,
-        ledger::{Error, SerializableExt, TransactionV7, TransactionV8},
-    },
-    infra::ledger_db::v1_1,
+use crate::domain::{
+    ContractAction, ContractAttributes, LedgerVersion, SerializedContractAddress,
+    SerializedContractState, SerializedTransactionIdentifier, TransactionHash,
+    TransactionStructure, ViewingKey,
+    ledger::{Error, SerializableExt, TransactionV7, TransactionV8},
 };
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+use crate::infra::ledger_db::v1_1;
+
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
 use midnight_coin_structure::{coin::Info, contract::ContractAddress};
 use midnight_ledger_v7::structure::{
     ContractAction as ContractActionV7, StandardTransaction as StandardTransactionV7,
-    SystemTransaction as LedgerSystemTransactionV7, TransactionIdentifier as TransactionIdentifierV7,
+    SystemTransaction as LedgerSystemTransactionV7,
 };
 use midnight_ledger_v8::structure::{
     ContractAction as ContractActionV8, StandardTransaction as StandardTransactionV8,
-    SystemTransaction as LedgerSystemTransactionV8, TransactionIdentifier as TransactionIdentifierV8,
+    SystemTransaction as LedgerSystemTransactionV8,
 };
 use midnight_serialize::tagged_deserialize;
 use midnight_storage_core::db::DB;
@@ -80,7 +80,7 @@ impl Transaction {
         match self {
             Self::V7(transaction) => transaction
                 .identifiers()
-                .map(|identifier: TransactionIdentifierV7| {
+                .map(|identifier| {
                     let identifier = identifier
                         .serialize()
                         .map_err(|error| Error::Serialize("TransactionIdentifierV7", error))?;
@@ -90,7 +90,7 @@ impl Transaction {
 
             Self::V8(transaction) => transaction
                 .identifiers()
-                .map(|identifier: TransactionIdentifierV8| {
+                .map(|identifier| {
                     let identifier = identifier
                         .serialize()
                         .map_err(|error| Error::Serialize("TransactionIdentifierV8", error))?;

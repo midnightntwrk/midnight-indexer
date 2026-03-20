@@ -23,29 +23,17 @@ use crate::{
             CommitteeMember, EpochInfo, EpochPerf, FirstValidEpoch, PoolMetadata, PresenceEvent,
             RegisteredStat, RegisteredTotals, Spo, SpoComposite, SpoIdentity, StakeShare,
         },
-        system_parameters::{DParameter, TermsAndConditions},
         storage::{
-            block::BlockStorage,
-            contract_action::ContractActionStorage,
-            dust::DustStorage,
-            ledger_events::LedgerEventStorage,
-            ledger_state::LedgerStateStorage,
-            spo::SpoStorage,
-            system_parameters::SystemParametersStorage,
-            transaction::TransactionStorage,
-            unshielded::UnshieldedUtxoStorage,
-            wallet::WalletStorage,
+            block::BlockStorage, contract_action::ContractActionStorage, dust::DustStorage,
+            ledger_events::LedgerEventStorage, ledger_state::LedgerStateStorage, spo::SpoStorage,
+            system_parameters::SystemParametersStorage, transaction::TransactionStorage,
+            unshielded::UnshieldedUtxoStorage, wallet::WalletStorage,
         },
+        system_parameters::{DParameter, TermsAndConditions},
     },
     infra::storage::{
         Storage,
-        dataloaders::{
-            BlockByHashLoader, BlockByHeightLoader, ContractActionsByTransactionIdLoader,
-            DustLedgerEventsByTransactionIdLoader, TransactionByIdLoader,
-            TransactionsByBlockIdLoader, UnshieldedUtxosCreatedByTransactionIdLoader,
-            UnshieldedUtxosSpentByTransactionIdLoader,
-            ZswapLedgerEventsByTransactionIdLoader,
-        },
+        dataloader::{BlockByHashLoader, BlockByHeightLoader},
     },
 };
 use async_graphql::dataloader::DataLoader;
@@ -65,17 +53,6 @@ pub struct CachingStorage {
     inner: Storage,
     block_by_hash: Arc<DataLoader<BlockByHashLoader>>,
     block_by_height: Arc<DataLoader<BlockByHeightLoader>>,
-    transaction_by_id: Arc<DataLoader<TransactionByIdLoader>>,
-    transactions_by_block_id: Arc<DataLoader<TransactionsByBlockIdLoader>>,
-    contract_actions_by_transaction_id: Arc<DataLoader<ContractActionsByTransactionIdLoader>>,
-    zswap_ledger_events_by_transaction_id:
-        Arc<DataLoader<ZswapLedgerEventsByTransactionIdLoader>>,
-    dust_ledger_events_by_transaction_id:
-        Arc<DataLoader<DustLedgerEventsByTransactionIdLoader>>,
-    unshielded_utxos_created_by_transaction_id:
-        Arc<DataLoader<UnshieldedUtxosCreatedByTransactionIdLoader>>,
-    unshielded_utxos_spent_by_transaction_id:
-        Arc<DataLoader<UnshieldedUtxosSpentByTransactionIdLoader>>,
 }
 
 impl CachingStorage {
@@ -87,34 +64,6 @@ impl CachingStorage {
             )),
             block_by_height: Arc::new(DataLoader::new(
                 BlockByHeightLoader(inner.clone()),
-                tokio::spawn,
-            )),
-            transaction_by_id: Arc::new(DataLoader::new(
-                TransactionByIdLoader(inner.clone()),
-                tokio::spawn,
-            )),
-            transactions_by_block_id: Arc::new(DataLoader::new(
-                TransactionsByBlockIdLoader(inner.clone()),
-                tokio::spawn,
-            )),
-            contract_actions_by_transaction_id: Arc::new(DataLoader::new(
-                ContractActionsByTransactionIdLoader(inner.clone()),
-                tokio::spawn,
-            )),
-            zswap_ledger_events_by_transaction_id: Arc::new(DataLoader::new(
-                ZswapLedgerEventsByTransactionIdLoader(inner.clone()),
-                tokio::spawn,
-            )),
-            dust_ledger_events_by_transaction_id: Arc::new(DataLoader::new(
-                DustLedgerEventsByTransactionIdLoader(inner.clone()),
-                tokio::spawn,
-            )),
-            unshielded_utxos_created_by_transaction_id: Arc::new(DataLoader::new(
-                UnshieldedUtxosCreatedByTransactionIdLoader(inner.clone()),
-                tokio::spawn,
-            )),
-            unshielded_utxos_spent_by_transaction_id: Arc::new(DataLoader::new(
-                UnshieldedUtxosSpentByTransactionIdLoader(inner.clone()),
                 tokio::spawn,
             )),
             inner,
@@ -134,12 +83,12 @@ impl BlockStorage for CachingStorage {
     }
 
     async fn get_block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>, sqlx::Error> {
-        let result: Result<Option<Block>, Arc<sqlx::Error>> = self.block_by_hash.load_one(hash).await;
+        let result = self.block_by_hash.load_one(hash).await;
         result.map_err(|e| sqlx::Error::Protocol(e.to_string()))
     }
 
     async fn get_block_by_height(&self, height: u32) -> Result<Option<Block>, sqlx::Error> {
-        let result: Result<Option<Block>, Arc<sqlx::Error>> = self.block_by_height.load_one(height).await;
+        let result = self.block_by_height.load_one(height).await;
         result.map_err(|e| sqlx::Error::Protocol(e.to_string()))
     }
 
@@ -158,18 +107,11 @@ impl BlockStorage for CachingStorage {
 
 impl TransactionStorage for CachingStorage {
     async fn get_transaction_by_id(&self, id: u64) -> Result<Option<Transaction>, sqlx::Error> {
-        let result: Result<Option<Transaction>, Arc<sqlx::Error>> = self.transaction_by_id.load_one(id).await;
-        result.map_err(|e| sqlx::Error::Protocol(e.to_string()))
+        self.inner.get_transaction_by_id(id).await
     }
 
-    async fn get_transactions_by_block_id(
-        &self,
-        id: u64,
-    ) -> Result<Vec<Transaction>, sqlx::Error> {
-        let result: Result<Option<Vec<Transaction>>, Arc<sqlx::Error>> = self.transactions_by_block_id.load_one(id).await;
-        result
-            .map(|opt| opt.unwrap_or_default())
-            .map_err(|e| sqlx::Error::Protocol(e.to_string()))
+    async fn get_transactions_by_block_id(&self, id: u64) -> Result<Vec<Transaction>, sqlx::Error> {
+        self.inner.get_transactions_by_block_id(id).await
     }
 
     async fn get_transactions_by_hash(
@@ -288,10 +230,7 @@ impl ContractActionStorage for CachingStorage {
         &self,
         id: u64,
     ) -> Result<Vec<ContractAction>, sqlx::Error> {
-        let result: Result<Option<Vec<ContractAction>>, Arc<sqlx::Error>> = self.contract_actions_by_transaction_id.load_one(id).await;
-        result
-            .map(|opt| opt.unwrap_or_default())
-            .map_err(|e| sqlx::Error::Protocol(e.to_string()))
+        self.inner.get_contract_actions_by_transaction_id(id).await
     }
 
     fn get_contract_actions_by_address(
@@ -342,22 +281,9 @@ impl LedgerEventStorage for CachingStorage {
         grouping: LedgerEventGrouping,
         transaction_id: u64,
     ) -> Result<Vec<LedgerEvent>, sqlx::Error> {
-        match grouping {
-            LedgerEventGrouping::Zswap => {
-                let result: Result<Option<Vec<LedgerEvent>>, Arc<sqlx::Error>> = 
-                    self.zswap_ledger_events_by_transaction_id.load_one(transaction_id).await;
-                result
-                    .map(|opt| opt.unwrap_or_default())
-                    .map_err(|e| sqlx::Error::Protocol(e.to_string()))
-            }
-            LedgerEventGrouping::Dust => {
-                let result: Result<Option<Vec<LedgerEvent>>, Arc<sqlx::Error>> = 
-                    self.dust_ledger_events_by_transaction_id.load_one(transaction_id).await;
-                result
-                    .map(|opt| opt.unwrap_or_default())
-                    .map_err(|e| sqlx::Error::Protocol(e.to_string()))
-            }
-        }
+        self.inner
+            .get_ledger_events_by_transaction_id(grouping, transaction_id)
+            .await
     }
 }
 
@@ -377,22 +303,18 @@ impl UnshieldedUtxoStorage for CachingStorage {
         &self,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
-        let result: Result<Option<Vec<UnshieldedUtxo>>, Arc<sqlx::Error>> = 
-            self.unshielded_utxos_created_by_transaction_id.load_one(transaction_id).await;
-        result
-            .map(|opt| opt.unwrap_or_default())
-            .map_err(|e| sqlx::Error::Protocol(e.to_string()))
+        self.inner
+            .get_unshielded_utxos_created_by_transaction(transaction_id)
+            .await
     }
 
     async fn get_unshielded_utxos_spent_by_transaction(
         &self,
         transaction_id: u64,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
-        let result: Result<Option<Vec<UnshieldedUtxo>>, Arc<sqlx::Error>> = 
-            self.unshielded_utxos_spent_by_transaction_id.load_one(transaction_id).await;
-        result
-            .map(|opt| opt.unwrap_or_default())
-            .map_err(|e| sqlx::Error::Protocol(e.to_string()))
+        self.inner
+            .get_unshielded_utxos_spent_by_transaction(transaction_id)
+            .await
     }
 
     async fn get_unshielded_utxos_by_address_created_by_transaction(
@@ -575,14 +497,18 @@ impl SpoStorage for CachingStorage {
         from_epoch: i64,
         to_epoch: i64,
     ) -> Result<Vec<PresenceEvent>, sqlx::Error> {
-        self.inner.get_registered_presence(from_epoch, to_epoch).await
+        self.inner
+            .get_registered_presence(from_epoch, to_epoch)
+            .await
     }
 
     async fn get_registered_first_valid_epochs(
         &self,
         upto_epoch: Option<i64>,
     ) -> Result<Vec<FirstValidEpoch>, sqlx::Error> {
-        self.inner.get_registered_first_valid_epochs(upto_epoch).await
+        self.inner
+            .get_registered_first_valid_epochs(upto_epoch)
+            .await
     }
 
     async fn get_stake_distribution(

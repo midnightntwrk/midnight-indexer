@@ -36,7 +36,6 @@ where
         grouping: LedgerEventGrouping,
         transaction_id: u64,
     ) -> Result<Vec<LedgerEvent>, sqlx::Error>;
-
 }
 
 #[allow(unused_variables)]
@@ -57,5 +56,4 @@ impl LedgerEventStorage for NoopStorage {
     ) -> Result<Vec<LedgerEvent>, sqlx::Error> {
         unimplemented!()
     }
-
 }

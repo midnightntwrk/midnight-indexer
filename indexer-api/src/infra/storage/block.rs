@@ -17,9 +17,10 @@ use crate::{
 };
 use async_stream::try_stream;
 use fastrace::trace;
-use futures::Stream;
+use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{domain::BlockHash, stream::flatten_chunks};
 use indoc::indoc;
+use log::debug;
 use std::num::NonZeroU32;
 
 impl BlockStorage for Storage {
@@ -111,83 +112,77 @@ impl BlockStorage for Storage {
     }
 }
 
+const BLOCK_SELECT: &str = "SELECT id, hash, height, protocol_version, parent_hash, author, timestamp, ledger_parameters FROM blocks";
+
 impl Storage {
     #[trace(properties = { "hashes": "{hashes:?}" })]
-    pub(super) async fn get_blocks_by_hashes(&self, hashes: &[BlockHash]) -> Result<Vec<Block>, sqlx::Error> {
-        let hashes = hashes.iter().map(|h| h.as_ref()).collect::<Vec<_>>();
+    pub fn get_blocks_by_hashes(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> impl Stream<Item = Result<Block, sqlx::Error>> + Send + 'static {
+        let pool = self.pool.clone();
+        try_stream! {
+            let mut query_builder = sqlx::QueryBuilder::new(BLOCK_SELECT);
+            query_builder.push(" WHERE hash ");
 
-        #[cfg(feature = "cloud")]
-        let query = indoc! {"
-            SELECT
-                id, hash, height, protocol_version, parent_hash, author, timestamp, ledger_parameters
-            FROM blocks
-            WHERE hash = ANY($1)
-        "};
+            #[cfg(feature = "cloud")]
+            {
+                query_builder.push(" = ANY(");
+                query_builder.push_bind(hashes.iter().map(|h| h.as_ref()).collect::<Vec<_>>());
+                query_builder.push(")");
+            }
 
-        #[cfg(feature = "standalone")]
-        let query = indoc! {"
-            SELECT
-                blocks.id, blocks.hash, blocks.height, blocks.protocol_version,
-                blocks.parent_hash, blocks.author, blocks.timestamp, blocks.ledger_parameters
-            FROM blocks
-            INNER JOIN json_each($1) ON hash = json_each.value
-        "};
+            #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+            {
+                query_builder.push(" IN (");
+                let mut separated = query_builder.separated(", ");
+                for hash in hashes {
+                    separated.push_bind(hash.as_ref().to_vec());
+                }
+                query_builder.push(")");
+            }
 
-        #[cfg(feature = "cloud")]
-        {
-            sqlx::query_as(query)
-                .bind(hashes)
-                .fetch_all(&*self.pool)
-                .await
+            let mut stream = query_builder.build_query_as::<Block>().fetch(&*pool);
+            while let Some(block) = stream.try_next().await? {
+                yield block;
+            }
         }
-
-        #[cfg(feature = "standalone")]
-        {
-            let hashes_json = serde_json::to_string(&hashes).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
-            sqlx::query_as(query)
-                .bind(hashes_json)
-                .fetch_all(&*self.pool)
-                .await
-        }
+        .boxed()
     }
 
     #[trace(properties = { "heights": "{heights:?}" })]
-    pub(super) async fn get_blocks_by_heights(&self, heights: &[u32]) -> Result<Vec<Block>, sqlx::Error> {
-        let heights = heights.iter().map(|&h| h as i64).collect::<Vec<_>>();
+    pub fn get_blocks_by_heights(
+        &self,
+        heights: Vec<u32>,
+    ) -> impl Stream<Item = Result<Block, sqlx::Error>> + Send + 'static {
+        let pool = self.pool.clone();
+        try_stream! {
+            let mut query_builder = sqlx::QueryBuilder::new(BLOCK_SELECT);
+            query_builder.push(" WHERE height ");
 
-        #[cfg(feature = "cloud")]
-        let query = indoc! {"
-            SELECT
-                id, hash, height, protocol_version, parent_hash, author, timestamp, ledger_parameters
-            FROM blocks
-            WHERE height = ANY($1)
-        "};
+            #[cfg(feature = "cloud")]
+            {
+                query_builder.push(" = ANY(");
+                query_builder.push_bind(heights.iter().map(|&h| h as i64).collect::<Vec<_>>());
+                query_builder.push(")");
+            }
 
-        #[cfg(feature = "standalone")]
-        let query = indoc! {"
-            SELECT
-                blocks.id, blocks.hash, blocks.height, blocks.protocol_version,
-                blocks.parent_hash, blocks.author, blocks.timestamp, blocks.ledger_parameters
-            FROM blocks
-            INNER JOIN json_each($1) ON height = json_each.value
-        "};
+            #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+            {
+                query_builder.push(" IN (");
+                let mut separated = query_builder.separated(", ");
+                for height in heights {
+                    separated.push_bind(height as i64);
+                }
+                query_builder.push(")");
+            }
 
-        #[cfg(feature = "cloud")]
-        {
-            sqlx::query_as(query)
-                .bind(heights)
-                .fetch_all(&*self.pool)
-                .await
+            let mut stream = query_builder.build_query_as::<Block>().fetch(&*pool);
+            while let Some(block) = stream.try_next().await? {
+                yield block;
+            }
         }
-
-        #[cfg(feature = "standalone")]
-        {
-            let heights_json = serde_json::to_string(&heights).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
-            sqlx::query_as(query)
-                .bind(heights_json)
-                .fetch_all(&*self.pool)
-                .await
-        }
+        .boxed()
     }
 
     #[trace(properties = { "height": "{height}", "batch_size": "{batch_size}" })]

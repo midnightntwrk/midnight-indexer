@@ -14,7 +14,7 @@
 mod block;
 pub mod caching;
 mod contract_action;
-pub mod dataloaders;
+pub mod dataloader;
 mod dust;
 mod ledger_events;
 mod ledger_state;
@@ -27,33 +27,22 @@ mod wallet;
 use crate::domain;
 use chacha20poly1305::ChaCha20Poly1305;
 
+#[cfg(feature = "cloud")]
+type Pool = indexer_common::infra::pool::postgres::PostgresPool;
+
+#[cfg(all(feature = "standalone", not(feature = "cloud")))]
+type Pool = indexer_common::infra::pool::sqlite::SqlitePool;
+
 /// Unified storage implementation for PostgreSQL (cloud) and SQLite (standalone). Uses Cargo
 /// features to select the appropriate database backend at build time.
 #[derive(Clone)]
 pub struct Storage {
     cipher: ChaCha20Poly1305,
-
-    #[cfg(feature = "cloud")]
-    pool: indexer_common::infra::pool::postgres::PostgresPool,
-
-    #[cfg(feature = "standalone")]
-    pool: indexer_common::infra::pool::sqlite::SqlitePool,
+    pool: Pool,
 }
 
 impl Storage {
-    #[cfg(feature = "cloud")]
-    pub fn new(
-        cipher: ChaCha20Poly1305,
-        pool: indexer_common::infra::pool::postgres::PostgresPool,
-    ) -> Self {
-        Self { cipher, pool }
-    }
-
-    #[cfg(feature = "standalone")]
-    pub fn new(
-        cipher: ChaCha20Poly1305,
-        pool: indexer_common::infra::pool::sqlite::SqlitePool,
-    ) -> Self {
+    pub fn new(cipher: ChaCha20Poly1305, pool: Pool) -> Self {
         Self { cipher, pool }
     }
 }

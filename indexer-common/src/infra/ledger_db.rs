@@ -19,7 +19,7 @@ use serde::Deserialize;
 
 #[cfg(feature = "cloud")]
 pub fn init(config: Config, pool: crate::infra::pool::postgres::PostgresPool) {
-    let Config { cache_size } = config;
+    let Config { cache_size, .. } = config;
 
     let db = v1_1::LedgerDb::new(pool);
     let _ = midnight_storage_core::storage::set_default_storage(|| {
@@ -27,13 +27,14 @@ pub fn init(config: Config, pool: crate::infra::pool::postgres::PostgresPool) {
     });
 }
 
-#[cfg(feature = "standalone")]
+#[cfg(all(feature = "standalone", not(feature = "cloud")))]
 pub async fn init(config: Config) -> Result<(), Error> {
     use crate::infra::{migrations, pool::sqlite};
 
     let Config {
         cache_size,
         cnn_url,
+        ..
     } = config;
 
     let pool = sqlite::SqlitePool::new(sqlite::Config { cnn_url }).await?;

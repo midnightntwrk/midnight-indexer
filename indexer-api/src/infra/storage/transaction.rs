@@ -78,7 +78,7 @@ impl TransactionStorage for Storage {
             AND transactions.variant = 'System'
         "};
 
-        #[cfg(feature = "standalone")]
+        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
         let query = indoc! {"
             SELECT
                 transactions.id,
@@ -127,7 +127,7 @@ impl TransactionStorage for Storage {
             .map(make_transaction)
             .transpose()?;
 
-        #[cfg(feature = "standalone")]
+        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
         if let Some(Transaction::Regular(transaction)) = &mut transaction {
             transaction.identifiers =
                 get_identifiers_for_transaction(transaction.id, &self.pool).await?;
@@ -183,7 +183,7 @@ impl TransactionStorage for Storage {
             ORDER BY id
         "};
 
-        #[cfg(feature = "standalone")]
+        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
         let query = indoc! {"
             SELECT
                 transactions.id as id,
@@ -235,7 +235,7 @@ impl TransactionStorage for Storage {
             .try_collect::<Vec<_>>()
             .await?;
 
-        #[cfg(feature = "standalone")]
+        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
         for transaction in transactions.iter_mut() {
             if let Transaction::Regular(transaction) = transaction {
                 transaction.identifiers =
@@ -296,7 +296,7 @@ impl TransactionStorage for Storage {
             ORDER BY id DESC
         "};
 
-        #[cfg(feature = "standalone")]
+        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
         let query = indoc! {"
             SELECT
                 transactions.id as id,
@@ -348,7 +348,7 @@ impl TransactionStorage for Storage {
             .try_collect::<Vec<_>>()
             .await?;
 
-        #[cfg(feature = "standalone")]
+        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
         for transaction in transactions.iter_mut() {
             if let Transaction::Regular(transaction) = transaction {
                 transaction.identifiers =
@@ -387,7 +387,7 @@ impl TransactionStorage for Storage {
             ORDER BY transactions.id
         "};
 
-        #[cfg(feature = "standalone")]
+        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
         let query = indoc! {"
             SELECT
                 transactions.id,
@@ -417,7 +417,7 @@ impl TransactionStorage for Storage {
             .try_collect::<Vec<_>>()
             .await?;
 
-        #[cfg(feature = "standalone")]
+        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
         for transaction in transactions.iter_mut() {
             if let Transaction::Regular(transaction) = transaction {
                 transaction.identifiers =
@@ -655,7 +655,7 @@ impl Storage {
                     .await?
             }
 
-            #[cfg(feature = "standalone")]
+            #[cfg(all(feature = "standalone", not(feature = "cloud")))]
             {
                 let ids_json = serde_json::to_string(&ids)
                     .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
@@ -669,7 +669,7 @@ impl Storage {
             }
         };
 
-        #[cfg(feature = "standalone")]
+        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
         for transaction in transactions.iter_mut() {
             if let Transaction::Regular(transaction) = transaction {
                 transaction.identifiers =
@@ -687,7 +687,7 @@ impl Storage {
         let ids = ids.iter().map(|&id| id as i64).collect::<Vec<_>>();
 
         #[cfg(feature = "cloud")]
-        let query = indoc! {"
+        let _query = indoc! {"
             SELECT
                 transactions.id,
                 transactions.block_id,
@@ -791,7 +791,7 @@ impl Storage {
                     .await?
             }
 
-            #[cfg(feature = "standalone")]
+            #[cfg(all(feature = "standalone", not(feature = "cloud")))]
             {
                 let ids_json = serde_json::to_string(&ids)
                     .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
@@ -805,7 +805,7 @@ impl Storage {
             }
         };
 
-        #[cfg(feature = "standalone")]
+        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
         for transaction in transactions.iter_mut() {
             if let Transaction::Regular(transaction) = transaction {
                 transaction.identifiers =
@@ -889,7 +889,7 @@ impl Storage {
             .try_collect::<Vec<_>>()
             .await?;
 
-        #[cfg(feature = "standalone")]
+        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
         for transaction in transactions.iter_mut() {
             transaction.identifiers =
                 get_identifiers_for_transaction(transaction.id, &self.pool).await?;
@@ -1030,136 +1030,7 @@ impl Storage {
             .try_collect::<Vec<_>>()
             .await?;
 
-        #[cfg(feature = "standalone")]
-        for transaction in transactions.iter_mut() {
-            if let Transaction::Regular(transaction) = transaction {
-                transaction.identifiers =
-                    get_identifiers_for_transaction(transaction.id, &self.pool).await?;
-            }
-        }
-
-        Ok(transactions)
-    }
-
-    pub(crate) async fn get_transactions_by_hashes(
-        &self,
-        hashes: &[TransactionHash],
-    ) -> Result<Vec<Transaction>, sqlx::Error> {
-        let hashes = hashes.iter().map(|h| h.as_ref()).collect::<Vec<_>>();
-
-        #[cfg(feature = "cloud")]
-        let query = indoc! {"
-            SELECT
-                transactions.id,
-                transactions.block_id,
-                transactions.variant,
-                transactions.hash,
-                transactions.protocol_version,
-                transactions.raw,
-                blocks.hash AS block_hash,
-                regular_transactions.transaction_result,
-                regular_transactions.merkle_tree_root,
-                regular_transactions.start_index,
-                regular_transactions.end_index,
-                regular_transactions.paid_fees,
-                regular_transactions.estimated_fees,
-                regular_transactions.identifiers
-            FROM transactions
-            INNER JOIN blocks ON blocks.id = transactions.block_id
-            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
-            WHERE transactions.hash = ANY($1)
-
-            UNION ALL
-
-            SELECT
-                transactions.id,
-                transactions.block_id,
-                transactions.variant,
-                transactions.hash,
-                transactions.protocol_version,
-                transactions.raw,
-                blocks.hash AS block_hash,
-                NULL AS transaction_result,
-                NULL AS merkle_tree_root,
-                NULL AS start_index,
-                NULL AS end_index,
-                NULL AS paid_fees,
-                NULL AS estimated_fees,
-                NULL AS identifiers
-            FROM transactions
-            INNER JOIN blocks ON blocks.id = transactions.block_id
-            WHERE transactions.hash = ANY($1)
-            AND transactions.variant = 'System'
-
-            ORDER BY id
-        "};
-
-        #[cfg(feature = "standalone")]
-        let query = indoc! {"
-            SELECT
-                transactions.id,
-                transactions.variant,
-                transactions.hash,
-                transactions.protocol_version,
-                transactions.raw,
-                blocks.hash AS block_hash,
-                regular_transactions.transaction_result,
-                regular_transactions.merkle_tree_root,
-                regular_transactions.start_index,
-                regular_transactions.end_index,
-                regular_transactions.paid_fees,
-                regular_transactions.estimated_fees
-            FROM transactions
-            INNER JOIN blocks ON blocks.id = transactions.block_id
-            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
-            INNER JOIN json_each($1) as batch_hashes ON transactions.hash = batch_hashes.value
-
-            UNION ALL
-
-            SELECT
-                transactions.id,
-                transactions.variant,
-                transactions.hash,
-                transactions.protocol_version,
-                transactions.raw,
-                blocks.hash AS block_hash,
-                NULL AS transaction_result,
-                NULL AS merkle_tree_root,
-                NULL AS start_index,
-                NULL AS end_index,
-                NULL AS paid_fees,
-                NULL AS estimated_fees
-            FROM transactions
-            INNER JOIN blocks ON blocks.id = transactions.block_id
-            INNER JOIN json_each($1) as batch_hashes ON transactions.hash = batch_hashes.value
-            WHERE transactions.variant = 'System'
-
-            ORDER BY id
-        "};
-
-        #[cfg(feature = "cloud")]
-        let transactions = sqlx::query(query)
-            .bind(hashes)
-            .fetch(&*self.pool)
-            .map_ok(make_transaction)
-            .map(|result| result.flatten())
-            .try_collect::<Vec<_>>()
-            .await?;
-
-        #[cfg(feature = "standalone")]
-        let mut transactions = {
-            let hashes_json = serde_json::to_string(&hashes)
-                .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
-            sqlx::query(query)
-                .bind(hashes_json)
-                .fetch(&*self.pool)
-                .map_ok(make_transaction)
-                .map(|result| result.flatten())
-                .try_collect::<Vec<_>>()
-                .await?
-        };
-
-        #[cfg(feature = "standalone")]
+        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
         for transaction in transactions.iter_mut() {
             if let Transaction::Regular(transaction) = transaction {
                 transaction.identifiers =
@@ -1181,7 +1052,7 @@ fn make_transaction(row: sqlx::postgres::PgRow) -> Result<Transaction, sqlx::Err
     Ok(transaction)
 }
 
-#[cfg(feature = "standalone")]
+#[cfg(all(feature = "standalone", not(feature = "cloud")))]
 fn make_transaction(row: sqlx::sqlite::SqliteRow) -> Result<Transaction, sqlx::Error> {
     let variant = row.try_get::<TransactionVariant, _>("variant")?;
     let transaction = match variant {
@@ -1191,7 +1062,7 @@ fn make_transaction(row: sqlx::sqlite::SqliteRow) -> Result<Transaction, sqlx::E
     Ok(transaction)
 }
 
-#[cfg(feature = "standalone")]
+#[cfg(all(feature = "standalone", not(feature = "cloud")))]
 async fn get_identifiers_for_transaction(
     transaction_id: u64,
     pool: &indexer_common::infra::pool::sqlite::SqlitePool,

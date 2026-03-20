@@ -32,7 +32,7 @@ use indexer_common::domain::Subscriber;
 
 #[derive(MergedSubscription)]
 pub struct Subscription<S, B>(
-    BlockSubscription<S, B>,
+    BlockSubscription<S>,
     ContractActionSubscription<S, B>,
     DustLedgerEventsSubscription<S, B>,
     ShieldedTransactionsSubscription<S, B>,

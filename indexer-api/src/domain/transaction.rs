@@ -42,10 +42,10 @@ impl Transaction {
         }
     }
 
-    pub fn hash(&self) -> &TransactionHash {
+    pub fn hash(&self) -> TransactionHash {
         match self {
-            Transaction::Regular(t) => &t.hash,
-            Transaction::System(t) => &t.hash,
+            Transaction::Regular(t) => t.hash,
+            Transaction::System(t) => t.hash,
         }
     }
 }
