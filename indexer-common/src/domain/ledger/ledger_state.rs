@@ -388,7 +388,9 @@ impl LedgerState {
                     .map_err(|error| Error::TransactionCost(error.into()))?;
                 let verified_ledger_transaction = transaction
                     .well_formed(&cx.ref_state, *STRICTNESS_V7, cx.block_context.tblock)
-                    .map_err(|error| Error::MalformedTransaction(error.into()))?;
+                    .map_err(|error| {
+                        Error::MalformedTransaction(Box::new(error) as crate::error::BoxError)
+                    })?;
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
 
@@ -461,7 +463,9 @@ impl LedgerState {
                     .map_err(|error| Error::TransactionCost(error.into()))?;
                 let verified_ledger_transaction = transaction
                     .well_formed(&cx.ref_state, *STRICTNESS_V8, cx.block_context.tblock)
-                    .map_err(|error| Error::MalformedTransaction(error.into()))?;
+                    .map_err(|error| {
+                        Error::MalformedTransaction(Box::new(error) as crate::error::BoxError)
+                    })?;
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
 
@@ -531,7 +535,9 @@ impl LedgerState {
                 let cost = transaction.cost(&ledger_state.parameters);
                 let (ledger_state, events) = ledger_state
                     .apply_system_tx(&transaction, timestamp(block_timestamp))
-                    .map_err(|error| Error::SystemTransaction(error.into()))?;
+                    .map_err(|error| {
+                        Error::SystemTransaction(Box::new(error) as crate::error::BoxError)
+                    })?;
                 let block_fullness = *block_fullness + cost;
 
                 let created_unshielded_utxos =
@@ -561,7 +567,9 @@ impl LedgerState {
                 let cost = transaction.cost(&ledger_state.parameters);
                 let (ledger_state, events) = ledger_state
                     .apply_system_tx(&transaction, timestamp(block_timestamp))
-                    .map_err(|error| Error::SystemTransaction(error.into()))?;
+                    .map_err(|error| {
+                        Error::SystemTransaction(Box::new(error) as crate::error::BoxError)
+                    })?;
                 let block_fullness = *block_fullness + cost;
 
                 let created_unshielded_utxos =
@@ -656,7 +664,7 @@ impl LedgerState {
                 start_index,
                 end_index,
             )
-            .map_err(|error| Error::InvalidUpdate(error.into()))?
+            .map_err(|error| Error::InvalidUpdate(Box::new(error) as crate::error::BoxError))?
             .tagged_serialize()
             .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdate", error)),
 
@@ -665,7 +673,7 @@ impl LedgerState {
                 start_index,
                 end_index,
             )
-            .map_err(|error| Error::InvalidUpdate(error.into()))?
+            .map_err(|error| Error::InvalidUpdate(Box::new(error) as crate::error::BoxError))?
             .tagged_serialize()
             .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdate", error)),
         }
@@ -701,7 +709,9 @@ impl LedgerState {
 
                 let ledger_state = ledger_state
                     .post_block_update(timestamp, normalized_fullness, overall_fullness)
-                    .map_err(|error| Error::BlockLimitExceeded(error.into()))?;
+                    .map_err(|error| {
+                        Error::BlockLimitExceeded(Box::new(error) as crate::error::BoxError)
+                    })?;
 
                 let ledger_parameters = ledger_state.parameters.deref().to_owned();
 
@@ -737,7 +747,9 @@ impl LedgerState {
 
                 let ledger_state = ledger_state
                     .post_block_update(timestamp, normalized_fullness, overall_fullness)
-                    .map_err(|error| Error::BlockLimitExceeded(error.into()))?;
+                    .map_err(|error| {
+                        Error::BlockLimitExceeded(Box::new(error) as crate::error::BoxError)
+                    })?;
 
                 let ledger_parameters = ledger_state.parameters.deref().to_owned();
 

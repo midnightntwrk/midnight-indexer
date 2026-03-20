@@ -60,8 +60,7 @@ where
             debug!(id; "streaming existing events");
 
             let ledger_events = storage
-                .get_ledger_events(LedgerEventGrouping::Zswap, id, batch_size)
-                .await;
+                .get_ledger_events(LedgerEventGrouping::Zswap, id, batch_size);
             let mut ledger_events = pin!(ledger_events);
             while let Some(ledger_event) = get_next_ledger_event(&mut ledger_events)
                 .await
@@ -85,8 +84,7 @@ where
                 debug!(id; "streaming next events");
 
                 let ledger_events = storage
-                    .get_ledger_events(LedgerEventGrouping::Zswap, id, batch_size)
-                    .await;
+                    .get_ledger_events(LedgerEventGrouping::Zswap, id, batch_size);
                 let mut ledger_events = pin!(ledger_events);
                 while let Some(ledger_event) = get_next_ledger_event(&mut ledger_events)
                     .await
