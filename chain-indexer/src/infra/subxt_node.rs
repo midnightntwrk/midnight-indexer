@@ -25,7 +25,10 @@ use async_stream::try_stream;
 use const_hex::FromHexError;
 use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt, stream};
-use http::header::{InvalidHeaderValue, USER_AGENT};
+use http::{
+    HeaderMap,
+    header::{InvalidHeaderValue, USER_AGENT},
+};
 use indexer_common::{
     domain::{
         BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, ProtocolVersionError,
@@ -39,32 +42,30 @@ use serde::Deserialize;
 use std::{future::ready, time::Duration};
 use subxt::{
     OnlineClient, SubstrateConfig,
-    backend::{
-        BackendExt,
-        legacy::LegacyRpcMethods,
-        rpc::reconnecting_rpc_client::{ExponentialBackoff, HeaderMap, RpcClient},
-    },
     config::{
-        Hasher,
+        Hash, RpcConfigFor,
         substrate::{ConsensusEngineId, DigestItem, SubstrateHeader},
     },
-    ext::subxt_rpcs,
+    rpcs::{
+        LegacyRpcMethods,
+        client::{ReconnectingRpcClient, reconnecting_rpc_client::ExponentialBackoff},
+    },
     utils::H256,
 };
 use thiserror::Error;
 use tokio::time::timeout;
 
-type SubxtBlock = subxt::blocks::Block<SubstrateConfig, OnlineClient<SubstrateConfig>>;
+type OnlineClientAtBlock = subxt::client::OnlineClientAtBlock<SubstrateConfig>;
+type SubxtBlock = subxt::client::Block<SubstrateConfig>;
 
 const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
-const TRAVERSE_BACK_LOG_AFTER: u32 = 1_000;
+const TRAVERSE_BACK_LOG_AFTER: u64 = 1_000;
 
 /// A [Node] implementation based on subxt.
 #[derive(Clone)]
 pub struct SubxtNode {
-    rpc_client: RpcClient,
-    default_online_client: OnlineClient<SubstrateConfig>,
-    compatible_online_client: Option<(NodeVersion, OnlineClient<SubstrateConfig>)>,
+    rpc_client: ReconnectingRpcClient,
+    online_client: OnlineClient<SubstrateConfig>,
     subscription_recovery_timeout: Duration,
 }
 
@@ -83,74 +84,21 @@ impl SubxtNode {
             .take(retry_max_attempts);
         let user_agent = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).parse()?;
         let headers = HeaderMap::from_iter([(USER_AGENT, user_agent)]);
-        let rpc_client = RpcClient::builder()
+        let rpc_client = ReconnectingRpcClient::builder()
             .set_headers(headers)
             .retry_policy(retry_policy)
             .build(&url)
             .await
             .map_err(|error| Error::RpcClient(error.into()))?;
 
-        let default_online_client =
+        let online_client =
             OnlineClient::<SubstrateConfig>::from_rpc_client(rpc_client.clone()).await?;
 
         Ok(Self {
             rpc_client,
-            default_online_client,
-            compatible_online_client: None,
+            online_client,
             subscription_recovery_timeout,
         })
-    }
-
-    async fn compatible_online_client(
-        &mut self,
-        hash: BlockHash,
-        node_version: NodeVersion,
-    ) -> Result<&OnlineClient<SubstrateConfig>, SubxtNodeError> {
-        if !self
-            .compatible_online_client
-            .as_ref()
-            .map(|&(v, _)| v == node_version)
-            .unwrap_or_default()
-        {
-            let genesis_hash = self.default_online_client.genesis_hash();
-
-            // Version must be greater or equal 15. This is a substrate/subxt detail.
-            let metadata = self
-                .default_online_client
-                .backend()
-                .metadata_at_version(15, H256(hash.0))
-                .await
-                .map_err(|error| SubxtNodeError::GetMetadata(error.into()))?;
-
-            let legacy_rpc_methods =
-                LegacyRpcMethods::<SubstrateConfig>::new(self.rpc_client.to_owned().into());
-            let runtime_version = legacy_rpc_methods
-                .state_get_runtime_version(Some(H256(hash.0)))
-                .await
-                .map_err(SubxtNodeError::GetRuntimeVersion)?;
-            let runtime_version = subxt::client::RuntimeVersion {
-                spec_version: runtime_version.spec_version,
-                transaction_version: runtime_version.transaction_version,
-            };
-
-            let online_client = OnlineClient::<SubstrateConfig>::from_rpc_client_with(
-                genesis_hash,
-                runtime_version,
-                metadata,
-                self.rpc_client.to_owned(),
-            )
-            .map_err(|error| SubxtNodeError::MakeOnlineClient(error.into()))?;
-
-            self.compatible_online_client = Some((node_version, online_client));
-        }
-
-        let compatible_online_client = self
-            .compatible_online_client
-            .as_ref()
-            .map(|(_, c)| c)
-            .expect("compatible_online_client is defined");
-
-        Ok(compatible_online_client)
     }
 
     /// Subscribe to finalized blocks, filtering duplicates and disconnection errors.
@@ -162,13 +110,12 @@ impl SubxtNode {
     /// block height, which is used to properly filter duplicates after re-subscribing.
     async fn subscribe_finalized_blocks(
         &self,
-        mut last_height: Option<u32>,
+        mut last_height: Option<u64>,
     ) -> Result<impl Stream<Item = Result<SubxtBlock, SubxtNodeError>> + use<>, SubxtNodeError>
     {
         let finalized_blocks = self
-            .default_online_client
-            .blocks()
-            .subscribe_finalized()
+            .online_client
+            .stream_blocks()
             .await
             .map_err(|error| SubxtNodeError::SubscribeFinalizedBlocks(error.into()))?
             .filter(move |block| {
@@ -191,9 +138,11 @@ impl SubxtNode {
                     }
 
                     // Filter out reconnect errors; see method comment above.
-                    Err(subxt::Error::Rpc(subxt::error::RpcError::ClientError(
-                        subxt_rpcs::Error::DisconnectedWillReconnect(_),
-                    ))) => {
+                    Err(subxt::error::BlocksError::CannotGetBlockHeader(
+                        subxt::error::BackendError::Rpc(subxt::error::RpcError::ClientError(
+                            subxt::rpcs::Error::DisconnectedWillReconnect(_),
+                        )),
+                    )) => {
                         warn!("node disconnected, reconnecting");
                         false
                     }
@@ -210,14 +159,14 @@ impl SubxtNode {
 
     async fn make_block(
         &mut self,
-        block: SubxtBlock,
         authorities: &mut Option<Vec<[u8; 32]>>,
+        block: OnlineClientAtBlock,
     ) -> Result<Block, SubxtNodeError> {
-        let hash = block.hash().0.into();
-        let height = block.number();
-        let parent_hash = block.header().parent_hash.0.into();
-        let protocol_version = block
-            .header()
+        let hash = block.block_hash().0.into();
+        let height = block.block_number();
+        let header = block_header(&block).await?;
+        let parent_hash = header.parent_hash.0.into();
+        let protocol_version = header
             .protocol_version()?
             .expect("protocol version header is present");
         let node_version = protocol_version.node_version();
@@ -233,46 +182,34 @@ impl SubxtNode {
             "making block"
         );
 
-        let online_client = self.compatible_online_client(hash, node_version).await?;
-
         // Fetch authorities if `None`, either initially or because of a `NewSession` event (below).
         if authorities.is_none() {
-            *authorities = runtimes::fetch_authorities(hash, node_version, online_client).await?;
+            *authorities = Some(runtimes::fetch_authorities(node_version, &block).await?);
         }
         let author = authorities
             .as_ref()
-            .map(|authorities| extract_block_author(block.header(), authorities, node_version))
+            .map(|authorities| extract_block_author(&header, authorities, node_version))
             .transpose()?
             .flatten();
 
-        let zswap_state_root =
-            runtimes::get_zswap_state_root(hash, node_version, online_client).await?;
+        let zswap_state_root = runtimes::get_zswap_state_root(node_version, &block).await?;
         let zswap_state_root = ZswapStateRoot::deserialize(zswap_state_root, ledger_version)?;
 
-        let extrinsics = block
-            .extrinsics()
-            .await
-            .map_err(|error| SubxtNodeError::GetExtrinsics(error.into()))?;
-        let events = block
-            .events()
-            .await
-            .map_err(|error| SubxtNodeError::GetEvents(error.into()))?;
         let BlockDetails {
             timestamp,
             transactions,
             mut dust_registration_events,
-        } = runtimes::make_block_details(extrinsics, events, authorities, node_version).await?;
+        } = runtimes::make_block_details(authorities, node_version, &block).await?;
 
         // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
         // registrations from pallet storage instead.
         // Also fetch the ledger state root for genesis ledger state detection.
         let ledger_state_root = if height == 0 {
             let genesis_registrations =
-                runtimes::fetch_genesis_cnight_registrations(hash, node_version, online_client)
-                    .await?;
+                runtimes::fetch_genesis_cnight_registrations(node_version, &block).await?;
             dust_registration_events.extend(genesis_registrations);
 
-            runtimes::get_ledger_state_root(hash, node_version, online_client)
+            runtimes::get_ledger_state_root(node_version, &block)
                 .await?
                 .map(Into::into)
         } else {
@@ -280,7 +217,7 @@ impl SubxtNode {
         };
 
         let transactions = stream::iter(transactions)
-            .then(|t| make_transaction(t, hash, protocol_version, online_client))
+            .then(|t| make_transaction(t, protocol_version, &block))
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -309,12 +246,11 @@ impl SubxtNode {
     }
 
     #[trace]
-    async fn fetch_block(&self, hash: H256) -> Result<SubxtBlock, SubxtNodeError> {
-        self.default_online_client
-            .blocks()
-            .at(hash)
+    async fn block_at(&self, hash: H256) -> Result<OnlineClientAtBlock, SubxtNodeError> {
+        self.online_client
+            .at_block(hash)
             .await
-            .map_err(|error| SubxtNodeError::FetchBlock(hash, error.into()))
+            .map_err(|error| SubxtNodeError::GetOnlineClientAt(hash, error.into()))
     }
 }
 
@@ -374,11 +310,8 @@ impl Node for SubxtNode {
                 // until we arrive at the highest stored block (excluded) or at genesis (included).
                 // For these we store the hashes; one hash is 32 bytes, i.e. one year is ~ 160MB.
                 // (one year ~ 5,256,000 blocks).
-                let genesis_parent_hash = self
-                    .fetch_block(self.default_online_client.genesis_hash())
-                    .await?
-                    .header()
-                    .parent_hash;
+                let genesis = self.block_at(self.online_client.genesis_hash()).await?;
+                let genesis_parent_hash = block_header(&genesis).await?.parent_hash;
 
                 let capacity = match after_height {
                     Some(after_height) if after_height < first_block.number() => {
@@ -392,35 +325,37 @@ impl Node for SubxtNode {
 
                 let mut parent_hash = first_block.header().parent_hash;
                 while parent_hash.0 != after_hash.0 && parent_hash != genesis_parent_hash {
-                    let block = self.fetch_block(parent_hash).await?;
-                    if block.number() % TRAVERSE_BACK_LOG_AFTER == 0 {
+                    let parent = self.block_at(parent_hash).await?;
+                    if parent.block_number() % TRAVERSE_BACK_LOG_AFTER == 0 {
                         info!(
                             highest_stored_height:? = after_height,
-                            current_height = block.number(),
+                            current_height = parent.block_number(),
                             first_finalized_height = first_block.number();
                             "traversing back via parent hashes"
                         );
                     }
-                    parent_hash = block.header().parent_hash;
-                    hashes.push(block.hash());
+                    parent_hash = block_header(&parent).await?.parent_hash;
+                    hashes.push(parent.block_hash());
                 }
 
                 // We fetch and yield the blocks for the stored block hashes.
                 for hash in hashes.into_iter().rev() {
-                    let block = self.fetch_block(hash).await?;
+                    let block = self.block_at(hash).await?;
                     debug!(
-                        hash:% = block.hash(),
-                        height = block.number(),
-                        parent_hash:% = block.header().parent_hash;
+                        hash:% = block.block_hash(),
+                        height = block.block_number();
                         "block fetched"
                     );
-                    yield self.make_block(block, &mut authorities).await?;
+                    yield self.make_block(&mut authorities, block).await?;
                 }
 
                 // Then we yield the first finalized block.
-                let block = self.make_block(first_block, &mut authorities).await?;
-                last_yielded_height = Some(block.height);
-                yield block;
+                let first_block = first_block.at().await.map_err(|error| {
+                    SubxtNodeError::GetOnlineClientAt(first_block.hash(), error.into())
+                })?;
+                let first_block = self.make_block(&mut authorities, first_block).await?;
+                last_yielded_height = Some(first_block.height);
+                yield first_block;
             }
 
             // Finally we emit all other finalized ones.
@@ -436,7 +371,10 @@ impl Node for SubxtNode {
                             parent_hash:% = block.header().parent_hash;
                             "block received"
                         );
-                        let block = self.make_block(block, &mut authorities).await?;
+                        let block = block.at().await.map_err(|error| {
+                            SubxtNodeError::GetOnlineClientAt(block.hash(), error.into())
+                        })?;
+                        let block = self.make_block(&mut authorities, block).await?;
                         last_yielded_height = Some(block.height);
                         yield block;
                     }
@@ -465,17 +403,15 @@ impl Node for SubxtNode {
     async fn fetch_system_parameters(
         &self,
         block_hash: BlockHash,
-        block_height: u32,
+        block_height: u64,
         timestamp: u64,
         node_version: NodeVersion,
     ) -> Result<SystemParametersChange, Self::Error> {
+        let block = self.block_at(H256(block_hash.0)).await?;
+
         let (d_parameter, terms_and_conditions) = tokio::try_join!(
-            runtimes::get_d_parameter(block_hash, node_version, &self.default_online_client),
-            runtimes::get_terms_and_conditions(
-                block_hash,
-                node_version,
-                &self.default_online_client
-            ),
+            runtimes::get_d_parameter(node_version, &block),
+            runtimes::get_terms_and_conditions(node_version, &block),
         )?;
 
         Ok(SystemParametersChange {
@@ -488,12 +424,13 @@ impl Node for SubxtNode {
     }
 
     async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
-        let legacy_rpc_methods =
-            LegacyRpcMethods::<SubstrateConfig>::new(self.rpc_client.to_owned().into());
+        let legacy_rpc_methods = LegacyRpcMethods::<RpcConfigFor<SubstrateConfig>>::new(
+            self.rpc_client.to_owned().into(),
+        );
         let properties = legacy_rpc_methods
             .system_properties()
             .await
-            .map_err(|error| SubxtNodeError::FetchSystemProperties(error.into()))?;
+            .map_err(SubxtNodeError::FetchSystemProperties)?;
 
         let genesis_ledger_state = properties
             .get("genesis_state")
@@ -548,7 +485,7 @@ pub enum Error {
     RpcClient(#[source] BoxError),
 
     #[error("cannot create subxt online client")]
-    OnlineClient(#[from] subxt::Error),
+    OnlineClient(#[from] subxt::error::OnlineClientError),
 
     #[error("cannot create HTTP header")]
     InvalidHeaderValue(#[from] InvalidHeaderValue),
@@ -558,49 +495,49 @@ pub enum Error {
 #[derive(Debug, Error)]
 pub enum SubxtNodeError {
     #[error("cannot subscribe to finalized blocks")]
-    SubscribeFinalizedBlocks(#[source] Box<subxt::Error>),
+    SubscribeFinalizedBlocks(#[source] Box<subxt::error::BlocksError>),
 
     #[error("cannot receive finalized block")]
-    ReceiveBlock(#[source] Box<subxt::Error>),
+    ReceiveBlock(#[source] Box<subxt::error::BlocksError>),
 
-    #[error("cannot fetch block at hash {0}")]
-    FetchBlock(H256, #[source] Box<subxt::Error>),
+    #[error("cannot get online client at block {0}")]
+    GetOnlineClientAt(H256, #[source] Box<subxt::error::OnlineClientAtBlockError>),
 
-    #[error("cannot get extrinsics")]
-    GetExtrinsics(#[source] Box<subxt::Error>),
+    #[error("cannot fetch extrinsics")]
+    FetchExtrinsics(#[source] Box<subxt::error::ExtrinsicError>),
 
-    #[error("cannot get events")]
-    GetEvents(#[source] Box<subxt::Error>),
+    #[error("cannot fetch events")]
+    FetchEvents(#[source] Box<subxt::error::EventsError>),
 
-    #[error("cannot next event")]
-    GetNextEvent(#[source] Box<subxt::Error>),
+    #[error("cannot get block header")]
+    GetBlockHeader(#[source] Box<subxt::error::BlockError>),
 
-    #[error("cannot decode event as root event")]
-    AsRootEvent(#[source] Box<subxt::Error>),
+    #[error("cannot get next extrinsic")]
+    GetNextExtrinsic(#[source] Box<subxt::error::ExtrinsicDecodeErrorAt>),
 
-    #[error("cannot get node metadata")]
-    GetMetadata(#[source] Box<subxt::Error>),
+    #[error("cannot decode extrinsic as call")]
+    DecodeExtrinsicAsCall(#[source] Box<subxt::error::ExtrinsicError>),
 
-    #[error("cannot make compatible subxt online client")]
-    MakeOnlineClient(#[source] Box<subxt::Error>),
+    #[error("cannot get next event")]
+    GetNextEvent(#[source] Box<subxt::error::EventsError>),
+
+    #[error("cannot decode subxt event as midnight event")]
+    DecodeEvent(#[source] Box<subxt::error::EventsError>),
 
     #[error("cannot fetch authorities")]
-    FetchAuthorities(#[source] Box<subxt::Error>),
+    FetchAuthorities(#[source] Box<subxt::error::StorageError>),
 
-    #[error("cannot use extrinsic as root extrinsic")]
-    AsRootExtrinsic(#[source] Box<subxt::Error>),
+    #[error("cannot decode authorities")]
+    DecodeAuthorities(#[source] Box<subxt::error::StorageValueError>),
 
-    #[error("cannot get runtime version")]
-    GetRuntimeVersion(#[source] subxt::ext::subxt_rpcs::Error),
+    #[error("cannot fetch genesis cNight registrations")]
+    FetchGenesisCnightRegistrations(#[source] Box<subxt::error::StorageError>),
 
-    #[error("cannot scale decode")]
-    ScaleDecode(#[from] parity_scale_codec::Error),
+    #[error("cannot decode genesis cNight registrations")]
+    DecodeGenesisCnightRegistrations(#[source] Box<subxt::error::StorageValueError>),
 
-    #[error(transparent)]
-    Ledger(#[from] ledger::Error),
-
-    #[error("cannot get contract state for address {0} at block {1}")]
-    GetContractState(SerializedContractAddress, BlockHash, #[source] BoxError),
+    #[error("cannot get contract state for address {0}")]
+    GetContractState(SerializedContractAddress, #[source] BoxError),
 
     #[error("cannot get zswap state root")]
     GetZswapStateRoot(#[source] BoxError),
@@ -608,35 +545,32 @@ pub enum SubxtNodeError {
     #[error("cannot get transaction cost")]
     GetTransactionCost(#[source] BoxError),
 
-    #[error("block with hash {0} not found")]
-    BlockNotFound(BlockHash),
-
-    #[error(transparent)]
-    ProtocolVersion(#[from] ProtocolVersionError),
-
-    #[error("invalid DUST address length: expected 32 bytes, was {0}")]
-    InvalidDustAddress(usize),
-
     #[error("cannot get D-Parameter")]
     GetDParameter(#[source] BoxError),
 
     #[error("cannot get Terms and Conditions")]
     GetTermsAndConditions(#[source] BoxError),
 
-    #[error("cannot fetch genesis cNight registrations")]
-    FetchGenesisCnightRegistrations(#[source] BoxError),
-
-    #[error("cannot fetch system properties")]
-    FetchSystemProperties(#[source] BoxError),
-
     #[error("cannot hex decode genesis ledger state")]
     HexDecodeGenesisLedgerState(#[source] FromHexError),
 
-    #[error("no genesis ledger state of String type in system parameters")]
-    GenesisLedgerStateNotFound,
-
     #[error("cannot get ledger state root")]
     GetLedgerStateRoot(#[source] BoxError),
+
+    #[error("cannot fetch system properties")]
+    FetchSystemProperties(#[source] subxt::rpcs::Error),
+
+    #[error("no String type genesis ledger state in system parameters")]
+    GenesisLedgerStateNotFound,
+
+    #[error(transparent)]
+    ProtocolVersion(#[from] ProtocolVersionError),
+
+    #[error("cannot scale decode")]
+    ScaleDecode(#[from] parity_scale_codec::Error),
+
+    #[error(transparent)]
+    Ledger(#[from] ledger::Error),
 }
 
 #[trace]
@@ -649,12 +583,12 @@ async fn receive_block(
 /// Check an authority set against a block header's digest logs to determine the author of that
 /// block.
 fn extract_block_author<H>(
-    header: &SubstrateHeader<u32, H>,
+    header: &SubstrateHeader<H>,
     authorities: &[[u8; 32]],
     node_version: NodeVersion,
 ) -> Result<Option<BlockAuthor>, SubxtNodeError>
 where
-    H: Hasher,
+    H: Hash,
 {
     if authorities.is_empty() {
         return Ok(None);
@@ -680,13 +614,12 @@ where
 
 async fn make_transaction(
     transaction: runtimes::Transaction,
-    block_hash: BlockHash,
     protocol_version: ProtocolVersion,
-    online_client: &OnlineClient<SubstrateConfig>,
+    block: &OnlineClientAtBlock,
 ) -> Result<Transaction, SubxtNodeError> {
     match transaction {
         runtimes::Transaction::Regular(transaction) => {
-            make_regular_transaction(transaction, block_hash, protocol_version, online_client).await
+            make_regular_transaction(transaction, protocol_version, block).await
         }
 
         runtimes::Transaction::System(transaction) => {
@@ -697,9 +630,8 @@ async fn make_transaction(
 
 async fn make_regular_transaction(
     transaction: ByteVec,
-    block_hash: BlockHash,
     protocol_version: ProtocolVersion,
-    online_client: &OnlineClient<SubstrateConfig>,
+    block: &OnlineClientAtBlock,
 ) -> Result<Transaction, SubxtNodeError> {
     let node_version = protocol_version.node_version();
 
@@ -712,30 +644,27 @@ async fn make_regular_transaction(
 
     let contract_actions = ledger_transaction
         .contract_actions(|address| async move {
-            runtimes::get_contract_state(address, block_hash, node_version, online_client).await
+            runtimes::get_contract_state(address, node_version, block).await
         })
         .await?
         .into_iter()
         .map(Into::into)
         .collect();
 
-    let fees =
-        match runtimes::get_transaction_cost(&transaction, block_hash, node_version, online_client)
-            .await
-        {
-            Ok(fees) => TransactionFees {
-                paid_fees: fees,
-                estimated_fees: fees,
-            },
+    let fees = match runtimes::get_transaction_cost(&transaction, node_version, block).await {
+        Ok(fees) => TransactionFees {
+            paid_fees: fees,
+            estimated_fees: fees,
+        },
 
-            Err(error) => {
-                warn!(
-                    error:%, block_hash:%, transaction_size = transaction.len();
-                    "cannot get runtime API fees, using fallback"
-                );
-                TransactionFees::from_ledger_transaction(&ledger_transaction, transaction.len())
-            }
-        };
+        Err(error) => {
+            warn!(
+                error:%, transaction_size = transaction.len();
+                "cannot get runtime API fees, using fallback"
+            );
+            TransactionFees::from_ledger_transaction(&ledger_transaction, transaction.len())
+        }
+    };
 
     let transaction = RegularTransaction {
         hash,
@@ -766,4 +695,14 @@ async fn make_system_transaction(
     };
 
     Ok(Transaction::System(transaction))
+}
+
+#[trace]
+async fn block_header(
+    block: &OnlineClientAtBlock,
+) -> Result<SubstrateHeader<H256>, SubxtNodeError> {
+    block
+        .block_header()
+        .await
+        .map_err(|error| SubxtNodeError::GetBlockHeader(error.into()))
 }

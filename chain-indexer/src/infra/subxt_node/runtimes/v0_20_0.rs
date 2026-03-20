@@ -14,23 +14,21 @@
 use crate::{
     domain::{DParameter, DustRegistrationEvent, TermsAndConditions},
     infra::subxt_node::{
-        SubxtNodeError,
+        OnlineClientAtBlock, SubxtNodeError,
         runtimes::{BlockDetails, Transaction},
     },
 };
-use futures::{TryStreamExt, stream};
+use futures::TryStreamExt;
 use indexer_common::domain::{
-    BlockHash, ByteVec, DustPublicKey, SerializedContractAddress, SerializedContractState,
+    ByteVec, DustPublicKey, SerializedContractAddress, SerializedContractState,
     TermsAndConditionsHash,
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
-use subxt::{OnlineClient, SubstrateConfig, blocks::Extrinsics, events::Events, utils::H256};
 
 pub async fn make_block_details(
-    extrinsics: Extrinsics<SubstrateConfig, OnlineClient<SubstrateConfig>>,
-    events: Events<SubstrateConfig>,
     authorities: &mut Option<Vec<[u8; 32]>>,
+    block: &OnlineClientAtBlock,
 ) -> Result<BlockDetails, SubxtNodeError> {
     use super::runtime_0_20_0::{
         Call, Event,
@@ -45,12 +43,19 @@ pub async fn make_block_details(
         timestamp,
     };
 
+    let extrinsics = block
+        .extrinsics()
+        .fetch()
+        .await
+        .map_err(|error| SubxtNodeError::FetchExtrinsics(error.into()))?;
+
     let calls = extrinsics
         .iter()
         .map(|extrinsic| {
             let call = extrinsic
-                .as_root_extrinsic::<Call>()
-                .map_err(|error| SubxtNodeError::AsRootExtrinsic(error.into()))?;
+                .map_err(|error| SubxtNodeError::GetNextExtrinsic(error.into()))?
+                .decode_call_data_as::<Call>()
+                .map_err(|error| SubxtNodeError::DecodeExtrinsicAsCall(error.into()))?;
             Ok(call)
         })
         .filter_ok(|call| {
@@ -84,13 +89,17 @@ pub async fn make_block_details(
     let mut dust_registration_events = vec![];
     let mut system_transactions_from_events = vec![];
 
-    for event_details in events.iter() {
-        let event_details =
-            event_details.map_err(|error| SubxtNodeError::GetNextEvent(error.into()))?;
+    let events = block
+        .events()
+        .fetch()
+        .await
+        .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?;
 
-        let event = event_details
-            .as_root_event::<Event>()
-            .map_err(|error| SubxtNodeError::AsRootEvent(error.into()))?;
+    for event in events.iter() {
+        let event = event
+            .map_err(|error| SubxtNodeError::GetNextEvent(error.into()))?
+            .decode_as::<Event>()
+            .map_err(|error| SubxtNodeError::DecodeEvent(error.into()))?;
 
         match event {
             Event::Session(NewSession { .. }) => {
@@ -160,16 +169,18 @@ pub async fn make_block_details(
 }
 
 pub async fn fetch_authorities(
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
-) -> Result<Option<Vec<[u8; 32]>>, SubxtNodeError> {
-    let authorities = online_client
+    block: &OnlineClientAtBlock,
+) -> Result<Vec<[u8; 32]>, SubxtNodeError> {
+    let authorities = block
         .storage()
-        .at(H256(block_hash.0))
-        .fetch(&super::runtime_0_20_0::storage().aura().authorities())
+        .entry(super::runtime_0_20_0::storage().aura().authorities())
+        .map_err(|error| SubxtNodeError::FetchAuthorities(error.into()))?
+        .fetch(())
         .await
         .map_err(|error| SubxtNodeError::FetchAuthorities(error.into()))?
-        .map(|authorities| authorities.0.into_iter().map(|public| public.0).collect());
+        .decode()
+        .map_err(|error| SubxtNodeError::DecodeAuthorities(error.into()))?;
+    let authorities = authorities.0.into_iter().map(|a| a.0).collect();
 
     Ok(authorities)
 }
@@ -182,41 +193,30 @@ pub fn decode_slot(mut slot: &[u8]) -> Result<u64, SubxtNodeError> {
 
 pub async fn get_contract_state(
     address: SerializedContractAddress,
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
+    block: &OnlineClientAtBlock,
 ) -> Result<SerializedContractState, SubxtNodeError> {
-    // This returns the serialized contract state.
-    let get_state = super::runtime_0_20_0::apis()
+    let get_state = super::runtime_0_20_0::runtime_apis()
         .midnight_runtime_api()
         .get_contract_state(address.as_slice().into());
 
-    let state = online_client
-        .runtime_api()
-        .at(H256(block_hash.0))
+    let state = block
+        .runtime_apis()
         .call(get_state)
         .await
-        .map_err(|error| {
-            SubxtNodeError::GetContractState(address.clone(), block_hash, error.into())
-        })?
-        .map_err(|error| {
-            SubxtNodeError::GetContractState(address, block_hash, format!("{error:?}").into())
-        })?
+        .map_err(|error| SubxtNodeError::GetContractState(address.clone(), error.into()))?
+        .map_err(|error| SubxtNodeError::GetContractState(address, format!("{error:?}").into()))?
         .into();
 
     Ok(state)
 }
 
-pub async fn get_zswap_state_root(
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
-) -> Result<Vec<u8>, SubxtNodeError> {
-    let get_zswap_state_root = super::runtime_0_20_0::apis()
+pub async fn get_zswap_state_root(block: &OnlineClientAtBlock) -> Result<Vec<u8>, SubxtNodeError> {
+    let get_zswap_state_root = super::runtime_0_20_0::runtime_apis()
         .midnight_runtime_api()
         .get_zswap_state_root();
 
-    let root = online_client
-        .runtime_api()
-        .at(H256(block_hash.0))
+    let root = block
+        .runtime_apis()
         .call(get_zswap_state_root)
         .await
         .map_err(|error| SubxtNodeError::GetZswapStateRoot(error.into()))?
@@ -225,18 +225,23 @@ pub async fn get_zswap_state_root(
     Ok(root)
 }
 
+pub async fn get_ledger_state_root(
+    _block: &OnlineClientAtBlock,
+) -> Result<Option<Vec<u8>>, SubxtNodeError> {
+    // get_ledger_state_root runtime API does not exist in v0.20.
+    Ok(None)
+}
+
 pub async fn get_transaction_cost(
     transaction: &[u8],
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
+    block: &OnlineClientAtBlock,
 ) -> Result<u128, SubxtNodeError> {
-    let get_transaction_cost = super::runtime_0_20_0::apis()
+    let get_transaction_cost = super::runtime_0_20_0::runtime_apis()
         .midnight_runtime_api()
         .get_transaction_cost(transaction.to_owned());
 
-    let cost = online_client
-        .runtime_api()
-        .at(H256(block_hash.0))
+    let cost = block
+        .runtime_apis()
         .call(get_transaction_cost)
         .await
         .map_err(|error| SubxtNodeError::GetTransactionCost(error.into()))?
@@ -245,17 +250,13 @@ pub async fn get_transaction_cost(
     Ok(cost as u128)
 }
 
-pub async fn get_d_parameter(
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
-) -> Result<DParameter, SubxtNodeError> {
-    let get_d_param = super::runtime_0_20_0::apis()
+pub async fn get_d_parameter(block: &OnlineClientAtBlock) -> Result<DParameter, SubxtNodeError> {
+    let get_d_param = super::runtime_0_20_0::runtime_apis()
         .system_parameters_api()
         .get_d_parameter();
 
-    let d_parameter = online_client
-        .runtime_api()
-        .at(H256(block_hash.0))
+    let d_parameter = block
+        .runtime_apis()
         .call(get_d_param)
         .await
         .map_err(|error| SubxtNodeError::GetDParameter(error.into()))?;
@@ -267,71 +268,68 @@ pub async fn get_d_parameter(
 }
 
 pub async fn fetch_genesis_cnight_registrations(
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
+    block: &OnlineClientAtBlock,
 ) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
     let query = super::runtime_0_20_0::storage()
         .c_night_observation()
-        .mappings_iter();
-    let mappings = online_client
+        .mappings();
+    block
         .storage()
-        .at(H256(block_hash.0))
-        .iter(query)
+        .entry(query)
+        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))?
+        .iter(())
         .await
-        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))?;
+        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))?
+        .try_collect::<Vec<_>>()
+        .await
+        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))?
+        .into_iter()
+        .try_fold(vec![], |mut events, mapping| {
+            let mapping = mapping
+                .value()
+                .decode()
+                .map_err(|error| SubxtNodeError::DecodeGenesisCnightRegistrations(error.into()))?;
 
-    mappings
-        .map_ok(|kv| {
-            // A registration is valid only if there is exactly one mapping entry.
-            let events = if kv.value.len() == 1 {
-                let entry = &kv.value[0];
-                let cardano_stake_key = entry.cardano_reward_address.0.into();
-                let dust_address = DustPublicKey::from(entry.dust_public_key.0.0.clone());
-                let utxo_id = entry.utxo_tx_hash.0.as_ref().into();
-                let utxo_index = entry.utxo_index.into();
+            let these_events = mapping
+                .first()
+                .map(|mapping| {
+                    let cardano_stake_key = mapping.cardano_reward_address.0.into();
+                    let dust_address = DustPublicKey::from(mapping.dust_public_key.0.0.clone());
+                    let utxo_id = mapping.utxo_tx_hash.0.as_ref().into();
+                    let utxo_index = mapping.utxo_index.into();
 
-                vec![
-                    DustRegistrationEvent::Registration {
-                        cardano_stake_key,
-                        dust_address: dust_address.clone(),
-                    },
-                    DustRegistrationEvent::MappingAdded {
-                        cardano_stake_key,
-                        dust_address,
-                        utxo_id,
-                        utxo_index,
-                    },
-                ]
-            } else {
-                vec![]
-            };
-            stream::iter(events.into_iter().map(Ok::<_, subxt::Error>))
+                    let events = vec![
+                        DustRegistrationEvent::Registration {
+                            cardano_stake_key,
+                            dust_address: dust_address.clone(),
+                        },
+                        DustRegistrationEvent::MappingAdded {
+                            cardano_stake_key,
+                            dust_address,
+                            utxo_id,
+                            utxo_index,
+                        },
+                    ];
+
+                    events
+                })
+                .unwrap_or_default();
+
+            events.extend(these_events);
+
+            Ok(events)
         })
-        .try_flatten()
-        .try_collect()
-        .await
-        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))
-}
-
-pub async fn get_ledger_state_root(
-    _block_hash: BlockHash,
-    _online_client: &OnlineClient<SubstrateConfig>,
-) -> Result<Option<Vec<u8>>, SubxtNodeError> {
-    // get_ledger_state_root runtime API does not exist in v0.20.
-    Ok(None)
 }
 
 pub async fn get_terms_and_conditions(
-    block_hash: BlockHash,
-    online_client: &OnlineClient<SubstrateConfig>,
+    block: &OnlineClientAtBlock,
 ) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
-    let get_tc = super::runtime_0_20_0::apis()
+    let get_tc = super::runtime_0_20_0::runtime_apis()
         .system_parameters_api()
         .get_terms_and_conditions();
 
-    let tc = online_client
-        .runtime_api()
-        .at(H256(block_hash.0))
+    let tc = block
+        .runtime_apis()
         .call(get_tc)
         .await
         .map_err(|error| SubxtNodeError::GetTermsAndConditions(error.into()))?;

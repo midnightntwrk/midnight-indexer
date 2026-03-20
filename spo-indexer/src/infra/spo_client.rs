@@ -19,7 +19,10 @@ use crate::{
     utils::remove_hex_prefix,
 };
 use blockfrost::{BlockfrostAPI, BlockfrostError};
-use http::header::{InvalidHeaderValue, USER_AGENT};
+use http::{
+    HeaderMap,
+    header::{InvalidHeaderValue, USER_AGENT},
+};
 use indexer_common::error::BoxError;
 use reqwest::Client as HttpClient;
 use secrecy::{ExposeSecret, SecretString};
@@ -27,9 +30,10 @@ use serde_json::value::RawValue;
 use std::collections::HashMap;
 use subxt::{
     PolkadotConfig,
-    backend::{
-        legacy::LegacyRpcMethods,
-        rpc::reconnecting_rpc_client::{ExponentialBackoff, HeaderMap, RpcClient},
+    config::RpcConfigFor,
+    rpcs::{
+        LegacyRpcMethods,
+        client::{ReconnectingRpcClient, reconnecting_rpc_client::ExponentialBackoff},
     },
 };
 use thiserror::Error;
@@ -55,8 +59,7 @@ pub struct Config {
 pub struct SPOClient {
     pub epoch_duration: u32,
     pub slots_per_epoch: u32,
-
-    rpc_client: RpcClient,
+    rpc_client: ReconnectingRpcClient,
     blockfrost: BlockfrostAPI,
     http: HttpClient,
     blockfrost_id: SecretString,
@@ -66,23 +69,32 @@ pub struct SPOClient {
 impl SPOClient {
     /// Create a new [SPOClient] with the given [Config].
     pub async fn new(config: Config) -> Result<Self, SPOClientError> {
+        let Config {
+            url,
+            blockfrost_id,
+            reconnect_max_delay,
+            reconnect_max_attempts,
+        } = config;
+
         let retry_policy = ExponentialBackoff::from_millis(10)
-            .max_delay(config.reconnect_max_delay)
-            .take(config.reconnect_max_attempts);
+            .max_delay(reconnect_max_delay)
+            .take(reconnect_max_attempts);
         let user_agent = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).parse()?;
         let headers = HeaderMap::from_iter([(USER_AGENT, user_agent)]);
-        let rpc_client = RpcClient::builder()
+        let rpc_client = ReconnectingRpcClient::builder()
             .set_headers(headers)
             .retry_policy(retry_policy)
-            .build(&config.url)
+            .build(&url)
             .await
             .map_err(|error| SPOClientError::Subtx(error.into()))?;
-        let blockfrost =
-            BlockfrostAPI::new(config.blockfrost_id.expose_secret(), Default::default());
+
+        let blockfrost = BlockfrostAPI::new(blockfrost_id.expose_secret(), Default::default());
+
         let http = HttpClient::builder()
             .user_agent("midnight-spo-indexer/1.0")
             .build()
             .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
+
         let (epoch_duration, slots_per_epoch) = get_epoch_duration(&rpc_client).await?;
 
         Ok(Self {
@@ -91,7 +103,7 @@ impl SPOClient {
             http,
             epoch_duration,
             slots_per_epoch,
-            blockfrost_id: config.blockfrost_id,
+            blockfrost_id,
         })
     }
 
@@ -100,11 +112,9 @@ impl SPOClient {
             .rpc_client
             .request("sidechain_getStatus".to_owned(), None)
             .await
-            .map_err(|error| {
-                SPOClientError::RpcCall("sidechain_getStatus".to_owned(), error.to_string())
-            })?;
+            .map_err(|error| SPOClientError::RpcCall("sidechain_getStatus".to_string(), error))?;
 
-        let response: SidechainStatusResponse = serde_json::from_str(raw_response.get())
+        let response = serde_json::from_str(raw_response.get())
             .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
 
         Ok(response)
@@ -158,10 +168,7 @@ impl SPOClient {
             )
             .await
             .map_err(|error| {
-                SPOClientError::RpcCall(
-                    "systemParameters_getAriadneParameters".to_owned(),
-                    error.to_string(),
-                )
+                SPOClientError::RpcCall("systemParameters_getAriadneParameters".to_owned(), error)
             })?;
 
         let mut reg_response: SPORegistrationResponse = serde_json::from_str(raw_response.get())
@@ -210,7 +217,7 @@ impl SPOClient {
             .request("sidechain_getEpochCommittee".to_owned(), Some(rpc_params))
             .await
             .map_err(|error| {
-                SPOClientError::RpcCall("sidechain_getEpochCommittee".to_owned(), error.to_string())
+                SPOClientError::RpcCall("sidechain_getEpochCommittee".to_owned(), error)
             });
 
         let Ok(raw_response) = raw_response else {
@@ -321,8 +328,11 @@ impl PoolStakeData {
     }
 }
 
-async fn get_epoch_duration(rpc_client: &RpcClient) -> Result<(u32, u32), SPOClientError> {
-    let legacy_rpc = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client.clone().into());
+async fn get_epoch_duration(
+    rpc_client: &ReconnectingRpcClient,
+) -> Result<(u32, u32), SPOClientError> {
+    let legacy_rpc =
+        LegacyRpcMethods::<RpcConfigFor<PolkadotConfig>>::new(rpc_client.to_owned().into());
     let storage_key = const_hex::decode(SLOT_PER_EPOCH_KEY)
         .expect("SLOT_PER_EPOCH_KEY constant should be valid hex");
 
@@ -346,8 +356,11 @@ pub enum SPOClientError {
     #[error("cannot create reconnecting subxt RPC client")]
     Subtx(#[source] BoxError),
 
-    #[error("cannot make rpc call {0}. Error: {1}")]
-    RpcCall(String, String),
+    #[error("cannot make rpc call {0}")]
+    RpcCall(
+        String,
+        #[source] subxt::rpcs::client::reconnecting_rpc_client::Error,
+    ),
 
     #[error("api call error")]
     Blockfrost(#[from] BlockfrostError),

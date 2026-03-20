@@ -44,7 +44,7 @@ pub struct Topic(pub &'static str);
 /// Message/event signaling that a block has been indexed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, From)]
 pub struct BlockIndexed {
-    pub height: u32,
+    pub height: u64,
     pub max_transaction_id: Option<u64>,
     pub caught_up: bool,
 }

@@ -11,10 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod spo_client;
 #[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
 #[cfg(any(feature = "cloud", feature = "standalone"))]
 pub mod storage;
-pub mod subxt_node;
 
 #[cfg_attr(docsrs, doc(cfg(feature = "cloud")))]
 #[cfg(feature = "cloud")]
@@ -24,5 +24,5 @@ pub struct Config {
     pub storage_config: indexer_common::infra::pool::postgres::Config,
 
     #[serde(rename = "node")]
-    pub node_config: subxt_node::Config,
+    pub node_config: spo_client::Config,
 }
