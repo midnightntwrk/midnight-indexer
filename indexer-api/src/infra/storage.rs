@@ -12,7 +12,6 @@
 // limitations under the License.
 
 mod block;
-pub mod caching;
 mod contract_action;
 pub mod dataloader;
 mod dust;

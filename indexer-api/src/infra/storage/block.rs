@@ -17,7 +17,7 @@ use crate::{
 };
 use async_stream::try_stream;
 use fastrace::trace;
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{Stream, TryStreamExt};
 use indexer_common::{domain::BlockHash, stream::flatten_chunks};
 use indoc::indoc;
 use std::num::NonZeroU32;
@@ -140,7 +140,7 @@ impl Storage {
                 query_builder.push(")");
             }
 
-            #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+            #[cfg(feature = "standalone")]
             {
                 query_builder.push(" IN (");
                 let mut separated = query_builder.separated(", ");
@@ -185,7 +185,7 @@ impl Storage {
                 query_builder.push(")");
             }
 
-            #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+            #[cfg(feature = "standalone")]
             {
                 query_builder.push(" IN (");
                 let mut separated = query_builder.separated(", ");

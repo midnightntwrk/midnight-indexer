@@ -78,7 +78,7 @@ impl TransactionStorage for Storage {
             AND transactions.variant = 'System'
         "};
 
-        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+        #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
                 transactions.id,
@@ -127,7 +127,7 @@ impl TransactionStorage for Storage {
             .map(make_transaction)
             .transpose()?;
 
-        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+        #[cfg(feature = "standalone")]
         if let Some(Transaction::Regular(transaction)) = &mut transaction {
             transaction.identifiers =
                 get_identifiers_for_transaction(transaction.id, &self.pool).await?;
@@ -183,7 +183,7 @@ impl TransactionStorage for Storage {
             ORDER BY id
         "};
 
-        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+        #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
                 transactions.id as id,
@@ -235,7 +235,7 @@ impl TransactionStorage for Storage {
             .try_collect::<Vec<_>>()
             .await?;
 
-        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+        #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
             if let Transaction::Regular(transaction) = transaction {
                 transaction.identifiers =
@@ -296,7 +296,7 @@ impl TransactionStorage for Storage {
             ORDER BY id DESC
         "};
 
-        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+        #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
                 transactions.id as id,
@@ -348,7 +348,7 @@ impl TransactionStorage for Storage {
             .try_collect::<Vec<_>>()
             .await?;
 
-        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+        #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
             if let Transaction::Regular(transaction) = transaction {
                 transaction.identifiers =
@@ -387,7 +387,7 @@ impl TransactionStorage for Storage {
             ORDER BY transactions.id
         "};
 
-        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+        #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
                 transactions.id,
@@ -417,7 +417,7 @@ impl TransactionStorage for Storage {
             .try_collect::<Vec<_>>()
             .await?;
 
-        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+        #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
             if let Transaction::Regular(transaction) = transaction {
                 transaction.identifiers =
@@ -655,7 +655,7 @@ impl Storage {
                     .await?
             }
 
-            #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+            #[cfg(feature = "standalone")]
             {
                 let ids_json = serde_json::to_string(&ids)
                     .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
@@ -669,7 +669,7 @@ impl Storage {
             }
         };
 
-        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+        #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
             if let Transaction::Regular(transaction) = transaction {
                 transaction.identifiers =
@@ -687,7 +687,7 @@ impl Storage {
         let ids = ids.iter().map(|&id| id as i64).collect::<Vec<_>>();
 
         #[cfg(feature = "cloud")]
-        let _query = indoc! {"
+        let query = indoc! {"
             SELECT
                 transactions.id,
                 transactions.block_id,
@@ -791,7 +791,7 @@ impl Storage {
                     .await?
             }
 
-            #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+            #[cfg(feature = "standalone")]
             {
                 let ids_json = serde_json::to_string(&ids)
                     .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
@@ -805,7 +805,7 @@ impl Storage {
             }
         };
 
-        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+        #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
             if let Transaction::Regular(transaction) = transaction {
                 transaction.identifiers =
@@ -889,7 +889,7 @@ impl Storage {
             .try_collect::<Vec<_>>()
             .await?;
 
-        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+        #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
             transaction.identifiers =
                 get_identifiers_for_transaction(transaction.id, &self.pool).await?;
@@ -1030,7 +1030,7 @@ impl Storage {
             .try_collect::<Vec<_>>()
             .await?;
 
-        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+        #[cfg(feature = "standalone")]
         for transaction in transactions.iter_mut() {
             if let Transaction::Regular(transaction) = transaction {
                 transaction.identifiers =
@@ -1052,7 +1052,7 @@ fn make_transaction(row: sqlx::postgres::PgRow) -> Result<Transaction, sqlx::Err
     Ok(transaction)
 }
 
-#[cfg(all(feature = "standalone", not(feature = "cloud")))]
+#[cfg(feature = "standalone")]
 fn make_transaction(row: sqlx::sqlite::SqliteRow) -> Result<Transaction, sqlx::Error> {
     let variant = row.try_get::<TransactionVariant, _>("variant")?;
     let transaction = match variant {
@@ -1062,7 +1062,7 @@ fn make_transaction(row: sqlx::sqlite::SqliteRow) -> Result<Transaction, sqlx::E
     Ok(transaction)
 }
 
-#[cfg(all(feature = "standalone", not(feature = "cloud")))]
+#[cfg(feature = "standalone")]
 async fn get_identifiers_for_transaction(
     transaction_id: u64,
     pool: &indexer_common::infra::pool::sqlite::SqlitePool,

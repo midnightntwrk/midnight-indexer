@@ -201,7 +201,7 @@ impl ContractActionStorage for Storage {
             LIMIT 1
         "};
 
-        #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+        #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
                 contract_actions.id,
