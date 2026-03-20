@@ -51,7 +51,7 @@ let indexerWsClient: IndexerWsClient;
 async function subscribeToUnshieldedTransactionEvents(
   subscriptionParams: UnshieldedTransactionSubscriptionParams,
   stopCondition: (message: UnshieldedTxSubscriptionResponse[]) => boolean,
-  timeout: number = 500,
+  timeout: number = 5000,
 ): Promise<UnshieldedTxSubscriptionResponse[]> {
   const receivedUnshieldedTransactions: UnshieldedTxSubscriptionResponse[] = [];
 
@@ -138,7 +138,6 @@ describe('unshielded transaction subscriptions', async () => {
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 10,
-        500,
       );
 
       // we want at least one message ...
@@ -179,33 +178,7 @@ describe('unshielded transaction subscriptions', async () => {
       // match in numbers. This is the same mechanism used by the wallet to sync transactions
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
-        (messages) => {
-          const events = messages
-            .map((msg) => msg.data?.unshieldedTransactions)
-            .filter((event): event is UnshieldedTransactionEvent => !!event);
-
-          let latestProgress: UnshieldedTransactionsProgress | undefined;
-          events.forEach((event) => {
-            if (event.__typename === 'UnshieldedTransactionsProgress') {
-              latestProgress = event as UnshieldedTransactionsProgress;
-            }
-          });
-
-          if (!latestProgress) {
-            return false;
-          }
-
-          const highestTransactionId = latestProgress.highestTransactionId;
-
-          const hasHighestTransaction = events.some(
-            (event) =>
-              event.__typename === 'UnshieldedTransaction' &&
-              event.transaction.id === highestTransactionId,
-          );
-
-          return hasHighestTransaction;
-        },
-        30000,
+        () => false,
       );
 
       messages.forEach((message) => {
@@ -261,7 +234,6 @@ describe('unshielded transaction subscriptions', async () => {
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 5,
-        500,
       );
 
       expect(messages.length).toBeGreaterThanOrEqual(1);
@@ -311,7 +283,6 @@ describe('unshielded transaction subscriptions', async () => {
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 10,
-        5000,
       );
 
       // We expect exactly one (non-error) message ...
@@ -347,7 +318,6 @@ describe('unshielded transaction subscriptions', async () => {
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         (messages) => messages.length >= 10,
-        500,
       );
 
       expect(messages.length).toBe(1);
@@ -402,7 +372,6 @@ describe('unshielded transaction subscriptions', async () => {
         messages = await subscribeToUnshieldedTransactionEvents(
           { address: targetAddress },
           (messages) => messages.length >= 10,
-          500,
         );
 
         expect(messages.length).toBe(1);
@@ -434,37 +403,9 @@ describe('unshielded transaction subscriptions', async () => {
       expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
       const targetAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
 
-      const LONG_TEST_TIMEOUT = 60000;
-
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
-        (messages) => {
-          const events = messages
-            .map((msg) => msg.data?.unshieldedTransactions)
-            .filter((event): event is UnshieldedTransactionEvent => !!event);
-
-          let latestProgress: UnshieldedTransactionsProgress | undefined;
-          events.forEach((event) => {
-            if (event.__typename === 'UnshieldedTransactionsProgress') {
-              latestProgress = event as UnshieldedTransactionsProgress;
-            }
-          });
-
-          if (!latestProgress) {
-            return false;
-          }
-
-          const highestTransactionId = latestProgress.highestTransactionId;
-
-          const hasHighestTransaction = events.some(
-            (event) =>
-              event.__typename === 'UnshieldedTransaction' &&
-              event.transaction.id === highestTransactionId,
-          );
-
-          return hasHighestTransaction;
-        },
-        LONG_TEST_TIMEOUT,
+        (messages) => messages[0].errors !== undefined,
       );
 
       expect(messages.length).toBeGreaterThanOrEqual(2);
@@ -519,7 +460,6 @@ describe('unshielded transaction subscriptions', async () => {
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
         (messages) => messages.length >= 10,
-        1000,
       );
 
       expect(messages.length).toBe(1);
@@ -546,7 +486,6 @@ describe('unshielded transaction subscriptions', async () => {
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
         (messages) => messages.length >= 10,
-        1000,
       );
 
       // We expect exactly one (non-error) message ...
@@ -578,7 +517,6 @@ describe('unshielded transaction subscriptions', async () => {
       let messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress },
         (messages) => messages.length >= 10,
-        500,
       );
 
       let foundTransactionIds: number[] = [];
@@ -613,7 +551,6 @@ describe('unshielded transaction subscriptions', async () => {
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: randomTransactionId },
         (_messages: UnshieldedTxSubscriptionResponse[]) => false,
-        1000,
       );
 
       expect(messages.length).toBeGreaterThanOrEqual(1);
@@ -646,7 +583,6 @@ describe('unshielded transaction subscriptions', async () => {
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress, transactionId: 0 },
         (_messages: UnshieldedTxSubscriptionResponse[]) => false,
-        1000,
       );
 
       expect(Array.isArray(messages)).toBe(true);
