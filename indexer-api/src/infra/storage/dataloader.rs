@@ -37,7 +37,7 @@ impl Loader<BlockHash> for BlockByHashLoader {
         keys: &[BlockHash],
     ) -> Result<HashMap<BlockHash, Block>, Arc<sqlx::Error>> {
         self.0
-            .get_blocks_by_hashes(keys.to_vec())
+            .get_blocks_by_hashes(keys)
             .map_ok(|block| (block.hash.clone(), block))
             .try_collect()
             .await
@@ -53,7 +53,7 @@ impl Loader<u32> for BlockByHeightLoader {
 
     async fn load(&self, keys: &[u32]) -> Result<HashMap<u32, Block>, Arc<sqlx::Error>> {
         self.0
-            .get_blocks_by_heights(keys.to_vec())
+            .get_blocks_by_heights(keys)
             .map_ok(|block| (block.height, block))
             .try_collect()
             .await

@@ -25,23 +25,29 @@ use async_graphql::{Context, Subscription};
 use async_stream::try_stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext};
 use futures::{Stream, TryStreamExt};
-use log::debug;
+use indexer_common::domain::{BlockIndexed, Subscriber};
+use log::{debug, warn};
 use std::{marker::PhantomData, pin::pin};
 
-pub struct BlockSubscription<S> {
+pub struct BlockSubscription<S, B> {
     _s: PhantomData<S>,
+    _b: PhantomData<B>,
 }
 
-impl<S> Default for BlockSubscription<S> {
+impl<S, B> Default for BlockSubscription<S, B> {
     fn default() -> Self {
-        Self { _s: PhantomData }
+        Self {
+            _s: PhantomData,
+            _b: PhantomData,
+        }
     }
 }
 
 #[Subscription]
-impl<S> BlockSubscription<S>
+impl<S, B> BlockSubscription<S, B>
 where
     S: Storage,
+    B: Subscriber,
 {
     /// Subscribe to blocks starting at the given offset or at the latest block if the offset is
     /// omitted.
@@ -49,24 +55,51 @@ where
         &self,
         cx: &'a Context<'a>,
         offset: Option<BlockOffset>,
-    ) -> Result<impl Stream<Item = ApiResult<Block<S>>> + use<'a, S>, ApiError> {
+    ) -> Result<impl Stream<Item = ApiResult<Block<S>>> + use<'a, S, B>, ApiError> {
         let storage = cx.get_storage::<S>();
+        let subscriber = cx.get_subscriber::<B>();
         let batch_size = cx.get_subscription_config().blocks.batch_size;
 
-        // 1. Resolve starting height
+        let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
         let mut height = resolve_height(offset, storage).await?;
 
         let blocks = try_stream! {
-            // 2. Stream existing blocks from DB.
-            debug!(height; "streaming blocks");
-            let db_blocks = storage.get_blocks(height, batch_size);
-            let mut db_blocks = pin!(db_blocks);
-            while let Some(block) = get_next_block(&mut db_blocks).await
+            // Stream existing blocks.
+            debug!(height; "streaming existing blocks");
+
+            let blocks = storage.get_blocks(height, batch_size);
+            let mut blocks = pin!(blocks);
+            while let Some(block) = get_next_block(&mut blocks)
+                .await
                 .map_err_into_server_error(|| format!("get next block at height {height}"))?
             {
                 height = block.height + 1;
                 yield block.into();
             }
+
+            // Stream live blocks.
+            debug!(height; "streaming live blocks");
+            let mut block_indexed_stream = pin!(block_indexed_stream);
+            while block_indexed_stream
+                .try_next()
+                .await
+                .map_err_into_server_error(|| "get next BlockIndexed event")?
+                .is_some()
+            {
+                debug!(height; "streaming next blocks");
+
+                let blocks = storage.get_blocks(height, batch_size);
+                let mut blocks = pin!(blocks);
+                while let Some(block) = get_next_block(&mut blocks)
+                    .await
+                    .map_err_into_server_error(|| format!("get next block at height {height}"))?
+                {
+                    height = block.height + 1;
+                    yield block.into();
+                }
+            }
+
+            warn!("stream of BlockIndexed events completed unexpectedly");
         };
 
         Ok(blocks)

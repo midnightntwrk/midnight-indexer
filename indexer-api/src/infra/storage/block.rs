@@ -20,7 +20,6 @@ use fastrace::trace;
 use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::{domain::BlockHash, stream::flatten_chunks};
 use indoc::indoc;
-use log::debug;
 use std::num::NonZeroU32;
 
 impl BlockStorage for Storage {
@@ -112,18 +111,27 @@ impl BlockStorage for Storage {
     }
 }
 
-const BLOCK_SELECT: &str = "SELECT id, hash, height, protocol_version, parent_hash, author, timestamp, ledger_parameters FROM blocks";
-
 impl Storage {
     #[trace(properties = { "hashes": "{hashes:?}" })]
-    pub fn get_blocks_by_hashes(
+    pub fn get_blocks_by_hashes<'a>(
         &self,
-        hashes: Vec<BlockHash>,
-    ) -> impl Stream<Item = Result<Block, sqlx::Error>> + Send + 'static {
+        hashes: &'a [BlockHash],
+    ) -> impl Stream<Item = Result<Block, sqlx::Error>> + Send + 'a {
         let pool = self.pool.clone();
         try_stream! {
-            let mut query_builder = sqlx::QueryBuilder::new(BLOCK_SELECT);
-            query_builder.push(" WHERE hash ");
+            let mut query_builder = sqlx::QueryBuilder::new(indoc! {"
+                SELECT
+                    id,
+                    hash,
+                    height,
+                    protocol_version,
+                    parent_hash,
+                    author,
+                    timestamp,
+                    ledger_parameters
+                FROM blocks
+                WHERE hash
+            "});
 
             #[cfg(feature = "cloud")]
             {
@@ -147,18 +155,28 @@ impl Storage {
                 yield block;
             }
         }
-        .boxed()
     }
 
     #[trace(properties = { "heights": "{heights:?}" })]
-    pub fn get_blocks_by_heights(
+    pub fn get_blocks_by_heights<'a>(
         &self,
-        heights: Vec<u32>,
-    ) -> impl Stream<Item = Result<Block, sqlx::Error>> + Send + 'static {
+        heights: &'a [u32],
+    ) -> impl Stream<Item = Result<Block, sqlx::Error>> + Send + 'a {
         let pool = self.pool.clone();
         try_stream! {
-            let mut query_builder = sqlx::QueryBuilder::new(BLOCK_SELECT);
-            query_builder.push(" WHERE height ");
+            let mut query_builder = sqlx::QueryBuilder::new(indoc! {"
+                SELECT
+                    id,
+                    hash,
+                    height,
+                    protocol_version,
+                    parent_hash,
+                    author,
+                    timestamp,
+                    ledger_parameters
+                FROM blocks
+                WHERE height
+            "});
 
             #[cfg(feature = "cloud")]
             {
@@ -172,7 +190,7 @@ impl Storage {
                 query_builder.push(" IN (");
                 let mut separated = query_builder.separated(", ");
                 for height in heights {
-                    separated.push_bind(height as i64);
+                    separated.push_bind(*height as i64);
                 }
                 query_builder.push(")");
             }
@@ -182,7 +200,6 @@ impl Storage {
                 yield block;
             }
         }
-        .boxed()
     }
 
     #[trace(properties = { "height": "{height}", "batch_size": "{batch_size}" })]
