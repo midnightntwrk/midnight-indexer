@@ -17,7 +17,7 @@ use crate::{
 };
 use fastrace::trace;
 use indexer_common::{
-    domain::{ByteVec, CardanoRewardAddress, LedgerVersion, ledger},
+    domain::{ByteVec, CardanoRewardAddress, LedgerVersion, TimestampMs, TimestampSecs, ledger},
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
@@ -78,15 +78,18 @@ impl DustStorage for Storage {
                     .fetch_optional(&*self.pool)
                     .await?;
 
-                if let Some((value, ctime)) = result {
+                if let Some((value, ctime_raw)) = result {
                     let value = u128::from(value);
                     night_balance = value;
 
                     // DUST generation rate = STAR * generation_decay_rate SPECK/second.
                     generation_rate = value.saturating_mul(generation_decay_rate);
 
-                    // Calculate current capacity based on elapsed time since creation.
+                    // dust_generation_info.ctime is in seconds (ledger convention).
+                    let ctime = TimestampSecs(ctime_raw);
+
                     // Get current timestamp from latest block.
+                    // blocks.timestamp is in milliseconds (Substrate Timestamp pallet).
                     let current_time_query = indoc! {"
                         SELECT timestamp
                         FROM blocks
@@ -94,15 +97,13 @@ impl DustStorage for Storage {
                         LIMIT 1
                     "};
 
-                    let current_timestamp = sqlx::query_as::<_, (i64,)>(current_time_query)
+                    let now = sqlx::query_as::<_, (i64,)>(current_time_query)
                         .fetch_optional(&*self.pool)
                         .await?
-                        .map(|(t,)| t)
-                        .unwrap_or(ctime);
+                        .map(|(t,)| TimestampMs(t))
+                        .unwrap_or(ctime.to_ms());
 
-                    // Calculate elapsed seconds since creation.
-                    // Convert from milliseconds to seconds.
-                    let elapsed_seconds = ((current_timestamp - ctime).max(0) as u128) / 1000;
+                    let elapsed_seconds = now.elapsed_seconds_since(ctime.to_ms());
 
                     // Maximum capacity (static cap) = STAR * night_dust_ratio.
                     max_capacity = value.saturating_mul(night_dust_ratio);
