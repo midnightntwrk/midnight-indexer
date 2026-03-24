@@ -14,7 +14,7 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ApiResult, ContextExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{HexEncodable, HexEncoded, decode_session_id, viewing_key::ViewingKey},
     },
 };
@@ -46,13 +46,20 @@ where
             .try_into_domain(cx.get_network_id())
             .map_err_into_client_error(|| "invalid viewing key")?;
 
-        let session_id = cx
-            .get_storage::<S>()
+        let storage = cx.get_storage::<S>();
+
+        let session_id = storage
             .connect_wallet(&viewing_key)
             .await
             .map_err_into_server_error(|| "connect wallet")?;
 
-        debug!("wallet connected");
+        let wallet_id = storage
+            .resolve_session_id(session_id)
+            .await
+            .map_err_into_server_error(|| "resolve session ID")?
+            .some_or_client_error(|| "unknown or expired session ID")?;
+
+        debug!(wallet_id:%; "wallet connected");
 
         Ok(session_id.hex_encode())
     }
@@ -63,12 +70,20 @@ where
         let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
 
-        cx.get_storage::<S>()
+        let storage = cx.get_storage::<S>();
+
+        let wallet_id = storage
+            .resolve_session_id(session_id)
+            .await
+            .map_err_into_server_error(|| "resolve session ID")?
+            .some_or_client_error(|| "unknown or expired session ID")?;
+
+        storage
             .disconnect_wallet(session_id)
             .await
             .map_err_into_server_error(|| "disconnect wallet")?;
 
-        debug!("wallet disconnected");
+        debug!(wallet_id:%; "wallet disconnected");
 
         Ok(Unit)
     }
