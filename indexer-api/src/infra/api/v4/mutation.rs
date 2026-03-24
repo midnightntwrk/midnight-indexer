@@ -75,15 +75,14 @@ where
         let wallet_id = storage
             .resolve_session_id(session_id)
             .await
-            .map_err_into_server_error(|| "resolve session ID")?
-            .some_or_client_error(|| "unknown or expired session ID")?;
+            .map_err_into_server_error(|| "resolve session ID")?;
 
         storage
             .disconnect_wallet(session_id)
             .await
             .map_err_into_server_error(|| "disconnect wallet")?;
 
-        debug!(wallet_id:%; "wallet disconnected");
+        debug!(wallet_id:?; "wallet disconnected");
 
         Ok(Unit)
     }
