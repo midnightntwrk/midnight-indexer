@@ -45,7 +45,7 @@ async fn run() -> anyhow::Result<()> {
     use spo_indexer::{
         application,
         config::Config,
-        infra::{self, subxt_node::SPOClient},
+        infra::{self, spo_client::SPOClient},
     };
     use tokio::signal::unix::{SignalKind, signal};
 

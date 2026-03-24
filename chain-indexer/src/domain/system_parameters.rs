@@ -32,7 +32,7 @@ pub struct TermsAndConditions {
 /// System parameters change detected during block processing.
 #[derive(Debug, Clone)]
 pub struct SystemParametersChange {
-    pub block_height: u32,
+    pub block_height: u64,
     pub block_hash: BlockHash,
     pub timestamp: u64,
     pub d_parameter: Option<DParameter>,

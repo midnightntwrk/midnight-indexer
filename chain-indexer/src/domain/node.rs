@@ -46,7 +46,7 @@ where
     async fn fetch_system_parameters(
         &self,
         block_hash: BlockHash,
-        block_height: u32,
+        block_height: u64,
         timestamp: u64,
         node_version: NodeVersion,
     ) -> Result<SystemParametersChange, Self::Error>;
@@ -59,7 +59,7 @@ where
 #[derive(Debug, Clone)]
 pub struct Block {
     pub hash: BlockHash,
-    pub height: u32,
+    pub height: u64,
     pub protocol_version: ProtocolVersion,
     pub parent_hash: BlockHash,
     pub author: Option<BlockAuthor>,

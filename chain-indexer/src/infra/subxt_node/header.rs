@@ -12,22 +12,19 @@
 // limitations under the License.
 
 use indexer_common::domain::{ProtocolVersion, ProtocolVersionError};
-use subxt::config::{
-    Hasher,
-    polkadot::U256,
-    substrate::{ConsensusEngineId, DigestItem, SubstrateHeader},
-};
+use subxt::config::substrate::{ConsensusEngineId, DigestItem, SubstrateHeader};
 
 const VERSION_ID: ConsensusEngineId = *b"MNSV";
 
 /// Extension methods for Substrate block headers.
-pub trait SubstrateHeaderExt<N> {
+pub trait SubstrateHeaderExt {
     /// Try to decode the [ProtocolVersion] from this Substrate block header.
     fn protocol_version(&self) -> Result<Option<ProtocolVersion>, ProtocolVersionError>;
 }
 
-impl<N: Copy + Into<U256> + TryFrom<U256>, H: Hasher> SubstrateHeaderExt<N>
-    for SubstrateHeader<N, H>
+impl<H> SubstrateHeaderExt for SubstrateHeader<H>
+where
+    H: subxt::config::Hash,
 {
     fn protocol_version(&self) -> Result<Option<ProtocolVersion>, ProtocolVersionError> {
         self.digest
