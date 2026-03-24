@@ -127,12 +127,12 @@ mod network_id_tests {
 /// A timestamp in milliseconds since the Unix epoch (Substrate Timestamp pallet convention).
 /// Use when working with values from the `blocks.timestamp` column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TimestampMs(pub i64);
+pub struct TimestampMs(pub u64);
 
 /// A timestamp in seconds since the Unix epoch (ledger convention).
 /// Use when working with values from `dust_generation_info.ctime`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TimestampSecs(pub i64);
+pub struct TimestampSecs(pub u64);
 
 impl TimestampSecs {
     /// Convert to milliseconds.
@@ -143,8 +143,8 @@ impl TimestampSecs {
 
 impl TimestampMs {
     /// Calculate elapsed seconds since an earlier timestamp.
-    pub fn elapsed_seconds_since(self, earlier: TimestampMs) -> u128 {
-        ((self.0 - earlier.0).max(0) as u128) / 1000
+    pub fn elapsed_seconds_since(self, earlier: TimestampMs) -> u64 {
+        self.0.saturating_sub(earlier.0) / 1000
     }
 }
 

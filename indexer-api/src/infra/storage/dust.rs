@@ -86,7 +86,7 @@ impl DustStorage for Storage {
                     generation_rate = value.saturating_mul(generation_decay_rate);
 
                     // dust_generation_info.ctime is in seconds (ledger convention).
-                    let ctime = TimestampSecs(ctime_raw);
+                    let ctime = TimestampSecs(ctime_raw as u64);
 
                     // Get current timestamp from latest block.
                     // blocks.timestamp is in milliseconds (Substrate Timestamp pallet).
@@ -100,7 +100,7 @@ impl DustStorage for Storage {
                     let now = sqlx::query_as::<_, (i64,)>(current_time_query)
                         .fetch_optional(&*self.pool)
                         .await?
-                        .map(|(t,)| TimestampMs(t))
+                        .map(|(t,)| TimestampMs(t as u64))
                         .unwrap_or(ctime.to_ms());
 
                     let elapsed_seconds = now.elapsed_seconds_since(ctime.to_ms());
@@ -112,7 +112,7 @@ impl DustStorage for Storage {
                     // elapsed_seconds. Capped at max_capacity.
                     let generated_capacity = value
                         .saturating_mul(generation_decay_rate)
-                        .saturating_mul(elapsed_seconds);
+                        .saturating_mul(elapsed_seconds as u128);
                     current_capacity = generated_capacity.min(max_capacity);
                 }
             }
