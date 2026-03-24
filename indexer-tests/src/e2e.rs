@@ -77,9 +77,14 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     let session_id = test_connect_mutation(&api_client, &api_url, &network_id)
         .await
         .context("test connect mutation query")?;
-    test_disconnect_mutation(&api_client, &api_url)
+    test_disconnect_mutation(&api_client, &api_url, &session_id)
         .await
         .context("test disconnect mutation query")?;
+
+    // Reconnect after disconnect test — session is needed for shielded transactions subscription.
+    let session_id = test_connect_mutation(&api_client, &api_url, &network_id)
+        .await
+        .context("test reconnect after disconnect")?;
 
     // Collect Indexer data using the block subscription.
     let indexer_data = IndexerData::collect(&ws_api_url)
@@ -343,12 +348,24 @@ async fn test_connect_mutation(
 }
 
 /// Test the disconnect mutation.
-async fn test_disconnect_mutation(api_client: &Client, api_url: &str) -> anyhow::Result<()> {
-    // Valid session ID (use a random 32-byte value; disconnect silently succeeds even if unknown).
-    let session_id = [0u8; 32].hex_encode();
-    let variables = disconnect_mutation::Variables { session_id };
+async fn test_disconnect_mutation(
+    api_client: &Client,
+    api_url: &str,
+    session_id: &HexEncoded,
+) -> anyhow::Result<()> {
+    // Valid session ID from a previous connect.
+    let variables = disconnect_mutation::Variables {
+        session_id: session_id.clone(),
+    };
     let response = send_query::<DisconnectMutation>(api_client, api_url, variables).await;
     assert!(response.is_ok());
+
+    // Unknown session ID.
+    let variables = disconnect_mutation::Variables {
+        session_id: [0u8; 32].hex_encode(),
+    };
+    let response = send_query::<DisconnectMutation>(api_client, api_url, variables).await;
+    assert!(response.is_err());
 
     // Invalid session ID (wrong length).
     let variables = disconnect_mutation::Variables {
