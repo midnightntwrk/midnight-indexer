@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use crate::{
     utils::remove_hex_prefix,
 };
 use blockfrost::{BlockfrostAPI, BlockfrostError};
+use http::header::{InvalidHeaderValue, USER_AGENT};
 use indexer_common::error::BoxError;
 use reqwest::Client as HttpClient;
 use secrecy::{ExposeSecret, SecretString};
@@ -28,7 +29,7 @@ use subxt::{
     PolkadotConfig,
     backend::{
         legacy::LegacyRpcMethods,
-        rpc::reconnecting_rpc_client::{ExponentialBackoff, RpcClient},
+        rpc::reconnecting_rpc_client::{ExponentialBackoff, HeaderMap, RpcClient},
     },
 };
 use thiserror::Error;
@@ -68,7 +69,10 @@ impl SPOClient {
         let retry_policy = ExponentialBackoff::from_millis(10)
             .max_delay(config.reconnect_max_delay)
             .take(config.reconnect_max_attempts);
+        let user_agent = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")).parse()?;
+        let headers = HeaderMap::from_iter([(USER_AGENT, user_agent)]);
         let rpc_client = RpcClient::builder()
+            .set_headers(headers)
             .retry_policy(retry_policy)
             .build(&config.url)
             .await
@@ -319,8 +323,8 @@ impl PoolStakeData {
 
 async fn get_epoch_duration(rpc_client: &RpcClient) -> Result<(u32, u32), SPOClientError> {
     let legacy_rpc = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client.clone().into());
-    let storage_key =
-        hex::decode(SLOT_PER_EPOCH_KEY).expect("SLOT_PER_EPOCH_KEY constant should be valid hex");
+    let storage_key = const_hex::decode(SLOT_PER_EPOCH_KEY)
+        .expect("SLOT_PER_EPOCH_KEY constant should be valid hex");
 
     let res = legacy_rpc
         .state_get_storage(&storage_key, None)
@@ -350,4 +354,7 @@ pub enum SPOClientError {
 
     #[error("unexpected error {0}")]
     UnexpectedResponse(String),
+
+    #[error("cannot create HTTP header")]
+    InvalidHeaderValue(#[from] InvalidHeaderValue),
 }

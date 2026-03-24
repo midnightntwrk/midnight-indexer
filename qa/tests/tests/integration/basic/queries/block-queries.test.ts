@@ -1,5 +1,5 @@
 // This file is part of midnightntwrk/midnight-indexer
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -48,6 +48,8 @@ async function getLatestBlockByHash(): Promise<Block> {
   expect(blockByHashResponse.data?.block?.hash).toBeDefined();
   expect(blockByHashResponse.data?.block?.hash).toBe(latestBlockHash);
 
+  expect(blockByHashResponse.data?.block?.ledgerParameters).toBeTruthy();
+
   return blockByHashResponse.data?.block as Block;
 }
 
@@ -70,6 +72,8 @@ async function getLatestBlockByHeight(): Promise<Block> {
   expect(blockByHashResponse.data?.block).toBeDefined();
   expect(blockByHashResponse.data?.block?.height).toBeDefined();
   expect(blockByHashResponse.data?.block?.height).toBe(latestBlockHeight);
+
+  expect(blockByHashResponse.data?.block?.ledgerParameters).toBeTruthy();
 
   return blockByHashResponse.data?.block as Block;
 }
@@ -401,6 +405,7 @@ describe(`genesis block`, () => {
     expect(blockQueryResponse.data?.block).toBeDefined();
 
     genesisBlock = blockQueryResponse.data?.block as Block;
+    expect(genesisBlock.ledgerParameters).toBeTruthy();
   });
 
   describe(`a block query to the genesis block`, async () => {

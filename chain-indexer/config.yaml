@@ -1,4 +1,4 @@
-run_migrations: true
+thread_stack_size: "24MiB"
 
 application:
   network_id: "undeployed"
@@ -7,6 +7,8 @@ application:
   caught_up_leeway: 5
 
 infra:
+  run_migrations: true
+
   storage:
     host: "localhost"
     port: 5432
@@ -18,7 +20,7 @@ infra:
     max_lifetime: "5m"
 
   ledger_db:
-    cache_size: 1024
+    cache_size: "1kiB"
 
   pub_sub:
     url: "localhost:4222"

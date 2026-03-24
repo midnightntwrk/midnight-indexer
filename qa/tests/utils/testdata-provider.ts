@@ -1,5 +1,5 @@
 // This file is part of midnightntwrk/midnight-indexer
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -199,6 +199,33 @@ class TestDataProvider {
    */
   getContractDeployBlockHash() {
     return this.getBlockData('ContractDeploy');
+  }
+
+  /**
+   * Gets the contract address for the first contract that has an action of the given type.
+   * @param actionType - The type of contract action to find.
+   * @returns The contract address as a string.
+   * @throws Error if no contract with that action type is found.
+   */
+  getContractAddressForActionType(actionType: string): string {
+    const envName = env.getCurrentEnvironmentName();
+    const baseDir = `data/static/${envName}`;
+    let contracts: ContractInfo[];
+    try {
+      contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`) as unknown as ContractInfo[];
+    } catch (_) {
+      throw new Error(
+        `Test data provider is missing the contract actions file for ${envName} environment`,
+      );
+    }
+    for (const contract of contracts) {
+      if (contract['contract-actions'].some((a) => a['action-type'] === actionType)) {
+        return contract['contract-address'];
+      }
+    }
+    throw new Error(
+      `Test data provider is missing a contract with action type ${actionType} for ${envName} environment`,
+    );
   }
 
   /**

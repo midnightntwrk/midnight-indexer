@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -13,11 +13,7 @@
 
 #[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
 #[cfg(any(feature = "cloud", feature = "standalone"))]
-mod v7;
-
-#[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
-#[cfg(any(feature = "cloud", feature = "standalone"))]
-pub use v7::LedgerDb;
+pub mod v1_1;
 
 use serde::Deserialize;
 
@@ -25,9 +21,9 @@ use serde::Deserialize;
 pub fn init(config: Config, pool: crate::infra::pool::postgres::PostgresPool) {
     let Config { cache_size } = config;
 
-    let db = v7::LedgerDb::new(pool);
+    let db = v1_1::LedgerDb::new(pool);
     let _ = midnight_storage_core::storage::set_default_storage(|| {
-        midnight_storage_core::Storage::new(cache_size, db)
+        midnight_storage_core::Storage::new(cache_size as usize, db)
     });
 }
 
@@ -43,9 +39,9 @@ pub async fn init(config: Config) -> Result<(), Error> {
     let pool = sqlite::SqlitePool::new(sqlite::Config { cnn_url }).await?;
     migrations::sqlite::run_for_ledger_db(&pool).await?;
 
-    let db = v7::LedgerDb::new(pool);
+    let db = v1_1::LedgerDb::new(pool);
     let _ = midnight_storage_core::storage::set_default_storage(|| {
-        midnight_storage_core::Storage::new(cache_size, db)
+        midnight_storage_core::Storage::new(cache_size as usize, db)
     });
 
     Ok(())
@@ -53,7 +49,8 @@ pub async fn init(config: Config) -> Result<(), Error> {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub cache_size: usize,
+    #[serde(with = "byte_unit_serde")]
+    pub cache_size: u64,
 
     #[cfg(feature = "standalone")]
     pub cnn_url: String,

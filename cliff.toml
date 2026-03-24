@@ -74,6 +74,7 @@ commit_parsers = [
     { message = "^chore\\(init\\)", skip = true },
     { message = "^chore\\(build\\)", skip = true },
     { message = "^chore\\(ci\\)", skip = true },
+    { message = "^ci", skip = true },
     { message = "^chore", group = "<!-- 7 -->⚙️ Miscellaneous Tasks" },
     { message = "^Merge pull request", skip = true },
     { message = ".*", group = "<!-- 10 -->💼 Other" },

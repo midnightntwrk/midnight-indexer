@@ -130,13 +130,13 @@ CREATE INDEX contract_balances_action_token_idx ON contract_balances (contract_a
 --------------------------------------------------------------------------------
 CREATE TABLE wallets (
   id BLOB PRIMARY KEY, -- UUID
-  session_id BLOB NOT NULL UNIQUE,
+  viewing_key_hash BLOB NOT NULL UNIQUE,
   viewing_key BLOB NOT NULL, -- Ciphertext with nonce, no longer unique!
   last_indexed_transaction_id INTEGER NOT NULL DEFAULT 0,
-  active BOOLEAN NOT NULL DEFAULT TRUE,
-  last_active INTEGER NOT NULL
+  last_active INTEGER NOT NULL,
+  session_id BLOB UNIQUE -- Random per-session ID for API authentication, NULL when disconnected.
 );
-CREATE INDEX wallets_session_id_idx ON wallets (session_id);
+CREATE INDEX wallets_viewing_key_hash_idx ON wallets (viewing_key_hash);
 CREATE INDEX wallets_last_indexed_transaction_id_idx ON wallets (last_indexed_transaction_id DESC);
 --------------------------------------------------------------------------------
 -- relevant_transactions
@@ -167,7 +167,7 @@ CREATE INDEX dust_generation_info_night_utxo_hash_idx ON dust_generation_info (n
 -- cNIGHT registration tracking
 CREATE TABLE cnight_registrations (
   id INTEGER PRIMARY KEY,
-  cardano_address BLOB NOT NULL,
+  cardano_stake_key BLOB NOT NULL,
   dust_address BLOB NOT NULL,
   valid BOOLEAN NOT NULL,
   registered_at INTEGER NOT NULL,
@@ -175,9 +175,9 @@ CREATE TABLE cnight_registrations (
   block_id INTEGER REFERENCES blocks (id),
   utxo_tx_hash BLOB,
   utxo_output_index INTEGER,
-  UNIQUE (cardano_address, dust_address)
+  UNIQUE (cardano_stake_key, dust_address)
 );
-CREATE INDEX cnight_registrations_cardano_address_idx ON cnight_registrations (cardano_address);
+CREATE INDEX cnight_registrations_cardano_stake_key_idx ON cnight_registrations (cardano_stake_key);
 CREATE INDEX cnight_registrations_dust_address_idx ON cnight_registrations (dust_address);
 CREATE INDEX cnight_registrations_block_id_idx ON cnight_registrations (block_id);
 CREATE TABLE system_parameters_terms_and_conditions (

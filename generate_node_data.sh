@@ -16,7 +16,7 @@ if [ -z "$1" ]; then
     exit 1
 fi
 readonly node_version="$1"
-readonly toolkit_image="ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version"
+readonly toolkit_image="midnightntwrk/midnight-node-toolkit:$node_version"
 readonly rng_seed="0000000000000000000000000000000000000000000000000000000000000037"
 readonly node_dir="$(pwd)/.node/$node_version"
 
@@ -36,7 +36,7 @@ docker run \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
     -e THRESHOLD=0 \
     -v $node_dir:/node \
-    ghcr.io/midnight-ntwrk/midnight-node:$node_version
+    midnightntwrk/midnight-node:$node_version
 
 # Wait for node to be ready.
 echo "Waiting for node to be ready..."
@@ -111,7 +111,7 @@ docker run \
     --network host \
     -v toolkit_out:/out \
     $toolkit_image \
-    generate-txs --dest-file /out/contract_tx_1_deploy.mn --to-bytes \
+    generate-txs --dest-file /out/contract_tx_1_deploy.mn \
     contract-simple \
     deploy \
     --rng-seed $rng_seed
@@ -154,5 +154,51 @@ docker run \
     --rng-seed $rng_seed \
     --contract-address $(cat /tmp/contract_address.mn) \
     --new-authority-seed 1000000000000000000000000000000000000000000000000000000000000001
+
+# Wait for enough blocks to be finalized so that the pre-populated chain data
+# contains sufficient blocks for e2e tests (MAX_HEIGHT = 32 in e2e.rs).
+readonly min_finalized_height=40
+echo "Waiting for finalized height >= $min_finalized_height..."
+timeout=360
+start_time=$(date +%s)
+while true; do
+    sleep 6
+
+    if (( $(date +%s) - start_time > timeout )); then
+        echo "Timeout after ${timeout}s waiting for finalized height >= $min_finalized_height"
+        exit 1
+    fi
+
+    finalized_hash=$(curl -s -X POST http://localhost:9944 \
+        -H "Content-Type: application/json" \
+        -d '{
+            "jsonrpc":"2.0",
+            "id":1,
+            "method":"chain_getFinalizedHead",
+            "params":[]
+        }' | jq -r .result)
+    if [[ -z "$finalized_hash" || "$finalized_hash" == "null" ]]; then
+        continue
+    fi
+
+    finalized_number=$(curl -s -X POST http://localhost:9944 \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"jsonrpc\":\"2.0\",
+            \"id\":2,
+            \"method\":\"chain_getHeader\",
+            \"params\":[\"$finalized_hash\"]
+        }" | jq -r '.result.number')
+    if [[ -z "$finalized_number" || "$finalized_number" == "null" ]]; then
+        continue
+    fi
+
+    height=$((finalized_number))
+    echo "finalized height: $height"
+    if [[ $height -ge $min_finalized_height ]]; then
+        echo "Reached target finalized height: $height"
+        break
+    fi
+done
 
 echo "Successfully generated node data"

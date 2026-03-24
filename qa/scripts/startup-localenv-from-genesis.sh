@@ -80,12 +80,12 @@ if [ -z "${INDEXER_TAG:-}" ]; then
         echo "Could not find commit for NODE_VERSION=$NODE_TAG, using HEAD"
     fi
 
-    docker pull ghcr.io/midnight-ntwrk/wallet-indexer:$TMP_INDEXER_TAG
+    docker pull midnightntwrk/wallet-indexer:$TMP_INDEXER_TAG
 
     if [ $? -ne 0 ]; then
         echo "Failed to pull indexer image $TMP_INDEXER_TAG trying with the latest known one"
         export TMP_INDEXER_TAG="3.0.0-d850c371"
-        docker pull ghcr.io/midnight-ntwrk/wallet-indexer:$TMP_INDEXER_TAG
+        docker pull midnightntwrk/wallet-indexer:$TMP_INDEXER_TAG
         if [ $? -ne 0 ]; then
             echo "Failed again even with 3.0.0-d850c371"
             exit 1

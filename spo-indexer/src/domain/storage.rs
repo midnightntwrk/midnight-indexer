@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -74,6 +74,7 @@ where
     -> Result<Vec<String>, sqlx::Error>;
 
     /// Upsert latest stake snapshot for a pool.
+    #[allow(clippy::too_many_arguments)]
     async fn save_stake_snapshot(
         &self,
         pool_id: &str,
@@ -87,6 +88,7 @@ where
     ) -> Result<(), sqlx::Error>;
 
     /// Append a history row for stake.
+    #[allow(clippy::too_many_arguments)]
     async fn insert_stake_history(
         &self,
         pool_id: &str,

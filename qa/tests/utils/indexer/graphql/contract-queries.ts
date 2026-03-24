@@ -1,5 +1,5 @@
 // This file is part of midnightntwrk/midnight-indexer
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -32,6 +32,13 @@ export const CONTRACT_ACTION_LIGHT_BODY = `
         }
     }
     ... on ContractUpdate {
+        transaction {
+            hash
+            block {
+                hash
+                height
+            }
+        }
         unshieldedBalances {
             tokenType
             amount

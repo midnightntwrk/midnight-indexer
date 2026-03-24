@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ use crate::{
 };
 use async_graphql::{Context, Object, scalar};
 use fastrace::trace;
-use indexer_common::domain::LedgerVersion;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -44,22 +43,22 @@ where
     #[trace]
     async fn connect(&self, cx: &Context<'_>, viewing_key: ViewingKey) -> ApiResult<HexEncoded> {
         let viewing_key = viewing_key
-            .try_into_domain(cx.get_network_id(), LedgerVersion::LATEST)
+            .try_into_domain(cx.get_network_id())
             .map_err_into_client_error(|| "invalid viewing key")?;
 
-        cx.get_storage::<S>()
+        let session_id = cx
+            .get_storage::<S>()
             .connect_wallet(&viewing_key)
             .await
             .map_err_into_server_error(|| "connect wallet")?;
 
-        let session_id = viewing_key.to_session_id();
-        debug!(session_id:%; "wallet connected");
+        debug!("wallet connected");
 
         Ok(session_id.hex_encode())
     }
 
     /// Disconnect the wallet with the given session ID.
-    #[trace(properties = { "session_id": "{session_id}" })]
+    #[trace]
     async fn disconnect(&self, cx: &Context<'_>, session_id: HexEncoded) -> ApiResult<Unit> {
         let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
@@ -67,11 +66,9 @@ where
         cx.get_storage::<S>()
             .disconnect_wallet(session_id)
             .await
-            .map_err_into_server_error(|| {
-                format!("disconnect wallet with session ID {session_id}")
-            })?;
+            .map_err_into_server_error(|| "disconnect wallet")?;
 
-        debug!(session_id:%; "wallet disconnected");
+        debug!("wallet disconnected");
 
         Ok(Unit)
     }

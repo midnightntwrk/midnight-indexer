@@ -1,5 +1,5 @@
 // This file is part of midnightntwrk/midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -202,6 +202,7 @@ export class Environment {
       case EnvironmentName.NODEDEV01:
       case EnvironmentName.QANET:
       case EnvironmentName.QANET_DEV:
+      case EnvironmentName.DEVNET:
         return CardanoNetwork.PREVIEW;
       default:
         throw new Error(`Unsupported environment name: ${this.envName}`);

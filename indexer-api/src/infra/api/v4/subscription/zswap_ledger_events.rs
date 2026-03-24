@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -21,10 +21,7 @@ use fastrace::{Span, future::FutureExt, prelude::SpanContext};
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, LedgerEventGrouping, Subscriber};
 use log::{debug, warn};
-use std::{marker::PhantomData, num::NonZeroU32, pin::pin};
-
-// TODO: Make configurable!
-const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
+use std::{marker::PhantomData, pin::pin};
 
 pub struct ZswapLedgerEventsSubscription<S, B> {
     _s: PhantomData<S>,
@@ -55,6 +52,7 @@ where
         let mut id = id.unwrap_or(1);
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
+        let batch_size = cx.get_subscription_config().zswap_ledger_events.batch_size;
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
 
@@ -62,7 +60,7 @@ where
             debug!(id; "streaming existing events");
 
             let ledger_events = storage
-                .get_ledger_events(LedgerEventGrouping::Zswap, id, BATCH_SIZE)
+                .get_ledger_events(LedgerEventGrouping::Zswap, id, batch_size)
                 .await;
             let mut ledger_events = pin!(ledger_events);
             while let Some(ledger_event) = get_next_ledger_event(&mut ledger_events)
@@ -87,7 +85,7 @@ where
                 debug!(id; "streaming next events");
 
                 let ledger_events = storage
-                    .get_ledger_events(LedgerEventGrouping::Zswap, id, BATCH_SIZE)
+                    .get_ledger_events(LedgerEventGrouping::Zswap, id, batch_size)
                     .await;
                 let mut ledger_events = pin!(ledger_events);
                 while let Some(ledger_event) = get_next_ledger_event(&mut ledger_events)

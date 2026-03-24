@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -38,10 +38,12 @@ use std::{
     fmt::{self, Display},
     io,
     net::IpAddr,
+    num::NonZeroU32,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 use thiserror::Error;
 use tokio::{
@@ -91,6 +93,7 @@ where
             request_body_limit,
             max_complexity,
             max_depth,
+            subscription_config,
         } = self.config;
 
         let app = make_app(
@@ -98,9 +101,10 @@ where
             network_id,
             self.storage,
             self.subscriber,
+            request_body_limit as usize,
             max_complexity,
             max_depth,
-            request_body_limit as usize,
+            subscription_config,
         );
 
         let listener = TcpListener::bind((address, port))
@@ -115,14 +119,69 @@ where
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct Config {
     pub address: IpAddr,
+
     pub port: u16,
     #[serde(with = "byte_unit_serde")]
     pub request_body_limit: u64,
+
     pub max_complexity: usize,
+
     pub max_depth: usize,
+
+    #[serde(rename = "subscription")]
+    pub subscription_config: SubscriptionConfig,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct SubscriptionConfig {
+    blocks: BlocksSubscriptionConfig,
+    contract_actions: ContractActionsSubscriptionConfig,
+    dust_ledger_events: DustLedgerEventsSubscriptionConfig,
+    shielded_transactions: ShieldedTransactionsSubscriptionConfig,
+    unshielded_transactions: UnshieldedTransactionsSubscriptionConfig,
+    zswap_ledger_events: ZswapLedgerEventsSubscriptionConfig,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct BlocksSubscriptionConfig {
+    batch_size: NonZeroU32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ContractActionsSubscriptionConfig {
+    batch_size: NonZeroU32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct DustLedgerEventsSubscriptionConfig {
+    batch_size: NonZeroU32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ShieldedTransactionsSubscriptionConfig {
+    batch_size: NonZeroU32,
+
+    #[serde(with = "humantime_serde")]
+    progress_update_interval: Duration,
+
+    #[serde(with = "humantime_serde")]
+    keep_wallet_alive_interval: Duration,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct UnshieldedTransactionsSubscriptionConfig {
+    batch_size: NonZeroU32,
+
+    #[serde(with = "humantime_serde")]
+    progress_update_interval: Duration,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ZswapLedgerEventsSubscriptionConfig {
+    batch_size: NonZeroU32,
 }
 
 #[derive(Debug, Error)]
@@ -155,9 +214,10 @@ fn make_app<S, B>(
     network_id: NetworkId,
     storage: S,
     subscriber: B,
+    request_body_limit: usize,
     max_complexity: usize,
     max_depth: usize,
-    request_body_limit: usize,
+    subscription_config: SubscriptionConfig,
 ) -> Router
 where
     S: Storage,
@@ -172,16 +232,18 @@ where
         subscriber,
         max_complexity,
         max_depth,
+        subscription_config,
     );
 
-    // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a Service
-    // Builder, so we layer FastraceLayer first.
+    // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a
+    // ServiceBuilder together, so we use `Router::layer` with the inverted (bottom to top) order.
     Router::new()
         .route("/ready", get(ready))
+        .nest("/api/v3", v4_app.clone()) // v3 is an alias to v4 for backwards compatibility.
         .nest("/api/v4", v4_app)
         .route("/api/{*rest}", any(redirect_api_to_latest))
         .with_state(caught_up)
-        .layer(FastraceLayer)
+        .layer(FastraceLayer::default())
         .layer(
             ServiceBuilder::new()
                 .layer(RequestBodyLimitLayer::new(request_body_limit))
@@ -245,7 +307,7 @@ async fn transform_lentgh_limit_exceeded(response: Response<Body>) -> Result<Res
 
 async fn shutdown_signal() {
     signal(SignalKind::terminate())
-        .expect("install SIGTERM handler")
+        .expect("SIGTERM handler can be registered")
         .recv()
         .await;
 }
@@ -264,6 +326,8 @@ trait ContextExt {
     fn get_ledger_state_cache(&self) -> &LedgerStateCache;
 
     fn get_metrics(&self) -> &Metrics;
+
+    fn get_subscription_config(&self) -> &SubscriptionConfig;
 }
 
 impl ContextExt for Context<'_> {
@@ -294,6 +358,11 @@ impl ContextExt for Context<'_> {
     fn get_metrics(&self) -> &Metrics {
         self.data::<Metrics>()
             .expect("Metrics is stored in Context")
+    }
+
+    fn get_subscription_config(&self) -> &SubscriptionConfig {
+        self.data::<SubscriptionConfig>()
+            .expect("SubscriptionConfig is stored in Context")
     }
 }
 
@@ -360,7 +429,7 @@ type ApiResult<T> = Result<T, ApiError>;
 
 /// The error type all API handlers must return.
 #[derive(Debug, Clone)]
-enum ApiError {
+pub enum ApiError {
     /// A client error, caused by invalid input.
     Client(InnerApiError),
 
@@ -387,4 +456,4 @@ impl StdError for ApiError {}
 
 #[derive(Debug, Clone, Error)]
 #[error("{0}")]
-struct InnerApiError(String, #[source] Option<Arc<dyn StdError + Send + Sync>>);
+pub struct InnerApiError(String, #[source] Option<Arc<dyn StdError + Send + Sync>>);

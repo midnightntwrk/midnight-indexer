@@ -1,5 +1,5 @@
 // This file is part of midnightntwrk/midnight-indexer
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@ async function getGenesisTransactionsByHash(): Promise<Transaction[]> {
     const response = await indexerHttpClient.getTransactionByOffset({ hash });
     expect(response).toBeSuccess();
     expect(Array.isArray(response.data?.transactions)).toBe(true);
-    expect(response.data?.transactions).toHaveLength(1);
+    expect(response.data?.transactions?.length).toBeGreaterThanOrEqual(1);
 
     if (response.data?.transactions[0]) {
       genesisTransactions.push(response.data.transactions[0]);

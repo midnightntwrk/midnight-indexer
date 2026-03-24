@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use crate::{
             TransactionV8,
         },
     },
-    infra::ledger_db::LedgerDb,
+    infra::ledger_db::v1_1,
 };
 use fastrace::trace;
 use itertools::Itertools;
@@ -34,19 +34,9 @@ use midnight_base_crypto::{
     hash::{HashOutput, persistent_commit},
     time::Timestamp,
 };
-use midnight_coin_structure_v7::{
-    coin::{
-        NIGHT as NIGHTV7, TokenType as TokenTypeV7, UnshieldedTokenType as UnshieldedTokenTypeV7,
-        UserAddress as UserAddressV7,
-    },
-    contract::ContractAddress as ContractAddressV7,
-};
-use midnight_coin_structure_v8::{
-    coin::{
-        NIGHT as NIGHTV8, TokenType as TokenTypeV8, UnshieldedTokenType as UnshieldedTokenTypeV8,
-        UserAddress as UserAddressV8,
-    },
-    contract::ContractAddress as ContractAddressV8,
+use midnight_coin_structure::{
+    coin::{NIGHT, TokenType as LedgerTokenType, UnshieldedTokenType, UserAddress},
+    contract::{ContractAddress as ContractAddressV7, ContractAddress as ContractAddressV8},
 };
 use midnight_ledger_v7::{
     dust::{
@@ -80,21 +70,16 @@ use midnight_ledger_v8::{
     },
     verify::WellFormedStrictness as WellFormedStrictnessV8,
 };
-use midnight_onchain_runtime_v7::context::BlockContext as BlockContextV7;
-use midnight_onchain_runtime_v8::context::BlockContext as BlockContextV8;
+use midnight_onchain_runtime_v2::context::BlockContext as BlockContextV2;
+use midnight_onchain_runtime_v3::context::BlockContext as BlockContextV3;
 use midnight_serialize::{Deserializable, tagged_deserialize};
 use midnight_storage_core::{
     arena::{ArenaKey, Sp, TypedArenaKey},
     db::DB,
     storage::default_storage,
 };
-use midnight_transient_crypto_v7::merkle_tree::{
-    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV7,
-    MerkleTreeDigest as MerkleTreeDigestV7, TreeInsertionPath as TreeInsertionPathV7,
-};
-use midnight_transient_crypto_v8::merkle_tree::{
-    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV8,
-    MerkleTreeDigest as MerkleTreeDigestV8, TreeInsertionPath as TreeInsertionPathV8,
+use midnight_transient_crypto::merkle_tree::{
+    MerkleTreeCollapsedUpdate, MerkleTreeDigest, TreeInsertionPath,
 };
 use midnight_zswap_v7::ledger::State as ZswapStateV7;
 use midnight_zswap_v8::ledger::State as ZswapStateV8;
@@ -117,12 +102,12 @@ static STRICTNESS_V8: LazyLock<WellFormedStrictnessV8> = LazyLock::new(|| {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LedgerState {
     V7 {
-        ledger_state: LedgerStateV7<LedgerDb>,
+        ledger_state: LedgerStateV7<v1_1::LedgerDb>,
         block_fullness: SyntheticCost,
     },
 
     V8 {
-        ledger_state: LedgerStateV8<LedgerDb>,
+        ledger_state: LedgerStateV8<v1_1::LedgerDb>,
         block_fullness: SyntheticCost,
     },
 }
@@ -152,12 +137,13 @@ impl LedgerState {
     ) -> Result<Self, Error> {
         match ledger_version {
             LedgerVersion::V7 => {
-                let ledger_state = tagged_deserialize::<LedgerStateV7<LedgerDb>>(&mut raw.as_ref())
-                    .map_err(|error| Error::Deserialize("GenesisLedgerStateV7", error))?;
+                let ledger_state =
+                    tagged_deserialize::<LedgerStateV7<v1_1::LedgerDb>>(&mut raw.as_ref())
+                        .map_err(|error| Error::Deserialize("GenesisLedgerStateV7", error))?;
 
                 let treasury_night = ledger_state
                     .treasury
-                    .get(&TokenTypeV7::Unshielded(NIGHTV7))
+                    .get(&LedgerTokenType::Unshielded(NIGHT))
                     .copied()
                     .unwrap_or(0);
 
@@ -175,12 +161,13 @@ impl LedgerState {
             }
 
             LedgerVersion::V8 => {
-                let ledger_state = tagged_deserialize::<LedgerStateV8<LedgerDb>>(&mut raw.as_ref())
-                    .map_err(|error| Error::Deserialize("GenesisLedgerStateV8", error))?;
+                let ledger_state =
+                    tagged_deserialize::<LedgerStateV8<v1_1::LedgerDb>>(&mut raw.as_ref())
+                        .map_err(|error| Error::Deserialize("GenesisLedgerStateV8", error))?;
 
                 let treasury_night = ledger_state
                     .treasury
-                    .get(&TokenTypeV8::Unshielded(NIGHTV8))
+                    .get(&LedgerTokenType::Unshielded(NIGHT))
                     .copied()
                     .unwrap_or(0);
 
@@ -218,15 +205,14 @@ impl LedgerState {
         let ledger_state = match ledger_version {
             LedgerVersion::V7 => {
                 let arena_key = TypedArenaKey::<
-                    LedgerStateV7<LedgerDb>,
-                    <LedgerDb as DB>::Hasher,
+                    LedgerStateV7<v1_1::LedgerDb>,
+                    <v1_1::LedgerDb as DB>::Hasher,
                 >::deserialize(&mut key.as_slice(), 0)
                 .map_err(|error| Error::Deserialize("TypedArenaKeyV7", error))?;
-                let ledger_state = default_storage::<LedgerDb>()
-                    .get(&arena_key)
+                let ledger_state = default_storage::<v1_1::LedgerDb>()
+                    .get_lazy(&arena_key)
                     .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
-                let ledger_state =
-                    Sp::into_inner(ledger_state).expect("loaded ledger state exists");
+                let ledger_state = (*ledger_state).clone();
 
                 Self::V7 {
                     ledger_state,
@@ -236,15 +222,14 @@ impl LedgerState {
 
             LedgerVersion::V8 => {
                 let arena_key = TypedArenaKey::<
-                    LedgerStateV8<LedgerDb>,
-                    <LedgerDb as DB>::Hasher,
+                    LedgerStateV8<v1_1::LedgerDb>,
+                    <v1_1::LedgerDb as DB>::Hasher,
                 >::deserialize(&mut key.as_slice(), 0)
                 .map_err(|error| Error::Deserialize("TypedArenaKeyV8", error))?;
-                let ledger_state = default_storage::<LedgerDb>()
-                    .get(&arena_key)
+                let ledger_state = default_storage::<v1_1::LedgerDb>()
+                    .get_lazy(&arena_key)
                     .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
-                let ledger_state =
-                    Sp::into_inner(ledger_state).expect("loaded ledger state exists");
+                let ledger_state = (*ledger_state).clone();
 
                 Self::V8 {
                     ledger_state,
@@ -271,13 +256,18 @@ impl LedgerState {
                 ledger_state.persist();
 
                 let key = ArenaKey::from(ledger_state.as_typed_key());
-                let key =
-                    TypedArenaKey::<LedgerStateV8<LedgerDb>, <LedgerDb as DB>::Hasher>::from(key);
+                let key = TypedArenaKey::<
+                    LedgerStateV8<v1_1::LedgerDb>,
+                    <v1_1::LedgerDb as DB>::Hasher,
+                >::from(key);
 
-                let ledger_state = default_storage::<LedgerDb>().get(&key).map_err(|error| {
-                    Error::LedgerStateTranslation(LedgerVersion::V7, ledger_version, error)
-                })?;
-                let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
+                let ledger_state =
+                    default_storage::<v1_1::LedgerDb>()
+                        .get_lazy(&key)
+                        .map_err(|error| {
+                            Error::LedgerStateTranslation(LedgerVersion::V7, ledger_version, error)
+                        })?;
+                let ledger_state = (*ledger_state).clone();
 
                 Ok(LedgerState::V8 {
                     ledger_state,
@@ -302,13 +292,13 @@ impl LedgerState {
 
     pub fn root(&self) -> Result<ByteVec, Error> {
         match self {
-            Self::V7 { ledger_state, .. } => default_storage::<LedgerDb>()
+            Self::V7 { ledger_state, .. } => default_storage::<v1_1::LedgerDb>()
                 .alloc(ledger_state.to_owned())
                 .as_typed_key()
                 .serialize()
                 .map_err(|error| Error::Serialize("LedgerStateV7", error)),
 
-            Self::V8 { ledger_state, .. } => default_storage::<LedgerDb>()
+            Self::V8 { ledger_state, .. } => default_storage::<v1_1::LedgerDb>()
                 .alloc(ledger_state.to_owned())
                 .as_typed_key()
                 .serialize()
@@ -324,7 +314,7 @@ impl LedgerState {
             } => {
                 let mut ledger_state = Sp::new(ledger_state);
                 ledger_state.persist();
-                default_storage::<LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
+                default_storage::<v1_1::LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
 
                 let key = ledger_state
                     .as_typed_key()
@@ -346,7 +336,7 @@ impl LedgerState {
             } => {
                 let mut ledger_state = Sp::new(ledger_state);
                 ledger_state.persist();
-                default_storage::<LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
+                default_storage::<v1_1::LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
 
                 let key = ledger_state
                     .as_typed_key()
@@ -380,12 +370,12 @@ impl LedgerState {
                 block_fullness,
             } => {
                 let transaction =
-                    tagged_deserialize::<TransactionV7<LedgerDb>>(&mut transaction.as_ref())
+                    tagged_deserialize::<TransactionV7<v1_1::LedgerDb>>(&mut transaction.as_ref())
                         .map_err(|error| Error::Deserialize("LedgerTransactionV7", error))?;
 
                 let cx = TransactionContextV7 {
                     ref_state: ledger_state.clone(),
-                    block_context: BlockContextV7 {
+                    block_context: BlockContextV2 {
                         tblock: timestamp(block_timestamp),
                         tblock_err: 30,
                         parent_block_hash: HashOutput(parent_block_hash.0),
@@ -452,12 +442,12 @@ impl LedgerState {
                 block_fullness,
             } => {
                 let transaction =
-                    tagged_deserialize::<TransactionV8<LedgerDb>>(&mut transaction.as_ref())
+                    tagged_deserialize::<TransactionV8<v1_1::LedgerDb>>(&mut transaction.as_ref())
                         .map_err(|error| Error::Deserialize("LedgerTransactionV8", error))?;
 
                 let cx = TransactionContextV8 {
                     ref_state: ledger_state.clone(),
-                    block_context: BlockContextV8 {
+                    block_context: BlockContextV3 {
                         tblock: timestamp(block_timestamp),
                         tblock_err: 30,
                         parent_block_hash: HashOutput(parent_block_hash.0),
@@ -661,23 +651,23 @@ impl LedgerState {
     /// Get the serialized merkle-tree collapsed update for the given indices.
     pub fn collapsed_update(&self, start_index: u64, end_index: u64) -> Result<ByteVec, Error> {
         match self {
-            Self::V7 { ledger_state, .. } => MerkleTreeCollapsedUpdateV7::new(
+            Self::V7 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
                 &ledger_state.zswap.coin_coms,
                 start_index,
                 end_index,
             )
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
-            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdateV7", error)),
+            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdate", error)),
 
-            Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdateV8::new(
+            Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
                 &ledger_state.zswap.coin_coms,
                 start_index,
                 end_index,
             )
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
-            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdateV8", error)),
+            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdate", error)),
         }
     }
 
@@ -788,8 +778,8 @@ impl LedgerParameters {
 /// Facade for zswap state root across supported (protocol) versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZswapStateRoot {
-    V7(MerkleTreeDigestV7),
-    V8(MerkleTreeDigestV8),
+    V7(MerkleTreeDigest),
+    V8(MerkleTreeDigest),
 }
 
 impl ZswapStateRoot {
@@ -801,13 +791,13 @@ impl ZswapStateRoot {
     ) -> Result<Self, Error> {
         let zswap_state_root = match ledger_version {
             LedgerVersion::V7 => {
-                let digest = MerkleTreeDigestV7::deserialize(&mut zswap_state_root.as_ref(), 0)
+                let digest = MerkleTreeDigest::deserialize(&mut zswap_state_root.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("MerkleTreeDigestV7", error))?;
                 Self::V7(digest)
             }
 
             LedgerVersion::V8 => {
-                let digest = MerkleTreeDigestV8::deserialize(&mut zswap_state_root.as_ref(), 0)
+                let digest = MerkleTreeDigest::deserialize(&mut zswap_state_root.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("MerkleTreeDigestV8", error))?;
                 Self::V8(digest)
             }
@@ -1020,7 +1010,7 @@ fn make_dust_initial_utxo_v8(
 }
 
 fn make_dust_generation_dtime_update_v7(
-    update: TreeInsertionPathV7<DustGenerationInfoV7>,
+    update: TreeInsertionPath<DustGenerationInfoV7>,
     raw: ByteVec,
 ) -> Result<LedgerEvent, Error> {
     let generation = &update.leaf.1;
@@ -1070,7 +1060,7 @@ fn make_dust_generation_dtime_update_v7(
 }
 
 fn make_dust_generation_dtime_update_v8(
-    update: TreeInsertionPathV8<DustGenerationInfoV8>,
+    update: TreeInsertionPath<DustGenerationInfoV8>,
     raw: ByteVec,
 ) -> Result<LedgerEvent, Error> {
     let generation = &update.leaf.1;
@@ -1184,7 +1174,7 @@ where
 
         // ClaimRewards creates a single unshielded UTXO for the claimed amount.
         TransactionV7::ClaimRewards(claim) => {
-            let owner = UserAddressV7::from(claim.owner);
+            let owner = UserAddress::from(claim.owner);
             let ledger_intent_hash = {
                 // ClaimRewards don't have intents, but UTXOs need an intent hash. We compute this
                 // hash the same way that the ledger does internally.
@@ -1193,7 +1183,7 @@ where
                     target_address: owner,
                     nonce: claim.nonce,
                 };
-                output.mk_intent_hash(NIGHTV7)
+                output.mk_intent_hash(NIGHT)
             };
             let intent_hash = ledger_intent_hash.0.0.into();
             let initial_nonce = make_initial_nonce_v7(OUTPUT_INDEX_ZERO, intent_hash);
@@ -1202,7 +1192,7 @@ where
             let utxo = UtxoV7 {
                 value: claim.value,
                 owner,
-                type_: UnshieldedTokenTypeV7::default(),
+                type_: UnshieldedTokenType::default(),
                 intent_hash: ledger_intent_hash,
                 output_no: OUTPUT_INDEX_ZERO,
             };
@@ -1288,7 +1278,7 @@ where
 
         // ClaimRewards creates a single unshielded UTXO for the claimed amount.
         TransactionV8::ClaimRewards(claim) => {
-            let owner = UserAddressV8::from(claim.owner);
+            let owner = UserAddress::from(claim.owner);
             let ledger_intent_hash = {
                 // ClaimRewards don't have intents, but UTXOs need an intent hash. We compute this
                 // hash the same way that the ledger does internally.
@@ -1297,7 +1287,7 @@ where
                     target_address: owner,
                     nonce: claim.nonce,
                 };
-                output.mk_intent_hash(NIGHTV8)
+                output.mk_intent_hash(NIGHT)
             };
             let intent_hash = ledger_intent_hash.0.0.into();
             let initial_nonce = make_initial_nonce_v8(OUTPUT_INDEX_ZERO, intent_hash);
@@ -1306,7 +1296,7 @@ where
             let utxo = UtxoV8 {
                 value: claim.value,
                 owner,
-                type_: UnshieldedTokenTypeV8::default(),
+                type_: UnshieldedTokenType::default(),
                 intent_hash: ledger_intent_hash,
                 output_no: OUTPUT_INDEX_ZERO,
             };
@@ -1487,14 +1477,14 @@ fn extend_unshielded_utxos_v7<D>(
             registered_for_dust_generation_v7(spend.output_no, intent_hash, ledger_state);
         let utxo = UtxoV7 {
             value: spend.value,
-            owner: UserAddressV7::from(spend.owner.clone()),
+            owner: UserAddress::from(spend.owner.clone()),
             type_: spend.type_,
             intent_hash: spend.intent_hash,
             output_no: spend.output_no,
         };
 
         UnshieldedUtxo {
-            owner: UserAddressV7::from(spend.owner).0.0.into(),
+            owner: UserAddress::from(spend.owner).0.0.into(),
             token_type: spend.type_.0.0.into(),
             value: spend.value,
             intent_hash,
@@ -1569,14 +1559,14 @@ fn extend_unshielded_utxos_v8<D>(
             registered_for_dust_generation_v8(spend.output_no, intent_hash, ledger_state);
         let utxo = UtxoV8 {
             value: spend.value,
-            owner: UserAddressV8::from(spend.owner.clone()),
+            owner: UserAddress::from(spend.owner.clone()),
             type_: spend.type_,
             intent_hash: spend.intent_hash,
             output_no: spend.output_no,
         };
 
         UnshieldedUtxo {
-            owner: UserAddressV8::from(spend.owner).0.0.into(),
+            owner: UserAddress::from(spend.owner).0.0.into(),
             token_type: spend.type_.0.0.into(),
             value: spend.value,
             intent_hash,

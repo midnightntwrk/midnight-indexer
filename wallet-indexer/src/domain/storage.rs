@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -56,13 +56,13 @@ where
         tx: &mut SqlxTransaction<Self::Database>,
     ) -> Result<(), sqlx::Error>;
 
-    /// Get the IDs of active walltes, thereby marking "old" ones inactive.
+    /// Get the IDs of active wallets, thereby deactivating outdated ones.
     async fn active_wallet_ids(&self, ttl: Duration) -> Result<Vec<Uuid>, sqlx::Error>;
 
-    /// Get the wallet with the given session ID.
+    /// Get the wallet with the given ID.
     async fn get_wallet_by_id(
         &self,
-        session_id: Uuid,
+        id: Uuid,
         tx: &mut SqlxTransaction<Self::Database>,
     ) -> Result<Wallet, sqlx::Error>;
 }

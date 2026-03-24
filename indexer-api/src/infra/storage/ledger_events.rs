@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -55,7 +55,7 @@ impl LedgerEventStorage for Storage {
                 ledger_events.id,
                 ledger_events.raw,
                 ledger_events.attributes,
-                MAX(ledger_events.id) OVER (PARTITION BY ledger_events.grouping) AS max_id,
+                (SELECT MAX(id) FROM ledger_events WHERE grouping = $1) AS max_id,
                 transactions.protocol_version
             FROM ledger_events
             INNER JOIN transactions ON transactions.id = ledger_events.transaction_id
@@ -89,7 +89,7 @@ impl Storage {
                 ledger_events.id,
                 ledger_events.raw,
                 ledger_events.attributes,
-                MAX(ledger_events.id) OVER (PARTITION BY ledger_events.grouping) AS max_id,
+                (SELECT MAX(id) FROM ledger_events WHERE grouping = $1) AS max_id,
                 transactions.protocol_version
             FROM ledger_events
             INNER JOIN transactions ON transactions.id = ledger_events.transaction_id

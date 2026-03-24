@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -17,7 +17,8 @@ use std::{num::NonZeroUsize, time::Duration};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub run_migrations: bool,
+    #[serde(with = "byte_unit_serde")]
+    pub thread_stack_size: u64,
 
     #[serde(rename = "application")]
     pub application_config: ApplicationConfig,
@@ -92,6 +93,8 @@ impl From<ApplicationConfig> for wallet_indexer::application::Config {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InfraConfig {
+    pub run_migrations: bool,
+
     #[serde(rename = "storage")]
     pub storage_config: pool::sqlite::Config,
 

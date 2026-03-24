@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, ContextExt, InnerApiError, ResultExt,
+        ApiError, ApiResult, ContextExt, InnerApiError, OptionExt, ResultExt,
         v4::{HexEncodable, HexEncoded, decode_session_id, transaction::RegularTransaction},
     },
 };
@@ -28,23 +28,13 @@ use futures::{
     future::ok,
     stream::{self, TryStreamExt},
 };
-use indexer_common::domain::{SessionId, Subscriber, WalletIndexed};
+use indexer_common::domain::{Subscriber, WalletIndexed};
 use log::{debug, warn};
-use std::{
-    future::ready, marker::PhantomData, num::NonZeroU32, pin::pin, sync::Arc, time::Duration,
-};
+use sqlx::types::Uuid;
+use std::{future::ready, marker::PhantomData, pin::pin, sync::Arc};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
-
-// TODO: Make configurable!
-const BATCH_SIZE: NonZeroU32 = NonZeroU32::new(100).unwrap();
-
-// TODO: Make configurable!
-const PROGRESS_UPDATES_INTERVAL: Duration = Duration::from_secs(3);
-
-// TODO: Make configurable!
-const KEEP_WALLET_ACTIVE_INTERVAL: Duration = Duration::from_secs(60);
 
 /// An event of the shielded transactions subscription.
 #[derive(Debug, Union)]
@@ -155,6 +145,12 @@ where
 
         let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
+        let wallet_id = cx
+            .get_storage::<S>()
+            .resolve_session_id(session_id)
+            .await
+            .map_err_into_server_error(|| "resolve session ID")?
+            .some_or_client_error(|| "unknown or expired session ID")?;
         let index = index.unwrap_or_default();
 
         // Build a stream of shielded transaction events by merging relevant transactions and
@@ -165,13 +161,13 @@ where
         let (trigger, tripwire) = Tripwire::new();
 
         let relevant_transactions = make_relevant_transactions::<S, B>(
-            cx, session_id, index, trigger,
+            cx, wallet_id, index, trigger,
         )
         .map_ok(|relevant_transaction| {
             ShieldedTransactionsEvent::RelevantTransaction(relevant_transaction.into())
         });
 
-        let progress = make_progress::<S>(cx, session_id)
+        let progress = make_progress::<S>(cx, wallet_id)
             .take_until_if(tripwire)
             .map_ok(ShieldedTransactionsEvent::ShieldedTransactionsProgress)
             .boxed();
@@ -181,8 +177,12 @@ where
         // As long as the subscription is alive, the wallet is periodically kept active, even if
         // there are no new transactions.
         let storage = cx.get_storage::<S>();
-        let keep_wallet_active = IntervalStream::new(interval(KEEP_WALLET_ACTIVE_INTERVAL))
-            .then(move |_| async move { storage.keep_wallet_active(session_id).await })
+        let keep_wallet_alive_interval = cx
+            .get_subscription_config()
+            .shielded_transactions
+            .keep_wallet_alive_interval;
+        let keep_wallet_active = IntervalStream::new(interval(keep_wallet_alive_interval))
+            .then(move |_| async move { storage.keep_wallet_active(wallet_id).await })
             .map_err(|error| {
                 ApiError::Server(InnerApiError(
                     "keep wallet active".to_string(),
@@ -193,7 +193,7 @@ where
             .try_filter_map(ok)
             .on_drop(move || {
                 cx.get_metrics().wallets_connected.decrement(1);
-                debug!(session_id:%; "shielded transaction subscription ended");
+                debug!(wallet_id:%; "shielded transaction subscription ended");
             });
 
         Ok(events)
@@ -202,7 +202,7 @@ where
 
 fn make_relevant_transactions<'a, S, B>(
     cx: &'a Context<'a>,
-    session_id: SessionId,
+    wallet_id: Uuid,
     mut index: u64,
     trigger: Trigger,
 ) -> impl Stream<Item = ApiResult<RelevantTransaction<S>>> + use<'a, S, B>
@@ -213,16 +213,20 @@ where
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
     let ledger_state_cache = cx.get_ledger_state_cache();
+    let batch_size = cx
+        .get_subscription_config()
+        .shielded_transactions
+        .batch_size;
 
     let wallet_indexed_events = subscriber
         .subscribe::<WalletIndexed>()
-        .try_filter(move |wallet_indexed| ready(wallet_indexed.session_id == session_id));
+        .try_filter(move |wallet_indexed| ready(wallet_indexed.wallet_id == wallet_id));
 
     try_stream! {
         // Stream exiting transactions.
-        debug!(session_id:%, index; "streaming existing transactions");
+        debug!(wallet_id:%, index; "streaming existing transactions");
 
-        let transactions = storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
+        let transactions = storage.get_relevant_transactions(wallet_id, index, batch_size);
         let mut transactions = pin!(transactions);
         while let Some(transaction) = get_next_transaction(&mut transactions)
             .await
@@ -243,7 +247,7 @@ where
         }
 
         // Stream live transactions.
-        debug!(session_id:%, index; "streaming live transactions");
+        debug!(wallet_id:%, index; "streaming live transactions");
         let mut wallet_indexed_events = pin!(wallet_indexed_events);
         while wallet_indexed_events
             .try_next()
@@ -254,7 +258,7 @@ where
             debug!(index; "streaming next live transactions");
 
             let transactions =
-                storage.get_relevant_transactions(session_id, index, BATCH_SIZE);
+                storage.get_relevant_transactions(wallet_id, index, batch_size);
             let mut transactions = pin!(transactions);
             while let Some(transaction) =  get_next_transaction(&mut transactions)
                 .await
@@ -320,24 +324,30 @@ where
 
 fn make_progress<'a, S>(
     cx: &'a Context<'a>,
-    session_id: SessionId,
+    wallet_id: Uuid,
 ) -> impl Stream<Item = ApiResult<ShieldedTransactionsProgress>> + use<'a, S>
 where
     S: Storage,
 {
-    let intervals = IntervalStream::new(interval(PROGRESS_UPDATES_INTERVAL));
-    intervals.then(move |_| make_progress_update(session_id, cx.get_storage::<S>()))
+    let storage = cx.get_storage::<S>();
+    let progress_update_interval = cx
+        .get_subscription_config()
+        .shielded_transactions
+        .progress_update_interval;
+
+    let intervals = IntervalStream::new(interval(progress_update_interval));
+    intervals.then(move |_| make_progress_update(wallet_id, storage))
 }
 
 async fn make_progress_update<S>(
-    session_id: SessionId,
+    wallet_id: Uuid,
     storage: &S,
 ) -> ApiResult<ShieldedTransactionsProgress>
 where
     S: Storage,
 {
     let (highest_end_index, highest_checked_end_index, highest_relevant_end_index) = storage
-        .get_highest_end_indices(session_id)
+        .get_highest_end_indices(wallet_id)
         .await
         .map_err_into_server_error(|| "get highest indices")?;
 

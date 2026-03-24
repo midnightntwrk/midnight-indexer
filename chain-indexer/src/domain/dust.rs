@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -16,21 +16,21 @@ use indexer_common::domain::{CardanoRewardAddress, DustPublicKey, DustUtxoId};
 /// Domain representation of DUST registration events from the NativeTokenObservation pallet.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DustRegistrationEvent {
-    /// Cardano address registered with DUST address.
+    /// Cardano stake key registered with DUST address.
     Registration {
-        cardano_address: CardanoRewardAddress,
+        cardano_stake_key: CardanoRewardAddress,
         dust_address: DustPublicKey,
     },
 
-    /// Cardano address deregistered from DUST address.
+    /// Cardano stake key deregistered from DUST address.
     Deregistration {
-        cardano_address: CardanoRewardAddress,
+        cardano_stake_key: CardanoRewardAddress,
         dust_address: DustPublicKey,
     },
 
     /// UTXO mapping added for registration.
     MappingAdded {
-        cardano_address: CardanoRewardAddress,
+        cardano_stake_key: CardanoRewardAddress,
         dust_address: DustPublicKey,
         utxo_id: DustUtxoId,
         utxo_index: u32,
@@ -38,7 +38,7 @@ pub enum DustRegistrationEvent {
 
     /// UTXO mapping removed from registration.
     MappingRemoved {
-        cardano_address: CardanoRewardAddress,
+        cardano_stake_key: CardanoRewardAddress,
         dust_address: DustPublicKey,
         utxo_id: DustUtxoId,
         utxo_index: u32,

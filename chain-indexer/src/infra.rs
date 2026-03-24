@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -20,6 +20,8 @@ pub mod subxt_node;
 #[cfg(feature = "cloud")]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
+    pub run_migrations: bool,
+
     #[serde(rename = "storage")]
     pub storage_config: indexer_common::infra::pool::postgres::Config,
 

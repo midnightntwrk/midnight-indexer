@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -39,28 +39,27 @@ use midnight_ledger_v8::{
     structure::ProofMarker as ProofMarkerV8,
 };
 use midnight_serialize::{Serializable, Tagged, tagged_serialize};
-use midnight_transient_crypto_v7::commitment::PureGeneratorPedersen as PureGeneratorPedersenV7;
-use midnight_transient_crypto_v8::commitment::PureGeneratorPedersen as PureGeneratorPedersenV8;
+use midnight_transient_crypto::commitment::PureGeneratorPedersen;
 use std::{io, string::FromUtf8Error};
 use thiserror::Error;
 
 type TransactionV7<D> = midnight_ledger_v7::structure::Transaction<
     SignatureV7,
     ProofMarkerV7,
-    PureGeneratorPedersenV7,
+    PureGeneratorPedersen,
     D,
 >;
 type TransactionV8<D> = midnight_ledger_v8::structure::Transaction<
     SignatureV7,
     ProofMarkerV8,
-    PureGeneratorPedersenV8,
+    PureGeneratorPedersen,
     D,
 >;
 
 type IntentV7<D> =
-    midnight_ledger_v7::structure::Intent<SignatureV7, ProofMarkerV7, PureGeneratorPedersenV7, D>;
+    midnight_ledger_v7::structure::Intent<SignatureV7, ProofMarkerV7, PureGeneratorPedersen, D>;
 type IntentV8<D> =
-    midnight_ledger_v8::structure::Intent<SignatureV7, ProofMarkerV8, PureGeneratorPedersenV8, D>;
+    midnight_ledger_v8::structure::Intent<SignatureV7, ProofMarkerV8, PureGeneratorPedersen, D>;
 
 /// Ledger related errors.
 #[derive(Debug, Error)]

@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -49,9 +49,6 @@ async fn run() -> anyhow::Result<()> {
     };
     use tokio::signal::unix::{SignalKind, signal};
 
-    // Register SIGTERM handler.
-    let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
-
     // Load configuration.
     let config = Config::load().context("load configuration")?;
     info!(config:?; "starting");
@@ -69,6 +66,8 @@ async fn run() -> anyhow::Result<()> {
     // Initialize tracing and metrics.
     telemetry::init_tracing(tracing_config);
     telemetry::init_metrics(metrics_config);
+
+    let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
     let node = SPOClient::new(infra_config.node_config)
         .await

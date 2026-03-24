@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,10 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! GraphQL API types for DUST operations.
-//!
-//! NOTE: This is a minimal cherry-pick for dustGenerationStatus query only.
-//! Other DUST-related types will be added when the full DUST system is integrated.
+//! GraphQL API types for DUST operations. Currently only supports the dustGenerationStatus query.
 
 use crate::{
     domain,

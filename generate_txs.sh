@@ -16,7 +16,7 @@ if [ -z "$1" ]; then
     exit 1
 fi
 readonly node_version="$1"
-readonly toolkit_image="ghcr.io/midnight-ntwrk/midnight-node-toolkit:$node_version"
+readonly toolkit_image="midnightntwrk/midnight-node-toolkit:$node_version"
 
 # Start the node container.
 docker run \
@@ -27,7 +27,7 @@ docker run \
     -e CFG_PRESET=dev \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
     -e THRESHOLD=0 \
-    ghcr.io/midnight-ntwrk/midnight-node:$node_version
+    midnightntwrk/midnight-node:$node_version
 
 # Wait for node to be ready.
 echo "Waiting for node to be ready..."
@@ -83,23 +83,13 @@ docker run \
     $toolkit_image \
     generate-txs \
     --dest-file /out/tx_1_2_2.mn \
-    --to-bytes \
     single-tx \
     --shielded-amount 10 \
     --unshielded-amount 10 \
     --source-seed "0000000000000000000000000000000000000000000000000000000000000001" \
     --destination-address mn_shield-addr_undeployed1tth9g6jf8he6cmhgtme6arty0jde7wnypsg53qc3x5navl9za355jqqvfftm8asg986dx9puzwkmedeune9nfkuqvtmccmxtjwvlrvccwypcs \
     --destination-address mn_addr_undeployed1gkasr3z3vwyscy2jpp53nzr37v7n4r3lsfgj6v5g584dakjzt0xqun4d4r
-docker run \
-    --rm \
-    --network host \
-    -v ./target:/out \
-    $toolkit_image \
-    get-tx-from-context \
-    --src-file /out/tx_1_2_2.mn \
-    --network undeployed \
-    --dest-file /out/tx_1_2_2.raw \
-    --from-bytes
+cat ./target/tx_1_2_2.mn | jq -r '.tx.Midnight' | xxd -r -p > ./target/tx_1_2_2.raw
 
 # 1 to 2/3.
 docker run \
@@ -109,22 +99,12 @@ docker run \
     $toolkit_image \
     generate-txs \
     --dest-file /out/tx_1_2_3.mn \
-    --to-bytes \
     single-tx \
     --shielded-amount 10 \
     --unshielded-amount 10 \
     --source-seed "0000000000000000000000000000000000000000000000000000000000000001" \
     --destination-address mn_shield-addr_undeployed1ngp7ce7cqclgucattj5kuw68v3s4826e9zwalhhmurymwet3v7psvrs4gtpv5p2zx8rd3jxpgjr4m8mxh7js7u3l33g23gcty67uq9cug4xep \
     --destination-address mn_addr_undeployed1g9nr3mvjcey7ca8shcs5d4yjndcnmczf90rhv4nju7qqqlfg4ygs0t4ngm
-docker run \
-    --rm \
-    --network host \
-    -v ./target:/out \
-    $toolkit_image \
-    get-tx-from-context \
-    --src-file /out/tx_1_2_3.mn \
-    --network undeployed \
-    --dest-file /out/tx_1_2_3.raw \
-    --from-bytes
+cat ./target/tx_1_2_3.mn | jq -r '.tx.Midnight' | xxd -r -p > ./target/tx_1_2_3.raw
 
 mv target/*.raw indexer-common/tests

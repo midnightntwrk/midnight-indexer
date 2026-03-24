@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -65,7 +65,7 @@ pub async fn run(
     // initial value is set to the maximum in case initial events are missed during startup.
     let max_transaction_id = Arc::new(AtomicU64::new(u64::MAX));
 
-    let block_indexed_task = task::spawn({
+    let mut block_indexed_task = task::spawn({
         let subscriber = subscriber.clone();
         let max_transaction_id = max_transaction_id.clone();
 
@@ -96,7 +96,7 @@ pub async fn run(
         }
     });
 
-    let index_wallets_task = {
+    let mut index_wallets_task = {
         task::spawn(async move {
             // As wallet IDs are cycled (see comment of `active_wallet_ids`), we prevent concurrent
             // processing of the same wallet by using a semaphore of one (see below) per wallet ID.
@@ -140,16 +140,26 @@ pub async fn run(
     };
 
     select! {
-        result = block_indexed_task => result
-            .context("block_indexed_task")
-            .and_then(|r| r.context("block_indexed_task failed")),
+        result = &mut block_indexed_task => {
+            let result = result
+                .context("block_indexed_task")
+                .and_then(|r| r.context("block_indexed_task failed"));
+            index_wallets_task.abort();
+            result
+        },
 
-        result = index_wallets_task => result
-            .context("index_wallets_task panicked")
-            .and_then(|r| r.context("index_wallets_task failed")),
+        result = &mut index_wallets_task => {
+            let result = result
+                .context("index_wallets_task panicked")
+                .and_then(|r| r.context("index_wallets_task failed"));
+            block_indexed_task.abort();
+            result
+        },
 
         _ = sigterm.recv() => {
             warn!("SIGTERM received");
+            block_indexed_task.abort();
+            index_wallets_task.abort();
             Ok(())
         }
     }
@@ -256,10 +266,8 @@ async fn index_wallet(
         tx.commit().await.context("commit database transaction")?;
 
         if !relevant_transactions.is_empty() {
-            let session_id = wallet.viewing_key.to_session_id();
-
             publisher
-                .publish(&WalletIndexed { session_id })
+                .publish(&WalletIndexed { wallet_id })
                 .await
                 .with_context(|| {
                     format!("publish WalletIndexed event for wallet ID {wallet_id}")

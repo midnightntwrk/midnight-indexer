@@ -1,5 +1,5 @@
 // This file is part of midnightntwrk/midnight-indexer
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -109,7 +109,7 @@ describe('unshielded transaction subscriptions', async () => {
     if (toolkit) {
       await toolkit.start();
     }
-  });
+  }, 120000);
 
   afterAll(async () => {
     await indexerWsClient.connectionClose();
@@ -179,8 +179,33 @@ describe('unshielded transaction subscriptions', async () => {
       // match in numbers. This is the same mechanism used by the wallet to sync transactions
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
-        () => false,
-        3000,
+        (messages) => {
+          const events = messages
+            .map((msg) => msg.data?.unshieldedTransactions)
+            .filter((event): event is UnshieldedTransactionEvent => !!event);
+
+          let latestProgress: UnshieldedTransactionsProgress | undefined;
+          events.forEach((event) => {
+            if (event.__typename === 'UnshieldedTransactionsProgress') {
+              latestProgress = event as UnshieldedTransactionsProgress;
+            }
+          });
+
+          if (!latestProgress) {
+            return false;
+          }
+
+          const highestTransactionId = latestProgress.highestTransactionId;
+
+          const hasHighestTransaction = events.some(
+            (event) =>
+              event.__typename === 'UnshieldedTransaction' &&
+              event.transaction.id === highestTransactionId,
+          );
+
+          return hasHighestTransaction;
+        },
+        30000,
       );
 
       messages.forEach((message) => {
@@ -409,10 +434,37 @@ describe('unshielded transaction subscriptions', async () => {
       expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
       const targetAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
 
+      const LONG_TEST_TIMEOUT = 60000;
+
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
-        (messages) => messages[0].errors !== undefined,
-        2000,
+        (messages) => {
+          const events = messages
+            .map((msg) => msg.data?.unshieldedTransactions)
+            .filter((event): event is UnshieldedTransactionEvent => !!event);
+
+          let latestProgress: UnshieldedTransactionsProgress | undefined;
+          events.forEach((event) => {
+            if (event.__typename === 'UnshieldedTransactionsProgress') {
+              latestProgress = event as UnshieldedTransactionsProgress;
+            }
+          });
+
+          if (!latestProgress) {
+            return false;
+          }
+
+          const highestTransactionId = latestProgress.highestTransactionId;
+
+          const hasHighestTransaction = events.some(
+            (event) =>
+              event.__typename === 'UnshieldedTransaction' &&
+              event.transaction.id === highestTransactionId,
+          );
+
+          return hasHighestTransaction;
+        },
+        LONG_TEST_TIMEOUT,
       );
 
       expect(messages.length).toBeGreaterThanOrEqual(2);

@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -150,7 +150,7 @@ describe('contract queries', () => {
       let existingContractAddress: string;
       let contractUpdateBlockHash: string;
       try {
-        existingContractAddress = dataProvider.getKnownContractAddress() as string;
+        existingContractAddress = dataProvider.getContractAddressForActionType('ContractUpdate');
         contractUpdateBlockHash = await dataProvider.getContractUpdateBlockHash();
       } catch (error) {
         log.warn(error);
@@ -255,7 +255,7 @@ describe('contract queries', () => {
       let existingContractAddress: string;
       let contractUpdateHeight: number;
       try {
-        existingContractAddress = dataProvider.getKnownContractAddress() as string;
+        existingContractAddress = dataProvider.getContractAddressForActionType('ContractUpdate');
         contractUpdateHeight = await dataProvider.getContractUpdateBlockHeight();
       } catch (error) {
         log.warn(error);

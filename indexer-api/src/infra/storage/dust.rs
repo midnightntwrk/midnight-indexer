@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ impl DustStorage for Storage {
             let registration_query = indoc! {"
                 SELECT dust_address, valid, utxo_tx_hash, utxo_output_index
                 FROM cnight_registrations
-                WHERE cardano_address = $1
+                WHERE cardano_stake_key = $1
                 AND removed_at IS NULL
                 ORDER BY registered_at DESC
                 LIMIT 1

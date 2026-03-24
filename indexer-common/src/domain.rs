@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ pub type BlockHash = ByteArray<32>;
 pub type IntentHash = ByteArray<32>;
 pub type Nonce = ByteArray<32>;
 pub type SessionId = ByteArray<32>;
+pub type ViewingKeyHash = ByteArray<32>;
 pub type TermsAndConditionsHash = ByteArray<32>;
 pub type TokenType = ByteArray<32>;
 pub type TransactionHash = ByteArray<32>;

@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -110,21 +110,21 @@ pub async fn make_block_details(
             Event::CNightObservation(native_token_event) => match native_token_event {
                 CnightObservationEvent::Registration(event) => {
                     dust_registration_events.push(DustRegistrationEvent::Registration {
-                        cardano_address: event.cardano_reward_address.0.into(),
+                        cardano_stake_key: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                     });
                 }
 
                 CnightObservationEvent::Deregistration(event) => {
                     dust_registration_events.push(DustRegistrationEvent::Deregistration {
-                        cardano_address: event.cardano_reward_address.0.into(),
+                        cardano_stake_key: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                     });
                 }
 
                 CnightObservationEvent::MappingAdded(event) => {
                     dust_registration_events.push(DustRegistrationEvent::MappingAdded {
-                        cardano_address: event.cardano_reward_address.0.into(),
+                        cardano_stake_key: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                         utxo_id: event.utxo_tx_hash.0.as_ref().into(),
                         utxo_index: event.utxo_index.into(),
@@ -133,7 +133,7 @@ pub async fn make_block_details(
 
                 CnightObservationEvent::MappingRemoved(event) => {
                     dust_registration_events.push(DustRegistrationEvent::MappingRemoved {
-                        cardano_address: event.cardano_reward_address.0.into(),
+                        cardano_stake_key: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                         utxo_id: event.utxo_tx_hash.0.as_ref().into(),
                         utxo_index: event.utxo_index.into(),
@@ -285,18 +285,18 @@ pub async fn fetch_genesis_cnight_registrations(
             // A registration is valid only if there is exactly one mapping entry.
             let events = if kv.value.len() == 1 {
                 let entry = &kv.value[0];
-                let cardano_address = entry.cardano_reward_address.0.into();
+                let cardano_stake_key = entry.cardano_reward_address.0.into();
                 let dust_address = DustPublicKey::from(entry.dust_public_key.0.0.clone());
                 let utxo_id = entry.utxo_tx_hash.0.as_ref().into();
                 let utxo_index = entry.utxo_index.into();
 
                 vec![
                     DustRegistrationEvent::Registration {
-                        cardano_address,
+                        cardano_stake_key,
                         dust_address: dust_address.clone(),
                     },
                     DustRegistrationEvent::MappingAdded {
-                        cardano_address,
+                        cardano_stake_key,
                         dust_address,
                         utxo_id,
                         utxo_index,

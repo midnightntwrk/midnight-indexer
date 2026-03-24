@@ -1,5 +1,5 @@
 // This file is part of midnightntwrk/midnight-indexer
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -52,6 +52,8 @@ export interface Block {
   height: number;
   timestamp: string;
   protocolVersion: number;
+  author: string | null;
+  ledgerParameters: string;
   parent: Block;
   transactions: Transaction[];
 }
@@ -233,31 +235,31 @@ export interface ZswapLedgerEvent {
 
 export type DustLedgerEvent =
   | {
-      __typename: 'ParamChange';
-      id: number;
-      raw: string;
-      maxId: number;
-    }
+    __typename: 'ParamChange';
+    id: number;
+    raw: string;
+    maxId: number;
+  }
   | {
-      __typename: 'DustInitialUtxo';
-      id: number;
-      raw: string;
-      maxId: number;
-      output: {
-        nonce: string;
-      };
-    }
-  | {
-      __typename: 'DustGenerationDtimeUpdate';
-      id: number;
-      raw: string;
-      maxId: number;
-    }
-  | {
-      __typename: 'DustSpendProcessed';
-      id: number;
-      raw: string;
-      maxId: number;
+    __typename: 'DustInitialUtxo';
+    id: number;
+    raw: string;
+    maxId: number;
+    output: {
+      nonce: string;
     };
+  }
+  | {
+    __typename: 'DustGenerationDtimeUpdate';
+    id: number;
+    raw: string;
+    maxId: number;
+  }
+  | {
+    __typename: 'DustSpendProcessed';
+    id: number;
+    raw: string;
+    maxId: number;
+  };
 
 export type ViewingKey = string & { __brand: 'ViewingKey' };

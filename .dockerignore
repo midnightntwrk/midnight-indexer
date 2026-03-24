@@ -1,12 +1,15 @@
 # From .gitignore.
+*.check
 .DS_Store
 .envrc.local
 .idea
 .sync_cache
 .vscode
-*.check
+.zed
 target
 
 # Additional files.
 .git
 .github
+.node/**/chain
+qa

@@ -4,6 +4,96 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0] - 2026-03-17
+
+## [4.0.0-rc.10] - 2026-03-16
+
+### 🐛 Bug Fixes
+
+- Flush pending inserts before delete/root-count to preserve batch_update ordering (#904)
+
+## [4.0.0-rc.9] - 2026-03-16
+
+### 🚜 Refactor
+
+- Rename cardano_address DB column to cardano_stake_key for clarity (#902)
+
+## [4.0.0-rc.8] - 2026-03-16
+
+### 🚜 Refactor
+
+- Batch ledger_db_nodes inserts to reduce SQL roundtrips (#892)
+
+## [4.0.0-rc.7] - 2026-03-13
+
+### 🚜 Refactor
+
+- Replace window function with scalar subquery in ledger events query (#890)
+
+## [4.0.0-rc.6] - 2026-03-12
+
+## [4.0.0-rc.5] - 2026-03-06
+
+### 🐛 Bug Fixes
+
+- Use lazy loading for ledger state deserialization to avoid recursion depth limit (#871)
+
+## [4.0.0-rc.4] - 2026-03-04
+
+### 🚀 Features
+
+- Use storage-core v1.1 with layout v2 (#861)
+
+### ⚙️ Miscellaneous Tasks
+
+- Drop year from copyright notices (#848)
+
+## [4.0.0-rc.3] - 2026-03-02
+
+### 🐛 Bug Fixes
+
+- Prevent processes from hanging on termination (#844)
+
+### 📚 Documentation
+
+- Update copyright year (#845)
+
+## [4.0.0-rc.2] - 2026-02-26
+
+### 🚀 Features
+
+- Add User-Agent header to subxt RPC client (#826)
+
+### 🐛 Bug Fixes
+
+- *(indexer-api)* Replace deterministic session ID with random per-session token (#807)
+
+### ⚙️ Miscellaneous Tasks
+
+- Make some magic numbers configurable (#817)
+
+## [4.0.0-rc.1] - 2026-02-20
+
+### 🚀 Features
+
+- *(indexer-api)* /api/v3 alias for /api/v4 for backwards compatibility (#815)
+
+### 🐛 Bug Fixes
+
+- Prevent standalone pub-sub from busy spinning (#792)
+- Use InitialNonce instead of HashOutput for night_utxo_hash in dtime update (#795)
+- *(chain-indexer)* Fold system parameters update into save_block transaction (#793)
+- *(chain-indexer)* Check all spent UTXOs are updated in save_spent_unshielded_utxos (#799)
+
+### 🚜 Refactor
+
+- Make protocol version an enum (#800)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(chain-indexer)* Replace panic with result in storage impl (#791)
+- Update debian trixie-slim base image to resolve CVE-2025-15467 (#801)
+
 ## [4.0.0-alpha.1] - 2026-02-16
 
 ### 🚀 Features
@@ -29,7 +119,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - *(chain-indexer)* Less verbose debug level logging (#779)
 - Remove obsolete schema-v3.graphql (#789)
 
-## [3.1.0-rc.1] - 2026-02-06
+## [3.1.0] - 2026-02-24
 
 ### 🚀 Features
 
@@ -49,7 +139,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### ⚙️ Miscellaneous Tasks
 
 - *(indexer-api)* Include ledger parameters in block query (#745)
+- Use pre-built GHCR image for spo-indexer in docker-compose and remove unused NATS dependency (#752)
 - Add spo-indexer docs, clean up unused NATS config and misleading blockfrost placeholder (#754)
+- Update debian trixie-slim base image to resolve CVE-2025-15467 (#801)
 
 ## [3.0.0] - 2026-01-28
 

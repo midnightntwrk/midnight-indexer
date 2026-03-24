@@ -1,5 +1,5 @@
 // This file is part of midnight-indexer.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -22,8 +22,11 @@ use midnight_storage_core::{
     backend::OnDiskObject,
     db::{DB, DummyArbitrary, Update},
 };
+use sqlx::QueryBuilder;
 use std::{collections::HashMap, future::ready};
 use tokio::{runtime::Handle, task::block_in_place};
+
+const BATCH_INSERT_SIZE: usize = 1_000;
 
 #[cfg(feature = "cloud")]
 type SqlxTransaction = sqlx::Transaction<'static, sqlx::Postgres>;
@@ -78,30 +81,6 @@ impl DB for LedgerDb {
         })
     }
 
-    fn get_unreachable_keys(&self) -> Vec<ArenaHash<Self::Hasher>> {
-        block_in_place(|| {
-            Handle::current().block_on(async {
-                let query = indoc! {"
-                    SELECT key
-                    FROM ledger_db_nodes
-                    WHERE key NOT IN (SELECT key FROM ledger_db_roots)
-                    AND ref_count = 0
-                "};
-
-                sqlx::query_as::<_, (Vec<u8>,)>(query)
-                    .fetch(&*self.pool)
-                    .and_then(|(key,)| {
-                        let key = ArenaHash::<Self::Hasher>::deserialize(&mut key.as_slice(), 0)
-                            .map_err(|error| sqlx::Error::Decode(error.into()));
-                        ready(key)
-                    })
-                    .try_collect::<Vec<_>>()
-                    .await
-                    .unwrap_or_panic("cannot get unreachable keys")
-            })
-        })
-    }
-
     fn insert_node(&mut self, key: ArenaHash<Self::Hasher>, object: OnDiskObject<Self::Hasher>) {
         block_in_place(|| {
             Handle::current().block_on(async {
@@ -111,7 +90,29 @@ impl DB for LedgerDb {
                     .await
                     .unwrap_or_panic("begin transaction for insert node");
 
-                insert_node(&mut tx, key, object).await;
+                let mut ser_object = Vec::with_capacity(object.serialized_size());
+                Serializable::serialize(&object, &mut ser_object)
+                    .unwrap_or_panic("cannot serialize object");
+
+                let query = indoc! {"
+                    INSERT INTO ledger_db_nodes (
+                        key,
+                        object
+                    )
+                    VALUES (
+                        $1,
+                        $2
+                    )
+                    ON CONFLICT (key) DO UPDATE
+                    SET object = EXCLUDED.object
+                "};
+
+                sqlx::query(query)
+                    .bind(key.0.as_slice())
+                    .bind(ser_object.as_slice())
+                    .execute(&mut *tx)
+                    .await
+                    .unwrap_or_panic("cannot insert node");
 
                 tx.commit()
                     .await
@@ -150,13 +151,23 @@ impl DB for LedgerDb {
                     .await
                     .unwrap_or_panic("begin transaction for batch update");
 
+                let mut inserts = Vec::new();
+
                 for (key, update) in updates {
                     match update {
-                        Update::InsertNode(object) => insert_node(&mut tx, key, object).await,
-                        Update::DeleteNode => delete_node(&mut tx, &key).await,
-                        Update::SetRootCount(count) => set_root_count(&mut tx, key, count).await,
+                        Update::InsertNode(object) => inserts.push((key, object)),
+                        Update::DeleteNode => {
+                            flush_inserts(&mut tx, &mut inserts).await;
+                            delete_node(&mut tx, &key).await;
+                        }
+                        Update::SetRootCount(count) => {
+                            flush_inserts(&mut tx, &mut inserts).await;
+                            set_root_count(&mut tx, key, count).await;
+                        }
                     }
                 }
+
+                flush_inserts(&mut tx, &mut inserts).await;
 
                 tx.commit()
                     .await
@@ -366,37 +377,32 @@ where
     }
 }
 
-async fn insert_node<H>(tx: &mut SqlxTransaction, key: ArenaHash<H>, object: OnDiskObject<H>)
-where
+async fn flush_inserts<H>(
+    tx: &mut SqlxTransaction,
+    inserts: &mut Vec<(ArenaHash<H>, OnDiskObject<H>)>,
+) where
     H: WellBehavedHasher,
 {
-    let mut ser_object = Vec::with_capacity(object.serialized_size());
-    Serializable::serialize(&object, &mut ser_object).unwrap_or_panic("cannot serialize object");
+    if inserts.is_empty() {
+        return;
+    }
 
-    let query = indoc! {"
-        INSERT INTO ledger_db_nodes (
-            key,
-            object,
-            ref_count
-        )
-        VALUES (
-            $1,
-            $2,
-            $3
-        )
-        ON CONFLICT (key) DO UPDATE
-        SET
-            object = EXCLUDED.object,
-            ref_count = EXCLUDED.ref_count
-    "};
+    for chunk in inserts.chunks(BATCH_INSERT_SIZE) {
+        QueryBuilder::new("INSERT INTO ledger_db_nodes (key, object) ")
+            .push_values(chunk, |mut q, (key, object)| {
+                let mut ser_object = Vec::with_capacity(object.serialized_size());
+                Serializable::serialize(object, &mut ser_object)
+                    .unwrap_or_panic("cannot serialize object");
+                q.push_bind(key.0.as_slice()).push_bind(ser_object);
+            })
+            .push(" ON CONFLICT (key) DO UPDATE SET object = EXCLUDED.object")
+            .build()
+            .execute(&mut **tx)
+            .await
+            .unwrap_or_panic("cannot batch insert nodes");
+    }
 
-    sqlx::query(query)
-        .bind(key.0.as_slice())
-        .bind(ser_object.as_slice())
-        .bind(object.ref_count as i64)
-        .execute(&mut **tx)
-        .await
-        .unwrap_or_panic("cannot insert node");
+    inserts.clear();
 }
 
 async fn delete_node<H>(tx: &mut SqlxTransaction, key: &ArenaHash<H>)

@@ -17,6 +17,7 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 [dependencies]
 anyhow             = { workspace = true }
 async-stream       = { workspace = true }
+byte-unit-serde    = { workspace = true }
 const-hex          = { workspace = true }
 derive_more        = { workspace = true, features = [ "from" ] }
 fastrace           = { workspace = true, features = [ "enable" ] }
@@ -25,6 +26,7 @@ humantime-serde    = { workspace = true }
 indexer-common     = { path = "../indexer-common" }
 indoc              = { workspace = true }
 itertools          = { workspace = true }
+http               = { workspace = true }
 log                = { workspace = true, features = [ "kv_std" ] }
 metrics            = { workspace = true }
 parity-scale-codec = { workspace = true }
