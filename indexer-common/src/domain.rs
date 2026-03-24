@@ -124,6 +124,30 @@ mod network_id_tests {
     }
 }
 
+/// A timestamp in milliseconds since the Unix epoch (Substrate Timestamp pallet convention).
+/// Use when working with values from the `blocks.timestamp` column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimestampMs(pub u64);
+
+/// A timestamp in seconds since the Unix epoch (ledger convention).
+/// Use when working with values from `dust_generation_info.ctime`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimestampSecs(pub u64);
+
+impl TimestampSecs {
+    /// Convert to milliseconds.
+    pub fn to_ms(self) -> TimestampMs {
+        TimestampMs(self.0 * 1000)
+    }
+}
+
+impl TimestampMs {
+    /// Calculate elapsed seconds since an earlier timestamp.
+    pub fn elapsed_seconds_since(self, earlier: TimestampMs) -> u64 {
+        self.0.saturating_sub(earlier.0) / 1000
+    }
+}
+
 /// The outcome of applying a regular transaction to the ledger state along with extracted data.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ApplyRegularTransactionOutcome {
