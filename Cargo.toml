@@ -78,7 +78,7 @@ secrecy                     = { version = "0.10" }
 serde                       = { version = "1.0" }
 serde_json                  = { version = "1.0" }
 serde_with                  = { version = "3.18" }
-sha2                        = { version = "0.10" }
+sha2                        = { version = "0.11" }
 sqlx                        = { version = "0.8" }
 stream-cancel               = { version = "0.8" }
 subxt                       = { version = "0.50" }
