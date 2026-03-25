@@ -153,11 +153,9 @@ services:
       POSTGRES_PASSWORD: $APP__INFRA__STORAGE__PASSWORD
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U indexer"]
-      start_interval: "2s"
-      start_period: "30s"
-      interval: "5s"
+      interval: "3s"
       timeout: "2s"
-      retries: 5
+      retries: 20
     security_opt:
       - no-new-privileges:true
 
