@@ -157,7 +157,7 @@ services:
       start_period: "30s"
       interval: "5s"
       timeout: "2s"
-      retries: 2
+      retries: 5
     security_opt:
       - no-new-privileges:true
 
