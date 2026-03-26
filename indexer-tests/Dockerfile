@@ -16,7 +16,7 @@ RUN cargo build -p indexer-tests --locked --profile $PROFILE && \
     mkdir -p /runtime/usr/local/bin && \
     mv "./target/${PROFILE/dev/debug}/indexer-tests" /runtime/usr/local/bin
 
-FROM debian:trixie-slim@sha256:66b37a5078a77098bfc80175fb5eb881a3196809242fd295b25502854e12cbec AS runtime
+FROM debian:trixie-slim@sha256:26f98ccd92fd0a44d6928ce8ff8f4921b4d2f535bfa07555ee5d18f61429cf0c AS runtime
 RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
     mkdir /var/run/indexer-tests && \
