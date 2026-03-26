@@ -112,7 +112,7 @@ jobs:
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache,mode=max
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache-${{ env.PROFILE }},mode=max
 
-  docker-compose-test:
+  docker-compose-validation:
     name: Docker Compose Validation
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -129,23 +129,16 @@ jobs:
           docker version
           docker compose version
 
-      - name: Set toolchain
+      - name: Set up environment
         run: |
-          toolchain=$(grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/')
-          echo "RUST_VERSION=$toolchain" | tee -a "$GITHUB_ENV"
+          version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
+          echo "VERSION=$version" | tee -a "$GITHUB_ENV"
 
       - name: Validate Docker Compose syntax
         run: |
           echo "Validating Docker Compose syntax for ${{ matrix.profile }} profile..."
           docker compose --profile ${{ matrix.profile }} config --quiet
           echo "Docker Compose syntax validation completed successfully"
-
-      - name: Store indexer version
-        env:
-          toolchain_toml: "rust-toolchain.toml"
-        run: |
-          version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
-          echo "version=$version" | tee -a "$GITHUB_ENV"
 
       - name: Login to GHCR
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
@@ -160,7 +153,6 @@ jobs:
         env:
           DOCKER_METADATA_SHORT_SHA_LENGTH: 8
         with:
-          # Note version is set above in Set up environment
           tags: |
             type=semver,pattern={{version}}
             ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
