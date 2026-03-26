@@ -49,9 +49,9 @@ jobs:
           toolchain_toml: "rust-toolchain.toml"
         run: |
           toolchain=$(grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/')
-          echo "toolchain=$toolchain" | tee -a "$GITHUB_ENV"
+          echo "TOOLCHAIN=$toolchain" | tee -a "$GITHUB_ENV"
           version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
-          echo "version=$version" | tee -a "$GITHUB_ENV"
+          echo "VERSION=$version" | tee -a "$GITHUB_ENV"
 
       - name: Login to DockerHub
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
@@ -77,7 +77,7 @@ jobs:
             ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.name) || '' }}
           tags: |
             type=semver,pattern={{version}}
-            ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.version) || '' }}
+            ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
           labels: |
             org.opencontainers.image.source=https://github.com/midnightntwrk/midnight-indexer/
             org.opencontainers.image.title=${{ matrix.name }}
@@ -93,16 +93,24 @@ jobs:
 
       - name: Build and push Docker Image
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        env:
+          PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'dev' }}
         with:
           context: .
           file: ./${{ matrix.name }}/Dockerfile
           push: true
-          build-args: RUST_VERSION=${{ env.toolchain }}
+          build-args: |
+            PROFILE=${{ env.PROFILE }}
+            RUST_VERSION=${{ env.TOOLCHAIN }}
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache
-          cache-to: type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache,mode=max
+          cache-from: |
+            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache
+            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache-${{ env.PROFILE }}
+          cache-to: |
+            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache,mode=max
+            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache-${{ env.PROFILE }},mode=max
 
   docker-compose-test:
     name: Docker Compose Validation
@@ -155,7 +163,7 @@ jobs:
           # Note version is set above in Set up environment
           tags: |
             type=semver,pattern={{version}}
-            ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.version) || '' }}
+            ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
 
       - name: Set up Indexer Tag to target
         run: |
