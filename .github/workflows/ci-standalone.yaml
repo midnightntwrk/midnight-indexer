@@ -52,11 +52,11 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
+      - name: Init Env Vars
+        uses: ./.github/actions/init-env
+
       - name: just check
         run: |
-          APP__INFRA__SECRET=$(openssl rand -hex 32)
-          export APP__INFRA__SECRET
-          git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
           rustup override set ${{needs.toolchain.outputs.toolchain}}
           just feature=standalone check
 
@@ -105,11 +105,11 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
+      - name: Init Env Vars
+        uses: ./.github/actions/init-env
+
       - name: just lint
         run: |
-          APP__INFRA__SECRET=$(openssl rand -hex 32)
-          export APP__INFRA__SECRET
-          git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
           rustup override set ${{needs.toolchain.outputs.toolchain}}
           just feature=standalone lint
 
@@ -147,11 +147,11 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
+      - name: Init Env Vars
+        uses: ./.github/actions/init-env
+
       - name: just test
         run: |
-          APP__INFRA__SECRET=$(openssl rand -hex 32)
-          export APP__INFRA__SECRET
-          git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
           rustup override set ${{needs.toolchain.outputs.toolchain}}
           just feature=standalone test
 
