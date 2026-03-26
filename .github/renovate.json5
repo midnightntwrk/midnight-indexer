@@ -6,5 +6,5 @@
     ":semanticCommits"
   ],
   "dependencyDashboard": true,
-  "enabled": true
+  "enabled": false
 }
