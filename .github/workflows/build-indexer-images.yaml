@@ -112,10 +112,6 @@ jobs:
     strategy:
       matrix:
         profile: [cloud, standalone]
-    env:
-      APP__INFRA__STORAGE__PASSWORD: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
-      APP__INFRA__PUB_SUB__PASSWORD: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}
-      APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -164,17 +160,17 @@ jobs:
       - name: Set up Indexer Tag to target
         run: |
           echo "Raw tags output: ${{ steps.meta.outputs.tags }}"
-          
+
           # Filter "latest" for release tags
           INDEXER_TAG=$(echo "${{ steps.meta.outputs.tags }}" | grep -v '^$' | grep -v '^latest$' | head -n1)
-          
+
           if [ -z "$INDEXER_TAG" ]; then
             echo "Failed to extract INDEXER_TAG from tags output"
             echo "Available tags:"
             echo "${{ steps.meta.outputs.tags }}"
             exit 1
           fi
-          
+
           echo "Using INDEXER_TAG=$INDEXER_TAG"
           echo "INDEXER_TAG=$INDEXER_TAG" >> "$GITHUB_ENV"
 
@@ -198,6 +194,9 @@ jobs:
           if [ "${{ github.ref_type }}" != "tag" ]; then
             echo "IMAGE_REGISTRY=ghcr.io/midnight-ntwrk" >> "$GITHUB_ENV"
           fi
+
+      - name: Init Env Vars
+        uses: ./.github/actions/init-env
 
       - name: Docker Compose Up
         run: |
