@@ -38,6 +38,7 @@ impl TransactionStorage for Storage {
         let query = indoc! {"
             SELECT
                 transactions.id,
+                transactions.block_id,
                 transactions.variant,
                 transactions.hash,
                 transactions.protocol_version,
@@ -543,6 +544,278 @@ impl TransactionStorage for Storage {
 }
 
 impl Storage {
+    pub(crate) async fn get_transactions_by_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
+        let ids = ids.iter().map(|&id| id as i64).collect::<Vec<_>>();
+
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            SELECT
+                transactions.id,
+                transactions.block_id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees,
+                regular_transactions.identifiers
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
+            WHERE transactions.id = ANY($1)
+
+            UNION ALL
+
+            SELECT
+                transactions.id,
+                transactions.block_id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                NULL AS transaction_result,
+                NULL AS merkle_tree_root,
+                NULL AS start_index,
+                NULL AS end_index,
+                NULL AS paid_fees,
+                NULL AS estimated_fees,
+                NULL AS identifiers
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE transactions.id = ANY($1)
+            AND transactions.variant = 'System'
+
+            ORDER BY id
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            SELECT
+                transactions.id,
+                transactions.block_id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
+            INNER JOIN json_each($1) as batch_ids ON transactions.id = batch_ids.value
+
+            UNION ALL
+
+            SELECT
+                transactions.id,
+                transactions.block_id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                NULL AS transaction_result,
+                NULL AS merkle_tree_root,
+                NULL AS start_index,
+                NULL AS end_index,
+                NULL AS paid_fees,
+                NULL AS estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN json_each($1) as batch_ids ON transactions.id = batch_ids.value
+            WHERE transactions.variant = 'System'
+
+            ORDER BY id
+        "};
+
+        #[cfg_attr(feature = "cloud", allow(unused_mut))]
+        let mut transactions = {
+            #[cfg(feature = "cloud")]
+            {
+                sqlx::query(query)
+                    .bind(ids)
+                    .fetch(&*self.pool)
+                    .map_ok(make_transaction)
+                    .map(|result| result.flatten())
+                    .try_collect::<Vec<_>>()
+                    .await?
+            }
+
+            #[cfg(feature = "standalone")]
+            {
+                let ids_json = serde_json::to_string(&ids)
+                    .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+                sqlx::query(query)
+                    .bind(ids_json)
+                    .fetch(&*self.pool)
+                    .map_ok(make_transaction)
+                    .map(|result| result.flatten())
+                    .try_collect::<Vec<_>>()
+                    .await?
+            }
+        };
+
+        #[cfg(feature = "standalone")]
+        for transaction in transactions.iter_mut() {
+            if let Transaction::Regular(transaction) = transaction {
+                transaction.identifiers =
+                    get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+            }
+        }
+
+        Ok(transactions)
+    }
+
+    pub(crate) async fn get_transactions_by_block_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
+        let ids = ids.iter().map(|&id| id as i64).collect::<Vec<_>>();
+
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            SELECT
+                transactions.id,
+                transactions.block_id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees,
+                regular_transactions.identifiers
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
+            WHERE transactions.block_id = ANY($1)
+
+            UNION ALL
+
+            SELECT
+                transactions.id as id,
+                transactions.block_id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                NULL AS transaction_result,
+                NULL AS merkle_tree_root,
+                NULL AS start_index,
+                NULL AS end_index,
+                NULL AS paid_fees,
+                NULL AS estimated_fees,
+                NULL AS identifiers
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE transactions.block_id = ANY($1)
+            AND transactions.variant = 'System'
+
+            ORDER BY id
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            SELECT
+                transactions.id as id,
+                transactions.block_id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.merkle_tree_root,
+                regular_transactions.start_index,
+                regular_transactions.end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
+            INNER JOIN json_each($1) as batch_ids ON transactions.block_id = batch_ids.value
+
+            UNION ALL
+
+            SELECT
+                transactions.id as id,
+                transactions.block_id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                NULL AS transaction_result,
+                NULL AS merkle_tree_root,
+                NULL AS start_index,
+                NULL AS end_index,
+                NULL AS paid_fees,
+                NULL AS estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN json_each($1) as batch_ids ON transactions.block_id = batch_ids.value
+            WHERE transactions.variant = 'System'
+
+            ORDER BY id
+        "};
+
+        #[cfg_attr(feature = "cloud", allow(unused_mut))]
+        let mut transactions = {
+            #[cfg(feature = "cloud")]
+            {
+                sqlx::query(query)
+                    .bind(ids)
+                    .fetch(&*self.pool)
+                    .map_ok(make_transaction)
+                    .map(|result| result.flatten())
+                    .try_collect::<Vec<_>>()
+                    .await?
+            }
+
+            #[cfg(feature = "standalone")]
+            {
+                let ids_json = serde_json::to_string(&ids)
+                    .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+                sqlx::query(query)
+                    .bind(ids_json)
+                    .fetch(&*self.pool)
+                    .map_ok(make_transaction)
+                    .map(|result| result.flatten())
+                    .try_collect::<Vec<_>>()
+                    .await?
+            }
+        };
+
+        #[cfg(feature = "standalone")]
+        for transaction in transactions.iter_mut() {
+            if let Transaction::Regular(transaction) = transaction {
+                transaction.identifiers =
+                    get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+            }
+        }
+
+        Ok(transactions)
+    }
+
     #[trace(properties = {
         "wallet_id": "{wallet_id}",
         "index": "{index}",

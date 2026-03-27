@@ -23,7 +23,7 @@ where
 {
     /// Get a stream of ledger events for the given grouping starting at the given ID, ordered by
     /// ID.
-    async fn get_ledger_events(
+    fn get_ledger_events(
         &self,
         grouping: LedgerEventGrouping,
         id: u64,
@@ -40,7 +40,7 @@ where
 
 #[allow(unused_variables)]
 impl LedgerEventStorage for NoopStorage {
-    async fn get_ledger_events(
+    fn get_ledger_events(
         &self,
         grouping: LedgerEventGrouping,
         id: u64,
