@@ -117,9 +117,9 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use futures::StreamExt;
-    use sqlx::types::Uuid;
     use std::{error::Error as StdError, time::Duration};
     use tokio::time::sleep;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_publish_subscribe() -> Result<(), Box<dyn StdError>> {

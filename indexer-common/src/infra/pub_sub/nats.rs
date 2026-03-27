@@ -43,7 +43,6 @@ mod tests {
     };
     use anyhow::Context;
     use futures::{StreamExt, TryStreamExt};
-    use sqlx::types::Uuid;
     use std::{
         sync::{
             Arc,
@@ -53,6 +52,7 @@ mod tests {
     };
     use testcontainers::{GenericImage, ImageExt, core::WaitFor, runners::AsyncRunner};
     use tokio::{task, time::sleep};
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_publish_subscribe() -> Result<(), BoxError> {

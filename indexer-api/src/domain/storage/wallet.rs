@@ -13,7 +13,7 @@
 
 use crate::domain::storage::NoopStorage;
 use indexer_common::domain::{SessionId, ViewingKey};
-use sqlx::types::Uuid;
+use uuid::Uuid;
 
 #[trait_variant::make(Send)]
 pub trait WalletStorage
