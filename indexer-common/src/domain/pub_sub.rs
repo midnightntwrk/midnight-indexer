@@ -17,8 +17,8 @@ use crate::domain::UnshieldedAddress;
 use derive_more::derive::From;
 use futures::{Stream, stream};
 use serde::{Deserialize, Serialize};
-use sqlx::types::Uuid;
 use std::{convert::Infallible, error::Error as StdError, fmt::Debug};
+use uuid::Uuid;
 
 macro_rules! message {
     ($name:ident) => {

@@ -14,8 +14,8 @@
 use crate::domain::{RegularTransaction, Transaction, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{SerializedTransactionIdentifier, TransactionHash, UnshieldedAddress};
-use sqlx::types::Uuid;
 use std::num::NonZeroU32;
+use uuid::Uuid;
 
 #[trait_variant::make(Send)]
 pub trait TransactionStorage

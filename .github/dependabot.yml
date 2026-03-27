@@ -9,6 +9,8 @@ updates:
       all:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "fake"
 
   - package-ecosystem: "github-actions"
     directory: "/"

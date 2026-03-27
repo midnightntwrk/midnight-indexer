@@ -30,11 +30,11 @@ use futures::{
 };
 use indexer_common::domain::{Subscriber, WalletIndexed};
 use log::{debug, warn};
-use sqlx::types::Uuid;
 use std::{future::ready, marker::PhantomData, pin::pin, sync::Arc};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
+use uuid::Uuid;
 
 /// An event of the shielded transactions subscription.
 #[derive(Debug, Union)]

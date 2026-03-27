@@ -31,7 +31,7 @@ midnight-serialize          = { version = "1.0" }
 midnight-storage-core       = { version = "1.1", features = [ "layout-v2" ] }
 midnight-transient-crypto   = { version = "2.0" }
 midnight-zswap_v7           = { package = "midnight-zswap", version = "7.0.3" }
-midnight-zswap_v8           = { package = "midnight-zswap", version = "8.0.0" }
+midnight-zswap_v8           = { package = "midnight-zswap", version = "8.0.3" }
 # Other dependencies.
 anyhow                      = { version = "1.0" }
 assert_matches              = { version = "1.5" }
@@ -92,5 +92,5 @@ tokio-tungstenite           = { version = "0.29" }
 tower                       = { version = "0.5" }
 tower-http                  = { version = "0.6" }
 trait-variant               = { version = "0.1" }
-uuid                        = { version = "1.22", features = [ "serde" ] }
+uuid                        = { version = "1.23", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }

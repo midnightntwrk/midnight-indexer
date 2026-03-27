@@ -18,9 +18,9 @@ use chacha20poly1305::{
 };
 use derive_more::From;
 use sha2::{Digest, Sha256};
-use sqlx::types::Uuid;
 use std::fmt::{self, Debug, Display};
 use thiserror::Error;
+use uuid::Uuid;
 
 pub const VIEWING_KEY_LEN: usize = 32;
 
