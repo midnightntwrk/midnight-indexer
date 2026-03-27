@@ -31,7 +31,9 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install cargo-deny
-        run: cargo install cargo-deny
+        uses: taiki-e/install-action@80a23c5ba9e1100fd8b777106e810018ed662a7b # v2.69.12
+        with:
+          tool: cargo-deny
 
       # Skip for fork PRs (no secrets available)
       - name: Add github.com credentials to netrc
