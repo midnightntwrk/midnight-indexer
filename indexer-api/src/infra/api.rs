@@ -30,7 +30,6 @@ use indexer_common::{
     error::StdErrorExt,
 };
 use log::{error, info, warn};
-use metrics::{Gauge, gauge};
 use serde::Deserialize;
 use std::{
     convert::Infallible,
@@ -193,21 +192,6 @@ pub enum AxumApiError {
     Serve(#[source] io::Error),
 }
 
-/// API related metrics.
-struct Metrics {
-    /// Number of currently connected wallets via the wallet subscription. Incremented when a
-    /// wallet subscription starts, decremented when it ends.
-    wallets_connected: Gauge,
-}
-
-impl Default for Metrics {
-    fn default() -> Self {
-        Self {
-            wallets_connected: gauge!("indexer_wallets_connected"),
-        }
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn make_app<S, B>(
     caught_up: Arc<AtomicBool>,
@@ -325,8 +309,6 @@ trait ContextExt {
 
     fn get_ledger_state_cache(&self) -> &LedgerStateCache;
 
-    fn get_metrics(&self) -> &Metrics;
-
     fn get_subscription_config(&self) -> &SubscriptionConfig;
 }
 
@@ -353,11 +335,6 @@ impl ContextExt for Context<'_> {
     fn get_ledger_state_cache(&self) -> &LedgerStateCache {
         self.data::<LedgerStateCache>()
             .expect("LedgerStateCache is stored in Context")
-    }
-
-    fn get_metrics(&self) -> &Metrics {
-        self.data::<Metrics>()
-            .expect("Metrics is stored in Context")
     }
 
     fn get_subscription_config(&self) -> &SubscriptionConfig {

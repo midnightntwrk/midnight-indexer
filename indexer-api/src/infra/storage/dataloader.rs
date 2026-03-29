@@ -38,7 +38,7 @@ impl Loader<BlockHash> for BlockByHashLoader {
     ) -> Result<HashMap<BlockHash, Block>, Arc<sqlx::Error>> {
         self.0
             .get_blocks_by_hashes(keys)
-            .map_ok(|block| (block.hash.clone(), block))
+            .map_ok(|block| (block.hash, block))
             .try_collect()
             .await
             .map_err(Arc::new)

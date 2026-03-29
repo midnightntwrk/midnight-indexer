@@ -34,5 +34,5 @@ pub struct Config {
     #[serde(rename = "api")]
     pub api_config: api::Config,
 
-    pub secret: secrecy::SecretString,
+    pub secret: String,
 }

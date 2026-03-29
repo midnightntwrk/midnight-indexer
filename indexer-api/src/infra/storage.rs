@@ -27,21 +27,29 @@ use crate::domain;
 use chacha20poly1305::ChaCha20Poly1305;
 
 #[cfg(feature = "cloud")]
-type Pool = indexer_common::infra::pool::postgres::PostgresPool;
-
-#[cfg(all(feature = "standalone", not(feature = "cloud")))]
-type Pool = indexer_common::infra::pool::sqlite::SqlitePool;
+use indexer_common::infra::pool::postgres::PostgresPool;
+#[cfg(feature = "standalone")]
+use indexer_common::infra::pool::sqlite::SqlitePool;
 
 /// Unified storage implementation for PostgreSQL (cloud) and SQLite (standalone). Uses Cargo
 /// features to select the appropriate database backend at build time.
 #[derive(Clone)]
 pub struct Storage {
     cipher: ChaCha20Poly1305,
-    pool: Pool,
+    #[cfg(feature = "cloud")]
+    pool: PostgresPool,
+    #[cfg(feature = "standalone")]
+    pool: SqlitePool,
 }
 
 impl Storage {
-    pub fn new(cipher: ChaCha20Poly1305, pool: Pool) -> Self {
+    #[cfg(feature = "cloud")]
+    pub fn new(cipher: ChaCha20Poly1305, pool: PostgresPool) -> Self {
+        Self { cipher, pool }
+    }
+
+    #[cfg(feature = "standalone")]
+    pub fn new(cipher: ChaCha20Poly1305, pool: SqlitePool) -> Self {
         Self { cipher, pool }
     }
 }

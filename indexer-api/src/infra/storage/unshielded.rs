@@ -147,6 +147,7 @@ impl UnshieldedUtxoStorage for Storage {
         Ok(utxos)
     }
 
+    #[trace(properties = { "address": "{address}", "transaction_id": "{transaction_id}" })]
     async fn get_unshielded_utxos_by_address_spent_by_transaction(
         &self,
         address: UnshieldedAddress,

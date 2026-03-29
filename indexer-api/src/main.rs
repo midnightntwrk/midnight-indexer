@@ -92,7 +92,7 @@ fn run() -> anyhow::Result<()> {
                 .context("run Postgres migrations")?;
         }
 
-        let cipher = make_cipher(secret).context("make cipher")?;
+        let cipher = make_cipher(secret.into()).context("make cipher")?;
         let storage = infra::storage::Storage::new(cipher, pool.clone());
 
         ledger_db::init(ledger_db_config, pool);

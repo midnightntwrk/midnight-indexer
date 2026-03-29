@@ -35,10 +35,7 @@ humantime-serde    = { workspace = true }
 indexer-common     = { path = "../indexer-common" }
 indoc              = { workspace = true }
 log                = { workspace = true, features = [ "kv" ] }
-metrics            = { workspace = true }
-secrecy            = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
-serde_json         = { workspace = true }
 sqlx               = { workspace = true, features = [ "time" ] }
 stream-cancel      = { workspace = true }
 thiserror          = { workspace = true }

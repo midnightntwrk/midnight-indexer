@@ -114,43 +114,42 @@ impl BlockStorage for Storage {
 impl Storage {
     #[trace(properties = { "hashes": "{hashes:?}" })]
     pub fn get_blocks_by_hashes<'a>(
-        &self,
+        &'a self,
         hashes: &'a [BlockHash],
     ) -> impl Stream<Item = Result<Block, sqlx::Error>> + Send + 'a {
-        let pool = self.pool.clone();
+        let mut query_builder = sqlx::QueryBuilder::new(indoc! {"
+            SELECT
+                id,
+                hash,
+                height,
+                protocol_version,
+                parent_hash,
+                author,
+                timestamp,
+                ledger_parameters
+            FROM blocks
+            WHERE hash
+        "});
+
+        #[cfg(feature = "cloud")]
+        {
+            query_builder.push(" = ANY(");
+            query_builder.push_bind(hashes.iter().map(|h| h.as_ref()).collect::<Vec<_>>());
+        }
+
+        #[cfg(feature = "standalone")]
+        {
+            query_builder.push(" IN (");
+            let mut separated = query_builder.separated(", ");
+            for hash in hashes {
+                separated.push_bind(hash.as_ref().to_vec());
+            }
+        }
+
+        query_builder.push(")");
+
         try_stream! {
-            let mut query_builder = sqlx::QueryBuilder::new(indoc! {"
-                SELECT
-                    id,
-                    hash,
-                    height,
-                    protocol_version,
-                    parent_hash,
-                    author,
-                    timestamp,
-                    ledger_parameters
-                FROM blocks
-                WHERE hash
-            "});
-
-            #[cfg(feature = "cloud")]
-            {
-                query_builder.push(" = ANY(");
-                query_builder.push_bind(hashes.iter().map(|h| h.as_ref()).collect::<Vec<_>>());
-                query_builder.push(")");
-            }
-
-            #[cfg(feature = "standalone")]
-            {
-                query_builder.push(" IN (");
-                let mut separated = query_builder.separated(", ");
-                for hash in hashes {
-                    separated.push_bind(hash.as_ref().to_vec());
-                }
-                query_builder.push(")");
-            }
-
-            let mut stream = query_builder.build_query_as::<Block>().fetch(&*pool);
+            let mut stream = query_builder.build_query_as::<Block>().fetch(&*self.pool);
             while let Some(block) = stream.try_next().await? {
                 yield block;
             }
@@ -159,43 +158,42 @@ impl Storage {
 
     #[trace(properties = { "heights": "{heights:?}" })]
     pub fn get_blocks_by_heights<'a>(
-        &self,
+        &'a self,
         heights: &'a [u32],
     ) -> impl Stream<Item = Result<Block, sqlx::Error>> + Send + 'a {
-        let pool = self.pool.clone();
+        let mut query_builder = sqlx::QueryBuilder::new(indoc! {"
+            SELECT
+                id,
+                hash,
+                height,
+                protocol_version,
+                parent_hash,
+                author,
+                timestamp,
+                ledger_parameters
+            FROM blocks
+            WHERE height
+        "});
+
+        #[cfg(feature = "cloud")]
+        {
+            query_builder.push(" = ANY(");
+            query_builder.push_bind(heights.iter().map(|&h| h as i64).collect::<Vec<_>>());
+        }
+
+        #[cfg(feature = "standalone")]
+        {
+            query_builder.push(" IN (");
+            let mut separated = query_builder.separated(", ");
+            for height in heights {
+                separated.push_bind(*height as i64);
+            }
+        }
+
+        query_builder.push(")");
+
         try_stream! {
-            let mut query_builder = sqlx::QueryBuilder::new(indoc! {"
-                SELECT
-                    id,
-                    hash,
-                    height,
-                    protocol_version,
-                    parent_hash,
-                    author,
-                    timestamp,
-                    ledger_parameters
-                FROM blocks
-                WHERE height
-            "});
-
-            #[cfg(feature = "cloud")]
-            {
-                query_builder.push(" = ANY(");
-                query_builder.push_bind(heights.iter().map(|&h| h as i64).collect::<Vec<_>>());
-                query_builder.push(")");
-            }
-
-            #[cfg(feature = "standalone")]
-            {
-                query_builder.push(" IN (");
-                let mut separated = query_builder.separated(", ");
-                for height in heights {
-                    separated.push_bind(*height as i64);
-                }
-                query_builder.push(")");
-            }
-
-            let mut stream = query_builder.build_query_as::<Block>().fetch(&*pool);
+            let mut stream = query_builder.build_query_as::<Block>().fetch(&*self.pool);
             while let Some(block) = stream.try_next().await? {
                 yield block;
             }

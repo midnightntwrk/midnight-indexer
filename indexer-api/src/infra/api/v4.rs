@@ -30,7 +30,7 @@ use crate::{
         storage::{NoopStorage, Storage},
     },
     infra::api::{
-        ApiResult, Metrics, OptionExt, ResultExt, SubscriptionConfig,
+        ApiResult, OptionExt, ResultExt, SubscriptionConfig,
         v4::{block::BlockOffset, mutation::Mutation, query::Query, subscription::Subscription},
     },
 };
@@ -354,14 +354,11 @@ where
     S: Storage,
     B: Subscriber,
 {
-    let metrics = Metrics::default();
-
     let schema = schema_builder::<S, B>()
         .data(network_id)
         .data(ledger_state_cache)
         .data(storage)
         .data(subscriber)
-        .data(metrics)
         .data(subscription_config)
         .limit_complexity(max_complexity)
         .limit_depth(max_depth)

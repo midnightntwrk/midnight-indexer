@@ -11,14 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{
-    ContractAction, ContractAttributes, LedgerVersion, SerializedContractAddress,
-    SerializedContractState, SerializedTransactionIdentifier, TransactionHash,
-    TransactionStructure, ViewingKey,
-    ledger::{Error, SerializableExt, TransactionV7, TransactionV8},
+use crate::{
+    domain::{
+        ContractAction, ContractAttributes, LedgerVersion, SerializedContractAddress,
+        SerializedContractState, SerializedTransactionIdentifier, TransactionHash,
+        TransactionStructure, ViewingKey,
+        ledger::{Error, SerializableExt, TransactionV7, TransactionV8},
+    },
+    infra::ledger_db::v1_1,
 };
-#[cfg(any(feature = "cloud", feature = "standalone"))]
-use crate::infra::ledger_db::v1_1;
 
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};

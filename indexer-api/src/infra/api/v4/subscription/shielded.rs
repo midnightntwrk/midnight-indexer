@@ -141,8 +141,6 @@ where
         index: Option<u64>,
     ) -> Result<impl Stream<Item = ApiResult<ShieldedTransactionsEvent<S>>> + use<'a, S, B>, ApiError>
     {
-        cx.get_metrics().wallets_connected.increment(1);
-
         let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
         let wallet_id = cx
@@ -192,7 +190,6 @@ where
         let events = stream::select(events.map_ok(Some), keep_wallet_active.map_ok(|_| None))
             .try_filter_map(ok)
             .on_drop(move || {
-                cx.get_metrics().wallets_connected.decrement(1);
                 debug!(wallet_id:%; "shielded transaction subscription ended");
             });
 
