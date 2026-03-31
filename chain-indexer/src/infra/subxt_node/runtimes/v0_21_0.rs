@@ -219,7 +219,7 @@ pub async fn get_zswap_state_root(block: &OnlineClientAtBlock) -> Result<Vec<u8>
     let root = block.runtime_apis().call(&get_zswap_state_root).await;
 
     let root = match root {
-        // Retry with online clinet at parent block if codegen is incompatible which can happen for
+        // Retry with online client at parent block if codegen is incompatible which can happen for
         // runtime updates, because subxt uses next metadata whereas Node uses previous metadata.
         Err(RuntimeApiError::IncompatibleCodegen) => {
             let parent_hash = block
