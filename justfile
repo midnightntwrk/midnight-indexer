@@ -123,6 +123,7 @@ run-indexer-standalone node="ws://localhost:9944" network_id="undeployed":
         APP__APPLICATION__NETWORK_ID={{network_id}} \
         APP__INFRA__NODE__URL={{node}} \
         APP__INFRA__STORAGE__CNN_URL=target/data/indexer.sqlite \
+        APP__INFRA__LEDGER_DB__CNN_URL=target/data/ledger-db.sqlite \
         cargo run -p indexer-standalone --features standalone
 
 update-node: generate-node-data get-node-metadata
