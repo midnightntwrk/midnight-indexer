@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "cloud")]
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 #[tokio::main]
 async fn main() {
     use indexer_common::telemetry;
@@ -33,7 +33,7 @@ async fn main() {
     }
 }
 
-#[cfg(feature = "cloud")]
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 async fn run() -> anyhow::Result<()> {
     use anyhow::Context;
     use indexer_common::{
@@ -73,20 +73,36 @@ async fn run() -> anyhow::Result<()> {
         .await
         .context("create SPOClient")?;
 
-    let pool = pool::postgres::PostgresPool::new(infra_config.storage_config)
-        .await
-        .context("create DB pool for Postgres")?;
-    if run_migrations {
-        migrations::postgres::run(&pool)
+    #[cfg(feature = "cloud")]
+    let storage = {
+        let pool = pool::postgres::PostgresPool::new(infra_config.storage_config)
             .await
-            .context("run Postgres migrations")?;
-    }
-    let storage = infra::storage::Storage::new(pool);
+            .context("create DB pool for Postgres")?;
+        if run_migrations {
+            migrations::postgres::run(&pool)
+                .await
+                .context("run Postgres migrations")?;
+        }
+        infra::storage::Storage::new(pool)
+    };
+
+    #[cfg(feature = "standalone")]
+    let storage = {
+        let pool = pool::sqlite::SqlitePool::new(infra_config.storage_config)
+            .await
+            .context("create DB pool for Sqlite")?;
+        if run_migrations {
+            migrations::sqlite::run(&pool)
+                .await
+                .context("run Sqlite migrations")?;
+        }
+        infra::storage::Storage::new(pool)
+    };
 
     application::run(application_config, node, storage, sigterm).await
 }
 
-#[cfg(not(feature = "cloud"))]
+#[cfg(not(any(feature = "cloud", feature = "standalone")))]
 fn main() {
     unimplemented!()
 }

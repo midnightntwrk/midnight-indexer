@@ -43,6 +43,25 @@ pub struct ApplicationConfig {
     pub transaction_batch_size: NonZeroUsize,
     #[serde(default = "concurrency_limit_default")]
     pub concurrency_limit: NonZeroUsize,
+    #[serde(default)]
+    pub spo: SpoApplicationConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpoApplicationConfig {
+    #[serde(default = "spo_interval_default")]
+    pub interval: u32,
+    #[serde(default = "spo_stake_refresh_default")]
+    pub stake_refresh: spo_indexer::application::StakeRefreshConfig,
+}
+
+impl Default for SpoApplicationConfig {
+    fn default() -> Self {
+        Self {
+            interval: spo_interval_default(),
+            stake_refresh: spo_stake_refresh_default(),
+        }
+    }
 }
 
 impl From<ApplicationConfig> for chain_indexer::application::Config {
@@ -91,6 +110,15 @@ impl From<ApplicationConfig> for wallet_indexer::application::Config {
     }
 }
 
+impl From<SpoApplicationConfig> for spo_indexer::application::Config {
+    fn from(config: SpoApplicationConfig) -> Self {
+        Self {
+            interval: config.interval,
+            stake_refresh: config.stake_refresh,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct InfraConfig {
     pub run_migrations: bool,
@@ -104,12 +132,48 @@ pub struct InfraConfig {
     #[serde(rename = "node")]
     pub node_config: chain_indexer::infra::subxt_node::Config,
 
+    #[serde(rename = "spo_node", default)]
+    pub spo_node_config: Option<SpoNodeConfig>,
+
     #[serde(rename = "api")]
     pub api_config: indexer_api::infra::api::Config,
 
     pub secret: secrecy::SecretString,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpoNodeConfig {
+    pub url: String,
+    #[serde(default, alias = "blockfrostId")]
+    pub blockfrost_id: String,
+    #[serde(with = "humantime_serde")]
+    pub reconnect_max_delay: Duration,
+    pub reconnect_max_attempts: usize,
+}
+
+impl From<SpoNodeConfig> for spo_indexer::infra::spo_client::Config {
+    fn from(config: SpoNodeConfig) -> Self {
+        Self {
+            url: config.url,
+            blockfrost_id: secrecy::SecretString::from(config.blockfrost_id),
+            reconnect_max_delay: config.reconnect_max_delay,
+            reconnect_max_attempts: config.reconnect_max_attempts,
+        }
+    }
+}
+
 fn concurrency_limit_default() -> NonZeroUsize {
     NonZeroUsize::MIN
+}
+
+fn spo_interval_default() -> u32 {
+    5000
+}
+
+fn spo_stake_refresh_default() -> spo_indexer::application::StakeRefreshConfig {
+    spo_indexer::application::StakeRefreshConfig {
+        period_secs: 900,
+        page_size: 100,
+        max_rps: 2,
+    }
 }

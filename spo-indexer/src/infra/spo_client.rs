@@ -46,6 +46,7 @@ pub const SLOT_DURATION: u32 = 6000;
 pub struct Config {
     pub url: String,
 
+    #[serde(default = "empty_secret")]
     pub blockfrost_id: SecretString,
 
     #[serde(with = "humantime_serde")]
@@ -105,6 +106,10 @@ impl SPOClient {
             slots_per_epoch,
             blockfrost_id,
         })
+    }
+
+    pub fn has_blockfrost_id(&self) -> bool {
+        !self.blockfrost_id.expose_secret().is_empty()
     }
 
     pub async fn get_sidechain_status(&self) -> Result<SidechainStatusResponse, SPOClientError> {
@@ -370,4 +375,8 @@ pub enum SPOClientError {
 
     #[error("cannot create HTTP header")]
     InvalidHeaderValue(#[from] InvalidHeaderValue),
+}
+
+fn empty_secret() -> SecretString {
+    SecretString::from(String::new())
 }
