@@ -79,6 +79,7 @@ fn run() -> anyhow::Result<()> {
         storage_config,
         ledger_db_config,
         node_config,
+        spo_node_config,
         api_config,
         secret,
     } = infra_config;
@@ -111,7 +112,7 @@ fn run() -> anyhow::Result<()> {
             .context("initialize ledger db")?;
 
         let chain_indexer = task::spawn({
-            let node = SubxtNode::new(node_config)
+            let node = SubxtNode::new(node_config.clone())
                 .await
                 .context("create SubxtNode")?;
             let storage = chain_indexer::infra::storage::Storage::new(pool.clone());
@@ -124,6 +125,31 @@ fn run() -> anyhow::Result<()> {
                 node,
                 storage,
                 pub_sub.publisher(),
+                sigterm,
+            )
+        });
+
+        let spo_indexer = task::spawn({
+            let spo_node_config = spo_node_config.clone().map(Into::into).unwrap_or_else(|| {
+                spo_indexer::infra::spo_client::Config {
+                    url: node_config.url.clone(),
+                    blockfrost_id: secrecy::SecretString::from(String::new()),
+                    reconnect_max_delay: node_config.reconnect_max_delay,
+                    reconnect_max_attempts: node_config.reconnect_max_attempts,
+                }
+            });
+            let node = spo_indexer::infra::spo_client::SPOClient::new(spo_node_config)
+                .await
+                .context("create SPOClient")?;
+            let storage = spo_indexer::infra::storage::Storage::new(pool.clone());
+
+            let sigterm =
+                signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+
+            spo_indexer::application::run(
+                application_config.spo.clone().into(),
+                node,
+                storage,
                 sigterm,
             )
         });
@@ -154,6 +180,7 @@ fn run() -> anyhow::Result<()> {
 
         select! {
             result = chain_indexer => handle_exit("chain-indexer", result),
+            result = spo_indexer => handle_exit("spo-indexer", result),
             result = wallet_indexer => handle_exit("wallet-indexer", result),
             result = indexer_api => handle_exit("indexer-api", result),
         }

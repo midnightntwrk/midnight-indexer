@@ -213,7 +213,7 @@ impl domain::storage::Storage for Storage {
                 ticker = CASE WHEN EXCLUDED.ticker IS NOT NULL AND EXCLUDED.ticker <> '' THEN EXCLUDED.ticker ELSE pool_metadata_cache.ticker END,
                 homepage_url = CASE WHEN EXCLUDED.homepage_url IS NOT NULL AND EXCLUDED.homepage_url <> '' THEN EXCLUDED.homepage_url ELSE pool_metadata_cache.homepage_url END,
                 url = CASE WHEN EXCLUDED.url IS NOT NULL AND EXCLUDED.url <> '' THEN EXCLUDED.url ELSE pool_metadata_cache.url END,
-                updated_at = NOW()"
+                updated_at = CURRENT_TIMESTAMP"
         })
         .bind(&metadata.pool_id)
         .bind(&metadata.hex_id)
@@ -340,7 +340,7 @@ impl domain::storage::Storage for Storage {
             "INSERT INTO spo_stake_history (
                 pool_id, recorded_at, mainchain_epoch,
                 live_stake, active_stake, live_delegators, live_saturation, declared_pledge, live_pledge
-            ) VALUES ($1, NOW(), $2, CAST($3 AS NUMERIC), CAST($4 AS NUMERIC), $5, $6, CAST($7 AS NUMERIC), CAST($8 AS NUMERIC))"
+            ) VALUES ($1, CURRENT_TIMESTAMP, $2, CAST($3 AS NUMERIC), CAST($4 AS NUMERIC), $5, $6, CAST($7 AS NUMERIC), CAST($8 AS NUMERIC))"
         })
         .bind(pool_id)
         .bind(mainchain_epoch)
@@ -381,8 +381,8 @@ impl domain::storage::Storage for Storage {
     async fn set_stake_refresh_cursor(&self, pool_id: Option<&str>) -> Result<(), sqlx::Error> {
         sqlx::query(indoc! {
             "INSERT INTO spo_stake_refresh_state (id, last_pool_id, updated_at)
-             VALUES (TRUE, $1, NOW())
-             ON CONFLICT (id) DO UPDATE SET last_pool_id = EXCLUDED.last_pool_id, updated_at = NOW()"
+             VALUES (TRUE, $1, CURRENT_TIMESTAMP)
+             ON CONFLICT (id) DO UPDATE SET last_pool_id = EXCLUDED.last_pool_id, updated_at = CURRENT_TIMESTAMP"
         })
         .bind(pool_id)
         .execute(&*self.pool)
@@ -416,7 +416,7 @@ impl Storage {
                 live_saturation = EXCLUDED.live_saturation,
                 declared_pledge = EXCLUDED.declared_pledge,
                 live_pledge     = EXCLUDED.live_pledge,
-                updated_at      = NOW()"
+                updated_at      = CURRENT_TIMESTAMP"
         })
         .bind(pool_id)
         .bind(live_stake)
