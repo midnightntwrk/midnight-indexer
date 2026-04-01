@@ -403,8 +403,12 @@ impl TransactionStorage for Storage {
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
-            INNER JOIN transaction_identifiers ON transactions.id = transaction_identifiers.transaction_id
-            WHERE transaction_identifiers.identifier = $1
+            WHERE EXISTS (
+                SELECT 1
+                FROM transaction_identifiers
+                WHERE transaction_identifiers.transaction_id = transactions.id
+                AND transaction_identifiers.identifier = $1
+            )
             ORDER BY transactions.id
         "};
 
@@ -800,6 +804,7 @@ async fn get_identifiers_for_transaction(
         SELECT identifier
         FROM transaction_identifiers
         WHERE transaction_id = $1
+        ORDER BY id
     "};
 
     sqlx::query_as::<_, (SerializedTransactionIdentifier,)>(query)
