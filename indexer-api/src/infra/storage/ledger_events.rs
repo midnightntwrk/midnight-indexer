@@ -26,16 +26,15 @@ impl LedgerEventStorage for Storage {
     fn get_ledger_events(
         &self,
         grouping: LedgerEventGrouping,
-        id: u64,
+        mut id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<LedgerEvent, sqlx::Error>> + Send {
-        let mut next_id = id;
         let chunks = try_stream! {
             loop {
-                let ledger_events = self.get_ledger_events(grouping, next_id, batch_size).await?;
+                let ledger_events = self.get_ledger_events(grouping, id, batch_size).await?;
 
                 match ledger_events.last() {
-                    Some(ledger_event) => next_id = ledger_event.id + 1,
+                    Some(ledger_event) => id = ledger_event.id + 1,
                     None => break,
                 }
 
