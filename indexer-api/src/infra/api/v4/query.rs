@@ -16,10 +16,11 @@ use crate::{
     infra::api::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
-            CardanoNetworkId, CardanoRewardAddress, HexEncoded,
+            CardanoNetworkId, CardanoRewardAddress, HexEncodable, HexEncoded,
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
             dust::DustGenerationStatus,
+            dust_generations::DustGenerations,
             merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate,
             spo::{
                 CommitteeMember, EpochInfo, EpochPerf, FirstValidEpoch, PoolMetadata,
@@ -273,6 +274,67 @@ where
             .into_iter()
             .map(|s| (s, network_id).into())
             .collect())
+    }
+
+    /// Get all active DUST registrations and aggregated generation stats for Cardano reward
+    /// addresses.
+    #[trace]
+    async fn dust_generations(
+        &self,
+        cx: &Context<'_>,
+        cardano_reward_addresses: Vec<CardanoRewardAddress>,
+    ) -> ApiResult<Vec<DustGenerations>> {
+        (cardano_reward_addresses.len() <= 10)
+            .then_some(())
+            .some_or_client_error(|| "maximum of ten reward addresses allowed")?;
+
+        let storage = cx.get_storage::<S>();
+        let network_id = cx.get_network_id();
+        let expected_cardano_network = CardanoNetworkId::from(network_id);
+
+        let addresses = cardano_reward_addresses
+            .into_iter()
+            .map(|key| key.decode_for_network(expected_cardano_network))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err_into_client_error(|| "invalid Cardano reward address")?;
+
+        let data = storage
+            .get_dust_generations(&addresses, LedgerVersion::LATEST)
+            .await
+            .map_err_into_server_error(|| "get DUST generations")?;
+
+        Ok(data
+            .into_iter()
+            .map(|d| DustGenerations::from_domain(d, network_id))
+            .collect())
+    }
+
+    /// Get a collapsed Merkle tree update for the dust commitment tree.
+    #[trace]
+    async fn dust_commitment_merkle_tree_update(
+        &self,
+        cx: &Context<'_>,
+        start_index: u64,
+        end_index: Option<u64>,
+    ) -> ApiResult<HexEncoded> {
+        let ledger_state_cache = cx.get_ledger_state_cache();
+        let storage = cx.get_storage::<S>();
+
+        let protocol_version = storage
+            .get_latest_block()
+            .await
+            .map_err_into_server_error(|| "get latest block")?
+            .some_or_server_error(|| "no blocks stored")?
+            .protocol_version;
+
+        let end_index = end_index.unwrap_or(u64::MAX);
+
+        Ok(ledger_state_cache
+            .dust_commitments_collapsed_update(start_index, end_index, storage, protocol_version)
+            .await
+            .map_err_into_server_error(|| "create dust commitment collapsed update")?
+            .update
+            .hex_encode())
     }
 
     /// Get the full history of D-parameter changes for governance auditability.

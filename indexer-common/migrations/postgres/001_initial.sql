@@ -50,6 +50,10 @@ CREATE TABLE regular_transactions (
   zswap_merkle_tree_root BYTEA NOT NULL,
   zswap_start_index BIGINT NOT NULL,
   zswap_end_index BIGINT NOT NULL,
+  dust_commitment_start_index BIGINT,
+  dust_commitment_end_index BIGINT,
+  dust_generation_start_index BIGINT,
+  dust_generation_end_index BIGINT,
   paid_fees BYTEA,
   estimated_fees BYTEA,
   identifiers BYTEA[] NOT NULL
@@ -160,10 +164,22 @@ CREATE TABLE dust_generation_info (
   nonce BYTEA NOT NULL,
   ctime BIGINT NOT NULL,
   merkle_index BIGINT NOT NULL,
-  dtime BIGINT
+  dtime BIGINT,
+  transaction_id BIGINT REFERENCES transactions (id)
 );
 CREATE INDEX ON dust_generation_info (owner);
 CREATE INDEX ON dust_generation_info (night_utxo_hash);
+CREATE INDEX ON dust_generation_info (transaction_id);
+CREATE TABLE dust_nullifiers (
+  id BIGSERIAL PRIMARY KEY,
+  nullifier BYTEA NOT NULL,
+  commitment BYTEA NOT NULL,
+  transaction_id BIGINT NOT NULL REFERENCES transactions (id),
+  block_id BIGINT NOT NULL REFERENCES blocks (id)
+);
+CREATE INDEX ON dust_nullifiers (nullifier);
+CREATE INDEX ON dust_nullifiers (transaction_id);
+CREATE INDEX ON dust_nullifiers (block_id);
 -- cNIGHT registration tracking
 CREATE TABLE cnight_registrations (
   id BIGSERIAL PRIMARY KEY,

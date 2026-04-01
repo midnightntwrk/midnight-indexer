@@ -241,7 +241,7 @@ impl From<&LedgerEventAttributes> for LedgerEventVariant {
             LedgerEventAttributes::DustGenerationDtimeUpdate { .. } => {
                 Self::DustGenerationDtimeUpdate
             }
-            LedgerEventAttributes::DustSpendProcessed => Self::DustSpendProcessed,
+            LedgerEventAttributes::DustSpendProcessed { .. } => Self::DustSpendProcessed,
         }
     }
 }
@@ -370,6 +370,10 @@ async fn save_regular_transaction(
             zswap_merkle_tree_root,
             zswap_start_index,
             zswap_end_index,
+            dust_commitment_start_index,
+            dust_commitment_end_index,
+            dust_generation_start_index,
+            dust_generation_end_index,
             paid_fees,
             estimated_fees,
             identifiers
@@ -383,6 +387,10 @@ async fn save_regular_transaction(
             zswap_merkle_tree_root,
             zswap_start_index,
             zswap_end_index,
+            dust_commitment_start_index,
+            dust_commitment_end_index,
+            dust_generation_start_index,
+            dust_generation_end_index,
             paid_fees,
             estimated_fees
         )
@@ -395,6 +403,10 @@ async fn save_regular_transaction(
                 .push_bind(&transaction.zswap_merkle_tree_root)
                 .push_bind(transaction.zswap_start_index as i64)
                 .push_bind(transaction.zswap_end_index as i64)
+                .push_bind(transaction.dust_commitment_start_index as i64)
+                .push_bind(transaction.dust_commitment_end_index as i64)
+                .push_bind(transaction.dust_generation_start_index as i64)
+                .push_bind(transaction.dust_generation_end_index as i64)
                 .push_bind(U128BeBytes::from(transaction.paid_fees))
                 .push_bind(U128BeBytes::from(transaction.estimated_fees));
             #[cfg(feature = "cloud")]
@@ -418,6 +430,8 @@ async fn save_regular_transaction(
     save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
 
     save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await?;
+
+    save_dust_nullifiers(&transaction.ledger_events, transaction_id, block_id, tx).await?;
 
     Ok(transaction_id as u64)
 }
@@ -695,9 +709,10 @@ async fn save_dust_generation_info(
                         nonce,
                         ctime,
                         merkle_index,
-                        dtime
+                        dtime,
+                        transaction_id
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 "};
 
                 let dtime = if generation_info.dtime == u64::MAX {
@@ -714,6 +729,7 @@ async fn save_dust_generation_info(
                     .bind(generation_info.ctime as i64)
                     .bind(output.mt_index as i64)
                     .bind(dtime)
+                    .bind(transaction_id)
                     .execute(&mut **tx)
                     .await?;
             }
@@ -739,6 +755,51 @@ async fn save_dust_generation_info(
             _ => {}
         }
     }
+
+    Ok(())
+}
+
+#[trace(properties = { "transaction_id": "{transaction_id}", "block_id": "{block_id}" })]
+async fn save_dust_nullifiers(
+    ledger_events: &[LedgerEvent],
+    transaction_id: i64,
+    block_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let nullifier_events = ledger_events
+        .iter()
+        .filter_map(|event| match &event.attributes {
+            LedgerEventAttributes::DustSpendProcessed {
+                nullifier,
+                commitment,
+            } => Some((nullifier, commitment)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    if nullifier_events.is_empty() {
+        return Ok(());
+    }
+
+    let query = indoc! {"
+        INSERT INTO dust_nullifiers (
+            nullifier,
+            commitment,
+            transaction_id,
+            block_id
+        )
+    "};
+
+    QueryBuilder::new(query)
+        .push_values(nullifier_events, |mut q, (nullifier, commitment)| {
+            q.push_bind(nullifier.as_ref())
+                .push_bind(commitment.as_ref())
+                .push_bind(transaction_id)
+                .push_bind(block_id);
+        })
+        .build()
+        .execute(&mut **tx)
+        .await?;
 
     Ok(())
 }

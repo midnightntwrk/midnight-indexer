@@ -67,6 +67,18 @@ pub struct RegularTransaction {
     #[sqlx(try_from = "i64")]
     pub zswap_end_index: u64, // Exclusive, i.e. the next free index.
 
+    #[sqlx(default)]
+    pub dust_commitment_start_index: Option<i64>,
+
+    #[sqlx(default)]
+    pub dust_commitment_end_index: Option<i64>,
+
+    #[sqlx(default)]
+    pub dust_generation_start_index: Option<i64>,
+
+    #[sqlx(default)]
+    pub dust_generation_end_index: Option<i64>,
+
     #[sqlx(try_from = "SqlxOption<U128BeBytes>")]
     pub paid_fees: Option<u128>,
 

@@ -109,7 +109,7 @@ impl TryFrom<LedgerEvent> for DustLedgerEvent {
                 }),
             ),
 
-            LedgerEventAttributes::DustSpendProcessed => {
+            LedgerEventAttributes::DustSpendProcessed { .. } => {
                 Ok(DustLedgerEvent::DustSpendProcessed(DustSpendProcessed {
                     id: ledger_event.id,
                     raw: ledger_event.raw.hex_encode(),

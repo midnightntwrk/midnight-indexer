@@ -590,6 +590,26 @@ impl LedgerState {
         }
     }
 
+    /// Get the first free index of the dust commitment tree.
+    pub fn dust_commitments_first_free(&self) -> u64 {
+        match self {
+            Self::V7 { ledger_state, .. } => ledger_state.dust.utxo.commitments_first_free,
+            Self::V8 { ledger_state, .. } => ledger_state.dust.utxo.commitments_first_free,
+        }
+    }
+
+    /// Get the first free index of the dust generation tree.
+    pub fn dust_generations_first_free(&self) -> u64 {
+        match self {
+            Self::V7 { ledger_state, .. } => {
+                ledger_state.dust.generation.generating_tree_first_free
+            }
+            Self::V8 { ledger_state, .. } => {
+                ledger_state.dust.generation.generating_tree_first_free
+            }
+        }
+    }
+
     /// Get the Merkle tree root of the zswap state.
     pub fn zswap_merkle_tree_root(&self) -> ZswapMerkleTreeRoot {
         match self {
@@ -612,6 +632,56 @@ impl LedgerState {
                     .expect("zswap state Merkle tree root should exist");
                 ZswapMerkleTreeRoot::V8(root)
             }
+        }
+    }
+
+    /// Get the serialized merkle tree root of the dust commitment tree.
+    pub fn dust_commitment_merkle_tree_root(&self) -> Result<ByteVec, Error> {
+        match self {
+            Self::V7 { ledger_state, .. } => ledger_state
+                .dust
+                .utxo
+                .commitments
+                .rehash()
+                .root()
+                .expect("dust commitment merkle tree root should exist")
+                .serialize()
+                .map_err(|error| Error::Serialize("DustCommitmentMerkleTreeRoot", error)),
+
+            Self::V8 { ledger_state, .. } => ledger_state
+                .dust
+                .utxo
+                .commitments
+                .rehash()
+                .root()
+                .expect("dust commitment merkle tree root should exist")
+                .serialize()
+                .map_err(|error| Error::Serialize("DustCommitmentMerkleTreeRoot", error)),
+        }
+    }
+
+    /// Get the serialized merkle tree root of the dust generation tree.
+    pub fn dust_generation_merkle_tree_root(&self) -> Result<ByteVec, Error> {
+        match self {
+            Self::V7 { ledger_state, .. } => ledger_state
+                .dust
+                .generation
+                .generating_tree
+                .rehash()
+                .root()
+                .expect("dust generation merkle tree root should exist")
+                .serialize()
+                .map_err(|error| Error::Serialize("DustGenerationMerkleTreeRoot", error)),
+
+            Self::V8 { ledger_state, .. } => ledger_state
+                .dust
+                .generation
+                .generating_tree
+                .rehash()
+                .root()
+                .expect("dust generation merkle tree root should exist")
+                .serialize()
+                .map_err(|error| Error::Serialize("DustGenerationMerkleTreeRoot", error)),
         }
     }
 
@@ -672,6 +742,60 @@ impl LedgerState {
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
             .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdate", error)),
+        }
+    }
+
+    /// Get the serialized dust generations merkle-tree collapsed update for the given indices.
+    pub fn dust_generations_collapsed_update(
+        &self,
+        start_index: u64,
+        end_index: u64,
+    ) -> Result<ByteVec, Error> {
+        match self {
+            Self::V7 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
+                &ledger_state.dust.generation.generating_tree,
+                start_index,
+                end_index,
+            )
+            .map_err(|error| Error::InvalidUpdate(error.into()))?
+            .tagged_serialize()
+            .map_err(|error| Error::Serialize("DustGenerationsMerkleTreeCollapsedUpdate", error)),
+
+            Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
+                &ledger_state.dust.generation.generating_tree,
+                start_index,
+                end_index,
+            )
+            .map_err(|error| Error::InvalidUpdate(error.into()))?
+            .tagged_serialize()
+            .map_err(|error| Error::Serialize("DustGenerationsMerkleTreeCollapsedUpdate", error)),
+        }
+    }
+
+    /// Get the serialized dust commitments merkle-tree collapsed update for the given indices.
+    pub fn dust_commitments_collapsed_update(
+        &self,
+        start_index: u64,
+        end_index: u64,
+    ) -> Result<ByteVec, Error> {
+        match self {
+            Self::V7 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
+                &ledger_state.dust.utxo.commitments,
+                start_index,
+                end_index,
+            )
+            .map_err(|error| Error::InvalidUpdate(error.into()))?
+            .tagged_serialize()
+            .map_err(|error| Error::Serialize("DustCommitmentsMerkleTreeCollapsedUpdate", error)),
+
+            Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
+                &ledger_state.dust.utxo.commitments,
+                start_index,
+                end_index,
+            )
+            .map_err(|error| Error::InvalidUpdate(error.into()))?
+            .tagged_serialize()
+            .map_err(|error| Error::Serialize("DustCommitmentsMerkleTreeCollapsedUpdate", error)),
         }
     }
 
@@ -868,9 +992,15 @@ where
                 Some(make_dust_generation_dtime_update_v7(update, raw))
             }
 
-            EventDetailsV7::DustSpendProcessed { .. } => {
-                Some(Ok(LedgerEvent::dust_spend_processed(raw)))
-            }
+            EventDetailsV7::DustSpendProcessed {
+                nullifier,
+                commitment,
+                ..
+            } => Some(Ok(LedgerEvent::dust_spend_processed(
+                raw,
+                nullifier.0.0.to_bytes_le().to_vec().into(),
+                commitment.0.0.to_bytes_le().to_vec().into(),
+            ))),
 
             other => panic!("unexpected EventDetailsV7 variant {other:?}"),
         })
@@ -917,9 +1047,15 @@ where
                 Some(make_dust_generation_dtime_update_v8(update, raw))
             }
 
-            EventDetailsV8::DustSpendProcessed { .. } => {
-                Some(Ok(LedgerEvent::dust_spend_processed(raw)))
-            }
+            EventDetailsV8::DustSpendProcessed {
+                nullifier,
+                commitment,
+                ..
+            } => Some(Ok(LedgerEvent::dust_spend_processed(
+                raw,
+                nullifier.0.0.to_bytes_le().to_vec().into(),
+                commitment.0.0.to_bytes_le().to_vec().into(),
+            ))),
 
             other => panic!("unexpected EventDetailsV8 variant {other:?}"),
         })

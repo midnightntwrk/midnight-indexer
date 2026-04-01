@@ -123,6 +123,18 @@ where
     #[graphql(deprecation = "Use zswapEndIndex instead")]
     end_index: u64,
 
+    /// The dust commitment tree start index.
+    dust_commitment_start_index: Option<u64>,
+
+    /// The dust commitment tree end index.
+    dust_commitment_end_index: Option<u64>,
+
+    /// The dust generation tree start index.
+    dust_generation_start_index: Option<u64>,
+
+    /// The dust generation tree end index.
+    dust_generation_end_index: Option<u64>,
+
     /// Fee information for this transaction.
     fees: TransactionFees,
 
@@ -224,6 +236,10 @@ where
             start_index: zswap_start_index,
             zswap_end_index,
             end_index: zswap_end_index,
+            dust_commitment_start_index: transaction.dust_commitment_start_index.map(|i| i as u64),
+            dust_commitment_end_index: transaction.dust_commitment_end_index.map(|i| i as u64),
+            dust_generation_start_index: transaction.dust_generation_start_index.map(|i| i as u64),
+            dust_generation_end_index: transaction.dust_generation_end_index.map(|i| i as u64),
             _s: PhantomData,
         }
     }

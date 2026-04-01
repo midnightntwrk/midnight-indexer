@@ -120,6 +120,34 @@ where
             terms_and_conditions,
         })
     }
+
+    /// The hex-encoded dust commitment Merkle tree root at the latest indexed state.
+    async fn dust_commitment_merkle_tree_root(
+        &self,
+        cx: &Context<'_>,
+    ) -> ApiResult<Option<HexEncoded>> {
+        let ledger_state_cache = cx.get_ledger_state_cache();
+        let storage = cx.get_storage::<S>();
+
+        match ledger_state_cache.dust_merkle_tree_roots(storage).await {
+            Ok(roots) => Ok(Some(roots.commitment_root.hex_encode())),
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// The hex-encoded dust generation Merkle tree root at the latest indexed state.
+    async fn dust_generation_merkle_tree_root(
+        &self,
+        cx: &Context<'_>,
+    ) -> ApiResult<Option<HexEncoded>> {
+        let ledger_state_cache = cx.get_ledger_state_cache();
+        let storage = cx.get_storage::<S>();
+
+        match ledger_state_cache.dust_merkle_tree_roots(storage).await {
+            Ok(roots) => Ok(Some(roots.generation_root.hex_encode())),
+            Err(_) => Ok(None),
+        }
+    }
 }
 
 impl<S> From<domain::Block> for Block<S>

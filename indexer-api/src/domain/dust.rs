@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{CardanoRewardAddress, DustPublicKey};
+use indexer_common::domain::{ByteVec, CardanoRewardAddress, DustPublicKey};
 use serde::{Deserialize, Serialize};
 
 /// DUST generation status for a specific Cardano reward address.
@@ -43,4 +43,45 @@ pub struct DustGenerationStatus {
 
     /// Cardano UTXO output index for update/unregister operations.
     pub utxo_output_index: Option<u32>,
+}
+
+/// Aggregated dust generations data for a Cardano reward address.
+#[derive(Debug, Clone)]
+pub struct DustGenerations {
+    pub cardano_reward_address: CardanoRewardAddress,
+    pub registrations: Vec<DustRegistration>,
+}
+
+/// A single dust registration with aggregated generation stats.
+#[derive(Debug, Clone)]
+pub struct DustRegistration {
+    pub dust_address: DustPublicKey,
+    pub valid: bool,
+    pub night_balance: u128,
+    pub generation_rate: u128,
+    pub max_capacity: u128,
+    pub current_capacity: u128,
+    pub utxo_tx_hash: Option<Vec<u8>>,
+    pub utxo_output_index: Option<u32>,
+}
+
+/// A dust generation entry for the subscription stream.
+#[derive(Debug, Clone)]
+pub struct DustGenerationEntry {
+    pub merkle_index: u64,
+    pub owner: ByteVec,
+    pub value: u128,
+    pub nonce: ByteVec,
+    pub ctime: u64,
+    pub transaction_id: u64,
+}
+
+/// A dust nullifier transaction for the subscription stream.
+#[derive(Debug, Clone)]
+pub struct DustNullifierTransaction {
+    pub nullifier: ByteVec,
+    pub commitment: ByteVec,
+    pub transaction_id: u64,
+    pub block_height: u32,
+    pub block_hash: ByteVec,
 }

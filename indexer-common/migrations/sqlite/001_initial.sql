@@ -36,6 +36,10 @@ CREATE TABLE regular_transactions (
   zswap_merkle_tree_root BLOB NOT NULL,
   zswap_start_index INTEGER NOT NULL,
   zswap_end_index INTEGER NOT NULL,
+  dust_commitment_start_index INTEGER,
+  dust_commitment_end_index INTEGER,
+  dust_generation_start_index INTEGER,
+  dust_generation_end_index INTEGER,
   paid_fees BLOB,
   estimated_fees BLOB
 );
@@ -161,10 +165,22 @@ CREATE TABLE dust_generation_info (
   nonce BLOB NOT NULL,
   ctime INTEGER NOT NULL,
   merkle_index INTEGER NOT NULL,
-  dtime INTEGER
+  dtime INTEGER,
+  transaction_id INTEGER REFERENCES transactions (id)
 );
 CREATE INDEX dust_generation_info_owner_idx ON dust_generation_info (owner);
 CREATE INDEX dust_generation_info_night_utxo_hash_idx ON dust_generation_info (night_utxo_hash);
+CREATE INDEX dust_generation_info_transaction_id_idx ON dust_generation_info (transaction_id);
+CREATE TABLE dust_nullifiers (
+  id INTEGER PRIMARY KEY,
+  nullifier BLOB NOT NULL,
+  commitment BLOB NOT NULL,
+  transaction_id INTEGER NOT NULL REFERENCES transactions (id),
+  block_id INTEGER NOT NULL REFERENCES blocks (id)
+);
+CREATE INDEX dust_nullifiers_nullifier_idx ON dust_nullifiers (nullifier);
+CREATE INDEX dust_nullifiers_transaction_id_idx ON dust_nullifiers (transaction_id);
+CREATE INDEX dust_nullifiers_block_id_idx ON dust_nullifiers (block_id);
 -- cNIGHT registration tracking
 CREATE TABLE cnight_registrations (
   id INTEGER PRIMARY KEY,

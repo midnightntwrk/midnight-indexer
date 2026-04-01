@@ -17,7 +17,8 @@ use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
         ContractActionSubscription, DParameterHistoryQuery, DisconnectMutation,
-        DustGenerationStatusQuery, DustLedgerEventsSubscription, ShieldedTransactionsSubscription,
+        DustCommitmentMerkleTreeUpdateQuery, DustGenerationStatusQuery, DustGenerationsQuery,
+        DustLedgerEventsSubscription, ShieldedTransactionsSubscription,
         TermsAndConditionsHistoryQuery, TransactionsQuery, UnshieldedTransactionsSubscription,
         ZswapLedgerEventsSubscription, ZswapMerkleTreeCollapsedUpdateQuery, block_query,
         block_subscription::{
@@ -31,8 +32,10 @@ use crate::{
         },
         connect_mutation,
         contract_action_query::{self},
-        contract_action_subscription, disconnect_mutation, dust_generation_status_query,
-        dust_ledger_events_subscription, shielded_transactions_subscription, transactions_query,
+        contract_action_subscription, disconnect_mutation,
+        dust_commitment_merkle_tree_update_query, dust_generation_status_query,
+        dust_generations_query, dust_ledger_events_subscription,
+        shielded_transactions_subscription, transactions_query,
         unshielded_transactions_subscription, zswap_ledger_events_subscription,
         zswap_merkle_tree_collapsed_update_query,
     },
@@ -106,6 +109,12 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_dust_generation_status_query(&api_client, &api_url)
         .await
         .context("test dust generation status query")?;
+    test_dust_generations_query(&api_client, &api_url)
+        .await
+        .context("test dust generations query")?;
+    test_dust_commitment_merkle_tree_update_query(&api_client, &api_url)
+        .await
+        .context("test dust commitment merkle tree update query")?;
     test_governance_queries(&api_client, &api_url)
         .await
         .context("test governance queries")?;
@@ -698,6 +707,53 @@ async fn test_dust_generation_status_query(
     Ok(())
 }
 
+/// Test the dustGenerations query (resolves #926).
+async fn test_dust_generations_query(api_client: &Client, api_url: &str) -> anyhow::Result<()> {
+    // Test with empty reward addresses list.
+    let variables = dust_generations_query::Variables {
+        cardano_reward_addresses: vec![],
+    };
+    let response = send_query::<DustGenerationsQuery>(api_client, api_url, variables).await?;
+    assert!(response.dust_generations.is_empty());
+
+    // Test with non-existent reward addresses — should return empty registrations.
+    let variables = dust_generations_query::Variables {
+        cardano_reward_addresses: vec![
+            "stake_test1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgcpttsx"
+                .try_into()
+                .unwrap(),
+        ],
+    };
+    let response = send_query::<DustGenerationsQuery>(api_client, api_url, variables).await?;
+    assert_eq!(response.dust_generations.len(), 1);
+    assert!(response.dust_generations[0].registrations.is_empty());
+
+    Ok(())
+}
+
+/// Test the dustCommitmentMerkleTreeUpdate query.
+async fn test_dust_commitment_merkle_tree_update_query(
+    api_client: &Client,
+    api_url: &str,
+) -> anyhow::Result<()> {
+    // Test with start_index 0 and no end_index — should succeed if blocks have been indexed.
+    let variables = dust_commitment_merkle_tree_update_query::Variables {
+        start_index: 0,
+        end_index: Some(0),
+    };
+    let response =
+        send_query::<DustCommitmentMerkleTreeUpdateQuery>(api_client, api_url, variables).await?;
+    // The result is a hex-encoded collapsed merkle tree update.
+    assert!(
+        !response
+            .dust_commitment_merkle_tree_update
+            .as_ref()
+            .is_empty()
+    );
+
+    Ok(())
+}
+
 /// Test governance queries (D-Parameter and Terms & Conditions history).
 async fn test_governance_queries(api_client: &Client, api_url: &str) -> anyhow::Result<()> {
     use crate::e2e::graphql::{d_parameter_history_query, terms_and_conditions_history_query};
@@ -1159,6 +1215,22 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct ZswapMerkleTreeCollapsedUpdateQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustGenerationsQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustCommitmentMerkleTreeUpdateQuery;
 
     #[derive(GraphQLQuery)]
     #[graphql(
