@@ -148,12 +148,7 @@ impl Storage {
 
         query_builder.push(")");
 
-        try_stream! {
-            let mut stream = query_builder.build_query_as::<Block>().fetch(&*self.pool);
-            while let Some(block) = stream.try_next().await? {
-                yield block;
-            }
-        }
+        query_builder.build_query_as::<Block>().fetch(&*self.pool)
     }
 
     #[trace(properties = { "heights": "{heights:?}" })]
@@ -192,12 +187,7 @@ impl Storage {
 
         query_builder.push(")");
 
-        try_stream! {
-            let mut stream = query_builder.build_query_as::<Block>().fetch(&*self.pool);
-            while let Some(block) = stream.try_next().await? {
-                yield block;
-            }
-        }
+        query_builder.build_query_as::<Block>().fetch(&*self.pool)
     }
 
     #[trace(properties = { "height": "{height}", "batch_size": "{batch_size}" })]

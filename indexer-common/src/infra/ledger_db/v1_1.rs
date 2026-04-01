@@ -28,7 +28,7 @@ use tokio::{runtime::Handle, task::block_in_place};
 #[cfg(feature = "cloud")]
 type SqlxTransaction = sqlx::Transaction<'static, sqlx::Postgres>;
 
-#[cfg(all(feature = "standalone", not(feature = "cloud")))]
+#[cfg(feature = "standalone")]
 type SqlxTransaction = sqlx::Transaction<'static, sqlx::Sqlite>;
 
 #[derive(Debug)]
@@ -36,7 +36,7 @@ pub struct LedgerDb {
     #[cfg(feature = "cloud")]
     pool: crate::infra::pool::postgres::PostgresPool,
 
-    #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+    #[cfg(feature = "standalone")]
     pool: crate::infra::pool::sqlite::SqlitePool,
 }
 
@@ -46,7 +46,7 @@ impl LedgerDb {
         Self { pool }
     }
 
-    #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+    #[cfg(feature = "standalone")]
     pub fn new(pool: crate::infra::pool::sqlite::SqlitePool) -> Self {
         Self { pool }
     }
@@ -185,16 +185,15 @@ impl DB for LedgerDb {
                         .await
                         .unwrap_or_panic("cannot batch get nodes");
 
-                    return keys
-                        .into_iter()
+                    keys.into_iter()
                         .map(|key| {
                             let node = nodes.remove(&key);
                             (key, node)
                         })
-                        .collect();
+                        .collect()
                 }
 
-                #[cfg(all(feature = "standalone", not(feature = "cloud")))]
+                #[cfg(feature = "standalone")]
                 {
                     use sqlx::QueryBuilder;
 
@@ -232,18 +231,12 @@ impl DB for LedgerDb {
                         .await
                         .unwrap_or_panic("cannot batch get nodes");
 
-                    return keys
-                        .into_iter()
+                    keys.into_iter()
                         .map(|key| {
                             let node = nodes.remove(&key);
                             (key, node)
                         })
-                        .collect();
-                }
-
-                #[cfg(not(any(feature = "cloud", feature = "standalone")))]
-                {
-                    panic!("Neither cloud nor standalone feature enabled");
+                        .collect()
                 }
             })
         })

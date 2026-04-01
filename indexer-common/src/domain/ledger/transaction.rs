@@ -20,7 +20,6 @@ use crate::{
     },
     infra::ledger_db::v1_1,
 };
-
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
 use midnight_coin_structure::{coin::Info, contract::ContractAddress};
