@@ -43,7 +43,7 @@ Copy required secrets into `~/.midnight-indexer.envrc` or `.envrc.local` (source
 ```bash
 export APP__INFRA__STORAGE__PASSWORD=postgres
 export APP__INFRA__PUB_SUB__PASSWORD=nats
-export APP__INFRA__SECRET=303132333435363738393031323334353637383930313233343536373839303132
+export APP__INFRA__SECRET=...
 ```
 
 All commits must be GPG-signed (`commit.gpgsign = true` is enforced by `.envrc`).
