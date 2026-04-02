@@ -21,58 +21,18 @@ mod unshielded;
 mod zswap_ledger_events;
 
 use crate::{
-    domain::{self, storage::Storage},
-    infra::api::v4::{
-        HexEncodable, HexEncoded,
-        subscription::{
-            block::BlockSubscription, contract_action::ContractActionSubscription,
-            dust_generations::DustGenerationsSubscription,
-            dust_ledger_events::DustLedgerEventsSubscription,
-            dust_nullifier_transactions::DustNullifierTransactionsSubscription,
-            shielded::ShieldedTransactionsSubscription,
-            unshielded::UnshieldedTransactionsSubscription,
-            zswap_ledger_events::ZswapLedgerEventsSubscription,
-        },
+    domain::storage::Storage,
+    infra::api::v4::subscription::{
+        block::BlockSubscription, contract_action::ContractActionSubscription,
+        dust_generations::DustGenerationsSubscription,
+        dust_ledger_events::DustLedgerEventsSubscription,
+        dust_nullifier_transactions::DustNullifierTransactionsSubscription,
+        shielded::ShieldedTransactionsSubscription, unshielded::UnshieldedTransactionsSubscription,
+        zswap_ledger_events::ZswapLedgerEventsSubscription,
     },
 };
-use async_graphql::{MergedSubscription, SimpleObject};
-use derive_more::Debug;
+use async_graphql::MergedSubscription;
 use indexer_common::domain::Subscriber;
-
-/// A collapsed merkle tree update shared across subscriptions.
-#[derive(Debug, Clone, SimpleObject)]
-pub struct CollapsedMerkleTree {
-    /// The start index.
-    pub start_index: u64,
-
-    /// The end index.
-    pub end_index: u64,
-
-    /// The hex-encoded value.
-    #[debug(skip)]
-    pub update: HexEncoded,
-
-    /// The protocol version.
-    pub protocol_version: u32,
-}
-
-impl From<domain::MerkleTreeCollapsedUpdate> for CollapsedMerkleTree {
-    fn from(value: domain::MerkleTreeCollapsedUpdate) -> Self {
-        let domain::MerkleTreeCollapsedUpdate {
-            start_index,
-            end_index,
-            update,
-            protocol_version,
-        } = value;
-
-        Self {
-            start_index,
-            end_index,
-            update: update.hex_encode(),
-            protocol_version: protocol_version.into(),
-        }
-    }
-}
 
 #[derive(MergedSubscription)]
 pub struct Subscription<S, B>(

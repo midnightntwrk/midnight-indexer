@@ -773,6 +773,7 @@ async fn save_dust_nullifiers(
                 nullifier,
                 commitment,
             } => Some((nullifier, commitment)),
+
             _ => None,
         })
         .collect::<Vec<_>>();

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain,
+    domain::dust::DustGenerations as DomainDustGenerations,
     infra::api::v4::{
         AddressType, CardanoNetworkId, CardanoRewardAddress, HexEncodable, HexEncoded,
         dust::DustAddress, encode_address, encode_cardano_reward_address,
@@ -60,14 +60,14 @@ pub struct DustRegistration {
 }
 
 impl DustGenerations {
-    pub fn from_domain(data: domain::dust::DustGenerations, network_id: &NetworkId) -> Self {
+    pub fn from_domain(dust_generations: DomainDustGenerations, network_id: &NetworkId) -> Self {
         let cardano_network_id = CardanoNetworkId::from(network_id);
         let cardano_reward_address = CardanoRewardAddress(encode_cardano_reward_address(
-            data.cardano_reward_address,
+            dust_generations.cardano_reward_address,
             cardano_network_id,
         ));
 
-        let registrations = data
+        let registrations = dust_generations
             .registrations
             .into_iter()
             .map(|r| {

@@ -18,6 +18,7 @@ use crate::{
     },
     infra::storage::Storage,
 };
+use async_stream::try_stream;
 use fastrace::trace;
 use futures::Stream;
 use indexer_common::{
@@ -139,7 +140,7 @@ impl DustGenerationsStorage for Storage {
         let pool = self.pool.clone();
         let dust_address = dust_address.to_vec();
 
-        async_stream::try_stream! {
+        try_stream! {
             loop {
                 let query = indoc! {"
                     SELECT merkle_index, owner, value, nonce, ctime, transaction_id
@@ -188,14 +189,14 @@ impl DustGenerationsStorage for Storage {
     async fn get_dust_nullifier_transactions(
         &self,
         nullifier_prefixes: &[Vec<u8>],
-        from_block: Option<u64>,
-        to_block: Option<u64>,
+        from_block: u64,
+        to_block: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustNullifierTransaction, sqlx::Error>> + Send {
         let pool = self.pool.clone();
         let nullifier_prefixes = nullifier_prefixes.to_vec();
 
-        async_stream::try_stream! {
+        try_stream! {
             let mut offset = 0i64;
 
             loop {
@@ -221,8 +222,8 @@ impl DustGenerationsStorage for Storage {
                         JOIN transactions t ON t.id = dn.transaction_id
                         JOIN blocks b ON b.id = dn.block_id
                         WHERE dn.nullifier >= $1 AND dn.nullifier < $2
-                        AND ($3::BIGINT IS NULL OR b.height >= $3)
-                        AND ($4::BIGINT IS NULL OR b.height <= $4)
+                        AND b.height >= $3
+                        AND b.height <= $4
                         ORDER BY b.height, t.id
                         LIMIT $5
                         OFFSET $6
@@ -231,8 +232,8 @@ impl DustGenerationsStorage for Storage {
                     let rows = sqlx::query_as::<_, (ByteVec, ByteVec, i64, i64, ByteVec)>(query)
                         .bind(&prefix[..])
                         .bind(&next_prefix[..])
-                        .bind(from_block.map(|b| b as i64))
-                        .bind(to_block.map(|b| b as i64))
+                        .bind(from_block as i64)
+                        .bind(to_block as i64)
                         .bind(batch_size.get() as i64)
                         .bind(offset)
                         .fetch_all(&*pool)

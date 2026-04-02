@@ -45,8 +45,8 @@ where
     async fn get_dust_nullifier_transactions(
         &self,
         nullifier_prefixes: &[Vec<u8>],
-        from_block: Option<u64>,
-        to_block: Option<u64>,
+        from_block: u64,
+        to_block: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustNullifierTransaction, sqlx::Error>> + Send;
 }
@@ -74,8 +74,8 @@ impl DustGenerationsStorage for NoopStorage {
     async fn get_dust_nullifier_transactions(
         &self,
         nullifier_prefixes: &[Vec<u8>],
-        from_block: Option<u64>,
-        to_block: Option<u64>,
+        from_block: u64,
+        to_block: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustNullifierTransaction, sqlx::Error>> + Send {
         stream::empty()

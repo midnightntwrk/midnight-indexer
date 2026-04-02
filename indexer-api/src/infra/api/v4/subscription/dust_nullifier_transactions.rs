@@ -86,10 +86,13 @@ where
                 .collect::<Result<Vec<_>, _>>()
                 .map_err_into_client_error(|| "invalid hex-encoded nullifier prefix")?;
 
+            let from = from_block.unwrap_or(0);
+            let to = to_block.unwrap_or(u64::MAX);
+
             debug!("streaming existing dust nullifier transactions");
 
             let entries = storage
-                .get_dust_nullifier_transactions(&prefix_bytes, from_block, to_block, batch_size)
+                .get_dust_nullifier_transactions(&prefix_bytes, from, to, batch_size)
                 .await;
             let mut entries = pin!(entries);
             while let Some(entry) = entries
@@ -106,8 +109,17 @@ where
                 };
             }
 
-            if to_block.is_some() {
-                return;
+            // If to_block is set, check if the current max block height already covers it.
+            if let Some(to_block) = to_block {
+                let latest_block = storage
+                    .get_latest_block()
+                    .await
+                    .map_err_into_server_error(|| "get latest block")?;
+                if let Some(block) = latest_block
+                    && block.height as u64 >= to_block
+                {
+                    return;
+                }
             }
 
             debug!("streaming live dust nullifier transactions");
@@ -119,7 +131,7 @@ where
                 .is_some()
             {
                 let entries = storage
-                    .get_dust_nullifier_transactions(&prefix_bytes, from_block, to_block, batch_size)
+                    .get_dust_nullifier_transactions(&prefix_bytes, from, to, batch_size)
                     .await;
                 let mut entries = pin!(entries);
                 while let Some(entry) = entries
@@ -134,6 +146,19 @@ where
                         block_height: entry.block_height,
                         block_hash: entry.block_hash.hex_encode(),
                     };
+                }
+
+                // Check if we've reached to_block after processing each BlockIndexed event.
+                if let Some(to_block) = to_block {
+                    let latest_block = storage
+                        .get_latest_block()
+                        .await
+                        .map_err_into_server_error(|| "get latest block")?;
+                    if let Some(block) = latest_block
+                        && block.height as u64 >= to_block
+                    {
+                        return;
+                    }
                 }
             }
 

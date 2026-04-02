@@ -11,12 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::CollapsedMerkleTree;
 use crate::{
     domain::{LedgerStateCache, storage::Storage},
     infra::api::{
         ApiResult, ContextExt, ResultExt,
-        v4::{HexEncodable, HexEncoded},
+        v4::{HexEncodable, HexEncoded, merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate},
     },
 };
 use async_graphql::{Context, SimpleObject, Subscription, Union};
@@ -25,6 +24,13 @@ use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};
 use log::{debug, warn};
 use std::{marker::PhantomData, pin::pin};
+
+/// An event of the dust generations subscription.
+#[derive(Union)]
+pub enum DustGenerationsEvent {
+    DustGenerations(DustGenerationEntry),
+    DustGenerationsProgress(DustGenerationsProgress),
+}
 
 pub struct DustGenerationsSubscription<S, B> {
     _s: PhantomData<S>,
@@ -56,7 +62,7 @@ pub struct DustGenerationEntry {
     /// The originating transaction ID.
     pub transaction_id: u64,
     /// Collapsed Merkle tree update filling the gap before this entry.
-    pub collapsed_merkle_tree: Option<CollapsedMerkleTree>,
+    pub collapsed_merkle_tree: Option<MerkleTreeCollapsedUpdate>,
 }
 
 /// Progress indicator for dust generations subscription (includes final collapsed update).
@@ -65,15 +71,7 @@ pub struct DustGenerationsProgress {
     /// The highest index processed so far.
     pub highest_index: u64,
     /// Final collapsed Merkle tree update covering remaining range.
-    pub collapsed_merkle_tree: Option<CollapsedMerkleTree>,
-}
-
-/// Union of events in the dust generations subscription.
-#[derive(Union)]
-pub enum DustGenerationsEvent {
-    Generation(DustGenerationEntry),
-
-    Progress(DustGenerationsProgress),
+    pub collapsed_merkle_tree: Option<MerkleTreeCollapsedUpdate>,
 }
 
 #[Subscription]
@@ -115,7 +113,7 @@ where
                 .await
                 .map_err_into_server_error(|| "get next dust generation entry")?
             {
-                let collapsed_merkle_tree = make_gap_collapsed_update(
+                let collapsed_merkle_tree = make_collapsed_update(
                     cursor,
                     entry.merkle_index,
                     storage,
@@ -124,7 +122,7 @@ where
 
                 cursor = entry.merkle_index + 1;
 
-                yield DustGenerationsEvent::Generation(DustGenerationEntry {
+                yield DustGenerationsEvent::DustGenerations(DustGenerationEntry {
                     merkle_index: entry.merkle_index,
                     owner: entry.owner.hex_encode(),
                     value: entry.value.to_string(),
@@ -139,10 +137,12 @@ where
                 let final_update = make_final_collapsed_update(
                     cursor, end_index, storage, ledger_state_cache,
                 ).await?;
-                yield DustGenerationsEvent::Progress(DustGenerationsProgress {
+
+                yield DustGenerationsEvent::DustGenerationsProgress(DustGenerationsProgress {
                     highest_index: end_index,
                     collapsed_merkle_tree: final_update,
                 });
+
                 return;
             }
 
@@ -163,7 +163,7 @@ where
                     .await
                     .map_err_into_server_error(|| "get next dust generation entry")?
                 {
-                    let collapsed_merkle_tree = make_gap_collapsed_update(
+                    let collapsed_merkle_tree = make_collapsed_update(
                         cursor,
                         entry.merkle_index,
                         storage,
@@ -172,7 +172,7 @@ where
 
                     cursor = entry.merkle_index + 1;
 
-                    yield DustGenerationsEvent::Generation(DustGenerationEntry {
+                    yield DustGenerationsEvent::DustGenerations(DustGenerationEntry {
                         merkle_index: entry.merkle_index,
                         owner: entry.owner.hex_encode(),
                         value: entry.value.to_string(),
@@ -188,10 +188,12 @@ where
                     let final_update = make_final_collapsed_update(
                         cursor, end_index, storage, ledger_state_cache,
                     ).await?;
-                    yield DustGenerationsEvent::Progress(DustGenerationsProgress {
+
+                    yield DustGenerationsEvent::DustGenerationsProgress(DustGenerationsProgress {
                         highest_index: end_index,
                         collapsed_merkle_tree: final_update,
                     });
+
                     return;
                 }
             }
@@ -202,12 +204,12 @@ where
 }
 
 /// Compute a collapsed Merkle tree update to fill the gap between cursor and entry's index.
-async fn make_gap_collapsed_update<S: Storage>(
+async fn make_collapsed_update<S: Storage>(
     cursor: u64,
     entry_index: u64,
     storage: &S,
     ledger_state_cache: &LedgerStateCache,
-) -> ApiResult<Option<CollapsedMerkleTree>> {
+) -> ApiResult<Option<MerkleTreeCollapsedUpdate>> {
     if cursor >= entry_index || entry_index == 0 {
         return Ok(None);
     }
@@ -235,7 +237,7 @@ async fn make_final_collapsed_update<S: Storage>(
     end_index: u64,
     storage: &S,
     ledger_state_cache: &LedgerStateCache,
-) -> ApiResult<Option<CollapsedMerkleTree>> {
+) -> ApiResult<Option<MerkleTreeCollapsedUpdate>> {
     let block = storage
         .get_latest_block()
         .await

@@ -36,10 +36,10 @@ CREATE TABLE regular_transactions (
   zswap_merkle_tree_root BLOB NOT NULL,
   zswap_start_index INTEGER NOT NULL,
   zswap_end_index INTEGER NOT NULL,
-  dust_commitment_start_index INTEGER,
-  dust_commitment_end_index INTEGER,
-  dust_generation_start_index INTEGER,
-  dust_generation_end_index INTEGER,
+  dust_commitment_start_index INTEGER NOT NULL,
+  dust_commitment_end_index INTEGER NOT NULL,
+  dust_generation_start_index INTEGER NOT NULL,
+  dust_generation_end_index INTEGER NOT NULL,
   paid_fees BLOB,
   estimated_fees BLOB
 );
