@@ -722,6 +722,59 @@ impl SpoStorage for Storage {
         let start = from_epoch.min(to_epoch);
         let end = to_epoch.max(from_epoch);
 
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            WITH rng AS (
+                SELECT generate_series($1::BIGINT, $2::BIGINT) AS epoch_no
+            ),
+            cur AS (
+                SELECT s.pool_id
+                FROM spo_stake_snapshot s
+            ),
+            union_firsts AS (
+                SELECT si.pool_id AS pool_id, MIN(sh.epoch_no)::BIGINT AS first_seen_epoch
+                FROM spo_history sh
+                LEFT JOIN spo_identity si ON si.spo_sk = sh.spo_sk
+                WHERE si.pool_id IS NOT NULL
+                GROUP BY si.pool_id
+                UNION ALL
+                SELECT si.pool_id AS pool_id, MIN(cm.epoch_no)::BIGINT AS first_seen_epoch
+                FROM committee_membership cm
+                LEFT JOIN spo_identity si ON si.sidechain_pubkey = cm.sidechain_pubkey
+                WHERE si.pool_id IS NOT NULL
+                GROUP BY si.pool_id
+                UNION ALL
+                SELECT si.pool_id AS pool_id, MIN(sep.epoch_no)::BIGINT AS first_seen_epoch
+                FROM spo_epoch_performance sep
+                LEFT JOIN spo_identity si ON si.spo_sk = sep.spo_sk
+                WHERE si.pool_id IS NOT NULL
+                GROUP BY si.pool_id
+            ),
+            firsts0 AS (
+                SELECT pool_id, MIN(first_seen_epoch)::BIGINT AS first_seen_epoch
+                FROM union_firsts
+                GROUP BY pool_id
+            ),
+            firsts_cur AS (
+                SELECT c.pool_id,
+                       COALESCE(f0.first_seen_epoch, $2::BIGINT) AS first_seen_epoch
+                FROM cur c
+                LEFT JOIN firsts0 f0 ON f0.pool_id = c.pool_id
+            ),
+            agg AS (
+                SELECT r.epoch_no,
+                       COUNT(*) FILTER (WHERE fc.first_seen_epoch <= r.epoch_no) AS total_registered,
+                       COUNT(*) FILTER (WHERE fc.first_seen_epoch = r.epoch_no) AS newly_registered
+                FROM rng r
+                CROSS JOIN firsts_cur fc
+                GROUP BY r.epoch_no
+            )
+            SELECT epoch_no, total_registered, newly_registered
+            FROM agg
+            ORDER BY epoch_no
+        "};
+
+        #[cfg(feature = "standalone")]
         let query = indoc! {"
             WITH RECURSIVE rng(epoch_no) AS (
                 SELECT $1
@@ -804,6 +857,53 @@ impl SpoStorage for Storage {
         let start = from_epoch.min(to_epoch);
         let end = to_epoch.max(from_epoch);
 
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            WITH rng AS (
+                SELECT generate_series($1::BIGINT, $2::BIGINT) AS epoch_no
+            ),
+            hist_valid AS (
+                SELECT sh.epoch_no,
+                       COUNT(DISTINCT si.pool_id) AS cnt
+                FROM spo_history sh
+                LEFT JOIN spo_identity si ON si.spo_sk = sh.spo_sk
+                WHERE sh.status IN ('VALID','Valid')
+                  AND sh.epoch_no BETWEEN $1::BIGINT AND $2::BIGINT
+                  AND si.pool_id IS NOT NULL
+                GROUP BY sh.epoch_no
+            ),
+            hist_invalid AS (
+                SELECT sh.epoch_no,
+                       COUNT(DISTINCT si.pool_id) AS cnt
+                FROM spo_history sh
+                LEFT JOIN spo_identity si ON si.spo_sk = sh.spo_sk
+                WHERE sh.status IN ('INVALID','Invalid')
+                  AND sh.epoch_no BETWEEN $1::BIGINT AND $2::BIGINT
+                  AND si.pool_id IS NOT NULL
+                GROUP BY sh.epoch_no
+            ),
+            fed AS (
+                SELECT c.epoch_no,
+                       COUNT(DISTINCT c.sidechain_pubkey) FILTER (WHERE c.expected_slots > 0) AS federated_valid_count,
+                       0::BIGINT AS federated_invalid_count
+                FROM committee_membership c
+                WHERE c.epoch_no BETWEEN $1::BIGINT AND $2::BIGINT
+                GROUP BY c.epoch_no
+            )
+            SELECT r.epoch_no,
+                   COALESCE(f.federated_valid_count, 0) AS federated_valid_count,
+                   COALESCE(f.federated_invalid_count, 0) AS federated_invalid_count,
+                   COALESCE(hv.cnt, 0) AS registered_valid_count,
+                   COALESCE(hi.cnt, 0) AS registered_invalid_count,
+                   COALESCE(hv.cnt, 0)::DOUBLE PRECISION AS dparam
+            FROM rng r
+            LEFT JOIN hist_valid hv ON hv.epoch_no = r.epoch_no
+            LEFT JOIN hist_invalid hi ON hi.epoch_no = r.epoch_no
+            LEFT JOIN fed f ON f.epoch_no = r.epoch_no
+            ORDER BY r.epoch_no
+        "};
+
+        #[cfg(feature = "standalone")]
         let query = indoc! {"
             WITH RECURSIVE rng(epoch_no) AS (
                 SELECT $1
