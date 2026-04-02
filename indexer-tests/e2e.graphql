@@ -45,8 +45,8 @@ query BlockQuery($block_offset: BlockOffset) {
                             }
                         }
                         identifiers
-                        startIndex
-                        endIndex
+                        zswapStartIndex
+                        zswapEndIndex
                         fees {
                             paidFees
                             estimatedFees
@@ -85,8 +85,8 @@ query BlockQuery($block_offset: BlockOffset) {
                             }
                         }
                         identifiers
-                        startIndex
-                        endIndex
+                        zswapStartIndex
+                        zswapEndIndex
                         fees {
                             paidFees
                             estimatedFees
@@ -105,8 +105,8 @@ query BlockQuery($block_offset: BlockOffset) {
                             }
                         }
                         identifiers
-                        startIndex
-                        endIndex
+                        zswapStartIndex
+                        zswapEndIndex
                         fees {
                             paidFees
                             estimatedFees
@@ -134,8 +134,8 @@ query BlockQuery($block_offset: BlockOffset) {
                             }
                         }
                         identifiers
-                        startIndex
-                        endIndex
+                        zswapStartIndex
+                        zswapEndIndex
                         fees {
                             paidFees
                             estimatedFees
@@ -154,8 +154,8 @@ query BlockQuery($block_offset: BlockOffset) {
                             }
                         }
                         identifiers
-                        startIndex
-                        endIndex
+                        zswapStartIndex
+                        zswapEndIndex
                         fees {
                             paidFees
                             estimatedFees
@@ -185,8 +185,8 @@ query BlockQuery($block_offset: BlockOffset) {
                     }
                 }
                 identifiers
-                startIndex
-                endIndex
+                zswapStartIndex
+                zswapEndIndex
                 fees {
                     paidFees
                     estimatedFees
@@ -222,8 +222,8 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                         }
                     }
                     identifiers
-                    startIndex
-                    endIndex
+                    zswapStartIndex
+                    zswapEndIndex
                     fees {
                         paidFees
                         estimatedFees
@@ -262,8 +262,8 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                         }
                     }
                     identifiers
-                    startIndex
-                    endIndex
+                    zswapStartIndex
+                    zswapEndIndex
                     fees {
                         paidFees
                         estimatedFees
@@ -282,8 +282,8 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                         }
                     }
                     identifiers
-                    startIndex
-                    endIndex
+                    zswapStartIndex
+                    zswapEndIndex
                     fees {
                         paidFees
                         estimatedFees
@@ -311,8 +311,8 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                         }
                     }
                     identifiers
-                    startIndex
-                    endIndex
+                    zswapStartIndex
+                    zswapEndIndex
                     fees {
                         paidFees
                         estimatedFees
@@ -331,8 +331,8 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                         }
                     }
                     identifiers
-                    startIndex
-                    endIndex
+                    zswapStartIndex
+                    zswapEndIndex
                     fees {
                         paidFees
                         estimatedFees
@@ -362,8 +362,8 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                 }
             }
             identifiers
-            startIndex
-            endIndex
+            zswapStartIndex
+            zswapEndIndex
             fees {
                 paidFees
                 estimatedFees
@@ -395,8 +395,8 @@ query ContractActionQuery(
                     }
                 }
                 identifiers
-                startIndex
-                endIndex
+                zswapStartIndex
+                zswapEndIndex
                 fees {
                     paidFees
                     estimatedFees
@@ -472,8 +472,8 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                             }
                         }
                         identifiers
-                        startIndex
-                        endIndex
+                        zswapStartIndex
+                        zswapEndIndex
                         fees {
                             paidFees
                             estimatedFees
@@ -512,8 +512,8 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                             }
                         }
                         identifiers
-                        startIndex
-                        endIndex
+                        zswapStartIndex
+                        zswapEndIndex
                         fees {
                             paidFees
                             estimatedFees
@@ -532,8 +532,8 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                             }
                         }
                         identifiers
-                        startIndex
-                        endIndex
+                        zswapStartIndex
+                        zswapEndIndex
                         fees {
                             paidFees
                             estimatedFees
@@ -561,8 +561,8 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                             }
                         }
                         identifiers
-                        startIndex
-                        endIndex
+                        zswapStartIndex
+                        zswapEndIndex
                         fees {
                             paidFees
                             estimatedFees
@@ -581,8 +581,8 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                             }
                         }
                         identifiers
-                        startIndex
-                        endIndex
+                        zswapStartIndex
+                        zswapEndIndex
                         fees {
                             paidFees
                             estimatedFees
@@ -612,8 +612,8 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                     }
                 }
                 identifiers
-                startIndex
-                endIndex
+                zswapStartIndex
+                zswapEndIndex
                 fees {
                     paidFees
                     estimatedFees
@@ -649,8 +649,8 @@ subscription ContractActionSubscription(
                     }
                 }
                 identifiers
-                startIndex
-                endIndex
+                zswapStartIndex
+                zswapEndIndex
                 fees {
                     paidFees
                     estimatedFees
@@ -676,10 +676,10 @@ subscription ShieldedTransactionsSubscription($sessionId: HexEncoded!) {
         __typename
         ... on RelevantTransaction {
             transaction {
-                startIndex
-                endIndex
+                zswapStartIndex
+                zswapEndIndex
             }
-            collapsedMerkleTree {
+            zswapCollapsedUpdate {
                 startIndex
                 endIndex
             }
@@ -709,8 +709,8 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                         }
                     }
                     identifiers
-                    startIndex
-                    endIndex
+                    zswapStartIndex
+                    zswapEndIndex
                     fees {
                         paidFees
                         estimatedFees
@@ -737,8 +737,8 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                             }
                         }
                         identifiers
-                        startIndex
-                        endIndex
+                        zswapStartIndex
+                        zswapEndIndex
                         fees {
                             paidFees
                             estimatedFees
@@ -766,8 +766,8 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                             }
                         }
                         identifiers
-                        startIndex
-                        endIndex
+                        zswapStartIndex
+                        zswapEndIndex
                         fees {
                             paidFees
                             estimatedFees
@@ -786,8 +786,8 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                             }
                         }
                         identifiers
-                        startIndex
-                        endIndex
+                        zswapStartIndex
+                        zswapEndIndex
                         fees {
                             paidFees
                             estimatedFees
@@ -821,7 +821,9 @@ subscription DustLedgerEventsSubscription($id: Int) {
     }
 }
 
-query DustGenerationStatusQuery($cardanoRewardAddresses: [CardanoRewardAddress!]!) {
+query DustGenerationStatusQuery(
+    $cardanoRewardAddresses: [CardanoRewardAddress!]!
+) {
     dustGenerationStatus(cardanoRewardAddresses: $cardanoRewardAddresses) {
         cardanoRewardAddress
         dustAddress

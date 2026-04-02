@@ -823,20 +823,20 @@ async fn test_shielded_transactions_subscription(
     // Verify that there are no index gaps.
     let mut expected_start_index = 0;
     for relevant_transaction in relevant_transactions {
-        if let Some(collapsed_merkle_tree) = relevant_transaction.collapsed_merkle_tree {
-            assert_eq!(collapsed_merkle_tree.start_index, expected_start_index);
-            assert!(collapsed_merkle_tree.end_index >= collapsed_merkle_tree.start_index);
+        if let Some(zswap_collapsed_update) = relevant_transaction.zswap_collapsed_update {
+            assert_eq!(zswap_collapsed_update.start_index, expected_start_index);
+            assert!(zswap_collapsed_update.end_index >= zswap_collapsed_update.start_index);
 
-            expected_start_index = collapsed_merkle_tree.end_index + 1;
+            expected_start_index = zswap_collapsed_update.end_index + 1;
         }
 
-        assert!(relevant_transaction.transaction.start_index == expected_start_index);
+        assert!(relevant_transaction.transaction.zswap_start_index == expected_start_index);
         assert!(
-            relevant_transaction.transaction.end_index
-                >= relevant_transaction.transaction.start_index
+            relevant_transaction.transaction.zswap_end_index
+                >= relevant_transaction.transaction.zswap_start_index
         );
 
-        expected_start_index = relevant_transaction.transaction.end_index;
+        expected_start_index = relevant_transaction.transaction.zswap_end_index;
     }
 
     Ok(())

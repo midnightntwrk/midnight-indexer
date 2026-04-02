@@ -56,13 +56,16 @@ input BlockOffset @oneOf {
 
 scalar CardanoRewardAddress
 
+"""
+A collapsed Merkle tree update between two indices.
+"""
 type CollapsedMerkleTree {
 	"""
-	The zswap state start index.
+	The start index.
 	"""
 	startIndex: Int!
 	"""
-	The zswap state end index.
+	The end index.
 	"""
 	endIndex: Int!
 	"""
@@ -413,6 +416,28 @@ type FirstValidEpoch {
 
 scalar HexEncoded
 
+"""
+A merkle-tree collapsed update between two indices.
+"""
+type MerkleTreeCollapsedUpdate {
+	"""
+	The start index.
+	"""
+	startIndex: Int!
+	"""
+	The end index.
+	"""
+	endIndex: Int!
+	"""
+	The hex-encoded value.
+	"""
+	update: HexEncoded!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+}
+
 type Mutation {
 	"""
 	Connect the wallet with the given viewing key and return a session ID.
@@ -470,6 +495,10 @@ type Query {
 	Find a block for the given optional offset; if not present, the latest block is returned.
 	"""
 	block(offset: BlockOffset): Block
+	"""
+	Get a merkle-tree collapsed update for the given zswap state index range.
+	"""
+	zswapMerkleTreeCollapsedUpdate(sessionId: HexEncoded!, startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!
 	"""
 	Find transactions for the given offset.
 	"""
@@ -622,17 +651,29 @@ type RegularTransaction implements Transaction {
 	"""
 	identifiers: [HexEncoded!]!
 	"""
-	The hex-encoded serialized merkle-tree root.
+	The hex-encoded serialized zswap merkle-tree root.
 	"""
-	merkleTreeRoot: HexEncoded!
+	zswapMerkleTreeRoot: HexEncoded!
+	"""
+	The hex-encoded serialized zswap merkle-tree root.
+	"""
+	merkleTreeRoot: HexEncoded! @deprecated(reason: "Use zswap_merkle_tree_root instead")
 	"""
 	The zswap state start index.
 	"""
-	startIndex: Int!
+	zswapStartIndex: Int!
+	"""
+	The zswap state start index.
+	"""
+	startIndex: Int! @deprecated(reason: "Use zswap_start_index instead")
 	"""
 	The zswap state end index.
 	"""
-	endIndex: Int!
+	zswapEndIndex: Int!
+	"""
+	The zswap state end index.
+	"""
+	endIndex: Int! @deprecated(reason: "Use zswap_end_index instead")
 	"""
 	Fee information for this transaction.
 	"""
@@ -672,9 +713,13 @@ type RelevantTransaction {
 	"""
 	transaction: RegularTransaction!
 	"""
+	An optional zswalp merkle-tree collapsed update.
+	"""
+	zswapCollapsedUpdate: MerkleTreeCollapsedUpdate
+	"""
 	An optional collapsed merkle tree.
 	"""
-	collapsedMerkleTree: CollapsedMerkleTree
+	collapsedMerkleTree: CollapsedMerkleTree @deprecated(reason: "Use `zswap_merkle_tree_collapsed_update` instead")
 }
 
 """
@@ -1113,6 +1158,10 @@ type ZswapLedgerEvent {
 	protocolVersion: Int!
 }
 
+"""
+Marks an element of a GraphQL schema as no longer supported.
+"""
+directive @deprecated(reason: String = "No longer supported") on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE
 """
 Directs the executor to include this field or fragment only when the `if` argument is true.
 """

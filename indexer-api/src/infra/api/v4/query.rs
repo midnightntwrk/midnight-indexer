@@ -19,7 +19,9 @@ use crate::{
             CardanoNetworkId, CardanoRewardAddress, HexEncoded,
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
+            decode_session_id,
             dust::DustGenerationStatus,
+            merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate,
             spo::{
                 CommitteeMember, EpochInfo, EpochPerf, FirstValidEpoch, PoolMetadata,
                 PresenceEvent, RegisteredStat, RegisteredTotals, Spo, SpoComposite, SpoIdentity,
@@ -86,6 +88,40 @@ where
         };
 
         Ok(block.map(Into::into))
+    }
+
+    /// Get a merkle-tree collapsed update for the given zswap state index range.
+    #[trace(properties = { "start_index": "{start_index}", "end_index": "{end_index}" })]
+    pub async fn zswap_merkle_tree_collapsed_update(
+        &self,
+        cx: &Context<'_>,
+        session_id: HexEncoded,
+        start_index: u64,
+        end_index: u64,
+    ) -> ApiResult<MerkleTreeCollapsedUpdate> {
+        let session_id =
+            decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
+        let storage = cx.get_storage::<S>();
+
+        storage
+            .resolve_session_id(session_id)
+            .await
+            .map_err_into_server_error(|| "resolve session ID")?
+            .some_or_client_error(|| "unknown or expired session ID")?;
+
+        let (protocol_version, _) = storage
+            .get_highest_ledger_state()
+            .await
+            .map_err_into_server_error(|| "get highest ledger state")?
+            .some_or_server_error(|| "no ledger state available")?;
+
+        let update = cx
+            .get_ledger_state_cache()
+            .make_zswap_collapsed_update(start_index, end_index, storage, protocol_version)
+            .await
+            .map_err_into_server_error(|| "create collapsed Merkle tree update")?;
+
+        Ok(update.into())
     }
 
     /// Find transactions for the given offset.

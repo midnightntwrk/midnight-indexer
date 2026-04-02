@@ -648,8 +648,12 @@ impl LedgerState {
         }
     }
 
-    /// Get the serialized merkle-tree collapsed update for the given indices.
-    pub fn collapsed_update(&self, start_index: u64, end_index: u64) -> Result<ByteVec, Error> {
+    /// Create a zswap merkle-tree collapsed update.
+    pub fn make_zswap_collapsed_update(
+        &self,
+        start_index: u64,
+        end_index: u64,
+    ) -> Result<ByteVec, Error> {
         match self {
             Self::V7 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
                 &ledger_state.zswap.coin_coms,

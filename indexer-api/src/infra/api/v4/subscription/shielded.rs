@@ -15,12 +15,17 @@ use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, InnerApiError, OptionExt, ResultExt,
-        v4::{HexEncodable, HexEncoded, decode_session_id, transaction::RegularTransaction},
+        v4::{
+            HexEncoded, decode_session_id,
+            merkle_tree_collapsed_update::{CollapsedMerkleTree, MerkleTreeCollapsedUpdate},
+            transaction::RegularTransaction,
+        },
     },
 };
 use async_graphql::{Context, SimpleObject, Subscription, Union};
 use async_stream::try_stream;
 use derive_more::Debug;
+
 use drop_stream::DropStreamExt;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{
@@ -53,7 +58,11 @@ where
     /// A transaction relevant for the subscribing wallet.
     transaction: RegularTransaction<S>,
 
+    /// An optional zswalp merkle-tree collapsed update.
+    zswap_collapsed_update: Option<MerkleTreeCollapsedUpdate>,
+
     /// An optional collapsed merkle tree.
+    #[graphql(deprecation = "Use `zswap_merkle_tree_collapsed_update` instead")]
     collapsed_merkle_tree: Option<CollapsedMerkleTree>,
 }
 
@@ -76,40 +85,6 @@ struct ShieldedTransactionsProgress {
     /// unless the latest checked transaction is relevant for the subscribing wallet. A value of
     /// zero means that no relevant transactions have been indexed for the subscribing wallet.
     highest_relevant_end_index: u64,
-}
-
-#[derive(Debug, SimpleObject)]
-struct CollapsedMerkleTree {
-    /// The zswap state start index.
-    start_index: u64,
-
-    /// The zswap state end index.
-    end_index: u64,
-
-    /// The hex-encoded value.
-    #[debug(skip)]
-    update: HexEncoded,
-
-    /// The protocol version.
-    protocol_version: u32,
-}
-
-impl From<domain::MerkleTreeCollapsedUpdate> for CollapsedMerkleTree {
-    fn from(value: domain::MerkleTreeCollapsedUpdate) -> Self {
-        let domain::MerkleTreeCollapsedUpdate {
-            start_index,
-            end_index,
-            update,
-            protocol_version,
-        } = value;
-
-        Self {
-            start_index,
-            end_index,
-            update: update.hex_encode(),
-            protocol_version: protocol_version.into(),
-        }
-    }
 }
 
 pub struct ShieldedTransactionsSubscription<S, B> {
@@ -296,25 +271,27 @@ where
 {
     debug!(index, transaction:?; "making relevant transaction");
 
-    let collapsed_merkle_tree = if index == transaction.start_index || transaction.start_index == 0
+    let zswap_collapsed_update = if index == transaction.start_index || transaction.start_index == 0
     {
         None
     } else {
-        let collapsed_merkle_tree = ledger_state_cache
-            .collapsed_update(
+        let zswap_collapsed_update = ledger_state_cache
+            .make_zswap_collapsed_update(
                 index,
                 transaction.start_index - 1,
                 storage,
                 transaction.protocol_version,
             )
             .await
-            .map_err_into_server_error(|| "create collapsed update")?
-            .into();
-        Some(collapsed_merkle_tree)
+            .map_err_into_server_error(|| "create zswap merkle-tree collapsed update")?;
+        Some(MerkleTreeCollapsedUpdate::from(zswap_collapsed_update))
     };
+
+    let collapsed_merkle_tree = zswap_collapsed_update.as_ref().map(|u| u.to_owned().into());
 
     let relevant_transaction = RelevantTransaction {
         transaction: transaction.into(),
+        zswap_collapsed_update,
         collapsed_merkle_tree,
     };
     debug!(relevant_transaction:?; "made relevant transaction");

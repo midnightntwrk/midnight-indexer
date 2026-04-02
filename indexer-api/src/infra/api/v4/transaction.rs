@@ -100,14 +100,27 @@ where
     #[debug(skip)]
     identifiers: Vec<HexEncoded>,
 
-    /// The hex-encoded serialized merkle-tree root.
+    /// The hex-encoded serialized zswap merkle-tree root.
     #[debug(skip)]
+    zswap_merkle_tree_root: HexEncoded,
+
+    /// The hex-encoded serialized zswap merkle-tree root.
+    #[debug(skip)]
+    #[graphql(deprecation = "Use zswap_merkle_tree_root instead")]
     merkle_tree_root: HexEncoded,
 
     /// The zswap state start index.
+    zswap_start_index: u64,
+
+    /// The zswap state start index.
+    #[graphql(deprecation = "Use zswap_start_index instead")]
     start_index: u64,
 
     /// The zswap state end index.
+    zswap_end_index: u64,
+
+    /// The zswap state end index.
+    #[graphql(deprecation = "Use zswap_end_index instead")]
     end_index: u64,
 
     /// Fee information for this transaction.
@@ -179,6 +192,8 @@ where
             ..
         } = transaction;
 
+        let zswap_merkle_tree_root = merkle_tree_root.hex_encode();
+
         // Use fees information from database (calculated by chain-indexer)
         let fees = TransactionFees {
             paid_fees: transaction
@@ -203,8 +218,11 @@ where
                 .into_iter()
                 .map(|identifier| identifier.hex_encode())
                 .collect::<Vec<_>>(),
-            merkle_tree_root: merkle_tree_root.hex_encode(),
+            merkle_tree_root: zswap_merkle_tree_root.clone(),
+            zswap_merkle_tree_root,
+            zswap_start_index: start_index,
             start_index,
+            zswap_end_index: end_index,
             end_index,
             _s: PhantomData,
         }
