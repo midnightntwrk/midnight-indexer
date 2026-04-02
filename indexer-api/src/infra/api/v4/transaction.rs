@@ -106,21 +106,21 @@ where
 
     /// The hex-encoded serialized zswap merkle-tree root.
     #[debug(skip)]
-    #[graphql(deprecation = "Use zswap_merkle_tree_root instead")]
+    #[graphql(deprecation = "Use zswapMerkleTreeRoot instead")]
     merkle_tree_root: HexEncoded,
 
     /// The zswap state start index.
     zswap_start_index: u64,
 
     /// The zswap state start index.
-    #[graphql(deprecation = "Use zswap_start_index instead")]
+    #[graphql(deprecation = "Use zswapStartIndex instead")]
     start_index: u64,
 
     /// The zswap state end index.
     zswap_end_index: u64,
 
     /// The zswap state end index.
-    #[graphql(deprecation = "Use zswap_end_index instead")]
+    #[graphql(deprecation = "Use zswapEndIndex instead")]
     end_index: u64,
 
     /// Fee information for this transaction.

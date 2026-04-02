@@ -58,11 +58,11 @@ where
     /// A transaction relevant for the subscribing wallet.
     transaction: RegularTransaction<S>,
 
-    /// An optional zswalp merkle-tree collapsed update.
+    /// An optional zswap merkle-tree collapsed update.
     zswap_collapsed_update: Option<MerkleTreeCollapsedUpdate>,
 
     /// An optional collapsed merkle tree.
-    #[graphql(deprecation = "Use `zswap_merkle_tree_collapsed_update` instead")]
+    #[graphql(deprecation = "Use zswapCollapsedUpdate instead")]
     collapsed_merkle_tree: Option<CollapsedMerkleTree>,
 }
 

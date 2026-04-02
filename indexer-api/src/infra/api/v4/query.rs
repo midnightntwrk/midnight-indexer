@@ -57,7 +57,7 @@ where
 {
     /// Find a block for the given optional offset; if not present, the latest block is returned.
     #[trace(properties = { "offset": "{offset:?}" })]
-    pub async fn block(
+    async fn block(
         &self,
         cx: &Context<'_>,
         offset: Option<BlockOffset>,
@@ -92,7 +92,7 @@ where
 
     /// Get a merkle-tree collapsed update for the given zswap state index range.
     #[trace(properties = { "start_index": "{start_index}", "end_index": "{end_index}" })]
-    pub async fn zswap_merkle_tree_collapsed_update(
+    async fn zswap_merkle_tree_collapsed_update(
         &self,
         cx: &Context<'_>,
         session_id: HexEncoded,

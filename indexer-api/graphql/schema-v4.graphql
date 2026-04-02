@@ -657,7 +657,7 @@ type RegularTransaction implements Transaction {
 	"""
 	The hex-encoded serialized zswap merkle-tree root.
 	"""
-	merkleTreeRoot: HexEncoded! @deprecated(reason: "Use zswap_merkle_tree_root instead")
+	merkleTreeRoot: HexEncoded! @deprecated(reason: "Use zswapMerkleTreeRoot instead")
 	"""
 	The zswap state start index.
 	"""
@@ -665,7 +665,7 @@ type RegularTransaction implements Transaction {
 	"""
 	The zswap state start index.
 	"""
-	startIndex: Int! @deprecated(reason: "Use zswap_start_index instead")
+	startIndex: Int! @deprecated(reason: "Use zswapStartIndex instead")
 	"""
 	The zswap state end index.
 	"""
@@ -673,7 +673,7 @@ type RegularTransaction implements Transaction {
 	"""
 	The zswap state end index.
 	"""
-	endIndex: Int! @deprecated(reason: "Use zswap_end_index instead")
+	endIndex: Int! @deprecated(reason: "Use zswapEndIndex instead")
 	"""
 	Fee information for this transaction.
 	"""
@@ -713,13 +713,13 @@ type RelevantTransaction {
 	"""
 	transaction: RegularTransaction!
 	"""
-	An optional zswalp merkle-tree collapsed update.
+	An optional zswap merkle-tree collapsed update.
 	"""
 	zswapCollapsedUpdate: MerkleTreeCollapsedUpdate
 	"""
 	An optional collapsed merkle tree.
 	"""
-	collapsedMerkleTree: CollapsedMerkleTree @deprecated(reason: "Use `zswap_merkle_tree_collapsed_update` instead")
+	collapsedMerkleTree: CollapsedMerkleTree @deprecated(reason: "Use zswapCollapsedUpdate instead")
 }
 
 """

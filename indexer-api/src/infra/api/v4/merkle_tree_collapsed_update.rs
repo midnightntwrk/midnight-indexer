@@ -84,7 +84,7 @@ impl From<MerkleTreeCollapsedUpdate> for CollapsedMerkleTree {
             start_index,
             end_index,
             update,
-            protocol_version: protocol_version.into(),
+            protocol_version,
         }
     }
 }
