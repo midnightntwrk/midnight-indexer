@@ -23,7 +23,7 @@ use indexer_common::domain::BlockHash;
 use std::{collections::HashMap, sync::Arc};
 
 // We wrap sqlx::Error in an Arc because async-graphql's DataLoader requires the
-// Error type to be Clone. This allows a single batched load failure to be 
+// Error type to be Clone. This allows a single batched load failure to be
 // propagated to all concurrent resolvers awaiting the result.
 // ---------------------------------------------------------------------------
 // Block loaders

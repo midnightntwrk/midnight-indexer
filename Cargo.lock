@@ -3063,6 +3063,7 @@ dependencies = [
  "indexer-common",
  "indoc",
  "log",
+ "metrics",
  "serde",
  "sqlx",
  "stream-cancel",
