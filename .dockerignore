@@ -1,4 +1,5 @@
 *.check
+.claude
 .config
 .dockerignore
 .DS_Store

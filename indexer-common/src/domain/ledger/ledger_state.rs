@@ -16,7 +16,7 @@ use crate::{
         ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, ByteArray, ByteVec,
         IntentHash, LedgerEvent, LedgerVersion, NetworkId, Nonce, SerializedContractAddress,
         SerializedLedgerParameters, SerializedLedgerStateKey, SerializedTransaction,
-        SerializedZswapState, SerializedZswapStateRoot, TokenType, TransactionResult,
+        SerializedZswapMerkleTreeRoot, SerializedZswapState, TokenType, TransactionResult,
         UnshieldedUtxo,
         dust::{self},
         ledger::{
@@ -591,7 +591,7 @@ impl LedgerState {
     }
 
     /// Get the merkle tree root of the zswap state.
-    pub fn zswap_merkle_tree_root(&self) -> ZswapStateRoot {
+    pub fn zswap_merkle_tree_root(&self) -> ZswapMerkleTreeRoot {
         match self {
             Self::V7 { ledger_state, .. } => {
                 let root = ledger_state
@@ -600,7 +600,7 @@ impl LedgerState {
                     .rehash()
                     .root()
                     .expect("zswap merkle tree root should exist");
-                ZswapStateRoot::V7(root)
+                ZswapMerkleTreeRoot::V7(root)
             }
 
             Self::V8 { ledger_state, .. } => {
@@ -610,7 +610,7 @@ impl LedgerState {
                     .rehash()
                     .root()
                     .expect("zswap merkle tree root should exist");
-                ZswapStateRoot::V8(root)
+                ZswapMerkleTreeRoot::V8(root)
             }
         }
     }
@@ -779,14 +779,14 @@ impl LedgerParameters {
     }
 }
 
-/// Facade for zswap state root across supported (protocol) versions.
+/// Facade for zswap merkle-tree root across supported (protocol) versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ZswapStateRoot {
+pub enum ZswapMerkleTreeRoot {
     V7(MerkleTreeDigest),
     V8(MerkleTreeDigest),
 }
 
-impl ZswapStateRoot {
+impl ZswapMerkleTreeRoot {
     /// Untagged deserialize the given serialized zswap state root using the given protocol version.
     #[trace(properties = { "ledger_version": "{ledger_version}" })]
     pub fn deserialize(
@@ -812,7 +812,7 @@ impl ZswapStateRoot {
 
     /// Serialize this zswap state root.
     #[trace]
-    pub fn serialize(&self) -> Result<SerializedZswapStateRoot, Error> {
+    pub fn serialize(&self) -> Result<SerializedZswapMerkleTreeRoot, Error> {
         match self {
             Self::V7(digest) => digest
                 .serialize()

@@ -186,13 +186,13 @@ where
             block_hash,
             transaction_result,
             identifiers,
-            merkle_tree_root,
-            start_index,
-            end_index,
+            zswap_merkle_tree_root,
+            zswap_start_index,
+            zswap_end_index,
             ..
         } = transaction;
 
-        let zswap_merkle_tree_root = merkle_tree_root.hex_encode();
+        let zswap_merkle_tree_root = zswap_merkle_tree_root.hex_encode();
 
         // Use fees information from database (calculated by chain-indexer)
         let fees = TransactionFees {
@@ -220,10 +220,10 @@ where
                 .collect::<Vec<_>>(),
             merkle_tree_root: zswap_merkle_tree_root.clone(),
             zswap_merkle_tree_root,
-            zswap_start_index: start_index,
-            start_index,
-            zswap_end_index: end_index,
-            end_index,
+            zswap_start_index,
+            start_index: zswap_start_index,
+            zswap_end_index,
+            end_index: zswap_end_index,
             _s: PhantomData,
         }
     }

@@ -44,9 +44,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 regular_transactions.transaction_result,
-                regular_transactions.merkle_tree_root,
-                regular_transactions.start_index,
-                regular_transactions.end_index,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees,
                 regular_transactions.identifiers
@@ -65,9 +65,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 NULL AS transaction_result,
-                NULL AS merkle_tree_root,
-                NULL AS start_index,
-                NULL AS end_index,
+                NULL AS zswap_merkle_tree_root,
+                NULL AS zswap_start_index,
+                NULL AS zswap_end_index,
                 NULL AS paid_fees,
                 NULL AS estimated_fees,
                 NULL AS identifiers
@@ -87,9 +87,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 regular_transactions.transaction_result,
-                regular_transactions.merkle_tree_root,
-                regular_transactions.start_index,
-                regular_transactions.end_index,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees
             FROM transactions
@@ -107,9 +107,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 NULL AS transaction_result,
-                NULL AS merkle_tree_root,
-                NULL AS start_index,
-                NULL AS end_index,
+                NULL AS zswap_merkle_tree_root,
+                NULL AS zswap_start_index,
+                NULL AS zswap_end_index,
                 NULL AS paid_fees,
                 NULL AS estimated_fees
             FROM transactions
@@ -147,9 +147,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 regular_transactions.transaction_result,
-                regular_transactions.merkle_tree_root,
-                regular_transactions.start_index,
-                regular_transactions.end_index,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees,
                 regular_transactions.identifiers
@@ -168,9 +168,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 NULL AS transaction_result,
-                NULL AS merkle_tree_root,
-                NULL AS start_index,
-                NULL AS end_index,
+                NULL AS zswap_merkle_tree_root,
+                NULL AS zswap_start_index,
+                NULL AS zswap_end_index,
                 NULL AS paid_fees,
                 NULL AS estimated_fees,
                 NULL AS identifiers
@@ -192,9 +192,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 regular_transactions.transaction_result,
-                regular_transactions.merkle_tree_root,
-                regular_transactions.start_index,
-                regular_transactions.end_index,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees
             FROM transactions
@@ -212,9 +212,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 NULL AS transaction_result,
-                NULL AS merkle_tree_root,
-                NULL AS start_index,
-                NULL AS end_index,
+                NULL AS zswap_merkle_tree_root,
+                NULL AS zswap_start_index,
+                NULL AS zswap_end_index,
                 NULL AS paid_fees,
                 NULL AS estimated_fees
             FROM transactions
@@ -260,9 +260,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 regular_transactions.transaction_result,
-                regular_transactions.merkle_tree_root,
-                regular_transactions.start_index,
-                regular_transactions.end_index,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees,
                 regular_transactions.identifiers
@@ -281,9 +281,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 NULL AS transaction_result,
-                NULL AS merkle_tree_root,
-                NULL AS start_index,
-                NULL AS end_index,
+                NULL AS zswap_merkle_tree_root,
+                NULL AS zswap_start_index,
+                NULL AS zswap_end_index,
                 NULL AS paid_fees,
                 NULL AS estimated_fees,
                 NULL AS identifiers
@@ -305,9 +305,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 regular_transactions.transaction_result,
-                regular_transactions.merkle_tree_root,
-                regular_transactions.start_index,
-                regular_transactions.end_index,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees
             FROM transactions
@@ -325,9 +325,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 NULL AS transaction_result,
-                NULL AS merkle_tree_root,
-                NULL AS start_index,
-                NULL AS end_index,
+                NULL AS zswap_merkle_tree_root,
+                NULL AS zswap_start_index,
+                NULL AS zswap_end_index,
                 NULL AS paid_fees,
                 NULL AS estimated_fees
             FROM transactions
@@ -373,9 +373,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 regular_transactions.transaction_result,
-                regular_transactions.merkle_tree_root,
-                regular_transactions.start_index,
-                regular_transactions.end_index,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees,
                 regular_transactions.identifiers
@@ -395,9 +395,9 @@ impl TransactionStorage for Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 regular_transactions.transaction_result,
-                regular_transactions.merkle_tree_root,
-                regular_transactions.start_index,
-                regular_transactions.end_index,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees
             FROM transactions
@@ -440,7 +440,7 @@ impl TransactionStorage for Storage {
                     .await?;
 
                 match transactions.last() {
-                    Some(transaction) => index = transaction.end_index,
+                    Some(transaction) => index = transaction.zswap_end_index,
                     None => break,
                 }
 
@@ -505,11 +505,11 @@ impl TransactionStorage for Storage {
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error> {
         let query = indoc! {"
             SELECT (
-                SELECT MAX(end_index)
+                SELECT MAX(zswap_end_index)
                 FROM regular_transactions
             ),
             (
-                SELECT end_index
+                SELECT zswap_end_index
                 FROM regular_transactions
                 WHERE id = (
                     SELECT MAX(last_indexed_transaction_id)
@@ -517,27 +517,30 @@ impl TransactionStorage for Storage {
                 )
             ),
             (
-                SELECT end_index
+                SELECT zswap_end_index
                 FROM regular_transactions
                 INNER JOIN relevant_transactions ON regular_transactions.id = relevant_transactions.transaction_id
                 INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
                 WHERE wallets.id = $1
                 AND wallets.session_id IS NOT NULL
-                ORDER BY end_index DESC
+                ORDER BY zswap_end_index DESC
                 LIMIT 1
             )
         "};
 
-        let (highest_end_index, highest_checked_end_index, highest_relevant_end_index) =
-            sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(query)
-                .bind(wallet_id)
-                .fetch_one(&*self.pool)
-                .await?;
+        let (
+            highest_zswap_end_index,
+            highest_checked_zswap_end_index,
+            highest_relevant_zswap_end_index,
+        ) = sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(query)
+            .bind(wallet_id)
+            .fetch_one(&*self.pool)
+            .await?;
 
         Ok((
-            highest_end_index.map(|n| n as u64),
-            highest_checked_end_index.map(|n| n as u64),
-            highest_relevant_end_index.map(|n| n as u64),
+            highest_zswap_end_index.map(|n| n as u64),
+            highest_checked_zswap_end_index.map(|n| n as u64),
+            highest_relevant_zswap_end_index.map(|n| n as u64),
         ))
     }
 }
@@ -563,9 +566,9 @@ impl Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 regular_transactions.transaction_result,
-                regular_transactions.merkle_tree_root,
-                regular_transactions.start_index,
-                regular_transactions.end_index,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees,
                 regular_transactions.identifiers
@@ -576,7 +579,7 @@ impl Storage {
             INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
             WHERE wallets.id = $1
             AND wallets.session_id IS NOT NULL
-            AND regular_transactions.start_index >= $2
+            AND regular_transactions.zswap_start_index >= $2
             ORDER BY transactions.id
             LIMIT $3
         "};
@@ -590,9 +593,9 @@ impl Storage {
                 transactions.raw,
                 blocks.hash AS block_hash,
                 regular_transactions.transaction_result,
-                regular_transactions.merkle_tree_root,
-                regular_transactions.start_index,
-                regular_transactions.end_index,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees
             FROM transactions
@@ -602,7 +605,7 @@ impl Storage {
             INNER JOIN wallets ON wallets.id = relevant_transactions.wallet_id
             WHERE wallets.id = $1
             AND wallets.session_id IS NOT NULL
-            AND regular_transactions.start_index >= $2
+            AND regular_transactions.zswap_start_index >= $2
             ORDER BY transactions.id
             LIMIT $3
         "};
@@ -648,9 +651,9 @@ impl Storage {
                     transactions.raw,
                     blocks.hash AS block_hash,
                     regular_transactions.transaction_result,
-                    regular_transactions.merkle_tree_root,
-                    regular_transactions.start_index,
-                    regular_transactions.end_index,
+                    regular_transactions.zswap_merkle_tree_root,
+                    regular_transactions.zswap_start_index,
+                    regular_transactions.zswap_end_index,
                     regular_transactions.paid_fees,
                     regular_transactions.estimated_fees,
                     regular_transactions.identifiers
@@ -673,9 +676,9 @@ impl Storage {
                     transactions.raw,
                     blocks.hash AS block_hash,
                     NULL AS transaction_result,
-                    NULL AS merkle_tree_root,
-                    NULL AS start_index,
-                    NULL AS end_index,
+                    NULL AS zswap_merkle_tree_root,
+                    NULL AS zswap_start_index,
+                    NULL AS zswap_end_index,
                     NULL AS paid_fees,
                     NULL AS estimated_fees,
                     NULL AS identifiers
@@ -704,9 +707,9 @@ impl Storage {
                     transactions.raw,
                     blocks.hash AS block_hash,
                     regular_transactions.transaction_result,
-                    regular_transactions.merkle_tree_root,
-                    regular_transactions.start_index,
-                    regular_transactions.end_index,
+                    regular_transactions.zswap_merkle_tree_root,
+                    regular_transactions.zswap_start_index,
+                    regular_transactions.zswap_end_index,
                     regular_transactions.paid_fees,
                     regular_transactions.estimated_fees
                 FROM transactions
@@ -728,9 +731,9 @@ impl Storage {
                     transactions.raw,
                     blocks.hash AS block_hash,
                     NULL AS transaction_result,
-                    NULL AS merkle_tree_root,
-                    NULL AS start_index,
-                    NULL AS end_index,
+                    NULL AS zswap_merkle_tree_root,
+                    NULL AS zswap_start_index,
+                    NULL AS zswap_end_index,
                     NULL AS paid_fees,
                     NULL AS estimated_fees
                 FROM transactions

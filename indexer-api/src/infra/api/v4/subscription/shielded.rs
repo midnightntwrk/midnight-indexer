@@ -49,7 +49,8 @@ enum ShieldedTransactionsEvent<S: Storage> {
     ShieldedTransactionsProgress(ShieldedTransactionsProgress),
 }
 
-/// A transaction relevant for the subscribing wallet and an optional collapsed merkle tree.
+/// A transaction relevant for the subscribing wallet and an optional zswap merkle-tree collapsed
+/// update.
 #[derive(Debug, SimpleObject)]
 struct RelevantTransaction<S>
 where
@@ -58,7 +59,8 @@ where
     /// A transaction relevant for the subscribing wallet.
     transaction: RegularTransaction<S>,
 
-    /// An optional zswap merkle-tree collapsed update.
+    /// Only include a zswap merkle-tree collapsed update if there is a gap between the current
+    /// zswap index "driving" the subscription and the zswap start index of the transaction.
     zswap_collapsed_update: Option<MerkleTreeCollapsedUpdate>,
 
     /// An optional collapsed merkle tree.
@@ -207,7 +209,7 @@ where
             .await
             .map_err_into_server_error(|| "get next transaction")?
         {
-            let end_index = transaction.end_index;
+            let end_index = transaction.zswap_end_index;
 
             yield make_relevant_transaction(
                 index,
@@ -239,7 +241,7 @@ where
                 .await
                 .map_err_into_server_error(|| "get next transaction")?
             {
-                let end_index = transaction.end_index;
+                let end_index = transaction.zswap_end_index;
 
                 yield make_relevant_transaction(
                     index,
@@ -271,20 +273,21 @@ where
 {
     debug!(index, transaction:?; "making relevant transaction");
 
-    let zswap_collapsed_update = if index == transaction.start_index || transaction.start_index == 0
-    {
-        None
-    } else {
+    // Only include a zswap merkle-tree collapsed update if there is a gap between the queried index
+    // and the start index of the transaction.
+    let zswap_collapsed_update = if index < transaction.zswap_start_index {
         let zswap_collapsed_update = ledger_state_cache
             .make_zswap_collapsed_update(
                 index,
-                transaction.start_index - 1,
+                transaction.zswap_start_index - 1,
                 storage,
                 transaction.protocol_version,
             )
             .await
             .map_err_into_server_error(|| "create zswap merkle-tree collapsed update")?;
         Some(MerkleTreeCollapsedUpdate::from(zswap_collapsed_update))
+    } else {
+        None
     };
 
     let collapsed_merkle_tree = zswap_collapsed_update.as_ref().map(|u| u.to_owned().into());
@@ -294,6 +297,7 @@ where
         zswap_collapsed_update,
         collapsed_merkle_tree,
     };
+
     debug!(relevant_transaction:?; "made relevant transaction");
 
     Ok(relevant_transaction)

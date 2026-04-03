@@ -705,7 +705,8 @@ type RegularTransaction implements Transaction {
 }
 
 """
-A transaction relevant for the subscribing wallet and an optional collapsed merkle tree.
+A transaction relevant for the subscribing wallet and an optional zswap merkle-tree collapsed
+update.
 """
 type RelevantTransaction {
 	"""
@@ -713,7 +714,8 @@ type RelevantTransaction {
 	"""
 	transaction: RegularTransaction!
 	"""
-	An optional zswap merkle-tree collapsed update.
+	Only include a zswap merkle-tree collapsed update if there is a gap between the current
+	zswap index "driving" the subscription and the zswap start index of the transaction.
 	"""
 	zswapCollapsedUpdate: MerkleTreeCollapsedUpdate
 	"""

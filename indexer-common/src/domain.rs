@@ -51,7 +51,7 @@ pub type DustUtxoId = ByteVec;
 // Untagged serialization: simple and/or stable types that are not expected to change.
 pub type SerializedLedgerStateKey = ByteVec;
 pub type SerializedTransactionIdentifier = ByteVec;
-pub type SerializedZswapStateRoot = ByteVec;
+pub type SerializedZswapMerkleTreeRoot = ByteVec;
 
 // Tagged serialization: complex types that may evolve; tags allow version-awareness.
 pub type SerializedContractAddress = ByteVec;

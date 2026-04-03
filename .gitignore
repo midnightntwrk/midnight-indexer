@@ -1,4 +1,5 @@
 *.check
+.claude
 .DS_Store
 .envrc.local
 .idea

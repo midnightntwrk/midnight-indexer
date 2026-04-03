@@ -32,15 +32,15 @@ CREATE INDEX transactions_variant_id_idx ON transactions (variant, id);
 CREATE TABLE regular_transactions (
   id INTEGER PRIMARY KEY REFERENCES transactions (id),
   transaction_result TEXT NOT NULL,
-  merkle_tree_root BLOB NOT NULL,
-  start_index INTEGER NOT NULL,
-  end_index INTEGER NOT NULL,
+  zswap_merkle_tree_root BLOB NOT NULL,
+  zswap_start_index INTEGER NOT NULL,
+  zswap_end_index INTEGER NOT NULL,
   paid_fees BLOB,
   estimated_fees BLOB
 );
 CREATE INDEX regular_transactions_transaction_result_idx ON regular_transactions (transaction_result);
-CREATE INDEX regular_transactions_start_idx ON regular_transactions (start_index);
-CREATE INDEX regular_transactions_end_idx ON regular_transactions (end_index);
+CREATE INDEX regular_transactions_zswap_start_idx ON regular_transactions (zswap_start_index);
+CREATE INDEX regular_transactions_zswap_end_idx ON regular_transactions (zswap_end_index);
 --------------------------------------------------------------------------------
 -- transaction_identifiers
 --------------------------------------------------------------------------------

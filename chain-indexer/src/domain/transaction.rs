@@ -15,7 +15,7 @@ use crate::domain::{ContractAction, node};
 use derive_more::Debug;
 use indexer_common::domain::{
     LedgerEvent, ProtocolVersion, SerializedTransaction, SerializedTransactionIdentifier,
-    SerializedZswapStateRoot, TransactionHash, TransactionResult, TransactionVariant,
+    SerializedZswapMerkleTreeRoot, TransactionHash, TransactionResult, TransactionVariant,
     UnshieldedUtxo,
 };
 
@@ -86,9 +86,9 @@ pub struct RegularTransaction {
     // These fields are set after applying the transaction to the ledger state.
     pub transaction_result: TransactionResult,
     #[debug(skip)]
-    pub merkle_tree_root: SerializedZswapStateRoot,
-    pub start_index: u64,
-    pub end_index: u64,
+    pub zswap_merkle_tree_root: SerializedZswapMerkleTreeRoot,
+    pub zswap_start_index: u64,
+    pub zswap_end_index: u64,
     #[debug(skip)]
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     #[debug(skip)]
@@ -108,9 +108,9 @@ impl From<node::RegularTransaction> for RegularTransaction {
             paid_fees: transaction.paid_fees,
             estimated_fees: transaction.estimated_fees,
             transaction_result: Default::default(),
-            merkle_tree_root: Default::default(),
-            start_index: Default::default(),
-            end_index: Default::default(),
+            zswap_merkle_tree_root: Default::default(),
+            zswap_start_index: Default::default(),
+            zswap_end_index: Default::default(),
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
             ledger_events: Default::default(),

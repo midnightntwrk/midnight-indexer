@@ -133,12 +133,12 @@ impl LedgerState {
 
         // Update transaction.
         transaction.transaction_result = transaction_result;
-        transaction.merkle_tree_root = self
+        transaction.zswap_merkle_tree_root = self
             .zswap_merkle_tree_root()
             .serialize()
             .map_err(|error| Error::SerializeMerkleTreeRoot(transaction.hash, error))?;
-        transaction.start_index = start_index;
-        transaction.end_index = self.zswap_first_free();
+        transaction.zswap_start_index = start_index;
+        transaction.zswap_end_index = self.zswap_first_free();
         transaction.created_unshielded_utxos = created_unshielded_utxos;
         transaction.spent_unshielded_utxos = spent_unshielded_utxos;
         transaction.ledger_events = ledger_events;
