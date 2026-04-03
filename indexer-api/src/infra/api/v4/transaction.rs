@@ -116,7 +116,7 @@ where
     #[graphql(deprecation = "Use zswapStartIndex instead")]
     start_index: u64,
 
-    /// The zswap state end index.
+    /// The zswap state end index; exclusive, i.e. the next free index into the zswap state.
     zswap_end_index: u64,
 
     /// The zswap state end index.

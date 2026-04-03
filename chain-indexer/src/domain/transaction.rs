@@ -88,7 +88,7 @@ pub struct RegularTransaction {
     #[debug(skip)]
     pub zswap_merkle_tree_root: SerializedZswapMerkleTreeRoot,
     pub zswap_start_index: u64,
-    pub zswap_end_index: u64,
+    pub zswap_end_index: u64, // Exclusive, i.e. the next free index.
     #[debug(skip)]
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     #[debug(skip)]

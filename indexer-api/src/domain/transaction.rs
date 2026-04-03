@@ -65,7 +65,7 @@ pub struct RegularTransaction {
     pub zswap_start_index: u64,
 
     #[sqlx(try_from = "i64")]
-    pub zswap_end_index: u64,
+    pub zswap_end_index: u64, // Exclusive, i.e. the next free index.
 
     #[sqlx(try_from = "SqlxOption<U128BeBytes>")]
     pub paid_fees: Option<u128>,

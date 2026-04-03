@@ -667,7 +667,7 @@ type RegularTransaction implements Transaction {
 	"""
 	startIndex: Int! @deprecated(reason: "Use zswapStartIndex instead")
 	"""
-	The zswap state end index.
+	The zswap state end index; exclusive, i.e. the next free index into the zswap state.
 	"""
 	zswapEndIndex: Int!
 	"""
