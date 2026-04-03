@@ -90,7 +90,7 @@ where
         Ok(block.map(Into::into))
     }
 
-    /// Get a merkle-tree collapsed update for the given zswap state index range.
+    /// Get a Merkle tree collapsed update for the given zswap state index range.
     #[trace(properties = { "start_index": "{start_index}", "end_index": "{end_index}" })]
     async fn zswap_merkle_tree_collapsed_update(
         &self,
@@ -119,7 +119,7 @@ where
             .get_ledger_state_cache()
             .make_zswap_collapsed_update(start_index, end_index, storage, protocol_version)
             .await
-            .map_err_into_server_error(|| "create collapsed Merkle tree update")?;
+            .map_err_into_server_error(|| "create zswap Merkle tree collapsed update")?;
 
         Ok(update.into())
     }

@@ -82,7 +82,7 @@ pub enum Error {
     #[error(transparent)]
     ByteArrayLen(ByteArrayLenError),
 
-    #[error("invalid merkle-tree collapsed update")]
+    #[error("invalid Merkle tree collapsed update")]
     InvalidUpdate(#[source] BoxError),
 
     #[error("malformed transaction")]

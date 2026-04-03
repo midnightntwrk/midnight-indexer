@@ -49,8 +49,8 @@ enum ShieldedTransactionsEvent<S: Storage> {
     ShieldedTransactionsProgress(ShieldedTransactionsProgress),
 }
 
-/// A transaction relevant for the subscribing wallet and an optional zswap merkle-tree collapsed
-/// update.
+/// A transaction relevant for the subscribing wallet and an optional zswap state Merkle tree
+/// collapsed update.
 #[derive(Debug, SimpleObject)]
 struct RelevantTransaction<S>
 where
@@ -59,11 +59,12 @@ where
     /// A transaction relevant for the subscribing wallet.
     transaction: RegularTransaction<S>,
 
-    /// Only include a zswap merkle-tree collapsed update if there is a gap between the current
-    /// zswap index "driving" the subscription and the zswap start index of the transaction.
+    /// Only include a zswap state Merkle tree collapsed update if there is a gap between the
+    /// current zswap index "driving" the subscription and the zswap start index of the
+    /// transaction.
     zswap_collapsed_update: Option<MerkleTreeCollapsedUpdate>,
 
-    /// An optional collapsed merkle tree.
+    /// An optional collapsed Merkle tree.
     #[graphql(deprecation = "Use zswapCollapsedUpdate instead")]
     collapsed_merkle_tree: Option<CollapsedMerkleTree>,
 }
@@ -71,21 +72,41 @@ where
 /// Information about the shielded transactions indexing progress.
 #[derive(Debug, SimpleObject)]
 struct ShieldedTransactionsProgress {
-    /// The highest zswap state end index (see `endIndex` of `Transaction`) of all transactions. It
-    /// represents the known state of the blockchain. A value of zero (completely unlikely) means
-    /// that no shielded transactions have been indexed yet.
+    /// The highest end index into the zswap state for all transactions. It represents the known
+    /// state of the blockchain. A value of zero (completely unlikely) means that no shielded
+    /// transactions have been indexed yet.
+    highest_zswap_end_index: u64,
+
+    /// The highest end index into the zswap state for all transactions. It represents the known
+    /// state of the blockchain. A value of zero (completely unlikely) means that no shielded
+    /// transactions have been indexed yet.
+    #[graphql(deprecation = "Use highestZswapEndIndex instead")]
     highest_end_index: u64,
 
-    /// The highest zswap state end index (see `endIndex` of `Transaction`) of all transactions
-    /// checked for relevance. Initially less than and eventually (when some wallet has been fully
-    /// indexed) equal to `highest_end_index`. A value of zero (very unlikely) means that no wallet
+    /// The highest highest end index into the zswap state for all transactions checked for
+    /// relevance. Initially less than and eventually (when some wallet has been fully indexed)
+    /// equal to `highest_end_index`. A value of zero (very unlikely) means that no wallet
     /// has subscribed before and indexing for the subscribing wallet has not yet started.
+    highest_checked_zswap_end_index: u64,
+
+    /// The highest highest end index into the zswap state for all transactions checked for
+    /// relevance. Initially less than and eventually (when some wallet has been fully indexed)
+    /// equal to `highest_end_index`. A value of zero (very unlikely) means that no wallet
+    /// has subscribed before and indexing for the subscribing wallet has not yet started.
+    #[graphql(deprecation = "Use highestCheckedZswapEndIndex instead")]
     highest_checked_end_index: u64,
 
-    /// The highest zswap state end index (see `endIndex` of `Transaction`) of all relevant
-    /// transactions for the subscribing wallet. Usually less than `highest_checked_end_index`
-    /// unless the latest checked transaction is relevant for the subscribing wallet. A value of
-    /// zero means that no relevant transactions have been indexed for the subscribing wallet.
+    /// The highest highest end index into the zswap state for all relevant transactions for the
+    /// subscribing wallet. Usually less than `highest_checked_end_index` unless the latest
+    /// checked transaction is relevant for the subscribing wallet. A value of zero means that
+    /// no relevant transactions have been indexed for the subscribing wallet.
+    highest_relevant_zswap_end_index: u64,
+
+    /// The highest highest end index into the zswap state for all relevant transactions for the
+    /// subscribing wallet. Usually less than `highest_checked_end_index` unless the latest
+    /// checked transaction is relevant for the subscribing wallet. A value of zero means that
+    /// no relevant transactions have been indexed for the subscribing wallet.
+    #[graphql(deprecation = "Use highestRelevantZswapEndIndex instead")]
     highest_relevant_end_index: u64,
 }
 
@@ -273,8 +294,8 @@ where
 {
     debug!(index, transaction:?; "making relevant transaction");
 
-    // Only include a zswap merkle-tree collapsed update if there is a gap between the queried index
-    // and the start index of the transaction.
+    // Only include a zswap state Merkle tree collapsed update if there is a gap between the queried
+    // index and the start index of the transaction.
     let zswap_collapsed_update = if index < transaction.zswap_start_index {
         let zswap_collapsed_update = ledger_state_cache
             .make_zswap_collapsed_update(
@@ -284,7 +305,7 @@ where
                 transaction.protocol_version,
             )
             .await
-            .map_err_into_server_error(|| "create zswap merkle-tree collapsed update")?;
+            .map_err_into_server_error(|| "create zswap state Merkle tree collapsed update")?;
         Some(MerkleTreeCollapsedUpdate::from(zswap_collapsed_update))
     } else {
         None
@@ -327,15 +348,22 @@ async fn make_progress_update<S>(
 where
     S: Storage,
 {
-    let (highest_end_index, highest_checked_end_index, highest_relevant_end_index) = storage
-        .get_highest_end_indices(wallet_id)
+    let (highest, highest_checked, highest_relevant) = storage
+        .get_highest_zswap_end_indices(wallet_id)
         .await
         .map_err_into_server_error(|| "get highest indices")?;
 
+    let highest_zswap_end_index = highest.unwrap_or_default();
+    let highest_checked_zswap_end_index = highest_checked.unwrap_or_default();
+    let highest_relevant_zswap_end_index = highest_relevant.unwrap_or_default();
+
     Ok(ShieldedTransactionsProgress {
-        highest_end_index: highest_end_index.unwrap_or_default(),
-        highest_checked_end_index: highest_checked_end_index.unwrap_or_default(),
-        highest_relevant_end_index: highest_relevant_end_index.unwrap_or_default(),
+        highest_zswap_end_index,
+        highest_end_index: highest_zswap_end_index,
+        highest_checked_zswap_end_index,
+        highest_checked_end_index: highest_checked_zswap_end_index,
+        highest_relevant_zswap_end_index,
+        highest_relevant_end_index: highest_relevant_zswap_end_index,
     })
 }
 

@@ -18,7 +18,7 @@ use crate::{
 use async_graphql::SimpleObject;
 use derive_more::Debug;
 
-/// A merkle-tree collapsed update between two indices.
+/// A Merkle tree collapsed update between two indices.
 #[derive(Debug, Clone, SimpleObject)]
 pub struct MerkleTreeCollapsedUpdate {
     /// The start index.
@@ -54,7 +54,7 @@ impl From<domain::MerkleTreeCollapsedUpdate> for MerkleTreeCollapsedUpdate {
 }
 
 // TODO: Remove once deprecated fields are removed from the schema.
-/// A collapsed Merkle tree update between two indices.
+/// A Merkle tree collapsed update between two indices.
 #[derive(Debug, SimpleObject)]
 pub struct CollapsedMerkleTree {
     /// The start index.

@@ -230,7 +230,7 @@ pub enum Error {
     #[error("cannot finalize transaction application")]
     PostApplyTransactions(#[source] indexer_common::domain::ledger::Error),
 
-    #[error("cannot serialize merkle tree root for transaction {0}")]
+    #[error("cannot serialize Merkle tree root for transaction {0}")]
     SerializeMerkleTreeRoot(
         TransactionHash,
         #[source] indexer_common::domain::ledger::Error,

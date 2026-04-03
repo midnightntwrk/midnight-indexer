@@ -499,7 +499,7 @@ impl TransactionStorage for Storage {
 
     #[allow(clippy::type_complexity)]
     #[trace(properties = { "wallet_id": "{wallet_id}" })]
-    async fn get_highest_end_indices(
+    async fn get_highest_zswap_end_indices(
         &self,
         wallet_id: Uuid,
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error> {

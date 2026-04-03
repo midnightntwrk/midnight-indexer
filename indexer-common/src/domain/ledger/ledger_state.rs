@@ -590,7 +590,7 @@ impl LedgerState {
         }
     }
 
-    /// Get the merkle tree root of the zswap state.
+    /// Get the Merkle tree root of the zswap state.
     pub fn zswap_merkle_tree_root(&self) -> ZswapMerkleTreeRoot {
         match self {
             Self::V7 { ledger_state, .. } => {
@@ -599,7 +599,7 @@ impl LedgerState {
                     .coin_coms
                     .rehash()
                     .root()
-                    .expect("zswap merkle tree root should exist");
+                    .expect("zswap state Merkle tree root should exist");
                 ZswapMerkleTreeRoot::V7(root)
             }
 
@@ -609,7 +609,7 @@ impl LedgerState {
                     .coin_coms
                     .rehash()
                     .root()
-                    .expect("zswap merkle tree root should exist");
+                    .expect("zswap state Merkle tree root should exist");
                 ZswapMerkleTreeRoot::V8(root)
             }
         }
@@ -648,7 +648,7 @@ impl LedgerState {
         }
     }
 
-    /// Create a zswap merkle-tree collapsed update.
+    /// Create a zswap state Merkle tree collapsed update.
     pub fn make_zswap_collapsed_update(
         &self,
         start_index: u64,
@@ -779,7 +779,7 @@ impl LedgerParameters {
     }
 }
 
-/// Facade for zswap merkle-tree root across supported (protocol) versions.
+/// Facade for zswap state Merkle tree root across supported (protocol) versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZswapMerkleTreeRoot {
     V7(MerkleTreeDigest),

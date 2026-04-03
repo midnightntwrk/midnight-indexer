@@ -24,7 +24,8 @@ use tokio::sync::RwLock;
 pub struct LedgerStateCache(RwLock<Option<LedgerState>>);
 
 impl LedgerStateCache {
-    /// Create a zswap merkle-tree collapsed update. Only load the ledger state if it is stale.
+    /// Create a zswap state Merkle tree collapsed update. Only load the ledger state if it is
+    /// stale.
     pub async fn make_zswap_collapsed_update(
         &self,
         start_index: u64,
@@ -102,7 +103,7 @@ impl LedgerState {
         indexer_common::domain::ledger::LedgerState::load(key, ledger_version).map(Into::into)
     }
 
-    /// Create a zswap merkle-tree collapsed update.
+    /// Create a zswap state Merkle tree collapsed update.
     pub fn make_zswap_collapsed_update(
         &self,
         start_index: u64,

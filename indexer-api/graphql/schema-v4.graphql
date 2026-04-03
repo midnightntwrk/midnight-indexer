@@ -57,7 +57,7 @@ input BlockOffset @oneOf {
 scalar CardanoRewardAddress
 
 """
-A collapsed Merkle tree update between two indices.
+A Merkle tree collapsed update between two indices.
 """
 type CollapsedMerkleTree {
 	"""
@@ -417,7 +417,7 @@ type FirstValidEpoch {
 scalar HexEncoded
 
 """
-A merkle-tree collapsed update between two indices.
+A Merkle tree collapsed update between two indices.
 """
 type MerkleTreeCollapsedUpdate {
 	"""
@@ -496,7 +496,7 @@ type Query {
 	"""
 	block(offset: BlockOffset): Block
 	"""
-	Get a merkle-tree collapsed update for the given zswap state index range.
+	Get a Merkle tree collapsed update for the given zswap state index range.
 	"""
 	zswapMerkleTreeCollapsedUpdate(sessionId: HexEncoded!, startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!
 	"""
@@ -651,27 +651,27 @@ type RegularTransaction implements Transaction {
 	"""
 	identifiers: [HexEncoded!]!
 	"""
-	The hex-encoded serialized zswap merkle-tree root.
+	The hex-encoded serialized zswap state Merkle tree root.
 	"""
 	zswapMerkleTreeRoot: HexEncoded!
 	"""
-	The hex-encoded serialized zswap merkle-tree root.
+	The hex-encoded serialized zswap state Merkle tree root.
 	"""
 	merkleTreeRoot: HexEncoded! @deprecated(reason: "Use zswapMerkleTreeRoot instead")
 	"""
-	The zswap state start index.
+	The start index into the zswap state.
 	"""
 	zswapStartIndex: Int!
 	"""
-	The zswap state start index.
+	The start index into the zswap state.
 	"""
 	startIndex: Int! @deprecated(reason: "Use zswapStartIndex instead")
 	"""
-	The zswap state end index; exclusive, i.e. the next free index into the zswap state.
+	The end index into the zswap state; exclusive, i.e. the next free index.
 	"""
 	zswapEndIndex: Int!
 	"""
-	The zswap state end index.
+	The end index into the zswap state; exclusive, i.e. the next free index.
 	"""
 	endIndex: Int! @deprecated(reason: "Use zswapEndIndex instead")
 	"""
@@ -705,8 +705,8 @@ type RegularTransaction implements Transaction {
 }
 
 """
-A transaction relevant for the subscribing wallet and an optional zswap merkle-tree collapsed
-update.
+A transaction relevant for the subscribing wallet and an optional zswap state Merkle tree
+collapsed update.
 """
 type RelevantTransaction {
 	"""
@@ -714,12 +714,13 @@ type RelevantTransaction {
 	"""
 	transaction: RegularTransaction!
 	"""
-	Only include a zswap merkle-tree collapsed update if there is a gap between the current
-	zswap index "driving" the subscription and the zswap start index of the transaction.
+	Only include a zswap state Merkle tree collapsed update if there is a gap between the
+	current zswap index "driving" the subscription and the zswap start index of the
+	transaction.
 	"""
 	zswapCollapsedUpdate: MerkleTreeCollapsedUpdate
 	"""
-	An optional collapsed merkle tree.
+	An optional collapsed Merkle tree.
 	"""
 	collapsedMerkleTree: CollapsedMerkleTree @deprecated(reason: "Use zswapCollapsedUpdate instead")
 }
@@ -749,25 +750,45 @@ Information about the shielded transactions indexing progress.
 """
 type ShieldedTransactionsProgress {
 	"""
-	The highest zswap state end index (see `endIndex` of `Transaction`) of all transactions. It
-	represents the known state of the blockchain. A value of zero (completely unlikely) means
-	that no shielded transactions have been indexed yet.
+	The highest end index into the zswap state for all transactions. It represents the known
+	state of the blockchain. A value of zero (completely unlikely) means that no shielded
+	transactions have been indexed yet.
 	"""
-	highestEndIndex: Int!
+	highestZswapEndIndex: Int!
 	"""
-	The highest zswap state end index (see `endIndex` of `Transaction`) of all transactions
-	checked for relevance. Initially less than and eventually (when some wallet has been fully
-	indexed) equal to `highest_end_index`. A value of zero (very unlikely) means that no wallet
+	The highest end index into the zswap state for all transactions. It represents the known
+	state of the blockchain. A value of zero (completely unlikely) means that no shielded
+	transactions have been indexed yet.
+	"""
+	highestEndIndex: Int! @deprecated(reason: "Use highestZswapEndIndex instead")
+	"""
+	The highest highest end index into the zswap state for all transactions checked for
+	relevance. Initially less than and eventually (when some wallet has been fully indexed)
+	equal to `highest_end_index`. A value of zero (very unlikely) means that no wallet
 	has subscribed before and indexing for the subscribing wallet has not yet started.
 	"""
-	highestCheckedEndIndex: Int!
+	highestCheckedZswapEndIndex: Int!
 	"""
-	The highest zswap state end index (see `endIndex` of `Transaction`) of all relevant
-	transactions for the subscribing wallet. Usually less than `highest_checked_end_index`
-	unless the latest checked transaction is relevant for the subscribing wallet. A value of
-	zero means that no relevant transactions have been indexed for the subscribing wallet.
+	The highest highest end index into the zswap state for all transactions checked for
+	relevance. Initially less than and eventually (when some wallet has been fully indexed)
+	equal to `highest_end_index`. A value of zero (very unlikely) means that no wallet
+	has subscribed before and indexing for the subscribing wallet has not yet started.
 	"""
-	highestRelevantEndIndex: Int!
+	highestCheckedEndIndex: Int! @deprecated(reason: "Use highestCheckedZswapEndIndex instead")
+	"""
+	The highest highest end index into the zswap state for all relevant transactions for the
+	subscribing wallet. Usually less than `highest_checked_end_index` unless the latest
+	checked transaction is relevant for the subscribing wallet. A value of zero means that
+	no relevant transactions have been indexed for the subscribing wallet.
+	"""
+	highestRelevantZswapEndIndex: Int!
+	"""
+	The highest highest end index into the zswap state for all relevant transactions for the
+	subscribing wallet. Usually less than `highest_checked_end_index` unless the latest
+	checked transaction is relevant for the subscribing wallet. A value of zero means that
+	no relevant transactions have been indexed for the subscribing wallet.
+	"""
+	highestRelevantEndIndex: Int! @deprecated(reason: "Use highestRelevantZswapEndIndex instead")
 }
 
 """
