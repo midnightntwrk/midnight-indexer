@@ -181,12 +181,7 @@ where
             .keep_wallet_alive_interval;
         let keep_wallet_active = IntervalStream::new(interval(keep_wallet_alive_interval))
             .then(move |_| async move { storage.keep_wallet_active(wallet_id).await })
-            .map_err(|error| {
-                ApiError::Server(InnerApiError(
-                    "keep wallet active".to_string(),
-                    Some(Arc::new(error)),
-                ))
-            });
+            .map_err(|error| ApiError::server("keep wallet active", error));
         let events = stream::select(events.map_ok(Some), keep_wallet_active.map_ok(|_| None))
             .try_filter_map(ok)
             .on_drop(move || {

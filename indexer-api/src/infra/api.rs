@@ -384,18 +384,14 @@ where
     where
         S: ToString,
     {
-        self.map_err(|error| {
-            ApiError::Client(InnerApiError(message().to_string(), Some(Arc::new(error))))
-        })
+        self.map_err(|error| ApiError::client(message(), error))
     }
 
     fn map_err_into_server_error<S>(self, message: impl Fn() -> S) -> ApiResult<T>
     where
         S: ToString,
     {
-        self.map_err(|error| {
-            ApiError::Server(InnerApiError(message().to_string(), Some(Arc::new(error))))
-        })
+        self.map_err(|error| ApiError::server(message(), error))
     }
 }
 
@@ -435,6 +431,16 @@ pub enum ApiError {
 
     /// An internal server error.
     Server(InnerApiError),
+}
+
+impl ApiError {
+    fn client(message: impl ToString, error: impl StdError + Send + Sync + 'static) -> Self {
+        Self::Client(InnerApiError(message.to_string(), Some(Arc::new(error))))
+    }
+
+    fn server(message: impl ToString, error: impl StdError + Send + Sync + 'static) -> Self {
+        Self::Server(InnerApiError(message.to_string(), Some(Arc::new(error))))
+    }
 }
 
 /// For client errors, write the full error chain and for server errors, log the full error chain

@@ -12,14 +12,13 @@
 // limitations under the License.
 
 use crate::{
-    domain::storage::Storage,
+    domain::{LedgerStateCacheError, storage::Storage},
     infra::api::{
-        ApiResult, ContextExt, OptionExt, ResultExt,
+        ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
             CardanoNetworkId, CardanoRewardAddress, HexEncoded,
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
-            decode_session_id,
             dust::DustGenerationStatus,
             merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate,
             spo::{
@@ -34,7 +33,7 @@ use crate::{
 };
 use async_graphql::{Context, Object};
 use fastrace::trace;
-use indexer_common::domain::LedgerVersion;
+use indexer_common::domain::{LedgerVersion, ledger};
 use std::marker::PhantomData;
 
 const DEFAULT_PERFORMANCE_LIMIT: i64 = 20;
@@ -95,19 +94,10 @@ where
     async fn zswap_merkle_tree_collapsed_update(
         &self,
         cx: &Context<'_>,
-        session_id: HexEncoded,
         start_index: u64,
         end_index: u64,
     ) -> ApiResult<MerkleTreeCollapsedUpdate> {
-        let session_id =
-            decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
         let storage = cx.get_storage::<S>();
-
-        storage
-            .resolve_session_id(session_id)
-            .await
-            .map_err_into_server_error(|| "resolve session ID")?
-            .some_or_client_error(|| "unknown or expired session ID")?;
 
         let (protocol_version, _) = storage
             .get_highest_ledger_state()
@@ -115,13 +105,17 @@ where
             .map_err_into_server_error(|| "get highest ledger state")?
             .some_or_server_error(|| "no ledger state available")?;
 
-        let update = cx
-            .get_ledger_state_cache()
+        cx.get_ledger_state_cache()
             .make_zswap_collapsed_update(start_index, end_index, storage, protocol_version)
             .await
-            .map_err_into_server_error(|| "create zswap Merkle tree collapsed update")?;
+            .map_err(|error| match error {
+                error @ LedgerStateCacheError::Ledger(ledger::Error::InvalidUpdate(_)) => {
+                    ApiError::client("invalid start_index and/or end_index", error)
+                }
 
-        Ok(update.into())
+                error => ApiError::server("create zswap Merkle tree collapsed update", error),
+            })
+            .map(MerkleTreeCollapsedUpdate::from)
     }
 
     /// Find transactions for the given offset.

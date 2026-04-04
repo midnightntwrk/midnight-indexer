@@ -498,7 +498,7 @@ type Query {
 	"""
 	Get a Merkle tree collapsed update for the given zswap state index range.
 	"""
-	zswapMerkleTreeCollapsedUpdate(sessionId: HexEncoded!, startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!
+	zswapMerkleTreeCollapsedUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!
 	"""
 	Find transactions for the given offset.
 	"""

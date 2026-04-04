@@ -70,12 +70,12 @@ impl LedgerStateCache {
 
         debug!(start_index, end_index; "creating collapsed update");
 
-        let collapsed_update = ledger_state_read
+        let update = ledger_state_read
             .as_ref()
             .expect("ledger_state is some")
             .make_zswap_collapsed_update(start_index, end_index, protocol_version)?;
 
-        Ok(collapsed_update)
+        Ok(update)
     }
 }
 
