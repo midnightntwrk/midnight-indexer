@@ -46,17 +46,17 @@ CREATE INDEX ON transactions (variant, id);
 CREATE TABLE regular_transactions (
   id BIGINT PRIMARY KEY REFERENCES transactions (id),
   transaction_result JSONB NOT NULL,
-  merkle_tree_root BYTEA NOT NULL,
-  start_index BIGINT NOT NULL,
-  end_index BIGINT NOT NULL,
+  zswap_merkle_tree_root BYTEA NOT NULL,
+  zswap_start_index BIGINT NOT NULL,
+  zswap_end_index BIGINT NOT NULL,
   paid_fees BYTEA,
   estimated_fees BYTEA,
   identifiers BYTEA[] NOT NULL
 );
 CREATE INDEX ON regular_transactions (transaction_result);
 CREATE INDEX ON regular_transactions USING GIN (transaction_result);
-CREATE INDEX ON regular_transactions (start_index);
-CREATE INDEX ON regular_transactions (end_index);
+CREATE INDEX ON regular_transactions (zswap_start_index);
+CREATE INDEX ON regular_transactions (zswap_end_index);
 --------------------------------------------------------------------------------
 -- contract_actions
 --------------------------------------------------------------------------------
@@ -223,7 +223,7 @@ CREATE TABLE pool_metadata_cache (
 CREATE TABLE spo_identity (
   spo_sk VARCHAR PRIMARY KEY,
   sidechain_pubkey VARCHAR UNIQUE,
-  pool_id VARCHAR REFERENCES pool_metadata_cache(pool_id),
+  pool_id VARCHAR REFERENCES pool_metadata_cache (pool_id),
   mainchain_pubkey VARCHAR UNIQUE,
   aura_pubkey VARCHAR UNIQUE
 );
@@ -244,7 +244,7 @@ CREATE INDEX IF NOT EXISTS committee_membership_epoch_no_idx ON committee_member
 -- spo_epoch_performance
 --------------------------------------------------------------------------------
 CREATE TABLE spo_epoch_performance (
-  spo_sk VARCHAR REFERENCES spo_identity(spo_sk),
+  spo_sk VARCHAR REFERENCES spo_identity (spo_sk),
   identity_label VARCHAR,
   epoch_no BIGINT NOT NULL,
   expected_blocks INT NOT NULL,
@@ -258,7 +258,7 @@ CREATE INDEX IF NOT EXISTS spo_epoch_performance_epoch_no_idx ON spo_epoch_perfo
 --------------------------------------------------------------------------------
 CREATE TABLE spo_history (
   spo_hist_sk BIGSERIAL PRIMARY KEY,
-  spo_sk VARCHAR REFERENCES spo_identity(spo_sk),
+  spo_sk VARCHAR REFERENCES spo_identity (spo_sk),
   epoch_no BIGINT NOT NULL,
   status TEXT NOT NULL,
   valid_from BIGINT NOT NULL,
@@ -270,7 +270,7 @@ CREATE INDEX IF NOT EXISTS spo_history_epoch_no_idx ON spo_history (epoch_no);
 -- spo_stake_snapshot
 --------------------------------------------------------------------------------
 CREATE TABLE spo_stake_snapshot (
-  pool_id VARCHAR PRIMARY KEY REFERENCES pool_metadata_cache(pool_id) ON DELETE CASCADE,
+  pool_id VARCHAR PRIMARY KEY REFERENCES pool_metadata_cache (pool_id) ON DELETE CASCADE,
   live_stake NUMERIC,
   active_stake NUMERIC,
   live_delegators INT,
@@ -286,7 +286,7 @@ CREATE INDEX IF NOT EXISTS spo_stake_snapshot_live_stake_idx ON spo_stake_snapsh
 --------------------------------------------------------------------------------
 CREATE TABLE spo_stake_history (
   id BIGSERIAL PRIMARY KEY,
-  pool_id VARCHAR NOT NULL REFERENCES pool_metadata_cache(pool_id) ON DELETE CASCADE,
+  pool_id VARCHAR NOT NULL REFERENCES pool_metadata_cache (pool_id) ON DELETE CASCADE,
   recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   mainchain_epoch INTEGER,
   live_stake NUMERIC,
@@ -306,6 +306,8 @@ CREATE TABLE spo_stake_refresh_state (
   last_pool_id VARCHAR,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-INSERT INTO spo_stake_refresh_state (id)
-VALUES (TRUE)
+INSERT INTO
+  spo_stake_refresh_state (id)
+VALUES
+  (TRUE)
 ON CONFLICT (id) DO NOTHING;

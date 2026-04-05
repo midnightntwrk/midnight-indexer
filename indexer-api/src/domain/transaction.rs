@@ -15,7 +15,7 @@ use derive_more::Debug;
 use indexer_common::{
     domain::{
         BlockHash, ProtocolVersion, SerializedTransaction, SerializedTransactionIdentifier,
-        SerializedZswapStateRoot, TransactionHash, TransactionResult,
+        SerializedZswapMerkleTreeRoot, TransactionHash, TransactionResult,
     },
     infra::sqlx::{SqlxOption, U128BeBytes},
 };
@@ -59,13 +59,13 @@ pub struct RegularTransaction {
     pub identifiers: Vec<SerializedTransactionIdentifier>,
 
     #[debug(skip)]
-    pub merkle_tree_root: SerializedZswapStateRoot,
+    pub zswap_merkle_tree_root: SerializedZswapMerkleTreeRoot,
 
     #[sqlx(try_from = "i64")]
-    pub start_index: u64,
+    pub zswap_start_index: u64,
 
     #[sqlx(try_from = "i64")]
-    pub end_index: u64,
+    pub zswap_end_index: u64, // Exclusive, i.e. the next free index.
 
     #[sqlx(try_from = "SqlxOption<U128BeBytes>")]
     pub paid_fees: Option<u128>,

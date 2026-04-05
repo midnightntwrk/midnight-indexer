@@ -364,9 +364,9 @@ async fn save_regular_transaction(
         INSERT INTO regular_transactions (
             id,
             transaction_result,
-            merkle_tree_root,
-            start_index,
-            end_index,
+            zswap_merkle_tree_root,
+            zswap_start_index,
+            zswap_end_index,
             paid_fees,
             estimated_fees,
             identifiers
@@ -377,9 +377,9 @@ async fn save_regular_transaction(
         INSERT INTO regular_transactions (
             id,
             transaction_result,
-            merkle_tree_root,
-            start_index,
-            end_index,
+            zswap_merkle_tree_root,
+            zswap_start_index,
+            zswap_end_index,
             paid_fees,
             estimated_fees
         )
@@ -389,9 +389,9 @@ async fn save_regular_transaction(
         .push_values([()], |mut q, _| {
             q.push_bind(transaction_id)
                 .push_bind(Json(&transaction.transaction_result))
-                .push_bind(&transaction.merkle_tree_root)
-                .push_bind(transaction.start_index as i64)
-                .push_bind(transaction.end_index as i64)
+                .push_bind(&transaction.zswap_merkle_tree_root)
+                .push_bind(transaction.zswap_start_index as i64)
+                .push_bind(transaction.zswap_end_index as i64)
                 .push_bind(U128BeBytes::from(transaction.paid_fees))
                 .push_bind(U128BeBytes::from(transaction.estimated_fees));
             #[cfg(feature = "cloud")]

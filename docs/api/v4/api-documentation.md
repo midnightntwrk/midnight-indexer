@@ -384,7 +384,7 @@ The Transaction type represents a blockchain transaction with its associated dat
 - `fees`: Fee information including both paid and estimated fees
 - `identifiers`: Transaction identifiers array ([HexEncoded!]!)
 - `raw`: The raw transaction content (HexEncoded)
-- `merkleTreeRoot`: The merkle-tree root (HexEncoded)
+- `merkleTreeRoot`: The Merkle tree root (HexEncoded)
 - `block`: Reference to the block containing this transaction
 - `contractActions`: Array of contract actions within this transaction
 - `unshieldedCreatedOutputs`: UTXOs created by this transaction
@@ -550,13 +550,13 @@ Adjust `index` and `offset` arguments as needed.
 **Event Types:**
 
 **ShieldedTransactionsEvent** (union type):
-- `ViewingUpdate`: Contains relevant transactions and/or collapsed Merkle tree updates
+- `ViewingUpdate`: Contains relevant transactions and/or zswap Merkle tree collapsed updates
   - `index`: Next start index into the zswap state (Int!)
   - `update`: Array of ZswapChainStateUpdate items ([ZswapChainStateUpdate!]!)
-    - `MerkleTreeCollapsedUpdate`: Merkle tree update
+    - `MerkleTreeCollapsedUpdate`: Zswap Merkle tree collapsed update
       - `start`: Start index (Int!)
       - `end`: End index (Int!)
-      - `update`: Hex-encoded merkle-tree collapsed update (HexEncoded)
+      - `update`: Hex-encoded Merkle tree collapsed update (HexEncoded)
       - `protocolVersion`: Protocol version (Int!)
     - `RelevantTransaction`: Transaction relevant to the wallet
       - `start`: Start index (Int!)

@@ -24,9 +24,9 @@ use tokio::sync::RwLock;
 pub struct LedgerStateCache(RwLock<Option<LedgerState>>);
 
 impl LedgerStateCache {
-    /// Create a collapsed update from the given start index to the given end index for the given
-    /// protocol version.
-    pub async fn collapsed_update(
+    /// Create a zswap state Merkle tree collapsed update. Only load the ledger state if it is
+    /// stale.
+    pub async fn make_zswap_collapsed_update(
         &self,
         start_index: u64,
         end_index: u64,
@@ -70,12 +70,12 @@ impl LedgerStateCache {
 
         debug!(start_index, end_index; "creating collapsed update");
 
-        let collapsed_update = ledger_state_read
+        let update = ledger_state_read
             .as_ref()
             .expect("ledger_state is some")
-            .collapsed_update(start_index, end_index, protocol_version)?;
+            .make_zswap_collapsed_update(start_index, end_index, protocol_version)?;
 
-        Ok(collapsed_update)
+        Ok(update)
     }
 }
 
@@ -103,14 +103,14 @@ impl LedgerState {
         indexer_common::domain::ledger::LedgerState::load(key, ledger_version).map(Into::into)
     }
 
-    /// Produce a collapsed Merkle Tree from this ledger state.
-    pub fn collapsed_update(
+    /// Create a zswap state Merkle tree collapsed update.
+    pub fn make_zswap_collapsed_update(
         &self,
         start_index: u64,
         end_index: u64,
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, ledger::Error> {
-        let update = self.0.collapsed_update(start_index, end_index)?;
+        let update = self.0.make_zswap_collapsed_update(start_index, end_index)?;
 
         Ok(MerkleTreeCollapsedUpdate {
             start_index,

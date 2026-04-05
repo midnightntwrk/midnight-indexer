@@ -67,11 +67,11 @@ where
     ) -> Result<Option<u64>, sqlx::Error>;
 
     /// Get a tuple of end indices:
-    /// - the highest zswap state end index of all transactions,
-    /// - the highest zswap state end index of all transactions checked for relevance and
-    /// - the highest zswap state end index of all relevant transactions for the wallet identified
+    /// - the highest zswap state end index for all transactions,
+    /// - the highest zswap state end index for all transactions checked for relevance and
+    /// - the highest zswap state end index for all relevant transactions for the wallet identified
     ///   by the given wallet ID.
-    async fn get_highest_end_indices(
+    async fn get_highest_zswap_end_indices(
         &self,
         wallet_id: Uuid,
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error>;
@@ -126,7 +126,7 @@ impl TransactionStorage for NoopStorage {
         unimplemented!()
     }
 
-    async fn get_highest_end_indices(
+    async fn get_highest_zswap_end_indices(
         &self,
         wallet_id: Uuid,
     ) -> Result<(Option<u64>, Option<u64>, Option<u64>), sqlx::Error> {

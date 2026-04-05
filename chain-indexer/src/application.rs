@@ -396,7 +396,7 @@ where
             block.height
         );
     }
-    if ledger_state.zswap_merkle_tree_root() != block.zswap_state_root {
+    if ledger_state.zswap_merkle_tree_root() != block.zswap_merkle_tree_root {
         bail!(
             "zswap state root mismatch for block {} at height {}",
             block.hash,
@@ -589,7 +589,8 @@ mod tests {
     use futures::{Stream, StreamExt, TryStreamExt, stream};
     use indexer_common::{
         domain::{
-            BlockHash, ByteArray, ByteVec, NodeVersion, ProtocolVersion, ledger::ZswapStateRoot,
+            BlockHash, ByteArray, ByteVec, NodeVersion, ProtocolVersion,
+            ledger::ZswapMerkleTreeRoot,
         },
         error::BoxError,
     };
@@ -656,7 +657,7 @@ mod tests {
         parent_hash: ZERO_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V7(Faker.fake()),
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
@@ -669,7 +670,7 @@ mod tests {
         parent_hash: BLOCK_0_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V7(Faker.fake()),
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
@@ -682,7 +683,7 @@ mod tests {
         parent_hash: BLOCK_1_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V7(Faker.fake()),
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
@@ -695,7 +696,7 @@ mod tests {
         parent_hash: BLOCK_2_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_state_root: ZswapStateRoot::V7(Faker.fake()),
+        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V7(Faker.fake()),
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),

@@ -211,7 +211,9 @@ pub async fn get_contract_state(
     Ok(state)
 }
 
-pub async fn get_zswap_state_root(block: &OnlineClientAtBlock) -> Result<Vec<u8>, SubxtNodeError> {
+pub async fn get_zswap_merkle_tree_root(
+    block: &OnlineClientAtBlock,
+) -> Result<Vec<u8>, SubxtNodeError> {
     let get_zswap_state_root = super::runtime_0_21_0::runtime_apis()
         .midnight_runtime_api()
         .get_zswap_state_root();

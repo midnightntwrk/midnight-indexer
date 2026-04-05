@@ -15,6 +15,7 @@ pub mod block;
 pub mod contract_action;
 pub mod dust;
 pub mod ledger_events;
+pub mod merkle_tree_collapsed_update;
 pub mod mutation;
 pub mod query;
 pub mod spo;

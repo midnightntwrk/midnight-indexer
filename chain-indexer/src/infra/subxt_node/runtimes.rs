@@ -87,14 +87,14 @@ pub async fn get_contract_state(
     }
 }
 
-pub async fn get_zswap_state_root(
+pub async fn get_zswap_merkle_tree_root(
     node_version: NodeVersion,
     block: &OnlineClientAtBlock,
 ) -> Result<Vec<u8>, SubxtNodeError> {
     match node_version {
-        NodeVersion::V0_20 => v0_20_0::get_zswap_state_root(block).await,
-        NodeVersion::V0_21 => v0_21_0::get_zswap_state_root(block).await,
-        NodeVersion::V0_22 => v0_22_0::get_zswap_state_root(block).await,
+        NodeVersion::V0_20 => v0_20_0::get_zswap_merkle_tree_root(block).await,
+        NodeVersion::V0_21 => v0_21_0::get_zswap_merkle_tree_root(block).await,
+        NodeVersion::V0_22 => v0_22_0::get_zswap_merkle_tree_root(block).await,
     }
 }
 

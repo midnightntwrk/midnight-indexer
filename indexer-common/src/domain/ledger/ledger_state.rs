@@ -16,7 +16,7 @@ use crate::{
         ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, ByteArray, ByteVec,
         IntentHash, LedgerEvent, LedgerVersion, NetworkId, Nonce, SerializedContractAddress,
         SerializedLedgerParameters, SerializedLedgerStateKey, SerializedTransaction,
-        SerializedZswapState, SerializedZswapStateRoot, TokenType, TransactionResult,
+        SerializedZswapMerkleTreeRoot, SerializedZswapState, TokenType, TransactionResult,
         UnshieldedUtxo,
         dust::{self},
         ledger::{
@@ -590,8 +590,8 @@ impl LedgerState {
         }
     }
 
-    /// Get the merkle tree root of the zswap state.
-    pub fn zswap_merkle_tree_root(&self) -> ZswapStateRoot {
+    /// Get the Merkle tree root of the zswap state.
+    pub fn zswap_merkle_tree_root(&self) -> ZswapMerkleTreeRoot {
         match self {
             Self::V7 { ledger_state, .. } => {
                 let root = ledger_state
@@ -599,8 +599,8 @@ impl LedgerState {
                     .coin_coms
                     .rehash()
                     .root()
-                    .expect("zswap merkle tree root should exist");
-                ZswapStateRoot::V7(root)
+                    .expect("zswap state Merkle tree root should exist");
+                ZswapMerkleTreeRoot::V7(root)
             }
 
             Self::V8 { ledger_state, .. } => {
@@ -609,8 +609,8 @@ impl LedgerState {
                     .coin_coms
                     .rehash()
                     .root()
-                    .expect("zswap merkle tree root should exist");
-                ZswapStateRoot::V8(root)
+                    .expect("zswap state Merkle tree root should exist");
+                ZswapMerkleTreeRoot::V8(root)
             }
         }
     }
@@ -648,8 +648,12 @@ impl LedgerState {
         }
     }
 
-    /// Get the serialized merkle-tree collapsed update for the given indices.
-    pub fn collapsed_update(&self, start_index: u64, end_index: u64) -> Result<ByteVec, Error> {
+    /// Create a zswap state Merkle tree collapsed update.
+    pub fn make_zswap_collapsed_update(
+        &self,
+        start_index: u64,
+        end_index: u64,
+    ) -> Result<ByteVec, Error> {
         match self {
             Self::V7 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
                 &ledger_state.zswap.coin_coms,
@@ -775,14 +779,14 @@ impl LedgerParameters {
     }
 }
 
-/// Facade for zswap state root across supported (protocol) versions.
+/// Facade for zswap state Merkle tree root across supported (protocol) versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ZswapStateRoot {
+pub enum ZswapMerkleTreeRoot {
     V7(MerkleTreeDigest),
     V8(MerkleTreeDigest),
 }
 
-impl ZswapStateRoot {
+impl ZswapMerkleTreeRoot {
     /// Untagged deserialize the given serialized zswap state root using the given protocol version.
     #[trace(properties = { "ledger_version": "{ledger_version}" })]
     pub fn deserialize(
@@ -808,7 +812,7 @@ impl ZswapStateRoot {
 
     /// Serialize this zswap state root.
     #[trace]
-    pub fn serialize(&self) -> Result<SerializedZswapStateRoot, Error> {
+    pub fn serialize(&self) -> Result<SerializedZswapMerkleTreeRoot, Error> {
         match self {
             Self::V7(digest) => digest
                 .serialize()

@@ -100,14 +100,27 @@ where
     #[debug(skip)]
     identifiers: Vec<HexEncoded>,
 
-    /// The hex-encoded serialized merkle-tree root.
+    /// The hex-encoded serialized zswap state Merkle tree root.
     #[debug(skip)]
+    zswap_merkle_tree_root: HexEncoded,
+
+    /// The hex-encoded serialized zswap state Merkle tree root.
+    #[debug(skip)]
+    #[graphql(deprecation = "Use zswapMerkleTreeRoot instead")]
     merkle_tree_root: HexEncoded,
 
-    /// The zswap state start index.
+    /// The start index into the zswap state.
+    zswap_start_index: u64,
+
+    /// The start index into the zswap state.
+    #[graphql(deprecation = "Use zswapStartIndex instead")]
     start_index: u64,
 
-    /// The zswap state end index.
+    /// The end index into the zswap state; exclusive, i.e. the next free index.
+    zswap_end_index: u64,
+
+    /// The end index into the zswap state; exclusive, i.e. the next free index.
+    #[graphql(deprecation = "Use zswapEndIndex instead")]
     end_index: u64,
 
     /// Fee information for this transaction.
@@ -173,11 +186,13 @@ where
             block_hash,
             transaction_result,
             identifiers,
-            merkle_tree_root,
-            start_index,
-            end_index,
+            zswap_merkle_tree_root,
+            zswap_start_index,
+            zswap_end_index,
             ..
         } = transaction;
+
+        let zswap_merkle_tree_root = zswap_merkle_tree_root.hex_encode();
 
         // Use fees information from database (calculated by chain-indexer)
         let fees = TransactionFees {
@@ -203,9 +218,12 @@ where
                 .into_iter()
                 .map(|identifier| identifier.hex_encode())
                 .collect::<Vec<_>>(),
-            merkle_tree_root: merkle_tree_root.hex_encode(),
-            start_index,
-            end_index,
+            merkle_tree_root: zswap_merkle_tree_root.clone(),
+            zswap_merkle_tree_root,
+            zswap_start_index,
+            start_index: zswap_start_index,
+            zswap_end_index,
+            end_index: zswap_end_index,
             _s: PhantomData,
         }
     }

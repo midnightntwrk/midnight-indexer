@@ -12,14 +12,15 @@
 // limitations under the License.
 
 use crate::{
-    domain::storage::Storage,
+    domain::{LedgerStateCacheError, storage::Storage},
     infra::api::{
-        ApiResult, ContextExt, OptionExt, ResultExt,
+        ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
             CardanoNetworkId, CardanoRewardAddress, HexEncoded,
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
             dust::DustGenerationStatus,
+            merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate,
             spo::{
                 CommitteeMember, EpochInfo, EpochPerf, FirstValidEpoch, PoolMetadata,
                 PresenceEvent, RegisteredStat, RegisteredTotals, Spo, SpoComposite, SpoIdentity,
@@ -32,7 +33,7 @@ use crate::{
 };
 use async_graphql::{Context, Object};
 use fastrace::trace;
-use indexer_common::domain::LedgerVersion;
+use indexer_common::domain::{LedgerVersion, ledger};
 use std::marker::PhantomData;
 
 const DEFAULT_PERFORMANCE_LIMIT: i64 = 20;
@@ -55,7 +56,7 @@ where
 {
     /// Find a block for the given optional offset; if not present, the latest block is returned.
     #[trace(properties = { "offset": "{offset:?}" })]
-    pub async fn block(
+    async fn block(
         &self,
         cx: &Context<'_>,
         offset: Option<BlockOffset>,
@@ -86,6 +87,35 @@ where
         };
 
         Ok(block.map(Into::into))
+    }
+
+    /// Get a Merkle tree collapsed update for the given zswap state index range.
+    #[trace(properties = { "start_index": "{start_index}", "end_index": "{end_index}" })]
+    async fn zswap_merkle_tree_collapsed_update(
+        &self,
+        cx: &Context<'_>,
+        start_index: u64,
+        end_index: u64,
+    ) -> ApiResult<MerkleTreeCollapsedUpdate> {
+        let storage = cx.get_storage::<S>();
+
+        let (protocol_version, _) = storage
+            .get_highest_ledger_state()
+            .await
+            .map_err_into_server_error(|| "get highest ledger state")?
+            .some_or_server_error(|| "no ledger state available")?;
+
+        cx.get_ledger_state_cache()
+            .make_zswap_collapsed_update(start_index, end_index, storage, protocol_version)
+            .await
+            .map_err(|error| match error {
+                error @ LedgerStateCacheError::Ledger(ledger::Error::InvalidUpdate(_)) => {
+                    ApiError::client("invalid start_index and/or end_index", error)
+                }
+
+                error => ApiError::server("create zswap Merkle tree collapsed update", error),
+            })
+            .map(MerkleTreeCollapsedUpdate::from)
     }
 
     /// Find transactions for the given offset.

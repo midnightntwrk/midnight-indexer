@@ -14,13 +14,18 @@
 use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, ContextExt, InnerApiError, OptionExt, ResultExt,
-        v4::{HexEncodable, HexEncoded, decode_session_id, transaction::RegularTransaction},
+        ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
+        v4::{
+            HexEncoded, decode_session_id,
+            merkle_tree_collapsed_update::{CollapsedMerkleTree, MerkleTreeCollapsedUpdate},
+            transaction::RegularTransaction,
+        },
     },
 };
 use async_graphql::{Context, SimpleObject, Subscription, Union};
 use async_stream::try_stream;
 use derive_more::Debug;
+
 use drop_stream::DropStreamExt;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{
@@ -30,7 +35,7 @@ use futures::{
 };
 use indexer_common::domain::{Subscriber, WalletIndexed};
 use log::{debug, warn};
-use std::{future::ready, marker::PhantomData, pin::pin, sync::Arc};
+use std::{future::ready, marker::PhantomData, pin::pin};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
@@ -44,7 +49,8 @@ enum ShieldedTransactionsEvent<S: Storage> {
     ShieldedTransactionsProgress(ShieldedTransactionsProgress),
 }
 
-/// A transaction relevant for the subscribing wallet and an optional collapsed merkle tree.
+/// A transaction relevant for the subscribing wallet and an optional zswap state Merkle tree
+/// collapsed update.
 #[derive(Debug, SimpleObject)]
 struct RelevantTransaction<S>
 where
@@ -53,63 +59,55 @@ where
     /// A transaction relevant for the subscribing wallet.
     transaction: RegularTransaction<S>,
 
-    /// An optional collapsed merkle tree.
+    /// Only include a zswap state Merkle tree collapsed update if there is a gap between the
+    /// current zswap index "driving" the subscription and the zswap start index of the
+    /// transaction.
+    zswap_collapsed_update: Option<MerkleTreeCollapsedUpdate>,
+
+    /// An optional collapsed Merkle tree.
+    #[graphql(deprecation = "Use zswapCollapsedUpdate instead")]
     collapsed_merkle_tree: Option<CollapsedMerkleTree>,
 }
 
 /// Information about the shielded transactions indexing progress.
 #[derive(Debug, SimpleObject)]
 struct ShieldedTransactionsProgress {
-    /// The highest zswap state end index (see `endIndex` of `Transaction`) of all transactions. It
-    /// represents the known state of the blockchain. A value of zero (completely unlikely) means
-    /// that no shielded transactions have been indexed yet.
+    /// The highest end index into the zswap state for all transactions. It represents the known
+    /// state of the blockchain. A value of zero (completely unlikely) means that no shielded
+    /// transactions have been indexed yet.
+    highest_zswap_end_index: u64,
+
+    /// The highest end index into the zswap state for all transactions. It represents the known
+    /// state of the blockchain. A value of zero (completely unlikely) means that no shielded
+    /// transactions have been indexed yet.
+    #[graphql(deprecation = "Use highestZswapEndIndex instead")]
     highest_end_index: u64,
 
-    /// The highest zswap state end index (see `endIndex` of `Transaction`) of all transactions
-    /// checked for relevance. Initially less than and eventually (when some wallet has been fully
-    /// indexed) equal to `highest_end_index`. A value of zero (very unlikely) means that no wallet
+    /// The highest highest end index into the zswap state for all transactions checked for
+    /// relevance. Initially less than and eventually (when some wallet has been fully indexed)
+    /// equal to `highest_end_index`. A value of zero (very unlikely) means that no wallet
     /// has subscribed before and indexing for the subscribing wallet has not yet started.
+    highest_checked_zswap_end_index: u64,
+
+    /// The highest highest end index into the zswap state for all transactions checked for
+    /// relevance. Initially less than and eventually (when some wallet has been fully indexed)
+    /// equal to `highest_end_index`. A value of zero (very unlikely) means that no wallet
+    /// has subscribed before and indexing for the subscribing wallet has not yet started.
+    #[graphql(deprecation = "Use highestCheckedZswapEndIndex instead")]
     highest_checked_end_index: u64,
 
-    /// The highest zswap state end index (see `endIndex` of `Transaction`) of all relevant
-    /// transactions for the subscribing wallet. Usually less than `highest_checked_end_index`
-    /// unless the latest checked transaction is relevant for the subscribing wallet. A value of
-    /// zero means that no relevant transactions have been indexed for the subscribing wallet.
+    /// The highest highest end index into the zswap state for all relevant transactions for the
+    /// subscribing wallet. Usually less than `highest_checked_end_index` unless the latest
+    /// checked transaction is relevant for the subscribing wallet. A value of zero means that
+    /// no relevant transactions have been indexed for the subscribing wallet.
+    highest_relevant_zswap_end_index: u64,
+
+    /// The highest highest end index into the zswap state for all relevant transactions for the
+    /// subscribing wallet. Usually less than `highest_checked_end_index` unless the latest
+    /// checked transaction is relevant for the subscribing wallet. A value of zero means that
+    /// no relevant transactions have been indexed for the subscribing wallet.
+    #[graphql(deprecation = "Use highestRelevantZswapEndIndex instead")]
     highest_relevant_end_index: u64,
-}
-
-#[derive(Debug, SimpleObject)]
-struct CollapsedMerkleTree {
-    /// The zswap state start index.
-    start_index: u64,
-
-    /// The zswap state end index.
-    end_index: u64,
-
-    /// The hex-encoded value.
-    #[debug(skip)]
-    update: HexEncoded,
-
-    /// The protocol version.
-    protocol_version: u32,
-}
-
-impl From<domain::MerkleTreeCollapsedUpdate> for CollapsedMerkleTree {
-    fn from(value: domain::MerkleTreeCollapsedUpdate) -> Self {
-        let domain::MerkleTreeCollapsedUpdate {
-            start_index,
-            end_index,
-            update,
-            protocol_version,
-        } = value;
-
-        Self {
-            start_index,
-            end_index,
-            update: update.hex_encode(),
-            protocol_version: protocol_version.into(),
-        }
-    }
 }
 
 pub struct ShieldedTransactionsSubscription<S, B> {
@@ -183,12 +181,7 @@ where
             .keep_wallet_alive_interval;
         let keep_wallet_active = IntervalStream::new(interval(keep_wallet_alive_interval))
             .then(move |_| async move { storage.keep_wallet_active(wallet_id).await })
-            .map_err(|error| {
-                ApiError::Server(InnerApiError(
-                    "keep wallet active".to_string(),
-                    Some(Arc::new(error)),
-                ))
-            });
+            .map_err(|error| ApiError::server("keep wallet active", error));
         let events = stream::select(events.map_ok(Some), keep_wallet_active.map_ok(|_| None))
             .try_filter_map(ok)
             .on_drop(move || {
@@ -232,7 +225,7 @@ where
             .await
             .map_err_into_server_error(|| "get next transaction")?
         {
-            let end_index = transaction.end_index;
+            let end_index = transaction.zswap_end_index;
 
             yield make_relevant_transaction(
                 index,
@@ -264,7 +257,7 @@ where
                 .await
                 .map_err_into_server_error(|| "get next transaction")?
             {
-                let end_index = transaction.end_index;
+                let end_index = transaction.zswap_end_index;
 
                 yield make_relevant_transaction(
                     index,
@@ -296,27 +289,31 @@ where
 {
     debug!(index, transaction:?; "making relevant transaction");
 
-    let collapsed_merkle_tree = if index == transaction.start_index || transaction.start_index == 0
-    {
-        None
-    } else {
-        let collapsed_merkle_tree = ledger_state_cache
-            .collapsed_update(
+    // Only include a zswap state Merkle tree collapsed update if there is a gap between the queried
+    // index and the start index of the transaction.
+    let zswap_collapsed_update = if index < transaction.zswap_start_index {
+        let zswap_collapsed_update = ledger_state_cache
+            .make_zswap_collapsed_update(
                 index,
-                transaction.start_index - 1,
+                transaction.zswap_start_index - 1,
                 storage,
                 transaction.protocol_version,
             )
             .await
-            .map_err_into_server_error(|| "create collapsed update")?
-            .into();
-        Some(collapsed_merkle_tree)
+            .map_err_into_server_error(|| "create zswap state Merkle tree collapsed update")?;
+        Some(MerkleTreeCollapsedUpdate::from(zswap_collapsed_update))
+    } else {
+        None
     };
+
+    let collapsed_merkle_tree = zswap_collapsed_update.as_ref().map(|u| u.to_owned().into());
 
     let relevant_transaction = RelevantTransaction {
         transaction: transaction.into(),
+        zswap_collapsed_update,
         collapsed_merkle_tree,
     };
+
     debug!(relevant_transaction:?; "made relevant transaction");
 
     Ok(relevant_transaction)
@@ -346,15 +343,22 @@ async fn make_progress_update<S>(
 where
     S: Storage,
 {
-    let (highest_end_index, highest_checked_end_index, highest_relevant_end_index) = storage
-        .get_highest_end_indices(wallet_id)
+    let (highest, highest_checked, highest_relevant) = storage
+        .get_highest_zswap_end_indices(wallet_id)
         .await
         .map_err_into_server_error(|| "get highest indices")?;
 
+    let highest_zswap_end_index = highest.unwrap_or_default();
+    let highest_checked_zswap_end_index = highest_checked.unwrap_or_default();
+    let highest_relevant_zswap_end_index = highest_relevant.unwrap_or_default();
+
     Ok(ShieldedTransactionsProgress {
-        highest_end_index: highest_end_index.unwrap_or_default(),
-        highest_checked_end_index: highest_checked_end_index.unwrap_or_default(),
-        highest_relevant_end_index: highest_relevant_end_index.unwrap_or_default(),
+        highest_zswap_end_index,
+        highest_end_index: highest_zswap_end_index,
+        highest_checked_zswap_end_index,
+        highest_checked_end_index: highest_checked_zswap_end_index,
+        highest_relevant_zswap_end_index,
+        highest_relevant_end_index: highest_relevant_zswap_end_index,
     })
 }
 

@@ -33,7 +33,7 @@ use indexer_common::{
     domain::{
         BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, ProtocolVersionError,
         SerializedContractAddress,
-        ledger::{self, ZswapStateRoot},
+        ledger::{self, ZswapMerkleTreeRoot},
     },
     error::BoxError,
 };
@@ -192,8 +192,10 @@ impl SubxtNode {
             .transpose()?
             .flatten();
 
-        let zswap_state_root = runtimes::get_zswap_state_root(node_version, &block).await?;
-        let zswap_state_root = ZswapStateRoot::deserialize(zswap_state_root, ledger_version)?;
+        let zswap_merkle_tree_root =
+            runtimes::get_zswap_merkle_tree_root(node_version, &block).await?;
+        let zswap_merkle_tree_root =
+            ZswapMerkleTreeRoot::deserialize(zswap_merkle_tree_root, ledger_version)?;
 
         let BlockDetails {
             timestamp,
@@ -228,7 +230,7 @@ impl SubxtNode {
             protocol_version,
             author,
             timestamp: timestamp.unwrap_or(0),
-            zswap_state_root,
+            zswap_merkle_tree_root,
             ledger_state_root,
             transactions,
             dust_registration_events,
