@@ -22,6 +22,7 @@ pub enum ProtocolVersion {
     V0_20(u32),
     V0_21(u32),
     V0_22(u32),
+    V1_0(u32),
 }
 
 impl ProtocolVersion {
@@ -30,6 +31,7 @@ impl ProtocolVersion {
             ProtocolVersion::V0_20(_) => LedgerVersion::V7,
             ProtocolVersion::V0_21(_) => LedgerVersion::V7,
             ProtocolVersion::V0_22(_) => LedgerVersion::V8,
+            ProtocolVersion::V1_0(_) => LedgerVersion::V8,
         }
     }
 
@@ -38,6 +40,7 @@ impl ProtocolVersion {
             ProtocolVersion::V0_20(_) => NodeVersion::V0_20,
             ProtocolVersion::V0_21(_) => NodeVersion::V0_21,
             ProtocolVersion::V0_22(_) => NodeVersion::V0_22,
+            ProtocolVersion::V1_0(_) => NodeVersion::V1_0,
         }
     }
 
@@ -52,6 +55,7 @@ impl From<ProtocolVersion> for u32 {
             ProtocolVersion::V0_20(n) => n,
             ProtocolVersion::V0_21(n) => n,
             ProtocolVersion::V0_22(n) => n,
+            ProtocolVersion::V1_0(n) => n,
         }
     }
 }
@@ -75,6 +79,8 @@ impl TryFrom<u32> for ProtocolVersion {
             Ok(Self::V0_21(version))
         } else if (0_022_000..0_023_000).contains(&version) {
             Ok(Self::V0_22(version))
+        } else if (1_000_000..1_001_000).contains(&version) {
+            Ok(Self::V1_0(version))
         } else {
             Err(ProtocolVersionError::Unsupported(version))
         }
@@ -119,6 +125,7 @@ pub enum NodeVersion {
     V0_20,
     V0_21,
     V0_22,
+    V1_0,
 }
 
 #[cfg(test)]
