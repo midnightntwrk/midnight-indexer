@@ -14,7 +14,7 @@
 use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
-        ApiError, ApiResult, ContextExt, InnerApiError, OptionExt, ResultExt,
+        ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
             HexEncoded, decode_session_id,
             merkle_tree_collapsed_update::{CollapsedMerkleTree, MerkleTreeCollapsedUpdate},
@@ -35,7 +35,7 @@ use futures::{
 };
 use indexer_common::domain::{Subscriber, WalletIndexed};
 use log::{debug, warn};
-use std::{future::ready, marker::PhantomData, pin::pin, sync::Arc};
+use std::{future::ready, marker::PhantomData, pin::pin};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;

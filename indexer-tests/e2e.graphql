@@ -834,6 +834,15 @@ query DustGenerationStatusQuery(
     }
 }
 
+query ZswapMerkleTreeCollapsedUpdateQuery($start_index: Int!, $end_index: Int!) {
+    zswapMerkleTreeCollapsedUpdate(startIndex: $start_index, endIndex: $end_index) {
+        startIndex
+        endIndex
+        update
+        protocolVersion
+    }
+}
+
 query DParameterHistoryQuery {
     dParameterHistory {
         blockHeight

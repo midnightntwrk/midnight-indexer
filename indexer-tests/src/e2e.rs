@@ -19,11 +19,12 @@ use crate::{
         ContractActionSubscription, DParameterHistoryQuery, DisconnectMutation,
         DustGenerationStatusQuery, DustLedgerEventsSubscription, ShieldedTransactionsSubscription,
         TermsAndConditionsHistoryQuery, TransactionsQuery, UnshieldedTransactionsSubscription,
-        ZswapLedgerEventsSubscription, block_query,
+        ZswapLedgerEventsSubscription, ZswapMerkleTreeCollapsedUpdateQuery, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
             BlockSubscriptionBlocksTransactionsDustLedgerEvents,
+            BlockSubscriptionBlocksTransactionsOn,
             BlockSubscriptionBlocksTransactionsOnRegularTransaction,
             BlockSubscriptionBlocksTransactionsUnshieldedCreatedOutputs,
             BlockSubscriptionBlocksTransactionsZswapLedgerEvents,
@@ -33,6 +34,7 @@ use crate::{
         contract_action_subscription, disconnect_mutation, dust_generation_status_query,
         dust_ledger_events_subscription, shielded_transactions_subscription, transactions_query,
         unshielded_transactions_subscription, zswap_ledger_events_subscription,
+        zswap_merkle_tree_collapsed_update_query,
     },
     graphql_ws_client,
 };
@@ -107,6 +109,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_governance_queries(&api_client, &api_url)
         .await
         .context("test governance queries")?;
+    test_zswap_merkle_tree_collapsed_update_query(&indexer_data, &api_client, &api_url)
+        .await
+        .context("test zswap Merkle tree collapsed update query")?;
 
     // Test subscriptions (the block subscription has already been tested above).
     test_contract_actions_subscription(&indexer_data, &ws_api_url)
@@ -718,6 +723,53 @@ async fn test_governance_queries(api_client: &Client, api_url: &str) -> anyhow::
     Ok(())
 }
 
+/// Test the zswapMerkleTreeCollapsedUpdate query.
+async fn test_zswap_merkle_tree_collapsed_update_query(
+    indexer_data: &IndexerData,
+    api_client: &Client,
+    api_url: &str,
+) -> anyhow::Result<()> {
+    let regular_transactions = indexer_data
+        .transactions
+        .iter()
+        .filter_map(|tx| match &tx.on {
+            BlockSubscriptionBlocksTransactionsOn::RegularTransaction(t) => Some(t),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        regular_transactions.len() >= 2,
+        "there are at least two regular transactions"
+    );
+
+    let start_index = regular_transactions.first().unwrap().zswap_end_index;
+    let end_index = regular_transactions.last().unwrap().zswap_start_index - 1;
+    let variables = zswap_merkle_tree_collapsed_update_query::Variables {
+        start_index,
+        end_index,
+    };
+
+    let update = send_query::<ZswapMerkleTreeCollapsedUpdateQuery>(api_client, api_url, variables)
+        .await?
+        .zswap_merkle_tree_collapsed_update;
+    assert_eq!(update.start_index, start_index);
+    assert_eq!(update.end_index, end_index);
+    assert!(update.protocol_version > 0);
+
+    // Invalid range (start > end) must return an error.
+
+    let variables = zswap_merkle_tree_collapsed_update_query::Variables {
+        start_index: 1,
+        end_index: 0,
+    };
+
+    let response =
+        send_query::<ZswapMerkleTreeCollapsedUpdateQuery>(api_client, api_url, variables).await;
+    assert!(response.is_err());
+
+    Ok(())
+}
+
 /// Test the contract action subscription.
 async fn test_contract_actions_subscription(
     indexer_data: &IndexerData,
@@ -1099,6 +1151,14 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct DustGenerationStatusQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct ZswapMerkleTreeCollapsedUpdateQuery;
 
     #[derive(GraphQLQuery)]
     #[graphql(
