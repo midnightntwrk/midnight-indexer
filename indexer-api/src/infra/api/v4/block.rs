@@ -49,6 +49,10 @@ where
     /// The hex-encoded block author.
     author: Option<HexEncoded>,
 
+    /// The hex-encoded serialized zswap state Merkle tree root.
+    #[debug(skip)]
+    zswap_merkle_tree_root: HexEncoded,
+
     /// The hex-encoded ledger parameters for this block.
     ledger_parameters: HexEncoded,
 
@@ -131,6 +135,7 @@ where
             author,
             timestamp,
             parent_hash,
+            zswap_merkle_tree_root,
             ledger_parameters,
         } = value;
 
@@ -139,6 +144,7 @@ where
             height,
             protocol_version: protocol_version.into(),
             author: author.map(|author| author.hex_encode()),
+            zswap_merkle_tree_root: zswap_merkle_tree_root.hex_encode(),
             ledger_parameters: ledger_parameters.hex_encode(),
             timestamp,
             id,

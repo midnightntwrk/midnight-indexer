@@ -11,7 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{BlockAuthor, BlockHash, ProtocolVersion, SerializedLedgerParameters};
+use indexer_common::domain::{
+    BlockAuthor, BlockHash, ProtocolVersion, SerializedLedgerParameters,
+    SerializedZswapMerkleTreeRoot,
+};
 use sqlx::prelude::FromRow;
 
 /// Relevant block data from the perspective of the Indexer API.
@@ -38,6 +41,8 @@ pub struct Block {
 
     #[sqlx(try_from = "i64")]
     pub timestamp: u64,
+
+    pub zswap_merkle_tree_root: SerializedZswapMerkleTreeRoot,
 
     pub ledger_parameters: SerializedLedgerParameters,
 }
