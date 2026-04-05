@@ -29,11 +29,7 @@ use crate::{
     error::BoxError,
 };
 use fastrace::trace;
-use midnight_base_crypto::signatures::Signature as SignatureV7;
-use midnight_ledger_v7::{
-    dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V7,
-    structure::ProofMarker as ProofMarkerV7,
-};
+use midnight_base_crypto::signatures::Signature;
 use midnight_ledger_v8::{
     dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V8,
     structure::ProofMarker as ProofMarkerV8,
@@ -43,23 +39,11 @@ use midnight_transient_crypto::commitment::PureGeneratorPedersen;
 use std::{io, string::FromUtf8Error};
 use thiserror::Error;
 
-type TransactionV7<D> = midnight_ledger_v7::structure::Transaction<
-    SignatureV7,
-    ProofMarkerV7,
-    PureGeneratorPedersen,
-    D,
->;
-type TransactionV8<D> = midnight_ledger_v8::structure::Transaction<
-    SignatureV7,
-    ProofMarkerV8,
-    PureGeneratorPedersen,
-    D,
->;
+type TransactionV8<D> =
+    midnight_ledger_v8::structure::Transaction<Signature, ProofMarkerV8, PureGeneratorPedersen, D>;
 
-type IntentV7<D> =
-    midnight_ledger_v7::structure::Intent<SignatureV7, ProofMarkerV7, PureGeneratorPedersen, D>;
 type IntentV8<D> =
-    midnight_ledger_v8::structure::Intent<SignatureV7, ProofMarkerV8, PureGeneratorPedersen, D>;
+    midnight_ledger_v8::structure::Intent<Signature, ProofMarkerV8, PureGeneratorPedersen, D>;
 
 /// Ledger related errors.
 #[derive(Debug, Error)]
@@ -147,12 +131,6 @@ impl<T> TaggedSerializableExt for T where T: Serializable + Tagged {}
 /// - `dust_grace_period`: Maximum time window for DUST spends (3 hours).
 pub fn dust_parameters(ledger_version: LedgerVersion) -> Result<DustParameters, Error> {
     let parameters = match ledger_version {
-        LedgerVersion::V7 => DustParameters {
-            night_dust_ratio: INITIAL_DUST_PARAMETERS_V7.night_dust_ratio,
-            generation_decay_rate: INITIAL_DUST_PARAMETERS_V7.generation_decay_rate,
-            dust_grace_period: INITIAL_DUST_PARAMETERS_V7.dust_grace_period.as_seconds() as u64,
-        },
-
         LedgerVersion::V8 => DustParameters {
             night_dust_ratio: INITIAL_DUST_PARAMETERS_V8.night_dust_ratio,
             generation_decay_rate: INITIAL_DUST_PARAMETERS_V8.generation_decay_rate,

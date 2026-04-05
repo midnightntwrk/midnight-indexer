@@ -17,14 +17,12 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 [dependencies]
 midnight-base-crypto        = { workspace = true }
 midnight-coin-structure     = { workspace = true }
-midnight-ledger_v7          = { workspace = true }
 midnight-ledger_v8          = { workspace = true }
 midnight-onchain-runtime_v2 = { workspace = true }
 midnight-onchain-runtime_v3 = { workspace = true }
 midnight-serialize          = { workspace = true }
 midnight-storage-core       = { workspace = true }
 midnight-transient-crypto   = { workspace = true }
-midnight-zswap_v7           = { workspace = true }
 midnight-zswap_v8           = { workspace = true }
 async-nats                  = { workspace = true, optional = true }
 byte-unit-serde             = { workspace = true }

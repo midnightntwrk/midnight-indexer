@@ -16,17 +16,13 @@ use crate::{
         ContractAction, ContractAttributes, LedgerVersion, SerializedContractAddress,
         SerializedContractState, SerializedTransactionIdentifier, TransactionHash,
         TransactionStructure, ViewingKey,
-        ledger::{Error, SerializableExt, TransactionV7, TransactionV8},
+        ledger::{Error, SerializableExt, TransactionV8},
     },
     infra::ledger_db::v1_1,
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
 use midnight_coin_structure::{coin::Info, contract::ContractAddress};
-use midnight_ledger_v7::structure::{
-    ContractAction as ContractActionV7, StandardTransaction as StandardTransactionV7,
-    SystemTransaction as LedgerSystemTransactionV7,
-};
 use midnight_ledger_v8::structure::{
     ContractAction as ContractActionV8, StandardTransaction as StandardTransactionV8,
     SystemTransaction as LedgerSystemTransactionV8,
@@ -34,13 +30,11 @@ use midnight_ledger_v8::structure::{
 use midnight_serialize::tagged_deserialize;
 use midnight_storage_core::db::DB;
 use midnight_transient_crypto::{encryption::SecretKey, proofs::Proof};
-use midnight_zswap_v7::Offer as OfferV7;
 use midnight_zswap_v8::Offer as OfferV8;
 use std::error::Error as StdError;
 
 #[derive(Debug, Clone)]
 pub enum Transaction {
-    V7(TransactionV7<v1_1::LedgerDb>),
     V8(TransactionV8<v1_1::LedgerDb>),
 }
 
@@ -51,12 +45,6 @@ impl Transaction {
         ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
         let transaction = match ledger_version {
-            LedgerVersion::V7 => {
-                let transaction = tagged_deserialize(&mut transaction.as_ref())
-                    .map_err(|error| Error::Deserialize("LedgerTransactionV7", error))?;
-                Self::V7(transaction)
-            }
-
             LedgerVersion::V8 => {
                 let transaction = tagged_deserialize(&mut transaction.as_ref())
                     .map_err(|error| Error::Deserialize("LedgerTransactionV8", error))?;
@@ -70,7 +58,6 @@ impl Transaction {
     /// Get the hash.
     pub fn hash(&self) -> TransactionHash {
         match self {
-            Self::V7(transaction) => transaction.transaction_hash().0.0.into(),
             Self::V8(transaction) => transaction.transaction_hash().0.0.into(),
         }
     }
@@ -78,16 +65,6 @@ impl Transaction {
     /// Get the identifiers.
     pub fn identifiers(&self) -> Result<Vec<SerializedTransactionIdentifier>, Error> {
         match self {
-            Self::V7(transaction) => transaction
-                .identifiers()
-                .map(|identifier| {
-                    let identifier = identifier
-                        .serialize()
-                        .map_err(|error| Error::Serialize("TransactionIdentifierV7", error))?;
-                    Ok(identifier)
-                })
-                .collect(),
-
             Self::V8(transaction) => transaction
                 .identifiers()
                 .map(|identifier| {
@@ -111,71 +88,6 @@ impl Transaction {
         F: Future<Output = Result<SerializedContractState, E>>,
     {
         match self {
-            Self::V7(transaction) => match transaction {
-                TransactionV7::Standard(standard_transaction) => {
-                    let contract_actions = futures::stream::iter(standard_transaction.actions())
-                        .then(|(_, contract_action)| async {
-                            match contract_action {
-                                ContractActionV7::Deploy(deploy) => {
-                                    let address = serialize_contract_address(deploy.address())?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
-                                            Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
-
-                                    Ok::<_, Error>(ContractAction {
-                                        address,
-                                        state,
-                                        attributes: ContractAttributes::Deploy,
-                                    })
-                                }
-
-                                ContractActionV7::Call(call) => {
-                                    let address = serialize_contract_address(call.address)?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
-                                            Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
-                                    let entry_point =
-                                        String::from_utf8(call.entry_point.as_ref().to_owned())
-                                            .map_err(|error| {
-                                                Error::FromUtf8("EntryPointBufV7", error)
-                                            })?;
-
-                                    Ok(ContractAction {
-                                        address,
-                                        state,
-                                        attributes: ContractAttributes::Call { entry_point },
-                                    })
-                                }
-
-                                ContractActionV7::Maintain(update) => {
-                                    let address = serialize_contract_address(update.address)?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
-                                            Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
-
-                                    Ok(ContractAction {
-                                        address,
-                                        state,
-                                        attributes: ContractAttributes::Update,
-                                    })
-                                }
-                            }
-                        })
-                        .try_collect::<Vec<_>>()
-                        .await?;
-
-                    Ok(contract_actions)
-                }
-
-                TransactionV7::ClaimRewards(_) => Ok(vec![]),
-            },
-
             Self::V8(transaction) => match transaction {
                 TransactionV8::Standard(standard_transaction) => {
                     let contract_actions = futures::stream::iter(standard_transaction.actions())
@@ -246,38 +158,6 @@ impl Transaction {
     /// Get the structure of this transaction for fees calculation.
     pub fn structure(&self, size: usize) -> TransactionStructure {
         match self {
-            Self::V7(transaction) => match transaction {
-                TransactionV7::Standard(standard_transaction) => {
-                    let contract_action_count = standard_transaction.actions().count();
-                    let identifier_count = transaction.identifiers().count();
-
-                    let segment_count = if contract_action_count > 1 || identifier_count > 2 {
-                        2
-                    } else {
-                        1
-                    };
-                    let estimated_input_count = identifier_count.max(1);
-                    let estimated_output_count = (identifier_count + 1).max(1);
-                    let has_contract_operations = contract_action_count > 0;
-
-                    TransactionStructure {
-                        segment_count,
-                        estimated_input_count,
-                        estimated_output_count,
-                        has_contract_operations,
-                        size,
-                    }
-                }
-
-                TransactionV7::ClaimRewards(_) => TransactionStructure {
-                    segment_count: 1,
-                    estimated_input_count: 1,
-                    estimated_output_count: 1,
-                    has_contract_operations: false,
-                    size,
-                },
-            },
-
             Self::V8(transaction) => match transaction {
                 TransactionV8::Standard(standard_transaction) => {
                     let contract_action_count = standard_transaction.actions().count();
@@ -315,32 +195,6 @@ impl Transaction {
     // Check if this transaction belongs to the given viewing key.
     pub fn relevant(&self, viewing_key: ViewingKey) -> bool {
         match self {
-            Self::V7(transaction) => match transaction {
-                TransactionV7::Standard(StandardTransactionV7 {
-                    guaranteed_coins,
-                    fallible_coins,
-                    ..
-                }) => {
-                    let secret_key = SecretKey::from_repr(&viewing_key.expose_secret().0)
-                        .expect("SecretKey can be created from repr");
-
-                    let can_decrypt_guaranteed_coins = guaranteed_coins
-                        .as_ref()
-                        .map(|guaranteed_coins| can_decrypt_v7(&secret_key, guaranteed_coins))
-                        .unwrap_or_default();
-
-                    let can_decrypt_fallible_coins = || {
-                        fallible_coins
-                            .values()
-                            .any(|fallible_coins| can_decrypt_v7(&secret_key, &fallible_coins))
-                    };
-
-                    can_decrypt_guaranteed_coins || can_decrypt_fallible_coins()
-                }
-
-                TransactionV7::ClaimRewards(_) => false,
-            },
-
             Self::V8(transaction) => match transaction {
                 TransactionV8::Standard(StandardTransactionV8 {
                     guaranteed_coins,
@@ -373,7 +227,6 @@ impl Transaction {
 /// Facade for `SystemTransaction` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum SystemTransaction {
-    V7(LedgerSystemTransactionV7),
     V8(LedgerSystemTransactionV8),
 }
 
@@ -384,12 +237,6 @@ impl SystemTransaction {
         ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
         let transaction = match ledger_version {
-            LedgerVersion::V7 => {
-                let transaction = tagged_deserialize(&mut transaction.as_ref())
-                    .map_err(|error| Error::Deserialize("LedgerSystemTransactionV7", error))?;
-                Self::V7(transaction)
-            }
-
             LedgerVersion::V8 => {
                 let transaction = tagged_deserialize(&mut transaction.as_ref())
                     .map_err(|error| Error::Deserialize("LedgerSystemTransactionV8", error))?;
@@ -403,7 +250,6 @@ impl SystemTransaction {
     /// Get the hash.
     pub fn hash(&self) -> TransactionHash {
         match self {
-            Self::V7(transaction) => transaction.transaction_hash().0.0.into(),
             Self::V8(transaction) => transaction.transaction_hash().0.0.into(),
         }
     }
@@ -415,17 +261,6 @@ fn serialize_contract_address(
     address
         .serialize()
         .map_err(|error| Error::Serialize("ContractAddress", error))
-}
-
-fn can_decrypt_v7<D: DB>(key: &SecretKey, offer: &OfferV7<Proof, D>) -> bool {
-    let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
-    let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
-    let mut ciphertexts = outputs.chain(transient);
-
-    ciphertexts.any(|ciphertext| {
-        key.decrypt::<Info>(&(*ciphertext).to_owned().into())
-            .is_some()
-    })
 }
 
 fn can_decrypt_v8<D: DB>(key: &SecretKey, offer: &OfferV8<Proof, D>) -> bool {
@@ -447,7 +282,7 @@ mod tests {
     };
     use anyhow::Context;
     use bip32::{DerivationPath, XPrv};
-    use midnight_zswap_v7::keys::{SecretKeys, Seed};
+    use midnight_zswap_v8::keys::{SecretKeys, Seed};
     use std::{fs, str::FromStr};
 
     /// Notice: The raw test data is created with `generate_txs.sh`.
