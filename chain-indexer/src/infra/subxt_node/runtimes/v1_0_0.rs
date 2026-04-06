@@ -299,7 +299,7 @@ pub async fn get_d_parameter(block: &OnlineClientAtBlock) -> Result<DParameter, 
 pub async fn fetch_genesis_cnight_registrations(
     block: &OnlineClientAtBlock,
 ) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
-    let query = super::runtime_0_20_0::storage()
+    let query = super::runtime_1_0_0::storage()
         .c_night_observation()
         .mappings();
     block

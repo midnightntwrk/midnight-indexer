@@ -155,5 +155,10 @@ mod tests {
             ProtocolVersion::try_from(0_022_666_u32).expect("0_022_666 is valid protocol version");
         assert_eq!(version.ledger_version(), LedgerVersion::V8);
         assert_eq!(version.node_version(), NodeVersion::V0_22);
+
+        let version =
+            ProtocolVersion::try_from(1_000_000_u32).expect("1_000_000 is valid protocol version");
+        assert_eq!(version.ledger_version(), LedgerVersion::V8);
+        assert_eq!(version.node_version(), NodeVersion::V1_0);
     }
 }
