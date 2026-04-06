@@ -17,7 +17,8 @@ use crate::domain::{
 use futures::Stream;
 use indexer_common::domain::{
     BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, SerializedTransaction,
-    SerializedTransactionIdentifier, TransactionHash, ledger::ZswapMerkleTreeRoot,
+    SerializedTransactionIdentifier, TransactionHash,
+    ledger::{self, ZswapMerkleTreeRoot},
 };
 use std::{error::Error as StdError, fmt::Debug};
 
@@ -70,9 +71,14 @@ pub struct Block {
     pub dust_registration_events: Vec<DustRegistrationEvent>,
 }
 
-impl From<Block> for (domain::Block, Vec<Transaction>) {
-    fn from(block: Block) -> (domain::Block, Vec<Transaction>) {
+impl TryFrom<Block> for (domain::Block, Vec<Transaction>) {
+    type Error = ledger::Error;
+
+    fn try_from(block: Block) -> Result<(domain::Block, Vec<Transaction>), Self::Error> {
+        let zswap_merkle_tree_root = block.zswap_merkle_tree_root.serialize()?;
+
         let transactions = block.transactions;
+
         let block = domain::Block {
             hash: block.hash,
             height: block.height,
@@ -80,13 +86,13 @@ impl From<Block> for (domain::Block, Vec<Transaction>) {
             parent_hash: block.parent_hash,
             author: block.author,
             timestamp: block.timestamp,
-            zswap_merkle_tree_root: block.zswap_merkle_tree_root,
+            zswap_merkle_tree_root,
             ledger_state_root: block.ledger_state_root,
             dust_registration_events: block.dust_registration_events,
             ledger_parameters: Default::default(),
         };
 
-        (block, transactions)
+        Ok((block, transactions))
     }
 }
 

@@ -14,7 +14,7 @@
 use crate::domain::DustRegistrationEvent;
 use indexer_common::domain::{
     BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedLedgerParameters,
-    ledger::ZswapMerkleTreeRoot,
+    SerializedZswapMerkleTreeRoot,
 };
 use std::fmt::Debug;
 
@@ -27,7 +27,7 @@ pub struct Block {
     pub parent_hash: BlockHash,
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
-    pub zswap_merkle_tree_root: ZswapMerkleTreeRoot,
+    pub zswap_merkle_tree_root: SerializedZswapMerkleTreeRoot,
     // TODO: Remove Option once support for Node < 0.22 is dropped!
     pub ledger_state_root: Option<ByteVec>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,

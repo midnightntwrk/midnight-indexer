@@ -5,6 +5,7 @@ query BlockQuery($block_offset: BlockOffset) {
         protocolVersion
         timestamp
         author
+        zswapMerkleTreeRoot
         ledgerParameters
         systemParameters {
             dParameter {
@@ -432,6 +433,7 @@ subscription BlockSubscription($block_offset: BlockOffset) {
         protocolVersion
         timestamp
         author
+        zswapMerkleTreeRoot
         ledgerParameters
         systemParameters {
             dParameter {
@@ -834,8 +836,14 @@ query DustGenerationStatusQuery(
     }
 }
 
-query ZswapMerkleTreeCollapsedUpdateQuery($start_index: Int!, $end_index: Int!) {
-    zswapMerkleTreeCollapsedUpdate(startIndex: $start_index, endIndex: $end_index) {
+query ZswapMerkleTreeCollapsedUpdateQuery(
+    $start_index: Int!
+    $end_index: Int!
+) {
+    zswapMerkleTreeCollapsedUpdate(
+        startIndex: $start_index
+        endIndex: $end_index
+    ) {
         startIndex
         endIndex
         update

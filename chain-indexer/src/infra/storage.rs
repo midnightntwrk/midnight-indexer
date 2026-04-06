@@ -254,11 +254,6 @@ async fn save_block(
     ledger_state_key: &SerializedLedgerStateKey,
     tx: &mut SqlxTransaction,
 ) -> Result<Option<u64>, sqlx::Error> {
-    let zswap_merkle_tree_root = block
-        .zswap_merkle_tree_root
-        .serialize()
-        .map_err(|error| sqlx::Error::Decode(error.into()))?;
-
     let query = indoc! {"
         INSERT INTO blocks (
             hash,
@@ -282,6 +277,7 @@ async fn save_block(
                 parent_hash,
                 author,
                 timestamp,
+                zswap_merkle_tree_root,
                 ledger_parameters,
                 ..
             } = block;
