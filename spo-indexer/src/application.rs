@@ -57,25 +57,20 @@ pub async fn run(
     storage: impl Storage,
     mut sigterm: Signal,
 ) -> anyhow::Result<()> {
-    if client.has_blockfrost_id() {
-        let st_cfg = config.stake_refresh.clone();
-        let storage_bg = storage.clone();
-        let client_bg = client.clone();
-        tokio::spawn(async move {
-            let mut ticker = interval(Duration::from_secs(st_cfg.period_secs.max(60)));
-            // Initial delay to avoid hammering on startup.
+    let st_cfg = config.stake_refresh.clone();
+    let storage_bg = storage.clone();
+    let client_bg = client.clone();
+    tokio::spawn(async move {
+        let mut ticker = interval(Duration::from_secs(st_cfg.period_secs.max(60)));
+        // Initial delay to avoid hammering on startup.
+        ticker.tick().await;
+        loop {
             ticker.tick().await;
-            loop {
-                ticker.tick().await;
-                if let Err(error) = refresh_stake_snapshots(&client_bg, &storage_bg, &st_cfg).await
-                {
-                    error!("stake refresh failed: {error:?}");
-                }
+            if let Err(error) = refresh_stake_snapshots(&client_bg, &storage_bg, &st_cfg).await {
+                error!("stake refresh failed: {error:?}");
             }
-        });
-    } else {
-        info!("Blockfrost API key not configured; stake refresh disabled");
-    }
+        }
+    });
 
     let poll_interval = Duration::from_secs(config.interval.into());
 
@@ -377,7 +372,7 @@ async fn get_epoch_to_process(
     let current_epoch = client.get_current_epoch().await?;
     let latest_epoch_num = match latest_processed {
         Some(epoch) => epoch.epoch_no,
-        None => client.get_first_epoch_num(storage).await?,
+        None => client.get_first_epoch_num().await?,
     };
 
     let time_offset: i64 =
