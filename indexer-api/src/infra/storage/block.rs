@@ -34,6 +34,7 @@ impl BlockStorage for Storage {
                 parent_hash,
                 author,
                 timestamp,
+                zswap_merkle_tree_root,
                 ledger_parameters
             FROM blocks
             ORDER BY height DESC
@@ -54,6 +55,7 @@ impl BlockStorage for Storage {
                 parent_hash,
                 author,
                 timestamp,
+                zswap_merkle_tree_root,
                 ledger_parameters
             FROM blocks
             WHERE hash = $1
@@ -77,6 +79,7 @@ impl BlockStorage for Storage {
                 parent_hash,
                 author,
                 timestamp,
+                zswap_merkle_tree_root,
                 ledger_parameters
             FROM blocks
             WHERE height = $1
@@ -127,6 +130,7 @@ impl Storage {
                 parent_hash,
                 author,
                 timestamp,
+                zswap_merkle_tree_root,
                 ledger_parameters
             FROM blocks
             WHERE height >= $1

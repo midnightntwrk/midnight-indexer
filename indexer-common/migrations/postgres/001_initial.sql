@@ -23,6 +23,7 @@ CREATE TABLE blocks (
   parent_hash BYTEA NOT NULL,
   author BYTEA,
   timestamp BIGINT NOT NULL,
+  zswap_merkle_tree_root BYTEA NOT NULL,
   ledger_parameters BYTEA NOT NULL,
   ledger_state_key BYTEA NOT NULL
 );

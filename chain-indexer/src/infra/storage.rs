@@ -262,6 +262,7 @@ async fn save_block(
             parent_hash,
             author,
             timestamp,
+            zswap_merkle_tree_root,
             ledger_parameters,
             ledger_state_key
         )
@@ -276,6 +277,7 @@ async fn save_block(
                 parent_hash,
                 author,
                 timestamp,
+                zswap_merkle_tree_root,
                 ledger_parameters,
                 ..
             } = block;
@@ -286,6 +288,7 @@ async fn save_block(
                 .push_bind(parent_hash.as_ref())
                 .push_bind(author.as_ref().map(|a| a.as_ref()))
                 .push_bind(*timestamp as i64)
+                .push_bind(zswap_merkle_tree_root.as_ref())
                 .push_bind(ledger_parameters.as_ref())
                 .push_bind(ledger_state_key);
         })

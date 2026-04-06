@@ -23,6 +23,10 @@ type Block {
 	"""
 	author: HexEncoded
 	"""
+	The hex-encoded serialized zswap state Merkle tree root.
+	"""
+	zswapMerkleTreeRoot: HexEncoded!
+	"""
 	The hex-encoded ledger parameters for this block.
 	"""
 	ledgerParameters: HexEncoded!

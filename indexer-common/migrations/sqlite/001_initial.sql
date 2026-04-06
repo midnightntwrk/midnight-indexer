@@ -9,6 +9,7 @@ CREATE TABLE blocks (
   parent_hash BLOB NOT NULL,
   author BLOB,
   timestamp INTEGER NOT NULL,
+  zswap_merkle_tree_root BLOB NOT NULL,
   ledger_parameters BLOB NOT NULL,
   ledger_state_key BLOB NOT NULL
 );
