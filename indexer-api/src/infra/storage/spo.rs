@@ -284,6 +284,25 @@ impl SpoStorage for Storage {
             let s_hex = normalize_hex(s).unwrap_or_else(|| s.to_ascii_lowercase());
             let s_hex_like = format!("%{s_hex}%");
 
+            #[cfg(feature = "cloud")]
+            let query = indoc! {"
+                SELECT s.pool_id AS pool_id_hex,
+                       'UNKNOWN' AS validator_class,
+                       si.sidechain_pubkey AS sidechain_pubkey_hex,
+                       si.aura_pubkey AS aura_pubkey_hex,
+                       pm.name, pm.ticker, pm.homepage_url, pm.url AS logo_url
+                FROM spo_stake_snapshot s
+                LEFT JOIN spo_identity si ON si.pool_id = s.pool_id
+                LEFT JOIN pool_metadata_cache pm ON pm.pool_id = s.pool_id
+                WHERE (
+                        pm.name ILIKE $3 OR pm.ticker ILIKE $3 OR pm.homepage_url ILIKE $3 OR s.pool_id ILIKE $4
+                     OR si.sidechain_pubkey ILIKE $4 OR si.aura_pubkey ILIKE $4 OR si.mainchain_pubkey ILIKE $4
+                  )
+                ORDER BY COALESCE(si.mainchain_pubkey, s.pool_id)
+                LIMIT $1 OFFSET $2
+            "};
+
+            #[cfg(feature = "standalone")]
             let query = indoc! {"
                 SELECT s.pool_id AS pool_id_hex,
                        'UNKNOWN' AS validator_class,
@@ -1107,23 +1126,47 @@ impl SpoStorage for Storage {
 
         // Build the main query.
         let base_select = if search.is_some() {
-            indoc! {"
-                SELECT
-                    pm.pool_id AS pool_id_hex,
-                    pm.name, pm.ticker, pm.homepage_url, pm.url AS logo_url,
-                    CAST(s.live_stake AS TEXT), CAST(s.active_stake AS TEXT), s.live_delegators, s.live_saturation,
-                    CAST(s.declared_pledge AS TEXT), CAST(s.live_pledge AS TEXT)
-                FROM spo_stake_snapshot s
-                JOIN pool_metadata_cache pm ON pm.pool_id = s.pool_id
-                WHERE (
-                    LOWER(pm.name) LIKE LOWER($3)
-                    OR LOWER(pm.ticker) LIKE LOWER($3)
-                    OR LOWER(pm.homepage_url) LIKE LOWER($3)
-                    OR LOWER(pm.pool_id) LIKE LOWER($4)
-                )
-                ORDER BY COALESCE(s.live_stake, 0) DESC, pm.pool_id
-                LIMIT $1 OFFSET $2
-            "}
+            #[cfg(feature = "cloud")]
+            {
+                indoc! {"
+                    SELECT
+                        pm.pool_id AS pool_id_hex,
+                        pm.name, pm.ticker, pm.homepage_url, pm.url AS logo_url,
+                        CAST(s.live_stake AS TEXT), CAST(s.active_stake AS TEXT), s.live_delegators, s.live_saturation,
+                        CAST(s.declared_pledge AS TEXT), CAST(s.live_pledge AS TEXT)
+                    FROM spo_stake_snapshot s
+                    JOIN pool_metadata_cache pm ON pm.pool_id = s.pool_id
+                    WHERE (
+                        pm.name ILIKE $3
+                        OR pm.ticker ILIKE $3
+                        OR pm.homepage_url ILIKE $3
+                        OR pm.pool_id ILIKE $4
+                    )
+                    ORDER BY COALESCE(s.live_stake, 0) DESC, pm.pool_id
+                    LIMIT $1 OFFSET $2
+                "}
+            }
+
+            #[cfg(feature = "standalone")]
+            {
+                indoc! {"
+                    SELECT
+                        pm.pool_id AS pool_id_hex,
+                        pm.name, pm.ticker, pm.homepage_url, pm.url AS logo_url,
+                        CAST(s.live_stake AS TEXT), CAST(s.active_stake AS TEXT), s.live_delegators, s.live_saturation,
+                        CAST(s.declared_pledge AS TEXT), CAST(s.live_pledge AS TEXT)
+                    FROM spo_stake_snapshot s
+                    JOIN pool_metadata_cache pm ON pm.pool_id = s.pool_id
+                    WHERE (
+                        LOWER(pm.name) LIKE LOWER($3)
+                        OR LOWER(pm.ticker) LIKE LOWER($3)
+                        OR LOWER(pm.homepage_url) LIKE LOWER($3)
+                        OR LOWER(pm.pool_id) LIKE LOWER($4)
+                    )
+                    ORDER BY COALESCE(s.live_stake, 0) DESC, pm.pool_id
+                    LIMIT $1 OFFSET $2
+                "}
+            }
         } else {
             indoc! {"
                 SELECT
