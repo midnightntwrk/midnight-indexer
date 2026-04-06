@@ -579,13 +579,15 @@ impl SpoStorage for Storage {
                 SELECT
                     epoch_no, starts_s, ends_s, dur_s, now_s,
                     CASE WHEN ends_s > now_s THEN 0
+                         WHEN dur_s <= 0 THEN 0
                          ELSE ((now_s - ends_s) / dur_s)::BIGINT + 1 END AS n
                 FROM last
             ), synth AS (
                 SELECT
                     (epoch_no + n) AS epoch_no,
                     dur_s AS duration_seconds,
-                    CASE WHEN n = 0 THEN LEAST(GREATEST(now_s - starts_s, 0), dur_s)
+                    CASE WHEN dur_s <= 0 THEN 0
+                         WHEN n = 0 THEN LEAST(GREATEST(now_s - starts_s, 0), dur_s)
                          ELSE LEAST(GREATEST(now_s - (ends_s + (n - 1) * dur_s), 0), dur_s)
                     END AS elapsed_seconds
                 FROM calc
