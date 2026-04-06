@@ -11,9 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use chain_indexer::{application as chain_app, infra::subxt_node};
+use indexer_api::{application as api_app, infra::api};
 use indexer_common::{domain::NetworkId, infra::pool, telemetry};
 use serde::Deserialize;
+use spo_indexer::{
+    application::{self as spo_app, StakeRefreshConfig},
+    infra::spo_client,
+};
 use std::{num::NonZeroUsize, time::Duration};
+use wallet_indexer::application as wallet_app;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -22,6 +29,9 @@ pub struct Config {
 
     #[serde(rename = "application")]
     pub application_config: ApplicationConfig,
+
+    #[serde(rename = "spo", default)]
+    pub spo_config: SpoApplicationConfig,
 
     #[serde(rename = "infra")]
     pub infra_config: InfraConfig,
@@ -43,8 +53,6 @@ pub struct ApplicationConfig {
     pub transaction_batch_size: NonZeroUsize,
     #[serde(default = "concurrency_limit_default")]
     pub concurrency_limit: NonZeroUsize,
-    #[serde(default)]
-    pub spo: SpoApplicationConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -52,7 +60,7 @@ pub struct SpoApplicationConfig {
     #[serde(default = "spo_interval_default")]
     pub interval: u32,
     #[serde(default = "spo_stake_refresh_default")]
-    pub stake_refresh: spo_indexer::application::StakeRefreshConfig,
+    pub stake_refresh: StakeRefreshConfig,
 }
 
 impl Default for SpoApplicationConfig {
@@ -64,7 +72,7 @@ impl Default for SpoApplicationConfig {
     }
 }
 
-impl From<ApplicationConfig> for chain_indexer::application::Config {
+impl From<ApplicationConfig> for chain_app::Config {
     fn from(config: ApplicationConfig) -> Self {
         let ApplicationConfig {
             network_id,
@@ -83,7 +91,7 @@ impl From<ApplicationConfig> for chain_indexer::application::Config {
     }
 }
 
-impl From<ApplicationConfig> for indexer_api::application::Config {
+impl From<ApplicationConfig> for api_app::Config {
     fn from(config: ApplicationConfig) -> Self {
         Self {
             network_id: config.network_id,
@@ -91,7 +99,7 @@ impl From<ApplicationConfig> for indexer_api::application::Config {
     }
 }
 
-impl From<ApplicationConfig> for wallet_indexer::application::Config {
+impl From<ApplicationConfig> for wallet_app::Config {
     fn from(config: ApplicationConfig) -> Self {
         let ApplicationConfig {
             active_wallets_query_delay,
@@ -110,7 +118,7 @@ impl From<ApplicationConfig> for wallet_indexer::application::Config {
     }
 }
 
-impl From<SpoApplicationConfig> for spo_indexer::application::Config {
+impl From<SpoApplicationConfig> for spo_app::Config {
     fn from(config: SpoApplicationConfig) -> Self {
         Self {
             interval: config.interval,
@@ -130,13 +138,13 @@ pub struct InfraConfig {
     pub ledger_db_config: indexer_common::infra::ledger_db::Config,
 
     #[serde(rename = "node")]
-    pub node_config: chain_indexer::infra::subxt_node::Config,
+    pub node_config: subxt_node::Config,
 
-    #[serde(rename = "spo_node", default)]
-    pub spo_node_config: Option<SpoNodeConfig>,
+    #[serde(rename = "spo_node")]
+    pub spo_node_config: SpoNodeConfig,
 
     #[serde(rename = "api")]
-    pub api_config: indexer_api::infra::api::Config,
+    pub api_config: api::Config,
 
     pub secret: secrecy::SecretString,
 }
@@ -144,14 +152,14 @@ pub struct InfraConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SpoNodeConfig {
     pub url: String,
-    #[serde(default, alias = "blockfrostId")]
+    #[serde(alias = "blockfrostId")]
     pub blockfrost_id: String,
     #[serde(with = "humantime_serde")]
     pub reconnect_max_delay: Duration,
     pub reconnect_max_attempts: usize,
 }
 
-impl From<SpoNodeConfig> for spo_indexer::infra::spo_client::Config {
+impl From<SpoNodeConfig> for spo_client::Config {
     fn from(config: SpoNodeConfig) -> Self {
         Self {
             url: config.url,
@@ -170,8 +178,8 @@ fn spo_interval_default() -> u32 {
     5000
 }
 
-fn spo_stake_refresh_default() -> spo_indexer::application::StakeRefreshConfig {
-    spo_indexer::application::StakeRefreshConfig {
+fn spo_stake_refresh_default() -> StakeRefreshConfig {
+    StakeRefreshConfig {
         period_secs: 900,
         page_size: 100,
         max_rps: 2,
