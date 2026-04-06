@@ -294,13 +294,13 @@ impl SpoStorage for Storage {
                 LEFT JOIN spo_identity si ON si.pool_id = s.pool_id
                 LEFT JOIN pool_metadata_cache pm ON pm.pool_id = s.pool_id
                 WHERE (
-                        LOWER(COALESCE(pm.name, '')) LIKE LOWER($3)
-                     OR LOWER(COALESCE(pm.ticker, '')) LIKE LOWER($3)
-                     OR LOWER(COALESCE(pm.homepage_url, '')) LIKE LOWER($3)
-                     OR LOWER(COALESCE(s.pool_id, '')) LIKE LOWER($4)
-                     OR LOWER(COALESCE(si.sidechain_pubkey, '')) LIKE LOWER($4)
-                     OR LOWER(COALESCE(si.aura_pubkey, '')) LIKE LOWER($4)
-                     OR LOWER(COALESCE(si.mainchain_pubkey, '')) LIKE LOWER($4)
+                        LOWER(pm.name) LIKE LOWER($3)
+                     OR LOWER(pm.ticker) LIKE LOWER($3)
+                     OR LOWER(pm.homepage_url) LIKE LOWER($3)
+                     OR LOWER(s.pool_id) LIKE LOWER($4)
+                     OR LOWER(si.sidechain_pubkey) LIKE LOWER($4)
+                     OR LOWER(si.aura_pubkey) LIKE LOWER($4)
+                     OR LOWER(si.mainchain_pubkey) LIKE LOWER($4)
                   )
                 ORDER BY COALESCE(si.mainchain_pubkey, s.pool_id)
                 LIMIT $1 OFFSET $2
@@ -1102,10 +1102,10 @@ impl SpoStorage for Storage {
                 FROM spo_stake_snapshot s
                 JOIN pool_metadata_cache pm ON pm.pool_id = s.pool_id
                 WHERE (
-                    LOWER(COALESCE(pm.name, '')) LIKE LOWER($3)
-                    OR LOWER(COALESCE(pm.ticker, '')) LIKE LOWER($3)
-                    OR LOWER(COALESCE(pm.homepage_url, '')) LIKE LOWER($3)
-                    OR LOWER(COALESCE(pm.pool_id, '')) LIKE LOWER($4)
+                    LOWER(pm.name) LIKE LOWER($3)
+                    OR LOWER(pm.ticker) LIKE LOWER($3)
+                    OR LOWER(pm.homepage_url) LIKE LOWER($3)
+                    OR LOWER(pm.pool_id) LIKE LOWER($4)
                 )
                 ORDER BY COALESCE(s.live_stake, 0) DESC, pm.pool_id
                 LIMIT $1 OFFSET $2
