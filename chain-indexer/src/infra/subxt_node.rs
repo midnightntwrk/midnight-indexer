@@ -644,16 +644,16 @@ async fn make_regular_transaction(
 
     let identifiers = ledger_transaction.identifiers()?;
 
-    let contract_actions = ledger_transaction
-        .contract_actions(|address| async move {
+    let (contract_actions, fees) = tokio::join!(
+        ledger_transaction.contract_actions(|address| async move {
             runtimes::get_contract_state(address, node_version, block).await
-        })
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
+        }),
+        runtimes::get_transaction_cost(&transaction, node_version, block),
+    );
 
-    let fees = match runtimes::get_transaction_cost(&transaction, node_version, block).await {
+    let contract_actions = contract_actions?.into_iter().map(Into::into).collect();
+
+    let fees = match fees {
         Ok(fees) => TransactionFees {
             paid_fees: fees,
             estimated_fees: fees,
