@@ -641,6 +641,18 @@ impl SpoStorage for Storage {
 
     #[trace]
     async fn get_epoch_utilization(&self, epoch: i64) -> Result<Option<f64>, sqlx::Error> {
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            SELECT COALESCE(
+                CASE WHEN SUM(expected_blocks) > 0
+                     THEN SUM(produced_blocks)::DOUBLE PRECISION / SUM(expected_blocks)
+                     ELSE 0.0 END,
+                0.0) AS utilization
+            FROM spo_epoch_performance
+            WHERE epoch_no = $1
+        "};
+
+        #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT COALESCE(
                 CASE WHEN SUM(expected_blocks) > 0
