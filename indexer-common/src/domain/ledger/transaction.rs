@@ -21,7 +21,7 @@ use crate::{
     infra::ledger_db::v1_1,
 };
 use fastrace::trace;
-use futures::{StreamExt, TryStreamExt};
+use futures::future::try_join_all;
 use midnight_coin_structure::{coin::Info, contract::ContractAddress};
 use midnight_ledger_v8::structure::{
     ContractAction as ContractActionV8, StandardTransaction as StandardTransactionV8,
@@ -88,70 +88,79 @@ impl Transaction {
         F: Future<Output = Result<SerializedContractState, E>>,
     {
         match self {
-            Self::V8(transaction) => match transaction {
-                TransactionV8::Standard(standard_transaction) => {
-                    let contract_actions = futures::stream::iter(standard_transaction.actions())
-                        .then(|(_, contract_action)| async {
-                            match contract_action {
-                                ContractActionV8::Deploy(deploy) => {
-                                    let address = serialize_contract_address(deploy.address())?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
-                                            Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
-
-                                    Ok::<_, Error>(ContractAction {
-                                        address,
-                                        state,
-                                        attributes: ContractAttributes::Deploy,
-                                    })
-                                }
-
-                                ContractActionV8::Call(call) => {
-                                    let address = serialize_contract_address(call.address)?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
-                                            Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
-                                    let entry_point =
-                                        String::from_utf8(call.entry_point.as_ref().to_owned())
+            Self::V8(transaction) => {
+                match transaction {
+                    TransactionV8::Standard(standard_transaction) => {
+                        try_join_all(standard_transaction.actions().map(
+                            |(_, contract_action)| async {
+                                match contract_action {
+                                    ContractActionV8::Deploy(deploy) => {
+                                        let address = serialize_contract_address(deploy.address())?;
+                                        let state = get_contract_state(address.clone())
+                                            .await
                                             .map_err(|error| {
-                                                Error::FromUtf8("EntryPointBufV8", error)
+                                                Error::GetContractState(
+                                                    address.clone(),
+                                                    error.into(),
+                                                )
                                             })?;
 
-                                    Ok(ContractAction {
-                                        address,
-                                        state,
-                                        attributes: ContractAttributes::Call { entry_point },
-                                    })
+                                        Ok::<_, Error>(ContractAction {
+                                            address,
+                                            state,
+                                            attributes: ContractAttributes::Deploy,
+                                        })
+                                    }
+
+                                    ContractActionV8::Call(call) => {
+                                        let address = serialize_contract_address(call.address)?;
+                                        let state = get_contract_state(address.clone())
+                                            .await
+                                            .map_err(|error| {
+                                                Error::GetContractState(
+                                                    address.clone(),
+                                                    error.into(),
+                                                )
+                                            })?;
+                                        let entry_point =
+                                            String::from_utf8(call.entry_point.as_ref().to_owned())
+                                                .map_err(|error| {
+                                                    Error::FromUtf8("EntryPointBufV8", error)
+                                                })?;
+
+                                        Ok(ContractAction {
+                                            address,
+                                            state,
+                                            attributes: ContractAttributes::Call { entry_point },
+                                        })
+                                    }
+
+                                    ContractActionV8::Maintain(update) => {
+                                        let address = serialize_contract_address(update.address)?;
+                                        let state = get_contract_state(address.clone())
+                                            .await
+                                            .map_err(|error| {
+                                                Error::GetContractState(
+                                                    address.clone(),
+                                                    error.into(),
+                                                )
+                                            })?;
+
+                                        Ok(ContractAction {
+                                            address,
+                                            state,
+                                            attributes: ContractAttributes::Update,
+                                        })
+                                    }
                                 }
+                            },
+                        ))
+                        .await
+                    }
 
-                                ContractActionV8::Maintain(update) => {
-                                    let address = serialize_contract_address(update.address)?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
-                                            Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
-
-                                    Ok(ContractAction {
-                                        address,
-                                        state,
-                                        attributes: ContractAttributes::Update,
-                                    })
-                                }
-                            }
-                        })
-                        .try_collect::<Vec<_>>()
-                        .await?;
-
-                    Ok(contract_actions)
+                    TransactionV8::ClaimRewards(_) => Ok(vec![]),
                 }
-
-                TransactionV8::ClaimRewards(_) => Ok(vec![]),
-            },
+            }
         }
     }
 
