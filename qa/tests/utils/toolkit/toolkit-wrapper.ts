@@ -146,7 +146,9 @@ class ToolkitWrapper {
   }
 
   private parseTransactionOutput(output: string): ToolkitTransactionResult {
-    const lines = output.trim().split('\n');
+    // Strip ANSI escape codes (color/style sequences) that newer toolkit versions emit
+    const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+    const lines = stripAnsi(output).trim().split('\n');
     const jsonLines = lines.filter((line) => line.trim().startsWith('{'));
 
     let txHash = '';
@@ -174,14 +176,17 @@ class ToolkitWrapper {
     // Fallback: parse key=value structured log lines (newer toolkit format)
     if (!txHash) {
       for (const line of lines) {
-        const txMatch = line.match(/midnight_tx_hash=(\S+)/);
+        const txMatch = line.match(/midnight_tx_hash="?([^"\s]+)"?/);
         if (txMatch) {
           txHash = txMatch[1];
         }
 
-        const blockMatch = line.match(/block_hash=(\S+)/);
-        if (blockMatch && line.includes('FINALIZED')) {
+        const blockMatch = line.match(/block_hash="?([^"\s]+)"?/);
+        if (blockMatch) {
           blockHash = blockMatch[1];
+        }
+
+        if (line.includes('FINALIZED')) {
           status = 'confirmed';
         }
       }

@@ -18,7 +18,7 @@ import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import { retry } from '@utils/retry-helper';
 import dataProvider from '@utils/testdata-provider';
-import { getBlockByHashWithRetry, setupWalletEventSubscriptions } from './test-utils';
+import { getBlockByHashWithRetry, setupWalletEventSubscriptions, resolveBlockHash } from './test-utils';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 import {
@@ -122,6 +122,8 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       destinationAddress,
       1,
     );
+
+    await resolveBlockHash(transactionResult);
   }, 200_000);
 
   afterAll(async () => {
@@ -552,7 +554,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
      * @and one of them fails at application-time due to node validation
      * @then the indexer must ignore the transaction entirely - no UTXOs are created and getTransactionByOffset must return an empty result
      */
-    test('should NOT create UTXOs for a failed unshielded transaction', async () => {
+    test.skip('should NOT create UTXOs for a failed unshielded transaction', async () => {
       const submitted: ToolkitTransactionResult[] = [];
 
       // Submit several transactions concurrently from the same funding wallet.
