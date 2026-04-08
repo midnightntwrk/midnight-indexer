@@ -202,6 +202,72 @@ TARGET_ENV=undeployed yarn test:smoke
 
 See the individual project README files for detailed information about each test suite.
 
+### Runtime Upgrade Test
+
+Tests indexer behaviour during a node runtime upgrade (e.g. 0.21 → 0.22). Uses the same approach as the node CI hardfork test: starts the newer node binary with an older chain-spec (embedding the old runtime), then applies the new runtime via governance.
+
+#### Prerequisites
+
+- All standard prerequisites above
+- The `FROM_NODE_TAG` node image must be available (e.g. `midnightntwrk/midnight-node:0.21.0`)
+- The `TO_NODE_TAG` node image must be available (e.g. `midnightntwrk/midnight-node:0.22.2`)
+- The runtime WASM must differ between the two versions (patch versions like 0.22.1 → 0.22.2 may have identical runtimes)
+
+#### How it works
+
+1. Generates a chain-spec from the old node — this embeds the old runtime
+2. Extracts the new runtime WASM from the new node image
+3. Starts the new node binary with the old chain-spec (the node executes the old runtime via WASM)
+4. Starts the indexer and waits for it to be ready
+5. Pauses for pre-upgrade test execution
+6. Performs a runtime upgrade via federated governance using the node-toolkit
+7. Verifies the `specVersion` changed
+8. Pauses for post-upgrade test execution
+
+#### Running the test
+
+```bash
+# From the repo root
+source .envrc
+
+FROM_NODE_TAG=0.22.2 \
+  TO_NODE_TAG=1.0.0-rc.1 \
+  INDEXER_TAG=4.1.0-ff417ad1 \
+  IMAGE_REGISTRY=ghcr.io/midnight-ntwrk \
+  bash qa/scripts/test-runtime-upgrade.sh
+```
+
+The script pauses after environment startup so you can run pre-upgrade tests:
+
+```bash
+cd qa/tests
+TARGET_ENV=undeployed yarn test:integration
+```
+
+You can verify the node version before and after the upgrade on https://polkadot.js.org/apps/?rpc=ws%3A%2F%2F127.0.0.1%3A9944#/explorer — the runtime version should change after the upgrade.
+
+Press Enter in the script to trigger the runtime upgrade. After the upgrade completes, run post-upgrade tests:
+
+```bash
+TARGET_ENV=undeployed yarn test:integration
+```
+
+#### Environment variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `FROM_NODE_TAG` | Yes | — | Old node version (e.g. `0.21.0`) |
+| `TO_NODE_TAG` | Yes | — | New node version (e.g. `0.22.2`) |
+| `INDEXER_TAG` | Yes | — | Indexer image tag to test |
+| `NODE_TOOLKIT_TAG` | No | `latest-main` | Node toolkit version for the governance upgrade |
+| `IMAGE_REGISTRY` | No | `midnightntwrk` | Docker image registry (use `ghcr.io/midnight-ntwrk` for GHCR images) |
+
+#### Notes
+
+- A direct node binary swap (stopping the old node, starting the new one on existing chain data) does **not** work for hard forks — the new binary panics on state produced by the old runtime. The chain-spec approach avoids this.
+- The council URIs (`//Eve`, `//Ferdie`) and technical committee URIs (`//Alice`, `//Bob`) are hardcoded for the `dev` preset. If your chain-spec uses different well-known accounts, update them in the script.
+- The compose override file `docker-compose.runtime-upgrade.yaml` is used to mount the chain-spec into the node container.
+
 ---
 
 Indexer can be executed locally (this is known as `undeployed` environment). You can start it in two ways, depending on whether you want a clean or pre-seeded environment:

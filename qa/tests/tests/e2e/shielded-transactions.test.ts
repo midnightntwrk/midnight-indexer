@@ -19,7 +19,7 @@ import dataProvider from '@utils/testdata-provider';
 import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 
 import type { Transaction } from '@utils/indexer/indexer-types';
-import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
+import { getBlockByHashWithRetry, getTransactionByHashWithRetry, resolveBlockHash } from './test-utils';
 import { TestContext } from 'vitest';
 import { collectValidZswapEvents } from 'tests/shared/zswap-events-utils';
 import { RegularTransactionSchema, ZswapLedgerEventSchema } from '@utils/indexer/graphql/schema';
@@ -75,6 +75,8 @@ describe('shielded transactions', () => {
       status: transactionResult.status,
     };
     log.info(`\nTX hashes from toolkit: ${JSON.stringify(summary, null, 2)} \n`);
+
+    await resolveBlockHash(transactionResult);
   }, 200_000);
 
   afterAll(async () => {

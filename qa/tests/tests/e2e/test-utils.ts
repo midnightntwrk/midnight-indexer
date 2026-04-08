@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { BlockResponse, TransactionResponse } from '@utils/indexer/indexer-types';
+import { BlockResponse, RegularTransaction, TransactionResponse, TransactionResultStatus } from '@utils/indexer/indexer-types';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { z } from 'zod';
 import log from '@utils/logging/logger';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
-import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
+import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 
 export function retry<T>(
   fn: () => Promise<T>,
@@ -58,6 +58,27 @@ export function retrySimple<T>(
   delayMs = 3000,
 ): Promise<T> {
   return retry(fn, (result) => result !== null, maxAttempts, delayMs) as Promise<T>;
+}
+
+/**
+ * When the toolkit doesn't provide a block hash (newer output format),
+ * resolve it from the indexer by looking up the transaction.
+ */
+export async function resolveBlockHash(result: ToolkitTransactionResult): Promise<void> {
+  if (result.blockHash || !result.txHash) return;
+  log.debug(`Block hash missing from toolkit output, resolving from indexer for tx ${result.txHash}`);
+  const txResponse = await getTransactionByHashWithRetry(result.txHash);
+  const transactions = txResponse?.data?.transactions ?? [];
+  const tx =
+    transactions.find(
+      (t) => (t as RegularTransaction).transactionResult?.status === TransactionResultStatus.SUCCESS,
+    ) ?? transactions[0];
+  if (tx?.block?.hash) {
+    result.blockHash = tx.block.hash;
+    log.debug(`Resolved block hash: ${result.blockHash}`);
+  } else {
+    log.warn(`Could not resolve block hash from indexer for tx ${result.txHash}`);
+  }
 }
 
 export function getBlockByHashWithRetry(hash: string): Promise<BlockResponse> {
