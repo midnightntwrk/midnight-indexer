@@ -129,6 +129,7 @@ docker run --rm \
   "midnightntwrk/midnight-node-toolkit:${NODE_TOOLKIT_TAG}" \
   runtime-upgrade \
   --wasm-file /wasm/runtime.wasm \
+  # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
   --rpc-url ws://node:9944 \
   -c "//Eve" \
   -c "//Ferdie" \

@@ -230,9 +230,9 @@ Tests indexer behaviour during a node runtime upgrade (e.g. 0.21 → 0.22). Uses
 # From the repo root
 source .envrc
 
-FROM_NODE_TAG=0.21.0 \
-  TO_NODE_TAG=0.22.2 \
-  INDEXER_TAG=4.1.0-a586cda5 \
+FROM_NODE_TAG=0.22.2 \
+  TO_NODE_TAG=1.0.0-rc.1 \
+  INDEXER_TAG=4.1.0-ff417ad1 \
   IMAGE_REGISTRY=ghcr.io/midnight-ntwrk \
   bash qa/scripts/test-runtime-upgrade.sh
 ```
@@ -243,6 +243,8 @@ The script pauses after environment startup so you can run pre-upgrade tests:
 cd qa/tests
 TARGET_ENV=undeployed yarn test:integration
 ```
+
+You can verify the node version before and after the upgrade on https://polkadot.js.org/apps/?rpc=ws%3A%2F%2F127.0.0.1%3A9944#/explorer — the runtime version should change after the upgrade.
 
 Press Enter in the script to trigger the runtime upgrade. After the upgrade completes, run post-upgrade tests:
 
