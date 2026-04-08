@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { BlockResponse, TransactionResponse } from '@utils/indexer/indexer-types';
+import { BlockResponse, RegularTransaction, TransactionResponse, TransactionResultStatus } from '@utils/indexer/indexer-types';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { z } from 'zod';
 import log from '@utils/logging/logger';
@@ -68,7 +68,11 @@ export async function resolveBlockHash(result: ToolkitTransactionResult): Promis
   if (result.blockHash || !result.txHash) return;
   log.debug(`Block hash missing from toolkit output, resolving from indexer for tx ${result.txHash}`);
   const txResponse = await getTransactionByHashWithRetry(result.txHash);
-  const tx = txResponse?.data?.transactions?.[0];
+  const transactions = txResponse?.data?.transactions ?? [];
+  const tx =
+    transactions.find(
+      (t) => (t as RegularTransaction).transactionResult?.status === TransactionResultStatus.SUCCESS,
+    ) ?? transactions[0];
   if (tx?.block?.hash) {
     result.blockHash = tx.block.hash;
     log.debug(`Resolved block hash: ${result.blockHash}`);
