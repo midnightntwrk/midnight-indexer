@@ -14,6 +14,7 @@
 mod block;
 mod contract_action;
 mod dust;
+mod dust_generations;
 mod ledger_events;
 mod ledger_state;
 mod spo;

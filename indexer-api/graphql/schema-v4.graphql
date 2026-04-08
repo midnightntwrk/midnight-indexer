@@ -42,6 +42,14 @@ type Block {
 	The system parameters (governance) at this block height.
 	"""
 	systemParameters: SystemParameters!
+	"""
+	The hex-encoded dust commitment Merkle tree root at the latest indexed state.
+	"""
+	dustCommitmentMerkleTreeRoot: HexEncoded
+	"""
+	The hex-encoded dust generation Merkle tree root at the latest indexed state.
+	"""
+	dustGenerationMerkleTreeRoot: HexEncoded
 }
 
 """
@@ -325,6 +333,73 @@ type DustGenerationStatus {
 	utxoOutputIndex: Int
 }
 
+"""
+Dust generations for a Cardano reward address.
+"""
+type DustGenerations {
+	"""
+	The Bech32-encoded Cardano reward address.
+	"""
+	cardanoRewardAddress: CardanoRewardAddress!
+	"""
+	All active registrations with aggregated generation stats.
+	"""
+	registrations: [DustRegistration!]!
+}
+
+"""
+An event of the dust generations subscription.
+"""
+union DustGenerationsEvent = DustGenerationsItem | DustGenerationsProgress
+
+"""
+A dust generations item with optional collapsed Merkle tree update.
+"""
+type DustGenerationsItem {
+	"""
+	The Merkle tree index.
+	"""
+	merkleIndex: Int!
+	"""
+	The hex-encoded owner (dust address).
+	"""
+	owner: HexEncoded!
+	"""
+	The NIGHT value in STAR.
+	"""
+	value: String!
+	"""
+	The hex-encoded nonce.
+	"""
+	nonce: HexEncoded!
+	"""
+	The creation timestamp.
+	"""
+	ctime: Int!
+	"""
+	The originating transaction ID.
+	"""
+	transactionId: Int!
+	"""
+	Collapsed Merkle tree update filling the gap before this entry.
+	"""
+	collapsedMerkleTree: MerkleTreeCollapsedUpdate
+}
+
+"""
+Progress indicator for dust generations subscription (includes final collapsed update).
+"""
+type DustGenerationsProgress {
+	"""
+	The highest index processed so far.
+	"""
+	highestIndex: Int!
+	"""
+	Final collapsed Merkle tree update covering remaining range.
+	"""
+	collapsedMerkleTree: MerkleTreeCollapsedUpdate
+}
+
 type DustInitialUtxo implements DustLedgerEvent {
 	"""
 	The ID of this dust ledger event.
@@ -359,6 +434,32 @@ interface DustLedgerEvent {
 }
 
 """
+A transaction containing a dust nullifier match with block context.
+"""
+type DustNullifierTransaction {
+	"""
+	The hex-encoded matched nullifier.
+	"""
+	nullifier: HexEncoded!
+	"""
+	The hex-encoded commitment.
+	"""
+	commitment: HexEncoded!
+	"""
+	The transaction ID (use to query full transaction via `transaction` query).
+	"""
+	transactionId: Int!
+	"""
+	The block height containing this transaction.
+	"""
+	blockHeight: Int!
+	"""
+	The hex-encoded block hash (use to query block with ledger parameters).
+	"""
+	blockHash: HexEncoded!
+}
+
+"""
 A dust output.
 """
 type DustOutput {
@@ -366,6 +467,44 @@ type DustOutput {
 	The hex-encoded 32-byte nonce.
 	"""
 	nonce: HexEncoded!
+}
+
+"""
+A single dust registration with aggregated generation stats.
+"""
+type DustRegistration {
+	"""
+	The Bech32m-encoded DUST address.
+	"""
+	dustAddress: DustAddress!
+	"""
+	Whether this registration is valid.
+	"""
+	valid: Boolean!
+	"""
+	NIGHT balance backing generation in STAR.
+	"""
+	nightBalance: String!
+	"""
+	DUST generation rate in SPECK per second.
+	"""
+	generationRate: String!
+	"""
+	Maximum DUST capacity in SPECK.
+	"""
+	maxCapacity: String!
+	"""
+	Current generated DUST capacity in SPECK.
+	"""
+	currentCapacity: String!
+	"""
+	Cardano UTXO transaction hash.
+	"""
+	utxoTxHash: HexEncoded
+	"""
+	Cardano UTXO output index.
+	"""
+	utxoOutputIndex: Int
 }
 
 type DustSpendProcessed implements DustLedgerEvent {
@@ -515,6 +654,15 @@ type Query {
 	Get DUST generation status for specific Cardano reward addresses.
 	"""
 	dustGenerationStatus(cardanoRewardAddresses: [CardanoRewardAddress!]!): [DustGenerationStatus!]!
+	"""
+	Get all active DUST registrations and aggregated generation stats for Cardano reward
+	addresses.
+	"""
+	dustGenerations(cardanoRewardAddresses: [CardanoRewardAddress!]!): [DustGenerations!]!
+	"""
+	Get a collapsed Merkle tree update for the dust commitment tree.
+	"""
+	dustCommitmentMerkleTreeUpdate(startIndex: Int!, endIndex: Int): HexEncoded!
 	"""
 	Get the full history of D-parameter changes for governance auditability.
 	"""
@@ -678,6 +826,22 @@ type RegularTransaction implements Transaction {
 	The end index into the zswap state; exclusive, i.e. the next free index.
 	"""
 	endIndex: Int! @deprecated(reason: "Use zswapEndIndex instead")
+	"""
+	The dust commitment tree start index.
+	"""
+	dustCommitmentStartIndex: Int!
+	"""
+	The dust commitment tree end index.
+	"""
+	dustCommitmentEndIndex: Int!
+	"""
+	The dust generation tree start index.
+	"""
+	dustGenerationStartIndex: Int!
+	"""
+	The dust generation tree end index.
+	"""
+	dustGenerationEndIndex: Int!
 	"""
 	Fee information for this transaction.
 	"""
@@ -897,9 +1061,21 @@ type Subscription {
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
 	"""
+	Subscribe to dust generation entries for a dust address within an index range.
+	Entries are interleaved with collapsed Merkle tree updates to fill gaps.
+	The subscription finishes after reaching the end index with a final collapsed update.
+	"""
+	dustGenerations(dustAddress: HexEncoded!, startIndex: Int!, endIndex: Int!): DustGenerationsEvent!
+	"""
 	Subscribe to dust ledger events starting at the given ID or at the very start if omitted.
 	"""
 	dustLedgerEvents(id: Int): DustLedgerEvent!
+	"""
+	Subscribe to transactions containing dust nullifiers matching the provided prefixes.
+	Returns transaction and block references for wallet to fetch full data.
+	If `toBlock` is specified, the subscription finishes after reaching that block.
+	"""
+	dustNullifierTransactions(nullifierPrefixes: [HexEncoded!]!, fromBlock: Int, toBlock: Int): DustNullifierTransaction!
 	"""
 	Subscribe to shielded transaction events for the given session ID starting at the given
 	index or at zero if omitted.

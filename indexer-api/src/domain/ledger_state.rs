@@ -72,11 +72,153 @@ impl LedgerStateCache {
 
         let update = ledger_state_read
             .as_ref()
-            .expect("ledger_state is some")
+            .expect("ledger state should exist after loading")
             .make_zswap_collapsed_update(start_index, end_index, protocol_version)?;
 
         Ok(update)
     }
+
+    /// Create a collapsed update for the dust generations tree.
+    pub async fn dust_generations_collapsed_update(
+        &self,
+        start_index: u64,
+        end_index: u64,
+        storage: &impl Storage,
+        protocol_version: ProtocolVersion,
+    ) -> Result<MerkleTreeCollapsedUpdate, LedgerStateCacheError> {
+        let mut ledger_state_read = self.0.read().await;
+
+        let first_free = ledger_state_read
+            .as_ref()
+            .map(|s| s.dust_generations_first_free())
+            .unwrap_or_default();
+        if end_index >= first_free {
+            drop(ledger_state_read);
+            let mut ledger_state_write = self.0.write().await;
+
+            let first_free = ledger_state_write
+                .as_ref()
+                .map(|s| s.dust_generations_first_free())
+                .unwrap_or_default();
+            if end_index >= first_free {
+                debug!(end_index, first_free; "outdated ledger state for dust generations, loading from storage");
+
+                let Some((protocol_version, ledger_state_key)) =
+                    storage.get_highest_ledger_state().await?
+                else {
+                    return Err(LedgerStateCacheError::NotFound);
+                };
+
+                let ledger_state =
+                    LedgerState::load(&ledger_state_key, protocol_version.ledger_version())?;
+                *ledger_state_write = Some(ledger_state);
+            }
+
+            ledger_state_read = ledger_state_write.downgrade();
+        }
+
+        debug!(start_index, end_index; "creating dust generations collapsed update");
+
+        let collapsed_update = ledger_state_read
+            .as_ref()
+            .expect("ledger state should exist after loading")
+            .dust_generations_collapsed_update(start_index, end_index, protocol_version)?;
+
+        Ok(collapsed_update)
+    }
+
+    /// Create a collapsed update for the dust commitments tree.
+    pub async fn dust_commitments_collapsed_update(
+        &self,
+        start_index: u64,
+        end_index: u64,
+        storage: &impl Storage,
+        protocol_version: ProtocolVersion,
+    ) -> Result<MerkleTreeCollapsedUpdate, LedgerStateCacheError> {
+        let mut ledger_state_read = self.0.read().await;
+
+        let first_free = ledger_state_read
+            .as_ref()
+            .map(|s| s.dust_commitments_first_free())
+            .unwrap_or_default();
+        if end_index >= first_free {
+            drop(ledger_state_read);
+            let mut ledger_state_write = self.0.write().await;
+
+            let first_free = ledger_state_write
+                .as_ref()
+                .map(|s| s.dust_commitments_first_free())
+                .unwrap_or_default();
+            if end_index >= first_free {
+                debug!(end_index, first_free; "outdated ledger state for dust commitments, loading from storage");
+
+                let Some((protocol_version, ledger_state_key)) =
+                    storage.get_highest_ledger_state().await?
+                else {
+                    return Err(LedgerStateCacheError::NotFound);
+                };
+
+                let ledger_state =
+                    LedgerState::load(&ledger_state_key, protocol_version.ledger_version())?;
+                *ledger_state_write = Some(ledger_state);
+            }
+
+            ledger_state_read = ledger_state_write.downgrade();
+        }
+
+        debug!(start_index, end_index; "creating dust commitments collapsed update");
+
+        let collapsed_update = ledger_state_read
+            .as_ref()
+            .expect("ledger state should exist after loading")
+            .dust_commitments_collapsed_update(start_index, end_index, protocol_version)?;
+
+        Ok(collapsed_update)
+    }
+
+    /// Get dust Merkle tree roots from the latest ledger state.
+    pub async fn dust_merkle_tree_roots(
+        &self,
+        storage: &impl Storage,
+    ) -> Result<DustMerkleTreeRoots, LedgerStateCacheError> {
+        let mut ledger_state_read = self.0.read().await;
+
+        if ledger_state_read.is_none() {
+            drop(ledger_state_read);
+            let mut ledger_state_write = self.0.write().await;
+
+            if ledger_state_write.is_none() {
+                let Some((protocol_version, ledger_state_key)) =
+                    storage.get_highest_ledger_state().await?
+                else {
+                    return Err(LedgerStateCacheError::NotFound);
+                };
+
+                let ledger_state =
+                    LedgerState::load(&ledger_state_key, protocol_version.ledger_version())?;
+                *ledger_state_write = Some(ledger_state);
+            }
+
+            ledger_state_read = ledger_state_write.downgrade();
+        }
+
+        let ledger_state = ledger_state_read
+            .as_ref()
+            .expect("ledger state should exist after loading");
+        let commitment_root = ledger_state.dust_commitment_merkle_tree_root()?;
+        let generation_root = ledger_state.dust_generation_merkle_tree_root()?;
+
+        Ok(DustMerkleTreeRoots {
+            commitment_root,
+            generation_root,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DustMerkleTreeRoots {
+    pub commitment_root: ByteVec,
+    pub generation_root: ByteVec,
 }
 
 #[derive(Debug, Error)]
@@ -111,6 +253,44 @@ impl LedgerState {
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, ledger::Error> {
         let update = self.0.make_zswap_collapsed_update(start_index, end_index)?;
+
+        Ok(MerkleTreeCollapsedUpdate {
+            start_index,
+            end_index,
+            update,
+            protocol_version,
+        })
+    }
+
+    /// Produce a collapsed Merkle Tree for the dust generations tree.
+    pub fn dust_generations_collapsed_update(
+        &self,
+        start_index: u64,
+        end_index: u64,
+        protocol_version: ProtocolVersion,
+    ) -> Result<MerkleTreeCollapsedUpdate, ledger::Error> {
+        let update = self
+            .0
+            .dust_generations_collapsed_update(start_index, end_index)?;
+
+        Ok(MerkleTreeCollapsedUpdate {
+            start_index,
+            end_index,
+            update,
+            protocol_version,
+        })
+    }
+
+    /// Produce a collapsed Merkle Tree for the dust commitments tree.
+    pub fn dust_commitments_collapsed_update(
+        &self,
+        start_index: u64,
+        end_index: u64,
+        protocol_version: ProtocolVersion,
+    ) -> Result<MerkleTreeCollapsedUpdate, ledger::Error> {
+        let update = self
+            .0
+            .dust_commitments_collapsed_update(start_index, end_index)?;
 
         Ok(MerkleTreeCollapsedUpdate {
             start_index,

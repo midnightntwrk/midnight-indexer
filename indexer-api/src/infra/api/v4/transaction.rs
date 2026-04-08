@@ -52,7 +52,7 @@ use std::marker::PhantomData;
 )]
 pub enum Transaction<S: Storage> {
     /// A regular Midnight transaction.
-    Regular(RegularTransaction<S>),
+    Regular(Box<RegularTransaction<S>>),
 
     /// A system Midnight transaction.
     System(SystemTransaction<S>),
@@ -64,7 +64,7 @@ where
 {
     fn from(transaction: domain::Transaction) -> Self {
         match transaction {
-            domain::Transaction::Regular(t) => Transaction::Regular(t.into()),
+            domain::Transaction::Regular(t) => Transaction::Regular(Box::new(t.into())),
             domain::Transaction::System(t) => Transaction::System(t.into()),
         }
     }
@@ -122,6 +122,18 @@ where
     /// The end index into the zswap state; exclusive, i.e. the next free index.
     #[graphql(deprecation = "Use zswapEndIndex instead")]
     end_index: u64,
+
+    /// The dust commitment tree start index.
+    dust_commitment_start_index: u64,
+
+    /// The dust commitment tree end index.
+    dust_commitment_end_index: u64,
+
+    /// The dust generation tree start index.
+    dust_generation_start_index: u64,
+
+    /// The dust generation tree end index.
+    dust_generation_end_index: u64,
 
     /// Fee information for this transaction.
     fees: TransactionFees,
@@ -189,6 +201,10 @@ where
             zswap_merkle_tree_root,
             zswap_start_index,
             zswap_end_index,
+            dust_commitment_start_index,
+            dust_commitment_end_index,
+            dust_generation_start_index,
+            dust_generation_end_index,
             ..
         } = transaction;
 
@@ -224,6 +240,10 @@ where
             start_index: zswap_start_index,
             zswap_end_index,
             end_index: zswap_end_index,
+            dust_commitment_start_index,
+            dust_commitment_end_index,
+            dust_generation_start_index,
+            dust_generation_end_index,
             _s: PhantomData,
         }
     }

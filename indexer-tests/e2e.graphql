@@ -851,6 +851,26 @@ query ZswapMerkleTreeCollapsedUpdateQuery(
     }
 }
 
+query DustGenerationsQuery($cardanoRewardAddresses: [CardanoRewardAddress!]!) {
+    dustGenerations(cardanoRewardAddresses: $cardanoRewardAddresses) {
+        cardanoRewardAddress
+        registrations {
+            dustAddress
+            valid
+            nightBalance
+            generationRate
+            maxCapacity
+            currentCapacity
+            utxoTxHash
+            utxoOutputIndex
+        }
+    }
+}
+
+query DustCommitmentMerkleTreeUpdateQuery($startIndex: Int!, $endIndex: Int) {
+    dustCommitmentMerkleTreeUpdate(startIndex: $startIndex, endIndex: $endIndex)
+}
+
 query DParameterHistoryQuery {
     dParameterHistory {
         blockHeight

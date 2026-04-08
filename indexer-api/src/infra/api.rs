@@ -139,7 +139,9 @@ pub struct Config {
 pub struct SubscriptionConfig {
     blocks: BlocksSubscriptionConfig,
     contract_actions: ContractActionsSubscriptionConfig,
+    pub dust_generations: DustGenerationsSubscriptionConfig,
     dust_ledger_events: DustLedgerEventsSubscriptionConfig,
+    pub dust_nullifier_transactions: DustNullifierTransactionsSubscriptionConfig,
     shielded_transactions: ShieldedTransactionsSubscriptionConfig,
     unshielded_transactions: UnshieldedTransactionsSubscriptionConfig,
     zswap_ledger_events: ZswapLedgerEventsSubscriptionConfig,
@@ -156,8 +158,18 @@ pub struct ContractActionsSubscriptionConfig {
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
+pub struct DustGenerationsSubscriptionConfig {
+    pub batch_size: NonZeroU32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct DustLedgerEventsSubscriptionConfig {
     batch_size: NonZeroU32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct DustNullifierTransactionsSubscriptionConfig {
+    pub batch_size: NonZeroU32,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

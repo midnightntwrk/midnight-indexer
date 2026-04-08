@@ -301,11 +301,18 @@ impl LedgerEvent {
         }
     }
 
-    fn dust_spend_processed(raw: SerializedLedgerEvent) -> Self {
+    fn dust_spend_processed(
+        raw: SerializedLedgerEvent,
+        nullifier: ByteVec,
+        commitment: ByteVec,
+    ) -> Self {
         Self {
             grouping: LedgerEventGrouping::Dust,
             raw,
-            attributes: LedgerEventAttributes::DustSpendProcessed,
+            attributes: LedgerEventAttributes::DustSpendProcessed {
+                nullifier,
+                commitment,
+            },
         }
     }
 }
@@ -330,7 +337,10 @@ pub enum LedgerEventAttributes {
         merkle_path: Vec<dust::DustMerklePathEntry>,
     },
 
-    DustSpendProcessed,
+    DustSpendProcessed {
+        nullifier: ByteVec,
+        commitment: ByteVec,
+    },
 }
 
 /// Minimal DUST output info for backwards compatibility.

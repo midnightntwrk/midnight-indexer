@@ -116,6 +116,8 @@ impl LedgerState {
 
         // Apply transaction.
         let start_index = self.zswap_first_free();
+        let dust_commitment_start_index = self.dust_commitments_first_free();
+        let dust_generation_start_index = self.dust_generations_first_free();
         let ApplyRegularTransactionOutcome {
             transaction_result,
             created_unshielded_utxos,
@@ -139,6 +141,10 @@ impl LedgerState {
             .map_err(|error| Error::SerializeMerkleTreeRoot(transaction.hash, error))?;
         transaction.zswap_start_index = start_index;
         transaction.zswap_end_index = self.zswap_first_free();
+        transaction.dust_commitment_start_index = dust_commitment_start_index;
+        transaction.dust_commitment_end_index = self.dust_commitments_first_free();
+        transaction.dust_generation_start_index = dust_generation_start_index;
+        transaction.dust_generation_end_index = self.dust_generations_first_free();
         transaction.created_unshielded_utxos = created_unshielded_utxos;
         transaction.spent_unshielded_utxos = spent_unshielded_utxos;
         transaction.ledger_events = ledger_events;

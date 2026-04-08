@@ -89,6 +89,10 @@ pub struct RegularTransaction {
     pub zswap_merkle_tree_root: SerializedZswapMerkleTreeRoot,
     pub zswap_start_index: u64,
     pub zswap_end_index: u64, // Exclusive, i.e. the next free index.
+    pub dust_commitment_start_index: u64,
+    pub dust_commitment_end_index: u64,
+    pub dust_generation_start_index: u64,
+    pub dust_generation_end_index: u64,
     #[debug(skip)]
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     #[debug(skip)]
@@ -111,6 +115,10 @@ impl From<node::RegularTransaction> for RegularTransaction {
             zswap_merkle_tree_root: Default::default(),
             zswap_start_index: Default::default(),
             zswap_end_index: Default::default(),
+            dust_commitment_start_index: Default::default(),
+            dust_commitment_end_index: Default::default(),
+            dust_generation_start_index: Default::default(),
+            dust_generation_end_index: Default::default(),
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
             ledger_events: Default::default(),

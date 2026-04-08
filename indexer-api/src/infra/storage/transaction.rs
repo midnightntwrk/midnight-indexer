@@ -47,6 +47,10 @@ impl TransactionStorage for Storage {
                 regular_transactions.zswap_merkle_tree_root,
                 regular_transactions.zswap_start_index,
                 regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees,
                 regular_transactions.identifiers
@@ -68,6 +72,10 @@ impl TransactionStorage for Storage {
                 NULL AS zswap_merkle_tree_root,
                 NULL AS zswap_start_index,
                 NULL AS zswap_end_index,
+                NULL AS dust_commitment_start_index,
+                NULL AS dust_commitment_end_index,
+                NULL AS dust_generation_start_index,
+                NULL AS dust_generation_end_index,
                 NULL AS paid_fees,
                 NULL AS estimated_fees,
                 NULL AS identifiers
@@ -90,6 +98,10 @@ impl TransactionStorage for Storage {
                 regular_transactions.zswap_merkle_tree_root,
                 regular_transactions.zswap_start_index,
                 regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees
             FROM transactions
@@ -110,6 +122,10 @@ impl TransactionStorage for Storage {
                 NULL AS zswap_merkle_tree_root,
                 NULL AS zswap_start_index,
                 NULL AS zswap_end_index,
+                NULL AS dust_commitment_start_index,
+                NULL AS dust_commitment_end_index,
+                NULL AS dust_generation_start_index,
+                NULL AS dust_generation_end_index,
                 NULL AS paid_fees,
                 NULL AS estimated_fees
             FROM transactions
@@ -150,6 +166,10 @@ impl TransactionStorage for Storage {
                 regular_transactions.zswap_merkle_tree_root,
                 regular_transactions.zswap_start_index,
                 regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees,
                 regular_transactions.identifiers
@@ -171,6 +191,10 @@ impl TransactionStorage for Storage {
                 NULL AS zswap_merkle_tree_root,
                 NULL AS zswap_start_index,
                 NULL AS zswap_end_index,
+                NULL AS dust_commitment_start_index,
+                NULL AS dust_commitment_end_index,
+                NULL AS dust_generation_start_index,
+                NULL AS dust_generation_end_index,
                 NULL AS paid_fees,
                 NULL AS estimated_fees,
                 NULL AS identifiers
@@ -195,6 +219,10 @@ impl TransactionStorage for Storage {
                 regular_transactions.zswap_merkle_tree_root,
                 regular_transactions.zswap_start_index,
                 regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees
             FROM transactions
@@ -215,6 +243,10 @@ impl TransactionStorage for Storage {
                 NULL AS zswap_merkle_tree_root,
                 NULL AS zswap_start_index,
                 NULL AS zswap_end_index,
+                NULL AS dust_commitment_start_index,
+                NULL AS dust_commitment_end_index,
+                NULL AS dust_generation_start_index,
+                NULL AS dust_generation_end_index,
                 NULL AS paid_fees,
                 NULL AS estimated_fees
             FROM transactions
@@ -263,6 +295,10 @@ impl TransactionStorage for Storage {
                 regular_transactions.zswap_merkle_tree_root,
                 regular_transactions.zswap_start_index,
                 regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees,
                 regular_transactions.identifiers
@@ -284,6 +320,10 @@ impl TransactionStorage for Storage {
                 NULL AS zswap_merkle_tree_root,
                 NULL AS zswap_start_index,
                 NULL AS zswap_end_index,
+                NULL AS dust_commitment_start_index,
+                NULL AS dust_commitment_end_index,
+                NULL AS dust_generation_start_index,
+                NULL AS dust_generation_end_index,
                 NULL AS paid_fees,
                 NULL AS estimated_fees,
                 NULL AS identifiers
@@ -308,6 +348,10 @@ impl TransactionStorage for Storage {
                 regular_transactions.zswap_merkle_tree_root,
                 regular_transactions.zswap_start_index,
                 regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees
             FROM transactions
@@ -328,6 +372,10 @@ impl TransactionStorage for Storage {
                 NULL AS zswap_merkle_tree_root,
                 NULL AS zswap_start_index,
                 NULL AS zswap_end_index,
+                NULL AS dust_commitment_start_index,
+                NULL AS dust_commitment_end_index,
+                NULL AS dust_generation_start_index,
+                NULL AS dust_generation_end_index,
                 NULL AS paid_fees,
                 NULL AS estimated_fees
             FROM transactions
@@ -376,6 +424,10 @@ impl TransactionStorage for Storage {
                 regular_transactions.zswap_merkle_tree_root,
                 regular_transactions.zswap_start_index,
                 regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees,
                 regular_transactions.identifiers
@@ -398,6 +450,10 @@ impl TransactionStorage for Storage {
                 regular_transactions.zswap_merkle_tree_root,
                 regular_transactions.zswap_start_index,
                 regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees
             FROM transactions
@@ -569,6 +625,10 @@ impl Storage {
                 regular_transactions.zswap_merkle_tree_root,
                 regular_transactions.zswap_start_index,
                 regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees,
                 regular_transactions.identifiers
@@ -596,6 +656,10 @@ impl Storage {
                 regular_transactions.zswap_merkle_tree_root,
                 regular_transactions.zswap_start_index,
                 regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
                 regular_transactions.paid_fees,
                 regular_transactions.estimated_fees
             FROM transactions
@@ -654,6 +718,10 @@ impl Storage {
                     regular_transactions.zswap_merkle_tree_root,
                     regular_transactions.zswap_start_index,
                     regular_transactions.zswap_end_index,
+                    regular_transactions.dust_commitment_start_index,
+                    regular_transactions.dust_commitment_end_index,
+                    regular_transactions.dust_generation_start_index,
+                    regular_transactions.dust_generation_end_index,
                     regular_transactions.paid_fees,
                     regular_transactions.estimated_fees,
                     regular_transactions.identifiers
@@ -679,6 +747,10 @@ impl Storage {
                     NULL AS zswap_merkle_tree_root,
                     NULL AS zswap_start_index,
                     NULL AS zswap_end_index,
+                    NULL AS dust_commitment_start_index,
+                    NULL AS dust_commitment_end_index,
+                    NULL AS dust_generation_start_index,
+                    NULL AS dust_generation_end_index,
                     NULL AS paid_fees,
                     NULL AS estimated_fees,
                     NULL AS identifiers
@@ -710,6 +782,10 @@ impl Storage {
                     regular_transactions.zswap_merkle_tree_root,
                     regular_transactions.zswap_start_index,
                     regular_transactions.zswap_end_index,
+                    regular_transactions.dust_commitment_start_index,
+                    regular_transactions.dust_commitment_end_index,
+                    regular_transactions.dust_generation_start_index,
+                    regular_transactions.dust_generation_end_index,
                     regular_transactions.paid_fees,
                     regular_transactions.estimated_fees
                 FROM transactions
@@ -734,6 +810,10 @@ impl Storage {
                     NULL AS zswap_merkle_tree_root,
                     NULL AS zswap_start_index,
                     NULL AS zswap_end_index,
+                    NULL AS dust_commitment_start_index,
+                    NULL AS dust_commitment_end_index,
+                    NULL AS dust_generation_start_index,
+                    NULL AS dust_generation_end_index,
                     NULL AS paid_fees,
                     NULL AS estimated_fees
                 FROM transactions
