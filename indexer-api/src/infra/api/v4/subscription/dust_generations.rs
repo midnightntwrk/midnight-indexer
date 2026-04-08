@@ -28,7 +28,7 @@ use std::{marker::PhantomData, pin::pin};
 /// An event of the dust generations subscription.
 #[derive(Union)]
 pub enum DustGenerationsEvent {
-    DustGenerations(DustGenerationEntry),
+    DustGenerationsItem(DustGenerationsItem),
     DustGenerationsProgress(DustGenerationsProgress),
 }
 
@@ -46,9 +46,9 @@ impl<S, B> Default for DustGenerationsSubscription<S, B> {
     }
 }
 
-/// A dust generation entry with optional collapsed Merkle tree update.
+/// A dust generations item with optional collapsed Merkle tree update.
 #[derive(Debug, Clone, SimpleObject)]
-pub struct DustGenerationEntry {
+pub struct DustGenerationsItem {
     /// The Merkle tree index.
     pub merkle_index: u64,
     /// The hex-encoded owner (dust address).
@@ -122,7 +122,7 @@ where
 
                 cursor = entry.merkle_index + 1;
 
-                yield DustGenerationsEvent::DustGenerations(DustGenerationEntry {
+                yield DustGenerationsEvent::DustGenerationsItem(DustGenerationsItem {
                     merkle_index: entry.merkle_index,
                     owner: entry.owner.hex_encode(),
                     value: entry.value.to_string(),
@@ -172,7 +172,7 @@ where
 
                     cursor = entry.merkle_index + 1;
 
-                    yield DustGenerationsEvent::DustGenerations(DustGenerationEntry {
+                    yield DustGenerationsEvent::DustGenerationsItem(DustGenerationsItem {
                         merkle_index: entry.merkle_index,
                         owner: entry.owner.hex_encode(),
                         value: entry.value.to_string(),

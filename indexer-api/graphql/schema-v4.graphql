@@ -292,40 +292,6 @@ type DustGenerationDtimeUpdate implements DustLedgerEvent {
 }
 
 """
-A dust generation entry with optional collapsed Merkle tree update.
-"""
-type DustGenerationEntry {
-	"""
-	The Merkle tree index.
-	"""
-	merkleIndex: Int!
-	"""
-	The hex-encoded owner (dust address).
-	"""
-	owner: HexEncoded!
-	"""
-	The NIGHT value in STAR.
-	"""
-	value: String!
-	"""
-	The hex-encoded nonce.
-	"""
-	nonce: HexEncoded!
-	"""
-	The creation timestamp.
-	"""
-	ctime: Int!
-	"""
-	The originating transaction ID.
-	"""
-	transactionId: Int!
-	"""
-	Collapsed Merkle tree update filling the gap before this entry.
-	"""
-	collapsedMerkleTree: MerkleTreeCollapsedUpdate
-}
-
-"""
 DUST generation status for a specific Cardano reward address.
 """
 type DustGenerationStatus {
@@ -384,7 +350,41 @@ type DustGenerations {
 """
 An event of the dust generations subscription.
 """
-union DustGenerationsEvent = DustGenerationEntry | DustGenerationsProgress
+union DustGenerationsEvent = DustGenerationsItem | DustGenerationsProgress
+
+"""
+A dust generations item with optional collapsed Merkle tree update.
+"""
+type DustGenerationsItem {
+	"""
+	The Merkle tree index.
+	"""
+	merkleIndex: Int!
+	"""
+	The hex-encoded owner (dust address).
+	"""
+	owner: HexEncoded!
+	"""
+	The NIGHT value in STAR.
+	"""
+	value: String!
+	"""
+	The hex-encoded nonce.
+	"""
+	nonce: HexEncoded!
+	"""
+	The creation timestamp.
+	"""
+	ctime: Int!
+	"""
+	The originating transaction ID.
+	"""
+	transactionId: Int!
+	"""
+	Collapsed Merkle tree update filling the gap before this entry.
+	"""
+	collapsedMerkleTree: MerkleTreeCollapsedUpdate
+}
 
 """
 Progress indicator for dust generations subscription (includes final collapsed update).
