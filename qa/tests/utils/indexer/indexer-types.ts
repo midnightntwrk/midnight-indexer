@@ -65,6 +65,7 @@ export interface Block {
   protocolVersion: number;
   author: string | null;
   ledgerParameters: string;
+  zswapMerkleTreeRoot: string;
   parent: Block;
   transactions: Transaction[];
 }

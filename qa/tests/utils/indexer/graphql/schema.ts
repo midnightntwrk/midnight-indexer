@@ -38,6 +38,7 @@ export const BlockSchema = z.lazy(() =>
     protocolVersion: z.number(),
     author: z.string().optional(),
     ledgerParameters: z.string(),
+    zswapMerkleTreeRoot: VarLenghtHex,
     parent: PartialBlockSchema,
     transactions: z.array(FullTransactionSchema).min(0),
   }),

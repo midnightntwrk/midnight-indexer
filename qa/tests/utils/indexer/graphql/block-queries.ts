@@ -34,6 +34,7 @@ query GetLatestBlock{
     timestamp
     author
     ledgerParameters
+    zswapMerkleTreeRoot
     parent {
         hash
         height
@@ -53,6 +54,7 @@ query GetBlock($OFFSET: BlockOffset!){
     timestamp
     author
     ledgerParameters
+    zswapMerkleTreeRoot
     parent {
       hash
       height
