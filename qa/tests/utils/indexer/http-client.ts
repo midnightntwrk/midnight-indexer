@@ -28,8 +28,10 @@ import type {
   ContractActionResponse,
   DustGenerationStatus,
   DustGenerationStatusResponse,
+  ZswapMerkleTreeCollapsedUpdateResponse,
+  ZswapMerkleTreeCollapsedUpdateResult,
 } from './indexer-types';
-import { GET_LATEST_BLOCK, GET_BLOCK_BY_OFFSET } from './graphql/block-queries';
+import { GET_LATEST_BLOCK, GET_BLOCK_BY_OFFSET, GET_ZSWAP_MERKLE_TREE_COLLAPSED_UPDATE } from './graphql/block-queries';
 import { GET_TRANSACTION_BY_OFFSET } from './graphql/transaction-queries';
 import { GET_CONTRACT_ACTION, GET_CONTRACT_ACTION_BY_OFFSET } from './graphql/contract-queries';
 import { GET_DUST_GENERATION_STATUS } from './graphql/dust-queries';
@@ -177,6 +179,37 @@ export class IndexerHttpClient {
       query,
       variables,
     );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  /**
+   * Retrieves a zswap Merkle tree collapsed update for the given index range
+   *
+   * @param startIndex - The start index of the range
+   * @param endIndex - The end index of the range
+   * @param queryOverride - Optional custom GraphQL query to override the default query
+   *
+   * @returns Promise resolving to the collapsed update response
+   */
+  async getZswapMerkleTreeCollapsedUpdate(
+    startIndex: number,
+    endIndex: number,
+    queryOverride?: string,
+  ): Promise<ZswapMerkleTreeCollapsedUpdateResponse> {
+    log.debug(`Target URL endpoint ${this.getTargetUrl()}`);
+
+    const query = queryOverride || GET_ZSWAP_MERKLE_TREE_COLLAPSED_UPDATE;
+    const variables = { START_INDEX: startIndex, END_INDEX: endIndex };
+
+    log.debug(`Using query\n${query}`);
+    log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
+
+    const response = await this.client.rawRequest<{
+      zswapMerkleTreeCollapsedUpdate: ZswapMerkleTreeCollapsedUpdateResult;
+    }>(query, variables);
 
     log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
 

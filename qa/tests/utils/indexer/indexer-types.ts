@@ -26,6 +26,17 @@ export type TransactionResponse = GraphQLResponse<{ transactions: Transaction[] 
 
 export type ContractActionResponse = GraphQLResponse<{ contractAction: ContractAction }>;
 
+export interface ZswapMerkleTreeCollapsedUpdateResult {
+  startIndex: number;
+  endIndex: number;
+  update: string;
+  protocolVersion: number;
+}
+
+export type ZswapMerkleTreeCollapsedUpdateResponse = GraphQLResponse<{
+  zswapMerkleTreeCollapsedUpdate: ZswapMerkleTreeCollapsedUpdateResult;
+}>;
+
 export type DustGenerationStatusResponse = GraphQLResponse<{
   dustGenerationStatus: DustGenerationStatus[];
 }>;
@@ -110,9 +121,9 @@ export interface Transaction {
 // RegularTransaction interface (includes additional fields)
 export interface RegularTransaction extends Transaction {
   identifiers?: string[];
-  merkleTreeRoot?: string;
-  startIndex?: number;
-  endIndex?: number;
+  zswapMerkleTreeRoot?: string;
+  zswapStartIndex?: number;
+  zswapEndIndex?: number;
   fees?: TransactionFees;
   transactionResult?: TransactionResult;
 }
@@ -141,7 +152,7 @@ export interface MerkleTreeCollapsedUpdate {
   protocolVersion: number;
 }
 
-export interface CollapsedMerkleTree {
+export interface ZswapCollapsedUpdate {
   startIndex: number;
   endIndex: number;
   update: string;
@@ -151,14 +162,14 @@ export interface CollapsedMerkleTree {
 export interface RelevantTransaction {
   __typename: 'RelevantTransaction';
   transaction: RegularTransaction;
-  collapsedMerkleTree?: CollapsedMerkleTree;
+  zswapCollapsedUpdate?: ZswapCollapsedUpdate;
 }
 
 export interface ShieldedTransactionsProgress {
   __typename: 'ShieldedTransactionsProgress';
-  highestEndIndex: number;
-  highestCheckedEndIndex: number;
-  highestRelevantEndIndex: number;
+  highestZswapEndIndex: number;
+  highestCheckedZswapEndIndex: number;
+  highestRelevantZswapEndIndex: number;
 }
 
 export type UnshieldedTransactionEvent = UnshieldedTransaction | UnshieldedTransactionsProgress;

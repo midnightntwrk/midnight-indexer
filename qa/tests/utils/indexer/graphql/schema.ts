@@ -67,6 +67,14 @@ export const UnshieldedUtxoSchema = z.object({
     .nullable(),
 });
 
+// Zswap Merkle tree collapsed update schema
+export const MerkleTreeCollapsedUpdateSchema = z.object({
+  startIndex: z.number(),
+  endIndex: z.number(),
+  update: VarLenghtHex,
+  protocolVersion: z.number(),
+});
+
 // Ledger event schemas
 export const ZswapLedgerEventSchema = z.object({
   id: z.number(),
@@ -145,10 +153,10 @@ const BaseTransactionFields = {
 export const RegularTransactionSchema = z.lazy(() =>
   z.object({
     ...BaseTransactionFields,
-    merkleTreeRoot: z.string().regex(/^[a-f0-9]+$/),
+    zswapMerkleTreeRoot: z.string().regex(/^[a-f0-9]+$/),
     identifiers: z.array(z.string()),
-    startIndex: z.number(),
-    endIndex: z.number(),
+    zswapStartIndex: z.number(),
+    zswapEndIndex: z.number(),
     fees: z.object({
       paidFees: z.string(),
       estimatedFees: z.string(),
@@ -302,7 +310,7 @@ export const RelevantTransactionSchema = z.object({
   transaction: z.object({
     hash: Hash64,
   }),
-  collapsedMerkleTree: z
+  zswapCollapsedUpdate: z
     .object({
       startIndex: z.number(),
       endIndex: z.number(),
@@ -314,9 +322,9 @@ export const RelevantTransactionSchema = z.object({
 
 export const ShieldedTransactionsProgressSchema = z.object({
   __typename: z.literal('ShieldedTransactionsProgress'),
-  highestEndIndex: z.number(),
-  highestCheckedEndIndex: z.number(),
-  highestRelevantEndIndex: z.number(),
+  highestZswapEndIndex: z.number(),
+  highestCheckedZswapEndIndex: z.number(),
+  highestRelevantZswapEndIndex: z.number(),
 });
 
 export const ShieldedTransactionEventSchema = z.union([

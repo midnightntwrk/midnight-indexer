@@ -69,10 +69,10 @@ export const BASE_TRANSACTION_FRAGMENT = `   id
 
 export const REGULAR_TRANSACTION_FRAGMENT = `   ... on RegularTransaction {
       ${BASE_TRANSACTION_FRAGMENT}
-      merkleTreeRoot
+      zswapMerkleTreeRoot
       identifiers
-      startIndex
-      endIndex
+      zswapStartIndex
+      zswapEndIndex
       fees {
         paidFees
         estimatedFees
