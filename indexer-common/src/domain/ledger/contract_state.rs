@@ -17,7 +17,6 @@ use crate::domain::{
 };
 use fastrace::trace;
 use midnight_coin_structure::coin::TokenType as MidnightTokenType;
-use midnight_onchain_runtime_v2::state::ContractState as ContractStateV2;
 use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
 use midnight_serialize::tagged_deserialize;
 use midnight_storage_core::{DefaultDB, arena::Sp};
@@ -25,7 +24,6 @@ use midnight_storage_core::{DefaultDB, arena::Sp};
 /// Facade for `ContractState` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum ContractState {
-    V2(ContractStateV2<DefaultDB>),
     V3(ContractStateV3<DefaultDB>),
 }
 
@@ -37,12 +35,6 @@ impl ContractState {
         ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
         let contract_state = match ledger_version {
-            LedgerVersion::V7 => {
-                let contract_state = tagged_deserialize(&mut contract_state.as_ref())
-                    .map_err(|error| Error::Deserialize("ContractStateV7", error))?;
-                Self::V2(contract_state)
-            }
-
             LedgerVersion::V8 => {
                 let contract_state = tagged_deserialize(&mut contract_state.as_ref())
                     .map_err(|error| Error::Deserialize("ContractStateV8", error))?;
@@ -56,41 +48,6 @@ impl ContractState {
     /// Get the token balances for this contract.
     pub fn balances(&self) -> Result<Vec<ContractBalance>, Error> {
         match self {
-            Self::V2(contract_state) => {
-                contract_state
-                    .balance
-                    .iter()
-                    .filter_map(|entry| {
-                        let (token_type_sp, amount_sp) = Sp::into_inner(entry)?;
-                        let token_type = Sp::into_inner(token_type_sp)?;
-                        let amount = Sp::into_inner(amount_sp)?;
-
-                        (amount > 0).then_some((token_type, amount))
-                    })
-                    .map(|(token_type, amount)| {
-                        match token_type {
-                            // For unshielded tokens extract the type directly.
-                            MidnightTokenType::Unshielded(unshielded) => Ok(ContractBalance {
-                                token_type: unshielded.0.0.into(),
-                                amount,
-                            }),
-
-                            // For other tokens we serialize the type.
-                            _ => {
-                                let token_type = token_type
-                                    .tagged_serialize()
-                                    .map_err(|error| Error::Serialize("TokenTypeV7", error))?;
-
-                                let token_type = TokenType::try_from(token_type.as_ref())
-                                    .map_err(Error::ByteArrayLen)?;
-
-                                Ok(ContractBalance { token_type, amount })
-                            }
-                        }
-                    })
-                    .collect()
-            }
-
             Self::V3(contract_state) => {
                 contract_state
                     .balance

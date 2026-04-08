@@ -19,8 +19,6 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProtocolVersion {
-    V0_20(u32),
-    V0_21(u32),
     V0_22(u32),
     V1_0(u32),
 }
@@ -28,8 +26,6 @@ pub enum ProtocolVersion {
 impl ProtocolVersion {
     pub fn ledger_version(self) -> LedgerVersion {
         match self {
-            ProtocolVersion::V0_20(_) => LedgerVersion::V7,
-            ProtocolVersion::V0_21(_) => LedgerVersion::V7,
             ProtocolVersion::V0_22(_) => LedgerVersion::V8,
             ProtocolVersion::V1_0(_) => LedgerVersion::V8,
         }
@@ -37,8 +33,6 @@ impl ProtocolVersion {
 
     pub fn node_version(self) -> NodeVersion {
         match self {
-            ProtocolVersion::V0_20(_) => NodeVersion::V0_20,
-            ProtocolVersion::V0_21(_) => NodeVersion::V0_21,
             ProtocolVersion::V0_22(_) => NodeVersion::V0_22,
             ProtocolVersion::V1_0(_) => NodeVersion::V1_0,
         }
@@ -52,8 +46,6 @@ impl ProtocolVersion {
 impl From<ProtocolVersion> for u32 {
     fn from(version: ProtocolVersion) -> Self {
         match version {
-            ProtocolVersion::V0_20(n) => n,
-            ProtocolVersion::V0_21(n) => n,
             ProtocolVersion::V0_22(n) => n,
             ProtocolVersion::V1_0(n) => n,
         }
@@ -73,11 +65,7 @@ impl TryFrom<u32> for ProtocolVersion {
     type Error = ProtocolVersionError;
 
     fn try_from(version: u32) -> Result<Self, Self::Error> {
-        if (0_020_000..0_021_000).contains(&version) {
-            Ok(Self::V0_20(version))
-        } else if (0_021_000..0_022_000).contains(&version) {
-            Ok(Self::V0_21(version))
-        } else if (0_022_000..0_023_000).contains(&version) {
+        if (0_022_000..0_023_000).contains(&version) {
             Ok(Self::V0_22(version))
         } else if (1_000_000..1_001_000).contains(&version) {
             Ok(Self::V1_0(version))
@@ -111,19 +99,16 @@ pub enum ProtocolVersionError {
 
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LedgerVersion {
-    V7,
     V8,
 }
 
 impl LedgerVersion {
-    pub const OLDEST: Self = Self::V7;
+    pub const OLDEST: Self = Self::V8;
     pub const LATEST: Self = Self::V8;
 }
 
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NodeVersion {
-    V0_20,
-    V0_21,
     V0_22,
     V1_0,
 }
@@ -138,18 +123,11 @@ mod tests {
         let version = ProtocolVersion::try_from(0_019_000_u32);
         assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 0_019_000);
 
+        let version = ProtocolVersion::try_from(0_021_000_u32);
+        assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 0_021_000);
+
         let version = ProtocolVersion::try_from(0_023_000_u32);
         assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 0_023_000);
-
-        let version =
-            ProtocolVersion::try_from(0_020_000_u32).expect("0_020_000 is valid protocol version");
-        assert_eq!(version.ledger_version(), LedgerVersion::V7);
-        assert_eq!(version.node_version(), NodeVersion::V0_20);
-
-        let version =
-            ProtocolVersion::try_from(0_021_001_u32).expect("0_021_001 is valid protocol version");
-        assert_eq!(version.ledger_version(), LedgerVersion::V7);
-        assert_eq!(version.node_version(), NodeVersion::V0_21);
 
         let version =
             ProtocolVersion::try_from(0_022_666_u32).expect("0_022_666 is valid protocol version");

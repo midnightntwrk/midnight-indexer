@@ -11,8 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod v0_20_0;
-mod v0_21_0;
 mod v0_22_0;
 mod v1_0_0;
 
@@ -48,8 +46,6 @@ pub async fn make_block_details(
 ) -> Result<BlockDetails, SubxtNodeError> {
     // TODO Replace this often repeated pattern with a macro?
     match node_version {
-        NodeVersion::V0_20 => v0_20_0::make_block_details(authorities, block).await,
-        NodeVersion::V0_21 => v0_21_0::make_block_details(authorities, block).await,
         NodeVersion::V0_22 => v0_22_0::make_block_details(authorities, block).await,
         NodeVersion::V1_0 => v1_0_0::make_block_details(authorities, block).await,
     }
@@ -61,8 +57,6 @@ pub async fn fetch_authorities(
     block: &OnlineClientAtBlock,
 ) -> Result<Vec<[u8; 32]>, SubxtNodeError> {
     match node_version {
-        NodeVersion::V0_20 => v0_20_0::fetch_authorities(block).await,
-        NodeVersion::V0_21 => v0_21_0::fetch_authorities(block).await,
         NodeVersion::V0_22 => v0_22_0::fetch_authorities(block).await,
         NodeVersion::V1_0 => v1_0_0::fetch_authorities(block).await,
     }
@@ -71,8 +65,6 @@ pub async fn fetch_authorities(
 /// Decode slot depending on the given protocol version.
 pub fn decode_slot(slot: &[u8], node_version: NodeVersion) -> Result<u64, SubxtNodeError> {
     match node_version {
-        NodeVersion::V0_20 => v0_20_0::decode_slot(slot),
-        NodeVersion::V0_21 => v0_21_0::decode_slot(slot),
         NodeVersion::V0_22 => v0_22_0::decode_slot(slot),
         NodeVersion::V1_0 => v1_0_0::decode_slot(slot),
     }
@@ -85,8 +77,6 @@ pub async fn get_contract_state(
     block: &OnlineClientAtBlock,
 ) -> Result<SerializedContractState, SubxtNodeError> {
     match node_version {
-        NodeVersion::V0_20 => v0_20_0::get_contract_state(address, block).await,
-        NodeVersion::V0_21 => v0_21_0::get_contract_state(address, block).await,
         NodeVersion::V0_22 => v0_22_0::get_contract_state(address, block).await,
         NodeVersion::V1_0 => v1_0_0::get_contract_state(address, block).await,
     }
@@ -97,8 +87,6 @@ pub async fn get_zswap_merkle_tree_root(
     block: &OnlineClientAtBlock,
 ) -> Result<Vec<u8>, SubxtNodeError> {
     match node_version {
-        NodeVersion::V0_20 => v0_20_0::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V0_21 => v0_21_0::get_zswap_merkle_tree_root(block).await,
         NodeVersion::V0_22 => v0_22_0::get_zswap_merkle_tree_root(block).await,
         NodeVersion::V1_0 => v1_0_0::get_zswap_merkle_tree_root(block).await,
     }
@@ -110,8 +98,6 @@ pub async fn get_ledger_state_root(
     block: &OnlineClientAtBlock,
 ) -> Result<Option<Vec<u8>>, SubxtNodeError> {
     match node_version {
-        NodeVersion::V0_20 => v0_20_0::get_ledger_state_root(block).await,
-        NodeVersion::V0_21 => v0_21_0::get_ledger_state_root(block).await,
         NodeVersion::V0_22 => v0_22_0::get_ledger_state_root(block).await,
         NodeVersion::V1_0 => v1_0_0::get_ledger_state_root(block).await,
     }
@@ -126,8 +112,6 @@ pub async fn get_transaction_cost(
     block: &OnlineClientAtBlock,
 ) -> Result<u128, SubxtNodeError> {
     match node_version {
-        NodeVersion::V0_20 => v0_20_0::get_transaction_cost(transaction.as_ref(), block).await,
-        NodeVersion::V0_21 => v0_21_0::get_transaction_cost(transaction.as_ref(), block).await,
         NodeVersion::V0_22 => v0_22_0::get_transaction_cost(transaction.as_ref(), block).await,
         NodeVersion::V1_0 => v1_0_0::get_transaction_cost(transaction.as_ref(), block).await,
     }
@@ -139,8 +123,6 @@ pub async fn get_d_parameter(
     block: &OnlineClientAtBlock,
 ) -> Result<DParameter, SubxtNodeError> {
     match node_version {
-        NodeVersion::V0_20 => v0_20_0::get_d_parameter(block).await,
-        NodeVersion::V0_21 => v0_21_0::get_d_parameter(block).await,
         NodeVersion::V0_22 => v0_22_0::get_d_parameter(block).await,
         NodeVersion::V1_0 => v1_0_0::get_d_parameter(block).await,
     }
@@ -154,8 +136,6 @@ pub async fn fetch_genesis_cnight_registrations(
     block: &OnlineClientAtBlock,
 ) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
     match node_version {
-        NodeVersion::V0_20 => v0_20_0::fetch_genesis_cnight_registrations(block).await,
-        NodeVersion::V0_21 => v0_21_0::fetch_genesis_cnight_registrations(block).await,
         NodeVersion::V0_22 => v0_22_0::fetch_genesis_cnight_registrations(block).await,
         NodeVersion::V1_0 => v1_0_0::fetch_genesis_cnight_registrations(block).await,
     }
@@ -167,8 +147,6 @@ pub async fn get_terms_and_conditions(
     block: &OnlineClientAtBlock,
 ) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
     match node_version {
-        NodeVersion::V0_20 => v0_20_0::get_terms_and_conditions(block).await,
-        NodeVersion::V0_21 => v0_21_0::get_terms_and_conditions(block).await,
         NodeVersion::V0_22 => v0_22_0::get_terms_and_conditions(block).await,
         NodeVersion::V1_0 => v1_0_0::get_terms_and_conditions(block).await,
     }
