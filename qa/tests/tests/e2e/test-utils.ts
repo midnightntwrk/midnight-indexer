@@ -76,6 +76,8 @@ export async function resolveBlockHash(result: ToolkitTransactionResult): Promis
   if (tx?.block?.hash) {
     result.blockHash = tx.block.hash;
     log.debug(`Resolved block hash: ${result.blockHash}`);
+  } else {
+    log.warn(`Could not resolve block hash from indexer for tx ${result.txHash}`);
   }
 }
 
