@@ -18,9 +18,10 @@ use crate::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
         ContractActionSubscription, DParameterHistoryQuery, DisconnectMutation,
         DustCommitmentMerkleTreeUpdateQuery, DustGenerationStatusQuery, DustGenerationsQuery,
-        DustLedgerEventsSubscription, ShieldedTransactionsSubscription,
-        TermsAndConditionsHistoryQuery, TransactionsQuery, UnshieldedTransactionsSubscription,
-        ZswapLedgerEventsSubscription, ZswapMerkleTreeCollapsedUpdateQuery, block_query,
+        DustLedgerEventsSubscription, ShieldedNullifierTransactionsSubscription,
+        ShieldedTransactionsSubscription, TermsAndConditionsHistoryQuery, TransactionsQuery,
+        UnshieldedTransactionsSubscription, ZswapLedgerEventsSubscription,
+        ZswapMerkleTreeCollapsedUpdateQuery, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
@@ -35,8 +36,8 @@ use crate::{
         contract_action_subscription, disconnect_mutation,
         dust_commitment_merkle_tree_update_query, dust_generation_status_query,
         dust_generations_query, dust_ledger_events_subscription,
-        shielded_transactions_subscription, transactions_query,
-        unshielded_transactions_subscription, zswap_ledger_events_subscription,
+        shielded_nullifier_transactions_subscription, shielded_transactions_subscription,
+        transactions_query, unshielded_transactions_subscription, zswap_ledger_events_subscription,
         zswap_merkle_tree_collapsed_update_query,
     },
     graphql_ws_client,
@@ -138,6 +139,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_dust_ledger_events_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test dust ledger events subscription")?;
+    test_shielded_nullifier_transactions_subscription(&ws_api_url)
+        .await
+        .context("test shielded nullifier transactions subscription")?;
 
     println!("Successfully finished e2e testing");
 
@@ -1037,6 +1041,31 @@ async fn test_dust_ledger_events_subscription(
     Ok(())
 }
 
+/// Test the shieldedNullifierTransactions subscription with a non-matching prefix.
+async fn test_shielded_nullifier_transactions_subscription(ws_api_url: &str) -> anyhow::Result<()> {
+    let variables = shielded_nullifier_transactions_subscription::Variables {
+        nullifier_prefixes: vec!["00".to_string().try_into().unwrap()],
+        from_block: Some(0),
+        to_block: Some(0),
+    };
+    let events = graphql_ws_client::subscribe::<ShieldedNullifierTransactionsSubscription>(
+        ws_api_url, variables,
+    )
+    .await
+    .context("subscribe to shielded nullifier transactions")?;
+    let events = tokio_stream::StreamExt::timeout(events, Duration::from_secs(3))
+        .take_while(|timeout_result| ready(timeout_result.is_ok()))
+        .filter_map(|timeout_result| ready(timeout_result.map(Some).unwrap_or(None)))
+        .try_collect::<Vec<_>>()
+        .await
+        .context("collect shielded nullifier transactions from subscription")?;
+
+    // No matching nullifiers expected in test data.
+    assert!(events.is_empty());
+
+    Ok(())
+}
+
 trait SerializeExt
 where
     Self: Serialize,
@@ -1192,6 +1221,14 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct DustLedgerEventsSubscription;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct ShieldedNullifierTransactionsSubscription;
 
     #[derive(GraphQLQuery)]
     #[graphql(

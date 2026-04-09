@@ -823,6 +823,23 @@ subscription DustLedgerEventsSubscription($id: Int) {
     }
 }
 
+subscription ShieldedNullifierTransactionsSubscription(
+    $nullifierPrefixes: [HexEncoded!]!
+    $fromBlock: Int
+    $toBlock: Int
+) {
+    shieldedNullifierTransactions(
+        nullifierPrefixes: $nullifierPrefixes
+        fromBlock: $fromBlock
+        toBlock: $toBlock
+    ) {
+        nullifier
+        transactionId
+        blockHeight
+        blockHash
+    }
+}
+
 query DustGenerationStatusQuery(
     $cardanoRewardAddresses: [CardanoRewardAddress!]!
 ) {
