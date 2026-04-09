@@ -104,15 +104,18 @@ describe('zswap merkle tree collapsed update queries', () => {
       log.debug(`Highest zswapEndIndex from genesis: ${maxEndIndex}`);
       expect(maxEndIndex).toBeGreaterThan(0);
 
-      log.debug(`Requesting collapsed update with startIndex=0, endIndex=${maxEndIndex}`);
-      const response = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, maxEndIndex);
+      // zswapEndIndex is exclusive (next free index), collapsed update endIndex is inclusive
+      const endIndex = maxEndIndex - 1;
+
+      log.debug(`Requesting collapsed update with startIndex=0, endIndex=${endIndex}`);
+      const response = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, endIndex);
 
       expect(response).toBeSuccess();
       expect(response.data?.zswapMerkleTreeCollapsedUpdate).toBeDefined();
 
       const collapsedUpdate = response.data!.zswapMerkleTreeCollapsedUpdate;
       expect(collapsedUpdate.startIndex).toBe(0);
-      expect(collapsedUpdate.endIndex).toBe(maxEndIndex);
+      expect(collapsedUpdate.endIndex).toBe(endIndex);
       expect(collapsedUpdate.update).toBeDefined();
       expect(collapsedUpdate.protocolVersion).toBeDefined();
     });
