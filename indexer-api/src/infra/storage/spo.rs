@@ -111,7 +111,7 @@ impl SpoStorage for Storage {
     #[trace]
     async fn get_spo_count(&self) -> Result<i64, sqlx::Error> {
         let query = indoc! {"
-            SELECT COUNT(1)::BIGINT FROM spo_stake_snapshot
+            SELECT COUNT(1) FROM spo_stake_snapshot
         "};
 
         sqlx::query_scalar::<_, i64>(query)
@@ -284,6 +284,7 @@ impl SpoStorage for Storage {
             let s_hex = normalize_hex(s).unwrap_or_else(|| s.to_ascii_lowercase());
             let s_hex_like = format!("%{s_hex}%");
 
+            #[cfg(feature = "cloud")]
             let query = indoc! {"
                 SELECT s.pool_id AS pool_id_hex,
                        'UNKNOWN' AS validator_class,
@@ -296,6 +297,29 @@ impl SpoStorage for Storage {
                 WHERE (
                         pm.name ILIKE $3 OR pm.ticker ILIKE $3 OR pm.homepage_url ILIKE $3 OR s.pool_id ILIKE $4
                      OR si.sidechain_pubkey ILIKE $4 OR si.aura_pubkey ILIKE $4 OR si.mainchain_pubkey ILIKE $4
+                  )
+                ORDER BY COALESCE(si.mainchain_pubkey, s.pool_id)
+                LIMIT $1 OFFSET $2
+            "};
+
+            #[cfg(feature = "standalone")]
+            let query = indoc! {"
+                SELECT s.pool_id AS pool_id_hex,
+                       'UNKNOWN' AS validator_class,
+                       si.sidechain_pubkey AS sidechain_pubkey_hex,
+                       si.aura_pubkey AS aura_pubkey_hex,
+                       pm.name, pm.ticker, pm.homepage_url, pm.url AS logo_url
+                FROM spo_stake_snapshot s
+                LEFT JOIN spo_identity si ON si.pool_id = s.pool_id
+                LEFT JOIN pool_metadata_cache pm ON pm.pool_id = s.pool_id
+                WHERE (
+                        LOWER(pm.name) LIKE LOWER($3)
+                     OR LOWER(pm.ticker) LIKE LOWER($3)
+                     OR LOWER(pm.homepage_url) LIKE LOWER($3)
+                     OR LOWER(s.pool_id) LIKE LOWER($4)
+                     OR LOWER(si.sidechain_pubkey) LIKE LOWER($4)
+                     OR LOWER(si.aura_pubkey) LIKE LOWER($4)
+                     OR LOWER(si.mainchain_pubkey) LIKE LOWER($4)
                   )
                 ORDER BY COALESCE(si.mainchain_pubkey, s.pool_id)
                 LIMIT $1 OFFSET $2
@@ -439,7 +463,7 @@ impl SpoStorage for Storage {
                    sep.produced_blocks,
                    sep.expected_blocks,
                    sep.identity_label,
-                   NULL::TEXT AS stake_snapshot,
+                   CAST(NULL AS TEXT) AS stake_snapshot,
                    si.pool_id AS pool_id_hex,
                    'UNKNOWN' AS validator_class
             FROM spo_epoch_performance sep
@@ -481,7 +505,7 @@ impl SpoStorage for Storage {
                    sep.produced_blocks,
                    sep.expected_blocks,
                    sep.identity_label,
-                   NULL::TEXT AS stake_snapshot,
+                   CAST(NULL AS TEXT) AS stake_snapshot,
                    si.pool_id AS pool_id_hex,
                    'UNKNOWN' AS validator_class
             FROM spo_epoch_performance sep
@@ -525,7 +549,7 @@ impl SpoStorage for Storage {
                    sep.produced_blocks,
                    sep.expected_blocks,
                    sep.identity_label,
-                   NULL::TEXT AS stake_snapshot,
+                   CAST(NULL AS TEXT) AS stake_snapshot,
                    si.pool_id AS pool_id_hex,
                    'UNKNOWN' AS validator_class
             FROM spo_epoch_performance sep
@@ -558,6 +582,7 @@ impl SpoStorage for Storage {
 
     #[trace]
     async fn get_current_epoch_info(&self) -> Result<Option<EpochInfo>, sqlx::Error> {
+        #[cfg(feature = "cloud")]
         let query = indoc! {"
             WITH last AS (
                 SELECT
@@ -573,14 +598,48 @@ impl SpoStorage for Storage {
                 SELECT
                     epoch_no, starts_s, ends_s, dur_s, now_s,
                     CASE WHEN ends_s > now_s THEN 0
+                         WHEN dur_s <= 0 THEN 0
                          ELSE ((now_s - ends_s) / dur_s)::BIGINT + 1 END AS n
                 FROM last
             ), synth AS (
                 SELECT
                     (epoch_no + n) AS epoch_no,
                     dur_s AS duration_seconds,
-                    CASE WHEN n = 0 THEN LEAST(GREATEST(now_s - starts_s, 0), dur_s)
+                    CASE WHEN dur_s <= 0 THEN 0
+                         WHEN n = 0 THEN LEAST(GREATEST(now_s - starts_s, 0), dur_s)
                          ELSE LEAST(GREATEST(now_s - (ends_s + (n - 1) * dur_s), 0), dur_s)
+                    END AS elapsed_seconds
+                FROM calc
+            )
+            SELECT epoch_no, duration_seconds, elapsed_seconds FROM synth
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            WITH last AS (
+                SELECT
+                    epoch_no,
+                    CAST(strftime('%s', starts_at) AS INTEGER) AS starts_s,
+                    CAST(strftime('%s', ends_at) AS INTEGER) AS ends_s,
+                    CAST(strftime('%s', ends_at) AS INTEGER) - CAST(strftime('%s', starts_at) AS INTEGER) AS dur_s,
+                    CAST(strftime('%s', 'now') AS INTEGER) AS now_s
+                FROM epochs
+                ORDER BY epoch_no DESC
+                LIMIT 1
+            ), calc AS (
+                SELECT
+                    epoch_no, starts_s, ends_s, dur_s, now_s,
+                    CASE WHEN ends_s > now_s THEN 0
+                         WHEN dur_s <= 0 THEN 0
+                         ELSE CAST((now_s - ends_s) / dur_s AS INTEGER) + 1 END AS n
+                FROM last
+            ), synth AS (
+                SELECT
+                    (epoch_no + n) AS epoch_no,
+                    dur_s AS duration_seconds,
+                    CASE WHEN dur_s <= 0 THEN 0
+                         WHEN n = 0 THEN MIN(MAX(now_s - starts_s, 0), dur_s)
+                         ELSE MIN(MAX(now_s - (ends_s + (n - 1) * dur_s), 0), dur_s)
                     END AS elapsed_seconds
                 FROM calc
             )
@@ -601,10 +660,22 @@ impl SpoStorage for Storage {
 
     #[trace]
     async fn get_epoch_utilization(&self, epoch: i64) -> Result<Option<f64>, sqlx::Error> {
+        #[cfg(feature = "cloud")]
         let query = indoc! {"
             SELECT COALESCE(
                 CASE WHEN SUM(expected_blocks) > 0
                      THEN SUM(produced_blocks)::DOUBLE PRECISION / SUM(expected_blocks)
+                     ELSE 0.0 END,
+                0.0) AS utilization
+            FROM spo_epoch_performance
+            WHERE epoch_no = $1
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            SELECT COALESCE(
+                CASE WHEN SUM(expected_blocks) > 0
+                     THEN SUM(produced_blocks) * 1.0 / SUM(expected_blocks)
                      ELSE 0.0 END,
                 0.0) AS utilization
             FROM spo_epoch_performance
@@ -684,6 +755,7 @@ impl SpoStorage for Storage {
         let start = from_epoch.min(to_epoch);
         let end = to_epoch.max(from_epoch);
 
+        #[cfg(feature = "cloud")]
         let query = indoc! {"
             WITH rng AS (
                 SELECT generate_series($1::BIGINT, $2::BIGINT) AS epoch_no
@@ -735,6 +807,62 @@ impl SpoStorage for Storage {
             ORDER BY epoch_no
         "};
 
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            WITH RECURSIVE rng(epoch_no) AS (
+                SELECT $1
+                UNION ALL
+                SELECT epoch_no + 1
+                FROM rng
+                WHERE epoch_no < $2
+            ),
+            cur AS (
+                SELECT s.pool_id
+                FROM spo_stake_snapshot s
+            ),
+            union_firsts AS (
+                SELECT si.pool_id AS pool_id, MIN(sh.epoch_no) AS first_seen_epoch
+                FROM spo_history sh
+                LEFT JOIN spo_identity si ON si.spo_sk = sh.spo_sk
+                WHERE si.pool_id IS NOT NULL
+                GROUP BY si.pool_id
+                UNION ALL
+                SELECT si.pool_id AS pool_id, MIN(cm.epoch_no) AS first_seen_epoch
+                FROM committee_membership cm
+                LEFT JOIN spo_identity si ON si.sidechain_pubkey = cm.sidechain_pubkey
+                WHERE si.pool_id IS NOT NULL
+                GROUP BY si.pool_id
+                UNION ALL
+                SELECT si.pool_id AS pool_id, MIN(sep.epoch_no) AS first_seen_epoch
+                FROM spo_epoch_performance sep
+                LEFT JOIN spo_identity si ON si.spo_sk = sep.spo_sk
+                WHERE si.pool_id IS NOT NULL
+                GROUP BY si.pool_id
+            ),
+            firsts0 AS (
+                SELECT pool_id, MIN(first_seen_epoch) AS first_seen_epoch
+                FROM union_firsts
+                GROUP BY pool_id
+            ),
+            firsts_cur AS (
+                SELECT c.pool_id,
+                       COALESCE(f0.first_seen_epoch, $2) AS first_seen_epoch
+                FROM cur c
+                LEFT JOIN firsts0 f0 ON f0.pool_id = c.pool_id
+            ),
+            agg AS (
+                SELECT r.epoch_no,
+                       SUM(CASE WHEN fc.first_seen_epoch <= r.epoch_no THEN 1 ELSE 0 END) AS total_registered,
+                       SUM(CASE WHEN fc.first_seen_epoch = r.epoch_no THEN 1 ELSE 0 END) AS newly_registered
+                FROM rng r
+                CROSS JOIN firsts_cur fc
+                GROUP BY r.epoch_no
+            )
+            SELECT epoch_no, total_registered, newly_registered
+            FROM agg
+            ORDER BY epoch_no
+        "};
+
         sqlx::query_as::<_, (i64, i64, i64)>(query)
             .bind(start)
             .bind(end)
@@ -762,6 +890,7 @@ impl SpoStorage for Storage {
         let start = from_epoch.min(to_epoch);
         let end = to_epoch.max(from_epoch);
 
+        #[cfg(feature = "cloud")]
         let query = indoc! {"
             WITH rng AS (
                 SELECT generate_series($1::BIGINT, $2::BIGINT) AS epoch_no
@@ -800,6 +929,56 @@ impl SpoStorage for Storage {
                    COALESCE(hv.cnt, 0) AS registered_valid_count,
                    COALESCE(hi.cnt, 0) AS registered_invalid_count,
                    COALESCE(hv.cnt, 0)::DOUBLE PRECISION AS dparam
+            FROM rng r
+            LEFT JOIN hist_valid hv ON hv.epoch_no = r.epoch_no
+            LEFT JOIN hist_invalid hi ON hi.epoch_no = r.epoch_no
+            LEFT JOIN fed f ON f.epoch_no = r.epoch_no
+            ORDER BY r.epoch_no
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            WITH RECURSIVE rng(epoch_no) AS (
+                SELECT $1
+                UNION ALL
+                SELECT epoch_no + 1
+                FROM rng
+                WHERE epoch_no < $2
+            ),
+            hist_valid AS (
+                SELECT sh.epoch_no,
+                       COUNT(DISTINCT si.pool_id) AS cnt
+                FROM spo_history sh
+                LEFT JOIN spo_identity si ON si.spo_sk = sh.spo_sk
+                WHERE sh.status IN ('VALID','Valid')
+                  AND sh.epoch_no BETWEEN $1 AND $2
+                  AND si.pool_id IS NOT NULL
+                GROUP BY sh.epoch_no
+            ),
+            hist_invalid AS (
+                SELECT sh.epoch_no,
+                       COUNT(DISTINCT si.pool_id) AS cnt
+                FROM spo_history sh
+                LEFT JOIN spo_identity si ON si.spo_sk = sh.spo_sk
+                WHERE sh.status IN ('INVALID','Invalid')
+                  AND sh.epoch_no BETWEEN $1 AND $2
+                  AND si.pool_id IS NOT NULL
+                GROUP BY sh.epoch_no
+            ),
+            fed AS (
+                SELECT c.epoch_no,
+                       COUNT(DISTINCT CASE WHEN c.expected_slots > 0 THEN c.sidechain_pubkey END) AS federated_valid_count,
+                       0 AS federated_invalid_count
+                FROM committee_membership c
+                WHERE c.epoch_no BETWEEN $1 AND $2
+                GROUP BY c.epoch_no
+            )
+            SELECT r.epoch_no,
+                   COALESCE(f.federated_valid_count, 0) AS federated_valid_count,
+                   COALESCE(f.federated_invalid_count, 0) AS federated_invalid_count,
+                   COALESCE(hv.cnt, 0) AS registered_valid_count,
+                   COALESCE(hi.cnt, 0) AS registered_invalid_count,
+                   COALESCE(hv.cnt, 0) * 1.0 AS dparam
             FROM rng r
             LEFT JOIN hist_valid hv ON hv.epoch_no = r.epoch_no
             LEFT JOIN hist_invalid hi ON hi.epoch_no = r.epoch_no
@@ -846,31 +1025,31 @@ impl SpoStorage for Storage {
 
         let query = indoc! {"
             WITH history AS (
-                SELECT sh.epoch_no::BIGINT AS epoch_no,
+                SELECT sh.epoch_no AS epoch_no,
                        COALESCE(si.pool_id, sh.spo_sk) AS id_key,
-                       'history'::TEXT AS source,
-                       sh.status::TEXT AS status
+                       'history' AS source,
+                       sh.status AS status
                 FROM spo_history sh
                 LEFT JOIN spo_identity si ON si.spo_sk = sh.spo_sk
-                WHERE sh.epoch_no BETWEEN $1::BIGINT AND $2::BIGINT
+                WHERE sh.epoch_no BETWEEN $1 AND $2
             ),
             committee AS (
-                SELECT cm.epoch_no::BIGINT AS epoch_no,
+                SELECT cm.epoch_no AS epoch_no,
                        COALESCE(si.pool_id, cm.sidechain_pubkey) AS id_key,
-                       'committee'::TEXT AS source,
-                       NULL::TEXT AS status
+                       'committee' AS source,
+                       CAST(NULL AS TEXT) AS status
                 FROM committee_membership cm
                 LEFT JOIN spo_identity si ON si.sidechain_pubkey = cm.sidechain_pubkey
-                WHERE cm.epoch_no BETWEEN $1::BIGINT AND $2::BIGINT
+                WHERE cm.epoch_no BETWEEN $1 AND $2
             ),
             performance AS (
-                SELECT sep.epoch_no::BIGINT AS epoch_no,
+                SELECT sep.epoch_no AS epoch_no,
                        COALESCE(si.pool_id, sep.spo_sk) AS id_key,
-                       'performance'::TEXT AS source,
-                       NULL::TEXT AS status
+                       'performance' AS source,
+                       CAST(NULL AS TEXT) AS status
                 FROM spo_epoch_performance sep
                 LEFT JOIN spo_identity si ON si.spo_sk = sep.spo_sk
-                WHERE sep.epoch_no BETWEEN $1::BIGINT AND $2::BIGINT
+                WHERE sep.epoch_no BETWEEN $1 AND $2
             )
             SELECT epoch_no, id_key, source, status FROM history
             UNION ALL
@@ -904,11 +1083,11 @@ impl SpoStorage for Storage {
     ) -> Result<Vec<FirstValidEpoch>, sqlx::Error> {
         let query = indoc! {"
             SELECT COALESCE(si.pool_id, sh.spo_sk) AS id_key,
-                   MIN(sh.epoch_no)::BIGINT AS first_valid_epoch
+                   MIN(sh.epoch_no) AS first_valid_epoch
             FROM spo_history sh
             LEFT JOIN spo_identity si ON si.spo_sk = sh.spo_sk
             WHERE sh.status IN ('VALID','Valid')
-              AND ($1::BIGINT IS NULL OR sh.epoch_no <= $1::BIGINT)
+              AND ($1 IS NULL OR sh.epoch_no <= $1)
             GROUP BY 1
             ORDER BY first_valid_epoch
         "};
@@ -937,7 +1116,7 @@ impl SpoStorage for Storage {
     ) -> Result<(Vec<StakeShare>, f64), sqlx::Error> {
         // First get total live stake.
         let total_query = indoc! {"
-            SELECT COALESCE(SUM(s.live_stake), 0)::TEXT
+            SELECT CAST(COALESCE(SUM(s.live_stake), 0) AS TEXT)
             FROM spo_stake_snapshot s
         "};
         let total_live_str: String = sqlx::query_scalar(total_query)
@@ -947,27 +1126,54 @@ impl SpoStorage for Storage {
 
         // Build the main query.
         let base_select = if search.is_some() {
-            indoc! {"
-                SELECT
-                    pm.pool_id AS pool_id_hex,
-                    pm.name, pm.ticker, pm.homepage_url, pm.url AS logo_url,
-                    (s.live_stake)::TEXT, (s.active_stake)::TEXT, s.live_delegators, s.live_saturation,
-                    (s.declared_pledge)::TEXT, (s.live_pledge)::TEXT
-                FROM spo_stake_snapshot s
-                JOIN pool_metadata_cache pm ON pm.pool_id = s.pool_id
-                WHERE (
-                    pm.name ILIKE $3 OR pm.ticker ILIKE $3 OR pm.homepage_url ILIKE $3 OR pm.pool_id ILIKE $4
-                )
-                ORDER BY COALESCE(s.live_stake, 0) DESC, pm.pool_id
-                LIMIT $1 OFFSET $2
-            "}
+            #[cfg(feature = "cloud")]
+            {
+                indoc! {"
+                    SELECT
+                        pm.pool_id AS pool_id_hex,
+                        pm.name, pm.ticker, pm.homepage_url, pm.url AS logo_url,
+                        CAST(s.live_stake AS TEXT), CAST(s.active_stake AS TEXT), s.live_delegators, s.live_saturation,
+                        CAST(s.declared_pledge AS TEXT), CAST(s.live_pledge AS TEXT)
+                    FROM spo_stake_snapshot s
+                    JOIN pool_metadata_cache pm ON pm.pool_id = s.pool_id
+                    WHERE (
+                        pm.name ILIKE $3
+                        OR pm.ticker ILIKE $3
+                        OR pm.homepage_url ILIKE $3
+                        OR pm.pool_id ILIKE $4
+                    )
+                    ORDER BY COALESCE(s.live_stake, 0) DESC, pm.pool_id
+                    LIMIT $1 OFFSET $2
+                "}
+            }
+
+            #[cfg(feature = "standalone")]
+            {
+                indoc! {"
+                    SELECT
+                        pm.pool_id AS pool_id_hex,
+                        pm.name, pm.ticker, pm.homepage_url, pm.url AS logo_url,
+                        CAST(s.live_stake AS TEXT), CAST(s.active_stake AS TEXT), s.live_delegators, s.live_saturation,
+                        CAST(s.declared_pledge AS TEXT), CAST(s.live_pledge AS TEXT)
+                    FROM spo_stake_snapshot s
+                    JOIN pool_metadata_cache pm ON pm.pool_id = s.pool_id
+                    WHERE (
+                        LOWER(pm.name) LIKE LOWER($3)
+                        OR LOWER(pm.ticker) LIKE LOWER($3)
+                        OR LOWER(pm.homepage_url) LIKE LOWER($3)
+                        OR LOWER(pm.pool_id) LIKE LOWER($4)
+                    )
+                    ORDER BY COALESCE(s.live_stake, 0) DESC, pm.pool_id
+                    LIMIT $1 OFFSET $2
+                "}
+            }
         } else {
             indoc! {"
                 SELECT
                     pm.pool_id AS pool_id_hex,
                     pm.name, pm.ticker, pm.homepage_url, pm.url AS logo_url,
-                    (s.live_stake)::TEXT, (s.active_stake)::TEXT, s.live_delegators, s.live_saturation,
-                    (s.declared_pledge)::TEXT, (s.live_pledge)::TEXT
+                    CAST(s.live_stake AS TEXT), CAST(s.active_stake AS TEXT), s.live_delegators, s.live_saturation,
+                    CAST(s.declared_pledge AS TEXT), CAST(s.live_pledge AS TEXT)
                 FROM spo_stake_snapshot s
                 JOIN pool_metadata_cache pm ON pm.pool_id = s.pool_id
                 ORDER BY COALESCE(s.live_stake, 0) DESC, pm.pool_id

@@ -212,9 +212,13 @@ impl ContractActionStorage for Storage {
                 contract_actions.transaction_id
             FROM contract_actions
             INNER JOIN regular_transactions ON regular_transactions.id = contract_actions.transaction_id
-            INNER JOIN transaction_identifiers ON regular_transactions.id = transaction_identifiers.transaction_id
             WHERE address = $1
-            AND transaction_identifiers.identifier = $2
+            AND EXISTS (
+                SELECT 1
+                FROM transaction_identifiers
+                WHERE transaction_identifiers.transaction_id = regular_transactions.id
+                AND transaction_identifiers.identifier = $2
+            )
             ORDER BY contract_actions.id DESC
             LIMIT 1
         "};
