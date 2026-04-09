@@ -63,7 +63,7 @@ where
         let batch_size = cx.get_subscription_config().contract_actions.batch_size;
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
-        let height = resolve_height(offset, storage).await?;
+        let height = resolve_height::<S>(offset, cx).await?;
         let mut contract_action_id = storage
             .get_contract_action_id_by_block_height(height)
             .await

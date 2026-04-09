@@ -434,8 +434,8 @@ where
     S: Storage,
 {
     let block = cx
-        .get_storage::<S>()
-        .get_block_by_hash(block_hash)
+        .get_block_by_hash_loader::<S>()
+        .load_one(block_hash)
         .await
         .map_err_into_server_error(|| format!("get block by hash {}", block_hash))?
         .some_or_server_error(|| format!("block with hash {} not found", block_hash))?;

@@ -62,26 +62,26 @@ where
         cx: &Context<'_>,
         offset: Option<BlockOffset>,
     ) -> ApiResult<Option<Block<S>>> {
-        let storage = cx.get_storage::<S>();
-
         let block = match offset {
             Some(BlockOffset::Hash(hash)) => {
                 let hash = hash
                     .hex_decode()
                     .map_err_into_client_error(|| "invalid block hash")?;
 
-                storage
-                    .get_block_by_hash(hash)
+                cx.get_block_by_hash_loader::<S>()
+                    .load_one(hash)
                     .await
                     .map_err_into_server_error(|| format!("get block by hash {hash}"))?
             }
 
-            Some(BlockOffset::Height(height)) => storage
+            Some(BlockOffset::Height(height)) => cx
+                .get_storage::<S>()
                 .get_block_by_height(height)
                 .await
                 .map_err_into_server_error(|| format!("get block by height {height}"))?,
 
-            None => storage
+            None => cx
+                .get_storage::<S>()
                 .get_latest_block()
                 .await
                 .map_err_into_server_error(|| "get latest block")?,

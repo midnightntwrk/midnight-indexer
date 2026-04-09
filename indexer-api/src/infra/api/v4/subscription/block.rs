@@ -61,7 +61,7 @@ where
         let batch_size = cx.get_subscription_config().blocks.batch_size;
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
-        let mut height = resolve_height(offset, storage).await?;
+        let mut height = resolve_height::<S>(offset, cx).await?;
 
         let blocks = try_stream! {
             // Stream existing blocks.

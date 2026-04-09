@@ -74,8 +74,8 @@ where
     /// The parent of this block.
     async fn parent(&self, cx: &Context<'_>) -> ApiResult<Option<Block<S>>> {
         let block = cx
-            .get_storage::<S>()
-            .get_block_by_hash(self.parent_hash)
+            .get_block_by_hash_loader::<S>()
+            .load_one(self.parent_hash)
             .await
             .map_err_into_server_error(|| format!("get block by hash {}", self.parent_hash))?;
 
