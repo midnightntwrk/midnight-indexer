@@ -17,6 +17,7 @@ import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import { MerkleTreeCollapsedUpdateSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
+import type { RegularTransaction } from '@utils/indexer/indexer-types';
 import { TestContext } from 'vitest';
 
 const indexerHttpClient = new IndexerHttpClient();
@@ -75,6 +76,103 @@ describe('zswap merkle tree collapsed update queries', () => {
         `Collapsed update schema validation failed ${JSON.stringify(parsed.error, null, 2)}`,
       ).toBe(true);
     });
+
+    /**
+     * A collapsed update query covering the full genesis zswap range returns a valid result
+     *
+     * @given the genesis block has indexed zswap state
+     * @when we query for a collapsed update covering the full range from genesis
+     * @then Indexer should return a valid collapsed update spanning the entire range
+     */
+    test('should return a collapsed update for the full genesis zswap range', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Zswap', 'CollapsedUpdate', 'FullRange'],
+      };
+
+      // Get the highest zswapEndIndex from genesis block transactions
+      const genesisResponse = await indexerHttpClient.getBlockByOffset({ height: 0 });
+      expect(genesisResponse).toBeSuccess();
+
+      const transactions = genesisResponse.data!.block.transactions;
+      const maxEndIndex = transactions.reduce((max, tx) => {
+        const regularTx = tx as RegularTransaction;
+        return regularTx.zswapEndIndex != null && regularTx.zswapEndIndex > max
+          ? regularTx.zswapEndIndex
+          : max;
+      }, 0);
+
+      log.debug(`Highest zswapEndIndex from genesis: ${maxEndIndex}`);
+      expect(maxEndIndex).toBeGreaterThan(0);
+
+      log.debug(`Requesting collapsed update with startIndex=0, endIndex=${maxEndIndex}`);
+      const response = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, maxEndIndex);
+
+      expect(response).toBeSuccess();
+      expect(response.data?.zswapMerkleTreeCollapsedUpdate).toBeDefined();
+
+      const collapsedUpdate = response.data!.zswapMerkleTreeCollapsedUpdate;
+      expect(collapsedUpdate.startIndex).toBe(0);
+      expect(collapsedUpdate.endIndex).toBe(maxEndIndex);
+      expect(collapsedUpdate.update).toBeDefined();
+      expect(collapsedUpdate.protocolVersion).toBeDefined();
+    });
+  });
+
+  describe('a collapsed update query with equal start and end indices', () => {
+    /**
+     * A collapsed update query where startIndex === endIndex returns a valid trivial update
+     *
+     * @given we use startIndex equal to endIndex
+     * @when we query for a collapsed update
+     * @then Indexer should return a valid collapsed update with matching indices
+     */
+    test('should return a valid update when startIndex equals endIndex', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Zswap', 'CollapsedUpdate', 'EdgeCase'],
+      };
+
+      log.debug('Requesting zswap merkle tree collapsed update with startIndex=0, endIndex=0');
+      const response = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, 0);
+
+      expect(response).toBeSuccess();
+      expect(response.data?.zswapMerkleTreeCollapsedUpdate).toBeDefined();
+
+      const collapsedUpdate = response.data!.zswapMerkleTreeCollapsedUpdate;
+      expect(collapsedUpdate.startIndex).toBe(0);
+      expect(collapsedUpdate.endIndex).toBe(0);
+      expect(collapsedUpdate.update).toBeDefined();
+      expect(collapsedUpdate.protocolVersion).toBeDefined();
+    });
+  });
+
+  describe('a collapsed update query idempotency', () => {
+    /**
+     * Two identical collapsed update queries should return the same result
+     *
+     * @given we query the same index range twice
+     * @when the chain head has not changed between calls
+     * @then both responses should be identical
+     */
+    test('should return identical results for the same query parameters', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Zswap', 'CollapsedUpdate', 'Idempotency'],
+      };
+
+      log.debug('Requesting zswap merkle tree collapsed update twice with startIndex=0, endIndex=1');
+      const response1 = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, 1);
+      const response2 = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, 1);
+
+      expect(response1).toBeSuccess();
+      expect(response2).toBeSuccess();
+
+      const update1 = response1.data!.zswapMerkleTreeCollapsedUpdate;
+      const update2 = response2.data!.zswapMerkleTreeCollapsedUpdate;
+
+      expect(update1.startIndex).toBe(update2.startIndex);
+      expect(update1.endIndex).toBe(update2.endIndex);
+      expect(update1.update).toBe(update2.update);
+      expect(update1.protocolVersion).toBe(update2.protocolVersion);
+    });
   });
 
   describe('a collapsed update query with invalid index range', () => {
@@ -83,7 +181,7 @@ describe('zswap merkle tree collapsed update queries', () => {
      *
      * @given we use an invalid index range where startIndex > endIndex
      * @when we query for a collapsed update
-     * @then Indexer should respond with an error
+     * @then Indexer should respond with an error about invalid start_index and/or end_index
      */
     test('should return an error when startIndex is greater than endIndex', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
@@ -94,14 +192,15 @@ describe('zswap merkle tree collapsed update queries', () => {
       const response = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(10, 5);
 
       expect(response).toBeError();
+      expect(response.errors![0].message).toContain('invalid start_index and/or end_index');
     });
 
     /**
-     * A collapsed update query with negative indices should return an error
+     * A collapsed update query with negative indices should return a parse error
      *
      * @given we use negative indices
      * @when we query for a collapsed update
-     * @then Indexer should respond with an error
+     * @then Indexer should respond with an error about invalid number parsing
      */
     test('should return an error when indices are negative', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
@@ -112,6 +211,26 @@ describe('zswap merkle tree collapsed update queries', () => {
       const response = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(-1, 1);
 
       expect(response).toBeError();
+      expect(response.errors![0].message).toContain('Invalid number');
+    });
+
+    /**
+     * A collapsed update query where endIndex exceeds the indexed zswap range should return an error
+     *
+     * @given we use an endIndex far beyond the current indexed range
+     * @when we query for a collapsed update
+     * @then Indexer should respond with an error about invalid Merkle tree collapsed update
+     */
+    test('should return an error when endIndex is beyond the indexed range', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Zswap', 'CollapsedUpdate', 'Negative'],
+      };
+
+      log.debug('Requesting zswap merkle tree collapsed update with startIndex=0, endIndex=999999999');
+      const response = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, 999999999);
+
+      expect(response).toBeError();
+      expect(response.errors![0].message).toContain('invalid start_index and/or end_index');
     });
   });
 });

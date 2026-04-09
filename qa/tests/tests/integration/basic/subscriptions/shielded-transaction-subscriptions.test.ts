@@ -26,7 +26,8 @@ import {
 } from '@utils/indexer/websocket-client';
 import { generateSyntheticViewingKey } from '@utils/bech32-codec';
 import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
-import { ShieldedTransactionEventSchema } from '@utils/indexer/graphql/schema';
+import { IndexerHttpClient } from '@utils/indexer/http-client';
+import { MerkleTreeCollapsedUpdateSchema, ShieldedTransactionEventSchema } from '@utils/indexer/graphql/schema';
 import dataProvider from '@utils/testdata-provider';
 
 // This is longer because it might take some time when
@@ -289,6 +290,69 @@ describe('shielded transaction subscriptions', () => {
           ).toBe(true);
         });
     });
+
+    /**
+     * The shielded transaction subscription provides progress events with highestZswapEndIndex.
+     * A wallet can use this value to request a collapsed Merkle tree update via the
+     * zswapMerkleTreeCollapsedUpdate query, mirroring the real wallet sync flow.
+     *
+     * @given a valid viewing key and an open wallet session
+     * @when we receive a ShieldedTransactionsProgress event with highestZswapEndIndex
+     * @then using that endIndex in zswapMerkleTreeCollapsedUpdate should return a valid result
+     */
+    test('should be able to use highestZswapEndIndex from progress event in collapsed update query', async () => {
+      const seedWithTransactions = dataProvider.getFundingSeed();
+      const viewingKey = await toolkit.showViewingKey(seedWithTransactions);
+
+      const sessionId: string = await indexerWsClient.openWalletSession(viewingKey);
+
+      // Collect events until we get a ShieldedTransactionsProgress
+      const highestZswapEndIndex = await new Promise<number>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Timed out waiting for ShieldedTransactionsProgress event'));
+        }, 15_000);
+
+        const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
+          {
+            next: (payload) => {
+              const event = payload.data?.shieldedTransactions;
+              if (event?.__typename === 'ShieldedTransactionsProgress') {
+                log.debug(`Received progress event: ${JSON.stringify(event)}`);
+                clearTimeout(timeout);
+                unsubscribe();
+                resolve(event.highestZswapEndIndex);
+              }
+            },
+          },
+          sessionId,
+        );
+      });
+
+      log.debug(`highestZswapEndIndex from progress event = ${highestZswapEndIndex}`);
+      expect(highestZswapEndIndex).toBeGreaterThan(0);
+
+      // highestZswapEndIndex is exclusive, so the collapsed update query needs (highestZswapEndIndex - 1)
+      const indexerHttpClient = new IndexerHttpClient();
+      const endIndex = highestZswapEndIndex - 1;
+      log.debug(`Querying collapsed update with startIndex=0, endIndex=${endIndex}`);
+      const response = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, endIndex);
+
+      expect(response).toBeSuccess();
+      expect(response.data?.zswapMerkleTreeCollapsedUpdate).toBeDefined();
+
+      const collapsedUpdate = response.data!.zswapMerkleTreeCollapsedUpdate;
+      expect(collapsedUpdate.startIndex).toBe(0);
+      expect(collapsedUpdate.endIndex).toBe(endIndex);
+
+      log.debug('Validating collapsed update schema');
+      const parsed = MerkleTreeCollapsedUpdateSchema.safeParse(collapsedUpdate);
+      expect(
+        parsed.success,
+        `Collapsed update schema validation failed ${JSON.stringify(parsed.error, null, 2)}`,
+      ).toBe(true);
+
+      await indexerWsClient.closeWalletSession(sessionId);
+    }, 30_000);
 
     /**
     * Ensures that a shielded transaction subscription cannot use a session ID
