@@ -73,14 +73,14 @@ impl DustGenerationsStorage for Storage {
             let mut registration_data = Vec::with_capacity(registrations.len());
 
             for (dust_address, valid, utxo_tx_hash, utxo_output_index) in registrations {
-                let generation_query = indoc! {"
+                let generations_query = indoc! {"
                     SELECT value, ctime
                     FROM dust_generation_info
                     WHERE owner = $1
                     AND dtime IS NULL
                 "};
 
-                let generations = sqlx::query_as::<_, (U128BeBytes, i64)>(generation_query)
+                let generations = sqlx::query_as::<_, (U128BeBytes, i64)>(generations_query)
                     .bind(dust_address.as_ref())
                     .fetch_all(&*self.pool)
                     .await?;
