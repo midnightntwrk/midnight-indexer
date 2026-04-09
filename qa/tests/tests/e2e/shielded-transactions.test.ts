@@ -18,7 +18,8 @@ import log from '@utils/logging/logger';
 import dataProvider from '@utils/testdata-provider';
 import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 
-import type { Transaction } from '@utils/indexer/indexer-types';
+import type { Transaction, RegularTransaction } from '@utils/indexer/indexer-types';
+import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { getBlockByHashWithRetry, getTransactionByHashWithRetry, resolveBlockHash } from './test-utils';
 import { TestContext } from 'vitest';
 import { collectValidZswapEvents } from 'tests/shared/zswap-events-utils';
@@ -30,7 +31,9 @@ import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
 describe('shielded transactions', () => {
   let indexerWsClient: IndexerWsClient;
   let indexerEventCoordinator: EventCoordinator;
+  let indexerHttpClient: IndexerHttpClient;
   let previousMaxLedgerId: number;
+  let zswapEndIndexBeforeTx: number;
   let toolkit: ToolkitWrapper;
   let transactionResult: ToolkitTransactionResult;
 
@@ -43,6 +46,7 @@ describe('shielded transactions', () => {
   beforeAll(async () => {
     indexerWsClient = new IndexerWsClient();
     indexerEventCoordinator = new EventCoordinator();
+    indexerHttpClient = new IndexerHttpClient();
     await indexerWsClient.connectionInit();
     // Start a one-off toolkit container
     toolkit = new ToolkitWrapper({});
@@ -59,6 +63,18 @@ describe('shielded transactions', () => {
     );
     previousMaxLedgerId = beforeDustEvents[0].data!.dustLedgerEvents.maxId;
     log.debug(`Previous max ledger ID before tx = ${previousMaxLedgerId}`);
+
+    // Capture the highest zswapEndIndex before the transaction from genesis block.
+    // E2E tests run on a fresh environment, so genesis provides the baseline zswap state.
+    const genesisResponse = await indexerHttpClient.getBlockByOffset({ height: 0 });
+    const genesisTxs = genesisResponse.data!.block.transactions;
+    zswapEndIndexBeforeTx = genesisTxs.reduce((max, tx) => {
+      const regularTx = tx as RegularTransaction;
+      return regularTx.zswapEndIndex != null && regularTx.zswapEndIndex > max
+        ? regularTx.zswapEndIndex
+        : max;
+    }, 0);
+    log.debug(`Highest zswapEndIndex from genesis = ${zswapEndIndexBeforeTx}`);
 
     // Submit one shielded->shielded transfer (1 STAR)
     transactionResult = await toolkit.generateSingleTx(
@@ -215,6 +231,40 @@ describe('shielded transactions', () => {
       const dust = dustEvents[0].data!.dustLedgerEvents;
       expect(dust.__typename).toBe('DustSpendProcessed');
       expect(dust.id).toBe(lastZswapMaxId + 1);
+    });
+
+    /**
+     * After a shielded transaction is confirmed, the zswap Merkle tree should grow.
+     * The zswapEndIndex of the transaction should be higher than the previous maximum.
+     *
+     * @given a confirmed shielded transaction
+     * @when we query the transaction from the indexer
+     * @then the transaction's zswapEndIndex should be greater than the zswapEndIndex before the transaction
+     */
+    test('should increase the zswap Merkle tree end index', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Transaction', 'Zswap', 'ShieldedTokens'],
+      };
+
+      ctx.skip?.(
+        transactionResult.status !== 'confirmed',
+        "Toolkit transaction hasn't been confirmed",
+      );
+
+      const transactionResponse = await getTransactionByHashWithRetry(transactionResult.txHash);
+      expect(transactionResponse).toBeSuccess();
+
+      const transactions = transactionResponse.data!.transactions;
+      const tx = transactions.find(
+        (t: Transaction) => t.hash === transactionResult.txHash,
+      );
+      expect(tx).toBeDefined();
+
+      const regularTx = tx as RegularTransaction;
+      expect(regularTx.zswapEndIndex).toBeDefined();
+      expect(regularTx.zswapEndIndex!).toBeGreaterThan(zswapEndIndexBeforeTx);
+
+      log.debug(`zswapEndIndex before tx: ${zswapEndIndexBeforeTx}, after tx: ${regularTx.zswapEndIndex}`);
     });
 
     /**

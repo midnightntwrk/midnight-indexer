@@ -20,7 +20,7 @@ export const SHIELDED_TRANSACTION_SUBSCRIPTION_BY_SESSION_ID = `subscription Wal
             transaction {
                 hash
             }
-            collapsedMerkleTree {
+            zswapCollapsedUpdate {
                 startIndex
                 endIndex
                 update
@@ -29,9 +29,9 @@ export const SHIELDED_TRANSACTION_SUBSCRIPTION_BY_SESSION_ID = `subscription Wal
         }
         ... on ShieldedTransactionsProgress {
             __typename
-            highestEndIndex
-            highestCheckedEndIndex
-            highestRelevantEndIndex
+            highestZswapEndIndex
+            highestCheckedZswapEndIndex
+            highestRelevantZswapEndIndex
         }
     }
 }`;
@@ -114,6 +114,7 @@ export const BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription BlocksSubscri
     timestamp
     protocolVersion
     ledgerParameters
+    zswapMerkleTreeRoot
     parent {
       hash
       height
@@ -145,6 +146,7 @@ export const BLOCKS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription BlocksSubs
     timestamp
     protocolVersion
     ledgerParameters
+    zswapMerkleTreeRoot
     parent {
       hash
       height
@@ -201,10 +203,10 @@ export const BLOCKS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription BlocksSubs
         protocolVersion
       }
       ... on RegularTransaction {
-        merkleTreeRoot
+        zswapMerkleTreeRoot
         identifiers
-        startIndex
-        endIndex
+        zswapStartIndex
+        zswapEndIndex
         fees {
           paidFees
           estimatedFees

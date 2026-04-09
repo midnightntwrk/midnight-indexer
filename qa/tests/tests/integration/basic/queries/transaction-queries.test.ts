@@ -382,7 +382,7 @@ describe(`genesis transactions`, () => {
 
     /**
      * SystemTransactions should not have RegularTransaction-specific fields like
-     * merkleTreeRoot, identifiers, fees, or transactionResult.
+     * zswapMerkleTreeRoot, identifiers, fees, or transactionResult.
      *
      * @given system transactions are fetched from the genesis block
      * @when we inspect their fields
@@ -394,7 +394,7 @@ describe(`genesis transactions`, () => {
 
       for (const tx of systemTxs) {
         const txAny = tx as unknown as Record<string, unknown>;
-        expect(txAny['merkleTreeRoot']).toBeUndefined();
+        expect(txAny['zswapMerkleTreeRoot']).toBeUndefined();
         expect(txAny['identifiers']).toBeUndefined();
         expect(txAny['fees']).toBeUndefined();
         expect(txAny['transactionResult']).toBeUndefined();

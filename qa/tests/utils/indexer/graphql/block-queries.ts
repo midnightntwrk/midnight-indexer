@@ -15,6 +15,16 @@
 
 import { TRANSACTION_BODY_FRAGMENT } from './transaction-queries';
 
+export const GET_ZSWAP_MERKLE_TREE_COLLAPSED_UPDATE = `
+query ZswapMerkleTreeCollapsedUpdate($START_INDEX: Int!, $END_INDEX: Int!) {
+  zswapMerkleTreeCollapsedUpdate(startIndex: $START_INDEX, endIndex: $END_INDEX) {
+    startIndex
+    endIndex
+    update
+    protocolVersion
+  }
+}`;
+
 export const GET_LATEST_BLOCK = `
 query GetLatestBlock{
   block{
@@ -24,6 +34,7 @@ query GetLatestBlock{
     timestamp
     author
     ledgerParameters
+    zswapMerkleTreeRoot
     parent {
         hash
         height
@@ -43,6 +54,7 @@ query GetBlock($OFFSET: BlockOffset!){
     timestamp
     author
     ledgerParameters
+    zswapMerkleTreeRoot
     parent {
       hash
       height
