@@ -181,6 +181,16 @@ CREATE TABLE dust_nullifiers (
 CREATE INDEX dust_nullifiers_nullifier_idx ON dust_nullifiers (nullifier);
 CREATE INDEX dust_nullifiers_transaction_id_idx ON dust_nullifiers (transaction_id);
 CREATE INDEX dust_nullifiers_block_id_idx ON dust_nullifiers (block_id);
+-- Zswap (shielded) nullifier tracking for shieldedNullifierTransactions subscription
+CREATE TABLE zswap_nullifiers (
+  id INTEGER PRIMARY KEY,
+  nullifier BLOB NOT NULL,
+  transaction_id INTEGER NOT NULL REFERENCES transactions (id),
+  block_id INTEGER NOT NULL REFERENCES blocks (id)
+);
+CREATE INDEX zswap_nullifiers_nullifier_idx ON zswap_nullifiers (nullifier);
+CREATE INDEX zswap_nullifiers_transaction_id_idx ON zswap_nullifiers (transaction_id);
+CREATE INDEX zswap_nullifiers_block_id_idx ON zswap_nullifiers (block_id);
 -- cNIGHT registration tracking
 CREATE TABLE cnight_registrations (
   id INTEGER PRIMARY KEY,

@@ -17,6 +17,7 @@ mod dust;
 mod dust_generations;
 mod ledger_events;
 mod ledger_state;
+mod shielded_nullifiers;
 mod spo;
 mod system_parameters;
 mod transaction;

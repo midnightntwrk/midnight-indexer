@@ -243,11 +243,11 @@ pub struct LedgerEvent {
 }
 
 impl LedgerEvent {
-    fn zswap_input(raw: SerializedLedgerEvent) -> Self {
+    fn zswap_input(raw: SerializedLedgerEvent, nullifier: ByteVec) -> Self {
         Self {
             grouping: LedgerEventGrouping::Zswap,
             raw,
-            attributes: LedgerEventAttributes::ZswapInput,
+            attributes: LedgerEventAttributes::ZswapInput { nullifier },
         }
     }
 
@@ -319,7 +319,9 @@ impl LedgerEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LedgerEventAttributes {
-    ZswapInput,
+    ZswapInput {
+        nullifier: ByteVec,
+    },
 
     ZswapOutput,
 

@@ -17,6 +17,7 @@ mod dust_generations;
 mod dust_ledger_events;
 mod dust_nullifier_transactions;
 mod shielded;
+mod shielded_nullifier_transactions;
 mod unshielded;
 mod zswap_ledger_events;
 
@@ -27,7 +28,9 @@ use crate::{
         dust_generations::DustGenerationsSubscription,
         dust_ledger_events::DustLedgerEventsSubscription,
         dust_nullifier_transactions::DustNullifierTransactionsSubscription,
-        shielded::ShieldedTransactionsSubscription, unshielded::UnshieldedTransactionsSubscription,
+        shielded::ShieldedTransactionsSubscription,
+        shielded_nullifier_transactions::ShieldedNullifierTransactionsSubscription,
+        unshielded::UnshieldedTransactionsSubscription,
         zswap_ledger_events::ZswapLedgerEventsSubscription,
     },
 };
@@ -41,6 +44,7 @@ pub struct Subscription<S, B>(
     DustGenerationsSubscription<S, B>,
     DustLedgerEventsSubscription<S, B>,
     DustNullifierTransactionsSubscription<S, B>,
+    ShieldedNullifierTransactionsSubscription<S, B>,
     ShieldedTransactionsSubscription<S, B>,
     UnshieldedTransactionsSubscription<S, B>,
     ZswapLedgerEventsSubscription<S, B>,
@@ -61,6 +65,7 @@ where
             DustGenerationsSubscription::default(),
             DustLedgerEventsSubscription::default(),
             DustNullifierTransactionsSubscription::default(),
+            ShieldedNullifierTransactionsSubscription::default(),
             ShieldedTransactionsSubscription::default(),
             UnshieldedTransactionsSubscription::default(),
             ZswapLedgerEventsSubscription::default(),

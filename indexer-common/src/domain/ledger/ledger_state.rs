@@ -591,7 +591,10 @@ where
             Ok::<_, Error>((event, raw))
         })
         .filter_map_ok(|(event, raw)| match event.content {
-            EventDetailsV8::ZswapInput { .. } => Some(Ok(LedgerEvent::zswap_input(raw))),
+            EventDetailsV8::ZswapInput { nullifier, .. } => Some(Ok(LedgerEvent::zswap_input(
+                raw,
+                nullifier.0.0.to_vec().into(),
+            ))),
 
             EventDetailsV8::ZswapOutput { .. } => Some(Ok(LedgerEvent::zswap_output(raw))),
 

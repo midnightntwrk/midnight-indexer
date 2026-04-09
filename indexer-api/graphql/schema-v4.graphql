@@ -909,6 +909,28 @@ type Segment {
 }
 
 """
+A transaction containing a shielded (zswap) nullifier match with block context.
+"""
+type ShieldedNullifierTransaction {
+	"""
+	The hex-encoded matched nullifier.
+	"""
+	nullifier: HexEncoded!
+	"""
+	The transaction ID (use to query full transaction via `transaction` query).
+	"""
+	transactionId: Int!
+	"""
+	The block height containing this transaction.
+	"""
+	blockHeight: Int!
+	"""
+	The hex-encoded block hash (use to query block with ledger parameters).
+	"""
+	blockHash: HexEncoded!
+}
+
+"""
 An event of the shielded transactions subscription.
 """
 union ShieldedTransactionsEvent = RelevantTransaction | ShieldedTransactionsProgress
@@ -1076,6 +1098,12 @@ type Subscription {
 	If `toBlock` is specified, the subscription finishes after reaching that block.
 	"""
 	dustNullifierTransactions(nullifierPrefixes: [HexEncoded!]!, fromBlock: Int, toBlock: Int): DustNullifierTransaction!
+	"""
+	Subscribe to transactions containing shielded (zswap) nullifiers matching the provided
+	prefixes. Returns transaction and block references for wallet to fetch full data.
+	If `toBlock` is specified, the subscription finishes after reaching that block.
+	"""
+	shieldedNullifierTransactions(nullifierPrefixes: [HexEncoded!]!, fromBlock: Int, toBlock: Int): ShieldedNullifierTransaction!
 	"""
 	Subscribe to shielded transaction events for the given session ID starting at the given
 	index or at zero if omitted.

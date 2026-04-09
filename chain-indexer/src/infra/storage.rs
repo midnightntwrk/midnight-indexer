@@ -234,7 +234,7 @@ pub enum LedgerEventVariant {
 impl From<&LedgerEventAttributes> for LedgerEventVariant {
     fn from(attributes: &LedgerEventAttributes) -> Self {
         match attributes {
-            LedgerEventAttributes::ZswapInput => Self::ZswapInput,
+            LedgerEventAttributes::ZswapInput { .. } => Self::ZswapInput,
             LedgerEventAttributes::ZswapOutput => Self::ZswapOutput,
             LedgerEventAttributes::ParamChange => Self::ParamChange,
             LedgerEventAttributes::DustInitialUtxo { .. } => Self::DustInitialUtxo,
@@ -432,6 +432,8 @@ async fn save_regular_transaction(
     save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await?;
 
     save_dust_nullifiers(&transaction.ledger_events, transaction_id, block_id, tx).await?;
+
+    save_zswap_nullifiers(&transaction.ledger_events, transaction_id, block_id, tx).await?;
 
     Ok(transaction_id as u64)
 }
@@ -795,6 +797,47 @@ async fn save_dust_nullifiers(
         .push_values(nullifier_events, |mut q, (nullifier, commitment)| {
             q.push_bind(nullifier.as_ref())
                 .push_bind(commitment.as_ref())
+                .push_bind(transaction_id)
+                .push_bind(block_id);
+        })
+        .build()
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace(properties = { "transaction_id": "{transaction_id}", "block_id": "{block_id}" })]
+async fn save_zswap_nullifiers(
+    ledger_events: &[LedgerEvent],
+    transaction_id: i64,
+    block_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let nullifier_events = ledger_events
+        .iter()
+        .filter_map(|event| match &event.attributes {
+            LedgerEventAttributes::ZswapInput { nullifier } => Some(nullifier),
+
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    if nullifier_events.is_empty() {
+        return Ok(());
+    }
+
+    let query = indoc! {"
+        INSERT INTO zswap_nullifiers (
+            nullifier,
+            transaction_id,
+            block_id
+        )
+    "};
+
+    QueryBuilder::new(query)
+        .push_values(nullifier_events, |mut q, nullifier| {
+            q.push_bind(nullifier.as_ref())
                 .push_bind(transaction_id)
                 .push_bind(block_id);
         })
