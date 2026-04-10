@@ -41,6 +41,7 @@ impl<S: Storage> Loader<BlockHash> for BlockByHashLoader<S> {
             .into_iter()
             .map(|b| (b.hash, b))
             .collect();
+
         Ok(blocks)
     }
 }

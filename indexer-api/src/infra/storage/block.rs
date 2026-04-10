@@ -48,7 +48,7 @@ impl BlockStorage for Storage {
         if hashes.is_empty() {
             return Ok(vec![]);
         }
-        self.fetch_blocks_by_hashes(hashes).await
+        self.get_blocks_by_hashes(hashes).await
     }
 
     #[trace(properties = { "height": "{height}" })]
@@ -99,10 +99,7 @@ impl BlockStorage for Storage {
 
 impl Storage {
     #[cfg(feature = "cloud")]
-    async fn fetch_blocks_by_hashes(
-        &self,
-        hashes: &[BlockHash],
-    ) -> Result<Vec<Block>, sqlx::Error> {
+    async fn get_blocks_by_hashes(&self, hashes: &[BlockHash]) -> Result<Vec<Block>, sqlx::Error> {
         let hashes = hashes.iter().map(|h| h.as_ref()).collect::<Vec<_>>();
 
         let query = indoc! {"
@@ -127,10 +124,7 @@ impl Storage {
     }
 
     #[cfg(feature = "standalone")]
-    async fn fetch_blocks_by_hashes(
-        &self,
-        hashes: &[BlockHash],
-    ) -> Result<Vec<Block>, sqlx::Error> {
+    async fn get_blocks_by_hashes(&self, hashes: &[BlockHash]) -> Result<Vec<Block>, sqlx::Error> {
         use sqlx::{QueryBuilder, Sqlite};
 
         let query = indoc! {"
