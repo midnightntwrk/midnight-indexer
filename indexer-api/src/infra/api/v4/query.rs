@@ -16,7 +16,7 @@ use crate::{
     infra::api::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
-            CardanoNetworkId, CardanoRewardAddress, HexEncodable, HexEncoded,
+            CardanoNetworkId, CardanoRewardAddress, HexEncoded,
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
             dust::DustGenerationStatus,
@@ -310,31 +310,32 @@ where
     }
 
     /// Get a collapsed Merkle tree update for the dust commitment tree.
-    #[trace]
+    #[trace(properties = { "start_index": "{start_index}", "end_index": "{end_index}" })]
     async fn dust_commitment_merkle_tree_update(
         &self,
         cx: &Context<'_>,
         start_index: u64,
-        end_index: Option<u64>,
-    ) -> ApiResult<HexEncoded> {
-        let ledger_state_cache = cx.get_ledger_state_cache();
+        end_index: u64,
+    ) -> ApiResult<MerkleTreeCollapsedUpdate> {
         let storage = cx.get_storage::<S>();
 
-        let protocol_version = storage
-            .get_latest_block()
+        let (protocol_version, _) = storage
+            .get_highest_ledger_state()
             .await
-            .map_err_into_server_error(|| "get latest block")?
-            .some_or_server_error(|| "no blocks stored")?
-            .protocol_version;
+            .map_err_into_server_error(|| "get highest ledger state")?
+            .some_or_server_error(|| "no ledger state available")?;
 
-        let end_index = end_index.unwrap_or(u64::MAX);
-
-        Ok(ledger_state_cache
+        cx.get_ledger_state_cache()
             .dust_commitments_collapsed_update(start_index, end_index, storage, protocol_version)
             .await
-            .map_err_into_server_error(|| "create dust commitment collapsed update")?
-            .update
-            .hex_encode())
+            .map_err(|error| match error {
+                error @ LedgerStateCacheError::Ledger(ledger::Error::InvalidUpdate(_)) => {
+                    ApiError::client("invalid start_index and/or end_index", error)
+                }
+
+                error => ApiError::server("create dust commitment collapsed update", error),
+            })
+            .map(MerkleTreeCollapsedUpdate::from)
     }
 
     /// Get the full history of D-parameter changes for governance auditability.

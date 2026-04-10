@@ -867,8 +867,13 @@ query DustGenerationsQuery($cardanoRewardAddresses: [CardanoRewardAddress!]!) {
     }
 }
 
-query DustCommitmentMerkleTreeUpdateQuery($startIndex: Int!, $endIndex: Int) {
-    dustCommitmentMerkleTreeUpdate(startIndex: $startIndex, endIndex: $endIndex)
+query DustCommitmentMerkleTreeUpdateQuery($startIndex: Int!, $endIndex: Int!) {
+    dustCommitmentMerkleTreeUpdate(startIndex: $startIndex, endIndex: $endIndex) {
+        startIndex
+        endIndex
+        update
+        protocolVersion
+    }
 }
 
 query DParameterHistoryQuery {
