@@ -13,8 +13,11 @@
 
 pub mod v4;
 
-use crate::domain::{Api, LedgerStateCache, storage::Storage};
-use async_graphql::Context;
+use crate::{
+    domain::{Api, LedgerStateCache, storage::Storage},
+    infra::api::v4::dataloader::BlockByHashLoader,
+};
+use async_graphql::{Context, dataloader::DataLoader};
 use axum::{
     Router,
     body::Body,
@@ -331,6 +334,10 @@ trait ContextExt {
     where
         S: Storage;
 
+    fn get_block_by_hash_loader<S>(&self) -> &DataLoader<BlockByHashLoader<S>>
+    where
+        S: Storage;
+
     fn get_subscriber<B>(&self) -> &B
     where
         B: Subscriber;
@@ -353,6 +360,14 @@ impl ContextExt for Context<'_> {
         S: Storage,
     {
         self.data::<S>().expect("Storage is stored in Context")
+    }
+
+    fn get_block_by_hash_loader<S>(&self) -> &DataLoader<BlockByHashLoader<S>>
+    where
+        S: Storage,
+    {
+        self.data::<DataLoader<BlockByHashLoader<S>>>()
+            .expect("BlockByHashLoader is stored in Context")
     }
 
     fn get_subscriber<B>(&self) -> &B

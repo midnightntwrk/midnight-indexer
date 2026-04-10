@@ -24,8 +24,8 @@ where
     /// Get the latest block.
     async fn get_latest_block(&self) -> Result<Option<Block>, sqlx::Error>;
 
-    /// Get a block for the given hash.
-    async fn get_block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>, sqlx::Error>;
+    /// Get blocks for the given hashes.
+    async fn get_blocks_by_hashes(&self, hashes: &[BlockHash]) -> Result<Vec<Block>, sqlx::Error>;
 
     /// Get a block for the given block height.
     async fn get_block_by_height(&self, height: u32) -> Result<Option<Block>, sqlx::Error>;
@@ -44,7 +44,7 @@ impl BlockStorage for NoopStorage {
         unimplemented!()
     }
 
-    async fn get_block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>, sqlx::Error> {
+    async fn get_blocks_by_hashes(&self, _hashes: &[BlockHash]) -> Result<Vec<Block>, sqlx::Error> {
         unimplemented!()
     }
 

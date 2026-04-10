@@ -44,28 +44,11 @@ impl BlockStorage for Storage {
         sqlx::query_as(query).fetch_optional(&*self.pool).await
     }
 
-    #[trace(properties = { "hash": "{hash}" })]
-    async fn get_block_by_hash(&self, hash: BlockHash) -> Result<Option<Block>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT
-                id,
-                hash,
-                height,
-                protocol_version,
-                parent_hash,
-                author,
-                timestamp,
-                zswap_merkle_tree_root,
-                ledger_parameters
-            FROM blocks
-            WHERE hash = $1
-            LIMIT 1
-        "};
-
-        sqlx::query_as(query)
-            .bind(hash.as_ref())
-            .fetch_optional(&*self.pool)
-            .await
+    async fn get_blocks_by_hashes(&self, hashes: &[BlockHash]) -> Result<Vec<Block>, sqlx::Error> {
+        if hashes.is_empty() {
+            return Ok(vec![]);
+        }
+        self.get_blocks_by_hashes(hashes).await
     }
 
     #[trace(properties = { "height": "{height}" })]
@@ -115,6 +98,60 @@ impl BlockStorage for Storage {
 }
 
 impl Storage {
+    #[cfg(feature = "cloud")]
+    async fn get_blocks_by_hashes(&self, hashes: &[BlockHash]) -> Result<Vec<Block>, sqlx::Error> {
+        let hashes = hashes.iter().map(|h| h.as_ref()).collect::<Vec<_>>();
+
+        let query = indoc! {"
+            SELECT
+                id,
+                hash,
+                height,
+                protocol_version,
+                parent_hash,
+                author,
+                timestamp,
+                zswap_merkle_tree_root,
+                ledger_parameters
+            FROM blocks
+            WHERE hash = ANY($1)
+        "};
+
+        sqlx::query_as(query)
+            .bind(hashes)
+            .fetch_all(&*self.pool)
+            .await
+    }
+
+    #[cfg(feature = "standalone")]
+    async fn get_blocks_by_hashes(&self, hashes: &[BlockHash]) -> Result<Vec<Block>, sqlx::Error> {
+        use sqlx::{QueryBuilder, Sqlite};
+
+        let query = indoc! {"
+            SELECT
+                id,
+                hash,
+                height,
+                protocol_version,
+                parent_hash,
+                author,
+                timestamp,
+                zswap_merkle_tree_root,
+                ledger_parameters
+            FROM blocks
+            WHERE hash IN (
+        "};
+
+        let mut query = QueryBuilder::<Sqlite>::new(query);
+        let mut sep = query.separated(", ");
+        for hash in hashes {
+            sep.push_bind(hash.as_ref());
+        }
+        query.push(")");
+
+        query.build_query_as().fetch_all(&*self.pool).await
+    }
+
     #[trace(properties = { "height": "{height}", "batch_size": "{batch_size}" })]
     async fn get_blocks(
         &self,

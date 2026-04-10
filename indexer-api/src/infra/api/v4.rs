@@ -13,6 +13,7 @@
 
 pub mod block;
 pub mod contract_action;
+pub mod dataloader;
 pub mod dust;
 pub mod dust_generations;
 pub mod ledger_events;
@@ -32,11 +33,14 @@ use crate::{
         storage::{NoopStorage, Storage},
     },
     infra::api::{
-        ApiResult, Metrics, OptionExt, ResultExt, SubscriptionConfig,
-        v4::{block::BlockOffset, mutation::Mutation, query::Query, subscription::Subscription},
+        ApiResult, ContextExt, Metrics, OptionExt, ResultExt, SubscriptionConfig,
+        v4::{
+            block::BlockOffset, dataloader::BlockByHashLoader, mutation::Mutation, query::Query,
+            subscription::Subscription,
+        },
     },
 };
-use async_graphql::{Schema, SchemaBuilder, scalar};
+use async_graphql::{Context, Schema, SchemaBuilder, dataloader::DataLoader, scalar};
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{Extension, Router, routing::post};
 use bech32::{Bech32, Bech32m, Hrp};
@@ -361,6 +365,10 @@ where
     let schema = schema_builder::<S, B>()
         .data(network_id)
         .data(ledger_state_cache)
+        .data(DataLoader::new(
+            BlockByHashLoader::new(storage.clone()),
+            tokio::spawn,
+        ))
         .data(storage)
         .data(subscriber)
         .data(metrics)
@@ -417,9 +425,12 @@ enum DecodeSessionIdError {
 }
 
 /// Resolve the block height for the given optional block offset. If it is a block height, it is
-/// simple, if it is a hash, the block is loaded and its height returned. If the block offset is
-/// omitted, the last block is loaded and its height returned.
-async fn resolve_height(offset: Option<BlockOffset>, storage: &impl Storage) -> ApiResult<u32> {
+/// simple, if it is a hash, the block is loaded via the DataLoader and its height returned. If the
+/// block offset is omitted, the last block is loaded and its height returned.
+async fn resolve_height<S: Storage>(
+    offset: Option<BlockOffset>,
+    cx: &Context<'_>,
+) -> ApiResult<u32> {
     match offset {
         Some(offset) => match offset {
             BlockOffset::Hash(hash) => {
@@ -427,8 +438,9 @@ async fn resolve_height(offset: Option<BlockOffset>, storage: &impl Storage) -> 
                     .hex_decode()
                     .map_err_into_client_error(|| "invalid block hash")?;
 
-                let block = storage
-                    .get_block_by_hash(hash)
+                let block = cx
+                    .get_block_by_hash_loader::<S>()
+                    .load_one(hash)
                     .await
                     .map_err_into_server_error(|| format!("get block by hash {hash}"))?
                     .some_or_client_error(|| format!("block with hash {hash} not found"))?;
@@ -437,7 +449,7 @@ async fn resolve_height(offset: Option<BlockOffset>, storage: &impl Storage) -> 
             }
 
             BlockOffset::Height(height) => {
-                storage
+                cx.get_storage::<S>()
                     .get_block_by_height(height)
                     .await
                     .map_err_into_server_error(|| "get block by height")?
@@ -448,7 +460,8 @@ async fn resolve_height(offset: Option<BlockOffset>, storage: &impl Storage) -> 
         },
 
         None => {
-            let latest_block = storage
+            let latest_block = cx
+                .get_storage::<S>()
                 .get_latest_block()
                 .await
                 .map_err_into_server_error(|| "get latest block")?;
