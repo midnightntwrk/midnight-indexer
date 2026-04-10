@@ -183,9 +183,9 @@ CREATE INDEX ON dust_nullifiers (block_id);
 -- Zswap (shielded) nullifier tracking for shieldedNullifierTransactions subscription
 CREATE TABLE zswap_nullifiers (
   id BIGSERIAL PRIMARY KEY,
-  nullifier BYTEA NOT NULL,
   transaction_id BIGINT NOT NULL REFERENCES transactions (id),
-  block_id BIGINT NOT NULL REFERENCES blocks (id)
+  block_id BIGINT NOT NULL REFERENCES blocks (id),
+  nullifier BYTEA NOT NULL
 );
 CREATE INDEX ON zswap_nullifiers (nullifier);
 CREATE INDEX ON zswap_nullifiers (transaction_id);

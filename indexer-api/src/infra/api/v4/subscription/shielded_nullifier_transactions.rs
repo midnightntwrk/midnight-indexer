@@ -14,7 +14,7 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ApiResult, ContextExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{HexEncodable, HexEncoded},
     },
 };
@@ -42,14 +42,25 @@ impl<S, B> Default for ShieldedNullifierTransactionsSubscription<S, B> {
 /// A transaction containing a shielded (zswap) nullifier match with block context.
 #[derive(Debug, Clone, SimpleObject)]
 pub struct ShieldedNullifierTransaction {
-    /// The hex-encoded matched nullifier.
-    pub nullifier: HexEncoded,
     /// The transaction ID (use to query full transaction via `transaction` query).
     pub transaction_id: u64,
-    /// The block height containing this transaction.
-    pub block_height: u32,
     /// The hex-encoded block hash (use to query block with ledger parameters).
     pub block_hash: HexEncoded,
+    /// The block height containing this transaction.
+    pub block_height: u32,
+    /// The hex-encoded matched nullifier.
+    pub nullifier: HexEncoded,
+}
+
+impl From<crate::domain::ShieldedNullifierTransaction> for ShieldedNullifierTransaction {
+    fn from(t: crate::domain::ShieldedNullifierTransaction) -> Self {
+        Self {
+            transaction_id: t.transaction_id,
+            block_hash: t.block_hash.hex_encode(),
+            block_height: t.block_height,
+            nullifier: t.nullifier.hex_encode(),
+        }
+    }
 }
 
 #[Subscription]
@@ -78,6 +89,10 @@ where
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
 
         try_stream! {
+            (nullifier_prefixes.len() <= 10)
+                .then_some(())
+                .some_or_client_error(|| "maximum of ten nullifier prefixes allowed")?;
+
             let prefix_bytes = nullifier_prefixes
                 .iter()
                 .map(|p| const_hex::decode(p.as_ref()))
@@ -85,25 +100,20 @@ where
                 .map_err_into_client_error(|| "invalid hex-encoded nullifier prefix")?;
 
             let from = from_block.unwrap_or(0);
-            let to = to_block.unwrap_or(i64::MAX as u64);
+            let to = to_block.unwrap_or(u64::MAX);
 
             debug!("streaming existing shielded nullifier transactions");
 
-            let entries = storage
+            let transactions = storage
                 .get_shielded_nullifier_transactions(&prefix_bytes, from, to, batch_size)
                 .await;
-            let mut entries = pin!(entries);
-            while let Some(entry) = entries
+            let mut transactions = pin!(transactions);
+            while let Some(transaction) = transactions
                 .try_next()
                 .await
                 .map_err_into_server_error(|| "get next shielded nullifier transaction")?
             {
-                yield ShieldedNullifierTransaction {
-                    nullifier: entry.nullifier.hex_encode(),
-                    transaction_id: entry.transaction_id,
-                    block_height: entry.block_height,
-                    block_hash: entry.block_hash.hex_encode(),
-                };
+                yield ShieldedNullifierTransaction::from(transaction);
             }
 
             if let Some(to) = to_block {
@@ -127,21 +137,16 @@ where
                 .map_err_into_server_error(|| "get next BlockIndexed event")?
                 .is_some()
             {
-                let entries = storage
+                let transactions = storage
                     .get_shielded_nullifier_transactions(&prefix_bytes, from, to, batch_size)
                     .await;
-                let mut entries = pin!(entries);
-                while let Some(entry) = entries
+                let mut transactions = pin!(transactions);
+                while let Some(transaction) = transactions
                     .try_next()
                     .await
                     .map_err_into_server_error(|| "get next shielded nullifier transaction")?
                 {
-                    yield ShieldedNullifierTransaction {
-                        nullifier: entry.nullifier.hex_encode(),
-                        transaction_id: entry.transaction_id,
-                        block_height: entry.block_height,
-                        block_hash: entry.block_hash.hex_encode(),
-                    };
+                    yield ShieldedNullifierTransaction::from(transaction);
                 }
 
                 if let Some(to) = to_block {

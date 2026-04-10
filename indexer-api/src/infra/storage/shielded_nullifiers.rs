@@ -36,6 +36,7 @@ impl ShieldedNullifiersStorage for Storage {
         let nullifier_prefixes = nullifier_prefixes.to_vec();
 
         try_stream! {
+            // Collected because per-prefix cursors require indexed access.
             let conditions = nullifier_prefixes
                 .iter()
                 .map(|prefix| {
@@ -51,6 +52,7 @@ impl ShieldedNullifiersStorage for Storage {
                 })
                 .collect::<Vec<_>>();
 
+            // Per-prefix cursor tracking: each prefix advances independently through the result set.
             let mut cursors = vec![0i64; conditions.len()];
 
             loop {
@@ -74,7 +76,7 @@ impl ShieldedNullifiersStorage for Storage {
                         .bind(&prefix[..])
                         .bind(&next_prefix[..])
                         .bind(from_block as i64)
-                        .bind(to_block as i64)
+                        .bind(to_block.min(i64::MAX as u64) as i64)
                         .bind(cursors[i])
                         .bind(batch_size.get() as i64)
                         .fetch_all(&*pool)

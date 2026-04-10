@@ -16,8 +16,8 @@ use indexer_common::domain::ByteVec;
 /// A shielded nullifier transaction for the subscription stream.
 #[derive(Debug, Clone)]
 pub struct ShieldedNullifierTransaction {
-    pub nullifier: ByteVec,
     pub transaction_id: u64,
-    pub block_height: u32,
     pub block_hash: ByteVec,
+    pub block_height: u32,
+    pub nullifier: ByteVec,
 }

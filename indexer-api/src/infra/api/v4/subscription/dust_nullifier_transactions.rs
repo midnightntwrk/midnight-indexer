@@ -87,7 +87,7 @@ where
                 .map_err_into_client_error(|| "invalid hex-encoded nullifier prefix")?;
 
             let from = from_block.unwrap_or(0);
-            let to = to_block.unwrap_or(i64::MAX as u64);
+            let to = to_block.unwrap_or(u64::MAX);
 
             debug!("streaming existing dust nullifier transactions");
 

@@ -913,21 +913,21 @@ A transaction containing a shielded (zswap) nullifier match with block context.
 """
 type ShieldedNullifierTransaction {
 	"""
-	The hex-encoded matched nullifier.
-	"""
-	nullifier: HexEncoded!
-	"""
 	The transaction ID (use to query full transaction via `transaction` query).
 	"""
 	transactionId: Int!
+	"""
+	The hex-encoded block hash (use to query block with ledger parameters).
+	"""
+	blockHash: HexEncoded!
 	"""
 	The block height containing this transaction.
 	"""
 	blockHeight: Int!
 	"""
-	The hex-encoded block hash (use to query block with ledger parameters).
+	The hex-encoded matched nullifier.
 	"""
-	blockHash: HexEncoded!
+	nullifier: HexEncoded!
 }
 
 """

@@ -213,6 +213,7 @@ impl DustGenerationsStorage for Storage {
                 })
                 .collect::<Vec<_>>();
 
+            // Per-prefix cursor tracking: each prefix advances independently through the result set.
             let mut cursors = vec![0i64; conditions.len()];
 
             loop {
@@ -236,7 +237,7 @@ impl DustGenerationsStorage for Storage {
                         .bind(&prefix[..])
                         .bind(&next_prefix[..])
                         .bind(from_block as i64)
-                        .bind(to_block as i64)
+                        .bind(to_block.min(i64::MAX as u64) as i64)
                         .bind(cursors[i])
                         .bind(batch_size.get() as i64)
                         .fetch_all(&*pool)

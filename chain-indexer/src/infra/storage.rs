@@ -829,17 +829,17 @@ async fn save_zswap_nullifiers(
 
     let query = indoc! {"
         INSERT INTO zswap_nullifiers (
-            nullifier,
             transaction_id,
-            block_id
+            block_id,
+            nullifier
         )
     "};
 
     QueryBuilder::new(query)
         .push_values(nullifier_events, |mut q, nullifier| {
-            q.push_bind(nullifier.as_ref())
-                .push_bind(transaction_id)
-                .push_bind(block_id);
+            q.push_bind(transaction_id)
+                .push_bind(block_id)
+                .push_bind(nullifier.as_ref());
         })
         .build()
         .execute(&mut **tx)
