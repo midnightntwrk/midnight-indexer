@@ -85,10 +85,11 @@ where
     /// The transactions within this block.
     async fn transactions(&self, cx: &Context<'_>) -> ApiResult<Vec<Transaction<S>>> {
         let transactions = cx
-            .get_storage::<S>()
-            .get_transactions_by_block_id(self.id)
+            .get_transactions_by_block_id_loader::<S>()
+            .load_one(self.id)
             .await
-            .map_err_into_server_error(|| format!("get transactions by block id {}", self.id))?;
+            .map_err_into_server_error(|| format!("get transactions by block id {}", self.id))?
+            .unwrap_or_default();
 
         Ok(transactions.into_iter().map(Into::into).collect())
     }

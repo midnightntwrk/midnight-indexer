@@ -25,8 +25,12 @@ where
     /// Get a transaction for the given ID.
     async fn get_transaction_by_id(&self, id: u64) -> Result<Option<Transaction>, sqlx::Error>;
 
-    /// Get the transactions for the block with the given ID, ordered by transaction ID.
-    async fn get_transactions_by_block_id(&self, id: u64) -> Result<Vec<Transaction>, sqlx::Error>;
+    /// Get the transactions for the blocks with the given IDs, ordered by block ID and transaction
+    /// ID. Each tuple carries the block ID alongside its transaction for grouping by the caller.
+    async fn get_transactions_by_block_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<(u64, Transaction)>, sqlx::Error>;
 
     /// Get transactions for the given hash, ordered descendingly by transaction ID. Transaction
     /// hashes are unique for successful transactions, yet not for failed ones.
@@ -83,7 +87,10 @@ impl TransactionStorage for NoopStorage {
         unimplemented!()
     }
 
-    async fn get_transactions_by_block_id(&self, id: u64) -> Result<Vec<Transaction>, sqlx::Error> {
+    async fn get_transactions_by_block_ids(
+        &self,
+        _ids: &[u64],
+    ) -> Result<Vec<(u64, Transaction)>, sqlx::Error> {
         unimplemented!()
     }
 
