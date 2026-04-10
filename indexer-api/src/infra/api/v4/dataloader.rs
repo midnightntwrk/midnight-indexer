@@ -17,6 +17,41 @@ use derive_more::Deref;
 use indexer_common::domain::BlockHash;
 use std::{collections::HashMap, sync::Arc};
 
+// ---- TransactionsByBlockIdLoader ----
+
+#[derive(Deref)]
+pub struct TransactionsByBlockIdLoader<S>(S);
+
+impl<S: Storage> TransactionsByBlockIdLoader<S> {
+    pub fn new(storage: S) -> Self {
+        Self(storage)
+    }
+}
+
+impl<S: Storage> Loader<u64> for TransactionsByBlockIdLoader<S> {
+    type Value = Vec<domain::Transaction>;
+    type Error = Arc<sqlx::Error>;
+
+    async fn load(
+        &self,
+        keys: &[u64],
+    ) -> Result<HashMap<u64, Vec<domain::Transaction>>, Arc<sqlx::Error>> {
+        let pairs = self
+            .get_transactions_by_block_ids(keys)
+            .await
+            .map_err(Arc::new)?;
+
+        let mut map: HashMap<u64, Vec<domain::Transaction>> = HashMap::new();
+        for (block_id, transaction) in pairs {
+            map.entry(block_id).or_default().push(transaction);
+        }
+
+        Ok(map)
+    }
+}
+
+// ---- BlockByHashLoader ----
+
 #[derive(Deref)]
 pub struct BlockByHashLoader<S>(S);
 

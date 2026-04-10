@@ -35,7 +35,10 @@ use crate::{
     infra::api::{
         ApiResult, ContextExt, Metrics, OptionExt, ResultExt, SubscriptionConfig,
         v4::{
-            block::BlockOffset, dataloader::BlockByHashLoader, mutation::Mutation, query::Query,
+            block::BlockOffset,
+            dataloader::{BlockByHashLoader, TransactionsByBlockIdLoader},
+            mutation::Mutation,
+            query::Query,
             subscription::Subscription,
         },
     },
@@ -367,6 +370,10 @@ where
         .data(ledger_state_cache)
         .data(DataLoader::new(
             BlockByHashLoader::new(storage.clone()),
+            tokio::spawn,
+        ))
+        .data(DataLoader::new(
+            TransactionsByBlockIdLoader::new(storage.clone()),
             tokio::spawn,
         ))
         .data(storage)
