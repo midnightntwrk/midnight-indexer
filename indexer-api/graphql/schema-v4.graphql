@@ -662,7 +662,7 @@ type Query {
 	"""
 	Get a collapsed Merkle tree update for the dust commitment tree.
 	"""
-	dustCommitmentMerkleTreeUpdate(startIndex: Int!, endIndex: Int): HexEncoded!
+	dustCommitmentMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!
 	"""
 	Get the full history of D-parameter changes for governance auditability.
 	"""
