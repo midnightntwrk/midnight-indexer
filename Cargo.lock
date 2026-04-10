@@ -3134,6 +3134,7 @@ dependencies = [
  "log",
  "secrecy",
  "serde",
+ "spo-indexer",
  "tokio",
  "wallet-indexer",
 ]
