@@ -69,6 +69,12 @@ where
         id: u64,
     ) -> Result<Vec<ContractAction>, sqlx::Error>;
 
+    /// Get the contract actions for the transactions with the given ids, ordered by transaction ID.
+    async fn get_contract_actions_by_transaction_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<ContractAction>, sqlx::Error>;
+
     /// Get a stream of contract actions for the given address starting at the given contract_action
     /// ID, ordered by transaction ID.
     fn get_contract_actions_by_address(
@@ -143,6 +149,13 @@ impl ContractActionStorage for NoopStorage {
     async fn get_contract_actions_by_transaction_id(
         &self,
         id: u64,
+    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    async fn get_contract_actions_by_transaction_ids(
+        &self,
+        _ids: &[u64],
     ) -> Result<Vec<ContractAction>, sqlx::Error> {
         unimplemented!()
     }
