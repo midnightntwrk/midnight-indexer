@@ -155,6 +155,7 @@ pub struct ApplyRegularTransactionOutcome {
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub ledger_events: Vec<LedgerEvent>,
+    pub fees: u128,
 }
 
 /// The outcome of applying a system transaction to the ledger state along with extracted data.
@@ -210,16 +211,6 @@ pub struct ContractBalance {
 
     /// Balance amount as u128.
     pub amount: u128,
-}
-
-/// Transaction structure for fees calculation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TransactionStructure {
-    pub segment_count: usize,
-    pub estimated_input_count: usize,
-    pub estimated_output_count: usize,
-    pub has_contract_operations: bool,
-    pub size: usize,
 }
 
 /// An unshielded UTXO.

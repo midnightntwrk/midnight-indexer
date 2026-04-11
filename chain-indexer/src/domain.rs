@@ -20,7 +20,6 @@ mod dust;
 mod ledger_state;
 mod system_parameters;
 mod transaction;
-mod transaction_fees;
 
 pub use block::*;
 pub use contract_action::*;
@@ -28,4 +27,3 @@ pub use dust::*;
 pub use ledger_state::*;
 pub use system_parameters::*;
 pub use transaction::*;
-pub use transaction_fees::*;
