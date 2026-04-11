@@ -198,27 +198,19 @@ impl DustGenerationsStorage for Storage {
         let nullifier_prefixes = nullifier_prefixes.to_vec();
 
         try_stream! {
-            let conditions = nullifier_prefixes
-                .iter()
-                .map(|prefix| {
-                    let mut next_prefix = prefix.clone();
-                    if let Some(last) = next_prefix.last_mut() {
-                        if *last < 255 {
-                            *last += 1;
-                        } else {
-                            next_prefix.push(0);
-                        }
+            for prefix in &nullifier_prefixes {
+                let mut next_prefix = prefix.clone();
+                if let Some(last) = next_prefix.last_mut() {
+                    if *last < 255 {
+                        *last += 1;
+                    } else {
+                        next_prefix.push(0);
                     }
-                    (prefix.clone(), next_prefix)
-                })
-                .collect::<Vec<_>>();
+                }
 
-            let mut cursors = vec![0i64; conditions.len()];
+                let mut cursor = 0i64;
 
-            loop {
-                let mut found_any = false;
-
-                for (i, (prefix, next_prefix)) in conditions.iter().enumerate() {
+                loop {
                     let query = indoc! {"
                         SELECT dn.id, dn.nullifier, dn.commitment, t.id, b.height, b.hash
                         FROM dust_nullifiers dn
@@ -236,15 +228,15 @@ impl DustGenerationsStorage for Storage {
                         .bind(&prefix[..])
                         .bind(&next_prefix[..])
                         .bind(from_block as i64)
-                        .bind(to_block as i64)
-                        .bind(cursors[i])
+                        .bind(to_block.min(i64::MAX as u64) as i64)
+                        .bind(cursor)
                         .bind(batch_size.get() as i64)
                         .fetch_all(&*pool)
                         .await?;
 
-                    if let Some(last) = rows.last() {
-                        cursors[i] = last.0;
-                        found_any = true;
+                    match rows.last() {
+                        Some(last) => cursor = last.0,
+                        None => break,
                     }
 
                     for (_, nullifier, commitment, transaction_id, block_height, block_hash) in rows {
@@ -256,10 +248,6 @@ impl DustGenerationsStorage for Storage {
                             block_hash,
                         };
                     }
-                }
-
-                if !found_any {
-                    break;
                 }
             }
         }

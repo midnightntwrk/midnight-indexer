@@ -19,6 +19,7 @@ pub mod dust;
 pub mod dust_generations;
 pub mod ledger_events;
 pub mod ledger_state;
+pub mod shielded_nullifiers;
 pub mod spo;
 pub mod system_parameters;
 pub mod transaction;
@@ -28,8 +29,9 @@ pub mod wallet;
 use crate::domain::storage::{
     block::BlockStorage, contract_action::ContractActionStorage, dust::DustStorage,
     dust_generations::DustGenerationsStorage, ledger_events::LedgerEventStorage,
-    ledger_state::LedgerStateStorage, spo::SpoStorage, system_parameters::SystemParametersStorage,
-    transaction::TransactionStorage, unshielded::UnshieldedUtxoStorage, wallet::WalletStorage,
+    ledger_state::LedgerStateStorage, shielded_nullifiers::ShieldedNullifiersStorage,
+    spo::SpoStorage, system_parameters::SystemParametersStorage, transaction::TransactionStorage,
+    unshielded::UnshieldedUtxoStorage, wallet::WalletStorage,
 };
 
 /// Storage abstraction.
@@ -47,6 +49,7 @@ where
         + TransactionStorage
         + UnshieldedUtxoStorage
         + WalletStorage
+        + ShieldedNullifiersStorage
         + Clone
         + Send
         + Sync
