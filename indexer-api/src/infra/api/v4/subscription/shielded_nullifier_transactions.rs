@@ -113,7 +113,7 @@ where
                 .await
                 .map_err_into_server_error(|| "get next shielded nullifier transaction")?
             {
-                yield ShieldedNullifierTransaction::from(transaction);
+                yield transaction.into();
             }
 
             if let Some(to) = to_block {
@@ -146,7 +146,7 @@ where
                     .await
                     .map_err_into_server_error(|| "get next shielded nullifier transaction")?
                 {
-                    yield ShieldedNullifierTransaction::from(transaction);
+                    yield transaction.into();
                 }
 
                 if let Some(to) = to_block {
