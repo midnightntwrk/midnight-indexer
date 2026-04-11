@@ -17,6 +17,39 @@ use derive_more::Deref;
 use indexer_common::domain::BlockHash;
 use std::{collections::HashMap, sync::Arc};
 
+// ---- ContractActionsByTransactionIdLoader ----
+
+#[derive(Deref)]
+pub struct ContractActionsByTransactionIdLoader<S>(S);
+
+impl<S: Storage> ContractActionsByTransactionIdLoader<S> {
+    pub fn new(storage: S) -> Self {
+        Self(storage)
+    }
+}
+
+impl<S: Storage> Loader<u64> for ContractActionsByTransactionIdLoader<S> {
+    type Value = Vec<domain::ContractAction>;
+    type Error = Arc<sqlx::Error>;
+
+    async fn load(
+        &self,
+        keys: &[u64],
+    ) -> Result<HashMap<u64, Vec<domain::ContractAction>>, Arc<sqlx::Error>> {
+        self.get_contract_actions_by_transaction_ids(keys)
+            .await
+            .map_err(Arc::new)
+            .map(|actions| {
+                actions
+                    .into_iter()
+                    .fold(HashMap::<_, Vec<_>>::new(), |mut map, action| {
+                        map.entry(action.transaction_id).or_default().push(action);
+                        map
+                    })
+            })
+    }
+}
+
 // ---- TransactionsByBlockIdLoader ----
 
 #[derive(Deref)]
@@ -36,17 +69,17 @@ impl<S: Storage> Loader<u64> for TransactionsByBlockIdLoader<S> {
         &self,
         keys: &[u64],
     ) -> Result<HashMap<u64, Vec<domain::Transaction>>, Arc<sqlx::Error>> {
-        let pairs = self
-            .get_transactions_by_block_ids(keys)
+        self.get_transactions_by_block_ids(keys)
             .await
-            .map_err(Arc::new)?;
-
-        let mut map: HashMap<u64, Vec<domain::Transaction>> = HashMap::new();
-        for (block_id, transaction) in pairs {
-            map.entry(block_id).or_default().push(transaction);
-        }
-
-        Ok(map)
+            .map_err(Arc::new)
+            .map(|pairs| {
+                pairs
+                    .into_iter()
+                    .fold(HashMap::<_, Vec<_>>::new(), |mut map, (block_id, tx)| {
+                        map.entry(block_id).or_default().push(tx);
+                        map
+                    })
+            })
     }
 }
 

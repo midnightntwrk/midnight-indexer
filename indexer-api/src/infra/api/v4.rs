@@ -36,7 +36,10 @@ use crate::{
         ApiResult, ContextExt, Metrics, OptionExt, ResultExt, SubscriptionConfig,
         v4::{
             block::BlockOffset,
-            dataloader::{BlockByHashLoader, TransactionsByBlockIdLoader},
+            dataloader::{
+                BlockByHashLoader, ContractActionsByTransactionIdLoader,
+                TransactionsByBlockIdLoader,
+            },
             mutation::Mutation,
             query::Query,
             subscription::Subscription,
@@ -374,6 +377,10 @@ where
         ))
         .data(DataLoader::new(
             TransactionsByBlockIdLoader::new(storage.clone()),
+            tokio::spawn,
+        ))
+        .data(DataLoader::new(
+            ContractActionsByTransactionIdLoader::new(storage.clone()),
             tokio::spawn,
         ))
         .data(storage)
