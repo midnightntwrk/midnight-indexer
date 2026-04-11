@@ -373,7 +373,7 @@ impl Storage {
         &self,
         ids: &[u64],
     ) -> Result<Vec<ContractAction>, sqlx::Error> {
-        let ids: Vec<i64> = ids.iter().map(|id| *id as i64).collect();
+        let ids = ids.iter().map(|id| *id as i64).collect::<Vec<_>>();
 
         let query = indoc! {"
             SELECT
@@ -398,24 +398,26 @@ impl Storage {
     ) -> Result<Vec<ContractAction>, sqlx::Error> {
         use sqlx::{QueryBuilder, Sqlite};
 
-        let mut qb = QueryBuilder::<Sqlite>::new("WITH transaction_ids(id) AS (VALUES (");
+        let mut qb = QueryBuilder::<Sqlite>::new(indoc! {"
+            WITH transaction_ids(id) AS (VALUES (
+        "});
         let mut sep = qb.separated("), (");
         for id in ids {
             sep.push_bind(*id as i64);
         }
-        qb.push(
-            ")) \
-            SELECT \
-                id, \
-                address, \
-                state, \
-                attributes, \
-                zswap_state, \
-                transaction_id \
-            FROM contract_actions \
-            WHERE transaction_id IN (SELECT id FROM transaction_ids) \
-            ORDER BY id",
-        );
+        qb.push(indoc! {"
+            ))
+            SELECT
+                id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
+            FROM contract_actions
+            WHERE transaction_id IN (SELECT id FROM transaction_ids)
+            ORDER BY id
+        "});
 
         qb.build_query_as().fetch_all(&*self.pool).await
     }

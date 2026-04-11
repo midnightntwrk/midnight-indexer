@@ -744,7 +744,7 @@ impl Storage {
         &self,
         ids: &[u64],
     ) -> Result<Vec<(u64, Transaction)>, sqlx::Error> {
-        let ids: Vec<i64> = ids.iter().map(|id| *id as i64).collect();
+        let ids = ids.iter().map(|id| *id as i64).collect::<Vec<_>>();
 
         let query = indoc! {"
             SELECT
@@ -816,67 +816,69 @@ impl Storage {
     ) -> Result<Vec<(u64, Transaction)>, sqlx::Error> {
         use sqlx::{QueryBuilder, Sqlite};
 
-        let mut qb = QueryBuilder::<Sqlite>::new("WITH block_ids(id) AS (VALUES (");
+        let mut qb = QueryBuilder::<Sqlite>::new(indoc! {"
+            WITH block_ids(id) AS (VALUES (
+        "});
         let mut sep = qb.separated("), (");
         for id in ids {
             sep.push_bind(*id as i64);
         }
-        qb.push(
-            ")) \
-            SELECT \
-                transactions.block_id AS block_id, \
-                transactions.id AS id, \
-                transactions.variant, \
-                transactions.hash, \
-                transactions.protocol_version, \
-                transactions.raw, \
-                blocks.hash AS block_hash, \
-                regular_transactions.transaction_result, \
-                regular_transactions.zswap_merkle_tree_root, \
-                regular_transactions.zswap_start_index, \
-                regular_transactions.zswap_end_index, \
-                regular_transactions.dust_commitment_start_index, \
-                regular_transactions.dust_commitment_end_index, \
-                regular_transactions.dust_generation_start_index, \
-                regular_transactions.dust_generation_end_index, \
-                regular_transactions.paid_fees, \
-                regular_transactions.estimated_fees \
-            FROM transactions \
-            INNER JOIN blocks ON blocks.id = transactions.block_id \
-            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id \
-            WHERE transactions.block_id IN (SELECT id FROM block_ids) \
-            UNION ALL \
-            SELECT \
-                transactions.block_id, \
-                transactions.id, \
-                transactions.variant, \
-                transactions.hash, \
-                transactions.protocol_version, \
-                transactions.raw, \
-                blocks.hash AS block_hash, \
-                NULL AS transaction_result, \
-                NULL AS zswap_merkle_tree_root, \
-                NULL AS zswap_start_index, \
-                NULL AS zswap_end_index, \
-                NULL AS dust_commitment_start_index, \
-                NULL AS dust_commitment_end_index, \
-                NULL AS dust_generation_start_index, \
-                NULL AS dust_generation_end_index, \
-                NULL AS paid_fees, \
-                NULL AS estimated_fees \
-            FROM transactions \
-            INNER JOIN blocks ON blocks.id = transactions.block_id \
-            WHERE transactions.block_id IN (SELECT id FROM block_ids) \
-            AND transactions.variant = 'System' \
-            ORDER BY block_id, id",
-        );
+        qb.push(indoc! {"
+            ))
+            SELECT
+                transactions.block_id AS block_id,
+                transactions.id AS id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
+            WHERE transactions.block_id IN (SELECT id FROM block_ids)
+            UNION ALL
+            SELECT
+                transactions.block_id,
+                transactions.id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                NULL AS transaction_result,
+                NULL AS zswap_merkle_tree_root,
+                NULL AS zswap_start_index,
+                NULL AS zswap_end_index,
+                NULL AS dust_commitment_start_index,
+                NULL AS dust_commitment_end_index,
+                NULL AS dust_generation_start_index,
+                NULL AS dust_generation_end_index,
+                NULL AS paid_fees,
+                NULL AS estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE transactions.block_id IN (SELECT id FROM block_ids)
+            AND transactions.variant = 'System'
+            ORDER BY block_id, id
+        "});
 
-        let mut transactions: Vec<(u64, Transaction)> = qb
+        let mut transactions = qb
             .build()
             .fetch(&*self.pool)
             .map_ok(make_transaction_with_block_id)
             .map(|result| result.flatten())
-            .try_collect()
+            .try_collect::<Vec<_>>()
             .await?;
 
         for (_, transaction) in transactions.iter_mut() {

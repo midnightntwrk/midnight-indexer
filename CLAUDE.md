@@ -98,3 +98,10 @@ The committed schema file `indexer-api/graphql/schema-v4.graphql` is checked by 
 - **E2E tests**: `indexer-tests/` crate — starts all components as child processes against a running node, exercises GraphQL queries and subscriptions end-to-end
 
 The `indexer-standalone` crate is excluded from `nextest` (it is only built as an artifact for e2e tests).
+
+## Coding Conventions
+
+- **`just all-all`** — run after completing a meaningful chunk of work, not after every small edit.
+- **Type annotations** — omit when the compiler can infer. Use turbofish (e.g. `.collect::<Vec<_>>()`) rather than annotating the binding if a hint is needed.
+- **Functional style** — prefer iterator combinators (`.map()`, `.fold()`, `.collect()`, etc.) over imperative loops with mutation.
+- **Multiline SQL** — always use `indoc!{ "..." }`. Never use `\` line continuations inside string literals.
