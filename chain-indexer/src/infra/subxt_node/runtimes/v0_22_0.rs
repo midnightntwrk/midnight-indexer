@@ -261,24 +261,6 @@ pub async fn get_ledger_state_root(
     Ok(Some(root))
 }
 
-pub async fn get_transaction_cost(
-    transaction: &[u8],
-    block: &OnlineClientAtBlock,
-) -> Result<u128, SubxtNodeError> {
-    let get_transaction_cost = super::runtime_0_22_0::runtime_apis()
-        .midnight_runtime_api()
-        .get_transaction_cost(transaction.to_owned());
-
-    let cost = block
-        .runtime_apis()
-        .call(get_transaction_cost)
-        .await
-        .map_err(|error| SubxtNodeError::GetTransactionCost(error.into()))?
-        .map_err(|error| SubxtNodeError::GetTransactionCost(format!("{error:?}").into()))?;
-
-    Ok(cost as u128)
-}
-
 pub async fn get_d_parameter(block: &OnlineClientAtBlock) -> Result<DParameter, SubxtNodeError> {
     let get_d_param = super::runtime_0_22_0::runtime_apis()
         .system_parameters_api()

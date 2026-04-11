@@ -240,6 +240,9 @@ impl LedgerState {
                 let cost = transaction
                     .cost(&ledger_state.parameters, true)
                     .map_err(|error| Error::TransactionCost(error.into()))?;
+                let fees = transaction
+                    .fees(&ledger_state.parameters, true)
+                    .map_err(|error| Error::TransactionCost(error.into()))?;
                 let verified_ledger_transaction = transaction
                     .well_formed(&cx.ref_state, *STRICTNESS_V8, cx.block_context.tblock)
                     .map_err(|error| Error::MalformedTransaction(error.into()))?;
@@ -288,6 +291,7 @@ impl LedgerState {
                     created_unshielded_utxos,
                     spent_unshielded_utxos,
                     ledger_events,
+                    fees,
                 })
             }
         }

@@ -103,20 +103,6 @@ pub async fn get_ledger_state_root(
     }
 }
 
-// TODO: This does not return the cost in DUST/SPEC, but some substrate weight based cost; this
-// needs to be replaced by getting the read cost from Node events. See PM-20973.
-/// Get cost for the given serialized transaction depending on the given protocol version.
-pub async fn get_transaction_cost(
-    transaction: impl AsRef<[u8]>,
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<u128, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_transaction_cost(transaction.as_ref(), block).await,
-        NodeVersion::V1_0 => v1_0_0::get_transaction_cost(transaction.as_ref(), block).await,
-    }
-}
-
 /// Get D-Parameter depending on the given protocol version.
 pub async fn get_d_parameter(
     node_version: NodeVersion,
