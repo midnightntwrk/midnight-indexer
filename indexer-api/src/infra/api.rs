@@ -15,7 +15,9 @@ pub mod v4;
 
 use crate::{
     domain::{Api, LedgerStateCache, storage::Storage},
-    infra::api::v4::dataloader::{BlockByHashLoader, TransactionsByBlockIdLoader},
+    infra::api::v4::dataloader::{
+        BlockByHashLoader, TransactionByIdLoader, TransactionsByBlockIdLoader,
+    },
 };
 use async_graphql::{Context, dataloader::DataLoader};
 use axum::{
@@ -338,6 +340,10 @@ trait ContextExt {
     where
         S: Storage;
 
+    fn get_transaction_by_id_loader<S>(&self) -> &DataLoader<TransactionByIdLoader<S>>
+    where
+        S: Storage;
+
     fn get_transactions_by_block_id_loader<S>(&self) -> &DataLoader<TransactionsByBlockIdLoader<S>>
     where
         S: Storage;
@@ -372,6 +378,14 @@ impl ContextExt for Context<'_> {
     {
         self.data::<DataLoader<BlockByHashLoader<S>>>()
             .expect("BlockByHashLoader is stored in Context")
+    }
+
+    fn get_transaction_by_id_loader<S>(&self) -> &DataLoader<TransactionByIdLoader<S>>
+    where
+        S: Storage,
+    {
+        self.data::<DataLoader<TransactionByIdLoader<S>>>()
+            .expect("TransactionByIdLoader is stored in Context")
     }
 
     fn get_transactions_by_block_id_loader<S>(&self) -> &DataLoader<TransactionsByBlockIdLoader<S>>
