@@ -113,3 +113,32 @@ impl<S: Storage> Loader<BlockHash> for BlockByHashLoader<S> {
         Ok(blocks)
     }
 }
+
+#[derive(Deref)]
+pub struct TransactionByIdLoader<S>(S);
+
+impl<S: Storage> TransactionByIdLoader<S> {
+    pub fn new(storage: S) -> Self {
+        Self(storage)
+    }
+}
+
+impl<S: Storage> Loader<u64> for TransactionByIdLoader<S> {
+    type Value = domain::Transaction;
+    type Error = Arc<sqlx::Error>;
+
+    async fn load(
+        &self,
+        keys: &[u64],
+    ) -> Result<HashMap<u64, domain::Transaction>, Arc<sqlx::Error>> {
+        let transactions = self
+            .get_transactions_by_ids(keys)
+            .await
+            .map_err(Arc::new)?
+            .into_iter()
+            .map(|t: domain::Transaction| (t.id(), t))
+            .collect();
+
+        Ok(transactions)
+    }
+}
