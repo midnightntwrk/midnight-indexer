@@ -254,6 +254,16 @@ impl ContractActionStorage for Storage {
             .await
     }
 
+    async fn get_contract_actions_by_transaction_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        self.fetch_contract_actions_by_transaction_ids(ids).await
+    }
+
     fn get_contract_actions_by_address(
         &self,
         address: &SerializedContractAddress,
@@ -356,5 +366,59 @@ impl Storage {
             .map_ok(ContractAction::from)
             .try_collect::<Vec<_>>()
             .await
+    }
+
+    #[cfg(feature = "cloud")]
+    async fn fetch_contract_actions_by_transaction_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+        let ids = ids.iter().map(|id| *id as i64).collect::<Vec<_>>();
+
+        let query = indoc! {"
+            SELECT
+                id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
+            FROM contract_actions
+            WHERE transaction_id = ANY($1)
+            ORDER BY id
+        "};
+
+        sqlx::query_as(query).bind(ids).fetch_all(&*self.pool).await
+    }
+
+    #[cfg(feature = "standalone")]
+    async fn fetch_contract_actions_by_transaction_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+        use sqlx::{QueryBuilder, Sqlite};
+
+        let mut qb = QueryBuilder::<Sqlite>::new(indoc! {"
+            WITH transaction_ids(id) AS (VALUES (
+        "});
+        let mut sep = qb.separated("), (");
+        for id in ids {
+            sep.push_bind(*id as i64);
+        }
+        qb.push(indoc! {"
+            ))
+            SELECT
+                id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
+            FROM contract_actions
+            WHERE transaction_id IN (SELECT id FROM transaction_ids)
+            ORDER BY id
+        "});
+
+        qb.build_query_as().fetch_all(&*self.pool).await
     }
 }

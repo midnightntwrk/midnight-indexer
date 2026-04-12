@@ -448,12 +448,13 @@ where
     S: Storage,
 {
     let contract_actions = cx
-        .get_storage::<S>()
-        .get_contract_actions_by_transaction_id(id)
+        .get_contract_actions_by_transaction_id_loader::<S>()
+        .load_one(id)
         .await
         .map_err_into_server_error(|| {
             format!("cannot get contract actions by transaction ID {id}")
-        })?;
+        })?
+        .unwrap_or_default();
 
     Ok(contract_actions.into_iter().map(Into::into).collect())
 }
