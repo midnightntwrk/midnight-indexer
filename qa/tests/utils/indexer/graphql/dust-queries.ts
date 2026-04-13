@@ -31,3 +31,34 @@ query GetDustGenerationStatus($CARDANO_REWARD_ADDRESSES: [CardanoRewardAddress!]
     ${DUST_GENERATION_STATUS_BODY_FRAGMENT}
   }
 }`;
+
+export const DUST_REGISTRATION_BODY_FRAGMENT = `
+  dustAddress
+  valid
+  nightBalance
+  generationRate
+  currentCapacity
+  maxCapacity
+  utxoTxHash
+  utxoOutputIndex
+`;
+
+export const GET_DUST_GENERATIONS = `
+query GetDustGenerations($CARDANO_REWARD_ADDRESSES: [CardanoRewardAddress!]!) {
+  dustGenerations(cardanoRewardAddresses: $CARDANO_REWARD_ADDRESSES) {
+    cardanoRewardAddress
+    registrations {
+      ${DUST_REGISTRATION_BODY_FRAGMENT}
+    }
+  }
+}`;
+
+export const GET_DUST_COMMITMENT_MERKLE_TREE_UPDATE = `
+query GetDustCommitmentMerkleTreeUpdate($START_INDEX: Int!, $END_INDEX: Int!) {
+  dustCommitmentMerkleTreeUpdate(startIndex: $START_INDEX, endIndex: $END_INDEX) {
+    startIndex
+    endIndex
+    update
+    protocolVersion
+  }
+}`;
