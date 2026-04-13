@@ -109,8 +109,6 @@ pub struct RegularTransaction {
     pub raw: SerializedTransaction,
     pub identifiers: Vec<SerializedTransactionIdentifier>,
     pub contract_actions: Vec<ContractAction>,
-    pub paid_fees: u128,
-    pub estimated_fees: u128,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

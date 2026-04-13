@@ -14,8 +14,7 @@
 use crate::{
     domain::{
         ContractAction, ContractAttributes, LedgerVersion, SerializedContractAddress,
-        SerializedContractState, SerializedTransactionIdentifier, TransactionHash,
-        TransactionStructure, ViewingKey,
+        SerializedContractState, SerializedTransactionIdentifier, TransactionHash, ViewingKey,
         ledger::{Error, SerializableExt, TransactionV8},
     },
     infra::ledger_db::v1_1,
@@ -151,43 +150,6 @@ impl Transaction {
                 }
 
                 TransactionV8::ClaimRewards(_) => Ok(vec![]),
-            },
-        }
-    }
-
-    /// Get the structure of this transaction for fees calculation.
-    pub fn structure(&self, size: usize) -> TransactionStructure {
-        match self {
-            Self::V8(transaction) => match transaction {
-                TransactionV8::Standard(standard_transaction) => {
-                    let contract_action_count = standard_transaction.actions().count();
-                    let identifier_count = transaction.identifiers().count();
-
-                    let segment_count = if contract_action_count > 1 || identifier_count > 2 {
-                        2
-                    } else {
-                        1
-                    };
-                    let estimated_input_count = identifier_count.max(1);
-                    let estimated_output_count = (identifier_count + 1).max(1);
-                    let has_contract_operations = contract_action_count > 0;
-
-                    TransactionStructure {
-                        segment_count,
-                        estimated_input_count,
-                        estimated_output_count,
-                        has_contract_operations,
-                        size,
-                    }
-                }
-
-                TransactionV8::ClaimRewards(_) => TransactionStructure {
-                    segment_count: 1,
-                    estimated_input_count: 1,
-                    estimated_output_count: 1,
-                    has_contract_operations: false,
-                    size,
-                },
             },
         }
     }

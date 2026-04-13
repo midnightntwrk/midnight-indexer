@@ -16,7 +16,7 @@ mod runtimes;
 
 use crate::{
     domain::{
-        BlockRef, SystemParametersChange, TransactionFees,
+        BlockRef, SystemParametersChange,
         node::{Block, Node, RegularTransaction, SystemTransaction, Transaction},
     },
     infra::subxt_node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
@@ -544,9 +544,6 @@ pub enum SubxtNodeError {
     #[error("cannot get zswap state root")]
     GetZswapStateRoot(#[source] BoxError),
 
-    #[error("cannot get transaction cost")]
-    GetTransactionCost(#[source] BoxError),
-
     #[error("cannot get D-Parameter")]
     GetDParameter(#[source] BoxError),
 
@@ -653,29 +650,12 @@ async fn make_regular_transaction(
         .map(Into::into)
         .collect();
 
-    let fees = match runtimes::get_transaction_cost(&transaction, node_version, block).await {
-        Ok(fees) => TransactionFees {
-            paid_fees: fees,
-            estimated_fees: fees,
-        },
-
-        Err(error) => {
-            warn!(
-                error:%, transaction_size = transaction.len();
-                "cannot get runtime API fees, using fallback"
-            );
-            TransactionFees::from_ledger_transaction(&ledger_transaction, transaction.len())
-        }
-    };
-
     let transaction = RegularTransaction {
         hash,
         protocol_version,
         identifiers,
         contract_actions,
         raw: transaction,
-        paid_fees: fees.paid_fees,
-        estimated_fees: fees.estimated_fees,
     };
 
     Ok(Transaction::Regular(transaction))
