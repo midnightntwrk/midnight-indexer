@@ -13,15 +13,15 @@
 
 use crate::domain::{ByteArray, VIEWING_KEY_LEN, ledger::Error};
 use fastrace::trace;
-use midnight_serialize::Deserializable;
+use midnight_serialize_v1::Deserializable;
 
 #[derive(Debug, Clone)]
-pub struct SecretKey(midnight_transient_crypto::encryption::SecretKey);
+pub struct SecretKey(midnight_transient_crypto_v2::encryption::SecretKey);
 
 impl SecretKey {
     #[trace]
     pub fn deserialize(secret_key: impl AsRef<[u8]>) -> Result<Self, Error> {
-        let inner = midnight_transient_crypto::encryption::SecretKey::deserialize(
+        let inner = midnight_transient_crypto_v2::encryption::SecretKey::deserialize(
             &mut secret_key.as_ref(),
             0,
         )

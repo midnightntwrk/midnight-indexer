@@ -15,8 +15,8 @@ use crate::error::StdErrorExt;
 use derive_more::Debug;
 use futures::TryStreamExt;
 use indoc::indoc;
-use midnight_serialize::{Deserializable, Serializable};
-use midnight_storage_core::{
+use midnight_serialize_v1::{Deserializable, Serializable};
+use midnight_storage_core_v1::{
     DefaultHasher, WellBehavedHasher,
     arena::ArenaHash,
     backend::OnDiskObject,

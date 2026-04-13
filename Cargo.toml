@@ -21,15 +21,14 @@ documentation = "https://github.com/midnightntwrk/midnight-indexer"
 publish       = false
 
 [workspace.dependencies]
-midnight-base-crypto        = { version = "1.0" }
-midnight-coin-structure     = { version = "2.0" }
-midnight-ledger_v8          = { package = "midnight-ledger", version = "8.0.3" }
-midnight-onchain-runtime_v2 = { package = "midnight-onchain-runtime", version = "2.0" }
-midnight-onchain-runtime_v3 = { package = "midnight-onchain-runtime", version = "3.0.0" }
-midnight-serialize          = { version = "1.0" }
-midnight-storage-core       = { version = "1.1", features = [ "layout-v2" ] }
-midnight-transient-crypto   = { version = "2.0" }
-midnight-zswap_v8           = { package = "midnight-zswap", version = "8.0.3" }
+midnight-base-crypto_v1      = { package = "midnight-base-crypto", version = "1.0" }
+midnight-coin-structure_v2   = { package = "midnight-coin-structure", version = "2.0" }
+midnight-ledger_v8           = { package = "midnight-ledger", version = "8.1.0-rc.1" }
+midnight-onchain-runtime_v3  = { package = "midnight-onchain-runtime", version = "3.0" }
+midnight-serialize_v1        = { package = "midnight-serialize", version = "1.0" }
+midnight-storage-core_v1     = { package = "midnight-storage-core", version = "1.2" }
+midnight-transient-crypto_v2 = { package = "midnight-transient-crypto", version = "2.0" }
+midnight-zswap_v8            = { package = "midnight-zswap", version = "8.1.0-rc.1" }
 # Other dependencies.
 anyhow                      = { version = "1.0" }
 assert_matches              = { version = "1.5" }
@@ -95,3 +94,13 @@ tower-http                  = { version = "0.6" }
 trait-variant               = { version = "0.1" }
 uuid                        = { version = "1.23", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }
+
+[patch.crates-io]
+midnight-ledger           = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "crate-ledger-8.1.0-rc.1" }
+midnight-zswap            = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zswap-8.1.0-rc.1" }
+midnight-transient-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.1.0-rc.1" }
+midnight-onchain-vm       = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-vm-3.1.0-rc.1" }
+midnight-onchain-state    = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-state-3.1.0-rc.1" }
+midnight-onchain-runtime  = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-runtime-3.1.0-rc.1" }
+midnight-serialize        = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "serialize-1.1.0-rc.1" }
+midnight-storage-core     = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "storage-core-1.2.0-rc.1" }

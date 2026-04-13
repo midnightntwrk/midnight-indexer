@@ -21,14 +21,14 @@ use crate::{
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
-use midnight_coin_structure::{coin::Info, contract::ContractAddress};
+use midnight_coin_structure_v2::{coin::Info, contract::ContractAddress};
 use midnight_ledger_v8::structure::{
     ContractAction as ContractActionV8, StandardTransaction as StandardTransactionV8,
     SystemTransaction as LedgerSystemTransactionV8,
 };
-use midnight_serialize::tagged_deserialize;
-use midnight_storage_core::db::DB;
-use midnight_transient_crypto::{encryption::SecretKey, proofs::Proof};
+use midnight_serialize_v1::tagged_deserialize;
+use midnight_storage_core_v1::db::DB;
+use midnight_transient_crypto_v2::{encryption::SecretKey, proofs::Proof};
 use midnight_zswap_v8::Offer as OfferV8;
 use std::error::Error as StdError;
 

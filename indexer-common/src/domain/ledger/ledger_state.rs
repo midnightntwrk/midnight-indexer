@@ -26,12 +26,12 @@ use crate::{
 use fastrace::trace;
 use itertools::Itertools;
 use log::info;
-use midnight_base_crypto::{
+use midnight_base_crypto_v1::{
     cost_model::{FixedPoint, NormalizedCost, SyntheticCost},
     hash::{HashOutput, persistent_commit},
     time::Timestamp,
 };
-use midnight_coin_structure::{
+use midnight_coin_structure_v2::{
     coin::{NIGHT, TokenType as LedgerTokenType, UnshieldedTokenType, UserAddress},
     contract::ContractAddress as ContractAddressV8,
 };
@@ -52,13 +52,13 @@ use midnight_ledger_v8::{
     verify::WellFormedStrictness as WellFormedStrictnessV8,
 };
 use midnight_onchain_runtime_v3::context::BlockContext as BlockContextV3;
-use midnight_serialize::{Deserializable, tagged_deserialize};
-use midnight_storage_core::{
+use midnight_serialize_v1::{Deserializable, tagged_deserialize};
+use midnight_storage_core_v1::{
     arena::{Sp, TypedArenaKey},
     db::DB,
     storage::default_storage,
 };
-use midnight_transient_crypto::merkle_tree::{
+use midnight_transient_crypto_v2::merkle_tree::{
     MerkleTreeCollapsedUpdate, MerkleTreeDigest, TreeInsertionPath,
 };
 use midnight_zswap_v8::ledger::State as ZswapStateV8;

@@ -22,8 +22,8 @@ pub fn init(config: Config, pool: crate::infra::pool::postgres::PostgresPool) {
     let Config { cache_size } = config;
 
     let db = v1_1::LedgerDb::new(pool);
-    let _ = midnight_storage_core::storage::set_default_storage(|| {
-        midnight_storage_core::Storage::new(cache_size as usize, db)
+    let _ = midnight_storage_core_v1::storage::set_default_storage(|| {
+        midnight_storage_core_v1::Storage::new(cache_size as usize, db)
     });
 }
 
@@ -40,8 +40,8 @@ pub async fn init(config: Config) -> Result<(), Error> {
     migrations::sqlite::run_for_ledger_db(&pool).await?;
 
     let db = v1_1::LedgerDb::new(pool);
-    let _ = midnight_storage_core::storage::set_default_storage(|| {
-        midnight_storage_core::Storage::new(cache_size as usize, db)
+    let _ = midnight_storage_core_v1::storage::set_default_storage(|| {
+        midnight_storage_core_v1::Storage::new(cache_size as usize, db)
     });
 
     Ok(())
