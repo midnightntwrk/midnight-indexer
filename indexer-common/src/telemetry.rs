@@ -33,6 +33,7 @@ use fastrace::{
     prelude::SpanRecord,
 };
 use fastrace_opentelemetry::OpenTelemetryReporter;
+use fastrace_tracing::FastraceCompatLayer;
 use logforth::{
     append::{FastraceEvent, Stdout},
     diagnostic::FastraceDiagnostic,
@@ -45,6 +46,7 @@ use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::Resource;
 use serde::Deserialize;
 use std::{borrow::Cow, net::IpAddr};
+use tracing_subscriber::layer::SubscriberExt;
 
 /// Telemetry (tracing, metrics) configuration.
 #[derive(Debug, Clone, Deserialize)]
@@ -153,6 +155,9 @@ pub fn init_tracing(config: TracingConfig) {
         };
 
         fastrace::set_reporter(reporter, fastrace::collector::Config::default());
+
+        let subscriber = tracing_subscriber::Registry::default().with(FastraceCompatLayer::new());
+        tracing::subscriber::set_global_default(subscriber).expect("tracing subscriber can be set");
     }
 }
 

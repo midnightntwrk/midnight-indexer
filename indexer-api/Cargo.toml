@@ -16,7 +16,7 @@ rustdoc-args = [ "--cfg", "docsrs" ]
 
 [dependencies]
 anyhow             = { workspace = true }
-async-graphql      = { workspace = true, features = [ "dataloader", "uuid" ] }
+async-graphql      = { workspace = true, features = [ "dataloader", "tracing", "uuid" ] }
 async-graphql-axum = { workspace = true }
 async-stream       = { workspace = true }
 axum               = { workspace = true, features = [ "http2" ] }

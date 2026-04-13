@@ -31,6 +31,7 @@ const-hex                   = { workspace = true, features = [ "serde" ] }
 derive_more                 = { workspace = true, features = [ "as_ref", "debug", "deref", "display", "from", "into" ] }
 fastrace                    = { workspace = true }
 fastrace-opentelemetry      = { workspace = true }
+fastrace-tracing            = { workspace = true }
 figment                     = { workspace = true, features = [ "env", "yaml" ] }
 futures                     = { workspace = true }
 humantime-serde             = { workspace = true }
@@ -51,6 +52,8 @@ sha2                        = { workspace = true }
 sqlx                        = { workspace = true, features = [ "runtime-tokio", "uuid" ] }
 thiserror                   = { workspace = true }
 tokio                       = { workspace = true, features = [ "time" ] }
+tracing                     = { workspace = true }
+tracing-subscriber          = { workspace = true, features = [ "registry" ] }
 tokio-stream                = { workspace = true, features = [ "sync" ] }
 trait-variant               = { workspace = true }
 uuid                        = { workspace = true }
