@@ -29,11 +29,17 @@ use indexer_common::{
 };
 use indoc::indoc;
 use sqlx::{FromRow, Row, types::Uuid};
+#[cfg(feature = "standalone")]
+use sqlx::{QueryBuilder, Sqlite};
 use std::num::NonZeroU32;
 
 impl TransactionStorage for Storage {
-    #[trace(properties = { "id": "{id}" })]
-    async fn get_transaction_by_id(&self, id: u64) -> Result<Option<Transaction>, sqlx::Error> {
+    #[trace(properties = { "ids": "{ids:?}" })]
+    async fn get_transactions_by_ids(&self, ids: &[u64]) -> Result<Vec<Transaction>, sqlx::Error> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+
         #[cfg(feature = "cloud")]
         let query = indoc! {"
             SELECT
@@ -57,7 +63,7 @@ impl TransactionStorage for Storage {
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
-            WHERE transactions.id = $1
+            WHERE transactions.id = ANY($1)
 
             UNION ALL
 
@@ -81,14 +87,14 @@ impl TransactionStorage for Storage {
                 NULL AS identifiers
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
-            WHERE transactions.id = $1
+            WHERE transactions.id = ANY($1)
             AND transactions.variant = 'System'
         "};
 
         #[cfg(feature = "standalone")]
         let query = indoc! {"
             SELECT
-                transactions.id,
+                transactions.id as id,
                 transactions.variant,
                 transactions.hash,
                 transactions.protocol_version,
@@ -107,48 +113,73 @@ impl TransactionStorage for Storage {
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
-            WHERE transactions.id = $1
-
-            UNION ALL
-
-            SELECT
-                transactions.id,
-                transactions.variant,
-                transactions.hash,
-                transactions.protocol_version,
-                transactions.raw,
-                blocks.hash AS block_hash,
-                NULL AS transaction_result,
-                NULL AS zswap_merkle_tree_root,
-                NULL AS zswap_start_index,
-                NULL AS zswap_end_index,
-                NULL AS dust_commitment_start_index,
-                NULL AS dust_commitment_end_index,
-                NULL AS dust_generation_start_index,
-                NULL AS dust_generation_end_index,
-                NULL AS paid_fees,
-                NULL AS estimated_fees
-            FROM transactions
-            INNER JOIN blocks ON blocks.id = transactions.block_id
-            WHERE transactions.id = $1
-            AND transactions.variant = 'System'
+            WHERE transactions.id IN (SELECT id FROM ids)
         "};
 
-        #[cfg_attr(feature = "cloud", allow(unused_mut))]
-        let mut transaction = sqlx::query(query)
-            .bind(id as i64)
-            .fetch_optional(&*self.pool)
-            .await?
-            .map(make_transaction)
-            .transpose()?;
+        #[cfg(feature = "cloud")]
+        let ids = ids.iter().map(|id| *id as i64).collect::<Vec<_>>();
+
+        #[cfg(feature = "cloud")]
+        let transactions = sqlx::query(query)
+            .bind(ids)
+            .fetch(&*self.pool)
+            .map_ok(make_transaction)
+            .map(|result| result.flatten())
+            .try_collect::<Vec<_>>()
+            .await?;
 
         #[cfg(feature = "standalone")]
-        if let Some(Transaction::Regular(transaction)) = &mut transaction {
-            transaction.identifiers =
-                get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+        let mut transactions = {
+            let mut query_builder = QueryBuilder::<Sqlite>::new("WITH ids(id) AS (VALUES (");
+            let mut sep = query_builder.separated("), (");
+            for id in ids {
+                sep.push_bind(*id as i64);
+            }
+            query_builder.push(")) ");
+            query_builder.push(query);
+            query_builder.push(indoc! {"
+                 UNION ALL
+                SELECT
+                    transactions.id AS id,
+                    transactions.variant,
+                    transactions.hash,
+                    transactions.protocol_version,
+                    transactions.raw,
+                    blocks.hash AS block_hash,
+                    NULL AS transaction_result,
+                    NULL AS zswap_merkle_tree_root,
+                    NULL AS zswap_start_index,
+                    NULL AS zswap_end_index,
+                    NULL AS dust_commitment_start_index,
+                    NULL AS dust_commitment_end_index,
+                    NULL AS dust_generation_start_index,
+                    NULL AS dust_generation_end_index,
+                    NULL AS paid_fees,
+                    NULL AS estimated_fees
+                FROM transactions
+                INNER JOIN blocks ON blocks.id = transactions.block_id
+                WHERE transactions.variant = 'System'
+                AND transactions.id IN (SELECT id FROM ids)
+            "});
+
+            query_builder
+                .build()
+                .fetch(&*self.pool)
+                .map_ok(make_transaction)
+                .map(|result| result.flatten())
+                .try_collect::<Vec<_>>()
+                .await?
+        };
+
+        #[cfg(feature = "standalone")]
+        for transaction in transactions.iter_mut() {
+            if let Transaction::Regular(transaction) = transaction {
+                transaction.identifiers =
+                    get_identifiers_for_transaction(transaction.id, &self.pool).await?;
+            }
         }
 
-        Ok(transaction)
+        Ok(transactions)
     }
 
     async fn get_transactions_by_block_ids(

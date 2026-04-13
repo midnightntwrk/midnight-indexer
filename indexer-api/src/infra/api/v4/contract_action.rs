@@ -296,10 +296,10 @@ where
     S: Storage,
 {
     let transaction = cx
-        .get_storage::<S>()
-        .get_transaction_by_id(id)
+        .get_transaction_by_id_loader::<S>()
+        .load_one(id)
         .await
-        .map_err_into_server_error(|| format!("get transaction by id {id})"))?
+        .map_err_into_server_error(|| format!("get transaction by id {id}"))?
         .some_or_server_error(|| format!("transaction with id {id} not found"))?;
 
     Ok(transaction.into())

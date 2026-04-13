@@ -37,7 +37,7 @@ use crate::{
         v4::{
             block::BlockOffset,
             dataloader::{
-                BlockByHashLoader, ContractActionsByTransactionIdLoader,
+                BlockByHashLoader, ContractActionsByTransactionIdLoader, TransactionByIdLoader,
                 TransactionsByBlockIdLoader,
             },
             mutation::Mutation,
@@ -373,6 +373,10 @@ where
         .data(ledger_state_cache)
         .data(DataLoader::new(
             BlockByHashLoader::new(storage.clone()),
+            tokio::spawn,
+        ))
+        .data(DataLoader::new(
+            TransactionByIdLoader::new(storage.clone()),
             tokio::spawn,
         ))
         .data(DataLoader::new(
