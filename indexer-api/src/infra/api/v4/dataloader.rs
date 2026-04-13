@@ -15,75 +15,8 @@ use crate::domain::{self, storage::Storage};
 use async_graphql::dataloader::Loader;
 use derive_more::Deref;
 use indexer_common::domain::BlockHash;
+use itertools::Itertools;
 use std::{collections::HashMap, sync::Arc};
-
-// ---- ContractActionsByTransactionIdLoader ----
-
-#[derive(Deref)]
-pub struct ContractActionsByTransactionIdLoader<S>(S);
-
-impl<S: Storage> ContractActionsByTransactionIdLoader<S> {
-    pub fn new(storage: S) -> Self {
-        Self(storage)
-    }
-}
-
-impl<S: Storage> Loader<u64> for ContractActionsByTransactionIdLoader<S> {
-    type Value = Vec<domain::ContractAction>;
-    type Error = Arc<sqlx::Error>;
-
-    async fn load(
-        &self,
-        keys: &[u64],
-    ) -> Result<HashMap<u64, Vec<domain::ContractAction>>, Arc<sqlx::Error>> {
-        self.get_contract_actions_by_transaction_ids(keys)
-            .await
-            .map_err(Arc::new)
-            .map(|actions| {
-                actions
-                    .into_iter()
-                    .fold(HashMap::<_, Vec<_>>::new(), |mut map, action| {
-                        map.entry(action.transaction_id).or_default().push(action);
-                        map
-                    })
-            })
-    }
-}
-
-// ---- TransactionsByBlockIdLoader ----
-
-#[derive(Deref)]
-pub struct TransactionsByBlockIdLoader<S>(S);
-
-impl<S: Storage> TransactionsByBlockIdLoader<S> {
-    pub fn new(storage: S) -> Self {
-        Self(storage)
-    }
-}
-
-impl<S: Storage> Loader<u64> for TransactionsByBlockIdLoader<S> {
-    type Value = Vec<domain::Transaction>;
-    type Error = Arc<sqlx::Error>;
-
-    async fn load(
-        &self,
-        keys: &[u64],
-    ) -> Result<HashMap<u64, Vec<domain::Transaction>>, Arc<sqlx::Error>> {
-        self.get_transactions_by_block_ids(keys)
-            .await
-            .map_err(Arc::new)
-            .map(|pairs| {
-                pairs
-                    .into_iter()
-                    .fold(HashMap::<_, Vec<_>>::new(), |mut map, (block_id, tx)| {
-                        map.entry(block_id).or_default().push(tx);
-                        map
-                    })
-            })
-    }
-}
-
-// ---- BlockByHashLoader ----
 
 #[derive(Deref)]
 pub struct BlockByHashLoader<S>(S);
@@ -136,9 +69,65 @@ impl<S: Storage> Loader<u64> for TransactionByIdLoader<S> {
             .await
             .map_err(Arc::new)?
             .into_iter()
-            .map(|t: domain::Transaction| (t.id(), t))
-            .collect();
+            .map(|t| (t.id(), t))
+            .collect::<HashMap<_, _>>();
 
         Ok(transactions)
+    }
+}
+
+#[derive(Deref)]
+pub struct TransactionsByBlockIdLoader<S>(S);
+
+impl<S: Storage> TransactionsByBlockIdLoader<S> {
+    pub fn new(storage: S) -> Self {
+        Self(storage)
+    }
+}
+
+impl<S: Storage> Loader<u64> for TransactionsByBlockIdLoader<S> {
+    type Value = Vec<domain::Transaction>;
+    type Error = Arc<sqlx::Error>;
+
+    async fn load(
+        &self,
+        keys: &[u64],
+    ) -> Result<HashMap<u64, Vec<domain::Transaction>>, Arc<sqlx::Error>> {
+        let transactions = self
+            .get_transactions_by_block_ids(keys)
+            .await
+            .map_err(Arc::new)?
+            .into_iter()
+            .into_group_map();
+
+        Ok(transactions)
+    }
+}
+
+#[derive(Deref)]
+pub struct ContractActionsByTransactionIdLoader<S>(S);
+
+impl<S: Storage> ContractActionsByTransactionIdLoader<S> {
+    pub fn new(storage: S) -> Self {
+        Self(storage)
+    }
+}
+
+impl<S: Storage> Loader<u64> for ContractActionsByTransactionIdLoader<S> {
+    type Value = Vec<domain::ContractAction>;
+    type Error = Arc<sqlx::Error>;
+
+    async fn load(
+        &self,
+        keys: &[u64],
+    ) -> Result<HashMap<u64, Vec<domain::ContractAction>>, Arc<sqlx::Error>> {
+        let actions = self
+            .get_contract_actions_by_transaction_ids(keys)
+            .await
+            .map_err(Arc::new)?
+            .into_iter()
+            .into_group_map_by(|action| action.transaction_id);
+
+        Ok(actions)
     }
 }

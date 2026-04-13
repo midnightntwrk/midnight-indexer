@@ -3054,6 +3054,7 @@ dependencies = [
  "humantime-serde",
  "indexer-common",
  "indoc",
+ "itertools 0.14.0",
  "log",
  "metrics",
  "secrecy",

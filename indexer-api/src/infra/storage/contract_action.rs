@@ -398,9 +398,7 @@ impl Storage {
     ) -> Result<Vec<ContractAction>, sqlx::Error> {
         use sqlx::{QueryBuilder, Sqlite};
 
-        let mut qb = QueryBuilder::<Sqlite>::new(indoc! {"
-            WITH transaction_ids(id) AS (VALUES (
-        "});
+        let mut qb = QueryBuilder::<Sqlite>::new("WITH transaction_ids(id) AS (VALUES (");
         let mut sep = qb.separated("), (");
         for id in ids {
             sep.push_bind(*id as i64);
