@@ -91,31 +91,6 @@ impl TransactionStorage for Storage {
             AND transactions.variant = 'System'
         "};
 
-        #[cfg(feature = "standalone")]
-        let query = indoc! {"
-            SELECT
-                transactions.id as id,
-                transactions.variant,
-                transactions.hash,
-                transactions.protocol_version,
-                transactions.raw,
-                blocks.hash AS block_hash,
-                regular_transactions.transaction_result,
-                regular_transactions.zswap_merkle_tree_root,
-                regular_transactions.zswap_start_index,
-                regular_transactions.zswap_end_index,
-                regular_transactions.dust_commitment_start_index,
-                regular_transactions.dust_commitment_end_index,
-                regular_transactions.dust_generation_start_index,
-                regular_transactions.dust_generation_end_index,
-                regular_transactions.paid_fees,
-                regular_transactions.estimated_fees
-            FROM transactions
-            INNER JOIN blocks ON blocks.id = transactions.block_id
-            INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
-            WHERE transactions.id IN (SELECT id FROM ids)
-        "};
-
         #[cfg(feature = "cloud")]
         let ids = ids.iter().map(|id| *id as i64).collect::<Vec<_>>();
 
@@ -130,15 +105,35 @@ impl TransactionStorage for Storage {
 
         #[cfg(feature = "standalone")]
         let mut transactions = {
-            let mut query_builder = QueryBuilder::<Sqlite>::new("WITH ids(id) AS (VALUES (");
-            let mut sep = query_builder.separated("), (");
+            let mut qb = QueryBuilder::<Sqlite>::new("WITH ids(id) AS (VALUES (");
+            let mut sep = qb.separated("), (");
             for id in ids {
                 sep.push_bind(*id as i64);
             }
-            query_builder.push(")) ");
-            query_builder.push(query);
-            query_builder.push(indoc! {"
-                 UNION ALL
+            qb.push(indoc! {"
+                ))
+                SELECT
+                    transactions.id AS id,
+                    transactions.variant,
+                    transactions.hash,
+                    transactions.protocol_version,
+                    transactions.raw,
+                    blocks.hash AS block_hash,
+                    regular_transactions.transaction_result,
+                    regular_transactions.zswap_merkle_tree_root,
+                    regular_transactions.zswap_start_index,
+                    regular_transactions.zswap_end_index,
+                    regular_transactions.dust_commitment_start_index,
+                    regular_transactions.dust_commitment_end_index,
+                    regular_transactions.dust_generation_start_index,
+                    regular_transactions.dust_generation_end_index,
+                    regular_transactions.paid_fees,
+                    regular_transactions.estimated_fees
+                FROM transactions
+                INNER JOIN blocks ON blocks.id = transactions.block_id
+                INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
+                WHERE transactions.id IN (SELECT id FROM ids)
+                UNION ALL
                 SELECT
                     transactions.id AS id,
                     transactions.variant,
@@ -162,8 +157,7 @@ impl TransactionStorage for Storage {
                 AND transactions.id IN (SELECT id FROM ids)
             "});
 
-            query_builder
-                .build()
+            qb.build()
                 .fetch(&*self.pool)
                 .map_ok(make_transaction)
                 .map(|result| result.flatten())
@@ -847,9 +841,7 @@ impl Storage {
     ) -> Result<Vec<(u64, Transaction)>, sqlx::Error> {
         use sqlx::{QueryBuilder, Sqlite};
 
-        let mut qb = QueryBuilder::<Sqlite>::new(indoc! {"
-            WITH block_ids(id) AS (VALUES (
-        "});
+        let mut qb = QueryBuilder::<Sqlite>::new("WITH block_ids(id) AS (VALUES (");
         let mut sep = qb.separated("), (");
         for id in ids {
             sep.push_bind(*id as i64);
