@@ -131,6 +131,35 @@ impl domain::storage::Storage for Storage {
             .await
     }
 
+    #[trace(properties = { "from": "{from}", "to": "{to}", "limit": "{limit}" })]
+    async fn get_transactions_in_range(
+        &self,
+        from: u64,
+        to: u64,
+        limit: NonZeroUsize,
+        tx: &mut SqlxTransaction<Self::Database>,
+    ) -> Result<Vec<Transaction>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT
+                id,
+                protocol_version,
+                raw
+            FROM transactions
+            WHERE id >= $1
+            AND id < $2
+            AND variant = 'Regular'
+            ORDER BY id DESC
+            LIMIT $3
+        "};
+
+        sqlx::query_as(query)
+            .bind(from as i64)
+            .bind(to as i64)
+            .bind(limit.get() as i32)
+            .fetch_all(&mut **tx)
+            .await
+    }
+
     #[trace]
     async fn save_relevant_transactions(
         &self,
@@ -150,10 +179,12 @@ impl domain::storage::Storage for Storage {
                 id,
                 viewing_key_hash,
                 viewing_key,
+                wanted_start_index,
+                first_indexed_transaction_id,
                 last_indexed_transaction_id,
                 last_active
             )
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES ($1, $2, $3, 0, 0, $4, $5)
             ON CONFLICT (viewing_key_hash)
             DO UPDATE SET last_indexed_transaction_id = $4
             RETURNING id
@@ -168,6 +199,46 @@ impl domain::storage::Storage for Storage {
             .fetch_one(&mut **tx)
             .await?
             .try_get::<Uuid, _>("id")?;
+
+        if !transactions.is_empty() {
+            let query = indoc! {"
+                INSERT INTO relevant_transactions (
+                    wallet_id,
+                    transaction_id
+                )
+            "};
+
+            QueryBuilder::new(query)
+                .push_values(transactions, |mut q, transaction| {
+                    q.push_bind(wallet_id).push_bind(transaction.id as i64);
+                })
+                .build()
+                .execute(&mut **tx)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    #[trace]
+    async fn save_backward_relevant_transactions(
+        &self,
+        wallet_id: Uuid,
+        transactions: &[Transaction],
+        first_indexed_transaction_id: u64,
+        tx: &mut SqlxTransaction<Self::Database>,
+    ) -> Result<(), sqlx::Error> {
+        let query = indoc! {"
+            UPDATE wallets
+            SET first_indexed_transaction_id = $1
+            WHERE id = $2
+        "};
+
+        sqlx::query(query)
+            .bind(first_indexed_transaction_id as i64)
+            .bind(wallet_id)
+            .execute(&mut **tx)
+            .await?;
 
         if !transactions.is_empty() {
             let query = indoc! {"
@@ -272,6 +343,8 @@ impl domain::storage::Storage for Storage {
             SELECT
                 id,
                 viewing_key,
+                wanted_start_index,
+                first_indexed_transaction_id,
                 last_indexed_transaction_id
             FROM wallets
             WHERE id = $1
@@ -295,6 +368,12 @@ pub struct Wallet {
     pub viewing_key: ByteVec,
 
     #[sqlx(try_from = "i64")]
+    pub wanted_start_index: u64,
+
+    #[sqlx(try_from = "i64")]
+    pub first_indexed_transaction_id: u64,
+
+    #[sqlx(try_from = "i64")]
     pub last_indexed_transaction_id: u64,
 }
 
@@ -305,6 +384,8 @@ impl TryFrom<(Wallet, &ChaCha20Poly1305)> for domain::Wallet {
         let Wallet {
             id,
             viewing_key,
+            wanted_start_index,
+            first_indexed_transaction_id,
             last_indexed_transaction_id,
         } = wallet;
 
@@ -312,6 +393,8 @@ impl TryFrom<(Wallet, &ChaCha20Poly1305)> for domain::Wallet {
 
         Ok(domain::Wallet {
             viewing_key,
+            wanted_start_index,
+            first_indexed_transaction_id,
             last_indexed_transaction_id,
         })
     }

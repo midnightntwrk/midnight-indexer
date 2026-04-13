@@ -21,31 +21,46 @@ use sqlx::types::{Uuid, time::OffsetDateTime};
 
 impl WalletStorage for Storage {
     #[trace]
-    async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<SessionId, sqlx::Error> {
+    async fn connect_wallet(
+        &self,
+        viewing_key: &ViewingKey,
+        start_index: Option<u64>,
+    ) -> Result<SessionId, sqlx::Error> {
         let id = Uuid::now_v7();
         let viewing_key_hash = viewing_key.hash();
         let session_id = generate_session_id();
         let viewing_key = viewing_key
             .encrypt(id, &self.cipher)
             .map_err(|error| sqlx::Error::Encode(error.into()))?;
+        let start_index = start_index.unwrap_or(0) as i64;
 
         let query = indoc! {"
             INSERT INTO wallets (
                 id,
                 viewing_key_hash,
                 viewing_key,
+                wanted_start_index,
+                first_indexed_transaction_id,
+                last_indexed_transaction_id,
                 last_active,
                 session_id
             )
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES ($1, $2, $3, $4, $4, $4, $5, $6)
             ON CONFLICT (viewing_key_hash)
-            DO UPDATE SET last_active = $4, session_id = $5
+            DO UPDATE SET
+                last_active = $5,
+                session_id = $6,
+                wanted_start_index = CASE
+                    WHEN wallets.wanted_start_index <= $4 THEN wallets.wanted_start_index
+                    ELSE $4
+                END
         "};
 
         sqlx::query(query)
             .bind(id)
             .bind(viewing_key_hash.as_ref())
             .bind(&viewing_key)
+            .bind(start_index)
             .bind(OffsetDateTime::now_utc())
             .bind(session_id.as_ref())
             .execute(&*self.pool)

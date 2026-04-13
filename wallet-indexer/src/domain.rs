@@ -21,6 +21,8 @@ use sqlx::prelude::FromRow;
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct Wallet {
     pub viewing_key: ViewingKey,
+    pub wanted_start_index: u64,
+    pub first_indexed_transaction_id: u64,
     pub last_indexed_transaction_id: u64,
 }
 

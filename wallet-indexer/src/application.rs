@@ -226,7 +226,72 @@ async fn index_wallet(
         .await
         .with_context(|| format!("get wallet for wallet ID {wallet_id}"))?;
 
-    // Only continue if possibly needed.
+    if wallet.first_indexed_transaction_id > wallet.wanted_start_index {
+        // Scan the backward gap in descending order so that first_indexed_transaction_id
+        // can be moved down continuously without re-processing transactions.
+        let transactions = storage
+            .get_transactions_in_range(
+                wallet.wanted_start_index,
+                wallet.first_indexed_transaction_id,
+                transaction_batch_size,
+                &mut tx,
+            )
+            .await
+            .context("get backward transactions")?;
+
+        // The query returns results in descending order; .last() is the minimum ID.
+        let first_indexed_transaction_id = transactions
+            .last()
+            .map(|t| t.id)
+            .unwrap_or(wallet.wanted_start_index);
+
+        let relevant_transactions = transactions
+            .into_iter()
+            .map(|transaction| {
+                transaction
+                    .relevant(&wallet)
+                    .with_context(|| {
+                        format!("check transaction relevance for wallet ID {wallet_id}")
+                    })
+                    .map(|relevant| (relevant, transaction))
+            })
+            .filter_map_ok(|(relevant, transaction)| relevant.then_some(transaction))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        storage
+            .save_backward_relevant_transactions(
+                wallet_id,
+                &relevant_transactions,
+                first_indexed_transaction_id,
+                &mut tx,
+            )
+            .await
+            .with_context(|| {
+                format!("save backward relevant transactions for wallet ID {wallet_id}")
+            })?;
+
+        tx.commit().await.context("commit database transaction")?;
+
+        if !relevant_transactions.is_empty() {
+            publisher
+                .publish(&WalletIndexed { wallet_id })
+                .await
+                .with_context(|| {
+                    format!("publish WalletIndexed event for wallet ID {wallet_id}")
+                })?;
+        }
+
+        debug!(
+            wallet_id:%,
+            first_indexed_transaction_id,
+            relevant_transactions_len = relevant_transactions.len();
+            "wallet backward indexed"
+        );
+
+        return Ok(());
+    }
+
+    // Forward scan: only continue if possibly needed.
     if wallet.last_indexed_transaction_id < max_transaction_id.load(Ordering::Acquire) {
         let from = wallet.last_indexed_transaction_id + 1;
         let transactions = storage

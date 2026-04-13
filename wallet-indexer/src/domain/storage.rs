@@ -46,6 +46,15 @@ where
         tx: &mut SqlxTransaction<Self::Database>,
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
+    /// Get at most `limit` transactions in the range `[from, to)`.
+    async fn get_transactions_in_range(
+        &self,
+        from: u64,
+        to: u64,
+        limit: NonZeroUsize,
+        tx: &mut SqlxTransaction<Self::Database>,
+    ) -> Result<Vec<Transaction>, sqlx::Error>;
+
     /// For the given session ID, transactionally save the given relevant `transactions` and
     /// update the last indexed transaction ID.
     async fn save_relevant_transactions(
@@ -53,6 +62,15 @@ where
         viewing_key: &ViewingKey,
         transactions: &[Transaction],
         last_indexed_transaction_id: u64,
+        tx: &mut SqlxTransaction<Self::Database>,
+    ) -> Result<(), sqlx::Error>;
+
+    /// Save backward-scanned relevant transactions and update the first indexed transaction ID.
+    async fn save_backward_relevant_transactions(
+        &self,
+        wallet_id: Uuid,
+        transactions: &[Transaction],
+        first_indexed_transaction_id: u64,
         tx: &mut SqlxTransaction<Self::Database>,
     ) -> Result<(), sqlx::Error>;
 
