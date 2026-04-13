@@ -425,6 +425,7 @@ where
         Mutation::<S>::default(),
         Subscription::<S, B>::default(),
     )
+    .extension(async_graphql::extensions::Tracing)
 }
 
 fn decode_session_id(session_id: HexEncoded) -> Result<SessionId, DecodeSessionIdError> {
