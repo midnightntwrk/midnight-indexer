@@ -28,6 +28,10 @@ import type {
   ContractActionResponse,
   DustGenerationStatus,
   DustGenerationStatusResponse,
+  DustGenerations,
+  DustGenerationsResponse,
+  DustCommitmentMerkleTreeUpdateResult,
+  DustCommitmentMerkleTreeUpdateResponse,
   ZswapMerkleTreeCollapsedUpdateResponse,
   ZswapMerkleTreeCollapsedUpdateResult,
 } from './indexer-types';
@@ -38,7 +42,7 @@ import {
 } from './graphql/block-queries';
 import { GET_TRANSACTION_BY_OFFSET } from './graphql/transaction-queries';
 import { GET_CONTRACT_ACTION, GET_CONTRACT_ACTION_BY_OFFSET } from './graphql/contract-queries';
-import { GET_DUST_GENERATION_STATUS } from './graphql/dust-queries';
+import { GET_DUST_GENERATION_STATUS, GET_DUST_GENERATIONS, GET_DUST_COMMITMENT_MERKLE_TREE_UPDATE } from './graphql/dust-queries';
 
 /**
  * HTTP client for interacting with the Midnight Indexer GraphQL API
@@ -240,6 +244,62 @@ export class IndexerHttpClient {
 
     const response = await this.client.rawRequest<{
       dustGenerationStatus: DustGenerationStatus[];
+    }>(query, variables);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  /**
+   * Retrieves all active DUST registrations and aggregated generation stats for given Cardano reward addresses
+   * @param cardanoRewardAddresses - Array of Cardano reward addresses to query
+   * @param queryOverride - Optional custom GraphQL query
+   * @returns Promise resolving to the DUST generations response
+   */
+  async getDustGenerations(
+    cardanoRewardAddresses: string[],
+    queryOverride?: string,
+  ): Promise<DustGenerationsResponse> {
+    log.debug(`Target URL endpoint ${this.getTargetUrl()}`);
+
+    const query = queryOverride || GET_DUST_GENERATIONS;
+    const variables = { CARDANO_REWARD_ADDRESSES: cardanoRewardAddresses };
+
+    log.debug(`Using query\n${query}`);
+    log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
+
+    const response = await this.client.rawRequest<{
+      dustGenerations: DustGenerations[];
+    }>(query, variables);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  /**
+   * Retrieves a collapsed Merkle tree update for the dust commitment tree
+   * @param startIndex - Start index of the range
+   * @param endIndex - Optional end index of the range
+   * @param queryOverride - Optional custom GraphQL query
+   * @returns Promise resolving to the hex-encoded collapsed update
+   */
+  async getDustCommitmentMerkleTreeUpdate(
+    startIndex: number,
+    endIndex: number,
+    queryOverride?: string,
+  ): Promise<DustCommitmentMerkleTreeUpdateResponse> {
+    log.debug(`Target URL endpoint ${this.getTargetUrl()}`);
+
+    const query = queryOverride || GET_DUST_COMMITMENT_MERKLE_TREE_UPDATE;
+    const variables = { START_INDEX: startIndex, END_INDEX: endIndex };
+
+    log.debug(`Using query\n${query}`);
+    log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
+
+    const response = await this.client.rawRequest<{
+      dustCommitmentMerkleTreeUpdate: DustCommitmentMerkleTreeUpdateResult;
     }>(query, variables);
 
     log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);

@@ -38,6 +38,7 @@ describe('shielded transactions', () => {
   let indexerHttpClient: IndexerHttpClient;
   let previousMaxLedgerId: number;
   let zswapEndIndexBeforeTx: number;
+  let dustCommitmentEndIndexBeforeTx: number;
   let toolkit: ToolkitWrapper;
   let transactionResult: ToolkitTransactionResult;
 
@@ -79,6 +80,14 @@ describe('shielded transactions', () => {
         : max;
     }, 0);
     log.debug(`Highest zswapEndIndex from genesis = ${zswapEndIndexBeforeTx}`);
+
+    dustCommitmentEndIndexBeforeTx = genesisTxs.reduce((max, tx) => {
+      const regularTx = tx as RegularTransaction;
+      return regularTx.dustCommitmentEndIndex != null && regularTx.dustCommitmentEndIndex > max
+        ? regularTx.dustCommitmentEndIndex
+        : max;
+    }, 0);
+    log.debug(`Highest dustCommitmentEndIndex from genesis = ${dustCommitmentEndIndexBeforeTx}`);
 
     // Submit one shielded->shielded transfer (1 STAR)
     transactionResult = await toolkit.generateSingleTx(
@@ -273,6 +282,40 @@ describe('shielded transactions', () => {
       log.debug(
         `zswapEndIndex before tx: ${zswapEndIndexBeforeTx}, after tx: ${regularTx.zswapEndIndex}`,
       );
+    });
+
+    /**
+     * After a shielded transaction is confirmed, the dust commitment Merkle tree should grow.
+     * The dustCommitmentEndIndex of the transaction should be higher than the previous maximum.
+     *
+     * @given a confirmed shielded transaction
+     * @when we query the transaction from the indexer
+     * @then the transaction's dustCommitmentEndIndex should be greater than the dustCommitmentEndIndex before the transaction
+     */
+    test('should increase the dust commitment Merkle tree end index', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Transaction', 'Dust', 'CommitmentMerkleTree', 'ShieldedTokens'],
+      };
+
+      ctx.skip?.(
+        transactionResult.status !== 'confirmed',
+        "Toolkit transaction hasn't been confirmed",
+      );
+
+      const transactionResponse = await getTransactionByHashWithRetry(transactionResult.txHash);
+      expect(transactionResponse).toBeSuccess();
+
+      const transactions = transactionResponse.data!.transactions;
+      const tx = transactions.find(
+        (t: Transaction) => t.hash === transactionResult.txHash,
+      );
+      expect(tx).toBeDefined();
+
+      const regularTx = tx as RegularTransaction;
+      expect(regularTx.dustCommitmentEndIndex).toBeDefined();
+      expect(regularTx.dustCommitmentEndIndex!).toBeGreaterThan(dustCommitmentEndIndexBeforeTx);
+
+      log.debug(`dustCommitmentEndIndex before tx: ${dustCommitmentEndIndexBeforeTx}, after tx: ${regularTx.dustCommitmentEndIndex}`);
     });
 
     /**
