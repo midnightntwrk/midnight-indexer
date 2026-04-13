@@ -248,10 +248,7 @@ impl IndexerData {
             };
 
             // Verify fees.
-            assert!(
-                transaction.fees.paid_fees.parse::<u64>().is_ok()
-                    && transaction.fees.estimated_fees.parse::<u64>().is_ok()
-            );
+            assert!(transaction.fee.parse::<u64>().is_ok());
         }
 
         // Verify that contract actions of a transaction reference that transaction.

@@ -135,7 +135,11 @@ where
     /// The dust generation tree end index.
     dust_generation_end_index: u64,
 
+    /// The fee for this transaction in SPECK (atomic unit of DUST).
+    fee: String,
+
     /// Fee information for this transaction.
+    #[graphql(deprecation = "Use fee instead")]
     fees: TransactionFees,
 
     #[graphql(skip)]
@@ -210,12 +214,13 @@ where
 
         let zswap_merkle_tree_root = zswap_merkle_tree_root.hex_encode();
 
-        // Use fees information from database (calculated by chain-indexer)
+        let fee = transaction
+            .paid_fees
+            .map(|f| f.to_string())
+            .unwrap_or_else(|| "0".to_owned());
+
         let fees = TransactionFees {
-            paid_fees: transaction
-                .paid_fees
-                .map(|f| f.to_string())
-                .unwrap_or_else(|| "0".to_owned()),
+            paid_fees: fee.clone(),
             estimated_fees: transaction
                 .estimated_fees
                 .map(|f| f.to_string())
@@ -229,6 +234,7 @@ where
             raw: raw.hex_encode(),
             block_hash,
             transaction_result: transaction_result.into(),
+            fee,
             fees,
             identifiers: identifiers
                 .into_iter()
@@ -383,12 +389,14 @@ pub struct Segment {
     success: bool,
 }
 
-/// Fees information for a transaction, including both paid and estimated fees.
+/// Fees information for a transaction.
 #[derive(Debug, Clone, PartialEq, Eq, SimpleObject)]
 pub struct TransactionFees {
-    /// The actual fees paid for this transaction in DUST.
+    /// The fees for this transaction in SPECK (atomic unit of DUST).
     paid_fees: String,
-    /// The estimated fees that was calculated for this transaction in DUST.
+
+    /// The fees for this transaction in SPECK (atomic unit of DUST).
+    #[graphql(deprecation = "Use paidFees instead")]
     estimated_fees: String,
 }
 

@@ -843,9 +843,13 @@ type RegularTransaction implements Transaction {
 	"""
 	dustGenerationEndIndex: Int!
 	"""
+	The fee for this transaction in SPECK (atomic unit of DUST).
+	"""
+	fee: String!
+	"""
 	Fee information for this transaction.
 	"""
-	fees: TransactionFees!
+	fees: TransactionFees! @deprecated(reason: "Use fee instead")
 	"""
 	The block for this transaction.
 	"""
@@ -1237,17 +1241,17 @@ interface Transaction {
 }
 
 """
-Fees information for a transaction, including both paid and estimated fees.
+Fees information for a transaction.
 """
 type TransactionFees {
 	"""
-	The actual fees paid for this transaction in DUST.
+	The fees for this transaction in SPECK (atomic unit of DUST).
 	"""
 	paidFees: String!
 	"""
-	The estimated fees that was calculated for this transaction in DUST.
+	The fees for this transaction in SPECK (atomic unit of DUST).
 	"""
-	estimatedFees: String!
+	estimatedFees: String! @deprecated(reason: "Use paidFees instead")
 }
 
 """
