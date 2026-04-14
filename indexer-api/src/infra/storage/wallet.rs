@@ -32,7 +32,10 @@ impl WalletStorage for Storage {
         let viewing_key = viewing_key
             .encrypt(id, &self.cipher)
             .map_err(|error| sqlx::Error::Encode(error.into()))?;
-        let start_index = start_index.unwrap_or(0) as i64;
+        let start_index: i64 = start_index
+            .unwrap_or(0)
+            .try_into()
+            .map_err(|error| sqlx::Error::Encode(Box::new(error)))?;
 
         let query = indoc! {"
             INSERT INTO wallets (
