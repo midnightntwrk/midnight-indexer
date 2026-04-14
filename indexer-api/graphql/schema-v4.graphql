@@ -104,6 +104,16 @@ type CommitteeMember {
 }
 
 """
+Options for the connect mutation.
+"""
+input ConnectOptions {
+	"""
+	Transaction index to start searching for relevant transactions (inclusive).
+	"""
+	startIndex: Int
+}
+
+"""
 A contract action.
 """
 interface ContractAction {
@@ -585,7 +595,7 @@ type Mutation {
 	"""
 	Connect the wallet with the given viewing key and return a session ID.
 	"""
-	connect(viewingKey: ViewingKey!): HexEncoded!
+	connect(viewingKey: ViewingKey!, options: ConnectOptions): HexEncoded!
 	"""
 	Disconnect the wallet with the given session ID.
 	"""

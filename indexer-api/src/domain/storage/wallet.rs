@@ -21,7 +21,12 @@ where
     Self: Clone + Send + Sync + 'static,
 {
     /// Connect a wallet, i.e. add it to the active ones, and return a random session ID.
-    async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<SessionId, sqlx::Error>;
+    /// If `start_index` is provided, transactions before that index are skipped.
+    async fn connect_wallet(
+        &self,
+        viewing_key: &ViewingKey,
+        start_index: Option<u64>,
+    ) -> Result<SessionId, sqlx::Error>;
 
     /// Disconnect a wallet, i.e. remove it from the active ones.
     async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error>;
@@ -35,7 +40,11 @@ where
 
 #[allow(unused_variables)]
 impl WalletStorage for NoopStorage {
-    async fn connect_wallet(&self, viewing_key: &ViewingKey) -> Result<SessionId, sqlx::Error> {
+    async fn connect_wallet(
+        &self,
+        viewing_key: &ViewingKey,
+        start_index: Option<u64>,
+    ) -> Result<SessionId, sqlx::Error> {
         unimplemented!()
     }
 

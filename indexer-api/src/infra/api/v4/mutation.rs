@@ -18,7 +18,7 @@ use crate::{
         v4::{HexEncodable, HexEncoded, decode_session_id, viewing_key::ViewingKey},
     },
 };
-use async_graphql::{Context, Object, scalar};
+use async_graphql::{Context, InputObject, Object, scalar};
 use fastrace::trace;
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -41,15 +41,29 @@ where
 {
     /// Connect the wallet with the given viewing key and return a session ID.
     #[trace]
-    async fn connect(&self, cx: &Context<'_>, viewing_key: ViewingKey) -> ApiResult<HexEncoded> {
+    async fn connect(
+        &self,
+        cx: &Context<'_>,
+        viewing_key: ViewingKey,
+        options: Option<ConnectOptions>,
+    ) -> ApiResult<HexEncoded> {
         let viewing_key = viewing_key
             .try_into_domain(cx.get_network_id())
             .map_err_into_client_error(|| "invalid viewing key")?;
 
+        let start_index = options
+            .and_then(|o| o.start_index)
+            .map(|i| {
+                u64::try_from(i)
+                    .ok()
+                    .some_or_client_error(|| "startIndex must not be negative")
+            })
+            .transpose()?;
+
         let storage = cx.get_storage::<S>();
 
         let session_id = storage
-            .connect_wallet(&viewing_key)
+            .connect_wallet(&viewing_key, start_index)
             .await
             .map_err_into_server_error(|| "connect wallet")?;
 
@@ -87,6 +101,13 @@ where
 
         Ok(Unit)
     }
+}
+
+/// Options for the connect mutation.
+#[derive(Debug, Clone, InputObject)]
+pub struct ConnectOptions {
+    /// Transaction index to start searching for relevant transactions (inclusive).
+    start_index: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

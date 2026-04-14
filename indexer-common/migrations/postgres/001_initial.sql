@@ -136,6 +136,8 @@ CREATE TABLE wallets (
   id UUID PRIMARY KEY,
   viewing_key_hash BYTEA NOT NULL UNIQUE,
   viewing_key BYTEA NOT NULL, -- Ciphertext with nonce, no longer unique!
+  wanted_start_index BIGINT NOT NULL DEFAULT 0,
+  first_indexed_transaction_id BIGINT NOT NULL DEFAULT 0,
   last_indexed_transaction_id BIGINT NOT NULL DEFAULT 0,
   last_active TIMESTAMPTZ NOT NULL,
   session_id BYTEA UNIQUE -- Random per-session ID for API authentication, NULL when disconnected.
