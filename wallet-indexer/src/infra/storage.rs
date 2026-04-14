@@ -472,7 +472,11 @@ mod tests {
             .get_transactions_in_range(3, 9, limit, &mut tx)
             .await?;
         let ids = result.iter().map(|t| t.id).collect::<Vec<_>>();
-        assert_eq!(ids, vec![8, 6, 4], "half-open range + Regular filter + DESC");
+        assert_eq!(
+            ids,
+            vec![8, 6, 4],
+            "half-open range + Regular filter + DESC"
+        );
 
         // `from` is inclusive.
         let result = storage
@@ -485,10 +489,7 @@ mod tests {
         let result = storage
             .get_transactions_in_range(3, 8, limit, &mut tx)
             .await?;
-        assert!(
-            !result.iter().any(|t| t.id == 8),
-            "`to` must be exclusive"
-        );
+        assert!(!result.iter().any(|t| t.id == 8), "`to` must be exclusive");
 
         // Empty range collapses to empty result.
         let result = storage
@@ -496,18 +497,19 @@ mod tests {
             .await?;
         assert!(result.is_empty());
 
-        // Limit is respected — request 2 from [0, 11): Regular = {2,4,6,8,10}, DESC top 2 = [10, 8].
+        // Limit is respected — request 2 from [0, 11): Regular = {2,4,6,8,10}, DESC top 2 = [10,
+        // 8].
         let two = NonZeroUsize::new(2).unwrap();
-        let result = storage.get_transactions_in_range(0, 11, two, &mut tx).await?;
-        assert_eq!(
-            result.iter().map(|t| t.id).collect::<Vec<_>>(),
-            vec![10, 8]
-        );
+        let result = storage
+            .get_transactions_in_range(0, 11, two, &mut tx)
+            .await?;
+        assert_eq!(result.iter().map(|t| t.id).collect::<Vec<_>>(), vec![10, 8]);
 
         Ok(())
     }
 
-    /// With an empty `transactions` slice the cursor still advances and no relevant rows are inserted.
+    /// With an empty `transactions` slice the cursor still advances and no relevant rows are
+    /// inserted.
     #[tokio::test]
     async fn save_backward_empty_batch_advances_cursor_only() -> Result<(), Box<dyn StdError>> {
         let (storage, pool) = new_storage().await?;
@@ -532,7 +534,10 @@ mod tests {
                 .bind(wallet_id)
                 .fetch_one(&*pool)
                 .await?;
-        assert_eq!(relevant_count, 0, "no relevant rows inserted for empty batch");
+        assert_eq!(
+            relevant_count, 0,
+            "no relevant rows inserted for empty batch"
+        );
 
         Ok(())
     }
@@ -554,7 +559,10 @@ mod tests {
         let batch = storage
             .get_transactions_in_range(50, 100, NonZeroUsize::new(10).unwrap(), &mut tx)
             .await?;
-        assert_eq!(batch.iter().map(|t| t.id).collect::<Vec<_>>(), vec![90, 75, 50]);
+        assert_eq!(
+            batch.iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![90, 75, 50]
+        );
 
         let new_cursor = batch.last().map(|t| t.id).unwrap();
         storage
