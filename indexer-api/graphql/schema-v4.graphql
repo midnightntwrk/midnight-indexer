@@ -108,7 +108,7 @@ Options for the connect mutation.
 """
 input ConnectOptions {
 	"""
-	Since what transaction index to start searching for relevant transactions.
+	Transaction index to start searching for relevant transactions (inclusive).
 	"""
 	startIndex: Int
 }

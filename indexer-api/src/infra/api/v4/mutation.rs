@@ -51,7 +51,14 @@ where
             .try_into_domain(cx.get_network_id())
             .map_err_into_client_error(|| "invalid viewing key")?;
 
-        let start_index = options.and_then(|o| o.start_index).map(|i| i as u64);
+        let start_index = options
+            .and_then(|o| o.start_index)
+            .map(|i| {
+                u64::try_from(i)
+                    .ok()
+                    .some_or_client_error(|| "startIndex must not be negative")
+            })
+            .transpose()?;
 
         let storage = cx.get_storage::<S>();
 
@@ -99,8 +106,8 @@ where
 /// Options for the connect mutation.
 #[derive(Debug, Clone, InputObject)]
 pub struct ConnectOptions {
-    /// Since what transaction index to start searching for relevant transactions.
-    start_index: Option<i32>,
+    /// Transaction index to start searching for relevant transactions (inclusive).
+    start_index: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
