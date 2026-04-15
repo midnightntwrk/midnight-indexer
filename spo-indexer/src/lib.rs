@@ -14,7 +14,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod application;
-#[cfg(feature = "cloud")]
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 pub mod config;
 pub mod domain;
 pub mod infra;

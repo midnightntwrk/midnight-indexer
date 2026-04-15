@@ -57,7 +57,6 @@ pub async fn run(
     storage: impl Storage,
     mut sigterm: Signal,
 ) -> anyhow::Result<()> {
-    // Mandatory background task: refresh stake snapshots periodically using Blockfrost.
     let st_cfg = config.stake_refresh.clone();
     let storage_bg = storage.clone();
     let client_bg = client.clone();
@@ -373,7 +372,7 @@ async fn get_epoch_to_process(
     let current_epoch = client.get_current_epoch().await?;
     let latest_epoch_num = match latest_processed {
         Some(epoch) => epoch.epoch_no,
-        None => client.get_first_epoch_num(storage).await?,
+        None => client.get_first_epoch_num().await?,
     };
 
     let time_offset: i64 =
