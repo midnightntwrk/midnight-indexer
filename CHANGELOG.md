@@ -4,6 +4,46 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2026-04-15
+
+### 🚀 Features
+
+- Add efficient dust wallet synchronisation endpoints (#980)
+- Remove support for node 0.20 and 0.21 (#986)
+- Add shieldedNullifierTransactions subscription (#996)
+- Bridge async-graphql tracing to fastrace (#1037)
+- Avoid unnecessary scans of shielded transactions (#1039)
+- Support ledger 8.1 (#1033)
+- Add node 1.0.0-rc.2 metadata and remove rc.1 (#1041)
+
+### 🐛 Bug Fixes
+
+- Per-generation capacity calculation and cursor pagination for dust queries (#997)
+- *(indexer-api)* Make standalone sqlite spo queries match postgres (#977)
+- *(api)* Align dustCommitmentMerkleTreeUpdate with zswapMerkleTreeCollapsedUpdate pattern (#1023)
+- Compute transaction fees using ledger's Transaction::fees() API (#1031)
+
+### 🚜 Refactor
+
+- Simplify and make recent code more consistent (#1035)
+
+### ⚡ Performance
+
+- *(indexer-api)* Introduce DataLoader for block-by-hash lookups (#1018)
+- *(indexer-api)* Introduce DataLoader for transactions-by-block-id lookups (#1022)
+- *(indexer-api)* Introduce DataLoader for contract-actions-by-transaction-id lookups (#1030)
+- *(indexer-api)* Introduce DataLoader for transaction-by-id lookups (#1027)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(api)* Add fee field and deprecate estimatedFees and fees wrapper (#1036)
+
+## [4.0.1] - 2026-03-25
+
+### 🐛 Bug Fixes
+
+- Correct timestamp unit mismatch in currentCapacity calculation (#929)
+
 ## [4.0.0] - 2026-03-17
 
 ## [4.0.0-rc.10] - 2026-03-16
