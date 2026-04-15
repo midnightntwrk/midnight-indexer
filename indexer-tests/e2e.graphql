@@ -48,10 +48,7 @@ query BlockQuery($block_offset: BlockOffset) {
                         identifiers
                         zswapStartIndex
                         zswapEndIndex
-                        fees {
-                            paidFees
-                            estimatedFees
-                        }
+                        fee
                     }
                 }
                 unshieldedBalances {
@@ -88,10 +85,7 @@ query BlockQuery($block_offset: BlockOffset) {
                         identifiers
                         zswapStartIndex
                         zswapEndIndex
-                        fees {
-                            paidFees
-                            estimatedFees
-                        }
+                        fee
                     }
                 }
                 spentAtTransaction {
@@ -108,10 +102,7 @@ query BlockQuery($block_offset: BlockOffset) {
                         identifiers
                         zswapStartIndex
                         zswapEndIndex
-                        fees {
-                            paidFees
-                            estimatedFees
-                        }
+                        fee
                     }
                 }
             }
@@ -137,10 +128,7 @@ query BlockQuery($block_offset: BlockOffset) {
                         identifiers
                         zswapStartIndex
                         zswapEndIndex
-                        fees {
-                            paidFees
-                            estimatedFees
-                        }
+                        fee
                     }
                 }
                 spentAtTransaction {
@@ -157,10 +145,7 @@ query BlockQuery($block_offset: BlockOffset) {
                         identifiers
                         zswapStartIndex
                         zswapEndIndex
-                        fees {
-                            paidFees
-                            estimatedFees
-                        }
+                        fee
                     }
                 }
             }
@@ -188,10 +173,7 @@ query BlockQuery($block_offset: BlockOffset) {
                 identifiers
                 zswapStartIndex
                 zswapEndIndex
-                fees {
-                    paidFees
-                    estimatedFees
-                }
+                fee
             }
         }
     }
@@ -225,10 +207,7 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                     identifiers
                     zswapStartIndex
                     zswapEndIndex
-                    fees {
-                        paidFees
-                        estimatedFees
-                    }
+                    fee
                 }
             }
             unshieldedBalances {
@@ -265,10 +244,7 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                     identifiers
                     zswapStartIndex
                     zswapEndIndex
-                    fees {
-                        paidFees
-                        estimatedFees
-                    }
+                    fee
                 }
             }
             spentAtTransaction {
@@ -285,10 +261,7 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                     identifiers
                     zswapStartIndex
                     zswapEndIndex
-                    fees {
-                        paidFees
-                        estimatedFees
-                    }
+                    fee
                 }
             }
         }
@@ -314,10 +287,7 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                     identifiers
                     zswapStartIndex
                     zswapEndIndex
-                    fees {
-                        paidFees
-                        estimatedFees
-                    }
+                    fee
                 }
             }
             spentAtTransaction {
@@ -334,10 +304,7 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
                     identifiers
                     zswapStartIndex
                     zswapEndIndex
-                    fees {
-                        paidFees
-                        estimatedFees
-                    }
+                    fee
                 }
             }
         }
@@ -365,10 +332,7 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
             identifiers
             zswapStartIndex
             zswapEndIndex
-            fees {
-                paidFees
-                estimatedFees
-            }
+            fee
         }
     }
 }
@@ -398,10 +362,7 @@ query ContractActionQuery(
                 identifiers
                 zswapStartIndex
                 zswapEndIndex
-                fees {
-                    paidFees
-                    estimatedFees
-                }
+                fee
             }
         }
         unshieldedBalances {
@@ -476,10 +437,7 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                         identifiers
                         zswapStartIndex
                         zswapEndIndex
-                        fees {
-                            paidFees
-                            estimatedFees
-                        }
+                        fee
                     }
                 }
                 unshieldedBalances {
@@ -516,10 +474,7 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                         identifiers
                         zswapStartIndex
                         zswapEndIndex
-                        fees {
-                            paidFees
-                            estimatedFees
-                        }
+                        fee
                     }
                 }
                 spentAtTransaction {
@@ -536,10 +491,7 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                         identifiers
                         zswapStartIndex
                         zswapEndIndex
-                        fees {
-                            paidFees
-                            estimatedFees
-                        }
+                        fee
                     }
                 }
             }
@@ -565,10 +517,7 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                         identifiers
                         zswapStartIndex
                         zswapEndIndex
-                        fees {
-                            paidFees
-                            estimatedFees
-                        }
+                        fee
                     }
                 }
                 spentAtTransaction {
@@ -585,10 +534,7 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                         identifiers
                         zswapStartIndex
                         zswapEndIndex
-                        fees {
-                            paidFees
-                            estimatedFees
-                        }
+                        fee
                     }
                 }
             }
@@ -616,10 +562,7 @@ subscription BlockSubscription($block_offset: BlockOffset) {
                 identifiers
                 zswapStartIndex
                 zswapEndIndex
-                fees {
-                    paidFees
-                    estimatedFees
-                }
+                fee
             }
         }
     }
@@ -653,10 +596,7 @@ subscription ContractActionSubscription(
                 identifiers
                 zswapStartIndex
                 zswapEndIndex
-                fees {
-                    paidFees
-                    estimatedFees
-                }
+                fee
             }
         }
         unshieldedBalances {
@@ -713,10 +653,7 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                     identifiers
                     zswapStartIndex
                     zswapEndIndex
-                    fees {
-                        paidFees
-                        estimatedFees
-                    }
+                    fee
                 }
             }
             createdUtxos {
@@ -741,10 +678,7 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                         identifiers
                         zswapStartIndex
                         zswapEndIndex
-                        fees {
-                            paidFees
-                            estimatedFees
-                        }
+                        fee
                     }
                 }
             }
@@ -770,10 +704,7 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                         identifiers
                         zswapStartIndex
                         zswapEndIndex
-                        fees {
-                            paidFees
-                            estimatedFees
-                        }
+                        fee
                     }
                 }
                 spentAtTransaction {
@@ -790,10 +721,7 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
                         identifiers
                         zswapStartIndex
                         zswapEndIndex
-                        fees {
-                            paidFees
-                            estimatedFees
-                        }
+                        fee
                     }
                 }
             }
