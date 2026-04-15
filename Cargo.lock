@@ -1598,9 +1598,9 @@ dependencies = [
 
 [[package]]
 name = "derive-where"
-version = "1.6.0"
+version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef941ded77d15ca19b40374869ac6000af1c9f2a4c0f3d4c70926287e6364a8f"
+checksum = "d08b3a0bcc0d079199cd476b2cae8435016ec11d1c0986c6901c5ac223041534"
 dependencies = [
  "proc-macro2",
  "quote 1.0.45",
@@ -3111,8 +3111,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-ledger",
- "midnight-onchain-runtime 2.0.1",
- "midnight-onchain-runtime 3.0.0",
+ "midnight-onchain-runtime",
  "midnight-serialize",
  "midnight-storage-core",
  "midnight-transient-crypto",
@@ -3984,9 +3983,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "8.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78ab921a746fc8cceb4d9f4f68800e29cdd038dbd3486f6675428b79ebe04ded"
+version = "8.1.0-rc.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=crate-ledger-8.1.0-rc.1#fc4ebb35bb2e061f7ce2315929bffc59823d15fd"
 dependencies = [
  "anyhow",
  "derive-where",
@@ -4000,9 +3998,9 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-ledger-static",
- "midnight-onchain-runtime 3.0.0",
+ "midnight-onchain-runtime",
  "midnight-serialize",
- "midnight-storage 2.0.1",
+ "midnight-storage",
  "midnight-transient-crypto",
  "midnight-zswap",
  "rand 0.8.5",
@@ -4027,9 +4025,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "251e828965432c89a3d13fec3c82fda23649eda3f8f76fa1326d97e00f195334"
+version = "3.1.0"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=onchain-runtime-3.1.0-rc.1#279fa7d8d5ad171472e787533b76efa3b1ed3a3e"
 dependencies = [
  "derive-where",
  "enum_index",
@@ -4040,36 +4037,10 @@ dependencies = [
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-onchain-state 2.0.1",
- "midnight-onchain-vm 1.0.2",
+ "midnight-onchain-state",
+ "midnight-onchain-vm",
  "midnight-serialize",
- "midnight-storage 1.1.1",
- "midnight-transient-crypto",
- "rand 0.8.5",
- "serde",
- "serde_bytes",
- "tracing",
-]
-
-[[package]]
-name = "midnight-onchain-runtime"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f4f57168b906d68eddcf14fe6b34b1b8202ad3415e9796fdb59a38c01205610"
-dependencies = [
- "derive-where",
- "enum_index",
- "enum_index_derive",
- "fake",
- "hex",
- "konst",
- "lazy_static",
- "midnight-base-crypto",
- "midnight-coin-structure",
- "midnight-onchain-state 3.0.0",
- "midnight-onchain-vm 3.0.0",
- "midnight-serialize",
- "midnight-storage 2.0.1",
+ "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
  "serde",
@@ -4079,28 +4050,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e153e26062e19ad07a065f8b4466243a6964e5fce5820d371fc9f4b036666ee7"
-dependencies = [
- "derive-where",
- "fake",
- "hex",
- "midnight-base-crypto",
- "midnight-coin-structure",
- "midnight-serialize",
- "midnight-storage 1.1.1",
- "midnight-transient-crypto",
- "rand 0.8.5",
- "serde",
- "serde_bytes",
-]
-
-[[package]]
-name = "midnight-onchain-state"
 version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cf32b5175d303251d7051fb30532d4fdef3c19c7e36c5831c002a27e8440163"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=onchain-state-3.1.0-rc.1#3ab59364bad95304af01d84e6d6fd7544d5b2c78"
 dependencies = [
  "derive-where",
  "fake",
@@ -4108,7 +4059,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-serialize",
- "midnight-storage 2.0.1",
+ "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
  "serde",
@@ -4117,9 +4068,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f737f8a5d227d07683d0c5829e1de02bdf297e39ab8ef954a3d4f49072f973f"
+version = "3.1.0"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=onchain-vm-3.1.0-rc.1#cbcdac28eb3fa30f759e733e74555b7c9f202bac"
 dependencies = [
  "derive-where",
  "fake",
@@ -4127,31 +4077,9 @@ dependencies = [
  "konst",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-onchain-state 2.0.1",
+ "midnight-onchain-state",
  "midnight-serialize",
- "midnight-storage 1.1.1",
- "midnight-transient-crypto",
- "rand 0.8.5",
- "rpds",
- "serde",
- "serde_bytes",
-]
-
-[[package]]
-name = "midnight-onchain-vm"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fe2080991c8f6063cb204480db6b5db4072fb6fe7cb807ef77371ea7f0bbc62"
-dependencies = [
- "derive-where",
- "fake",
- "hex",
- "konst",
- "midnight-base-crypto",
- "midnight-coin-structure",
- "midnight-onchain-state 3.0.0",
- "midnight-serialize",
- "midnight-storage 2.0.1",
+ "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
  "rpds",
@@ -4181,9 +4109,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cf09a5e7e71e9cda92d6a401448cccaf6147ecb2b473bda2bb0afcccebdfd12"
+version = "1.1.0"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=serialize-1.1.0-rc.1#fdea5bbdd2759c293843cfc52543436b94673e95"
 dependencies = [
  "crypto",
  "konst",
@@ -4202,24 +4129,6 @@ dependencies = [
  "proc-macro2",
  "quote 1.0.45",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "midnight-storage"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df40bcb4aa0a709f5c4441f6d05aa15e853f434d777c6ef8a4692c00f24d3f6e"
-dependencies = [
- "crypto",
- "derive-where",
- "midnight-base-crypto",
- "midnight-serialize",
- "midnight-storage-core",
- "parking_lot",
- "rand 0.8.5",
- "serde",
- "sha2 0.10.9",
- "tempfile",
 ]
 
 [[package]]
@@ -4243,9 +4152,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-core"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bc1be493c1a38918c0629d4b0ab8725ef0b759a6243410c5f7504700c851feb"
+version = "1.2.0"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=storage-core-1.2.0-rc.1#b23837b2dacc2284bb18853bc37148448b04d419"
 dependencies = [
  "archery",
  "crypto",
@@ -4280,9 +4188,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f0e92f0e835fc85d3e22d54b2e0fbfd3d3777439475da8d10020ef7bf016bb1"
+version = "2.1.0"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=transient-crypto-2.1.0-rc.1#08a5076a88c089f9687e8017475224985dbb008b"
 dependencies = [
  "anyhow",
  "blake2b_simd",
@@ -4339,9 +4246,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "8.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b1ef7334eb838a0fb19c3ca769b358a1e4796a76548a10f5f1c369fac41bc92"
+version = "8.1.0-rc.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=zswap-8.1.0-rc.1#83e660749c1abfb9f3b52762bd0a761714aa10a1"
 dependencies = [
  "derive-where",
  "fake",
@@ -4352,9 +4258,9 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-ledger-static",
- "midnight-onchain-runtime 3.0.0",
+ "midnight-onchain-runtime",
  "midnight-serialize",
- "midnight-storage 2.0.1",
+ "midnight-storage",
  "midnight-transient-crypto",
  "rand 0.8.5",
  "serde",

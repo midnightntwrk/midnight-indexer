@@ -29,13 +29,13 @@ use crate::{
     error::BoxError,
 };
 use fastrace::trace;
-use midnight_base_crypto::signatures::Signature;
+use midnight_base_crypto_v1::signatures::Signature;
 use midnight_ledger_v8::{
     dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V8,
     structure::ProofMarker as ProofMarkerV8,
 };
-use midnight_serialize::{Serializable, Tagged, tagged_serialize};
-use midnight_transient_crypto::commitment::PureGeneratorPedersen;
+use midnight_serialize_v1::{Serializable, Tagged, tagged_serialize};
+use midnight_transient_crypto_v2::commitment::PureGeneratorPedersen;
 use std::{io, string::FromUtf8Error};
 use thiserror::Error;
 
