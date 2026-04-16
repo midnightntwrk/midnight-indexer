@@ -61,6 +61,11 @@ type SubxtBlock = subxt::client::Block<SubstrateConfig>;
 const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
 const CATCH_UP_LOG_INTERVAL: u64 = 1_000;
 
+/// One GRANDPA session worth of blocks. Blocks within this distance of the finalized tip are
+/// fetched by hash (backward traversal) to avoid any risk of ingesting non-canonical blocks.
+/// Blocks further back are fetched by height with parent hash verification.
+const FINALIZATION_SAFETY_MARGIN: u64 = 200;
+
 /// A [Node] implementation based on subxt.
 #[derive(Clone)]
 pub struct SubxtNode {
@@ -318,16 +323,57 @@ impl Node for SubxtNode {
                 let start_height = after_height.map(|h| h + 1).unwrap_or(0);
                 let end_height = first_block.number();
 
-                for height in start_height..end_height {
+                // Blocks older than FINALIZATION_SAFETY_MARGIN from the finalized tip are
+                // guaranteed to be finalized by an earlier GRANDPA round, so they can be
+                // fetched by height with parent hash verification. Blocks within the safety
+                // margin are fetched by hash (backward traversal) to avoid any risk of
+                // ingesting non-canonical blocks near the tip.
+                let safe_height = end_height
+                    .saturating_sub(FINALIZATION_SAFETY_MARGIN)
+                    .max(start_height);
+
+                // Initialize from the stored block hash so the first forward-fetched block
+                // is verified against it too.
+                let mut last_forward_hash = after_height.map(|_| H256(after_hash.0));
+                for height in start_height..safe_height {
                     if height % CATCH_UP_LOG_INTERVAL == 0 {
                         info!(
                             highest_stored_height:? = after_height,
                             current_height = height,
                             first_finalized_height = end_height;
-                            "catching up"
+                            "catching up by height"
                         );
                     }
                     let block = self.block_at_height(height).await?;
+                    let block_hash = block.block_hash();
+                    if let Some(expected_parent) = last_forward_hash {
+                        let parent_hash = block_header(&block).await?.parent_hash;
+                        if parent_hash != expected_parent {
+                            Err(SubxtNodeError::ParentHashMismatch(
+                                height,
+                                expected_parent,
+                                parent_hash,
+                            ))?;
+                        }
+                    }
+                    last_forward_hash = Some(block_hash);
+                    yield self.make_block(&mut authorities, block).await?;
+                }
+
+                let stop_hash = last_forward_hash.unwrap_or(H256(after_hash.0));
+                let genesis = self.block_at(self.online_client.genesis_hash()).await?;
+                let genesis_parent_hash = block_header(&genesis).await?.parent_hash;
+
+                let mut hashes = Vec::new();
+                let mut parent_hash = first_block.header().parent_hash;
+                while parent_hash != stop_hash && parent_hash != genesis_parent_hash {
+                    let parent = self.block_at(parent_hash).await?;
+                    parent_hash = block_header(&parent).await?.parent_hash;
+                    hashes.push(parent.block_hash());
+                }
+
+                for hash in hashes.into_iter().rev() {
+                    let block = self.block_at(hash).await?;
                     yield self.make_block(&mut authorities, block).await?;
                 }
 
@@ -487,6 +533,9 @@ pub enum SubxtNodeError {
 
     #[error("cannot get online client at block height {0}")]
     GetOnlineClientAtHeight(u64, #[source] Box<subxt::error::OnlineClientAtBlockError>),
+
+    #[error("parent hash mismatch at height {0}: expected {1}, was {2}")]
+    ParentHashMismatch(u64, H256, H256),
 
     #[error("cannot fetch extrinsics")]
     FetchExtrinsics(#[source] Box<subxt::error::ExtrinsicError>),
