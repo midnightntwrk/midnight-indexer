@@ -66,6 +66,8 @@ export interface Block {
   author: string | null;
   ledgerParameters: string;
   zswapMerkleTreeRoot: string;
+  dustCommitmentMerkleTreeRoot: string | null;
+  dustGenerationMerkleTreeRoot: string | null;
   parent: Block;
   transactions: Transaction[];
 }
@@ -125,6 +127,10 @@ export interface RegularTransaction extends Transaction {
   zswapMerkleTreeRoot?: string;
   zswapStartIndex?: number;
   zswapEndIndex?: number;
+  dustCommitmentStartIndex?: number;
+  dustCommitmentEndIndex?: number;
+  dustGenerationStartIndex?: number;
+  dustGenerationEndIndex?: number;
   fees?: TransactionFees;
   transactionResult?: TransactionResult;
 }
@@ -280,5 +286,71 @@ export type DustLedgerEvent =
     maxId: number;
     protocolVersion: number;
   };
+
+// Dust Generations types (PR #980)
+export interface DustRegistration {
+  dustAddress: string;
+  valid: boolean;
+  nightBalance: string;
+  generationRate: string;
+  maxCapacity: string;
+  currentCapacity: string;
+  utxoTxHash: string | null;
+  utxoOutputIndex: number | null;
+}
+
+export interface DustGenerations {
+  cardanoRewardAddress: string;
+  registrations: DustRegistration[];
+}
+
+export type DustGenerationsResponse = GraphQLResponse<{
+  dustGenerations: DustGenerations[];
+}>;
+
+export interface DustCommitmentMerkleTreeUpdateResult {
+  startIndex: number;
+  endIndex: number;
+  update: string;
+  protocolVersion: number;
+}
+
+export type DustCommitmentMerkleTreeUpdateResponse = GraphQLResponse<{
+  dustCommitmentMerkleTreeUpdate: DustCommitmentMerkleTreeUpdateResult;
+}>;
+
+export interface CollapsedMerkleTree {
+  startIndex: number;
+  endIndex: number;
+  update: string;
+  protocolVersion: number;
+}
+
+export interface DustGenerationsItem {
+  __typename: 'DustGenerationsItem';
+  merkleIndex: number;
+  owner: string;
+  value: string;
+  nonce: string;
+  ctime: number;
+  transactionId: number;
+  collapsedMerkleTree: CollapsedMerkleTree | null;
+}
+
+export interface DustGenerationsProgress {
+  __typename: 'DustGenerationsProgress';
+  highestIndex: number;
+  collapsedMerkleTree: CollapsedMerkleTree | null;
+}
+
+export type DustGenerationsEvent = DustGenerationsItem | DustGenerationsProgress;
+
+export interface DustNullifierTransaction {
+  nullifier: string;
+  commitment: string;
+  transactionId: number;
+  blockHeight: number;
+  blockHash: string;
+}
 
 export type ViewingKey = string & { __brand: 'ViewingKey' };
