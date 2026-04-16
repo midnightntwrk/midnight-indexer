@@ -64,7 +64,7 @@ const CATCH_UP_LOG_INTERVAL: u64 = 1_000;
 /// One GRANDPA session worth of blocks. Blocks within this distance of the finalized tip are
 /// fetched by hash (backward traversal) to avoid any risk of ingesting non-canonical blocks.
 /// Blocks further back are fetched by height with parent hash verification.
-const FINALIZATION_SAFETY_MARGIN: u64 = 200;
+const FINALIZATION_SAFETY_MARGIN: u64 = 400;
 
 /// A [Node] implementation based on subxt.
 #[derive(Clone)]
