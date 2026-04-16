@@ -364,7 +364,7 @@ impl Node for SubxtNode {
                 let genesis = self.block_at(self.online_client.genesis_hash()).await?;
                 let genesis_parent_hash = block_header(&genesis).await?.parent_hash;
 
-                let mut hashes = Vec::new();
+                let mut hashes = Vec::with_capacity(FINALIZATION_SAFETY_MARGIN as usize);
                 let mut parent_hash = first_block.header().parent_hash;
                 while parent_hash != stop_hash && parent_hash != genesis_parent_hash {
                     let parent = self.block_at(parent_hash).await?;
