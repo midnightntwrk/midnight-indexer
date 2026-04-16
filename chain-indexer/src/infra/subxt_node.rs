@@ -346,18 +346,18 @@ impl Node for SubxtNode {
                     }
                     let block = self.block_at_height(height).await?;
                     let block_hash = block.block_hash();
-                    if let Some(expected_parent) = last_forward_hash {
-                        let parent_hash = block_header(&block).await?.parent_hash;
-                        if parent_hash != expected_parent {
-                            Err(SubxtNodeError::ParentHashMismatch(
-                                height,
-                                expected_parent,
-                                parent_hash,
-                            ))?;
-                        }
+                    let made_block = self.make_block(&mut authorities, block).await?;
+                    if let Some(expected_parent) = last_forward_hash
+                        && made_block.parent_hash.0 != expected_parent.0
+                    {
+                        Err(SubxtNodeError::ParentHashMismatch(
+                            height,
+                            expected_parent,
+                            H256(made_block.parent_hash.0),
+                        ))?;
                     }
                     last_forward_hash = Some(block_hash);
-                    yield self.make_block(&mut authorities, block).await?;
+                    yield made_block;
                 }
 
                 let stop_hash = last_forward_hash.unwrap_or(H256(after_hash.0));
