@@ -27,4 +27,4 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  #v6.0.2
 
       - name: Scan code
-        uses: midnightntwrk/upload-sarif-github-action@07dad711370cc5985885ebcf07cb8c9264bc4167
+        uses: midnightntwrk/upload-sarif-github-action@47a6b67fb94c6d8385cfe3cd336152dfd49bbcf2
