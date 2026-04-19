@@ -616,8 +616,11 @@ describe('dust generation status queries', () => {
       } else {
         rewardAddress = 'stake1ux0k2hy4h6c8k95vzr52ant8yy77ggxg2wmk7cha4h4kraqjq4sfe';
       }
+
+      log.debug(`Using cross-network Cardano reward address: ${rewardAddress}`);
       const response: DustGenerationStatusResponse =
         await indexerHttpClient.getDustGenerationStatus([rewardAddress]);
+      log.debug(`Dust generation status response payload: ${JSON.stringify(response.data)}`);
       expect(response).toBeError();
 
       expect(response.errors?.[0].message).toContain('invalid Cardano reward address');
