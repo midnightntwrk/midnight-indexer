@@ -145,7 +145,9 @@ describe('dust generation status queries', () => {
       // currentCapacity is in SPECK — for any address generating for more than a few minutes, expect at least 1 DUST
       expect(BigInt(registeredStatus?.currentCapacity)).toBeGreaterThanOrEqual(SPECK_PER_DUST);
       // maxCapacity is in SPECK (1 DUST = 10^15 SPECK), for 1 NIGHT the cap is 5 DUST = 5 * 10^15 SPECK
-      expect(BigInt(registeredStatus?.maxCapacity)).toBeGreaterThanOrEqual(MIN_MAX_CAPACITY_FOR_ONE_NIGHT);
+      expect(BigInt(registeredStatus?.maxCapacity)).toBeGreaterThanOrEqual(
+        MIN_MAX_CAPACITY_FOR_ONE_NIGHT,
+      );
       expect(registeredStatus?.utxoTxHash).not.toBeNull();
       expect(registeredStatus?.utxoTxHash).toMatch(/^[a-f0-9]{64}$/);
       expect(registeredStatus?.utxoOutputIndex).not.toBeNull();
