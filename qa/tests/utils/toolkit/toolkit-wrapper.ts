@@ -139,7 +139,15 @@ class ToolkitWrapper {
    */
   private async sendGeneratedTx(txFileName: string): Promise<string> {
     const result = await this.execToolkit(
-      [TOOLKIT_BIN, 'generate-txs', '--src-file', `/out/${txFileName}`, 'send', '-d', this.getRpcUrl()],
+      [
+        TOOLKIT_BIN,
+        'generate-txs',
+        '--src-file',
+        `/out/${txFileName}`,
+        'send',
+        '-d',
+        this.getRpcUrl(),
+      ],
       'generate-txs send failed',
     );
     return result.output.trim();
@@ -347,7 +355,7 @@ class ToolkitWrapper {
         fs.mkdirSync(goldenCacheDir);
         log.warn(
           `Golden cache directory not found at: ${goldenCacheDir}\n` +
-          `Please ensure the global setup has run to warm up the cache, or run with warmupCache: true first.`,
+            `Please ensure the global setup has run to warm up the cache, or run with warmupCache: true first.`,
         );
       }
 

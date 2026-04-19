@@ -43,28 +43,32 @@ describe('dust balance query using toolkit', () => {
      * @when we call getDustBalance with the seed
      * @then we should receive a valid DustBalance object according to the requested schema
      */
-    test('should respond with a dust balance according to the requested schema', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = {
-        labels: ['Query', 'Dust', 'Toolkit', 'Balance', 'SchemaValidation'],
-      };
+    test(
+      'should respond with a dust balance according to the requested schema',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = {
+          labels: ['Query', 'Dust', 'Toolkit', 'Balance', 'SchemaValidation'],
+        };
 
-      const walletSeed = dataProvider.getFundingSeed();
+        const walletSeed = dataProvider.getFundingSeed();
 
-      log.debug(`Querying dust balance for seed: ${walletSeed}`);
+        log.debug(`Querying dust balance for seed: ${walletSeed}`);
 
-      const dustBalance: DustBalance = await toolkit.getDustBalance(walletSeed);
+        const dustBalance: DustBalance = await toolkit.getDustBalance(walletSeed);
 
-      log.debug('Checking if we actually received a dust balance');
-      expect(dustBalance).toBeDefined();
+        log.debug('Checking if we actually received a dust balance');
+        expect(dustBalance).toBeDefined();
 
-      const validationResult = DustBalanceSchema.safeParse(dustBalance);
-      expect(
-        validationResult.success,
-        `DUST balance schema validation failed: ${JSON.stringify(validationResult.error, null, 2)}`,
-      ).toBe(true);
+        const validationResult = DustBalanceSchema.safeParse(dustBalance);
+        expect(
+          validationResult.success,
+          `DUST balance schema validation failed: ${JSON.stringify(validationResult.error, null, 2)}`,
+        ).toBe(true);
 
-      expect(dustBalance.total).toBeGreaterThan(0);
-      log.debug(`Dust balance total: ${dustBalance.total}`);
-    }, TOOLKIT_STARTUP_TIMEOUT);
+        expect(dustBalance.total).toBeGreaterThan(0);
+        log.debug(`Dust balance total: ${dustBalance.total}`);
+      },
+      TOOLKIT_STARTUP_TIMEOUT,
+    );
   });
 });

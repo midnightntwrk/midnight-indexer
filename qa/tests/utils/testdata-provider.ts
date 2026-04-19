@@ -67,10 +67,7 @@ class TestDataProvider {
   getFundingSeed() {
     // Build the environment-specific variable name (e.g., FUNDING_SEED_PREVIEW)
     let envName = env.getCurrentEnvironmentName();
-    let envNameUppercase = envName
-      .toUpperCase()
-      .replace(/-/g, '_')
-      .replace('.', '_');
+    let envNameUppercase = envName.toUpperCase().replace(/-/g, '_').replace('.', '_');
 
     const envVarName = `FUNDING_SEED_${envNameUppercase}`;
 
