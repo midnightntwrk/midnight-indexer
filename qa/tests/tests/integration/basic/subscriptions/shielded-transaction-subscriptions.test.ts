@@ -27,7 +27,10 @@ import {
 import { generateSyntheticViewingKey } from '@utils/bech32-codec';
 import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import { MerkleTreeCollapsedUpdateSchema, ShieldedTransactionEventSchema } from '@utils/indexer/graphql/schema';
+import {
+  MerkleTreeCollapsedUpdateSchema,
+  ShieldedTransactionEventSchema,
+} from '@utils/indexer/graphql/schema';
 import dataProvider from '@utils/testdata-provider';
 
 // This is longer because it might take some time when
@@ -354,6 +357,7 @@ describe('shielded transaction subscriptions', () => {
       await indexerWsClient.closeWalletSession(sessionId);
     }, 30_000);
 
+    /**
      * Ensures that a shielded transaction subscription cannot use a session ID
      * after the wallet session has been disconnected.
      *

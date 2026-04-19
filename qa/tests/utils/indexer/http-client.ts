@@ -31,7 +31,11 @@ import type {
   ZswapMerkleTreeCollapsedUpdateResponse,
   ZswapMerkleTreeCollapsedUpdateResult,
 } from './indexer-types';
-import { GET_LATEST_BLOCK, GET_BLOCK_BY_OFFSET, GET_ZSWAP_MERKLE_TREE_COLLAPSED_UPDATE } from './graphql/block-queries';
+import {
+  GET_LATEST_BLOCK,
+  GET_BLOCK_BY_OFFSET,
+  GET_ZSWAP_MERKLE_TREE_COLLAPSED_UPDATE,
+} from './graphql/block-queries';
 import { GET_TRANSACTION_BY_OFFSET } from './graphql/transaction-queries';
 import { GET_CONTRACT_ACTION, GET_CONTRACT_ACTION_BY_OFFSET } from './graphql/contract-queries';
 import { GET_DUST_GENERATION_STATUS } from './graphql/dust-queries';
