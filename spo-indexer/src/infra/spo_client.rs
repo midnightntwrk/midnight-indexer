@@ -368,31 +368,38 @@ impl SPOClient {
 
 #[derive(Debug, Clone)]
 pub struct PoolStakeData {
-    pub live_stake: Option<String>,
-    pub active_stake: Option<String>,
+    pub live_stake: Option<i64>,
+    pub active_stake: Option<i64>,
     pub live_delegators: Option<i64>,
     pub live_saturation: Option<f64>,
-    pub declared_pledge: Option<String>,
-    pub live_pledge: Option<String>,
+    pub declared_pledge: Option<i64>,
+    pub live_pledge: Option<i64>,
 }
 
 impl PoolStakeData {
     fn from_json(v: &serde_json::Value) -> Self {
         Self {
-            live_stake: v
-                .get("live_stake")
-                .and_then(|x| x.as_str().map(|s| s.to_owned())),
-            active_stake: v
-                .get("active_stake")
-                .and_then(|x| x.as_str().map(|s| s.to_owned())),
+            live_stake: parse_lovelace(v, "live_stake"),
+            active_stake: parse_lovelace(v, "active_stake"),
             live_delegators: v.get("live_delegators").and_then(|x| x.as_i64()),
             live_saturation: v.get("live_saturation").and_then(|x| x.as_f64()),
-            declared_pledge: v
-                .get("declared_pledge")
-                .and_then(|x| x.as_str().map(|s| s.to_owned())),
-            live_pledge: v
-                .get("live_pledge")
-                .and_then(|x| x.as_str().map(|s| s.to_owned())),
+            declared_pledge: parse_lovelace(v, "declared_pledge"),
+            live_pledge: parse_lovelace(v, "live_pledge"),
+        }
+    }
+}
+
+/// Parse a Blockfrost lovelace field (transported as a decimal string) into an
+/// `i64`. Returns `None` for missing or unparseable values; a warning is logged
+/// so a schema change on the Blockfrost side is visible rather than silently
+/// coerced to zero at the SQL layer.
+fn parse_lovelace(v: &serde_json::Value, field: &str) -> Option<i64> {
+    let raw = v.get(field)?.as_str()?;
+    match raw.parse::<i64>() {
+        Ok(n) => Some(n),
+        Err(error) => {
+            log::warn!("blockfrost {field} is not a valid i64 ({raw:?}): {error}");
+            None
         }
     }
 }
