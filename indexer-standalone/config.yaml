@@ -36,7 +36,6 @@ infra:
 
   spo_node:
     url: "ws://localhost:9944"
-    blockfrost_id: "replace_with_blockfrost_project_id"
     reconnect_max_delay: "10s"
     reconnect_max_attempts: 30
 
