@@ -4,6 +4,50 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2026-04-20
+
+### 🚀 Features
+
+- Log wallet ID on connect and disconnect mutations (#935)
+- *(indexer-api)* Add query for zswap collapsed update (#982)
+- Support node v1.0 (#985)
+- *(indexer-api)* Add zswap Merkle tree root to block (#988)
+- Add efficient dust wallet synchronisation endpoints (#980)
+- Remove support for node 0.20 and 0.21 (#986)
+- Add shieldedNullifierTransactions subscription (#996)
+- Bridge async-graphql tracing to fastrace (#1037)
+- Avoid unnecessary scans of shielded transactions (#1039)
+- Support ledger 8.1 (#1033)
+- Add node 1.0.0-rc.2 metadata and remove rc.1 (#1041)
+
+### 🐛 Bug Fixes
+
+- Pin upload-sarif-github-action to latest SHA (KICS/Trivy disabled)
+- Add start_period to postgres healthcheck in docker-compose (#936)
+- *(chain-indexer)* Falling back to metadata of parent block (#970)
+- Per-generation capacity calculation and cursor pagination for dust queries (#997)
+- *(indexer-api)* Make standalone sqlite spo queries match postgres (#977)
+- *(api)* Align dustCommitmentMerkleTreeUpdate with zswapMerkleTreeCollapsedUpdate pattern (#1023)
+- Compute transaction fees using ledger's Transaction::fees() API (#1031)
+
+### 🚜 Refactor
+
+- Simplify and make recent code more consistent (#1035)
+
+### ⚡ Performance
+
+- *(indexer-api)* Introduce DataLoader for block-by-hash lookups (#1018)
+- *(indexer-api)* Introduce DataLoader for transactions-by-block-id lookups (#1022)
+- *(indexer-api)* Introduce DataLoader for contract-actions-by-transaction-id lookups (#1030)
+- *(indexer-api)* Introduce DataLoader for transaction-by-id lookups (#1027)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(security)* Fix vulnerability (#914)
+- *(api)* Add fee field and deprecate estimatedFees and fees wrapper (#1036)
+- Bump midnight-storage-core to 1.2.0-rc.2 (#1052)
+- Remove unused node 0.20 and 0.21 data (#1042)
+
 ## [4.0.0] - 2026-03-17
 
 ## [4.0.0-rc.10] - 2026-03-16
