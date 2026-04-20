@@ -151,14 +151,11 @@ impl SPOClient {
                 let fields = extrinsic
                     .decode_call_data_fields_unchecked_as::<Value>()
                     .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
-                let timestamp = fields
-                    .at("now")
-                    .and_then(Value::as_u128)
-                    .ok_or_else(|| {
-                        SPOClientError::UnexpectedResponse(format!(
-                            "timestamp extrinsic did not contain field `now` for block #{block_number}"
-                        ))
-                    })?;
+                let timestamp = fields.at("now").and_then(Value::as_u128).ok_or_else(|| {
+                    SPOClientError::UnexpectedResponse(format!(
+                        "timestamp extrinsic did not contain field `now` for block #{block_number}"
+                    ))
+                })?;
 
                 return u64::try_from(timestamp).map_err(|_| {
                     SPOClientError::UnexpectedResponse(format!(
@@ -168,8 +165,9 @@ impl SPOClient {
             }
         }
 
-        let legacy_rpc =
-            LegacyRpcMethods::<RpcConfigFor<PolkadotConfig>>::new(self.rpc_client.to_owned().into());
+        let legacy_rpc = LegacyRpcMethods::<RpcConfigFor<PolkadotConfig>>::new(
+            self.rpc_client.to_owned().into(),
+        );
         let block_hash = legacy_rpc
             .chain_get_block_hash(Some(block_number.into()))
             .await
