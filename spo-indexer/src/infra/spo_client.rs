@@ -80,9 +80,7 @@ impl SPOClient {
         } = config;
 
         if blockfrost_id.expose_secret().is_empty() {
-            return Err(SPOClientError::UnexpectedResponse(
-                "blockfrost_id must be configured".to_owned(),
-            ));
+            return Err(SPOClientError::MissingBlockfrostId);
         }
 
         let retry_policy = ExponentialBackoff::from_millis(10)
@@ -438,6 +436,9 @@ pub enum SPOClientError {
 
     #[error("unexpected error {0}")]
     UnexpectedResponse(String),
+
+    #[error("blockfrost_id must be configured")]
+    MissingBlockfrostId,
 
     #[error("cannot create HTTP header")]
     InvalidHeaderValue(#[from] InvalidHeaderValue),
