@@ -212,12 +212,12 @@ async fn refresh_stake_snapshots(
                 storage
                     .save_stake_snapshot(
                         pid,
-                        pd.live_stake.as_deref(),
-                        pd.active_stake.as_deref(),
+                        pd.live_stake,
+                        pd.active_stake,
                         pd.live_delegators,
                         pd.live_saturation,
-                        pd.declared_pledge.as_deref(),
-                        pd.live_pledge.as_deref(),
+                        pd.declared_pledge,
+                        pd.live_pledge,
                         &mut tx,
                     )
                     .await?;
@@ -225,12 +225,12 @@ async fn refresh_stake_snapshots(
                     .insert_stake_history(
                         pid,
                         main_epoch,
-                        pd.live_stake.as_deref(),
-                        pd.active_stake.as_deref(),
+                        pd.live_stake,
+                        pd.active_stake,
                         pd.live_delegators,
                         pd.live_saturation,
-                        pd.declared_pledge.as_deref(),
-                        pd.live_pledge.as_deref(),
+                        pd.declared_pledge,
+                        pd.live_pledge,
                         &mut tx,
                     )
                     .await?;
