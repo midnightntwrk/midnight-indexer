@@ -101,6 +101,12 @@ impl SubxtNode {
         })
     }
 
+    /// Returns a clone of the underlying reconnecting RPC client so other
+    /// indexers in the same process can share the single websocket connection.
+    pub fn rpc_client(&self) -> ReconnectingRpcClient {
+        self.rpc_client.clone()
+    }
+
     /// Subscribe to finalized blocks, filtering duplicates and disconnection errors.
     /// Subxt with its reconnecting-rpc-client feature exposes the error case, i.e. yields one `Err`
     /// item, then reconnects and continues with `Ok` items. Therefore we filter out the respective

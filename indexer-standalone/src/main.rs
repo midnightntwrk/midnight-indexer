@@ -53,7 +53,7 @@ fn run() -> anyhow::Result<()> {
         infra::{ledger_db, migrations, pool, pub_sub},
         telemetry,
     };
-    use log::info;
+    use log::{info, warn};
     use spo_indexer::{
         application as spo_app,
         infra::{spo_client::SPOClient, storage as spo_storage},
@@ -123,10 +123,35 @@ fn run() -> anyhow::Result<()> {
             .await
             .context("initialize ledger db")?;
 
-        let chain_indexer = task::spawn({
-            let node = SubxtNode::new(node_config.clone())
+        let chain_node = SubxtNode::new(node_config.clone())
+            .await
+            .context("create SubxtNode")?;
+
+        // Share the chain node's websocket RPC client with the SPO indexer when
+        // they target the same node URL; otherwise fall back to a dedicated
+        // client. This halves socket usage in the common single-node setup.
+        let spo_client = if spo_node_config.url == node_config.url {
+            let spo_cfg: spo_indexer::infra::spo_client::Config =
+                spo_node_config.clone().into();
+            SPOClient::new_with_rpc_client(
+                chain_node.rpc_client(),
+                spo_cfg.blockfrost_id,
+                spo_cfg.http_pool,
+            )
+            .await
+            .context("create SPOClient")?
+        } else {
+            warn!(
+                chain_url = node_config.url.as_str(),
+                spo_url = spo_node_config.url.as_str();
+                "chain and spo node URLs differ; keeping separate websocket RPC clients"
+            );
+            SPOClient::new(spo_node_config.clone().into())
                 .await
-                .context("create SubxtNode")?;
+                .context("create SPOClient")?
+        };
+
+        let chain_indexer = task::spawn({
             let storage = chain_storage::Storage::new(pool.clone());
 
             let sigterm =
@@ -134,7 +159,7 @@ fn run() -> anyhow::Result<()> {
 
             chain_app::run(
                 application_config.clone().into(),
-                node,
+                chain_node,
                 storage,
                 pub_sub.publisher(),
                 sigterm,
@@ -142,15 +167,12 @@ fn run() -> anyhow::Result<()> {
         });
 
         let spo_indexer = task::spawn({
-            let node = SPOClient::new(spo_node_config.clone().into())
-                .await
-                .context("create SPOClient")?;
             let storage = spo_storage::Storage::new(pool.clone());
 
             let sigterm =
                 signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
-            spo_app::run(spo_config.clone().into(), node, storage, sigterm)
+            spo_app::run(spo_config.clone().into(), spo_client, storage, sigterm)
         });
 
         let indexer_api = task::spawn({

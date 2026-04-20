@@ -38,6 +38,13 @@ infra:
     url: "ws://localhost:9944"
     reconnect_max_delay: "10s"
     reconnect_max_attempts: 30
+    # Tuning for the Blockfrost HTTP connection pools. Applied to both the
+    # direct client and the one owned by the blockfrost crate. Omit to use
+    # defaults (max_idle_per_host=4, idle_timeout=30s, tcp_keepalive=60s).
+    # http_pool:
+    #   max_idle_per_host: 4
+    #   idle_timeout: "30s"
+    #   tcp_keepalive: "60s"
 
   api:
     address: "0.0.0.0"

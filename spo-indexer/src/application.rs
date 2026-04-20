@@ -205,10 +205,13 @@ async fn refresh_stake_snapshots(
         (1000 / cfg.max_rps.max(1)) as u64
     };
 
-    let mut tx = storage.create_tx().await?;
+    // Use one transaction per pool so the shared SQLite writer is not held
+    // across Blockfrost HTTP calls and rate-limit sleeps, which would otherwise
+    // starve the connection pool for concurrent readers/writers.
     for pid in pool_ids.iter() {
         match client.get_pool_data(pid).await {
             Ok(pd) => {
+                let mut tx = storage.create_tx().await?;
                 storage
                     .save_stake_snapshot(
                         pid,
@@ -234,6 +237,7 @@ async fn refresh_stake_snapshots(
                         &mut tx,
                     )
                     .await?;
+                tx.commit().await?;
                 total_updated += 1;
             }
             Err(error) => {
@@ -244,7 +248,6 @@ async fn refresh_stake_snapshots(
             sleep(Duration::from_millis(sleep_per_req_ms)).await;
         }
     }
-    tx.commit().await?;
 
     // Persist cursor at the last processed id
     let last_id = pool_ids.last().map(|s| s.as_str());
