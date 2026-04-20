@@ -59,7 +59,12 @@ type OnlineClientAtBlock = subxt::client::OnlineClientAtBlock<SubstrateConfig>;
 type SubxtBlock = subxt::client::Block<SubstrateConfig>;
 
 const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
-const TRAVERSE_BACK_LOG_AFTER: u64 = 1_000;
+const CATCH_UP_LOG_INTERVAL: u64 = 1_000;
+
+/// One GRANDPA session worth of blocks. Blocks within this distance of the finalized tip are
+/// fetched by hash (backward traversal) to avoid any risk of ingesting non-canonical blocks.
+/// Blocks further back are fetched by height with parent hash verification.
+const FINALIZATION_SAFETY_MARGIN: u64 = 400;
 
 /// A [Node] implementation based on subxt.
 #[derive(Clone)]
@@ -254,6 +259,14 @@ impl SubxtNode {
             .await
             .map_err(|error| SubxtNodeError::GetOnlineClientAt(hash, error.into()))
     }
+
+    #[trace]
+    async fn block_at_height(&self, height: u64) -> Result<OnlineClientAtBlock, SubxtNodeError> {
+        self.online_client
+            .at_block(height)
+            .await
+            .map_err(|error| SubxtNodeError::GetOnlineClientAtHeight(height, error.into()))
+    }
 }
 
 impl Node for SubxtNode {
@@ -307,47 +320,60 @@ impl Node for SubxtNode {
             // Then we fetch and yield earlier blocks and then yield the first finalized block,
             // unless the highest stored block matches the first finalized block.
             if first_block.hash().0 != after_hash.0 {
-                // If we have not already stored the first finalized block, we fetch all blocks
-                // walking backwards from the one with the parent hash of the first finalized block
-                // until we arrive at the highest stored block (excluded) or at genesis (included).
-                // For these we store the hashes; one hash is 32 bytes, i.e. one year is ~ 160MB.
-                // (one year ~ 5,256,000 blocks).
+                let start_height = after_height.map(|h| h + 1).unwrap_or(0);
+                let end_height = first_block.number();
+
+                // Blocks older than FINALIZATION_SAFETY_MARGIN from the finalized tip are
+                // guaranteed to be finalized by an earlier GRANDPA round, so they can be
+                // fetched by height with parent hash verification. Blocks within the safety
+                // margin are fetched by hash (backward traversal) to avoid any risk of
+                // ingesting non-canonical blocks near the tip.
+                let safe_height = end_height
+                    .saturating_sub(FINALIZATION_SAFETY_MARGIN)
+                    .max(start_height);
+
+                // Initialize from the stored block hash so the first forward-fetched block
+                // is verified against it too.
+                let mut last_forward_hash = after_height.map(|_| H256(after_hash.0));
+                for height in start_height..safe_height {
+                    if height % CATCH_UP_LOG_INTERVAL == 0 {
+                        info!(
+                            highest_stored_height:? = after_height,
+                            current_height = height,
+                            first_finalized_height = end_height;
+                            "catching up by height"
+                        );
+                    }
+                    let block = self.block_at_height(height).await?;
+                    let block_hash = block.block_hash();
+                    let made_block = self.make_block(&mut authorities, block).await?;
+                    if let Some(expected_parent) = last_forward_hash
+                        && made_block.parent_hash.0 != expected_parent.0
+                    {
+                        Err(SubxtNodeError::ParentHashMismatch(
+                            height,
+                            expected_parent,
+                            H256(made_block.parent_hash.0),
+                        ))?;
+                    }
+                    last_forward_hash = Some(block_hash);
+                    yield made_block;
+                }
+
+                let stop_hash = last_forward_hash.unwrap_or(H256(after_hash.0));
                 let genesis = self.block_at(self.online_client.genesis_hash()).await?;
                 let genesis_parent_hash = block_header(&genesis).await?.parent_hash;
 
-                let capacity = match after_height {
-                    Some(after_height) if after_height < first_block.number() => {
-                        (first_block.number() - after_height) as usize + 1
-                    }
-                    _ => first_block.number() as usize + 1,
-                };
-                // Cap at one year, see comment above.
-                let capacity = capacity.min(5_256_000);
-                let mut hashes = Vec::with_capacity(capacity);
-
+                let mut hashes = Vec::with_capacity(FINALIZATION_SAFETY_MARGIN as usize);
                 let mut parent_hash = first_block.header().parent_hash;
-                while parent_hash.0 != after_hash.0 && parent_hash != genesis_parent_hash {
+                while parent_hash != stop_hash && parent_hash != genesis_parent_hash {
                     let parent = self.block_at(parent_hash).await?;
-                    if parent.block_number() % TRAVERSE_BACK_LOG_AFTER == 0 {
-                        info!(
-                            highest_stored_height:? = after_height,
-                            current_height = parent.block_number(),
-                            first_finalized_height = first_block.number();
-                            "traversing back via parent hashes"
-                        );
-                    }
                     parent_hash = block_header(&parent).await?.parent_hash;
                     hashes.push(parent.block_hash());
                 }
 
-                // We fetch and yield the blocks for the stored block hashes.
                 for hash in hashes.into_iter().rev() {
                     let block = self.block_at(hash).await?;
-                    debug!(
-                        hash:% = block.block_hash(),
-                        height = block.block_number();
-                        "block fetched"
-                    );
                     yield self.make_block(&mut authorities, block).await?;
                 }
 
@@ -504,6 +530,12 @@ pub enum SubxtNodeError {
 
     #[error("cannot get online client at block {0}")]
     GetOnlineClientAt(H256, #[source] Box<subxt::error::OnlineClientAtBlockError>),
+
+    #[error("cannot get online client at block height {0}")]
+    GetOnlineClientAtHeight(u64, #[source] Box<subxt::error::OnlineClientAtBlockError>),
+
+    #[error("parent hash mismatch at height {0}: expected {1}, was {2}")]
+    ParentHashMismatch(u64, H256, H256),
 
     #[error("cannot fetch extrinsics")]
     FetchExtrinsics(#[source] Box<subxt::error::ExtrinsicError>),
