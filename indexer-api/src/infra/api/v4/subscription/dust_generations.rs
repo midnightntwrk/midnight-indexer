@@ -49,14 +49,25 @@ impl<S, B> Default for DustGenerationsSubscription<S, B> {
 /// A dust generations item with optional collapsed Merkle tree update.
 #[derive(Debug, Clone, SimpleObject)]
 pub struct DustGenerationsItem {
-    /// The Merkle tree index.
+    /// Deprecated alias of `commitmentMtIndex`. Scheduled for removal in a
+    /// follow-up release.
+    #[graphql(deprecation = "Use `commitmentMtIndex` or `generationMtIndex` \
+        to disambiguate which tree. This field mirrors `commitmentMtIndex`.")]
     pub merkle_index: u64,
+    /// Index of this output in the dust commitment Merkle tree.
+    pub commitment_mt_index: u64,
+    /// Index of this output in the dust generation Merkle tree.
+    pub generation_mt_index: u64,
     /// The hex-encoded owner (dust address).
     pub owner: HexEncoded,
-    /// The NIGHT value in STAR.
+    /// The NIGHT value backing this output, in STAR.
     pub value: String,
+    /// The DUST value at creation, in SPECK.
+    pub initial_value: String,
     /// The hex-encoded nonce.
     pub nonce: HexEncoded,
+    /// Hex-encoded hash of the NIGHT UTXO that backs this dust output.
+    pub backing_night: HexEncoded,
     /// The creation timestamp.
     pub ctime: u64,
     /// The originating transaction ID.
@@ -115,18 +126,22 @@ where
             {
                 let collapsed_merkle_tree = make_collapsed_update(
                     cursor,
-                    entry.merkle_index,
+                    entry.generation_mt_index,
                     storage,
                     ledger_state_cache,
                 ).await?;
 
-                cursor = entry.merkle_index + 1;
+                cursor = entry.generation_mt_index + 1;
 
                 yield DustGenerationsEvent::DustGenerationsItem(DustGenerationsItem {
-                    merkle_index: entry.merkle_index,
+                    merkle_index: entry.commitment_mt_index,
+                    commitment_mt_index: entry.commitment_mt_index,
+                    generation_mt_index: entry.generation_mt_index,
                     owner: entry.owner.hex_encode(),
                     value: entry.value.to_string(),
+                    initial_value: entry.initial_value.to_string(),
                     nonce: entry.nonce.hex_encode(),
+                    backing_night: entry.backing_night.hex_encode(),
                     ctime: entry.ctime,
                     transaction_id: entry.transaction_id,
                     collapsed_merkle_tree,
@@ -165,18 +180,22 @@ where
                 {
                     let collapsed_merkle_tree = make_collapsed_update(
                         cursor,
-                        entry.merkle_index,
+                        entry.generation_mt_index,
                         storage,
                         ledger_state_cache,
                     ).await?;
 
-                    cursor = entry.merkle_index + 1;
+                    cursor = entry.generation_mt_index + 1;
 
                     yield DustGenerationsEvent::DustGenerationsItem(DustGenerationsItem {
-                        merkle_index: entry.merkle_index,
+                        merkle_index: entry.commitment_mt_index,
+                        commitment_mt_index: entry.commitment_mt_index,
+                        generation_mt_index: entry.generation_mt_index,
                         owner: entry.owner.hex_encode(),
                         value: entry.value.to_string(),
+                        initial_value: entry.initial_value.to_string(),
                         nonce: entry.nonce.hex_encode(),
+                        backing_night: entry.backing_night.hex_encode(),
                         ctime: entry.ctime,
                         transaction_id: entry.transaction_id,
                         collapsed_merkle_tree,

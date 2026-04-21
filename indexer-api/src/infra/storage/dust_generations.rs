@@ -143,42 +143,46 @@ impl DustGenerationsStorage for Storage {
 
         try_stream! {
             loop {
+                // `generation_index >= $2` implicitly filters out legacy rows
+                // (inserted before the 002 migration) whose generation_index
+                // is NULL. Those rows also lack backing_night / initial_value,
+                // so skipping them keeps the stream well-typed without having
+                // to plumb Option fields through the domain layer.
                 let query = indoc! {"
-                    SELECT merkle_index, owner, value, nonce, ctime, transaction_id
+                    SELECT
+                        merkle_index AS commitment_mt_index,
+                        generation_index AS generation_mt_index,
+                        owner,
+                        value,
+                        initial_value,
+                        nonce,
+                        backing_night,
+                        ctime,
+                        transaction_id
                     FROM dust_generation_info
                     WHERE owner = $1
-                    AND merkle_index >= $2
-                    AND merkle_index <= $3
-                    ORDER BY merkle_index
+                    AND generation_index >= $2
+                    AND generation_index <= $3
+                    ORDER BY generation_index
                     LIMIT $4
                 "};
 
-                let entries = sqlx::query_as::<_, (i64, ByteVec, U128BeBytes, ByteVec, i64, i64)>(
-                    query,
-                )
-                .bind(&dust_address[..])
-                .bind(start_index as i64)
-                .bind(end_index as i64)
-                .bind(batch_size.get() as i64)
-                .fetch_all(&*pool)
-                .await?;
+                let entries = sqlx::query_as::<_, DustGenerationEntry>(query)
+                    .bind(&dust_address[..])
+                    .bind(start_index as i64)
+                    .bind(end_index as i64)
+                    .bind(batch_size.get() as i64)
+                    .fetch_all(&*pool)
+                    .await?;
 
-                if entries.is_empty() {
+                let Some(last_index) = entries.last().map(|e| e.generation_mt_index) else {
                     break;
+                };
+
+                for entry in entries {
+                    yield entry;
                 }
 
-                for (merkle_index, owner, value, nonce, ctime, transaction_id) in &entries {
-                    yield DustGenerationEntry {
-                        merkle_index: *merkle_index as u64,
-                        owner: owner.clone(),
-                        value: u128::from(*value),
-                        nonce: nonce.clone(),
-                        ctime: *ctime as u64,
-                        transaction_id: *transaction_id as u64,
-                    };
-                }
-
-                let last_index = entries.last().unwrap().0 as u64;
                 if last_index >= end_index {
                     break;
                 }
