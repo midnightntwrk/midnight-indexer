@@ -49,11 +49,6 @@ impl<S, B> Default for DustGenerationsSubscription<S, B> {
 /// A dust generations item with optional collapsed Merkle tree update.
 #[derive(Debug, Clone, SimpleObject)]
 pub struct DustGenerationsItem {
-    /// Deprecated alias of `commitmentMtIndex`. Scheduled for removal in a
-    /// follow-up release.
-    #[graphql(deprecation = "Use `commitmentMtIndex` or `generationMtIndex` \
-        to disambiguate which tree. This field mirrors `commitmentMtIndex`.")]
-    pub merkle_index: u64,
     /// Index of this output in the dust commitment Merkle tree.
     pub commitment_mt_index: u64,
     /// Index of this output in the dust generation Merkle tree.
@@ -134,7 +129,6 @@ where
                 cursor = entry.generation_mt_index + 1;
 
                 yield DustGenerationsEvent::DustGenerationsItem(DustGenerationsItem {
-                    merkle_index: entry.commitment_mt_index,
                     commitment_mt_index: entry.commitment_mt_index,
                     generation_mt_index: entry.generation_mt_index,
                     owner: entry.owner.hex_encode(),
@@ -188,7 +182,6 @@ where
                     cursor = entry.generation_mt_index + 1;
 
                     yield DustGenerationsEvent::DustGenerationsItem(DustGenerationsItem {
-                        merkle_index: entry.commitment_mt_index,
                         commitment_mt_index: entry.commitment_mt_index,
                         generation_mt_index: entry.generation_mt_index,
                         owner: entry.owner.hex_encode(),

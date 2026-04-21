@@ -367,11 +367,6 @@ A dust generations item with optional collapsed Merkle tree update.
 """
 type DustGenerationsItem {
 	"""
-	Deprecated alias of `commitmentMtIndex`. Scheduled for removal in a
-	follow-up release.
-	"""
-	merkleIndex: Int! @deprecated(reason: "Use `commitmentMtIndex` or `generationMtIndex` to disambiguate which tree. This field mirrors `commitmentMtIndex`.")
-	"""
 	Index of this output in the dust commitment Merkle tree.
 	"""
 	commitmentMtIndex: Int!
