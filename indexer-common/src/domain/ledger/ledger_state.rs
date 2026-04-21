@@ -133,6 +133,17 @@ impl LedgerState {
         }
     }
 
+    /// Replace the ledger parameters with the given ones. Used to align indexer parameters
+    /// with the node's authoritative `get_ledger_parameters` before applying a block's
+    /// transactions, so fee computation uses the same `fee_prices` the node used.
+    pub fn set_ledger_parameters(&mut self, parameters: LedgerParameters) {
+        match (self, parameters) {
+            (Self::V8 { ledger_state, .. }, LedgerParameters::V8(params)) => {
+                ledger_state.parameters = Sp::new(params);
+            }
+        }
+    }
+
     pub fn load(
         key: &SerializedLedgerStateKey,
         ledger_version: LedgerVersion,
@@ -539,6 +550,22 @@ impl LedgerParameters {
             Self::V8(parameters) => parameters
                 .tagged_serialize()
                 .map_err(|error| Error::Serialize("SerializedLedgerParametersV8", error)),
+        }
+    }
+
+    /// Deserialize tagged ledger parameters as returned by the node's
+    /// `get_ledger_parameters` runtime API.
+    #[trace(properties = { "ledger_version": "{ledger_version}" })]
+    pub fn deserialize(
+        raw: impl AsRef<[u8]>,
+        ledger_version: LedgerVersion,
+    ) -> Result<Self, Error> {
+        match ledger_version {
+            LedgerVersion::V8 => {
+                let params = tagged_deserialize::<LedgerParametersV8>(&mut raw.as_ref())
+                    .map_err(|error| Error::Deserialize("LedgerParametersV8", error))?;
+                Ok(Self::V8(params))
+            }
         }
     }
 }

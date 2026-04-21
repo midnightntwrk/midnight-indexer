@@ -431,6 +431,18 @@ impl Node for SubxtNode {
         })
     }
 
+    async fn fetch_ledger_parameters(&self, block_hash: BlockHash) -> Result<ByteVec, Self::Error> {
+        let block = self.block_at(H256(block_hash.0)).await?;
+        let header = block_header(&block).await?;
+        let node_version = header
+            .protocol_version()?
+            .expect("protocol version header is present")
+            .node_version();
+
+        let parameters = runtimes::get_ledger_parameters(node_version, &block).await?;
+        Ok(parameters.into())
+    }
+
     async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
         let legacy_rpc_methods = LegacyRpcMethods::<RpcConfigFor<SubstrateConfig>>::new(
             self.rpc_client.to_owned().into(),
@@ -561,6 +573,9 @@ pub enum SubxtNodeError {
 
     #[error("cannot get ledger state root")]
     GetLedgerStateRoot(#[source] BoxError),
+
+    #[error("cannot get ledger parameters")]
+    GetLedgerParameters(#[source] BoxError),
 
     #[error("cannot fetch system properties")]
     FetchSystemProperties(#[source] subxt::rpcs::Error),

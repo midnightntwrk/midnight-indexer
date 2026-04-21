@@ -55,6 +55,11 @@ where
     /// Fetch serialized genesis ledger state from the chain spec's system properties.
     /// Returns the raw bytes of the genesis `LedgerState`, errs if unavailable.
     async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error>;
+
+    /// Fetch the node's authoritative serialized `LedgerParameters` at the given block.
+    /// Used to keep indexer fee computation aligned with the node regardless of any drift in
+    /// locally derived `fee_prices`.
+    async fn fetch_ledger_parameters(&self, block_hash: BlockHash) -> Result<ByteVec, Self::Error>;
 }
 
 #[derive(Debug, Clone)]
