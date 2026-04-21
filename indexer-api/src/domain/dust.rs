@@ -91,8 +91,6 @@ pub struct DustGenerationEntry {
     #[sqlx(try_from = "U128BeBytes")]
     pub initial_value: u128,
 
-    pub nonce: ByteVec,
-
     /// Hash of the NIGHT UTXO that backs this dust output (InitialNonce).
     pub backing_night: ByteVec,
 

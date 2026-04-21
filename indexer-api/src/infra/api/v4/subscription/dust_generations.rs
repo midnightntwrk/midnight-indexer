@@ -59,8 +59,6 @@ pub struct DustGenerationsItem {
     pub value: String,
     /// The DUST value at creation, in SPECK.
     pub initial_value: String,
-    /// The hex-encoded nonce.
-    pub nonce: HexEncoded,
     /// Hex-encoded hash of the NIGHT UTXO that backs this dust output.
     pub backing_night: HexEncoded,
     /// The creation timestamp.
@@ -134,7 +132,6 @@ where
                     owner: entry.owner.hex_encode(),
                     value: entry.value.to_string(),
                     initial_value: entry.initial_value.to_string(),
-                    nonce: entry.nonce.hex_encode(),
                     backing_night: entry.backing_night.hex_encode(),
                     ctime: entry.ctime,
                     transaction_id: entry.transaction_id,
@@ -187,7 +184,6 @@ where
                         owner: entry.owner.hex_encode(),
                         value: entry.value.to_string(),
                         initial_value: entry.initial_value.to_string(),
-                        nonce: entry.nonce.hex_encode(),
                         backing_night: entry.backing_night.hex_encode(),
                         ctime: entry.ctime,
                         transaction_id: entry.transaction_id,

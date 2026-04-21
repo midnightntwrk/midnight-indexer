@@ -387,10 +387,6 @@ type DustGenerationsItem {
 	"""
 	initialValue: String!
 	"""
-	The hex-encoded nonce.
-	"""
-	nonce: HexEncoded!
-	"""
 	Hex-encoded hash of the NIGHT UTXO that backs this dust output.
 	"""
 	backingNight: HexEncoded!

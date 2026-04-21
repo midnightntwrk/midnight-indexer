@@ -155,7 +155,6 @@ impl DustGenerationsStorage for Storage {
                         owner,
                         value,
                         initial_value,
-                        nonce,
                         backing_night,
                         ctime,
                         transaction_id
