@@ -131,8 +131,7 @@ fn run() -> anyhow::Result<()> {
         // they target the same node URL; otherwise fall back to a dedicated
         // client. This halves socket usage in the common single-node setup.
         let spo_client = if spo_node_config.url == node_config.url {
-            let spo_cfg: spo_indexer::infra::spo_client::Config =
-                spo_node_config.clone().into();
+            let spo_cfg: spo_indexer::infra::spo_client::Config = spo_node_config.clone().into();
             SPOClient::new_with_rpc_client(
                 chain_node.rpc_client(),
                 spo_cfg.blockfrost_id,

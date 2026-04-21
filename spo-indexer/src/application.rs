@@ -20,13 +20,18 @@ use crate::{
     infra::spo_client::{SLOT_DURATION, SPOClient},
     utils::{hex_to_bytes, remove_hex_prefix},
 };
+use anyhow::Context;
 use blake2::{
     Blake2bVar,
     digest::{Update, VariableOutput},
 };
 use log::{debug, error, info, warn};
 use serde::Deserialize;
-use std::{cmp, collections::HashMap, time::Duration};
+use std::{
+    cmp,
+    collections::{HashMap, hash_map::Entry},
+    time::{Duration, Instant},
+};
 use subxt::utils::to_hex;
 use tokio::{
     select,
@@ -99,30 +104,86 @@ async fn process_next_epoch(
     };
     info!(epoch_no = epoch.epoch_no; "processing epoch");
 
-    let mut tx = storage.create_tx().await?;
+    // Fetch everything from the network before opening a transaction. Holding
+    // the SQLite writer across HTTP calls starves concurrent writers (e.g. the
+    // chain-indexer or the stake-refresh task) beyond `busy_timeout` and trips
+    // `database is locked` errors.
+    let prefetch_started = Instant::now();
     let committee = client.get_committee(epoch.epoch_no).await?;
     let raw_spos = client.get_spo_registrations(epoch.epoch_no).await?;
     let membership = committee_to_membership(client, &committee);
 
-    storage.save_epoch(&epoch, &mut tx).await?;
-    storage.save_membership(&membership, &mut tx).await?;
-
     let mut blocks_produced: HashMap<String, u32> = HashMap::new();
     let mut val_to_registration: HashMap<String, CandidateRegistration> = HashMap::new();
+    let mut pool_metadata: HashMap<String, PoolMetadata> = HashMap::new();
 
-    for (_, registrations) in raw_spos.candidate_registrations {
-        for raw_spo in &registrations {
+    for registrations in raw_spos.candidate_registrations.values() {
+        for raw_spo in registrations {
             let cardano_id = get_cardano_id(&raw_spo.mainchain_pub_key);
             // Normalize all keys by stripping optional 0x prefix for consistency with DB values.
             let spo_sk = remove_hex_prefix(&raw_spo.sidechain_pub_key).to_owned();
 
             val_to_registration.insert(spo_sk.clone(), raw_spo.clone());
-            save_pool_metadata(client, storage, &mut tx, cardano_id.clone()).await?;
-            save_spo_identity(storage, raw_spo, cardano_id, &mut tx).await?;
-            save_spo_history(storage, raw_spo, epoch.epoch_no.into(), &mut tx).await?;
+
+            if let Entry::Vacant(slot) = pool_metadata.entry(cardano_id.clone()) {
+                let meta = client
+                    .get_pool_metadata(cardano_id.clone())
+                    .await
+                    .unwrap_or_else(|_| PoolMetadata {
+                        pool_id: cardano_id.clone(),
+                        hex_id: cardano_id,
+                        name: String::new(),
+                        ticker: String::new(),
+                        homepage_url: String::new(),
+                        url: String::new(),
+                    });
+                slot.insert(meta);
+            }
 
             let count_mk = blocks_produced.entry(spo_sk).or_insert(0);
             *count_mk += 1;
+        }
+    }
+
+    debug!(
+        epoch_no = epoch.epoch_no,
+        registrations = val_to_registration.len(),
+        unique_pools = pool_metadata.len(),
+        prefetch_ms = prefetch_started.elapsed().as_millis() as u64;
+        "spo: network pre-fetch complete"
+    );
+
+    // All network work is done — now persist in a single short transaction.
+    let tx_started = Instant::now();
+    let mut tx = storage
+        .create_tx()
+        .await
+        .context("spo.process_next_epoch: begin tx")?;
+    storage
+        .save_epoch(&epoch, &mut tx)
+        .await
+        .context("spo.process_next_epoch: save_epoch")?;
+    storage
+        .save_membership(&membership, &mut tx)
+        .await
+        .context("spo.process_next_epoch: save_membership")?;
+
+    for registrations in raw_spos.candidate_registrations.values() {
+        for raw_spo in registrations {
+            let cardano_id = get_cardano_id(&raw_spo.mainchain_pub_key);
+            let meta = pool_metadata
+                .get(&cardano_id)
+                .expect("metadata prefetched for every cardano_id");
+            storage
+                .save_pool_meta(meta, &mut tx)
+                .await
+                .context("spo.process_next_epoch: save_pool_meta")?;
+            save_spo_identity(storage, raw_spo, cardano_id, &mut tx)
+                .await
+                .context("spo.process_next_epoch: save_spo_identity")?;
+            save_spo_history(storage, raw_spo, epoch.epoch_no.into(), &mut tx)
+                .await
+                .context("spo.process_next_epoch: save_spo_history")?;
         }
     }
 
@@ -155,13 +216,20 @@ async fn process_next_epoch(
 
                 storage
                     .save_spo_performance(&spo_performance, &mut tx)
-                    .await?;
+                    .await
+                    .context("spo.process_next_epoch: save_spo_performance")?;
             }
         }
     }
 
-    tx.commit().await?;
-    info!(epoch_no = epoch.epoch_no; "processed epoch");
+    tx.commit()
+        .await
+        .context("spo.process_next_epoch: commit tx")?;
+    info!(
+        epoch_no = epoch.epoch_no,
+        tx_ms = tx_started.elapsed().as_millis() as u64;
+        "processed epoch"
+    );
     Ok(())
 }
 
@@ -211,7 +279,11 @@ async fn refresh_stake_snapshots(
     for pid in pool_ids.iter() {
         match client.get_pool_data(pid).await {
             Ok(pd) => {
-                let mut tx = storage.create_tx().await?;
+                let tx_started = Instant::now();
+                let mut tx = storage
+                    .create_tx()
+                    .await
+                    .with_context(|| format!("spo.refresh_stake_snapshots: begin tx ({pid})"))?;
                 storage
                     .save_stake_snapshot(
                         pid,
@@ -223,7 +295,10 @@ async fn refresh_stake_snapshots(
                         pd.live_pledge,
                         &mut tx,
                     )
-                    .await?;
+                    .await
+                    .with_context(|| {
+                        format!("spo.refresh_stake_snapshots: save_stake_snapshot ({pid})")
+                    })?;
                 storage
                     .insert_stake_history(
                         pid,
@@ -236,8 +311,17 @@ async fn refresh_stake_snapshots(
                         pd.live_pledge,
                         &mut tx,
                     )
-                    .await?;
-                tx.commit().await?;
+                    .await
+                    .with_context(|| {
+                        format!("spo.refresh_stake_snapshots: insert_stake_history ({pid})")
+                    })?;
+                tx.commit()
+                    .await
+                    .with_context(|| format!("spo.refresh_stake_snapshots: commit tx ({pid})"))?;
+                let tx_ms = tx_started.elapsed().as_millis() as u64;
+                if tx_ms > 1_000 {
+                    warn!(pid, tx_ms; "spo: stake snapshot tx held > 1s");
+                }
                 total_updated += 1;
             }
             Err(error) => {
@@ -302,28 +386,6 @@ async fn save_spo_identity(
     };
 
     storage.save_spo(&spo, tx).await?;
-    Ok(())
-}
-
-async fn save_pool_metadata(
-    client: &SPOClient,
-    storage: &impl Storage,
-    tx: &mut SqlxTransaction,
-    cardano_id: String,
-) -> anyhow::Result<()> {
-    let saved_meta = client
-        .get_pool_metadata(cardano_id.clone())
-        .await
-        .unwrap_or_else(|_| PoolMetadata {
-            pool_id: cardano_id.clone(),
-            hex_id: cardano_id,
-            name: String::new(),
-            ticker: String::new(),
-            homepage_url: String::new(),
-            url: String::new(),
-        });
-
-    storage.save_pool_meta(&saved_meta, tx).await?;
     Ok(())
 }
 

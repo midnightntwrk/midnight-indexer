@@ -36,7 +36,11 @@ pub async fn init(config: Config) -> Result<(), Error> {
         cnn_url,
     } = config;
 
-    let pool = sqlite::SqlitePool::new(sqlite::Config { cnn_url }).await?;
+    let pool = sqlite::SqlitePool::new(sqlite::Config {
+        cnn_url,
+        ..Default::default()
+    })
+    .await?;
     migrations::sqlite::run_for_ledger_db(&pool).await?;
 
     let db = v1_1::LedgerDb::new(pool);
