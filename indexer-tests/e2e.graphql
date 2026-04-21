@@ -821,6 +821,15 @@ query DustCommitmentMerkleTreeUpdateQuery($startIndex: Int!, $endIndex: Int!) {
     }
 }
 
+query DustGenerationMerkleTreeUpdateQuery($startIndex: Int!, $endIndex: Int!) {
+    dustGenerationMerkleTreeUpdate(startIndex: $startIndex, endIndex: $endIndex) {
+        startIndex
+        endIndex
+        update
+        protocolVersion
+    }
+}
+
 query DParameterHistoryQuery {
     dParameterHistory {
         blockHeight
