@@ -17,11 +17,11 @@ use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
         ContractActionSubscription, DParameterHistoryQuery, DisconnectMutation,
-        DustCommitmentMerkleTreeUpdateQuery, DustGenerationStatusQuery, DustGenerationsQuery,
-        DustLedgerEventsSubscription, ShieldedNullifierTransactionsSubscription,
-        ShieldedTransactionsSubscription, TermsAndConditionsHistoryQuery, TransactionsQuery,
-        UnshieldedTransactionsSubscription, ZswapLedgerEventsSubscription,
-        ZswapMerkleTreeCollapsedUpdateQuery, block_query,
+        DustCommitmentMerkleTreeUpdateQuery, DustGenerationMerkleTreeUpdateQuery,
+        DustGenerationStatusQuery, DustGenerationsQuery, DustLedgerEventsSubscription,
+        ShieldedNullifierTransactionsSubscription, ShieldedTransactionsSubscription,
+        TermsAndConditionsHistoryQuery, TransactionsQuery, UnshieldedTransactionsSubscription,
+        ZswapLedgerEventsSubscription, ZswapMerkleTreeCollapsedUpdateQuery, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
@@ -34,8 +34,8 @@ use crate::{
         connect_mutation,
         contract_action_query::{self},
         contract_action_subscription, disconnect_mutation,
-        dust_commitment_merkle_tree_update_query, dust_generation_status_query,
-        dust_generations_query, dust_ledger_events_subscription,
+        dust_commitment_merkle_tree_update_query, dust_generation_merkle_tree_update_query,
+        dust_generation_status_query, dust_generations_query, dust_ledger_events_subscription,
         shielded_nullifier_transactions_subscription, shielded_transactions_subscription,
         transactions_query, unshielded_transactions_subscription, zswap_ledger_events_subscription,
         zswap_merkle_tree_collapsed_update_query,
@@ -116,6 +116,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_dust_commitment_merkle_tree_update_query(&api_client, &api_url)
         .await
         .context("test dust commitment merkle tree update query")?;
+    test_dust_generation_merkle_tree_update_query(&api_client, &api_url)
+        .await
+        .context("test dust generation merkle tree update query")?;
     test_governance_queries(&api_client, &api_url)
         .await
         .context("test governance queries")?;
@@ -748,6 +751,22 @@ async fn test_dust_commitment_merkle_tree_update_query(
     Ok(())
 }
 
+/// Test the dustGenerationMerkleTreeUpdate query.
+async fn test_dust_generation_merkle_tree_update_query(
+    api_client: &Client,
+    api_url: &str,
+) -> anyhow::Result<()> {
+    let variables = dust_generation_merkle_tree_update_query::Variables {
+        start_index: 0,
+        end_index: 0,
+    };
+    let response =
+        send_query::<DustGenerationMerkleTreeUpdateQuery>(api_client, api_url, variables).await?;
+    assert!(response.dust_generation_merkle_tree_update.start_index >= 0);
+
+    Ok(())
+}
+
 /// Test governance queries (D-Parameter and Terms & Conditions history).
 async fn test_governance_queries(api_client: &Client, api_url: &str) -> anyhow::Result<()> {
     use crate::e2e::graphql::{d_parameter_history_query, terms_and_conditions_history_query};
@@ -1258,6 +1277,14 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct DustCommitmentMerkleTreeUpdateQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustGenerationMerkleTreeUpdateQuery;
 
     #[derive(GraphQLQuery)]
     #[graphql(

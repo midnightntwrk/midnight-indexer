@@ -338,6 +338,35 @@ where
             .map(MerkleTreeCollapsedUpdate::from)
     }
 
+    /// Get a collapsed Merkle tree update for the dust generation tree.
+    #[trace(properties = { "start_index": "{start_index}", "end_index": "{end_index}" })]
+    async fn dust_generation_merkle_tree_update(
+        &self,
+        cx: &Context<'_>,
+        start_index: u64,
+        end_index: u64,
+    ) -> ApiResult<MerkleTreeCollapsedUpdate> {
+        let storage = cx.get_storage::<S>();
+
+        let (protocol_version, _) = storage
+            .get_highest_ledger_state()
+            .await
+            .map_err_into_server_error(|| "get highest ledger state")?
+            .some_or_server_error(|| "no ledger state available")?;
+
+        cx.get_ledger_state_cache()
+            .dust_generations_collapsed_update(start_index, end_index, storage, protocol_version)
+            .await
+            .map_err(|error| match error {
+                error @ LedgerStateCacheError::Ledger(ledger::Error::InvalidUpdate(_)) => {
+                    ApiError::client("invalid start_index and/or end_index", error)
+                }
+
+                error => ApiError::server("create dust generation collapsed update", error),
+            })
+            .map(MerkleTreeCollapsedUpdate::from)
+    }
+
     /// Get the full history of D-parameter changes for governance auditability.
     #[trace]
     async fn d_parameter_history(&self, cx: &Context<'_>) -> ApiResult<Vec<DParameterChange>> {

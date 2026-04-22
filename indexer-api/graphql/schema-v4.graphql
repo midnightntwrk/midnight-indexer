@@ -674,6 +674,10 @@ type Query {
 	"""
 	dustCommitmentMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!
 	"""
+	Get a collapsed Merkle tree update for the dust generation tree.
+	"""
+	dustGenerationMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!
+	"""
 	Get the full history of D-parameter changes for governance auditability.
 	"""
 	dParameterHistory: [DParameterChange!]!
