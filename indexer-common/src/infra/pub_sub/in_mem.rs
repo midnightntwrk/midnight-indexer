@@ -15,10 +15,10 @@ pub mod publisher;
 pub mod subscriber;
 
 use crate::infra::pub_sub::in_mem::{publisher::InMemPublisher, subscriber::InMemSubscriber};
-use log::error;
+use log::warn;
 use serde_json::Value;
 use tokio::{
-    sync::broadcast::{self, Sender, error::RecvError},
+    sync::broadcast::{self, Receiver, Sender, error::RecvError},
     task,
 };
 
@@ -44,9 +44,9 @@ impl InMemPubSub {
 
 impl Default for InMemPubSub {
     fn default() -> Self {
-        let (block_indexed_sender, mut block_indexed_receiver) = broadcast::channel(42);
-        let (wallet_indexed_sender, mut wallet_indexed_receiver) = broadcast::channel(42);
-        let (unshielded_utxo_sender, mut unshielded_utxo_receiver) = broadcast::channel(42);
+        let (block_indexed_sender, block_indexed_receiver) = broadcast::channel(42);
+        let (wallet_indexed_sender, wallet_indexed_receiver) = broadcast::channel(42);
+        let (unshielded_utxo_sender, unshielded_utxo_receiver) = broadcast::channel(42);
 
         let pub_sub = InMemPubSub {
             block_indexed_sender,
@@ -54,59 +54,35 @@ impl Default for InMemPubSub {
             unshielded_utxo_sender,
         };
 
-        task::spawn(async move {
-            loop {
-                match block_indexed_receiver.recv().await {
-                    Ok(_) => continue,
-
-                    Err(RecvError::Lagged(_)) => {
-                        error!("cannot drain block_indexed_receiver");
-                        break;
-                    }
-
-                    Err(RecvError::Closed) => {
-                        break;
-                    }
-                }
-            }
-        });
-
-        task::spawn(async move {
-            loop {
-                match wallet_indexed_receiver.recv().await {
-                    Ok(_) => continue,
-
-                    Err(RecvError::Lagged(_)) => {
-                        error!("cannot drain wallet_indexed_receiver");
-                        break;
-                    }
-
-                    Err(RecvError::Closed) => {
-                        break;
-                    }
-                }
-            }
-        });
-
-        task::spawn(async move {
-            loop {
-                match unshielded_utxo_receiver.recv().await {
-                    Ok(_) => continue,
-
-                    Err(RecvError::Lagged(_)) => {
-                        error!("cannot drain unshielded_utxo_receiver");
-                        break;
-                    }
-
-                    Err(RecvError::Closed) => {
-                        break;
-                    }
-                }
-            }
-        });
+        // Keep one receiver alive per topic for as long as the `InMemPubSub`
+        // lives. This guarantees that `broadcast::Sender::send` always has at
+        // least one active receiver, so publishers do not see spurious
+        // "channel closed" errors when no external subscriber happens to be
+        // attached. `RecvError::Lagged` does not invalidate the receiver —
+        // `recv` just skips ahead — so we must keep looping, not break.
+        spawn_drain("block_indexed_receiver", block_indexed_receiver);
+        spawn_drain("wallet_indexed_receiver", wallet_indexed_receiver);
+        spawn_drain("unshielded_utxo_receiver", unshielded_utxo_receiver);
 
         pub_sub
     }
+}
+
+fn spawn_drain(name: &'static str, mut receiver: Receiver<Value>) {
+    task::spawn(async move {
+        loop {
+            match receiver.recv().await {
+                Ok(_) => continue,
+
+                Err(RecvError::Lagged(skipped)) => {
+                    warn!(receiver = name, skipped; "drain receiver lagged");
+                    continue;
+                }
+
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 #[cfg(test)]
