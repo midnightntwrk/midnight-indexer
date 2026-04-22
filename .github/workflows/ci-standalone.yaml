@@ -52,14 +52,15 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
+      - name: Init Env Vars
+        uses: ./.github/actions/init-env
+
       - name: just check
         run: |
           . ./.envrc
           git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
           rustup override set ${{needs.toolchain.outputs.toolchain}}
           just feature=standalone check
-        env:
-          APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}
 
   fmt-check:
     runs-on: ubuntu-latest
@@ -106,14 +107,15 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
+      - name: Init Env Vars
+        uses: ./.github/actions/init-env
+
       - name: just lint
         run: |
           . ./.envrc
           git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
           rustup override set ${{needs.toolchain.outputs.toolchain}}
           just feature=standalone lint
-        env:
-          APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}
 
   test:
     runs-on: ubuntu-latest-8-core-x64
@@ -149,14 +151,15 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
+      - name: Init Env Vars
+        uses: ./.github/actions/init-env
+
       - name: just test
         run: |
           . ./.envrc
           git config --global url."https://@github.com".insteadOf "ssh://git@github.com"
           rustup override set ${{needs.toolchain.outputs.toolchain}}
           just feature=standalone test
-        env:
-          APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}
 
   doc:
     runs-on: ubuntu-latest-8-core-x64
