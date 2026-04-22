@@ -1687,6 +1687,7 @@ mod tests {
         error::BoxError,
     };
     use anyhow::Context;
+    use midnight_base_crypto::cost_model::SyntheticCost;
 
     #[cfg(any(feature = "cloud", feature = "standalone"))]
     #[tokio::test(flavor = "multi_thread")]
@@ -1786,5 +1787,67 @@ mod tests {
         assert!(result.is_err());
 
         Ok(())
+    }
+
+    /// Overflow in any dimension clamps to the corresponding limit; resulting `NormalizedCost`
+    /// has each dim = 1.0. Regression guard: previously we used
+    /// `.normalize().unwrap_or(NormalizedCost::ZERO)` which flipped the sign of the price
+    /// adjustment relative to the node.
+    #[test]
+    fn test_clamp_and_normalize_overflow_normalises_to_one() {
+        use super::clamp_and_normalize;
+        use midnight_base_crypto::cost_model::{CostDuration, FixedPoint};
+
+        let limits = SyntheticCost {
+            read_time: CostDuration::from_picoseconds(1_000),
+            compute_time: CostDuration::from_picoseconds(1_000),
+            block_usage: 1_000,
+            bytes_written: 1_000,
+            bytes_churned: 1_000,
+        };
+        let overfull = SyntheticCost {
+            read_time: limits.read_time,
+            compute_time: limits.compute_time,
+            block_usage: limits.block_usage + 1,
+            bytes_written: limits.bytes_written,
+            bytes_churned: limits.bytes_churned,
+        };
+
+        let normalized = clamp_and_normalize(&overfull, &limits, "test");
+        assert_eq!(normalized.read_time, FixedPoint::ONE);
+        assert_eq!(normalized.compute_time, FixedPoint::ONE);
+        assert_eq!(normalized.block_usage, FixedPoint::ONE);
+        assert_eq!(normalized.bytes_written, FixedPoint::ONE);
+        assert_eq!(normalized.bytes_churned, FixedPoint::ONE);
+    }
+
+    /// Non-overfull cost normalises to the expected ratios.
+    #[test]
+    fn test_clamp_and_normalize_below_limits_preserves_ratios() {
+        use super::clamp_and_normalize;
+        use midnight_base_crypto::cost_model::{CostDuration, FixedPoint};
+
+        let limits = SyntheticCost {
+            read_time: CostDuration::from_picoseconds(1_000),
+            compute_time: CostDuration::from_picoseconds(1_000),
+            block_usage: 1_000,
+            bytes_written: 1_000,
+            bytes_churned: 1_000,
+        };
+        let cost = SyntheticCost {
+            read_time: CostDuration::from_picoseconds(500),
+            compute_time: CostDuration::from_picoseconds(500),
+            block_usage: 500,
+            bytes_written: 500,
+            bytes_churned: 500,
+        };
+
+        let normalized = clamp_and_normalize(&cost, &limits, "test");
+        let half = FixedPoint::from_u64_div(1, 2);
+        assert_eq!(normalized.read_time, half);
+        assert_eq!(normalized.compute_time, half);
+        assert_eq!(normalized.block_usage, half);
+        assert_eq!(normalized.bytes_written, half);
+        assert_eq!(normalized.bytes_churned, half);
     }
 }
