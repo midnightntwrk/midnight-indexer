@@ -28,7 +28,7 @@ use crate::{
 };
 use fastrace::trace;
 use itertools::Itertools;
-use log::info;
+use log::{error, info};
 use midnight_base_crypto::{
     cost_model::{FixedPoint, NormalizedCost, SyntheticCost},
     hash::{HashOutput, persistent_commit},
@@ -386,6 +386,9 @@ impl LedgerState {
                 let cost = transaction
                     .cost(&ledger_state.parameters, true)
                     .map_err(|error| Error::TransactionCost(error.into()))?;
+                let fees = transaction
+                    .fees(&ledger_state.parameters, true)
+                    .map_err(|error| Error::TransactionCost(error.into()))?;
                 let verified_ledger_transaction = transaction
                     .well_formed(&cx.ref_state, *STRICTNESS_V7, cx.block_context.tblock)
                     .map_err(|error| Error::MalformedTransaction(error.into()))?;
@@ -434,6 +437,7 @@ impl LedgerState {
                     created_unshielded_utxos,
                     spent_unshielded_utxos,
                     ledger_events,
+                    fees,
                 })
             }
 
@@ -458,6 +462,9 @@ impl LedgerState {
 
                 let cost = transaction
                     .cost(&ledger_state.parameters, true)
+                    .map_err(|error| Error::TransactionCost(error.into()))?;
+                let fees = transaction
+                    .fees(&ledger_state.parameters, true)
                     .map_err(|error| Error::TransactionCost(error.into()))?;
                 let verified_ledger_transaction = transaction
                     .well_formed(&cx.ref_state, *STRICTNESS_V8, cx.block_context.tblock)
@@ -507,6 +514,7 @@ impl LedgerState {
                     created_unshielded_utxos,
                     spent_unshielded_utxos,
                     ledger_events,
+                    fees,
                 })
             }
         }
@@ -682,9 +690,9 @@ impl LedgerState {
                 block_fullness,
             } => {
                 let timestamp = timestamp(block_timestamp);
-                let normalized_fullness = block_fullness
-                    .normalize(ledger_state.parameters.limits.block_limits)
-                    .unwrap_or(NormalizedCost::ZERO);
+                let block_limits = ledger_state.parameters.limits.block_limits;
+                let normalized_fullness =
+                    clamp_and_normalize(block_fullness, &block_limits, "post_block_update_v7");
                 let overall_fullness = FixedPoint::max(
                     FixedPoint::max(
                         FixedPoint::max(
@@ -718,9 +726,9 @@ impl LedgerState {
                 block_fullness,
             } => {
                 let timestamp = timestamp(block_timestamp);
-                let normalized_fullness = block_fullness
-                    .normalize(ledger_state.parameters.limits.block_limits)
-                    .unwrap_or(NormalizedCost::ZERO);
+                let block_limits = ledger_state.parameters.limits.block_limits;
+                let normalized_fullness =
+                    clamp_and_normalize(block_fullness, &block_limits, "post_block_update_v8");
                 let overall_fullness = FixedPoint::max(
                     FixedPoint::max(
                         FixedPoint::max(
@@ -1645,6 +1653,31 @@ where
         .utxos
         .get(utxo)
         .map(|meta| meta.ctime.to_secs())
+}
+
+/// Matches the node's `clamp_and_normalize`: falling back to `NormalizedCost::ZERO` on
+/// overflow would drive `overall_price` opposite to the node and compound drift.
+fn clamp_and_normalize(
+    cost: &SyntheticCost,
+    limits: &SyntheticCost,
+    context: &str,
+) -> NormalizedCost {
+    let clamped = SyntheticCost {
+        read_time: cost.read_time.min(limits.read_time),
+        compute_time: cost.compute_time.min(limits.compute_time),
+        block_usage: cost.block_usage.min(limits.block_usage),
+        bytes_written: cost.bytes_written.min(limits.bytes_written),
+        bytes_churned: cost.bytes_churned.min(limits.bytes_churned),
+    };
+    if clamped != *cost {
+        error!(
+            original:? = *cost,
+            limits:? = *limits,
+            context;
+            "block fullness exceeded limits, clamping"
+        );
+    }
+    clamped.normalize(*limits).expect("clamped cost normalises")
 }
 
 #[cfg(test)]

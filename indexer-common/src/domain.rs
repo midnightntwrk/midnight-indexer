@@ -155,6 +155,7 @@ pub struct ApplyRegularTransactionOutcome {
     pub created_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub ledger_events: Vec<LedgerEvent>,
+    pub fees: u128,
 }
 
 /// The outcome of applying a system transaction to the ledger state along with extracted data.
