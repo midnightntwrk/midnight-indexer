@@ -11,8 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{ByteVec, CardanoRewardAddress, DustPublicKey};
+use indexer_common::{
+    domain::{ByteVec, CardanoRewardAddress, DustPublicKey},
+    infra::sqlx::U128BeBytes,
+};
 use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 
 /// DUST generation status for a specific Cardano reward address.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,13 +70,34 @@ pub struct DustRegistration {
 }
 
 /// A dust generation entry for the subscription stream.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, FromRow)]
 pub struct DustGenerationEntry {
-    pub merkle_index: u64,
+    /// Commitment-tree index from QualifiedDustOutput.mt_index.
+    /// (DB column is named `merkle_index`; SELECT uses an alias.)
+    #[sqlx(try_from = "i64")]
+    pub commitment_mt_index: u64,
+
+    /// Generation-tree index from DustInitialUtxo.generation_index.
+    #[sqlx(try_from = "i64")]
+    pub generation_mt_index: u64,
+
     pub owner: ByteVec,
+
+    /// NIGHT amount backing this dust output, in STAR.
+    #[sqlx(try_from = "U128BeBytes")]
     pub value: u128,
-    pub nonce: ByteVec,
+
+    /// DUST amount at creation, in SPECK, from QualifiedDustOutput.initial_value.
+    #[sqlx(try_from = "U128BeBytes")]
+    pub initial_value: u128,
+
+    /// Hash of the NIGHT UTXO that backs this dust output (InitialNonce).
+    pub backing_night: ByteVec,
+
+    #[sqlx(try_from = "i64")]
     pub ctime: u64,
+
+    #[sqlx(try_from = "i64")]
     pub transaction_id: u64,
 }
 

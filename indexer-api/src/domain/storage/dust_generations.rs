@@ -32,7 +32,11 @@ where
         ledger_version: LedgerVersion,
     ) -> Result<Vec<DustGenerations>, sqlx::Error>;
 
-    /// Get dust generation entries for a dust address within an index range.
+    /// Get dust generation entries for a dust address within a generation-tree
+    /// index range. `start_index` and `end_index` are interpreted as positions
+    /// in the dust generation Merkle tree (NOT the commitment tree). Entries
+    /// inserted before the dust generation/commitment split was tracked
+    /// (legacy rows with NULL `generation_index`) are skipped.
     async fn get_dust_generation_entries(
         &self,
         dust_address: &[u8],

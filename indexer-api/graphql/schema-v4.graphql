@@ -367,21 +367,29 @@ A dust generations item with optional collapsed Merkle tree update.
 """
 type DustGenerationsItem {
 	"""
-	The Merkle tree index.
+	Index of this output in the dust commitment Merkle tree.
 	"""
-	merkleIndex: Int!
+	commitmentMtIndex: Int!
+	"""
+	Index of this output in the dust generation Merkle tree.
+	"""
+	generationMtIndex: Int!
 	"""
 	The hex-encoded owner (dust address).
 	"""
 	owner: HexEncoded!
 	"""
-	The NIGHT value in STAR.
+	The NIGHT value backing this output, in STAR.
 	"""
 	value: String!
 	"""
-	The hex-encoded nonce.
+	The DUST value at creation, in SPECK.
 	"""
-	nonce: HexEncoded!
+	initialValue: String!
+	"""
+	Hex-encoded hash of the NIGHT UTXO that backs this dust output.
+	"""
+	backingNight: HexEncoded!
 	"""
 	The creation timestamp.
 	"""

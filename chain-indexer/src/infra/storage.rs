@@ -701,7 +701,7 @@ async fn save_dust_generation_info(
             LedgerEventAttributes::DustInitialUtxo {
                 output,
                 generation_info,
-                ..
+                generation_index,
             } => {
                 let query = indoc! {"
                     INSERT INTO dust_generation_info (
@@ -711,10 +711,13 @@ async fn save_dust_generation_info(
                         nonce,
                         ctime,
                         merkle_index,
+                        generation_index,
+                        backing_night,
+                        initial_value,
                         dtime,
                         transaction_id
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 "};
 
                 let dtime = if generation_info.dtime == u64::MAX {
@@ -730,6 +733,9 @@ async fn save_dust_generation_info(
                     .bind(generation_info.nonce.as_ref())
                     .bind(generation_info.ctime as i64)
                     .bind(output.mt_index as i64)
+                    .bind(*generation_index as i64)
+                    .bind(output.backing_night.as_ref())
+                    .bind(U128BeBytes::from(&output.initial_value))
                     .bind(dtime)
                     .bind(transaction_id)
                     .execute(&mut **tx)
