@@ -121,6 +121,7 @@ impl LedgerState {
             created_unshielded_utxos,
             spent_unshielded_utxos,
             ledger_events,
+            fees,
         } = self
             .0
             .apply_regular_transaction(
@@ -142,6 +143,8 @@ impl LedgerState {
         transaction.created_unshielded_utxos = created_unshielded_utxos;
         transaction.spent_unshielded_utxos = spent_unshielded_utxos;
         transaction.ledger_events = ledger_events;
+        transaction.paid_fees = fees;
+        transaction.estimated_fees = fees;
 
         // Update contract actions.
         for contract_action in transaction.contract_actions.iter_mut() {
