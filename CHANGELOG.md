@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.0] - 2026-04-23
+
+### 🚀 Features
+
+- *(indexer-api)* Add dustGenerationMerkleTreeUpdate query (#1062)
+- Dust generations QDO fields and generation tree index (#1059)
+
+### 🐛 Bug Fixes
+
+- *(indexer-common)* Clamp block_fullness on post_block_update to match node (#1061)
+
+### ⚡ Performance
+
+- *(chain-indexer)* Replace backward traversal with forward iteration by block height (#1038)
+
 ## [4.1.0] - 2026-04-20
 
 ### 🚀 Features
