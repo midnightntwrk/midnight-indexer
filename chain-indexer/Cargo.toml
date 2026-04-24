@@ -40,8 +40,12 @@ trait-variant      = { workspace = true }
 
 [dev-dependencies]
 clap      = { workspace = true, features = [ "derive" ] }
+const-hex = { workspace = true }
 criterion = { workspace = true }
 fake      = { workspace = true }
+reqwest   = { workspace = true, features = [ "json", "rustls" ] }
+serde     = { workspace = true, features = [ "derive" ] }
+serde_json = { workspace = true }
 tempfile  = { workspace = true }
 
 [[bench]]
@@ -51,6 +55,11 @@ required-features = [ "standalone" ]
 
 [[bench]]
 name              = "apply_transaction"
+harness           = false
+required-features = [ "standalone" ]
+
+[[bench]]
+name              = "preprod_genesis"
 harness           = false
 required-features = [ "standalone" ]
 
