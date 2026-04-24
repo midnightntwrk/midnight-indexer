@@ -49,6 +49,11 @@ name              = "ledger_state"
 harness           = false
 required-features = [ "standalone" ]
 
+[[bench]]
+name              = "apply_transaction"
+harness           = false
+required-features = [ "standalone" ]
+
 [build-dependencies]
 anyhow    = { workspace = true }
 itertools = { workspace = true }
