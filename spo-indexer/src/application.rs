@@ -57,7 +57,6 @@ pub async fn run(
     storage: impl Storage,
     mut sigterm: Signal,
 ) -> anyhow::Result<()> {
-    // Mandatory background task: refresh stake snapshots periodically using Blockfrost.
     let st_cfg = config.stake_refresh.clone();
     let storage_bg = storage.clone();
     let client_bg = client.clone();
@@ -213,12 +212,12 @@ async fn refresh_stake_snapshots(
                 storage
                     .save_stake_snapshot(
                         pid,
-                        pd.live_stake.as_deref(),
-                        pd.active_stake.as_deref(),
+                        pd.live_stake,
+                        pd.active_stake,
                         pd.live_delegators,
                         pd.live_saturation,
-                        pd.declared_pledge.as_deref(),
-                        pd.live_pledge.as_deref(),
+                        pd.declared_pledge,
+                        pd.live_pledge,
                         &mut tx,
                     )
                     .await?;
@@ -226,12 +225,12 @@ async fn refresh_stake_snapshots(
                     .insert_stake_history(
                         pid,
                         main_epoch,
-                        pd.live_stake.as_deref(),
-                        pd.active_stake.as_deref(),
+                        pd.live_stake,
+                        pd.active_stake,
                         pd.live_delegators,
                         pd.live_saturation,
-                        pd.declared_pledge.as_deref(),
-                        pd.live_pledge.as_deref(),
+                        pd.declared_pledge,
+                        pd.live_pledge,
                         &mut tx,
                     )
                     .await?;
@@ -373,7 +372,7 @@ async fn get_epoch_to_process(
     let current_epoch = client.get_current_epoch().await?;
     let latest_epoch_num = match latest_processed {
         Some(epoch) => epoch.epoch_no,
-        None => client.get_first_epoch_num(storage).await?,
+        None => client.get_first_epoch_num().await?,
     };
 
     let time_offset: i64 =
