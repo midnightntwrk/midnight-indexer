@@ -61,6 +61,7 @@ uuid                         = { workspace = true }
 anyhow                 = { workspace = true }
 assert_matches         = { workspace = true }
 bip32                  = { workspace = true }
+criterion              = { workspace = true }
 reqwest                = { workspace = true }
 tempfile               = { workspace = true }
 testcontainers         = { workspace = true }
@@ -71,6 +72,11 @@ tokio                  = { workspace = true, features = [ "macros", "rt-multi-th
 [features]
 cloud      = [ "async-nats", "serde_with", "sqlx/postgres", "sqlx/tls-rustls" ]
 standalone = [ "sqlx/sqlite" ]
+
+[[bench]]
+name              = "ledger_transaction"
+harness           = false
+required-features = [ "standalone" ]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [ 'cfg(coverage_nightly)' ] }
