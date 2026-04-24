@@ -78,5 +78,10 @@ name              = "ledger_transaction"
 harness           = false
 required-features = [ "standalone" ]
 
+[[bench]]
+name              = "ledger_state"
+harness           = false
+required-features = [ "standalone" ]
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [ 'cfg(coverage_nightly)' ] }
