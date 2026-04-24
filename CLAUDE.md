@@ -14,6 +14,7 @@ just lint           # clippy with -D warnings across all packages
 just lint-fix       # clippy --fix
 just test           # build executables, run nextest, verify GraphQL schema
 just doc            # build docs with -D warnings
+just bench          # run criterion benchmarks (indexer-common, chain-indexer; standalone feature)
 just all            # license-headers + check + fmt + lint + test + doc
 just all-all        # run all for both cloud and standalone features
 ```
