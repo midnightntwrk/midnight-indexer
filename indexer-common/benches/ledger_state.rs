@@ -11,15 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Benchmarks for ledger state deserialisation.
-//!
-//! `from_genesis` reads a SCALE-encoded `LedgerStateV8` blob (as returned by
-//! the node's `system_properties.genesis_state` RPC) and reconstructs the full
-//! in-memory state, exercising `tagged_deserialize` + arena allocation. This
-//! ran into the recursion-depth ceiling pre-#871, so is a sensitive path to
-//! watch for regressions on ledger-version bumps.
-//!
-//! Run with `cargo bench --features standalone -p indexer-common --bench ledger_state`.
+//! SCALE-decodes the genesis ledger state blob (regression-sensitive path per #871).
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use indexer_common::{

@@ -11,9 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Benchmarks for ledger transaction operations.
-//!
-//! Run with `just bench` or `cargo bench --features standalone -p indexer-common`.
+//! Transaction deserialisation and wallet-relevance filtering.
 
 use bip32::{DerivationPath, XPrv};
 use criterion::{Criterion, black_box, criterion_group, criterion_main};

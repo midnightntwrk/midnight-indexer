@@ -11,22 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Benchmarks for chain-indexer ledger state operations.
-//!
-//! These cover the block-processing code paths that don't require
-//! pre-existing transactions signed for a specific prior state:
-//!
-//! - `LedgerState::new` — bootstrap cost when the indexer starts from a network without genesis
-//!   state
-//! - `apply_transactions` on an empty batch — exercises `finalize_apply_transactions` (merkle tree
-//!   updates, ledger parameter calculation) which runs once per block regardless of transaction
-//!   count
-//!
-//! Applying real signed transactions requires matching ledger state; that is a
-//! follow-up once we can capture a realistic state + tx fixture pair.
-//!
-//! Run with `just bench` or
-//! `cargo bench --features standalone -p chain-indexer`.
+//! Bootstrap + empty-batch apply — the per-block overhead that runs regardless
+//! of transaction count.
 
 use chain_indexer::domain::LedgerState;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
