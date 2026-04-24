@@ -202,6 +202,23 @@ export APP__INFRA__SECRET=303132333435363738393031323334353637383930313233343536
 # export APP__INFRA__NODE__BLOCKFROST_ID=<your-blockfrost-api-key>  # only required for spo-indexer
 ```
 
+### Benchmarks
+
+Criterion micro-benchmarks live under `indexer-common/benches/` and `chain-indexer/benches/` and require the `standalone` feature (simpler sqlite-backed `ledger_db` bootstrap than the cloud path). Run the whole suite with:
+
+```bash
+just bench
+```
+
+Or per crate:
+
+```bash
+cargo bench -p indexer-common --features standalone
+cargo bench -p chain-indexer --features standalone
+```
+
+`chain-indexer/benches/apply_transaction.rs` reads `indexer-common/tests/genesis_state.raw` plus the same `tx_*.raw` fixtures the integration tests use. Both are regenerated together by `just generate-txs` (requires Docker); re-run it after any ledger/node version bump.
+
 ### Required Configuration for private Repositories
 
 You may need access to private Midnight repositories and container registries. To achieve this:

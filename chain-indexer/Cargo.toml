@@ -39,8 +39,20 @@ tokio              = { workspace = true, features = [ "macros", "rt-multi-thread
 trait-variant      = { workspace = true }
 
 [dev-dependencies]
-clap = { workspace = true, features = [ "derive" ] }
-fake = { workspace = true }
+clap      = { workspace = true, features = [ "derive" ] }
+criterion = { workspace = true }
+fake      = { workspace = true }
+tempfile  = { workspace = true }
+
+[[bench]]
+name              = "ledger_state"
+harness           = false
+required-features = [ "standalone" ]
+
+[[bench]]
+name              = "apply_transaction"
+harness           = false
+required-features = [ "standalone" ]
 
 [build-dependencies]
 anyhow    = { workspace = true }

@@ -59,6 +59,9 @@ doc:
         RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p indexer-standalone --no-deps --features standalone; \
     fi
 
+bench:
+    cargo bench -p indexer-common -p chain-indexer --features standalone
+
 all: license-headers check fmt lint test doc
 
 all-all:

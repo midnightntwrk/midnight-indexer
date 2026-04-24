@@ -107,4 +107,14 @@ docker run \
     --destination-address mn_addr_undeployed1g9nr3mvjcey7ca8shcs5d4yjndcnmczf90rhv4nju7qqqlfg4ygs0t4ngm
 cat ./target/tx_1_2_3.mn | jq -r '.tx.Midnight' | xxd -r -p > ./target/tx_1_2_3.raw
 
+# Capture the genesis ledger state from the node's system_properties RPC.
+# This matches the state the txs above are signed against, so benches can
+# apply them on top of this state.
+curl -s -X POST http://localhost:9944 \
+    -H "Content-Type: application/json" \
+    -d '{"jsonrpc":"2.0","id":3,"method":"system_properties","params":[]}' \
+    | jq -r '.result.genesis_state' \
+    | sed 's/^0x//' \
+    | xxd -r -p > ./target/genesis_state.raw
+
 mv target/*.raw indexer-common/tests
