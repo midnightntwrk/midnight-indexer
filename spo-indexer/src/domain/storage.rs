@@ -78,12 +78,12 @@ where
     async fn save_stake_snapshot(
         &self,
         pool_id: &str,
-        live_stake: Option<&str>,
-        active_stake: Option<&str>,
+        live_stake: Option<i64>,
+        active_stake: Option<i64>,
         live_delegators: Option<i64>,
         live_saturation: Option<f64>,
-        declared_pledge: Option<&str>,
-        live_pledge: Option<&str>,
+        declared_pledge: Option<i64>,
+        live_pledge: Option<i64>,
         tx: &mut SqlxTransaction,
     ) -> Result<(), sqlx::Error>;
 
@@ -93,12 +93,12 @@ where
         &self,
         pool_id: &str,
         mainchain_epoch: Option<i64>,
-        live_stake: Option<&str>,
-        active_stake: Option<&str>,
+        live_stake: Option<i64>,
+        active_stake: Option<i64>,
         live_delegators: Option<i64>,
         live_saturation: Option<f64>,
-        declared_pledge: Option<&str>,
-        live_pledge: Option<&str>,
+        declared_pledge: Option<i64>,
+        live_pledge: Option<i64>,
         tx: &mut SqlxTransaction,
     ) -> Result<(), sqlx::Error>;
 

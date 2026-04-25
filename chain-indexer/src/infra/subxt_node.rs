@@ -106,6 +106,12 @@ impl SubxtNode {
         })
     }
 
+    /// Returns a clone of the underlying reconnecting RPC client so other
+    /// indexers in the same process can share the single websocket connection.
+    pub fn rpc_client(&self) -> ReconnectingRpcClient {
+        self.rpc_client.clone()
+    }
+
     /// Subscribe to finalized blocks, filtering duplicates and disconnection errors.
     /// Subxt with its reconnecting-rpc-client feature exposes the error case, i.e. yields one `Err`
     /// item, then reconnects and continues with `Ok` items. Therefore we filter out the respective
@@ -451,6 +457,18 @@ impl Node for SubxtNode {
         })
     }
 
+    async fn fetch_ledger_parameters(&self, block_hash: BlockHash) -> Result<ByteVec, Self::Error> {
+        let block = self.block_at(H256(block_hash.0)).await?;
+        let header = block_header(&block).await?;
+        let node_version = header
+            .protocol_version()?
+            .expect("protocol version header is present")
+            .node_version();
+
+        let parameters = runtimes::get_ledger_parameters(node_version, &block).await?;
+        Ok(parameters.into())
+    }
+
     async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
         let legacy_rpc_methods = LegacyRpcMethods::<RpcConfigFor<SubstrateConfig>>::new(
             self.rpc_client.to_owned().into(),
@@ -587,6 +605,9 @@ pub enum SubxtNodeError {
 
     #[error("cannot get ledger state root")]
     GetLedgerStateRoot(#[source] BoxError),
+
+    #[error("cannot get ledger parameters")]
+    GetLedgerParameters(#[source] BoxError),
 
     #[error("cannot fetch system properties")]
     FetchSystemProperties(#[source] subxt::rpcs::Error),

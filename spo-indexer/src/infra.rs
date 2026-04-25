@@ -16,12 +16,17 @@ pub mod spo_client;
 #[cfg(any(feature = "cloud", feature = "standalone"))]
 pub mod storage;
 
-#[cfg_attr(docsrs, doc(cfg(feature = "cloud")))]
-#[cfg(feature = "cloud")]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
     #[serde(rename = "storage")]
+    #[cfg(feature = "cloud")]
     pub storage_config: indexer_common::infra::pool::postgres::Config,
+
+    #[serde(rename = "storage")]
+    #[cfg(feature = "standalone")]
+    pub storage_config: indexer_common::infra::pool::sqlite::Config,
 
     #[serde(rename = "node")]
     pub node_config: spo_client::Config,

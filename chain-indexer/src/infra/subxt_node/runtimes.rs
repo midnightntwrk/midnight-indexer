@@ -103,6 +103,17 @@ pub async fn get_ledger_state_root(
     }
 }
 
+/// Get the serialized `LedgerParameters` at the given block.
+pub async fn get_ledger_parameters(
+    node_version: NodeVersion,
+    block: &OnlineClientAtBlock,
+) -> Result<Vec<u8>, SubxtNodeError> {
+    match node_version {
+        NodeVersion::V0_22 => v0_22_0::get_ledger_parameters(block).await,
+        NodeVersion::V1_0 => v1_0_0::get_ledger_parameters(block).await,
+    }
+}
+
 /// Get D-Parameter depending on the given protocol version.
 pub async fn get_d_parameter(
     node_version: NodeVersion,

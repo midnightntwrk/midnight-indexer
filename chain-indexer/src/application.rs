@@ -27,6 +27,7 @@ use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{
     BlockIndexed, LedgerVersion, NetworkId, Publisher, UnshieldedUtxoIndexed,
+    ledger::LedgerParameters,
 };
 use log::{debug, info, warn};
 use parking_lot::RwLock;
@@ -328,6 +329,28 @@ where
     if *parent_block_timestamp == 0 {
         *parent_block_timestamp = block.timestamp;
     };
+
+    // For non-genesis blocks, override the indexer's `LedgerParameters` with the node's
+    // authoritative ones at `parent_hash` (end of previous block = start of this block).
+    // This anchors fee computation to the node and prevents drift that was producing
+    // `paid_fees = 1 SPECK` for all transactions (see PR #979 investigation).
+    if block.height > 0 {
+        let raw_node_parameters = node
+            .fetch_ledger_parameters(block.parent_hash)
+            .await
+            .context("fetch ledger parameters from node")?;
+        let node_parameters = LedgerParameters::deserialize(&raw_node_parameters, ledger_version)
+            .context("deserialize node ledger parameters")?;
+        let indexer_parameters = ledger_state.ledger_parameters();
+        if node_parameters != indexer_parameters {
+            warn!(
+                block_height = block.height,
+                parent_hash:% = block.parent_hash;
+                "ledger parameters drift between node and indexer, overriding with node's"
+            );
+        }
+        ledger_state.set_ledger_parameters(node_parameters);
+    }
 
     let apply_transactions = |ledger_state: &mut LedgerState| {
         ledger_state

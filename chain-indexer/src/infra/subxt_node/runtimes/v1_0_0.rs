@@ -261,6 +261,21 @@ pub async fn get_ledger_state_root(
     Ok(Some(root))
 }
 
+pub async fn get_ledger_parameters(block: &OnlineClientAtBlock) -> Result<Vec<u8>, SubxtNodeError> {
+    let get_ledger_parameters = super::runtime_1_0_0::runtime_apis()
+        .midnight_runtime_api()
+        .get_ledger_parameters();
+
+    let parameters = block
+        .runtime_apis()
+        .call(get_ledger_parameters)
+        .await
+        .map_err(|error| SubxtNodeError::GetLedgerParameters(error.into()))?
+        .map_err(|error| SubxtNodeError::GetLedgerParameters(format!("{error:?}").into()))?;
+
+    Ok(parameters)
+}
+
 pub async fn get_d_parameter(block: &OnlineClientAtBlock) -> Result<DParameter, SubxtNodeError> {
     let get_d_param = super::runtime_1_0_0::runtime_apis()
         .system_parameters_api()
