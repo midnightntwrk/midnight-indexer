@@ -18,7 +18,11 @@ import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import { retry } from '@utils/retry-helper';
 import dataProvider from '@utils/testdata-provider';
-import { getBlockByHashWithRetry, setupWalletEventSubscriptions, resolveBlockHash } from './test-utils';
+import {
+  getBlockByHashWithRetry,
+  setupWalletEventSubscriptions,
+  resolveBlockHash,
+} from './test-utils';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 import {

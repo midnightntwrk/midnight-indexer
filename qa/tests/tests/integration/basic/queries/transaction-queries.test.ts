@@ -76,9 +76,7 @@ function getRegularTransactions(transactions: Transaction[]): RegularTransaction
 }
 
 function getSystemTransactions(transactions: Transaction[]): SystemTransaction[] {
-  return transactions.filter(
-    (tx) => tx.__typename === 'SystemTransaction',
-  ) as SystemTransaction[];
+  return transactions.filter((tx) => tx.__typename === 'SystemTransaction') as SystemTransaction[];
 }
 
 function extractUtxos(transactions: Transaction[]): UnshieldedUtxo[] {

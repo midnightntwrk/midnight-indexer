@@ -161,7 +161,9 @@ describe('zswap merkle tree collapsed update queries', () => {
         labels: ['Query', 'Zswap', 'CollapsedUpdate', 'Idempotency'],
       };
 
-      log.debug('Requesting zswap merkle tree collapsed update twice with startIndex=0, endIndex=1');
+      log.debug(
+        'Requesting zswap merkle tree collapsed update twice with startIndex=0, endIndex=1',
+      );
       const response1 = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, 1);
       const response2 = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, 1);
 
@@ -229,7 +231,9 @@ describe('zswap merkle tree collapsed update queries', () => {
         labels: ['Query', 'Zswap', 'CollapsedUpdate', 'Negative'],
       };
 
-      log.debug('Requesting zswap merkle tree collapsed update with startIndex=0, endIndex=999999999');
+      log.debug(
+        'Requesting zswap merkle tree collapsed update with startIndex=0, endIndex=999999999',
+      );
       const response = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, 999999999);
 
       expect(response).toBeError();

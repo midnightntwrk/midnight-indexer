@@ -112,6 +112,7 @@ describe('dust ledger event subscriptions', () => {
         3,
         fromId,
       );
+
       received
         .filter((msg) => msg.data?.dustLedgerEvents)
         .forEach((msg) => {

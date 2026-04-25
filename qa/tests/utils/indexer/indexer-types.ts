@@ -250,35 +250,35 @@ export interface ZswapLedgerEvent {
 
 export type DustLedgerEvent =
   | {
-    __typename: 'ParamChange';
-    id: number;
-    raw: string;
-    maxId: number;
-    protocolVersion: number;
-  }
+      __typename: 'ParamChange';
+      id: number;
+      raw: string;
+      maxId: number;
+      protocolVersion: number;
+    }
   | {
-    __typename: 'DustInitialUtxo';
-    id: number;
-    raw: string;
-    maxId: number;
-    protocolVersion: number;
-    output: {
-      nonce: string;
+      __typename: 'DustInitialUtxo';
+      id: number;
+      raw: string;
+      maxId: number;
+      protocolVersion: number;
+      output: {
+        nonce: string;
+      };
+    }
+  | {
+      __typename: 'DustGenerationDtimeUpdate';
+      id: number;
+      raw: string;
+      maxId: number;
+      protocolVersion: number;
+    }
+  | {
+      __typename: 'DustSpendProcessed';
+      id: number;
+      raw: string;
+      maxId: number;
+      protocolVersion: number;
     };
-  }
-  | {
-    __typename: 'DustGenerationDtimeUpdate';
-    id: number;
-    raw: string;
-    maxId: number;
-    protocolVersion: number;
-  }
-  | {
-    __typename: 'DustSpendProcessed';
-    id: number;
-    raw: string;
-    maxId: number;
-    protocolVersion: number;
-  };
 
 export type ViewingKey = string & { __brand: 'ViewingKey' };
