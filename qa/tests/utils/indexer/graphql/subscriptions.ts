@@ -115,6 +115,8 @@ export const BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription BlocksSubscri
     protocolVersion
     ledgerParameters
     zswapMerkleTreeRoot
+    dustCommitmentMerkleTreeRoot
+    dustGenerationMerkleTreeRoot
     parent {
       hash
       height
@@ -147,6 +149,8 @@ export const BLOCKS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription BlocksSubs
     protocolVersion
     ledgerParameters
     zswapMerkleTreeRoot
+    dustCommitmentMerkleTreeRoot
+    dustGenerationMerkleTreeRoot
     parent {
       hash
       height
@@ -333,6 +337,50 @@ export const ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID = `
       raw
       maxId
       protocolVersion
+    }
+  }
+`;
+
+export const DUST_GENERATIONS_SUBSCRIPTION = `
+  subscription DustGenerations($dustAddress: HexEncoded!, $startIndex: Int!, $endIndex: Int!) {
+    dustGenerations(dustAddress: $dustAddress, startIndex: $startIndex, endIndex: $endIndex) {
+      ... on DustGenerationsItem {
+        __typename
+        merkleIndex
+        owner
+        value
+        nonce
+        ctime
+        transactionId
+        collapsedMerkleTree {
+          startIndex
+          endIndex
+          update
+          protocolVersion
+        }
+      }
+      ... on DustGenerationsProgress {
+        __typename
+        highestIndex
+        collapsedMerkleTree {
+          startIndex
+          endIndex
+          update
+          protocolVersion
+        }
+      }
+    }
+  }
+`;
+
+export const DUST_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
+  subscription DustNullifierTransactions($nullifierPrefixes: [HexEncoded!]!, $fromBlock: Int, $toBlock: Int) {
+    dustNullifierTransactions(nullifierPrefixes: $nullifierPrefixes, fromBlock: $fromBlock, toBlock: $toBlock) {
+      nullifier
+      commitment
+      transactionId
+      blockHeight
+      blockHash
     }
   }
 `;
