@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.1] - 2026-04-27
+
+### ⚙️ Dependencies
+
+- Bump to node 1.0.0-rc.3 and storage-core 1.2.0-rc.3 (#1077)
+
+### 🚀 Features
+
+- *(bench)* Add preprod genesis and multi-tx apply benchmarks (#1076)
+
 ## [4.2.0] - 2026-04-23
 
 ### 🚀 Features
