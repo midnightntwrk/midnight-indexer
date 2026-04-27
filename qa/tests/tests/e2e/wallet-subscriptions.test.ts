@@ -230,7 +230,12 @@ describe.sequential('wallet event subscriptions', { timeout: 200_000 }, () => {
       secondDestinationAddressEvents.length = 0;
 
       // First transaction: A > B1
-      const b1TxResult = await toolkit.generateSingleTx(sourceSeed, 'unshielded', destinationAddress, 3);
+      const b1TxResult = await toolkit.generateSingleTx(
+        sourceSeed,
+        'unshielded',
+        destinationAddress,
+        3,
+      );
 
       // Wait for B1's UnshieldedTransaction matching the submitted tx hash
       const latestB1Tx = await retrySimple(async () => {
@@ -281,7 +286,12 @@ describe.sequential('wallet event subscriptions', { timeout: 200_000 }, () => {
       ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'A→B2'] };
 
       // Generate A > B2 transaction
-      const b2TxResult = await toolkit.generateSingleTx(sourceSeed, 'unshielded', secondDestinationAddress!, 1);
+      const b2TxResult = await toolkit.generateSingleTx(
+        sourceSeed,
+        'unshielded',
+        secondDestinationAddress!,
+        1,
+      );
 
       // Wait for B2's UnshieldedTransaction matching the submitted tx hash
       const latestB2Tx = await retrySimple(async () => {

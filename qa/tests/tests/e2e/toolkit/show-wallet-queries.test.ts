@@ -48,24 +48,28 @@ describe('show wallet queries using toolkit', () => {
      * @when we call showPrivateWalletState with the seed
      * @then we should receive a valid PrivateWalletState object according to the requested schema
      */
-    test('should respond with a private wallet state according to the requested schema', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = {
-        labels: ['Query', 'Wallet', 'Toolkit', 'PrivateState', 'SchemaValidation'],
-      };
+    test(
+      'should respond with a private wallet state according to the requested schema',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = {
+          labels: ['Query', 'Wallet', 'Toolkit', 'PrivateState', 'SchemaValidation'],
+        };
 
-      const walletSeed = dataProvider.getFundingSeed();
+        const walletSeed = dataProvider.getFundingSeed();
 
-      log.debug(`Querying private wallet state for seed: ${walletSeed}`);
-      const walletState: PrivateWalletState = await toolkit.showPrivateWalletState(walletSeed);
+        log.debug(`Querying private wallet state for seed: ${walletSeed}`);
+        const walletState: PrivateWalletState = await toolkit.showPrivateWalletState(walletSeed);
 
-      expect(walletState).toBeDefined();
+        expect(walletState).toBeDefined();
 
-      const validationResult = PrivateWalletStateSchema.safeParse(walletState);
-      expect(
-        validationResult.success,
-        `PrivateWalletState validation failed: ${JSON.stringify(validationResult.error, null, 2)}`,
-      ).toBe(true);
-    }, TOOLKIT_STARTUP_TIMEOUT);
+        const validationResult = PrivateWalletStateSchema.safeParse(walletState);
+        expect(
+          validationResult.success,
+          `PrivateWalletState validation failed: ${JSON.stringify(validationResult.error, null, 2)}`,
+        ).toBe(true);
+      },
+      TOOLKIT_STARTUP_TIMEOUT,
+    );
   });
 
   describe('public wallet state query using toolkit', () => {
@@ -77,28 +81,32 @@ describe('show wallet queries using toolkit', () => {
      * @when we call showPublicWalletState with the address
      * @then we should receive a valid PublicWalletState object according to the requested schema
      */
-    test('should respond with a public wallet state according to the requested schema', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = {
-        labels: ['Query', 'Wallet', 'Toolkit', 'PublicState', 'SchemaValidation'],
-      };
+    test(
+      'should respond with a public wallet state according to the requested schema',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = {
+          labels: ['Query', 'Wallet', 'Toolkit', 'PublicState', 'SchemaValidation'],
+        };
 
-      const walletSeed = dataProvider.getFundingSeed();
+        const walletSeed = dataProvider.getFundingSeed();
 
-      // Get the unshielded address from the seed
-      const addressInfo = await toolkit.showAddress(walletSeed);
-      const walletAddress = addressInfo.unshielded;
+        // Get the unshielded address from the seed
+        const addressInfo = await toolkit.showAddress(walletSeed);
+        const walletAddress = addressInfo.unshielded;
 
-      log.debug(`Querying public wallet state for address: ${walletAddress}`);
-      const publicWalletState: PublicWalletState =
-        await toolkit.showPublicWalletState(walletAddress);
+        log.debug(`Querying public wallet state for address: ${walletAddress}`);
+        const publicWalletState: PublicWalletState =
+          await toolkit.showPublicWalletState(walletAddress);
 
-      expect(publicWalletState).toBeDefined();
+        expect(publicWalletState).toBeDefined();
 
-      const validationResult = PublicWalletStateSchema.safeParse(publicWalletState);
-      expect(
-        validationResult.success,
-        `PublicWalletState validation failed: ${JSON.stringify(validationResult.error, null, 2)}`,
-      ).toBe(true);
-    }, TOOLKIT_STARTUP_TIMEOUT);
+        const validationResult = PublicWalletStateSchema.safeParse(publicWalletState);
+        expect(
+          validationResult.success,
+          `PublicWalletState validation failed: ${JSON.stringify(validationResult.error, null, 2)}`,
+        ).toBe(true);
+      },
+      TOOLKIT_STARTUP_TIMEOUT,
+    );
   });
 });

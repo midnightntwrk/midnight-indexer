@@ -160,7 +160,9 @@ describe.sequential('contract actions', () => {
 
         if (contractAction?.__typename === 'ContractDeploy') {
           expect(contractAction.address).toBeDefined();
-          expect(sameHash(contractAction.address, contractDeployResult['contract-address-untagged'])).toBe(true);
+          expect(
+            sameHash(contractAction.address, contractDeployResult['contract-address-untagged']),
+          ).toBe(true);
 
           const zswapState = contractAction.zswapState;
           log.debug(`zswapState (Deploy): length ${zswapState?.length ?? 0}`);
@@ -175,10 +177,17 @@ describe.sequential('contract actions', () => {
 
   describe('a transaction to call a smart contract', () => {
     beforeAll(async () => {
-      contractCallResult = await toolkit.callContract('store', contractDeployResult, undefined, fundingSeed);
+      contractCallResult = await toolkit.callContract(
+        'store',
+        contractDeployResult,
+        undefined,
+        fundingSeed,
+      );
 
       expect(contractCallResult.status).toBe('confirmed');
-      log.debug(`Call tx hash: ${contractCallResult.txHash}, block: ${contractCallResult.blockHash}`);
+      log.debug(
+        `Call tx hash: ${contractCallResult.txHash}, block: ${contractCallResult.blockHash}`,
+      );
 
       contractCallBlockHash = contractCallResult.blockHash;
       contractCallTransactionHash = contractCallResult.txHash;
@@ -268,7 +277,9 @@ describe.sequential('contract actions', () => {
 
         if (contractAction?.__typename === 'ContractCall') {
           expect(contractAction.address).toBeDefined();
-          expect(sameHash(contractAction.address, contractDeployResult['contract-address-untagged'])).toBe(true);
+          expect(
+            sameHash(contractAction.address, contractDeployResult['contract-address-untagged']),
+          ).toBe(true);
           expect(contractAction.entryPoint).toBeDefined();
           expect(contractAction.deploy).toBeDefined();
           expect(contractAction.deploy?.address).toBeDefined();
@@ -279,7 +290,6 @@ describe.sequential('contract actions', () => {
   });
 
   describe('a transaction to update a smart contract', () => {
-
     beforeAll(async () => {
       // Allow call to finalize before running maintenance (update)
       await getTransactionByHashWithRetry(contractCallTransactionHash);
@@ -307,7 +317,9 @@ describe.sequential('contract actions', () => {
           labels: ['Query', 'Transaction', 'ByHash', 'ContractUpdate'],
         };
 
-        const transactionResponse = await getTransactionByHashWithRetry(contractUpdateTransactionHash);
+        const transactionResponse = await getTransactionByHashWithRetry(
+          contractUpdateTransactionHash,
+        );
 
         expect(transactionResponse).toBeSuccess();
         expect(transactionResponse?.data?.transactions).toBeDefined();
@@ -385,7 +397,9 @@ describe.sequential('contract actions', () => {
 
         if (contractAction?.__typename === 'ContractUpdate') {
           expect(contractAction.address).toBeDefined();
-          expect(sameHash(contractAction.address, contractDeployResult['contract-address-untagged'])).toBe(true);
+          expect(
+            sameHash(contractAction.address, contractDeployResult['contract-address-untagged']),
+          ).toBe(true);
         }
       },
       TEST_TIMEOUT,

@@ -173,7 +173,7 @@ export class IndexerWsClient {
    * is created in connectionInit().
    */
   constructor() {
-    const apiVersion = process.env.INDEXER_API_VERSION || 'v4';
+    const apiVersion = process.env.INDEXER_API_VERSION?.trim() || 'v4';
     this.graphqlAPIEndpoint = `/api/${apiVersion}/graphql/ws`;
     this.targetUrl = env.getIndexerWebsocketBaseURL() + this.graphqlAPIEndpoint;
   }
