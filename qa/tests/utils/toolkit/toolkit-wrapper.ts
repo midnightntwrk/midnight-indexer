@@ -154,7 +154,6 @@ class ToolkitWrapper {
   }
 
   private parseTransactionOutput(output: string): ToolkitTransactionResult {
-    // Strip ANSI escape codes (color/style sequences) that newer toolkit versions emit
     // eslint-disable-next-line no-control-regex
     const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
     const lines = stripAnsi(output).trim().split('\n');

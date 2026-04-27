@@ -65,8 +65,8 @@ export class IndexerHttpClient {
    * @param endpoint - The base URL for the indexer HTTP endpoint. Defaults to the environment configuration
    */
   constructor() {
-    const apiVersion = process.env.INDEXER_API_VERSION?.trim();
-    this.graphqlAPIEndpoint = apiVersion ? `/api/${apiVersion}/graphql` : '/api/graphql';
+    const apiVersion = process.env.INDEXER_API_VERSION?.trim() || 'v4';
+    this.graphqlAPIEndpoint = `/api/${apiVersion}/graphql`;
     this.targetUrl = env.getIndexerHttpBaseURL() + this.graphqlAPIEndpoint;
     this.client = new GraphQLClient(this.targetUrl, { errorPolicy: 'all' });
   }
