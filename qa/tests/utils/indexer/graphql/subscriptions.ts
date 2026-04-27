@@ -346,10 +346,12 @@ export const DUST_GENERATIONS_SUBSCRIPTION = `
     dustGenerations(dustAddress: $dustAddress, startIndex: $startIndex, endIndex: $endIndex) {
       ... on DustGenerationsItem {
         __typename
-        merkleIndex
+        commitmentMtIndex
+        generationMtIndex
         owner
         value
-        nonce
+        initialValue
+        backingNight
         ctime
         transactionId
         collapsedMerkleTree {

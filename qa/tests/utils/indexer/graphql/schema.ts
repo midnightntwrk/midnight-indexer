@@ -367,10 +367,12 @@ export const CollapsedMerkleTreeSchema = z.object({
 
 export const DustGenerationsItemSchema = z.object({
   __typename: z.literal('DustGenerationsItem'),
-  merkleIndex: z.number(),
+  commitmentMtIndex: z.number(),
+  generationMtIndex: z.number(),
   owner: VarLenghtHex,
   value: z.string().regex(/^\d+$/),
-  nonce: VarLenghtHex,
+  initialValue: z.string().regex(/^\d+$/),
+  backingNight: VarLenghtHex,
   ctime: z.number(),
   transactionId: z.number(),
   collapsedMerkleTree: CollapsedMerkleTreeSchema.nullable(),

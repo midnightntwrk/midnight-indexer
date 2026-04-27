@@ -328,10 +328,12 @@ export interface CollapsedMerkleTree {
 
 export interface DustGenerationsItem {
   __typename: 'DustGenerationsItem';
-  merkleIndex: number;
+  commitmentMtIndex: number;
+  generationMtIndex: number;
   owner: string;
   value: string;
-  nonce: string;
+  initialValue: string;
+  backingNight: string;
   ctime: number;
   transactionId: number;
   collapsedMerkleTree: CollapsedMerkleTree | null;
