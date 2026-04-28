@@ -124,4 +124,45 @@ mod tests {
 
         Ok(())
     }
+
+    /// Regression test: when no external subscriber is attached, the drain
+    /// task is the sole receiver keeping the channel alive. If it broke on
+    /// `RecvError::Lagged` (the pre-fix behavior), the receiver would be
+    /// dropped and subsequent `publish` calls would fail with `SendError`
+    /// because the broadcast channel has no active receivers.
+    ///
+    /// To force the drain task to lag, we publish far more messages than the
+    /// channel capacity (42) in a tight loop. `publish` contains no await
+    /// points, so on a current-thread runtime the drain task cannot be
+    /// scheduled until we explicitly yield, guaranteeing overflow.
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_drain_survives_lag() -> Result<(), Box<dyn StdError>> {
+        let pub_sub = InMemPubSub::default();
+        let publisher = pub_sub.publisher();
+
+        for height in 0..1000 {
+            publisher
+                .publish(&BlockIndexed {
+                    height,
+                    max_transaction_id: None,
+                    caught_up: false,
+                })
+                .await?;
+        }
+
+        // Let the drain task observe the lag.
+        sleep(Duration::from_millis(50)).await;
+
+        // If the drain task broke on lag, this publish would fail with
+        // `SendError` because no receivers remain.
+        publisher
+            .publish(&BlockIndexed {
+                height: 9999,
+                max_transaction_id: None,
+                caught_up: false,
+            })
+            .await?;
+
+        Ok(())
+    }
 }
