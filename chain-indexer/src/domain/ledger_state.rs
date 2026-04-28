@@ -64,6 +64,23 @@ impl LedgerState {
             .map(Into::into)
     }
 
+    /// Unpersist a previously-persisted ledger state by its serialized key.
+    /// Balances a prior `persist()` call so storage-core's gc-v1 can reclaim
+    /// the now-unreachable arena nodes on a subsequent `gc()` pass.
+    pub fn unpersist(
+        key: &SerializedLedgerStateKey,
+        ledger_version: LedgerVersion,
+    ) -> Result<(), Error> {
+        indexer_common::domain::ledger::LedgerState::unpersist(key, ledger_version)
+            .map_err(Error::Unpersist)
+    }
+
+    /// Run a time-bounded mark-and-sweep gc on the ledger DB and return the
+    /// number of arena nodes culled.
+    pub fn gc(bound: std::time::Duration) -> usize {
+        indexer_common::domain::ledger::LedgerState::gc(bound)
+    }
+
     /// Apply the given node transactions to this ledger state and return domain transactions.
     #[trace(properties = { "parent_block_hash": "{parent_block_hash}" })]
     pub fn apply_transactions(
@@ -223,6 +240,9 @@ pub enum Error {
 
     #[error(transparent)]
     Translate(indexer_common::domain::ledger::Error),
+
+    #[error(transparent)]
+    Unpersist(indexer_common::domain::ledger::Error),
 
     #[error("cannot apply regular transaction {hash}", hash = stringify_hash(.0))]
     ApplyRegularTransaction(

@@ -46,6 +46,8 @@ pub struct ApplicationConfig {
     pub blocks_buffer: usize,
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
+    #[serde(with = "humantime_serde", default = "gc_bound_default")]
+    pub gc_bound: Duration,
     #[serde(with = "humantime_serde")]
     pub active_wallets_query_delay: Duration,
     #[serde(with = "humantime_serde")]
@@ -53,6 +55,10 @@ pub struct ApplicationConfig {
     pub transaction_batch_size: NonZeroUsize,
     #[serde(default = "concurrency_limit_default")]
     pub concurrency_limit: NonZeroUsize,
+}
+
+fn gc_bound_default() -> Duration {
+    Duration::from_millis(200)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -79,6 +85,7 @@ impl From<ApplicationConfig> for chain_app::Config {
             blocks_buffer,
             caught_up_max_distance,
             caught_up_leeway,
+            gc_bound,
             ..
         } = config;
 
@@ -87,6 +94,7 @@ impl From<ApplicationConfig> for chain_app::Config {
             blocks_buffer,
             caught_up_max_distance,
             caught_up_leeway,
+            gc_bound,
         }
     }
 }

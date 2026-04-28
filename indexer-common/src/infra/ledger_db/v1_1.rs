@@ -57,6 +57,7 @@ impl LedgerDb {
 
 impl DB for LedgerDb {
     type Hasher = DefaultHasher;
+    type ScanResumeHandle = ArenaHash<DefaultHasher>;
 
     fn get_node(&self, key: &ArenaHash<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>> {
         block_in_place(|| {
@@ -354,6 +355,49 @@ impl DB for LedgerDb {
             })
         })
     }
+
+    fn scan(
+        &self,
+        resume_from: Option<Self::ScanResumeHandle>,
+        batch_size: usize,
+    ) -> (
+        Vec<(ArenaHash<Self::Hasher>, OnDiskObject<Self::Hasher>)>,
+        Option<Self::ScanResumeHandle>,
+    ) {
+        block_in_place(|| {
+            Handle::current().block_on(async {
+                let mut query = QueryBuilder::new("SELECT key, object FROM ledger_db_nodes");
+                if let Some(handle) = resume_from.as_ref() {
+                    query.push(" WHERE key > ");
+                    query.push_bind(handle.0.as_slice());
+                }
+                query.push(" ORDER BY key LIMIT ");
+                query.push_bind(batch_size as i64);
+
+                let raw = query
+                    .build_query_as::<(Vec<u8>, Vec<u8>)>()
+                    .fetch_all(&*self.pool)
+                    .await
+                    .unwrap_or_panic("cannot scan ledger_db_nodes");
+
+                let batch = raw
+                    .into_iter()
+                    .map(|(key, object)| {
+                        let key = ArenaHash::<Self::Hasher>::deserialize(&mut key.as_slice(), 0)
+                            .unwrap_or_panic("cannot deserialize key as ArenaHash");
+                        let object =
+                            OnDiskObject::<Self::Hasher>::deserialize(&mut object.as_slice(), 0)
+                                .unwrap_or_panic("cannot deserialize node as OnDiskObject");
+                        (key, object)
+                    })
+                    .collect::<Vec<_>>();
+
+                let next_handle = batch.last().map(|(k, _)| k.clone());
+
+                (batch, next_handle)
+            })
+        })
+    }
 }
 
 impl Default for LedgerDb {
@@ -450,5 +494,142 @@ where
             .execute(&mut **tx)
             .await
             .unwrap_or_panic("cannot set root count");
+    }
+}
+
+#[cfg(all(test, feature = "standalone"))]
+mod sqlite_tests {
+    use crate::infra::{
+        ledger_db::v1_1::LedgerDb,
+        migrations::sqlite::run_for_ledger_db,
+        pool::sqlite::{Config, SqlitePool},
+    };
+    use anyhow::Context;
+    use midnight_storage_core_v1::{DefaultHasher, arena::ArenaHash, db::DB};
+    use std::error::Error as StdError;
+
+    #[tokio::test]
+    async fn scan_empty_db_returns_no_rows_and_no_handle() -> Result<(), Box<dyn StdError>> {
+        let pool = SqlitePool::new(Config::default())
+            .await
+            .context("create sqlite pool")?;
+        run_for_ledger_db(&pool)
+            .await
+            .context("run ledger_db migrations")?;
+
+        let db = LedgerDb::new(pool);
+
+        let (batch, handle) = tokio::task::spawn_blocking(move || {
+            // scan() uses block_in_place internally, which requires being on a
+            // multi-thread runtime; spawn_blocking is a clean way to satisfy that.
+            db.scan(None, 100)
+        })
+        .await
+        .context("await scan")?;
+
+        assert!(batch.is_empty());
+        assert!(handle.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn scan_with_resume_on_empty_db_still_returns_no_rows() -> Result<(), Box<dyn StdError>> {
+        let pool = SqlitePool::new(Config::default())
+            .await
+            .context("create sqlite pool")?;
+        run_for_ledger_db(&pool)
+            .await
+            .context("run ledger_db migrations")?;
+
+        let db = LedgerDb::new(pool);
+        let fake_resume: ArenaHash<DefaultHasher> = ArenaHash::default();
+
+        let (batch, handle) = tokio::task::spawn_blocking(move || db.scan(Some(fake_resume), 50))
+            .await
+            .context("await scan")?;
+
+        assert!(batch.is_empty());
+        assert!(handle.is_none());
+
+        Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "cloud"))]
+mod postgres_tests {
+    use crate::infra::{
+        ledger_db::v1_1::LedgerDb,
+        migrations::postgres::run as run_migrations,
+        pool::{self, postgres::PostgresPool},
+    };
+    use anyhow::Context;
+    use midnight_storage_core_v1::{DefaultHasher, arena::ArenaHash, db::DB};
+    use sqlx::postgres::PgSslMode;
+    use std::{error::Error as StdError, time::Duration};
+    use testcontainers::{ImageExt, runners::AsyncRunner};
+    use testcontainers_modules::postgres::Postgres;
+
+    async fn setup_pool()
+    -> Result<(testcontainers::ContainerAsync<Postgres>, PostgresPool), Box<dyn StdError>> {
+        let container = Postgres::default()
+            .with_db_name("indexer")
+            .with_user("indexer")
+            .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
+            .with_tag("17.1-alpine")
+            .start()
+            .await
+            .context("start Postgres container")?;
+        let port = container
+            .get_host_port_ipv4(5432)
+            .await
+            .context("get Postgres port")?;
+
+        let config = pool::postgres::Config {
+            host: "localhost".to_string(),
+            port,
+            dbname: "indexer".to_string(),
+            user: "indexer".to_string(),
+            password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
+            sslmode: PgSslMode::Prefer,
+            max_connections: 10,
+            idle_timeout: Duration::from_secs(60),
+            max_lifetime: Duration::from_secs(5 * 60),
+        };
+        let pool = PostgresPool::new(config).await?;
+        run_migrations(&pool).await.context("run migrations")?;
+
+        Ok((container, pool))
+    }
+
+    #[tokio::test]
+    async fn scan_empty_db_returns_no_rows_and_no_handle() -> Result<(), Box<dyn StdError>> {
+        let (_container, pool) = setup_pool().await?;
+        let db = LedgerDb::new(pool);
+
+        let (batch, handle) = tokio::task::spawn_blocking(move || db.scan(None, 100))
+            .await
+            .context("await scan")?;
+
+        assert!(batch.is_empty());
+        assert!(handle.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn scan_with_resume_on_empty_db_still_returns_no_rows() -> Result<(), Box<dyn StdError>> {
+        let (_container, pool) = setup_pool().await?;
+        let db = LedgerDb::new(pool);
+        let fake_resume: ArenaHash<DefaultHasher> = ArenaHash::default();
+
+        let (batch, handle) = tokio::task::spawn_blocking(move || db.scan(Some(fake_resume), 50))
+            .await
+            .context("await scan")?;
+
+        assert!(batch.is_empty());
+        assert!(handle.is_none());
+
+        Ok(())
     }
 }
