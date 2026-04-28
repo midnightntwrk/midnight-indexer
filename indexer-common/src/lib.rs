@@ -22,3 +22,4 @@ pub mod error;
 pub mod infra;
 pub mod stream;
 pub mod telemetry;
+pub mod version;

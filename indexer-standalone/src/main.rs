@@ -20,6 +20,9 @@ fn main() {
     use log::error;
     use std::panic;
 
+    // Handle `--version` before anything else so it works without a config file.
+    indexer_common::handle_version_flag!();
+
     // Initialize logging.
     telemetry::init_logging();
 

@@ -18,6 +18,7 @@ use indexer_tests::e2e;
 /// e2e tests against the Indexer API.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    indexer_common::handle_version_flag!();
     Cli::parse().run().await
 }
 
