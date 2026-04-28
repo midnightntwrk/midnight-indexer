@@ -123,35 +123,37 @@ fn run() -> anyhow::Result<()> {
             .await
             .context("initialize ledger db")?;
 
-        let chain_indexer = task::spawn({
-            let node = SubxtNode::new(node_config.clone())
-                .await
-                .context("create SubxtNode")?;
+        // Move the node connection setup *inside* each spawned task so a slow
+        // or unreachable URL only blocks its own component, not the whole
+        // runtime startup. The previous shape `task::spawn({ ... .await? ... })`
+        // ran the .await synchronously in the outer block_on, holding back the
+        // indexer-api and wallet-indexer spawns for up to
+        // `reconnect_max_attempts × reconnect_max_delay` (≈5 min by default).
+        let chain_indexer = {
             let storage = chain_storage::Storage::new(pool.clone());
+            let publisher = pub_sub.publisher();
+            let application_config = application_config.clone();
+            task::spawn(async move {
+                let node = SubxtNode::new(node_config)
+                    .await
+                    .context("create SubxtNode")?;
+                let sigterm =
+                    signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+                chain_app::run(application_config.into(), node, storage, publisher, sigterm).await
+            })
+        };
 
-            let sigterm =
-                signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
-
-            chain_app::run(
-                application_config.clone().into(),
-                node,
-                storage,
-                pub_sub.publisher(),
-                sigterm,
-            )
-        });
-
-        let spo_indexer = task::spawn({
-            let node = SPOClient::new(spo_node_config.clone().into())
-                .await
-                .context("create SPOClient")?;
+        let spo_indexer = {
             let storage = spo_storage::Storage::new(pool.clone());
-
-            let sigterm =
-                signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
-
-            spo_app::run(spo_config.clone().into(), node, storage, sigterm)
-        });
+            task::spawn(async move {
+                let node = SPOClient::new(spo_node_config.into())
+                    .await
+                    .context("create SPOClient")?;
+                let sigterm =
+                    signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+                spo_app::run(spo_config.into(), node, storage, sigterm).await
+            })
+        };
 
         let indexer_api = task::spawn({
             let subscriber = pub_sub.subscriber();
