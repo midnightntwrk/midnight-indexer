@@ -39,8 +39,14 @@ fn main() {
 fn run() -> anyhow::Result<()> {
     use crate::config::{Config, InfraConfig};
     use anyhow::Context;
-    use chain_indexer::infra::subxt_node::SubxtNode;
-    use indexer_api::infra::api::AxumApi;
+    use chain_indexer::{
+        application as chain_app,
+        infra::{storage as chain_storage, subxt_node::SubxtNode},
+    };
+    use indexer_api::{
+        application as api_app,
+        infra::{api::AxumApi, storage as api_storage},
+    };
     use indexer_common::{
         cipher::make_cipher,
         config::ConfigExt,
@@ -48,6 +54,10 @@ fn run() -> anyhow::Result<()> {
         telemetry,
     };
     use log::info;
+    use spo_indexer::{
+        application as spo_app,
+        infra::{spo_client::SPOClient, storage as spo_storage},
+    };
     use std::panic;
     use tokio::{
         runtime::Builder,
@@ -55,11 +65,13 @@ fn run() -> anyhow::Result<()> {
         signal::unix::{SignalKind, signal},
         task,
     };
+    use wallet_indexer::{application as wallet_app, infra::storage as wallet_storage};
 
     // Load configuration.
     let Config {
         thread_stack_size,
         application_config,
+        spo_config,
         infra_config,
         telemetry_config:
             telemetry::Config {
@@ -79,6 +91,7 @@ fn run() -> anyhow::Result<()> {
         storage_config,
         ledger_db_config,
         node_config,
+        spo_node_config,
         api_config,
         secret,
     } = infra_config;
@@ -110,40 +123,54 @@ fn run() -> anyhow::Result<()> {
             .await
             .context("initialize ledger db")?;
 
-        let chain_indexer = task::spawn({
-            let node = SubxtNode::new(node_config)
-                .await
-                .context("create SubxtNode")?;
-            let storage = chain_indexer::infra::storage::Storage::new(pool.clone());
+        // Move the node connection setup *inside* each spawned task so a slow
+        // or unreachable URL only blocks its own component, not the whole
+        // runtime startup. The previous shape `task::spawn({ ... .await? ... })`
+        // ran the .await synchronously in the outer block_on, holding back the
+        // indexer-api and wallet-indexer spawns for up to
+        // `reconnect_max_attempts × reconnect_max_delay` (≈5 min by default).
+        let chain_indexer = {
+            let storage = chain_storage::Storage::new(pool.clone());
+            let publisher = pub_sub.publisher();
+            let application_config = application_config.clone();
+            task::spawn(async move {
+                let node = SubxtNode::new(node_config)
+                    .await
+                    .context("create SubxtNode")?;
+                let sigterm =
+                    signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+                chain_app::run(application_config.into(), node, storage, publisher, sigterm).await
+            })
+        };
 
-            let sigterm =
-                signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
-
-            chain_indexer::application::run(
-                application_config.clone().into(),
-                node,
-                storage,
-                pub_sub.publisher(),
-                sigterm,
-            )
-        });
+        let spo_indexer = {
+            let storage = spo_storage::Storage::new(pool.clone());
+            task::spawn(async move {
+                let node = SPOClient::new(spo_node_config.into())
+                    .await
+                    .context("create SPOClient")?;
+                let sigterm =
+                    signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+                spo_app::run(spo_config.into(), node, storage, sigterm).await
+            })
+        };
 
         let indexer_api = task::spawn({
             let subscriber = pub_sub.subscriber();
-            let storage = indexer_api::infra::storage::Storage::new(cipher.clone(), pool.clone());
+            let storage = api_storage::Storage::new(cipher.clone(), pool.clone());
             let api = AxumApi::new(api_config, storage, subscriber.clone());
 
-            indexer_api::application::run(application_config.clone().into(), api, subscriber)
+            api_app::run(application_config.clone().into(), api, subscriber)
         });
 
         let wallet_indexer = task::spawn({
-            let storage = wallet_indexer::infra::storage::Storage::new(cipher, pool);
+            let storage = wallet_storage::Storage::new(cipher, pool);
             let publisher = pub_sub.publisher();
             let subscriber = pub_sub.subscriber();
             let sigterm =
                 signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
-            wallet_indexer::application::run(
+            wallet_app::run(
                 application_config.into(),
                 storage,
                 publisher,
@@ -154,6 +181,7 @@ fn run() -> anyhow::Result<()> {
 
         select! {
             result = chain_indexer => handle_exit("chain-indexer", result),
+            result = spo_indexer => handle_exit("spo-indexer", result),
             result = wallet_indexer => handle_exit("wallet-indexer", result),
             result = indexer_api => handle_exit("indexer-api", result),
         }

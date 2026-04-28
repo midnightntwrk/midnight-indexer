@@ -29,8 +29,9 @@ use secrecy::{ExposeSecret, SecretString};
 use serde_json::value::RawValue;
 use std::collections::HashMap;
 use subxt::{
-    PolkadotConfig,
+    OnlineClient, PolkadotConfig,
     config::RpcConfigFor,
+    dynamic::{At, Value},
     rpcs::{
         LegacyRpcMethods,
         client::{ReconnectingRpcClient, reconnecting_rpc_client::ExponentialBackoff},
@@ -39,6 +40,7 @@ use subxt::{
 use thiserror::Error;
 
 const SLOT_PER_EPOCH_KEY: &str = "3eaeb1cee77dc09baac326e5a1d29726f38178a5f54bee65a8446a55b585f261";
+const TIMESTAMP_NOW_KEY: &str = "f0c365c3cf59d671eb72da0e7a411863f0c365c3cf59d671eb72da0e7a411863";
 pub const SLOT_DURATION: u32 = 6000;
 
 /// Config for node connection.
@@ -60,6 +62,7 @@ pub struct SPOClient {
     pub epoch_duration: u32,
     pub slots_per_epoch: u32,
     rpc_client: ReconnectingRpcClient,
+    online_client: OnlineClient<PolkadotConfig>,
     blockfrost: BlockfrostAPI,
     http: HttpClient,
     blockfrost_id: SecretString,
@@ -76,6 +79,10 @@ impl SPOClient {
             reconnect_max_attempts,
         } = config;
 
+        if blockfrost_id.expose_secret().is_empty() {
+            return Err(SPOClientError::MissingBlockfrostId);
+        }
+
         let retry_policy = ExponentialBackoff::from_millis(10)
             .max_delay(reconnect_max_delay)
             .take(reconnect_max_attempts);
@@ -87,6 +94,9 @@ impl SPOClient {
             .build(&url)
             .await
             .map_err(|error| SPOClientError::Subtx(error.into()))?;
+        let online_client = OnlineClient::<PolkadotConfig>::from_rpc_client(rpc_client.clone())
+            .await
+            .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
 
         let blockfrost = BlockfrostAPI::new(blockfrost_id.expose_secret(), Default::default());
 
@@ -99,6 +109,7 @@ impl SPOClient {
 
         Ok(Self {
             rpc_client,
+            online_client,
             blockfrost,
             http,
             epoch_duration,
@@ -120,20 +131,76 @@ impl SPOClient {
         Ok(response)
     }
 
-    pub async fn get_first_epoch_num(
-        &self,
-        storage: &impl crate::domain::storage::Storage,
-    ) -> Result<u32, SPOClientError> {
-        let current_epoch = self.get_current_epoch().await?;
-        let block_timestamp = storage
-            .get_block_timestamp(1)
+    async fn get_block_timestamp(&self, block_number: u32) -> Result<u64, SPOClientError> {
+        let at_block = self
+            .online_client
+            .at_block(block_number)
             .await
-            .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?
+            .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
+        let extrinsics = at_block
+            .extrinsics()
+            .fetch()
+            .await
+            .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
+
+        for extrinsic in extrinsics.iter() {
+            let extrinsic =
+                extrinsic.map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
+
+            if extrinsic.pallet_name() == "Timestamp" && extrinsic.call_name() == "set" {
+                let fields = extrinsic
+                    .decode_call_data_fields_unchecked_as::<Value>()
+                    .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
+                let timestamp = fields.at("now").and_then(Value::as_u128).ok_or_else(|| {
+                    SPOClientError::UnexpectedResponse(format!(
+                        "timestamp extrinsic did not contain field `now` for block #{block_number}"
+                    ))
+                })?;
+
+                return u64::try_from(timestamp).map_err(|_| {
+                    SPOClientError::UnexpectedResponse(format!(
+                        "timestamp extrinsic value overflowed u64 for block #{block_number}"
+                    ))
+                });
+            }
+        }
+
+        let legacy_rpc = LegacyRpcMethods::<RpcConfigFor<PolkadotConfig>>::new(
+            self.rpc_client.to_owned().into(),
+        );
+        let block_hash = legacy_rpc
+            .chain_get_block_hash(Some(block_number.into()))
+            .await
+            .map_err(|error| SPOClientError::Subtx(error.into()))?
             .ok_or_else(|| {
-                SPOClientError::UnexpectedResponse(
-                    "block #1 timestamp not found in database".to_owned(),
-                )
+                SPOClientError::UnexpectedResponse(format!(
+                    "block hash not found for block #{block_number}"
+                ))
             })?;
+        let storage_key = const_hex::decode(TIMESTAMP_NOW_KEY)
+            .expect("TIMESTAMP_NOW_KEY constant should be valid hex");
+
+        let raw_bytes = legacy_rpc
+            .state_get_storage(&storage_key, Some(block_hash))
+            .await
+            .map_err(|error| SPOClientError::Subtx(error.into()))?
+            .ok_or_else(|| {
+                SPOClientError::UnexpectedResponse(format!(
+                    "timestamp storage value not found for block #{block_number}"
+                ))
+            })?;
+        let raw_response: [u8; 8] = raw_bytes.try_into().map_err(|_| {
+            SPOClientError::UnexpectedResponse(format!(
+                "timestamp storage value for block #{block_number} should be 8 bytes"
+            ))
+        })?;
+
+        Ok(u64::from_le_bytes(raw_response))
+    }
+
+    pub async fn get_first_epoch_num(&self) -> Result<u32, SPOClientError> {
+        let current_epoch = self.get_current_epoch().await?;
+        let block_timestamp = self.get_block_timestamp(1).await?;
 
         let num_epochs: u64 =
             (current_epoch.ends_at as u64 - block_timestamp as u64) / (self.epoch_duration as u64);
@@ -299,31 +366,38 @@ impl SPOClient {
 
 #[derive(Debug, Clone)]
 pub struct PoolStakeData {
-    pub live_stake: Option<String>,
-    pub active_stake: Option<String>,
+    pub live_stake: Option<i64>,
+    pub active_stake: Option<i64>,
     pub live_delegators: Option<i64>,
     pub live_saturation: Option<f64>,
-    pub declared_pledge: Option<String>,
-    pub live_pledge: Option<String>,
+    pub declared_pledge: Option<i64>,
+    pub live_pledge: Option<i64>,
 }
 
 impl PoolStakeData {
     fn from_json(v: &serde_json::Value) -> Self {
         Self {
-            live_stake: v
-                .get("live_stake")
-                .and_then(|x| x.as_str().map(|s| s.to_owned())),
-            active_stake: v
-                .get("active_stake")
-                .and_then(|x| x.as_str().map(|s| s.to_owned())),
+            live_stake: parse_lovelace(v, "live_stake"),
+            active_stake: parse_lovelace(v, "active_stake"),
             live_delegators: v.get("live_delegators").and_then(|x| x.as_i64()),
             live_saturation: v.get("live_saturation").and_then(|x| x.as_f64()),
-            declared_pledge: v
-                .get("declared_pledge")
-                .and_then(|x| x.as_str().map(|s| s.to_owned())),
-            live_pledge: v
-                .get("live_pledge")
-                .and_then(|x| x.as_str().map(|s| s.to_owned())),
+            declared_pledge: parse_lovelace(v, "declared_pledge"),
+            live_pledge: parse_lovelace(v, "live_pledge"),
+        }
+    }
+}
+
+/// Parse a Blockfrost lovelace field (transported as a decimal string) into an
+/// `i64`. Returns `None` for missing or unparseable values; a warning is logged
+/// so a schema change on the Blockfrost side is visible rather than silently
+/// coerced to zero at the SQL layer.
+fn parse_lovelace(v: &serde_json::Value, field: &str) -> Option<i64> {
+    let raw = v.get(field)?.as_str()?;
+    match raw.parse::<i64>() {
+        Ok(n) => Some(n),
+        Err(error) => {
+            log::warn!("blockfrost {field} is not a valid i64 ({raw:?}): {error}");
+            None
         }
     }
 }
@@ -367,6 +441,9 @@ pub enum SPOClientError {
 
     #[error("unexpected error {0}")]
     UnexpectedResponse(String),
+
+    #[error("blockfrost_id must be configured")]
+    MissingBlockfrostId,
 
     #[error("cannot create HTTP header")]
     InvalidHeaderValue(#[from] InvalidHeaderValue),
