@@ -280,7 +280,6 @@ There are a number of deployed environments that are used for testing components
 - devnet
 - qanet
 - preview
-- testnet02
 
 When running **E2E tests** against deployed environments (devnet, qanet, preview, etc.),
 Toolkit Postgres must still be running locally:

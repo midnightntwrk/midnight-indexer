@@ -59,9 +59,6 @@ class TestDataProvider {
    * Gets the funding seed for the current environment.
    * First checks for an environment-specific variable (e.g., FUNDING_SEED_PREVIEW),
    * then falls back to a default seed for undeployed environments.
-   *
-   * Note that for node-dev-01 the variable will have to be FUNDING_SEED_NODE_DEV_01
-   * as "-" is not allowed in environment variable names.
    * @returns The funding seed as a string.
    */
   getFundingSeed() {

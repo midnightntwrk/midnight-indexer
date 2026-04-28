@@ -592,7 +592,7 @@ describe('dust generation status queries', () => {
      * - Cardano preprod(testnet) -> Midnight preprod
      * - Cardano preview(testnet) -> Midnight preview
      * -         |                -> Midnight qanet
-     * -         |                -> Midnight node-dev-01
+     * -         |                -> Midnight devnet
      *
      * So essntially to check the expected encoding, it's enough to check the Midnight environment name, given
      * the mapping above. Also note that preprod and preview addresses in Cardano have the test label in the

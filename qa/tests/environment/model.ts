@@ -19,14 +19,10 @@ import log from '@utils/logging/logger';
 export enum EnvironmentName {
   MAINNET = 'mainnet',
   UNDEPLOYED = 'undeployed',
-  NODEDEV01 = 'node-dev-01',
   DEVNET = 'devnet',
   QANET = 'qanet',
-  QANET_DEV = 'qanet.dev',
   PREVIEW = 'preview',
   PREPROD = 'preprod',
-  TESTNET = 'testnet',
-  TESTNET02 = 'testnet02',
 }
 
 export enum CardanoNetwork {
@@ -62,14 +58,14 @@ const hostEntries: HostEntry[] = [
     indexerHost: 'localhost:8088',
     nodeHost: 'localhost:9944',
   },
-  { env: EnvironmentName.QANET, domain: 'qanet.midnight.network' },
-  { env: EnvironmentName.QANET_DEV, domain: 'qanet.dev.midnight.network' },
-  { env: EnvironmentName.NODEDEV01, domain: 'node-dev-01.dev.midnight.network' },
+  {
+    env: EnvironmentName.QANET,
+    indexerHost: 'indexer-green.qanet.midnight.network',
+    nodeHost: 'rpc.qanet.midnight.network',
+  },
   { env: EnvironmentName.DEVNET, domain: 'devnet.midnight.network' },
   { env: EnvironmentName.PREVIEW, domain: 'preview.midnight.network' },
   { env: EnvironmentName.PREPROD, domain: 'preprod.midnight.network' },
-  { env: EnvironmentName.TESTNET, domain: 'testnet.midnight.network' },
-  { env: EnvironmentName.TESTNET02, domain: 'testnet-02.midnight.network' },
 ];
 
 const hostConfigByEnvName: Record<EnvironmentName, HostConfig> = hostEntries.reduce(
@@ -199,9 +195,7 @@ export class Environment {
       case EnvironmentName.PREPROD:
         return CardanoNetwork.PREPROD;
       case EnvironmentName.PREVIEW:
-      case EnvironmentName.NODEDEV01:
       case EnvironmentName.QANET:
-      case EnvironmentName.QANET_DEV:
       case EnvironmentName.DEVNET:
         return CardanoNetwork.PREVIEW;
       default:
@@ -229,10 +223,6 @@ export class Environment {
   }
 
   getNetworkId(): string {
-    // This check will have to be removed once we sunset the old qanet environment.
-    if (this.envName === EnvironmentName.QANET_DEV) {
-      return 'qanet';
-    }
     return this.networkId;
   }
 
