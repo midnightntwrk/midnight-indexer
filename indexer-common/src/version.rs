@@ -13,8 +13,8 @@
 
 //! Static version reporting for binaries.
 //!
-//! Every binary entry point should invoke [`handle_version_flag!`] before any
-//! configuration loading so that `--version` / `-v` works without a
+//! Every binary entry point should invoke [`crate::handle_version_flag!`]
+//! before any configuration loading so that `--version` / `-v` works without a
 //! `config.yaml` on disk. The version is baked in at compile time via
 //! `CARGO_PKG_VERSION` (inherited from the workspace `version`); the optional
 //! git SHA and build date come from `indexer-common/build.rs` and are simply
@@ -32,9 +32,9 @@ enum Action {
 /// Print the version line to stdout and exit 0 if argv contains a version
 /// flag; otherwise return so the caller can continue normal startup.
 ///
-/// Prefer the [`handle_version_flag!`] macro at the call site — it captures
-/// the *caller's* `CARGO_BIN_NAME` and `CARGO_PKG_VERSION` automatically so
-/// each binary's `main` is a single line.
+/// Prefer the [`crate::handle_version_flag!`] macro at the call site, which
+/// captures the *caller's* `CARGO_BIN_NAME` and `CARGO_PKG_VERSION`
+/// automatically so each binary's `main` is a single line.
 pub fn handle_version_flag(bin_name: &str, version: &str) {
     if action_for(std::env::args().skip(1)) == Action::PrintVersionAndExit {
         println!("{}", format_version_line(bin_name, version));
@@ -47,10 +47,7 @@ pub fn handle_version_flag(bin_name: &str, version: &str) {
 #[macro_export]
 macro_rules! handle_version_flag {
     () => {
-        $crate::version::handle_version_flag(
-            env!("CARGO_BIN_NAME"),
-            env!("CARGO_PKG_VERSION"),
-        )
+        $crate::version::handle_version_flag(env!("CARGO_BIN_NAME"), env!("CARGO_PKG_VERSION"))
     };
 }
 
