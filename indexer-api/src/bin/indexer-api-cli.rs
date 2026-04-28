@@ -18,6 +18,7 @@ use clap::{Parser, Subcommand};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    indexer_common::handle_version_flag!();
     Cli::parse().run()
 }
 
