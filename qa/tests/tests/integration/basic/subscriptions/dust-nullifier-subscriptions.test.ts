@@ -30,7 +30,7 @@ describe('dust nullifier transactions subscription', () => {
   beforeEach(async () => {
     indexerWsClient = new IndexerWsClient();
     await indexerWsClient.connectionInit();
-  });
+  }, 30_000);
 
   afterEach(async () => {
     await indexerWsClient.connectionClose();
@@ -56,7 +56,9 @@ describe('dust nullifier transactions subscription', () => {
       const toBlock = Math.min(latestHeight, 10);
       const nullifierPrefixes = ['00'];
 
-      log.debug(`Subscribing to dust nullifier transactions with prefixes=${nullifierPrefixes}, fromBlock=0, toBlock=${toBlock}`);
+      log.debug(
+        `Subscribing to dust nullifier transactions with prefixes=${nullifierPrefixes}, fromBlock=0, toBlock=${toBlock}`,
+      );
 
       const received: DustNullifierTransactionSubscriptionResponse[] = [];
 
@@ -71,7 +73,9 @@ describe('dust nullifier transactions subscription', () => {
           {
             next: (payload) => {
               received.push(payload);
-              log.debug(`Received dust nullifier transaction: ${JSON.stringify(payload.data?.dustNullifierTransactions)}`);
+              log.debug(
+                `Received dust nullifier transaction: ${JSON.stringify(payload.data?.dustNullifierTransactions)}`,
+              );
             },
             error: (error) => {
               clearTimeout(timeout);

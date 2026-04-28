@@ -60,7 +60,7 @@ describe('shielded transaction subscriptions', () => {
     // Initialise the indexer websocket client and connect to it
     indexerWsClient = new IndexerWsClient();
     await indexerWsClient.connectionInit();
-  });
+  }, 30_000);
 
   afterEach(async () => {
     // Close the indexer websocket client

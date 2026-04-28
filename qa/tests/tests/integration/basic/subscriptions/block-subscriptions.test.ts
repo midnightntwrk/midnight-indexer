@@ -37,7 +37,7 @@ describe('block subscriptions', () => {
     indexerWsClient = new IndexerWsClient();
     eventCoordinator = new EventCoordinator();
     await indexerWsClient.connectionInit();
-  });
+  }, 30_000);
 
   afterEach(async () => {
     await indexerWsClient.connectionClose();

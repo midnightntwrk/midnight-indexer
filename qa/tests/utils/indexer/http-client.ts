@@ -42,7 +42,11 @@ import {
 } from './graphql/block-queries';
 import { GET_TRANSACTION_BY_OFFSET } from './graphql/transaction-queries';
 import { GET_CONTRACT_ACTION, GET_CONTRACT_ACTION_BY_OFFSET } from './graphql/contract-queries';
-import { GET_DUST_GENERATION_STATUS, GET_DUST_GENERATIONS, GET_DUST_COMMITMENT_MERKLE_TREE_UPDATE } from './graphql/dust-queries';
+import {
+  GET_DUST_GENERATION_STATUS,
+  GET_DUST_GENERATIONS,
+  GET_DUST_COMMITMENT_MERKLE_TREE_UPDATE,
+} from './graphql/dust-queries';
 
 /**
  * HTTP client for interacting with the Midnight Indexer GraphQL API

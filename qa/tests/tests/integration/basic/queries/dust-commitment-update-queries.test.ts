@@ -161,7 +161,9 @@ describe('dust commitment merkle tree update queries', () => {
         labels: ['Query', 'Dust', 'CommitmentMerkleTree', 'CollapsedUpdate', 'Idempotency'],
       };
 
-      log.debug('Requesting dust commitment merkle tree update twice with startIndex=0, endIndex=1');
+      log.debug(
+        'Requesting dust commitment merkle tree update twice with startIndex=0, endIndex=1',
+      );
       const response1 = await indexerHttpClient.getDustCommitmentMerkleTreeUpdate(0, 1);
       const response2 = await indexerHttpClient.getDustCommitmentMerkleTreeUpdate(0, 1);
 
@@ -229,7 +231,9 @@ describe('dust commitment merkle tree update queries', () => {
         labels: ['Query', 'Dust', 'CommitmentMerkleTree', 'CollapsedUpdate', 'Negative'],
       };
 
-      log.debug('Requesting dust commitment merkle tree update with startIndex=0, endIndex=999999999');
+      log.debug(
+        'Requesting dust commitment merkle tree update with startIndex=0, endIndex=999999999',
+      );
       const response = await indexerHttpClient.getDustCommitmentMerkleTreeUpdate(0, 999999999);
 
       expect(response).toBeError();

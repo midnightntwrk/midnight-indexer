@@ -306,16 +306,16 @@ describe('shielded transactions', () => {
       expect(transactionResponse).toBeSuccess();
 
       const transactions = transactionResponse.data!.transactions;
-      const tx = transactions.find(
-        (t: Transaction) => t.hash === transactionResult.txHash,
-      );
+      const tx = transactions.find((t: Transaction) => t.hash === transactionResult.txHash);
       expect(tx).toBeDefined();
 
       const regularTx = tx as RegularTransaction;
       expect(regularTx.dustCommitmentEndIndex).toBeDefined();
       expect(regularTx.dustCommitmentEndIndex!).toBeGreaterThan(dustCommitmentEndIndexBeforeTx);
 
-      log.debug(`dustCommitmentEndIndex before tx: ${dustCommitmentEndIndexBeforeTx}, after tx: ${regularTx.dustCommitmentEndIndex}`);
+      log.debug(
+        `dustCommitmentEndIndex before tx: ${dustCommitmentEndIndexBeforeTx}, after tx: ${regularTx.dustCommitmentEndIndex}`,
+      );
     });
 
     /**

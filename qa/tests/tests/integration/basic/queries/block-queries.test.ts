@@ -583,7 +583,9 @@ describe(`genesis block`, () => {
       expect(regularTxs.length).toBeGreaterThan(0);
 
       for (const tx of regularTxs) {
-        log.debug(`Transaction ${tx.hash}: zswap=[${tx.zswapStartIndex}, ${tx.zswapEndIndex}], dustCommitment=[${tx.dustCommitmentStartIndex}, ${tx.dustCommitmentEndIndex}], dustGeneration=[${tx.dustGenerationStartIndex}, ${tx.dustGenerationEndIndex}]`);
+        log.debug(
+          `Transaction ${tx.hash}: zswap=[${tx.zswapStartIndex}, ${tx.zswapEndIndex}], dustCommitment=[${tx.dustCommitmentStartIndex}, ${tx.dustCommitmentEndIndex}], dustGeneration=[${tx.dustGenerationStartIndex}, ${tx.dustGenerationEndIndex}]`,
+        );
 
         expect(tx.zswapEndIndex!).toBeGreaterThanOrEqual(tx.zswapStartIndex!);
         expect(tx.dustCommitmentEndIndex!).toBeGreaterThanOrEqual(tx.dustCommitmentStartIndex!);

@@ -396,4 +396,3 @@ export const DustNullifierTransactionSchema = z.object({
   blockHeight: z.number(),
   blockHash: Hash64,
 });
-

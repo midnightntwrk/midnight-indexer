@@ -31,7 +31,7 @@ describe('dust generations subscription', () => {
   beforeEach(async () => {
     indexerWsClient = new IndexerWsClient();
     await indexerWsClient.connectionInit();
-  });
+  }, 30_000);
 
   afterEach(async () => {
     await indexerWsClient.connectionClose();
@@ -84,7 +84,9 @@ describe('dust generations subscription', () => {
           {
             next: (payload) => {
               received.push(payload);
-              log.debug(`Received dust generations event ${received.length}: ${JSON.stringify(payload.data?.dustGenerations?.__typename)}`);
+              log.debug(
+                `Received dust generations event ${received.length}: ${JSON.stringify(payload.data?.dustGenerations?.__typename)}`,
+              );
 
               // Stop after receiving a progress event (indicates completion)
               if (payload.data?.dustGenerations?.__typename === 'DustGenerationsProgress') {

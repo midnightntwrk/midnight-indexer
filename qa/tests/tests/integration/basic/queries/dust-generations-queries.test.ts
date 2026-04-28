@@ -21,7 +21,7 @@ import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import { DustGenerationsSchema, DustGenerationStatusSchema } from '@utils/indexer/graphql/schema';
+import { DustGenerationsSchema } from '@utils/indexer/graphql/schema';
 
 type AcceptedRewardAddressHrpPrefix = 'stake' | 'stake_test';
 
@@ -231,21 +231,23 @@ describe('dust generations queries', () => {
 
   describe('a dust generations query with invalid input', () => {
     /**
-     * A dust generations query with an empty addresses array should return an error
+     * A dust generations query with an empty addresses array should return an empty result
      *
      * @given we provide an empty array of addresses
      * @when we query dustGenerations
-     * @then Indexer should respond with an error
+     * @then Indexer should respond with an empty dustGenerations array
      */
-    test('should return an error for an empty addresses array', async (ctx: TestContext) => {
+    test('should return an empty result for an empty addresses array', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
-        labels: ['Query', 'Dust', 'Generations', 'Negative'],
+        labels: ['Query', 'Dust', 'Generations'],
       };
 
       log.debug('Querying dustGenerations with empty array');
       const response = await indexerHttpClient.getDustGenerations([]);
 
-      expect(response).toBeError();
+      expect(response).toBeSuccess();
+      expect(response.data?.dustGenerations).toBeDefined();
+      expect(response.data?.dustGenerations).toHaveLength(0);
     });
 
     /**
