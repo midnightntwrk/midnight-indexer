@@ -15,7 +15,10 @@ use crate::{
     domain::{LedgerStateCache, storage::Storage},
     infra::api::{
         ApiResult, ContextExt, ResultExt,
-        v4::{HexEncodable, HexEncoded, merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate},
+        v4::{
+            HexEncodable, HexEncoded, dust::DustAddress,
+            merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate,
+        },
     },
 };
 use async_graphql::{Context, SimpleObject, Subscription, Union};
@@ -90,7 +93,7 @@ where
     async fn dust_generations<'a>(
         &self,
         cx: &'a Context<'a>,
-        dust_address: HexEncoded,
+        dust_address: DustAddress,
         start_index: u64,
         end_index: u64,
     ) -> impl Stream<Item = ApiResult<DustGenerationsEvent>> {
@@ -98,12 +101,14 @@ where
         let subscriber = cx.get_subscriber::<B>();
         let ledger_state_cache = cx.get_ledger_state_cache();
         let batch_size = cx.get_subscription_config().dust_generations.batch_size;
+        let network_id = cx.get_network_id();
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
 
         try_stream! {
-            let dust_address_bytes = const_hex::decode(dust_address.as_ref())
-                .map_err_into_client_error(|| "invalid hex-encoded dust address")?;
+            let dust_address_bytes = dust_address
+                .try_into_domain(network_id)
+                .map_err_into_client_error(|| "invalid bech32m dust address")?;
             let mut cursor = start_index;
 
             debug!(start_index, end_index; "streaming existing dust generation entries");
