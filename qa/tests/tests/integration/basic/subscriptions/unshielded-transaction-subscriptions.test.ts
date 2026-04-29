@@ -15,7 +15,7 @@
 
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
-import { env, EnvironmentName } from 'environment/model';
+import { env } from 'environment/model';
 import dataProvider from 'utils/testdata-provider';
 import { GraphQLError } from 'graphql/error/GraphQLError';
 import {
@@ -346,19 +346,6 @@ describe('unshielded transaction subscriptions', async () => {
           // should be accepted in this case
           log.info(
             `Skipping test for environment ${environment} because it is the current environment`,
-          );
-          continue;
-        }
-
-        // Environments can share the same underlying network id (e.g. qanet and qanet.dev both map
-        // to the "qanet" network id). In those cases, an address for that environment should be
-        // accepted, so we skip the check here as well.
-        const environmentNetworkId =
-          environment === EnvironmentName.QANET_DEV ? 'qanet' : environment;
-
-        if (environmentNetworkId === currentNetworkId) {
-          log.info(
-            `Skipping test for environment ${environment} because it shares the same network id as ${currentEnvironment}`,
           );
           continue;
         }
