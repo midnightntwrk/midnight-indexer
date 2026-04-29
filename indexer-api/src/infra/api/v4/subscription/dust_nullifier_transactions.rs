@@ -14,7 +14,7 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ApiResult, ContextExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{HexEncodable, HexEncoded},
     },
 };
@@ -80,11 +80,21 @@ where
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
 
         try_stream! {
+            (!nullifier_prefixes.is_empty())
+                .then_some(())
+                .some_or_client_error(|| "nullifierPrefixes must not be empty")?;
+
             let prefix_bytes = nullifier_prefixes
                 .iter()
                 .map(|p| const_hex::decode(p.as_ref()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err_into_client_error(|| "invalid hex-encoded nullifier prefix")?;
+
+            prefix_bytes
+                .iter()
+                .all(|b| !b.is_empty())
+                .then_some(())
+                .some_or_client_error(|| "nullifierPrefixes elements must not be empty")?;
 
             let from = from_block.unwrap_or(0);
             let to = to_block.unwrap_or(u64::MAX);
