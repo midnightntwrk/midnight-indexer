@@ -23,6 +23,7 @@ import {
 } from '@utils/indexer/websocket-client';
 import { DustGenerationsEventSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
+import { env } from 'environment/model';
 import dataProvider from '@utils/testdata-provider';
 
 const indexerHttpClient = new IndexerHttpClient();
@@ -30,6 +31,12 @@ const indexerHttpClient = new IndexerHttpClient();
 function encodeDustAddressAsHex(dustAddress: string): string {
   const { words } = bech32m.decode(dustAddress);
   return Buffer.from(bech32m.fromWords(words)).toString('hex');
+}
+
+function generateDustAddressForNetworkId(networkId: string): string {
+  const hrp = networkId === 'mainnet' ? 'mn_dust' : `mn_dust_${networkId}`;
+  const payload = Buffer.alloc(32, 1);
+  return bech32m.encode(hrp, bech32m.toWords(payload));
 }
 
 function safeUnsubscribe(unsubscribe: () => void): void {
@@ -62,7 +69,7 @@ describe('dust generations subscription', () => {
      * @then we should receive DustGenerationsItem and/or DustGenerationsProgress events
      * @and each event should match the expected schema
      */
-    test('should stream dust generation events for a valid dust address', async () => {
+    test('should stream dust generation events for a valid dust address in bech32m format', async () => {
       let rewardAddress: string;
       try {
         rewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust');
@@ -80,9 +87,7 @@ describe('dust generations subscription', () => {
       expect(generations[0].registrations.length).toBeGreaterThanOrEqual(1);
 
       const dustAddress = generations[0].registrations[0].dustAddress;
-      const dustAddressHex = encodeDustAddressAsHex(dustAddress);
       log.debug(`Using dust address (bech32m): ${dustAddress}`);
-      log.debug(`Using dust address (hex): ${dustAddressHex}`);
 
       // Subscribe with a small range starting from 0
       const received: DustGenerationsSubscriptionResponse[] = [];
@@ -131,7 +136,7 @@ describe('dust generations subscription', () => {
               settle(resolve);
             },
           },
-          dustAddressHex,
+          dustAddress,
           0,
           10,
         );
@@ -192,7 +197,7 @@ describe('dust generations subscription', () => {
               reject(new Error('Subscription completed without error'));
             },
           },
-          'invalid_hex',
+          'invalid_address',
           0,
           10,
         );
@@ -201,6 +206,153 @@ describe('dust generations subscription', () => {
 
       expect(errorReceived).toBeDefined();
       log.debug(`Received expected error: ${errorReceived}`);
+    });
+
+    /**
+     * A dust generations subscription with a valid bech32m dust address from another network should return an error
+     *
+     * @given valid bech32m dust addresses for all network IDs other than the target one
+     * @when we subscribe to dustGenerations
+     * @then Indexer should return an error related to unexpected/wrong HRP prefix
+     */
+    test('should return an error for a valid address that is meant for another networkid', async () => {
+      const targetNetworkId = env.getNetworkId().toLowerCase();
+      const networkIds = env.getAllEnvironmentNames();
+
+      for (const networkId of networkIds) {
+        if (networkId.toLowerCase() === targetNetworkId) {
+          continue;
+        }
+
+        const foreignDustAddress = generateDustAddressForNetworkId(networkId);
+        log.debug(`Testing foreign dust address for networkId=${networkId}: ${foreignDustAddress}`);
+
+        const result = await new Promise<{
+          error: string | null;
+          completed: boolean;
+          timedOut: boolean;
+        }>((resolve) => {
+          let settled = false;
+          let unsubscribe = () => {};
+          const settle = (value: {
+            error: string | null;
+            completed: boolean;
+            timedOut: boolean;
+          }) => {
+            if (settled) return;
+            settled = true;
+            resolve(value);
+          };
+
+          const timeout = setTimeout(() => {
+            safeUnsubscribe(unsubscribe);
+            settle({ error: null, completed: false, timedOut: true });
+          }, 10_000);
+
+          const subscription = indexerWsClient.subscribeToDustGenerations(
+            {
+              next: (payload) => {
+                if (payload.errors && payload.errors.length > 0) {
+                  clearTimeout(timeout);
+                  safeUnsubscribe(unsubscribe);
+                  settle({
+                    error: payload.errors[0].message,
+                    completed: false,
+                    timedOut: false,
+                  });
+                }
+              },
+              error: (error) => {
+                clearTimeout(timeout);
+                safeUnsubscribe(unsubscribe);
+                settle({
+                  error: typeof error === 'string' ? error : JSON.stringify(error),
+                  completed: false,
+                  timedOut: false,
+                });
+              },
+              complete: () => {
+                clearTimeout(timeout);
+                settle({ error: null, completed: true, timedOut: false });
+              },
+            },
+            foreignDustAddress,
+            0,
+            10,
+          );
+          unsubscribe = subscription.unsubscribe;
+        });
+
+        expect
+          .soft(result.timedOut, `networkId=${networkId} timed out waiting for error`)
+          .toBe(false);
+        expect
+          .soft(
+            result.completed,
+            `networkId=${networkId} subscription completed without emitting an error`,
+          )
+          .toBe(false);
+        expect.soft(result.error, `networkId=${networkId} should emit an error`).toBeTruthy();
+        if (result.error) {
+          expect
+            .soft(
+              result.error.toLowerCase(),
+              `networkId=${networkId} error should mention wrong HRP`,
+            )
+            .toMatch(/(expected hrp|unexpected hrp|wrong hrp|invalid.*network|network id)/);
+        }
+      }
+    });
+
+    /**
+     * A dust generations subscription with a hex-encoded address should return an error.
+     *
+     * @given a valid bech32m dust address converted to hex format
+     * @when we subscribe to dustGenerations using hex format
+     * @then Indexer should return an error indicating the expected bech32m/HRP format
+     */
+    test('should return an error for a valid dust address passed in hex format', async () => {
+      const targetNetworkId = env.getNetworkId().toLowerCase();
+      const bech32DustAddress = generateDustAddressForNetworkId(targetNetworkId);
+      const hexDustAddress = encodeDustAddressAsHex(bech32DustAddress);
+
+      const errorReceived = await new Promise<string>((resolve, reject) => {
+        let unsubscribe = () => {};
+        const timeout = setTimeout(() => {
+          safeUnsubscribe(unsubscribe);
+          reject(new Error('Timed out waiting for error for hex dust address'));
+        }, 10_000);
+
+        const subscription = indexerWsClient.subscribeToDustGenerations(
+          {
+            next: (payload) => {
+              if (payload.errors && payload.errors.length > 0) {
+                clearTimeout(timeout);
+                safeUnsubscribe(unsubscribe);
+                resolve(payload.errors[0].message);
+              }
+            },
+            error: (error) => {
+              clearTimeout(timeout);
+              safeUnsubscribe(unsubscribe);
+              resolve(typeof error === 'string' ? error : JSON.stringify(error));
+            },
+            complete: () => {
+              clearTimeout(timeout);
+              reject(new Error('Subscription completed without error for hex dust address'));
+            },
+          },
+          hexDustAddress,
+          0,
+          10,
+        );
+        unsubscribe = subscription.unsubscribe;
+      });
+
+      expect(errorReceived).toBeDefined();
+      expect(errorReceived.toLowerCase()).toMatch(
+        /(expected hrp|unexpected hrp|wrong hrp|bech32|invalid.*address)/,
+      );
     });
   });
 });
