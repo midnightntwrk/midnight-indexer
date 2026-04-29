@@ -14,6 +14,8 @@
 // limitations under the License.
 
 import log from '@utils/logging/logger';
+import { bech32m } from 'bech32';
+import { Buffer } from 'node:buffer';
 import '@utils/logging/test-logging-hooks';
 import {
   IndexerWsClient,
@@ -24,6 +26,20 @@ import { IndexerHttpClient } from '@utils/indexer/http-client';
 import dataProvider from '@utils/testdata-provider';
 
 const indexerHttpClient = new IndexerHttpClient();
+
+function encodeDustAddressAsHex(dustAddress: string): string {
+  const { words } = bech32m.decode(dustAddress);
+  return Buffer.from(bech32m.fromWords(words)).toString('hex');
+}
+
+function safeUnsubscribe(unsubscribe: () => void): void {
+  try {
+    unsubscribe();
+  } catch (error) {
+    // If the websocket is already closed during teardown, unsubscribe can throw.
+    log.debug(`Ignoring unsubscribe error during teardown: ${String(error)}`);
+  }
+}
 
 describe('dust generations subscription', () => {
   let indexerWsClient: IndexerWsClient;
@@ -41,7 +57,7 @@ describe('dust generations subscription', () => {
     /**
      * A dust generations subscription streams items and ends with a progress event
      *
-     * @given a registered dust address and a valid index range
+     * @given a registered dust address in bech32m format (mn_dust...) and a valid index range
      * @when we subscribe to dustGenerations
      * @then we should receive DustGenerationsItem and/or DustGenerationsProgress events
      * @and each event should match the expected schema
@@ -64,21 +80,31 @@ describe('dust generations subscription', () => {
       expect(generations[0].registrations.length).toBeGreaterThanOrEqual(1);
 
       const dustAddress = generations[0].registrations[0].dustAddress;
-      log.debug(`Using dust address: ${dustAddress}`);
+      const dustAddressHex = encodeDustAddressAsHex(dustAddress);
+      log.debug(`Using dust address (bech32m): ${dustAddress}`);
+      log.debug(`Using dust address (hex): ${dustAddressHex}`);
 
       // Subscribe with a small range starting from 0
       const received: DustGenerationsSubscriptionResponse[] = [];
 
       await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let unsubscribe = () => {};
+        const settle = (handler: () => void) => {
+          if (settled) return;
+          settled = true;
+          handler();
+        };
+
         const timeout = setTimeout(() => {
-          subscription.unsubscribe();
+          safeUnsubscribe(unsubscribe);
           // It's OK if we received some events before timeout
           if (received.length > 0) {
-            resolve();
+            settle(resolve);
           } else {
-            reject(new Error('Timed out waiting for dust generations events'));
+            settle(() => reject(new Error('Timed out waiting for dust generations events')));
           }
-        }, 15_000);
+        }, 12_000);
 
         const subscription = indexerWsClient.subscribeToDustGenerations(
           {
@@ -91,24 +117,25 @@ describe('dust generations subscription', () => {
               // Stop after receiving a progress event (indicates completion)
               if (payload.data?.dustGenerations?.__typename === 'DustGenerationsProgress') {
                 clearTimeout(timeout);
-                subscription.unsubscribe();
-                resolve();
+                safeUnsubscribe(unsubscribe);
+                settle(resolve);
               }
             },
             error: (error) => {
               clearTimeout(timeout);
-              subscription.unsubscribe();
-              reject(new Error(`Subscription error: ${JSON.stringify(error)}`));
+              safeUnsubscribe(unsubscribe);
+              settle(() => reject(new Error(`Subscription error: ${JSON.stringify(error)}`)));
             },
             complete: () => {
               clearTimeout(timeout);
-              resolve();
+              settle(resolve);
             },
           },
-          dustAddress,
+          dustAddressHex,
           0,
           10,
         );
+        unsubscribe = subscription.unsubscribe;
       });
 
       expect(received.length).toBeGreaterThan(0);
@@ -127,7 +154,7 @@ describe('dust generations subscription', () => {
       // The last event should be a DustGenerationsProgress
       const lastEvent = received[received.length - 1].data!.dustGenerations;
       expect(lastEvent.__typename).toBe('DustGenerationsProgress');
-    });
+    }, 30_000);
   });
 
   describe('subscription error handling', () => {
@@ -140,8 +167,9 @@ describe('dust generations subscription', () => {
      */
     test('should return an error for an invalid dust address', async () => {
       const errorReceived = await new Promise<string>((resolve, reject) => {
+        let unsubscribe = () => {};
         const timeout = setTimeout(() => {
-          subscription.unsubscribe();
+          safeUnsubscribe(unsubscribe);
           reject(new Error('Timed out waiting for error'));
         }, 10_000);
 
@@ -150,13 +178,13 @@ describe('dust generations subscription', () => {
             next: (payload) => {
               if (payload.errors && payload.errors.length > 0) {
                 clearTimeout(timeout);
-                subscription.unsubscribe();
+                safeUnsubscribe(unsubscribe);
                 resolve(payload.errors[0].message);
               }
             },
             error: (error) => {
               clearTimeout(timeout);
-              subscription.unsubscribe();
+              safeUnsubscribe(unsubscribe);
               resolve(typeof error === 'string' ? error : JSON.stringify(error));
             },
             complete: () => {
@@ -168,6 +196,7 @@ describe('dust generations subscription', () => {
           0,
           10,
         );
+        unsubscribe = subscription.unsubscribe;
       });
 
       expect(errorReceived).toBeDefined();

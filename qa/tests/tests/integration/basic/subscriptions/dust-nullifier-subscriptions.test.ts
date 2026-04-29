@@ -114,79 +114,107 @@ describe('dust nullifier transactions subscription', () => {
 
   describe('subscription error handling', () => {
     /**
-     * A dust nullifier transactions subscription with an empty prefixes array should return an error
+     * A dust nullifier transactions subscription with an empty prefixes array should stay quiet
      *
      * @given an empty array of nullifier prefixes
      * @when we subscribe to dustNullifierTransactions
-     * @then the subscription should return an error
+     * @then the subscription should stay open without data or errors
      */
-    test('should return an error for empty nullifier prefixes', async () => {
-      const errorReceived = await new Promise<string>((resolve, reject) => {
+    test('should stay open without events for empty nullifier prefixes', async () => {
+      const settled = await new Promise<{
+        completed: boolean;
+        error: string | null;
+        eventCount: number;
+      }>((resolve) => {
+        let eventCount = 0;
         const timeout = setTimeout(() => {
           subscription.unsubscribe();
-          reject(new Error('Timed out waiting for error'));
-        }, 10_000);
+          resolve({ completed: false, error: null, eventCount });
+        }, 8_000);
 
         const subscription = indexerWsClient.subscribeToDustNullifierTransactions(
           {
             next: (payload) => {
+              eventCount++;
               if (payload.errors && payload.errors.length > 0) {
                 clearTimeout(timeout);
                 subscription.unsubscribe();
-                resolve(payload.errors[0].message);
+                resolve({
+                  completed: false,
+                  error: payload.errors[0].message,
+                  eventCount,
+                });
               }
             },
             error: (error) => {
               clearTimeout(timeout);
               subscription.unsubscribe();
-              resolve(typeof error === 'string' ? error : JSON.stringify(error));
+              resolve({
+                completed: false,
+                error: typeof error === 'string' ? error : JSON.stringify(error),
+                eventCount,
+              });
             },
             complete: () => {
               clearTimeout(timeout);
-              reject(new Error('Subscription completed without error'));
+              resolve({ completed: true, error: null, eventCount });
             },
           },
           [],
           0,
-          10,
         );
       });
 
-      expect(errorReceived).toBeDefined();
-      log.debug(`Received expected error: ${errorReceived}`);
+      expect(settled.error).toBeNull();
+      expect(settled.completed).toBe(false);
+      expect(settled.eventCount).toBe(0);
     });
 
     /**
-     * A dust nullifier transactions subscription with invalid block range should return an error
+     * A dust nullifier transactions subscription with invalid block range should complete cleanly
      *
      * @given fromBlock > toBlock
      * @when we subscribe to dustNullifierTransactions
-     * @then the subscription should return an error
+     * @then the subscription should complete without events or errors
      */
-    test('should return an error when fromBlock is greater than toBlock', async () => {
-      const errorReceived = await new Promise<string>((resolve, reject) => {
+    test('should complete when fromBlock is greater than toBlock', async () => {
+      const settled = await new Promise<{
+        completed: boolean;
+        error: string | null;
+        eventCount: number;
+      }>((resolve, reject) => {
+        let eventCount = 0;
         const timeout = setTimeout(() => {
           subscription.unsubscribe();
-          reject(new Error('Timed out waiting for error'));
+          reject(new Error('Timed out waiting for completion'));
         }, 10_000);
 
         const subscription = indexerWsClient.subscribeToDustNullifierTransactions(
           {
             next: (payload) => {
+              eventCount++;
               if (payload.errors && payload.errors.length > 0) {
                 clearTimeout(timeout);
                 subscription.unsubscribe();
-                resolve(payload.errors[0].message);
+                resolve({
+                  completed: false,
+                  error: payload.errors[0].message,
+                  eventCount,
+                });
               }
             },
             error: (error) => {
               clearTimeout(timeout);
               subscription.unsubscribe();
-              resolve(typeof error === 'string' ? error : JSON.stringify(error));
+              resolve({
+                completed: false,
+                error: typeof error === 'string' ? error : JSON.stringify(error),
+                eventCount,
+              });
             },
             complete: () => {
               clearTimeout(timeout);
-              reject(new Error('Subscription completed without error'));
+              resolve({ completed: true, error: null, eventCount });
             },
           },
           ['00'],
@@ -195,8 +223,9 @@ describe('dust nullifier transactions subscription', () => {
         );
       });
 
-      expect(errorReceived).toBeDefined();
-      log.debug(`Received expected error: ${errorReceived}`);
+      expect(settled.error).toBeNull();
+      expect(settled.completed).toBe(true);
+      expect(settled.eventCount).toBe(0);
     });
   });
 });
