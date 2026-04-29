@@ -334,11 +334,11 @@ type DustGenerationDtimeUpdateItem {
 	"""
 	collapsedMerkleTree: MerkleTreeCollapsedUpdate
 	"""
-	Path from the updated leaf to the root of the dust generation tree,
-	matching the ledger's `TreeInsertionPath<DustGenerationInfo>`.
-	Wallets apply this via `generating_tree.update_from_evidence(...)`.
+	Hex-encoded tagged-serialised `TreeInsertionPath<DustGenerationInfo>`
+	from the originating ledger event. Wallets deserialise this and hand
+	it to `generating_tree.update_from_evidence(...)`.
 	"""
-	merklePath: [DustMerklePathEntry!]!
+	treeInsertionPath: HexEncoded!
 }
 
 """
@@ -489,24 +489,6 @@ interface DustLedgerEvent {
 	raw: HexEncoded!
 	maxId: Int!
 	protocolVersion: Int!
-}
-
-"""
-One entry in a `DustGenerationDtimeUpdateItem.merklePath`. Mirrors the
-ledger's `TreeInsertionPathEntry`: the hash is the node along the path
-from leaf to root (not the sibling), and may be `null` if the tree was
-not fully rehashed at the point the update was constructed.
-"""
-type DustMerklePathEntry {
-	"""
-	Hex-encoded hash of the node along the path. `null` when the
-	upstream `TreeInsertionPathEntry.hash` was `None`.
-	"""
-	hash: HexEncoded
-	"""
-	Whether the path went left at this branch.
-	"""
-	goesLeft: Boolean!
 }
 
 """
@@ -1167,16 +1149,10 @@ type Subscription {
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
 	"""
-	Subscribe to dust generation entries for a dust address within an index
-	range, interleaved with collapsed Merkle tree updates and
+	Subscribe to dust generation entries for a dust address within an index range.
+	Entries are interleaved with collapsed Merkle tree updates and
 	`DustGenerationDtimeUpdateItem` events for entries the subscriber owns.
-	Finishes at end_index with a final collapsed update.
-	
-	On reconnect, historical dtime updates after the wallet's last fully-
-	synced block (derived from the entry below `startIndex`) are replayed
-	before entry backfill. Fresh subscriptions skip historical dtime
-	backfill; the wallet learns of pre-existing spends primarily via block
-	sync and `dustNullifierTransactions`.
+	The subscription finishes after reaching the end index with a final collapsed update.
 	"""
 	dustGenerations(dustAddress: DustAddress!, startIndex: Int!, endIndex: Int!): DustGenerationsEvent!
 	"""

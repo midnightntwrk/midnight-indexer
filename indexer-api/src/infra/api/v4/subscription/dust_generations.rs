@@ -24,7 +24,7 @@ use crate::{
 use async_graphql::{Context, SimpleObject, Subscription, Union};
 use async_stream::try_stream;
 use futures::{Stream, TryStreamExt};
-use indexer_common::domain::{BlockIndexed, ByteVec, Subscriber};
+use indexer_common::domain::{BlockIndexed, Subscriber};
 use log::{debug, warn};
 use std::{marker::PhantomData, pin::pin};
 
@@ -104,23 +104,10 @@ pub struct DustGenerationDtimeUpdateItem {
     /// passed this entry's index, which is the typical case for dtime
     /// updates on already-seen entries.
     pub collapsed_merkle_tree: Option<MerkleTreeCollapsedUpdate>,
-    /// Path from the updated leaf to the root of the dust generation tree,
-    /// matching the ledger's `TreeInsertionPath<DustGenerationInfo>`.
-    /// Wallets apply this via `generating_tree.update_from_evidence(...)`.
-    pub merkle_path: Vec<DustMerklePathEntry>,
-}
-
-/// One entry in a `DustGenerationDtimeUpdateItem.merklePath`. Mirrors the
-/// ledger's `TreeInsertionPathEntry`: the hash is the node along the path
-/// from leaf to root (not the sibling), and may be `null` if the tree was
-/// not fully rehashed at the point the update was constructed.
-#[derive(Debug, Clone, SimpleObject)]
-pub struct DustMerklePathEntry {
-    /// Hex-encoded hash of the node along the path. `null` when the
-    /// upstream `TreeInsertionPathEntry.hash` was `None`.
-    pub hash: Option<HexEncoded>,
-    /// Whether the path went left at this branch.
-    pub goes_left: bool,
+    /// Hex-encoded tagged-serialised `TreeInsertionPath<DustGenerationInfo>`
+    /// from the originating ledger event. Wallets deserialise this and hand
+    /// it to `generating_tree.update_from_evidence(...)`.
+    pub tree_insertion_path: HexEncoded,
 }
 
 #[Subscription]
@@ -129,16 +116,10 @@ where
     S: Storage,
     B: Subscriber,
 {
-    /// Subscribe to dust generation entries for a dust address within an index
-    /// range, interleaved with collapsed Merkle tree updates and
+    /// Subscribe to dust generation entries for a dust address within an index range.
+    /// Entries are interleaved with collapsed Merkle tree updates and
     /// `DustGenerationDtimeUpdateItem` events for entries the subscriber owns.
-    /// Finishes at end_index with a final collapsed update.
-    ///
-    /// On reconnect, historical dtime updates after the wallet's last fully-
-    /// synced block (derived from the entry below `startIndex`) are replayed
-    /// before entry backfill. Fresh subscriptions skip historical dtime
-    /// backfill; the wallet learns of pre-existing spends primarily via block
-    /// sync and `dustNullifierTransactions`.
+    /// The subscription finishes after reaching the end index with a final collapsed update.
     async fn dust_generations<'a>(
         &self,
         cx: &'a Context<'a>,
@@ -393,23 +374,11 @@ async fn make_final_collapsed_update<S: Storage>(
 }
 
 /// Convert a domain dtime update entry into the GraphQL item, attaching a
-/// caller-computed `collapsed_merkle_tree`. The `merkle_path` entries are
-/// converted from raw bytes to `HexEncoded` here.
+/// caller-computed `collapsed_merkle_tree`.
 fn dtime_update_item(
     update: DustGenerationDtimeUpdateEntry,
     collapsed_merkle_tree: Option<MerkleTreeCollapsedUpdate>,
 ) -> DustGenerationDtimeUpdateItem {
-    let merkle_path = update
-        .merkle_path
-        .into_iter()
-        .map(|entry| DustMerklePathEntry {
-            hash: entry
-                .sibling_hash
-                .map(|bytes| ByteVec::from(bytes).hex_encode()),
-            goes_left: entry.goes_left,
-        })
-        .collect();
-
     DustGenerationDtimeUpdateItem {
         generation_mt_index: update.generation_mt_index,
         owner: update.owner.hex_encode(),
@@ -417,6 +386,6 @@ fn dtime_update_item(
         new_dtime: update.new_dtime,
         transaction_id: update.transaction_id,
         collapsed_merkle_tree,
-        merkle_path,
+        tree_insertion_path: update.tree_insertion_path.hex_encode(),
     }
 }

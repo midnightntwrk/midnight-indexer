@@ -248,8 +248,8 @@ impl DustGenerationsStorage for Storage {
                 // attributes blob (JSONB on Postgres, TEXT on SQLite) is
                 // also returned so the caller can deserialise
                 // `LedgerEventAttributes::DustGenerationDtimeUpdate` to
-                // recover the merkle_path (and dtime) without further SQL
-                // extraction.
+                // recover the tree_insertion_path (and dtime) without
+                // further SQL extraction.
                 #[cfg(feature = "cloud")]
                 let query = indoc! {"
                     SELECT
@@ -335,7 +335,7 @@ impl DustGenerationsStorage for Storage {
 
                     let LedgerEventAttributes::DustGenerationDtimeUpdate {
                         generation_info,
-                        merkle_path,
+                        tree_insertion_path,
                         ..
                     } = attributes
                     else {
@@ -353,7 +353,7 @@ impl DustGenerationsStorage for Storage {
                         night_utxo_hash,
                         new_dtime: generation_info.dtime,
                         transaction_id: transaction_id as u64,
-                        merkle_path,
+                        tree_insertion_path,
                     };
                 }
 
@@ -431,7 +431,8 @@ impl DustGenerationsStorage for Storage {
 
 /// Row shape returned by the dtime-updates query. The `attributes` JSONB
 /// blob is deserialised into the `LedgerEventAttributes` enum so the caller
-/// can extract the merkle_path (and dtime) without further SQL extraction.
+/// can extract the tree_insertion_path (and dtime) without further SQL
+/// extraction.
 #[derive(FromRow)]
 struct DtimeUpdateRow {
     #[sqlx(rename = "ledger_event_id")]
