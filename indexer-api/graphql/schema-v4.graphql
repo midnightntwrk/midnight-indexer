@@ -302,6 +302,46 @@ type DustGenerationDtimeUpdate implements DustLedgerEvent {
 }
 
 """
+A dust generation dtime update emitted when the backing Night UTXO is
+spent and the entry's decay time is set.
+"""
+type DustGenerationDtimeUpdateItem {
+	"""
+	Generation-tree index of the entry whose dtime changed.
+	"""
+	generationMtIndex: Int!
+	"""
+	The hex-encoded owner (dust address).
+	"""
+	owner: HexEncoded!
+	"""
+	Hex-encoded hash of the NIGHT UTXO that backs this dust output.
+	"""
+	nightUtxoHash: HexEncoded!
+	"""
+	The decay time as observed in this ledger event.
+	"""
+	newDtime: Int!
+	"""
+	The originating transaction ID.
+	"""
+	transactionId: Int!
+	"""
+	Collapsed Merkle tree update covering the gap between the wallet's
+	current cursor and this entry. `null` when the wallet has already
+	passed this entry's index, which is the typical case for dtime
+	updates on already-seen entries.
+	"""
+	collapsedMerkleTree: MerkleTreeCollapsedUpdate
+	"""
+	Path from the updated leaf to the root of the dust generation tree,
+	matching the ledger's `TreeInsertionPath<DustGenerationInfo>`.
+	Wallets apply this via `generating_tree.update_from_evidence(...)`.
+	"""
+	merklePath: [DustMerklePathEntry!]!
+}
+
+"""
 DUST generation status for a specific Cardano reward address.
 """
 type DustGenerationStatus {
@@ -360,7 +400,7 @@ type DustGenerations {
 """
 An event of the dust generations subscription.
 """
-union DustGenerationsEvent = DustGenerationsItem | DustGenerationsProgress
+union DustGenerationsEvent = DustGenerationsItem | DustGenerationsProgress | DustGenerationDtimeUpdateItem
 
 """
 A dust generations item with optional collapsed Merkle tree update.
@@ -449,6 +489,24 @@ interface DustLedgerEvent {
 	raw: HexEncoded!
 	maxId: Int!
 	protocolVersion: Int!
+}
+
+"""
+One entry in a `DustGenerationDtimeUpdateItem.merklePath`. Mirrors the
+ledger's `TreeInsertionPathEntry`: the hash is the node along the path
+from leaf to root (not the sibling), and may be `null` if the tree was
+not fully rehashed at the point the update was constructed.
+"""
+type DustMerklePathEntry {
+	"""
+	Hex-encoded hash of the node along the path. `null` when the
+	upstream `TreeInsertionPathEntry.hash` was `None`.
+	"""
+	hash: HexEncoded
+	"""
+	Whether the path went left at this branch.
+	"""
+	goesLeft: Boolean!
 }
 
 """
@@ -1109,9 +1167,16 @@ type Subscription {
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
 	"""
-	Subscribe to dust generation entries for a dust address within an index range.
-	Entries are interleaved with collapsed Merkle tree updates to fill gaps.
-	The subscription finishes after reaching the end index with a final collapsed update.
+	Subscribe to dust generation entries for a dust address within an index
+	range, interleaved with collapsed Merkle tree updates and
+	`DustGenerationDtimeUpdateItem` events for entries the subscriber owns.
+	Finishes at end_index with a final collapsed update.
+	
+	On reconnect, historical dtime updates after the wallet's last fully-
+	synced block (derived from the entry below `startIndex`) are replayed
+	before entry backfill. Fresh subscriptions skip historical dtime
+	backfill; the wallet learns of pre-existing spends primarily via block
+	sync and `dustNullifierTransactions`.
 	"""
 	dustGenerations(dustAddress: DustAddress!, startIndex: Int!, endIndex: Int!): DustGenerationsEvent!
 	"""

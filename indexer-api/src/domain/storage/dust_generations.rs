@@ -12,7 +12,10 @@
 // limitations under the License.
 
 use crate::domain::{
-    dust::{DustGenerationEntry, DustGenerations, DustNullifierTransaction},
+    dust::{
+        DustGenerationDtimeUpdateEntry, DustGenerationEntry, DustGenerations,
+        DustNullifierTransaction,
+    },
     storage::NoopStorage,
 };
 use futures::{Stream, stream};
@@ -45,6 +48,28 @@ where
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationEntry, sqlx::Error>> + Send;
 
+    /// Look up the block_id of the wallet's most recent owned entry below
+    /// `start_index`. Returns `None` for fresh subscriptions or wallets with
+    /// no prior entries (in which case dtime backfill is skipped entirely).
+    async fn get_dust_generation_dtime_cutoff_block_id(
+        &self,
+        dust_address: &[u8],
+        start_index: u64,
+    ) -> Result<Option<u64>, sqlx::Error>;
+
+    /// Get dust generation dtime update events for a dust address whose
+    /// transaction's block_id exceeds the cutoff and whose ledger event id
+    /// exceeds `after_event_id`. Used both for initial backfill (with the
+    /// cutoff derived above) and live tail (with the cutoff being the latest
+    /// processed block). The stream is ordered by ledger event id.
+    async fn get_dust_generation_dtime_updates(
+        &self,
+        dust_address: &[u8],
+        cutoff_block_id: u64,
+        after_event_id: u64,
+        batch_size: NonZeroU32,
+    ) -> impl Stream<Item = Result<DustGenerationDtimeUpdateEntry, sqlx::Error>> + Send;
+
     /// Get transactions containing dust nullifiers matching a prefix.
     async fn get_dust_nullifier_transactions(
         &self,
@@ -72,6 +97,24 @@ impl DustGenerationsStorage for NoopStorage {
         end_index: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationEntry, sqlx::Error>> + Send {
+        stream::empty()
+    }
+
+    async fn get_dust_generation_dtime_cutoff_block_id(
+        &self,
+        dust_address: &[u8],
+        start_index: u64,
+    ) -> Result<Option<u64>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn get_dust_generation_dtime_updates(
+        &self,
+        dust_address: &[u8],
+        cutoff_block_id: u64,
+        after_event_id: u64,
+        batch_size: NonZeroU32,
+    ) -> impl Stream<Item = Result<DustGenerationDtimeUpdateEntry, sqlx::Error>> + Send {
         stream::empty()
     }
 

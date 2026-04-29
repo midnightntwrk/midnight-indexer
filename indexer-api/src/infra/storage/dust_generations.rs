@@ -13,7 +13,10 @@
 
 use crate::{
     domain::{
-        dust::{DustGenerationEntry, DustGenerations, DustNullifierTransaction, DustRegistration},
+        dust::{
+            DustGenerationDtimeUpdateEntry, DustGenerationEntry, DustGenerations,
+            DustNullifierTransaction, DustRegistration,
+        },
         storage::dust_generations::DustGenerationsStorage,
     },
     infra::storage::Storage,
@@ -22,10 +25,14 @@ use async_stream::try_stream;
 use fastrace::trace;
 use futures::Stream;
 use indexer_common::{
-    domain::{ByteVec, CardanoRewardAddress, LedgerVersion, TimestampMs, TimestampSecs, ledger},
+    domain::{
+        ByteVec, CardanoRewardAddress, LedgerEventAttributes, LedgerVersion, TimestampMs,
+        TimestampSecs, ledger,
+    },
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
+use sqlx::FromRow;
 use std::num::NonZeroU32;
 
 impl DustGenerationsStorage for Storage {
@@ -190,6 +197,171 @@ impl DustGenerationsStorage for Storage {
         }
     }
 
+    #[trace(properties = { "start_index": "{start_index}" })]
+    async fn get_dust_generation_dtime_cutoff_block_id(
+        &self,
+        dust_address: &[u8],
+        start_index: u64,
+    ) -> Result<Option<u64>, sqlx::Error> {
+        // Highest owned entry strictly below `start_index` gives the block we
+        // last fully synced through. `generation_index < start_index` also
+        // implicitly skips legacy NULL rows (NULL fails the comparison).
+        let query = indoc! {"
+            SELECT t.block_id
+            FROM dust_generation_info dgi
+            JOIN transactions t ON t.id = dgi.transaction_id
+            WHERE dgi.owner = $1
+            AND dgi.generation_index < $2
+            ORDER BY dgi.generation_index DESC
+            LIMIT 1
+        "};
+
+        sqlx::query_as::<_, (i64,)>(query)
+            .bind(dust_address)
+            .bind(start_index as i64)
+            .fetch_optional(&*self.pool)
+            .await
+            .map(|row| row.map(|(block_id,)| block_id as u64))
+    }
+
+    async fn get_dust_generation_dtime_updates(
+        &self,
+        dust_address: &[u8],
+        cutoff_block_id: u64,
+        mut after_event_id: u64,
+        batch_size: NonZeroU32,
+    ) -> impl Stream<Item = Result<DustGenerationDtimeUpdateEntry, sqlx::Error>> + Send {
+        let pool = self.pool.clone();
+        let dust_address = dust_address.to_vec();
+
+        try_stream! {
+            loop {
+                // Filter by indexed `variant` (Postgres LEDGER_EVENT_VARIANT
+                // enum, SQLite TEXT-with-CHECK). Join `dust_generation_info`
+                // via `night_utxo_hash`, which is stored inside the
+                // attributes as a hex string (ByteVec uses
+                // #[serde(with = "const_hex")] which serialises with a `0x`
+                // prefix). Strip the prefix only if present (anchored, not
+                // global) so any malformed input fails loudly at decode
+                // time rather than being silently rewritten. The indexed
+                // BYTEA/BLOB equality predicate on dgi then fires. The full
+                // attributes blob (JSONB on Postgres, TEXT on SQLite) is
+                // also returned so the caller can deserialise
+                // `LedgerEventAttributes::DustGenerationDtimeUpdate` to
+                // recover the merkle_path (and dtime) without further SQL
+                // extraction.
+                #[cfg(feature = "cloud")]
+                let query = indoc! {"
+                    SELECT
+                        le.id AS ledger_event_id,
+                        dgi.generation_index AS generation_mt_index,
+                        dgi.owner,
+                        dgi.night_utxo_hash,
+                        le.attributes,
+                        le.transaction_id
+                    FROM ledger_events le
+                    JOIN transactions t ON t.id = le.transaction_id
+                    JOIN dust_generation_info dgi
+                      ON dgi.night_utxo_hash = decode(
+                           regexp_replace(
+                               le.attributes -> 'DustGenerationDtimeUpdate'
+                                             -> 'generation_info'
+                                            ->> 'night_utxo_hash',
+                               '^0x', ''),
+                           'hex')
+                    WHERE le.variant = 'DustGenerationDtimeUpdate'
+                    AND t.block_id > $1
+                    AND dgi.owner = $2
+                    AND le.id > $3
+                    ORDER BY le.id
+                    LIMIT $4
+                "};
+
+                #[cfg(feature = "standalone")]
+                let query = indoc! {"
+                    WITH dtime_events AS (
+                        SELECT
+                            le.id AS ledger_event_id,
+                            le.transaction_id,
+                            le.attributes,
+                            json_extract(le.attributes,
+                                '$.DustGenerationDtimeUpdate.generation_info.night_utxo_hash')
+                                AS hash_hex
+                        FROM ledger_events le
+                        WHERE le.variant = 'DustGenerationDtimeUpdate'
+                        AND le.id > $3
+                    )
+                    SELECT
+                        e.ledger_event_id,
+                        dgi.generation_index AS generation_mt_index,
+                        dgi.owner,
+                        dgi.night_utxo_hash,
+                        e.attributes,
+                        e.transaction_id
+                    FROM dtime_events e
+                    JOIN transactions t ON t.id = e.transaction_id
+                    JOIN dust_generation_info dgi
+                      ON dgi.night_utxo_hash = unhex(iif(
+                            substr(e.hash_hex, 1, 2) = '0x',
+                            substr(e.hash_hex, 3),
+                            e.hash_hex))
+                    WHERE t.block_id > $1
+                    AND dgi.owner = $2
+                    ORDER BY e.ledger_event_id
+                    LIMIT $4
+                "};
+
+                let rows = sqlx::query_as::<_, DtimeUpdateRow>(query)
+                    .bind(cutoff_block_id as i64)
+                    .bind(&dust_address[..])
+                    .bind(after_event_id as i64)
+                    .bind(batch_size.get() as i64)
+                    .fetch_all(&*pool)
+                    .await?;
+
+                let Some(last_event_id) = rows.last().map(|row| row.ledger_event_id) else {
+                    break;
+                };
+
+                for row in rows {
+                    let DtimeUpdateRow {
+                        ledger_event_id,
+                        generation_mt_index,
+                        owner,
+                        night_utxo_hash,
+                        attributes,
+                        transaction_id,
+                    } = row;
+
+                    let LedgerEventAttributes::DustGenerationDtimeUpdate {
+                        generation_info,
+                        merkle_path,
+                        ..
+                    } = attributes
+                    else {
+                        // The `WHERE le.variant = 'DustGenerationDtimeUpdate'`
+                        // filter above means every row matches this variant.
+                        // A mismatch here would be DB corruption; skip rather
+                        // than panic.
+                        continue;
+                    };
+
+                    yield DustGenerationDtimeUpdateEntry {
+                        ledger_event_id: ledger_event_id as u64,
+                        generation_mt_index: generation_mt_index as u64,
+                        owner,
+                        night_utxo_hash,
+                        new_dtime: generation_info.dtime,
+                        transaction_id: transaction_id as u64,
+                        merkle_path,
+                    };
+                }
+
+                after_event_id = last_event_id as u64;
+            }
+        }
+    }
+
     async fn get_dust_nullifier_transactions(
         &self,
         nullifier_prefixes: &[Vec<u8>],
@@ -255,4 +427,20 @@ impl DustGenerationsStorage for Storage {
             }
         }
     }
+}
+
+/// Row shape returned by the dtime-updates query. The `attributes` JSONB
+/// blob is deserialised into the `LedgerEventAttributes` enum so the caller
+/// can extract the merkle_path (and dtime) without further SQL extraction.
+#[derive(FromRow)]
+struct DtimeUpdateRow {
+    #[sqlx(rename = "ledger_event_id")]
+    ledger_event_id: i64,
+    #[sqlx(rename = "generation_mt_index")]
+    generation_mt_index: i64,
+    owner: ByteVec,
+    night_utxo_hash: ByteVec,
+    #[sqlx(json)]
+    attributes: LedgerEventAttributes,
+    transaction_id: i64,
 }
