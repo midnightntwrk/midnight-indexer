@@ -768,6 +768,24 @@ subscription ShieldedNullifierTransactionsSubscription(
     }
 }
 
+subscription DustNullifierTransactionsSubscription(
+    $nullifierPrefixes: [HexEncoded!]!
+    $fromBlock: Int
+    $toBlock: Int
+) {
+    dustNullifierTransactions(
+        nullifierPrefixes: $nullifierPrefixes
+        fromBlock: $fromBlock
+        toBlock: $toBlock
+    ) {
+        nullifier
+        commitment
+        transactionId
+        blockHeight
+        blockHash
+    }
+}
+
 query DustGenerationStatusQuery(
     $cardanoRewardAddresses: [CardanoRewardAddress!]!
 ) {

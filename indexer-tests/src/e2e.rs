@@ -19,9 +19,10 @@ use crate::{
         ContractActionSubscription, DParameterHistoryQuery, DisconnectMutation,
         DustCommitmentMerkleTreeUpdateQuery, DustGenerationMerkleTreeUpdateQuery,
         DustGenerationStatusQuery, DustGenerationsQuery, DustLedgerEventsSubscription,
-        ShieldedNullifierTransactionsSubscription, ShieldedTransactionsSubscription,
-        TermsAndConditionsHistoryQuery, TransactionsQuery, UnshieldedTransactionsSubscription,
-        ZswapLedgerEventsSubscription, ZswapMerkleTreeCollapsedUpdateQuery, block_query,
+        DustNullifierTransactionsSubscription, ShieldedNullifierTransactionsSubscription,
+        ShieldedTransactionsSubscription, TermsAndConditionsHistoryQuery, TransactionsQuery,
+        UnshieldedTransactionsSubscription, ZswapLedgerEventsSubscription,
+        ZswapMerkleTreeCollapsedUpdateQuery, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
@@ -36,8 +37,9 @@ use crate::{
         contract_action_subscription, disconnect_mutation,
         dust_commitment_merkle_tree_update_query, dust_generation_merkle_tree_update_query,
         dust_generation_status_query, dust_generations_query, dust_ledger_events_subscription,
-        shielded_nullifier_transactions_subscription, shielded_transactions_subscription,
-        transactions_query, unshielded_transactions_subscription, zswap_ledger_events_subscription,
+        dust_nullifier_transactions_subscription, shielded_nullifier_transactions_subscription,
+        shielded_transactions_subscription, transactions_query,
+        unshielded_transactions_subscription, zswap_ledger_events_subscription,
         zswap_merkle_tree_collapsed_update_query,
     },
     graphql_ws_client,
@@ -145,6 +147,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_shielded_nullifier_transactions_subscription(&ws_api_url)
         .await
         .context("test shielded nullifier transactions subscription")?;
+    test_dust_nullifier_transactions_subscription(&ws_api_url)
+        .await
+        .context("test dust nullifier transactions subscription")?;
 
     println!("Successfully finished e2e testing");
 
@@ -1082,6 +1087,92 @@ async fn test_shielded_nullifier_transactions_subscription(ws_api_url: &str) -> 
     Ok(())
 }
 
+/// Test the dustNullifierTransactions subscription. Verifies the input-validation
+/// guards from #1089 (empty array and empty-string element both error) and #1095
+/// (fromBlock > toBlock errors), plus a valid non-matching prefix with a bounded
+/// range completes empty. Each case is wrapped in a defensive timeout so the test
+/// fails fast rather than hanging if the server doesn't behave as expected.
+async fn test_dust_nullifier_transactions_subscription(ws_api_url: &str) -> anyhow::Result<()> {
+    // Empty nullifierPrefixes array → client error per #1089.
+    let variables = dust_nullifier_transactions_subscription::Variables {
+        nullifier_prefixes: vec![],
+        from_block: Some(0),
+        to_block: Some(0),
+    };
+    let stream = graphql_ws_client::subscribe::<DustNullifierTransactionsSubscription>(
+        ws_api_url, variables,
+    )
+    .await
+    .context("subscribe with empty nullifierPrefixes")?;
+    let result = tokio::time::timeout(Duration::from_secs(3), stream.try_collect::<Vec<_>>())
+        .await
+        .context("expected client error within 3s for empty nullifierPrefixes")?;
+    assert!(
+        result.is_err(),
+        "expected client error for empty nullifierPrefixes, got: {result:?}"
+    );
+
+    // Empty-string prefix element → also client error per #1089.
+    let variables = dust_nullifier_transactions_subscription::Variables {
+        nullifier_prefixes: vec!["".to_string().try_into().unwrap()],
+        from_block: Some(0),
+        to_block: Some(0),
+    };
+    let stream = graphql_ws_client::subscribe::<DustNullifierTransactionsSubscription>(
+        ws_api_url, variables,
+    )
+    .await
+    .context("subscribe with empty-string prefix")?;
+    let result = tokio::time::timeout(Duration::from_secs(3), stream.try_collect::<Vec<_>>())
+        .await
+        .context("expected client error within 3s for empty-string prefix")?;
+    assert!(
+        result.is_err(),
+        "expected client error for empty-string prefix, got: {result:?}"
+    );
+
+    // Valid non-matching prefix with bounded range → completes empty. Per-event
+    // timeout pattern matches `test_shielded_nullifier_transactions_subscription`.
+    let variables = dust_nullifier_transactions_subscription::Variables {
+        nullifier_prefixes: vec!["00".to_string().try_into().unwrap()],
+        from_block: Some(0),
+        to_block: Some(0),
+    };
+    let events = graphql_ws_client::subscribe::<DustNullifierTransactionsSubscription>(
+        ws_api_url, variables,
+    )
+    .await
+    .context("subscribe with valid prefix")?;
+    let events = tokio_stream::StreamExt::timeout(events, Duration::from_secs(3))
+        .take_while(|timeout_result| ready(timeout_result.is_ok()))
+        .filter_map(|timeout_result| ready(timeout_result.map(Some).unwrap_or(None)))
+        .try_collect::<Vec<_>>()
+        .await
+        .context("collect dust nullifier transactions")?;
+    assert!(events.is_empty());
+
+    // fromBlock > toBlock → client error per #1095.
+    let variables = dust_nullifier_transactions_subscription::Variables {
+        nullifier_prefixes: vec!["00".to_string().try_into().unwrap()],
+        from_block: Some(10),
+        to_block: Some(5),
+    };
+    let stream = graphql_ws_client::subscribe::<DustNullifierTransactionsSubscription>(
+        ws_api_url, variables,
+    )
+    .await
+    .context("subscribe with fromBlock > toBlock")?;
+    let result = tokio::time::timeout(Duration::from_secs(3), stream.try_collect::<Vec<_>>())
+        .await
+        .context("expected client error within 3s for fromBlock > toBlock")?;
+    assert!(
+        result.is_err(),
+        "expected client error for fromBlock > toBlock, got: {result:?}"
+    );
+
+    Ok(())
+}
+
 trait SerializeExt
 where
     Self: Serialize,
@@ -1245,6 +1336,14 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct ShieldedNullifierTransactionsSubscription;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustNullifierTransactionsSubscription;
 
     #[derive(GraphQLQuery)]
     #[graphql(

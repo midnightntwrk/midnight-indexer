@@ -16,12 +16,12 @@
 use crate::{
     domain,
     infra::api::v4::{
-        AddressType, CardanoNetworkId, CardanoRewardAddress, HexEncodable, HexEncoded,
-        encode_address, encode_cardano_reward_address,
+        AddressType, CardanoNetworkId, CardanoRewardAddress, DecodeAddressError, HexEncodable,
+        HexEncoded, decode_address, encode_address, encode_cardano_reward_address,
     },
 };
 use async_graphql::{SimpleObject, scalar};
-use indexer_common::domain::NetworkId;
+use indexer_common::domain::{DustPublicKey, NetworkId};
 use serde::{Deserialize, Serialize};
 
 /// Bech32m-encoded DUST address.
@@ -35,6 +35,17 @@ use serde::{Deserialize, Serialize};
 pub struct DustAddress(pub String);
 
 scalar!(DustAddress);
+
+impl DustAddress {
+    /// Bech32m-decode this dust address into its raw bytes, validating the
+    /// network-aware HRP (`mn_dust` on mainnet, `mn_dust_<network>` elsewhere).
+    pub fn try_into_domain(
+        &self,
+        network_id: &NetworkId,
+    ) -> Result<DustPublicKey, DecodeAddressError> {
+        decode_address(&self.0, AddressType::Dust, network_id)
+    }
+}
 
 /// DUST generation status for a specific Cardano reward address.
 #[derive(Debug, Clone, SimpleObject)]
@@ -65,6 +76,39 @@ pub struct DustGenerationStatus {
 
     /// Cardano UTXO output index for update/unregister operations.
     pub utxo_output_index: Option<u32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::infra::api::v4::{AddressType, dust::DustAddress, encode_address};
+    use indexer_common::domain::ByteVec;
+
+    #[test]
+    fn test_try_into_domain_round_trip() {
+        let network_id = "undeployed".try_into().unwrap();
+        let bytes = ByteVec::from(vec![1, 2, 3, 4, 5]);
+        let dust_address = DustAddress(encode_address(&bytes, AddressType::Dust, &network_id));
+
+        let decoded = dust_address.try_into_domain(&network_id).unwrap();
+        assert_eq!(decoded.as_ref(), bytes.as_ref());
+    }
+
+    #[test]
+    fn test_try_into_domain_rejects_hex() {
+        let network_id = "undeployed".try_into().unwrap();
+        let dust_address = DustAddress("1234567890abcdef".to_string());
+        assert!(dust_address.try_into_domain(&network_id).is_err());
+    }
+
+    #[test]
+    fn test_try_into_domain_rejects_wrong_network_hrp() {
+        let undeployed = "undeployed".try_into().unwrap();
+        let preview = "preview".try_into().unwrap();
+        let bytes = ByteVec::from(vec![1, 2, 3, 4, 5]);
+        let dust_address = DustAddress(encode_address(&bytes, AddressType::Dust, &undeployed));
+
+        assert!(dust_address.try_into_domain(&preview).is_err());
+    }
 }
 
 impl From<(domain::DustGenerationStatus, &NetworkId)> for DustGenerationStatus {

@@ -14,7 +14,7 @@
 use crate::{
     domain::storage::Storage,
     infra::api::{
-        ApiResult, ContextExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{HexEncodable, HexEncoded},
     },
 };
@@ -80,14 +80,26 @@ where
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
 
         try_stream! {
+            (!nullifier_prefixes.is_empty())
+                .then_some(())
+                .some_or_client_error(|| "nullifierPrefixes must not be empty")?;
+
             let prefix_bytes = nullifier_prefixes
                 .iter()
                 .map(|p| const_hex::decode(p.as_ref()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err_into_client_error(|| "invalid hex-encoded nullifier prefix")?;
 
+            prefix_bytes
+                .iter()
+                .all(|b| !b.is_empty())
+                .then_some(())
+                .some_or_client_error(|| "nullifierPrefixes elements must not be empty")?;
+
             let from = from_block.unwrap_or(0);
             let to = to_block.unwrap_or(u64::MAX);
+
+            validate_block_range(from, to)?;
 
             debug!("streaming existing dust nullifier transactions");
 
@@ -164,5 +176,33 @@ where
 
             warn!("stream of BlockIndexed events completed unexpectedly");
         }
+    }
+}
+
+/// Reject `fromBlock > toBlock` with a client error so callers get a clear
+/// signal that they likely have a bug in their request rather than thinking
+/// their query just happens to match nothing (#1095).
+fn validate_block_range(from: u64, to: u64) -> ApiResult<()> {
+    (from <= to)
+        .then_some(())
+        .some_or_client_error(|| "fromBlock must not exceed toBlock")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_block_range;
+
+    #[test]
+    fn test_validate_block_range_accepts_valid_ranges() {
+        assert!(validate_block_range(0, 0).is_ok());
+        assert!(validate_block_range(5, 10).is_ok());
+        assert!(validate_block_range(0, u64::MAX).is_ok());
+    }
+
+    #[test]
+    fn test_validate_block_range_rejects_from_greater_than_to() {
+        assert!(validate_block_range(1, 0).is_err());
+        assert!(validate_block_range(10, 5).is_err());
+        assert!(validate_block_range(u64::MAX, 0).is_err());
     }
 }

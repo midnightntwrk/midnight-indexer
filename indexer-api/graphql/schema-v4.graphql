@@ -1113,7 +1113,7 @@ type Subscription {
 	Entries are interleaved with collapsed Merkle tree updates to fill gaps.
 	The subscription finishes after reaching the end index with a final collapsed update.
 	"""
-	dustGenerations(dustAddress: HexEncoded!, startIndex: Int!, endIndex: Int!): DustGenerationsEvent!
+	dustGenerations(dustAddress: DustAddress!, startIndex: Int!, endIndex: Int!): DustGenerationsEvent!
 	"""
 	Subscribe to dust ledger events starting at the given ID or at the very start if omitted.
 	"""
