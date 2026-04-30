@@ -78,6 +78,31 @@ pub struct DustGenerationStatus {
     pub utxo_output_index: Option<u32>,
 }
 
+impl From<(domain::DustGenerationStatus, &NetworkId)> for DustGenerationStatus {
+    fn from((status, network_id): (domain::DustGenerationStatus, &NetworkId)) -> Self {
+        let cardano_network_id = CardanoNetworkId::from(network_id);
+        let cardano_reward_address = CardanoRewardAddress(encode_cardano_reward_address(
+            status.cardano_reward_address,
+            cardano_network_id,
+        ));
+        let dust_address = status
+            .dust_address
+            .map(|addr| DustAddress(encode_address(addr, AddressType::Dust, network_id)));
+
+        Self {
+            cardano_reward_address,
+            dust_address,
+            registered: status.registered,
+            night_balance: status.night_balance.to_string(),
+            generation_rate: status.generation_rate.to_string(),
+            max_capacity: status.max_capacity.to_string(),
+            current_capacity: status.current_capacity.to_string(),
+            utxo_tx_hash: status.utxo_tx_hash.map(|h| h.hex_encode()),
+            utxo_output_index: status.utxo_output_index,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::infra::api::v4::{AddressType, dust::DustAddress, encode_address};
@@ -108,30 +133,5 @@ mod tests {
         let dust_address = DustAddress(encode_address(&bytes, AddressType::Dust, &undeployed));
 
         assert!(dust_address.try_into_domain(&preview).is_err());
-    }
-}
-
-impl From<(domain::DustGenerationStatus, &NetworkId)> for DustGenerationStatus {
-    fn from((status, network_id): (domain::DustGenerationStatus, &NetworkId)) -> Self {
-        let cardano_network_id = CardanoNetworkId::from(network_id);
-        let cardano_reward_address = CardanoRewardAddress(encode_cardano_reward_address(
-            status.cardano_reward_address,
-            cardano_network_id,
-        ));
-        let dust_address = status
-            .dust_address
-            .map(|addr| DustAddress(encode_address(addr, AddressType::Dust, network_id)));
-
-        Self {
-            cardano_reward_address,
-            dust_address,
-            registered: status.registered,
-            night_balance: status.night_balance.to_string(),
-            generation_rate: status.generation_rate.to_string(),
-            max_capacity: status.max_capacity.to_string(),
-            current_capacity: status.current_capacity.to_string(),
-            utxo_tx_hash: status.utxo_tx_hash.map(|h| h.hex_encode()),
-            utxo_output_index: status.utxo_output_index,
-        }
     }
 }
