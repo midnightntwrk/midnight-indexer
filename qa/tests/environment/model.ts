@@ -58,11 +58,7 @@ const hostEntries: HostEntry[] = [
     indexerHost: 'localhost:8088',
     nodeHost: 'localhost:9944',
   },
-  {
-    env: EnvironmentName.QANET,
-    indexerHost: 'indexer-green.qanet.midnight.network',
-    nodeHost: 'rpc.qanet.midnight.network',
-  },
+  { env: EnvironmentName.QANET, domain: 'devnet.midnight.network' },
   { env: EnvironmentName.DEVNET, domain: 'devnet.midnight.network' },
   { env: EnvironmentName.PREVIEW, domain: 'preview.midnight.network' },
   { env: EnvironmentName.PREPROD, domain: 'preprod.midnight.network' },
