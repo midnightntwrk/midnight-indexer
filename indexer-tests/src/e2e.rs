@@ -18,11 +18,11 @@ use crate::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
         ContractActionSubscription, DParameterHistoryQuery, DisconnectMutation,
         DustCommitmentMerkleTreeUpdateQuery, DustGenerationMerkleTreeUpdateQuery,
-        DustGenerationStatusQuery, DustGenerationsQuery, DustLedgerEventsSubscription,
-        DustNullifierTransactionsSubscription, ShieldedNullifierTransactionsSubscription,
-        ShieldedTransactionsSubscription, TermsAndConditionsHistoryQuery, TransactionsQuery,
-        UnshieldedTransactionsSubscription, ZswapLedgerEventsSubscription,
-        ZswapMerkleTreeCollapsedUpdateQuery, block_query,
+        DustGenerationStatusQuery, DustGenerationsQuery, DustGenerationsSubscription,
+        DustLedgerEventsSubscription, DustNullifierTransactionsSubscription,
+        ShieldedNullifierTransactionsSubscription, ShieldedTransactionsSubscription,
+        TermsAndConditionsHistoryQuery, TransactionsQuery, UnshieldedTransactionsSubscription,
+        ZswapLedgerEventsSubscription, ZswapMerkleTreeCollapsedUpdateQuery, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
@@ -36,10 +36,10 @@ use crate::{
         contract_action_query::{self},
         contract_action_subscription, disconnect_mutation,
         dust_commitment_merkle_tree_update_query, dust_generation_merkle_tree_update_query,
-        dust_generation_status_query, dust_generations_query, dust_ledger_events_subscription,
-        dust_nullifier_transactions_subscription, shielded_nullifier_transactions_subscription,
-        shielded_transactions_subscription, transactions_query,
-        unshielded_transactions_subscription, zswap_ledger_events_subscription,
+        dust_generation_status_query, dust_generations_query, dust_generations_subscription,
+        dust_ledger_events_subscription, dust_nullifier_transactions_subscription,
+        shielded_nullifier_transactions_subscription, shielded_transactions_subscription,
+        transactions_query, unshielded_transactions_subscription, zswap_ledger_events_subscription,
         zswap_merkle_tree_collapsed_update_query,
     },
     graphql_ws_client,
@@ -47,7 +47,10 @@ use crate::{
 use anyhow::{Context, bail};
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
-use indexer_api::infra::api::v4::{HexEncodable, HexEncoded, viewing_key::ViewingKey};
+use indexer_api::infra::api::v4::{
+    AddressType, HexEncodable, HexEncoded, dust::DustAddress, encode_address,
+    viewing_key::ViewingKey,
+};
 use indexer_common::domain::NetworkId;
 use itertools::Itertools;
 use reqwest::Client;
@@ -144,6 +147,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_dust_ledger_events_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test dust ledger events subscription")?;
+    test_dust_generations_subscription(&ws_api_url)
+        .await
+        .context("test dust generations subscription")?;
     test_shielded_nullifier_transactions_subscription(&ws_api_url)
         .await
         .context("test shielded nullifier transactions subscription")?;
@@ -1062,6 +1068,52 @@ async fn test_dust_ledger_events_subscription(
     Ok(())
 }
 
+/// Test the dustGenerations subscription with a fresh dust address. Uses
+/// `start_index > end_index` so the resolver's `cursor > end_index` check
+/// fires on first pass (cursor starts at start_index, no entries to advance
+/// it), yielding a single final `DustGenerationsProgress` event and closing.
+/// Verifies wire-format compatibility for all three union variants and the
+/// completion-event shape on the empty case.
+async fn test_dust_generations_subscription(ws_api_url: &str) -> anyhow::Result<()> {
+    let end_index: i64 = 0;
+    let network_id: NetworkId = "undeployed".try_into().unwrap();
+    let dust_address = DustAddress(encode_address([0u8; 32], AddressType::Dust, &network_id));
+    let variables = dust_generations_subscription::Variables {
+        dust_address,
+        start_index: 1,
+        end_index,
+    };
+    let events = graphql_ws_client::subscribe::<DustGenerationsSubscription>(ws_api_url, variables)
+        .await
+        .context("subscribe to dust generations")?
+        .map_ok(|data| data.dust_generations.to_json_value())
+        .take(1)
+        .take_until(sleep(Duration::from_secs(5)))
+        .try_collect::<Vec<_>>()
+        .await
+        .context("collect dust generations events from subscription")?;
+
+    assert_eq!(
+        events.len(),
+        1,
+        "expected exactly one DustGenerationsProgress event"
+    );
+
+    let event = &events[0];
+    assert_eq!(
+        event.get("__typename").and_then(|v| v.as_str()),
+        Some("DustGenerationsProgress"),
+        "expected DustGenerationsProgress variant, got: {event:?}"
+    );
+    assert_eq!(
+        event.get("highestIndex").and_then(|v| v.as_i64()),
+        Some(end_index),
+        "highestIndex should match the requested endIndex"
+    );
+
+    Ok(())
+}
+
 /// Test the shieldedNullifierTransactions subscription with a non-matching prefix.
 async fn test_shielded_nullifier_transactions_subscription(ws_api_url: &str) -> anyhow::Result<()> {
     let variables = shielded_nullifier_transactions_subscription::Variables {
@@ -1328,6 +1380,14 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct DustLedgerEventsSubscription;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustGenerationsSubscription;
 
     #[derive(GraphQLQuery)]
     #[graphql(
