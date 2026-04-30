@@ -327,13 +327,6 @@ type DustGenerationDtimeUpdateItem {
 	"""
 	transactionId: Int!
 	"""
-	Collapsed Merkle tree update covering the gap between the wallet's
-	current cursor and this entry. `null` when the wallet has already
-	passed this entry's index, which is the typical case for dtime
-	updates on already-seen entries.
-	"""
-	collapsedMerkleTree: MerkleTreeCollapsedUpdate
-	"""
 	Hex-encoded tagged-serialised `TreeInsertionPath<DustGenerationInfo>`
 	from the originating ledger event. Wallets deserialise this and hand
 	it to `generating_tree.update_from_evidence(...)`.

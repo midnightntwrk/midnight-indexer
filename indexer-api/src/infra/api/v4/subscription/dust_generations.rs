@@ -99,11 +99,6 @@ pub struct DustGenerationDtimeUpdateItem {
     pub new_dtime: u64,
     /// The originating transaction ID.
     pub transaction_id: u64,
-    /// Collapsed Merkle tree update covering the gap between the wallet's
-    /// current cursor and this entry. `null` when the wallet has already
-    /// passed this entry's index, which is the typical case for dtime
-    /// updates on already-seen entries.
-    pub collapsed_merkle_tree: Option<MerkleTreeCollapsedUpdate>,
     /// Hex-encoded tagged-serialised `TreeInsertionPath<DustGenerationInfo>`
     /// from the originating ledger event. Wallets deserialise this and hand
     /// it to `generating_tree.update_from_evidence(...)`.
@@ -171,14 +166,8 @@ where
                     .map_err_into_server_error(|| "get next dtime update")?
                 {
                     dtime_after_event_id = update.ledger_event_id;
-                    let collapsed_merkle_tree = make_collapsed_update(
-                        cursor,
-                        update.generation_mt_index,
-                        storage,
-                        ledger_state_cache,
-                    ).await?;
                     yield DustGenerationsEvent::DustGenerationDtimeUpdateItem(
-                        dtime_update_item(update, collapsed_merkle_tree),
+                        dtime_update_item(update),
                     );
                 }
             }
@@ -287,14 +276,8 @@ where
                         .map_err_into_server_error(|| "get next dtime update")?
                     {
                         dtime_after_event_id = update.ledger_event_id;
-                        let collapsed_merkle_tree = make_collapsed_update(
-                            cursor,
-                            update.generation_mt_index,
-                            storage,
-                            ledger_state_cache,
-                        ).await?;
                         yield DustGenerationsEvent::DustGenerationDtimeUpdateItem(
-                            dtime_update_item(update, collapsed_merkle_tree),
+                            dtime_update_item(update),
                         );
                     }
                 }
@@ -373,19 +356,14 @@ async fn make_final_collapsed_update<S: Storage>(
     }
 }
 
-/// Convert a domain dtime update entry into the GraphQL item, attaching a
-/// caller-computed `collapsed_merkle_tree`.
-fn dtime_update_item(
-    update: DustGenerationDtimeUpdateEntry,
-    collapsed_merkle_tree: Option<MerkleTreeCollapsedUpdate>,
-) -> DustGenerationDtimeUpdateItem {
+/// Convert a domain dtime update entry into the GraphQL item.
+fn dtime_update_item(update: DustGenerationDtimeUpdateEntry) -> DustGenerationDtimeUpdateItem {
     DustGenerationDtimeUpdateItem {
         generation_mt_index: update.generation_mt_index,
         owner: update.owner.hex_encode(),
         night_utxo_hash: update.night_utxo_hash.hex_encode(),
         new_dtime: update.new_dtime,
         transaction_id: update.transaction_id,
-        collapsed_merkle_tree,
         tree_insertion_path: update.tree_insertion_path.hex_encode(),
     }
 }
