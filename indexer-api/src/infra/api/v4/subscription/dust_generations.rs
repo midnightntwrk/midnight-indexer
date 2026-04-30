@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{LedgerStateCache, storage::Storage},
+    domain::{LedgerStateCache, dust::DustGenerationDtimeUpdateEntry, storage::Storage},
     infra::api::{
         ApiResult, ContextExt, ResultExt,
         v4::{
@@ -29,10 +29,14 @@ use log::{debug, warn};
 use std::{marker::PhantomData, pin::pin};
 
 /// An event of the dust generations subscription.
+// The `Dust*` prefix on every variant matches the existing GraphQL type
+// names; renaming would change the public union members.
+#[allow(clippy::enum_variant_names)]
 #[derive(Union)]
 pub enum DustGenerationsEvent {
     DustGenerationsItem(DustGenerationsItem),
     DustGenerationsProgress(DustGenerationsProgress),
+    DustGenerationDtimeUpdateItem(DustGenerationDtimeUpdateItem),
 }
 
 pub struct DustGenerationsSubscription<S, B> {
@@ -81,6 +85,26 @@ pub struct DustGenerationsProgress {
     pub collapsed_merkle_tree: Option<MerkleTreeCollapsedUpdate>,
 }
 
+/// A dust generation dtime update emitted when the backing Night UTXO is
+/// spent and the entry's decay time is set.
+#[derive(Debug, Clone, SimpleObject)]
+pub struct DustGenerationDtimeUpdateItem {
+    /// Generation-tree index of the entry whose dtime changed.
+    pub generation_mt_index: u64,
+    /// The hex-encoded owner (dust address).
+    pub owner: HexEncoded,
+    /// Hex-encoded hash of the NIGHT UTXO that backs this dust output.
+    pub night_utxo_hash: HexEncoded,
+    /// The decay time as observed in this ledger event.
+    pub new_dtime: u64,
+    /// The originating transaction ID.
+    pub transaction_id: u64,
+    /// Hex-encoded tagged-serialised `TreeInsertionPath<DustGenerationInfo>`
+    /// from the originating ledger event. Wallets deserialise this and hand
+    /// it to `generating_tree.update_from_evidence(...)`.
+    pub tree_insertion_path: HexEncoded,
+}
+
 #[Subscription]
 impl<S, B> DustGenerationsSubscription<S, B>
 where
@@ -88,7 +112,8 @@ where
     B: Subscriber,
 {
     /// Subscribe to dust generation entries for a dust address within an index range.
-    /// Entries are interleaved with collapsed Merkle tree updates to fill gaps.
+    /// Entries are interleaved with collapsed Merkle tree updates and
+    /// `DustGenerationDtimeUpdateItem` events for entries the subscriber owns.
     /// The subscription finishes after reaching the end index with a final collapsed update.
     async fn dust_generations<'a>(
         &self,
@@ -110,6 +135,42 @@ where
                 .try_into_domain(network_id)
                 .map_err_into_client_error(|| "invalid bech32m dust address")?;
             let mut cursor = start_index;
+
+            // Derive the dtime cutoff from the wallet's most recent owned
+            // entry below `start_index`. `None` for fresh subscriptions; we
+            // skip historical dtime backfill in that case.
+            let dtime_cutoff_block_id = storage
+                .get_dust_generation_dtime_cutoff_block_id(&dust_address_bytes, start_index)
+                .await
+                .map_err_into_server_error(|| "get dtime cutoff block id")?;
+
+            // Single dtime cursor across initial backfill and live tail. It
+            // advances past every emitted DustGenerationDtimeUpdateItem so
+            // subsequent block-driven polls don't re-emit.
+            let mut dtime_after_event_id = 0u64;
+
+            if let Some(cutoff) = dtime_cutoff_block_id {
+                debug!(cutoff; "replaying dtime updates after cutoff");
+                let updates = storage
+                    .get_dust_generation_dtime_updates(
+                        &dust_address_bytes,
+                        cutoff,
+                        dtime_after_event_id,
+                        batch_size,
+                    )
+                    .await;
+                let mut updates = pin!(updates);
+                while let Some(update) = updates
+                    .try_next()
+                    .await
+                    .map_err_into_server_error(|| "get next dtime update")?
+                {
+                    dtime_after_event_id = update.ledger_event_id;
+                    yield DustGenerationsEvent::DustGenerationDtimeUpdateItem(
+                        dtime_update_item(update),
+                    );
+                }
+            }
 
             debug!(start_index, end_index; "streaming existing dust generation entries");
 
@@ -196,6 +257,31 @@ where
                     });
                 }
 
+                // Drain any new dtime updates for entries the subscriber
+                // owns. Reuses the same cutoff (initial entry-block anchor)
+                // and the running event cursor so we don't re-emit.
+                if let Some(cutoff) = dtime_cutoff_block_id {
+                    let updates = storage
+                        .get_dust_generation_dtime_updates(
+                            &dust_address_bytes,
+                            cutoff,
+                            dtime_after_event_id,
+                            batch_size,
+                        )
+                        .await;
+                    let mut updates = pin!(updates);
+                    while let Some(update) = updates
+                        .try_next()
+                        .await
+                        .map_err_into_server_error(|| "get next dtime update")?
+                    {
+                        dtime_after_event_id = update.ledger_event_id;
+                        yield DustGenerationsEvent::DustGenerationDtimeUpdateItem(
+                            dtime_update_item(update),
+                        );
+                    }
+                }
+
                 // Check if we've now reached end_index.
                 if cursor > end_index {
                     let final_update = make_final_collapsed_update(
@@ -267,5 +353,17 @@ async fn make_final_collapsed_update<S: Storage>(
     match update {
         Ok(update) => Ok(Some(update.into())),
         Err(_) => Ok(None),
+    }
+}
+
+/// Convert a domain dtime update entry into the GraphQL item.
+fn dtime_update_item(update: DustGenerationDtimeUpdateEntry) -> DustGenerationDtimeUpdateItem {
+    DustGenerationDtimeUpdateItem {
+        generation_mt_index: update.generation_mt_index,
+        owner: update.owner.hex_encode(),
+        night_utxo_hash: update.night_utxo_hash.hex_encode(),
+        new_dtime: update.new_dtime,
+        transaction_id: update.transaction_id,
+        tree_insertion_path: update.tree_insertion_path.hex_encode(),
     }
 }

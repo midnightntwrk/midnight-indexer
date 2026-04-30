@@ -751,6 +751,31 @@ subscription DustLedgerEventsSubscription($id: Int) {
     }
 }
 
+subscription DustGenerationsSubscription(
+    $dustAddress: DustAddress!
+    $startIndex: Int!
+    $endIndex: Int!
+) {
+    dustGenerations(
+        dustAddress: $dustAddress
+        startIndex: $startIndex
+        endIndex: $endIndex
+    ) {
+        __typename
+        ... on DustGenerationsItem {
+            generationMtIndex
+        }
+        ... on DustGenerationsProgress {
+            highestIndex
+        }
+        ... on DustGenerationDtimeUpdateItem {
+            generationMtIndex
+            newDtime
+            treeInsertionPath
+        }
+    }
+}
+
 subscription ShieldedNullifierTransactionsSubscription(
     $nullifierPrefixes: [HexEncoded!]!
     $fromBlock: Int

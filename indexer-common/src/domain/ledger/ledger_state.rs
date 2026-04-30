@@ -716,20 +716,15 @@ fn make_dust_generation_dtime_update_v8(
             }
         });
 
-    let merkle_path = update
-        .path
-        .iter()
-        .map(|entry| dust::DustMerklePathEntry {
-            sibling_hash: entry.hash.as_ref().map(|h| h.0.0.to_bytes_le().to_vec()),
-            goes_left: entry.goes_left,
-        })
-        .collect();
+    let tree_insertion_path = update
+        .tagged_serialize()
+        .map_err(|error| Error::Serialize("TreeInsertionPath<DustGenerationInfoV8>", error))?;
 
     Ok(LedgerEvent::dust_generation_dtime_update(
         raw,
         generation_info,
         mt_index,
-        merkle_path,
+        tree_insertion_path,
     ))
 }
 

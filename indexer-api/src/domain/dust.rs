@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use indexer_common::{
-    domain::{ByteVec, CardanoRewardAddress, DustPublicKey},
+    domain::{ByteVec, CardanoRewardAddress, DustPublicKey, SerializedDustTreeInsertionPath},
     infra::sqlx::U128BeBytes,
 };
 use serde::{Deserialize, Serialize};
@@ -99,6 +99,37 @@ pub struct DustGenerationEntry {
 
     #[sqlx(try_from = "i64")]
     pub transaction_id: u64,
+}
+
+/// A dust generation dtime update entry for the subscription stream.
+///
+/// Built from the row by the storage layer, not directly via `FromRow`,
+/// because `tree_insertion_path` is sourced by deserialising
+/// `LedgerEventAttributes::DustGenerationDtimeUpdate` from the row's
+/// JSONB `attributes` column.
+#[derive(Debug, Clone)]
+pub struct DustGenerationDtimeUpdateEntry {
+    /// Ledger event id of this dtime update. Internal cursor for advancing
+    /// between live-tail polls; not exposed on the GraphQL surface.
+    pub ledger_event_id: u64,
+
+    /// Generation-tree index of the entry whose dtime changed.
+    pub generation_mt_index: u64,
+
+    pub owner: ByteVec,
+
+    /// Hash of the NIGHT UTXO that backs this dust output.
+    pub night_utxo_hash: ByteVec,
+
+    /// New decay time as observed in this ledger event.
+    pub new_dtime: u64,
+
+    pub transaction_id: u64,
+
+    /// Tagged-serialised `TreeInsertionPath<DustGenerationInfo>` from the
+    /// originating ledger event. Surfaced verbatim on the GraphQL API so
+    /// wallets can hand it to `generating_tree.update_from_evidence(...)`.
+    pub tree_insertion_path: SerializedDustTreeInsertionPath,
 }
 
 /// A dust nullifier transaction for the subscription stream.
