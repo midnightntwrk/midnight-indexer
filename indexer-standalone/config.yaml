@@ -42,6 +42,12 @@ infra:
     # APP__INFRA__SPO_NODE__BLOCKFROST_ID env var. If you are not exercising
     # SPO features locally, any non-empty placeholder is accepted at startup,
     # e.g. APP__INFRA__SPO_NODE__BLOCKFROST_ID=dummy-not-using-spo
+    #
+    # Optional Blockfrost HTTP pool tuning (defaults: 4 / 30s / 60s).
+    # http_pool:
+    #   max_idle_per_host: 4
+    #   idle_timeout: "30s"
+    #   tcp_keepalive: "60s"
 
   api:
     address: "0.0.0.0"
