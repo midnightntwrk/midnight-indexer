@@ -288,8 +288,16 @@ async fn ready(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
     }
 }
 
-async fn redirect_api_to_latest(OriginalUri(uri): OriginalUri) -> Redirect {
-    redirect_to_latest(uri, "/api")
+async fn redirect_api_to_latest(OriginalUri(uri): OriginalUri) -> Response {
+    // Avoid redirecting paths already under a known API version, otherwise the redirect prepends
+    // `/api/v4` again and the client follows itself into an infinite loop. Unrecognised paths
+    // under a known version should 404 like any other unknown route.
+    let path = uri.path();
+    if path.starts_with("/api/v3/") || path.starts_with("/api/v4/") {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    redirect_to_latest(uri, "/api").into_response()
 }
 
 fn redirect_to_latest(uri: Uri, target: &str) -> Redirect {
@@ -539,3 +547,35 @@ impl StdError for ApiError {}
 #[derive(Debug, Clone, Error)]
 #[error("{0}")]
 pub struct InnerApiError(String, #[source] Option<Arc<dyn StdError + Send + Sync>>);
+
+#[cfg(test)]
+mod tests {
+    use crate::infra::api::redirect_api_to_latest;
+    use axum::{
+        extract::OriginalUri,
+        http::{StatusCode, Uri, header},
+    };
+
+    /// Regression for #1085, an unrecognised path under `/api/v4` must not redirect to a
+    /// `/api/v4/v4/...` URL (which would loop indefinitely). Same guard applies to `/api/v3`.
+    #[tokio::test]
+    async fn unknown_versioned_paths_return_404() {
+        for path in ["/api/v4/schema", "/api/v3/schema"] {
+            let uri: Uri = path.parse().unwrap();
+            let response = redirect_api_to_latest(OriginalUri(uri)).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+    }
+
+    /// Unversioned `/api/...` paths still get the existing redirect to the latest version.
+    #[tokio::test]
+    async fn unversioned_api_path_redirects_to_latest() {
+        let uri: Uri = "/api/foo".parse().unwrap();
+        let response = redirect_api_to_latest(OriginalUri(uri)).await;
+        assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(
+            response.headers().get(header::LOCATION).unwrap(),
+            "/api/v4/foo"
+        );
+    }
+}
