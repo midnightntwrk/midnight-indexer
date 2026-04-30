@@ -269,11 +269,15 @@ const isCardanoRewardAddress = (value: string) => {
   }
 };
 
+const DustAddressBech32m = z.string().regex(/^mn_dust(_[a-z0-9]+)?1/, {
+  message: 'must be a bech32m DustAddress (mn_dust... / mn_dust_<network>...)',
+});
+
 export const DustGenerationStatusSchema = z.object({
   cardanoRewardAddress: z
     .string()
     .refine(isCardanoRewardAddress, { message: 'Invalid Cardano reward address format' }),
-  dustAddress: z.string().nullable(),
+  dustAddress: DustAddressBech32m.nullable(),
   registered: z.boolean(),
   nightBalance: z.string().regex(/^\d+$/),
   generationRate: z.string().regex(/^\d+$/),
@@ -341,7 +345,7 @@ export const ShieldedTransactionEventSchema = z.union([
 
 // Dust Generations schemas (PR #980)
 export const DustRegistrationSchema = z.object({
-  dustAddress: z.string(),
+  dustAddress: DustAddressBech32m,
   valid: z.boolean(),
   nightBalance: z.string().regex(/^\d+$/),
   generationRate: z.string().regex(/^\d+$/),

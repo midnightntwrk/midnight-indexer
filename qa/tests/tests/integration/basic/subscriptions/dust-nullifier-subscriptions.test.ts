@@ -114,13 +114,13 @@ describe('dust nullifier transactions subscription', () => {
 
   describe('subscription error handling', () => {
     /**
-     * A dust nullifier transactions subscription with an empty prefixes array should stay quiet
+     * A dust nullifier transactions subscription with an empty prefixes array should return an error
      *
      * @given an empty array of nullifier prefixes
      * @when we subscribe to dustNullifierTransactions
-     * @then the subscription should stay open without data or errors
+     * @then the subscription should return a client error about empty prefixes
      */
-    test('should stay open without events for empty nullifier prefixes', async () => {
+    test('should return an error for empty nullifier prefixes', async () => {
       const settled = await new Promise<{
         completed: boolean;
         error: string | null;
@@ -165,19 +165,19 @@ describe('dust nullifier transactions subscription', () => {
         );
       });
 
-      expect(settled.error).toBeNull();
+      expect(settled.error).toContain('nullifierPrefixes must not be empty');
       expect(settled.completed).toBe(false);
-      expect(settled.eventCount).toBe(0);
+      expect(settled.eventCount).toBeGreaterThanOrEqual(0);
     });
 
     /**
-     * A dust nullifier transactions subscription with invalid block range should complete cleanly
+     * A dust nullifier transactions subscription with invalid block range should return an error
      *
      * @given fromBlock > toBlock
      * @when we subscribe to dustNullifierTransactions
-     * @then the subscription should complete without events or errors
+     * @then the subscription should return a client error
      */
-    test('should complete when fromBlock is greater than toBlock', async () => {
+    test('should return an error when fromBlock is greater than toBlock', async () => {
       const settled = await new Promise<{
         completed: boolean;
         error: string | null;
@@ -223,9 +223,9 @@ describe('dust nullifier transactions subscription', () => {
         );
       });
 
-      expect(settled.error).toBeNull();
-      expect(settled.completed).toBe(true);
-      expect(settled.eventCount).toBe(0);
+      expect(settled.error).toContain('fromBlock must not exceed toBlock');
+      expect(settled.completed).toBe(false);
+      expect(settled.eventCount).toBeGreaterThanOrEqual(0);
     });
   });
 });

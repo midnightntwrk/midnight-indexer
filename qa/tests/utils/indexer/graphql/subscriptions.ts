@@ -342,7 +342,7 @@ export const ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID = `
 `;
 
 export const DUST_GENERATIONS_SUBSCRIPTION = `
-  subscription DustGenerations($dustAddress: HexEncoded!, $startIndex: Int!, $endIndex: Int!) {
+  subscription DustGenerations($dustAddress: DustAddress!, $startIndex: Int!, $endIndex: Int!) {
     dustGenerations(dustAddress: $dustAddress, startIndex: $startIndex, endIndex: $endIndex) {
       ... on DustGenerationsItem {
         __typename

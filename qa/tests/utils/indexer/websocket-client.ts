@@ -954,7 +954,7 @@ export class IndexerWsClient {
    * The subscription finishes after reaching the end index with a final collapsed update.
    *
    * @param handlers - Callback functions for handling incoming dust generation events
-   * @param dustAddress - Hex-encoded dust address to subscribe for
+   * @param dustAddress - Bech32m-encoded dust address to subscribe for
    * @param startIndex - Start index into the dust commitment tree
    * @param endIndex - End index into the dust commitment tree
    * @param queryOverride - Optional custom GraphQL subscription query
