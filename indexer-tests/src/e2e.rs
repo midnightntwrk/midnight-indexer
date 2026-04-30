@@ -1087,11 +1087,11 @@ async fn test_shielded_nullifier_transactions_subscription(ws_api_url: &str) -> 
     Ok(())
 }
 
-/// Test the dustNullifierTransactions subscription. Verifies the input-validation guards
-/// from #1089 (empty array and empty-string element both error) and that a valid
-/// non-matching prefix with a bounded range completes empty. Each case is wrapped in
-/// a defensive timeout so the test fails fast rather than hanging if the server
-/// doesn't behave as expected.
+/// Test the dustNullifierTransactions subscription. Verifies the input-validation
+/// guards from #1089 (empty array and empty-string element both error) and #1095
+/// (fromBlock > toBlock errors), plus a valid non-matching prefix with a bounded
+/// range completes empty. Each case is wrapped in a defensive timeout so the test
+/// fails fast rather than hanging if the server doesn't behave as expected.
 async fn test_dust_nullifier_transactions_subscription(ws_api_url: &str) -> anyhow::Result<()> {
     // Empty nullifierPrefixes array → client error per #1089.
     let variables = dust_nullifier_transactions_subscription::Variables {
@@ -1150,6 +1150,25 @@ async fn test_dust_nullifier_transactions_subscription(ws_api_url: &str) -> anyh
         .await
         .context("collect dust nullifier transactions")?;
     assert!(events.is_empty());
+
+    // fromBlock > toBlock → client error per #1095.
+    let variables = dust_nullifier_transactions_subscription::Variables {
+        nullifier_prefixes: vec!["00".to_string().try_into().unwrap()],
+        from_block: Some(10),
+        to_block: Some(5),
+    };
+    let stream = graphql_ws_client::subscribe::<DustNullifierTransactionsSubscription>(
+        ws_api_url, variables,
+    )
+    .await
+    .context("subscribe with fromBlock > toBlock")?;
+    let result = tokio::time::timeout(Duration::from_secs(3), stream.try_collect::<Vec<_>>())
+        .await
+        .context("expected client error within 3s for fromBlock > toBlock")?;
+    assert!(
+        result.is_err(),
+        "expected client error for fromBlock > toBlock, got: {result:?}"
+    );
 
     Ok(())
 }
