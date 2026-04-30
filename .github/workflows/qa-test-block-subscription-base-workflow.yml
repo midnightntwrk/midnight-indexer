@@ -38,6 +38,7 @@ jobs:
     env:
       TARGET_ENV: ${{ inputs.target_env }}
       INDEXER_API_VERSION: ${{ inputs.indexer_api_version }}
+      LOG_LEVEL: DEBUG
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -53,6 +54,12 @@ jobs:
       - name: Run tests
         run: yarn test:integration block-subscriptions
 
+      - name: Generate API coverage report (non-blocking)
+        if: always()
+        continue-on-error: true
+        run: |
+          yarn coverage:generate --target-env=${{ inputs.target_env }} --indexer-api-version=${{ inputs.indexer_api_version }}
+
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -67,4 +74,12 @@ jobs:
         with:
           name: test-logs-block-subscriptions
           path: qa/tests/logs/**
+          retention-days: 7
+
+      - name: Upload API coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: qa-api-coverage-block-subscriptions
+          path: qa/tests/coverage/output/**
           retention-days: 7

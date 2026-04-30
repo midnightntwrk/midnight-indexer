@@ -19,7 +19,8 @@ yarn-error.log*
 .DS_Store
 .env
 dist/
-coverage/
+coverage/output/
+coverage/output/latest-run.json
 
 # Report files
 reports/
