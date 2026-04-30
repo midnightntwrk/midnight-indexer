@@ -20,3 +20,18 @@ pub struct PoolMetadata {
     pub homepage_url: String,
     pub url: String,
 }
+
+impl PoolMetadata {
+    /// Placeholder used when the upstream metadata fetch fails so we still
+    /// persist a row keyed by `cardano_id`.
+    pub fn placeholder(cardano_id: String) -> Self {
+        Self {
+            pool_id: cardano_id.clone(),
+            hex_id: cardano_id,
+            name: String::new(),
+            ticker: String::new(),
+            homepage_url: String::new(),
+            url: String::new(),
+        }
+    }
+}

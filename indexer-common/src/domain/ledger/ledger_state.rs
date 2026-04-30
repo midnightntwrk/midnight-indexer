@@ -1097,11 +1097,9 @@ mod tests {
                 .display()
                 .to_string();
 
-            let pool = SqlitePool::new(pool::sqlite::Config {
-                cnn_url: sqlite_file,
-            })
-            .await
-            .context("create pool")?;
+            let pool = SqlitePool::new(pool::sqlite::Config::with_url(sqlite_file))
+                .await
+                .context("create pool")?;
             migrations::sqlite::run(&pool)
                 .await
                 .context("run migrations")?;
