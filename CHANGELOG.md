@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.0] - 2026-04-30
+
+### 🚀 Features
+
+- *(indexer-standalone)* Run spo indexer in standalone sqlite mode (#979)
+- *(cli)* Support --version without confg (#1083)
+- *(indexer-api)* Include DustGenerationDtimeUpdate in dustGenerations subscription (#1080)
+
+### 🐛 Bug Fixes
+
+- *(indexer-common)* Keep in-memory pub/sub drain tasks alive after lag (#1063)
+- *(indexer-api)* Tighten dust subscription input validation (#1090)
+- *(indexer-api)* Avoid infinite redirect loop on unknown /api/v3 and /api/v4 paths (#1093)
+
 ## [4.2.1] - 2026-04-27
 
 ### ⚙️ Dependencies
