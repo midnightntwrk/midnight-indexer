@@ -39,6 +39,8 @@ export const BlockSchema = z.lazy(() =>
     author: z.string().optional(),
     ledgerParameters: z.string(),
     zswapMerkleTreeRoot: VarLenghtHex,
+    dustCommitmentMerkleTreeRoot: VarLenghtHex.nullable(),
+    dustGenerationMerkleTreeRoot: VarLenghtHex.nullable(),
     parent: PartialBlockSchema,
     transactions: z.array(FullTransactionSchema).min(0),
   }),
@@ -158,6 +160,10 @@ export const RegularTransactionSchema = z.lazy(() =>
     identifiers: z.array(z.string()),
     zswapStartIndex: z.number(),
     zswapEndIndex: z.number(),
+    dustCommitmentStartIndex: z.number(),
+    dustCommitmentEndIndex: z.number(),
+    dustGenerationStartIndex: z.number(),
+    dustGenerationEndIndex: z.number(),
     fees: z.object({
       paidFees: z.string(),
       estimatedFees: z.string(),
@@ -263,11 +269,15 @@ const isCardanoRewardAddress = (value: string) => {
   }
 };
 
+const DustAddressBech32m = z.string().regex(/^mn_dust(_[a-z0-9]+)?1/, {
+  message: 'must be a bech32m DustAddress (mn_dust... / mn_dust_<network>...)',
+});
+
 export const DustGenerationStatusSchema = z.object({
   cardanoRewardAddress: z
     .string()
     .refine(isCardanoRewardAddress, { message: 'Invalid Cardano reward address format' }),
-  dustAddress: z.string().nullable(),
+  dustAddress: DustAddressBech32m.nullable(),
   registered: z.boolean(),
   nightBalance: z.string().regex(/^\d+$/),
   generationRate: z.string().regex(/^\d+$/),
@@ -332,3 +342,61 @@ export const ShieldedTransactionEventSchema = z.union([
   RelevantTransactionSchema,
   ShieldedTransactionsProgressSchema,
 ]);
+
+// Dust Generations schemas (PR #980)
+export const DustRegistrationSchema = z.object({
+  dustAddress: DustAddressBech32m,
+  valid: z.boolean(),
+  nightBalance: z.string().regex(/^\d+$/),
+  generationRate: z.string().regex(/^\d+$/),
+  maxCapacity: z.string().regex(/^\d+$/),
+  currentCapacity: z.string().regex(/^\d+$/),
+  utxoTxHash: z.string().nullable(),
+  utxoOutputIndex: z.number().int().nullable(),
+});
+
+export const DustGenerationsSchema = z.object({
+  cardanoRewardAddress: z
+    .string()
+    .refine(isCardanoRewardAddress, { message: 'Invalid Cardano reward address format' }),
+  registrations: z.array(DustRegistrationSchema),
+});
+
+export const CollapsedMerkleTreeSchema = z.object({
+  startIndex: z.number(),
+  endIndex: z.number(),
+  update: VarLenghtHex,
+  protocolVersion: z.number(),
+});
+
+export const DustGenerationsItemSchema = z.object({
+  __typename: z.literal('DustGenerationsItem'),
+  commitmentMtIndex: z.number(),
+  generationMtIndex: z.number(),
+  owner: VarLenghtHex,
+  value: z.string().regex(/^\d+$/),
+  initialValue: z.string().regex(/^\d+$/),
+  backingNight: VarLenghtHex,
+  ctime: z.number(),
+  transactionId: z.number(),
+  collapsedMerkleTree: CollapsedMerkleTreeSchema.nullable(),
+});
+
+export const DustGenerationsProgressSchema = z.object({
+  __typename: z.literal('DustGenerationsProgress'),
+  highestIndex: z.number(),
+  collapsedMerkleTree: CollapsedMerkleTreeSchema.nullable(),
+});
+
+export const DustGenerationsEventSchema = z.discriminatedUnion('__typename', [
+  DustGenerationsItemSchema,
+  DustGenerationsProgressSchema,
+]);
+
+export const DustNullifierTransactionSchema = z.object({
+  nullifier: VarLenghtHex,
+  commitment: VarLenghtHex,
+  transactionId: z.number(),
+  blockHeight: z.number(),
+  blockHash: Hash64,
+});

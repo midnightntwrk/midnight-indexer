@@ -21,6 +21,8 @@ import type {
   Block,
   BlockOffset,
   DustLedgerEvent,
+  DustGenerationsEvent,
+  DustNullifierTransaction,
   ZswapLedgerEvent,
   ShieldedTransactionsEvent,
   UnshieldedTransactionEvent,
@@ -37,6 +39,8 @@ import {
   CONTRACT_ACTIONS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET,
   DUST_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT,
   DUST_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID,
+  DUST_GENERATIONS_SUBSCRIPTION,
+  DUST_NULLIFIER_TRANSACTIONS_SUBSCRIPTION,
   ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT,
   ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID,
 } from './graphql/subscriptions';
@@ -57,6 +61,14 @@ export type ContractActionSubscriptionResponse = GraphQLResponse<{
 
 export type DustLedgerEventSubscriptionResponse = GraphQLResponse<{
   dustLedgerEvents: DustLedgerEvent;
+}>;
+
+export type DustGenerationsSubscriptionResponse = GraphQLResponse<{
+  dustGenerations: DustGenerationsEvent;
+}>;
+
+export type DustNullifierTransactionSubscriptionResponse = GraphQLResponse<{
+  dustNullifierTransactions: DustNullifierTransaction;
 }>;
 
 export type ZswapLedgerEventSubscriptionResponse = GraphQLResponse<{
@@ -918,6 +930,112 @@ export class IndexerWsClient {
     };
 
     log.debug(`Zswap Ledger Events payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = {
+          id: subscriptionId,
+          type: 'stop',
+        };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
+    };
+  }
+
+  /**
+   * Subscribes to dust generation entries for a dust address within an index range.
+   *
+   * Entries are interleaved with collapsed Merkle tree updates to fill gaps.
+   * The subscription finishes after reaching the end index with a final collapsed update.
+   *
+   * @param handlers - Callback functions for handling incoming dust generation events
+   * @param dustAddress - Bech32m-encoded dust address to subscribe for
+   * @param startIndex - Start index into the dust commitment tree
+   * @param endIndex - End index into the dust commitment tree
+   * @param queryOverride - Optional custom GraphQL subscription query
+   *
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToDustGenerations(
+    handlers: SubscriptionHandlers<DustGenerationsSubscriptionResponse>,
+    dustAddress: string,
+    startIndex: number,
+    endIndex: number,
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const query = queryOverride || DUST_GENERATIONS_SUBSCRIPTION;
+    const variables = { dustAddress, startIndex, endIndex };
+
+    const subscriptionId = this.getNextId();
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: {
+        query,
+        variables,
+      },
+    };
+
+    log.debug(`Dust Generations payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = {
+          id: subscriptionId,
+          type: 'stop',
+        };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
+    };
+  }
+
+  /**
+   * Subscribes to transactions containing dust nullifiers matching the provided prefixes.
+   *
+   * Returns transaction and block references for wallet to fetch full data.
+   * If `toBlock` is specified, the subscription finishes after reaching that block.
+   *
+   * @param handlers - Callback functions for handling incoming nullifier transaction events
+   * @param nullifierPrefixes - Array of hex-encoded nullifier prefixes to match
+   * @param fromBlock - Optional starting block height
+   * @param toBlock - Optional ending block height (subscription finishes after this)
+   * @param queryOverride - Optional custom GraphQL subscription query
+   *
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToDustNullifierTransactions(
+    handlers: SubscriptionHandlers<DustNullifierTransactionSubscriptionResponse>,
+    nullifierPrefixes: string[],
+    fromBlock?: number,
+    toBlock?: number,
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const query = queryOverride || DUST_NULLIFIER_TRANSACTIONS_SUBSCRIPTION;
+    const variables = { nullifierPrefixes, fromBlock, toBlock };
+
+    const subscriptionId = this.getNextId();
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: {
+        query,
+        variables,
+      },
+    };
+
+    log.debug(`Dust Nullifier Transactions payload:\n${JSON.stringify(payload, null, 2)}`);
 
     this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
     this.getWs().send(JSON.stringify(payload));

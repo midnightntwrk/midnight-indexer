@@ -26,6 +26,7 @@ import {
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 import {
+  RegularTransaction,
   Transaction,
   UnshieldedTransaction,
   UnshieldedTransactionEvent,
@@ -90,6 +91,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
   let indexerEventCoordinator: EventCoordinator;
   indexerEventCoordinator = new EventCoordinator();
   let previousMaxDustId: number;
+  let dustCommitmentEndIndexBeforeTx: number;
 
   beforeAll(async () => {
     indexerHttpClient = new IndexerHttpClient();
@@ -118,6 +120,17 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
     );
     previousMaxDustId = beforeEvents[0].data!.dustLedgerEvents.maxId;
     log.debug(`Previous max dust ID before tx = ${previousMaxDustId}`);
+
+    // Capture the highest dustCommitmentEndIndex before the transaction from genesis block.
+    const genesisResponse = await indexerHttpClient.getBlockByOffset({ height: 0 });
+    const genesisTxs = genesisResponse.data!.block.transactions;
+    dustCommitmentEndIndexBeforeTx = genesisTxs.reduce((max, tx) => {
+      const regularTx = tx as RegularTransaction;
+      return regularTx.dustCommitmentEndIndex != null && regularTx.dustCommitmentEndIndex > max
+        ? regularTx.dustCommitmentEndIndex
+        : max;
+    }, 0);
+    log.debug(`Highest dustCommitmentEndIndex from genesis = ${dustCommitmentEndIndexBeforeTx}`);
 
     // Submit a single unshielded transaction (1 STAR) from source → destination
     transactionResult = await toolkit.generateSingleTx(
@@ -511,6 +524,42 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       log.info(`Highest transaction ID after transaction: ${highestTransactionIdAfterTransaction}`);
       expect(highestTransactionIdAfterTransaction).toBeGreaterThan(
         highestTransactionIdBeforeTransaction,
+      );
+    });
+
+    /**
+     * After an unshielded transaction is confirmed, the dust commitment Merkle tree should grow.
+     * The dustCommitmentEndIndex of the transaction should be higher than the previous maximum.
+     *
+     * @given a confirmed unshielded transaction
+     * @when we query the transaction from the indexer
+     * @then the transaction's dustCommitmentEndIndex should be greater than the dustCommitmentEndIndex before the transaction
+     */
+    test('should increase the dust commitment Merkle tree end index', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Transaction', 'Dust', 'CommitmentMerkleTree', 'UnshieldedTokens'],
+      };
+
+      ctx.skip?.(
+        transactionResult.status !== 'confirmed',
+        "Toolkit transaction hasn't been confirmed",
+      );
+
+      const transactionResponse = await indexerHttpClient.getTransactionByOffset({
+        hash: transactionResult.txHash,
+      });
+      expect(transactionResponse).toBeSuccess();
+
+      const transactions = transactionResponse.data!.transactions;
+      const tx = transactions.find((t: Transaction) => t.hash === transactionResult.txHash);
+      expect(tx).toBeDefined();
+
+      const regularTx = tx as RegularTransaction;
+      expect(regularTx.dustCommitmentEndIndex).toBeDefined();
+      expect(regularTx.dustCommitmentEndIndex!).toBeGreaterThan(dustCommitmentEndIndexBeforeTx);
+
+      log.debug(
+        `dustCommitmentEndIndex before tx: ${dustCommitmentEndIndexBeforeTx}, after tx: ${regularTx.dustCommitmentEndIndex}`,
       );
     });
 

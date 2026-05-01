@@ -562,5 +562,35 @@ describe(`genesis block`, () => {
         expect.soft(currentOutputIndex).toBeGreaterThan(previousOutputIndex);
       }
     });
+
+    /**
+     * Genesis block regular transactions should have valid index ranges
+     *
+     * @given the genesis block is indexed
+     * @when we inspect its regular transactions
+     * @then endIndex >= startIndex for zswap, dustCommitment, and dustGeneration indices
+     */
+    test('should contain valid index ranges on regular transactions', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Transaction', 'IndexFields', 'Genesis'],
+      };
+
+      const genesisTransactions = await extractGenesisTransactions(genesisBlock);
+      const regularTxs = genesisTransactions.filter(
+        (tx) => tx.__typename === 'RegularTransaction',
+      ) as RegularTransaction[];
+
+      expect(regularTxs.length).toBeGreaterThan(0);
+
+      for (const tx of regularTxs) {
+        log.debug(
+          `Transaction ${tx.hash}: zswap=[${tx.zswapStartIndex}, ${tx.zswapEndIndex}], dustCommitment=[${tx.dustCommitmentStartIndex}, ${tx.dustCommitmentEndIndex}], dustGeneration=[${tx.dustGenerationStartIndex}, ${tx.dustGenerationEndIndex}]`,
+        );
+
+        expect(tx.zswapEndIndex!).toBeGreaterThanOrEqual(tx.zswapStartIndex!);
+        expect(tx.dustCommitmentEndIndex!).toBeGreaterThanOrEqual(tx.dustCommitmentStartIndex!);
+        expect(tx.dustGenerationEndIndex!).toBeGreaterThanOrEqual(tx.dustGenerationStartIndex!);
+      }
+    });
   });
 });

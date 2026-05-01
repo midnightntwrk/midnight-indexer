@@ -338,7 +338,6 @@ describe('unshielded transaction subscriptions', async () => {
      */
     test('should return an error message, given the address provided is for another network', async () => {
       const currentEnvironment = env.getCurrentEnvironmentName();
-      const currentNetworkId = env.getNetworkId();
 
       for (const environment of env.getAllEnvironmentNames()) {
         if (environment === currentEnvironment) {
