@@ -17,7 +17,7 @@ use indexer_common::{domain::NetworkId, infra::pool, telemetry};
 use serde::Deserialize;
 use spo_indexer::{
     application::{self as spo_app, StakeRefreshConfig},
-    infra::spo_client,
+    infra::spo_client::{self, HttpPoolConfig},
 };
 use std::{num::NonZeroUsize, time::Duration};
 use wallet_indexer::application as wallet_app;
@@ -157,6 +157,8 @@ pub struct SpoNodeConfig {
     #[serde(with = "humantime_serde")]
     pub reconnect_max_delay: Duration,
     pub reconnect_max_attempts: usize,
+    #[serde(default)]
+    pub http_pool: HttpPoolConfig,
 }
 
 impl From<SpoNodeConfig> for spo_client::Config {
@@ -166,6 +168,7 @@ impl From<SpoNodeConfig> for spo_client::Config {
             blockfrost_id: secrecy::SecretString::from(config.blockfrost_id),
             reconnect_max_delay: config.reconnect_max_delay,
             reconnect_max_attempts: config.reconnect_max_attempts,
+            http_pool: config.http_pool,
         }
     }
 }
