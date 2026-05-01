@@ -45,8 +45,6 @@ subscription BlocksSubscription($OFFSET: BlockOffset) {
         contractActions {
           __typename
           address
-          state
-          zswapState
         }
         unshieldedCreatedOutputs {
           owner
@@ -78,12 +76,10 @@ subscription BlocksSubscription($OFFSET: BlockOffset) {
       ... on SystemTransaction {
         zswapLedgerEvents {
           id
-          raw
           maxId
         }
         dustLedgerEvents {
           id
-          raw
           maxId
         }
       }
