@@ -46,7 +46,7 @@ jobs:
 
       - name: Run cargo-deny
         # cargo-deny 0.19.0+ includes fix for empty locations in SARIF output
-        run: cargo deny -f sarif check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed | tee scan.sarif || true
+        run: cargo deny -f sarif check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed | tee scan.sarif
         # TODO: once everything's open sourced remove -Aunlicensed
 
       - name: Upload SARIF to GitHub Security
