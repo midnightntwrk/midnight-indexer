@@ -1,0 +1,36 @@
+{
+  "indexer-core": [
+    "Query.dustCommitmentMerkleTreeUpdate",
+    "Query.dustGenerationMerkleTreeUpdate",
+    "Query.dustGenerations"
+  ],
+  "spo-api": [
+    "Query.block",
+    "Query.contractAction",
+    "Query.currentEpochInfo",
+    "Query.dParameterHistory",
+    "Query.dustGenerationStatus",
+    "Query.spoCount",
+    "Query.termsAndConditionsHistory",
+    "Query.transactions",
+    "Query.zswapMerkleTreeCollapsedUpdate",
+    "Query.spoIdentities",
+    "Query.spoIdentityByPoolId",
+    "Query.poolMetadata",
+    "Query.poolMetadataList",
+    "Query.spoByPoolId",
+    "Query.spoList",
+    "Query.spoCompositeByPoolId",
+    "Query.stakePoolOperators",
+    "Query.spoPerformanceLatest",
+    "Query.spoPerformanceBySpoSk",
+    "Query.epochPerformance",
+    "Query.epochUtilization",
+    "Query.committee",
+    "Query.registeredTotalsSeries",
+    "Query.registeredSpoSeries",
+    "Query.registeredPresence",
+    "Query.registeredFirstValidEpochs",
+    "Query.stakeDistribution"
+  ]
+}
