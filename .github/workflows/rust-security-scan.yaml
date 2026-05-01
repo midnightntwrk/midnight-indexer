@@ -44,16 +44,22 @@ jobs:
           username: MidnightCI
           password: ${{ secrets.MIDNIGHTCI_REPO }}
 
-      - name: Run cargo-deny
-        # cargo-deny 0.19.0+ includes fix for empty locations in SARIF output
-        # shell: bash forces `bash --noprofile --norc -eo pipefail`, so the
-        # pipeline propagates cargo-deny's exit code instead of `tee`'s.
-        # Without pipefail, cargo-deny advisory failures are silently swallowed.
-        shell: bash
+      - name: Run cargo-deny (produce SARIF for Security tab)
+        # cargo-deny 0.19.0+ includes fix for empty locations in SARIF output.
+        # `-f sarif` always exits 0 (failures are encoded in the SARIF, not the
+        # exit code), so this step never fails CI. Gating happens below.
         run: cargo deny -f sarif check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed | tee scan.sarif
-        # TODO: once everything's open sourced remove -Aunlicensed
+        # `-Aunlicensed` covers upstream ledger crates without `license = ...`
+        # fields (e.g. midnight-circuits, midnight-zk-stdlib). Drop once those
+        # crates ship with explicit license fields.
 
       - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@7273f08caa1dcf2c2837f362f1982de0ab4dc344
         with:
           sarif_file: scan.sarif
+
+      - name: Run cargo-deny (gate CI on advisories)
+        # Re-run without `-f sarif` so cargo-deny exits non-zero on findings.
+        # `--disable-fetch` reuses the advisory DB cached by the previous step.
+        # Same `-Aunlicensed` rationale as above.
+        run: cargo deny check --disable-fetch -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed
