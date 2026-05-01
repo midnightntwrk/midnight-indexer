@@ -46,6 +46,10 @@ jobs:
 
       - name: Run cargo-deny
         # cargo-deny 0.19.0+ includes fix for empty locations in SARIF output
+        # shell: bash forces `bash --noprofile --norc -eo pipefail`, so the
+        # pipeline propagates cargo-deny's exit code instead of `tee`'s.
+        # Without pipefail, cargo-deny advisory failures are silently swallowed.
+        shell: bash
         run: cargo deny -f sarif check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed | tee scan.sarif
         # TODO: once everything's open sourced remove -Aunlicensed
 
