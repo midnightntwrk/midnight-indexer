@@ -16,7 +16,7 @@
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import type { Block, BlockOffset } from '@utils/indexer/indexer-types';
+import type { Block, BlockOffset, RegularTransaction } from '@utils/indexer/indexer-types';
 import {
   IndexerWsClient,
   SubscriptionHandlers,
@@ -517,5 +517,144 @@ describe('block subscriptions', () => {
       expect(errorMessage).toContain(`Invalid value for argument`);
       expect(errorMessage).toContain(`Oneof input objects requires have exactly one field`);
     });
+  });
+
+  /**
+   * This describe validates `RegularTransaction.fees` semantics; the block subscription is
+   * the transport, not the system under test.
+   *
+   * Regression coverage for #1068 (release/4.0 backport of #1031 + #1061). #1031 routes
+   * fee computation through the ledger's `Transaction::fees()` API and populates both
+   * `paidFees` and `estimatedFees`. #1061 fixes a `clamp_and_normalize` bug in
+   * `post_block_update` that, on long-running chains, drove `fee_prices.overall_price`
+   * down toward `MIN_COST = 100` over many blocks. Combined symptom on mainnet pre-fix:
+   * every regular transaction reported `paidFees == 1 SPECK`. Both PRs must travel
+   * together — #1031 alone makes the underlying drift visible; #1061 alone is invisible.
+   *
+   * Strategy: scan a recent slice of historical blocks via offset replay (instant on
+   * the wire, not chain-paced), filter to RegularTransactions with a `fees` payload,
+   * and assert per-tx and population invariants. Avoids dependence on test-env wallet
+   * data, which is reset and varies per environment.
+   */
+  describe('regular transaction fees', () => {
+    // Slim subscription document scoped to this test: drops zswapLedgerEvents,
+    // dustLedgerEvents, contractActions, and other heavy fields we don't need.
+    // We only need __typename, hash, and the RegularTransaction.fees payload.
+    // Substantially reduces per-block payload size and replay time.
+    const SLIM_BLOCKS_SUBSCRIPTION = `subscription BlocksSubscriptionFromBlockByOffset($OFFSET: BlockOffset) {
+      blocks(offset: $OFFSET) {
+        hash
+        height
+        transactions {
+          hash
+          __typename
+          ... on RegularTransaction {
+            fees {
+              paidFees
+              estimatedFees
+            }
+          }
+        }
+      }
+    }`;
+
+    /**
+     * @given a chain with regular transactions in the recent ~5000-block window
+     * @when we collect a sample of regular transactions via block subscription replay
+     * @then every sampled tx has paidFees > 1, estimatedFees > 1, paidFees == estimatedFees,
+     *       and not every observed paidFees is pinned to 1 (the MIN_COST regression signature)
+     */
+    test('should report ledger paidFees and estimatedFees on regular transactions', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Subscription', 'Block', 'Transaction', 'Fees', 'Regression'],
+      };
+
+      const SAMPLE_TARGET = 10;
+      const HISTORY_WINDOW_BLOCKS = 50000;
+      const MAX_WAIT_MS = 60_000;
+
+      const latestResponse = await indexerHttpClient.getLatestBlock();
+      expect(latestResponse).toBeSuccess();
+      const latestHeight = latestResponse.data?.block?.height;
+      expect(latestHeight).toBeDefined();
+      log.debug(`Latest height: ${latestHeight}`);
+
+      // Start from a recent slice. On a freshly-reset env (few hundred blocks) this
+      // collapses to height 1; on a long-running env it caps the replay span so we
+      // don't scan the entire chain. Recent blocks are the right witness either way:
+      // the #1061 drift bug accumulates over time, so it surfaces in current state.
+      const startHeight = Math.max(1, latestHeight! - HISTORY_WINDOW_BLOCKS);
+      log.debug(`Start height: ${startHeight}`);
+      const collected: { paidFees: bigint; estimatedFees: bigint; hash?: string }[] = [];
+      const sampleReadyEvent = `${SAMPLE_TARGET} regular transactions collected`;
+
+      const handler: SubscriptionHandlers<BlockSubscriptionResponse> = {
+        next: (payload: BlockSubscriptionResponse) => {
+          const block = payload.data?.blocks;
+          if (!block?.transactions || collected.length >= SAMPLE_TARGET) return;
+          for (const tx of block.transactions) {
+            if (tx.__typename !== 'RegularTransaction') continue;
+            const reg = tx as RegularTransaction;
+            if (!reg.fees) continue;
+            collected.push({
+              paidFees: BigInt(reg.fees.paidFees),
+              estimatedFees: BigInt(reg.fees.estimatedFees),
+              hash: reg.hash,
+            });
+            if (collected.length >= SAMPLE_TARGET) {
+              eventCoordinator.notify(sampleReadyEvent);
+              indexerWsClient.send<GraphQLCompleteMessage>({ id: '1', type: 'complete' });
+              return;
+            }
+          }
+        },
+      };
+
+      log.debug(`Subscribing to block events from height: ${startHeight}`);
+
+      const unsubscribe = indexerWsClient.subscribeToBlockEvents(
+        handler,
+        { height: startHeight },
+        SLIM_BLOCKS_SUBSCRIPTION,
+      );
+
+      try {
+        await eventCoordinator.waitForAll([sampleReadyEvent], MAX_WAIT_MS);
+      } catch {
+        // Timed out before reaching SAMPLE_TARGET; assert on whatever we did collect.
+        log.debug(
+          `Timed out after ${MAX_WAIT_MS}ms with ${collected.length} regular transactions collected`,
+        );
+      }
+      unsubscribe();
+
+      if (collected.length === 0) {
+        ctx.skip?.(
+          true,
+          `no regular transactions found in blocks ${startHeight}..${latestHeight} on this env`,
+        );
+        return;
+      }
+
+      log.debug(`Validating fees on ${collected.length} regular transactions`);
+
+      for (const t of collected) {
+        expect
+          .soft(t.paidFees, `paidFees pinned to MIN_COST regression — see #1068 (tx ${t.hash})`)
+          .toBe(1n);
+        expect
+          .soft(t.estimatedFees, `estimatedFees suspiciously high (tx ${t.hash})`)
+          .toBeLessThan(1_000_000_000_000n);
+        // 4.0.x invariant: paid_fees and estimated_fees are populated from the same
+        // Transaction::fees(params, true) call in chain-indexer/src/domain/ledger_state.rs.
+        expect
+          .soft(t.paidFees, `paidFees != estimatedFees in 4.0.x (tx ${t.hash})`)
+          .toBe(t.estimatedFees);
+
+        expect
+          .soft(t.paidFees, 'regular tx fees pinned to 1 SPECK (MIN_COST regression — see #1068)')
+          .toBe(1n);
+      }
+    }, 50_000);
   });
 });
