@@ -207,6 +207,36 @@ impl LedgerState {
         }
     }
 
+    /// Unpersist a previously-persisted ledger state by its serialized key, decrementing the
+    /// GC root count on the underlying arena node so it becomes eligible for garbage collection
+    /// on the next `gc()` pass. Each call should balance a prior `persist()` call for the same key.
+    pub fn unpersist(
+        key: &SerializedLedgerStateKey,
+        ledger_version: LedgerVersion,
+    ) -> Result<(), Error> {
+        match ledger_version {
+            LedgerVersion::V8 => {
+                let arena_key = TypedArenaKey::<
+                    LedgerStateV8<v1_1::LedgerDb>,
+                    <v1_1::LedgerDb as DB>::Hasher,
+                >::deserialize(&mut key.as_slice(), 0)
+                .map_err(|error| Error::Deserialize("TypedArenaKeyV8", error))?;
+
+                default_storage::<v1_1::LedgerDb>()
+                    .with_backend(|b| b.unpersist(arena_key.key.hash()));
+
+                Ok(())
+            }
+        }
+    }
+
+    /// Run a time-bounded mark-and-sweep garbage collection on the ledger DB.
+    /// Returns the number of nodes culled. The bound is observed best-effort:
+    /// gc() checks the budget between batches and stops when exceeded.
+    pub fn gc(bound: std::time::Duration) -> usize {
+        default_storage::<v1_1::LedgerDb>().with_backend(|b| b.gc(bound))
+    }
+
     /// Apply the given serialized regular transaction to this ledger state and return the
     /// transaction result as well as the created and spent unshielded UTXOs.
     #[trace]
