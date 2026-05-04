@@ -15,6 +15,7 @@ pub mod storage;
 
 mod api;
 mod block;
+pub mod bridge;
 mod contract_action;
 pub mod dust;
 mod ledger_event;
@@ -27,6 +28,7 @@ mod unshielded;
 
 pub use api::*;
 pub use block::*;
+pub use bridge::*;
 pub use contract_action::*;
 pub use dust::*;
 pub use ledger_event::*;

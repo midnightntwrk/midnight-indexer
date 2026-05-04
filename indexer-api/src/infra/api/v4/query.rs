@@ -12,12 +12,20 @@
 // limitations under the License.
 
 use crate::{
-    domain::{LedgerStateCacheError, storage::Storage},
+    domain::{
+        LedgerStateCacheError,
+        bridge::TreasuryReason,
+        storage::{Storage, bridge::BridgeEventFilter},
+    },
     infra::api::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
             CardanoNetworkId, CardanoRewardAddress, HexEncoded,
             block::{Block, BlockOffset},
+            bridge::{
+                BridgeBalance, BridgeClaim, BridgeEvent, BridgeEventVariant, BridgePoolSummary,
+                BridgeTreasuryReason,
+            },
             contract_action::{ContractAction, ContractActionOffset},
             dust::DustGenerationStatus,
             dust_generations::DustGenerations,
@@ -32,6 +40,7 @@ use crate::{
         },
     },
 };
+use indexer_common::domain::UnshieldedAddress;
 use async_graphql::{Context, Object};
 use fastrace::trace;
 use indexer_common::domain::{LedgerVersion, ledger};
@@ -777,6 +786,200 @@ where
             .map_err_into_server_error(|| "get stake distribution")?;
 
         Ok(shares.into_iter().map(Into::into).collect())
+    }
+
+    /// List c2m-bridge pallet events with optional filters.
+    #[trace]
+    async fn bridge_events(
+        &self,
+        cx: &Context<'_>,
+        recipient: Option<HexEncoded>,
+        variant: Option<BridgeEventVariant>,
+        block_height_from: Option<u64>,
+        block_height_to: Option<u64>,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> ApiResult<Vec<BridgeEvent>> {
+        let storage = cx.get_storage::<S>();
+        let recipient = recipient
+            .map(|h| h.hex_decode::<UnshieldedAddress>())
+            .transpose()
+            .map_err_into_client_error(|| "invalid recipient address")?;
+
+        let filter = BridgeEventFilter {
+            variant: variant.map(Into::into),
+            recipient,
+            block_height_from,
+            block_height_to,
+            id_from: None,
+        };
+        let events = storage
+            .get_bridge_events(&filter, offset.unwrap_or(0), limit.unwrap_or(100).min(1_000))
+            .await
+            .map_err_into_server_error(|| "get bridge events")?;
+
+        Ok(events.into_iter().map(Into::into).collect())
+    }
+
+    /// List c2m-bridge claims (`ClaimRewardsTransaction` with `ClaimKind::CardanoBridge`).
+    #[trace]
+    async fn bridge_claims(
+        &self,
+        cx: &Context<'_>,
+        recipient: Option<HexEncoded>,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> ApiResult<Vec<BridgeClaim>> {
+        let storage = cx.get_storage::<S>();
+        let recipient = recipient
+            .map(|h| h.hex_decode::<UnshieldedAddress>())
+            .transpose()
+            .map_err_into_client_error(|| "invalid recipient address")?;
+
+        let claims = storage
+            .get_bridge_claims(recipient, offset.unwrap_or(0), limit.unwrap_or(100).min(1_000))
+            .await
+            .map_err_into_server_error(|| "get bridge claims")?;
+
+        Ok(claims.into_iter().map(Into::into).collect())
+    }
+
+    /// Get the c2m-bridge balance summary (deposited, claimed, balance) for an address.
+    #[trace]
+    async fn bridge_balance(
+        &self,
+        cx: &Context<'_>,
+        address: HexEncoded,
+    ) -> ApiResult<BridgeBalance> {
+        let storage = cx.get_storage::<S>();
+        let address = address
+            .hex_decode::<UnshieldedAddress>()
+            .map_err_into_client_error(|| "invalid recipient address")?;
+
+        let balance = storage
+            .get_bridge_balance(address)
+            .await
+            .map_err_into_server_error(|| "get bridge balance")?;
+
+        Ok(balance.into())
+    }
+
+    /// Convenience query for a recipient's deposit history. By default returns only successful
+    /// `UserTransfer` events; pass `includeUnapproved: true` to also include `UnapprovedTransfer`.
+    #[trace]
+    async fn bridge_deposits(
+        &self,
+        cx: &Context<'_>,
+        recipient: HexEncoded,
+        include_unapproved: Option<bool>,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> ApiResult<Vec<BridgeEvent>> {
+        let storage = cx.get_storage::<S>();
+        let recipient = recipient
+            .hex_decode::<UnshieldedAddress>()
+            .map_err_into_client_error(|| "invalid recipient address")?;
+
+        let user_filter = BridgeEventFilter {
+            variant: Some(BridgeEventVariant::UserTransfer.into()),
+            recipient: Some(recipient),
+            ..Default::default()
+        };
+        let mut events = storage
+            .get_bridge_events(
+                &user_filter,
+                offset.unwrap_or(0),
+                limit.unwrap_or(100).min(1_000),
+            )
+            .await
+            .map_err_into_server_error(|| "get bridge deposits (user)")?;
+
+        if include_unapproved.unwrap_or(false) {
+            let unapproved_filter = BridgeEventFilter {
+                variant: Some(BridgeEventVariant::UnapprovedTransfer.into()),
+                recipient: Some(recipient),
+                ..Default::default()
+            };
+            let mut unapproved = storage
+                .get_bridge_events(
+                    &unapproved_filter,
+                    offset.unwrap_or(0),
+                    limit.unwrap_or(100).min(1_000),
+                )
+                .await
+                .map_err_into_server_error(|| "get bridge deposits (unapproved)")?;
+            events.append(&mut unapproved);
+        }
+
+        Ok(events.into_iter().map(Into::into).collect())
+    }
+
+    /// List Reserve top-up events (ReserveTransfer), optionally bounded by block height.
+    #[trace]
+    async fn bridge_reserve_inflows(
+        &self,
+        cx: &Context<'_>,
+        block_height_from: Option<u64>,
+        block_height_to: Option<u64>,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> ApiResult<Vec<BridgeEvent>> {
+        let storage = cx.get_storage::<S>();
+        let events = storage
+            .get_bridge_reserve_inflows(
+                block_height_from,
+                block_height_to,
+                offset.unwrap_or(0),
+                limit.unwrap_or(100).min(1_000),
+            )
+            .await
+            .map_err_into_server_error(|| "get bridge reserve inflows")?;
+
+        Ok(events.into_iter().map(Into::into).collect())
+    }
+
+    /// List treasury-redirected events (Invalid, Unapproved, SubminimalFlush), optionally
+    /// filtered by reason and block range.
+    #[trace]
+    async fn bridge_treasury_inflows(
+        &self,
+        cx: &Context<'_>,
+        reason: Option<BridgeTreasuryReason>,
+        block_height_from: Option<u64>,
+        block_height_to: Option<u64>,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> ApiResult<Vec<BridgeEvent>> {
+        let storage = cx.get_storage::<S>();
+        let reason: Option<TreasuryReason> = reason.map(Into::into);
+        let events = storage
+            .get_bridge_treasury_inflows(
+                reason,
+                block_height_from,
+                block_height_to,
+                offset.unwrap_or(0),
+                limit.unwrap_or(100).min(1_000),
+            )
+            .await
+            .map_err_into_server_error(|| "get bridge treasury inflows")?;
+
+        Ok(events.into_iter().map(Into::into).collect())
+    }
+
+    /// Aggregate snapshot of bridge inflows to protocol pools (Reserve and Treasury).
+    #[trace]
+    async fn bridge_pool_summary(
+        &self,
+        cx: &Context<'_>,
+        at_block: Option<u64>,
+    ) -> ApiResult<BridgePoolSummary> {
+        let storage = cx.get_storage::<S>();
+        let summary = storage
+            .get_bridge_pool_summary(at_block)
+            .await
+            .map_err_into_server_error(|| "get bridge pool summary")?;
+
+        Ok(summary.into())
     }
 }
 

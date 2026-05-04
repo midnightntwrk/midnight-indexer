@@ -12,6 +12,7 @@
 // limitations under the License.
 
 pub mod block;
+pub mod bridge;
 pub mod contract_action;
 pub mod dataloader;
 pub mod dust;
