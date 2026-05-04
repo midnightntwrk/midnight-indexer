@@ -21,8 +21,7 @@ use indexer_common::{
     domain::{
         BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
         LedgerEventAttributes, ProtocolVersion, SerializedLedgerStateKey, TermsAndConditionsHash,
-        UnshieldedUtxo,
-        bridge::BridgePalletEvent,
+        UnshieldedUtxo, bridge::BridgePalletEvent,
     },
     infra::sqlx::U128BeBytes,
 };

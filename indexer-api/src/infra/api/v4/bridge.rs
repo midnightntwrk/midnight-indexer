@@ -290,7 +290,9 @@ impl From<domain_bridge::BridgePoolSummary> for BridgePoolSummary {
             .filter_map(|agg| {
                 let reason = match agg.reason {
                     BridgePalletEventVariant::InvalidTransfer => BridgeTreasuryReason::Invalid,
-                    BridgePalletEventVariant::UnapprovedTransfer => BridgeTreasuryReason::Unapproved,
+                    BridgePalletEventVariant::UnapprovedTransfer => {
+                        BridgeTreasuryReason::Unapproved
+                    }
                     BridgePalletEventVariant::SubminimalFlushTransfer => {
                         BridgeTreasuryReason::SubminimalFlush
                     }

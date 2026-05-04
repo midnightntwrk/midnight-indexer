@@ -259,7 +259,6 @@ pub async fn make_block_details(
             //     }
             // }
             // ```
-
             _ => {}
         }
     }

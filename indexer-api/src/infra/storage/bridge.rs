@@ -14,8 +14,8 @@
 use crate::{
     domain::{
         bridge::{
-            BridgeBalance, BridgeClaim, BridgeEvent, BridgePoolSummary,
-            BridgeTreasuryAggregate, TreasuryReason,
+            BridgeBalance, BridgeClaim, BridgeEvent, BridgePoolSummary, BridgeTreasuryAggregate,
+            TreasuryReason,
         },
         storage::bridge::{BridgeEventFilter, BridgeStorage},
     },
@@ -65,8 +65,8 @@ fn map_event_row(row: &<Db as sqlx::Database>::Row) -> Result<BridgeEvent, sqlx:
     let mc_tx_hash = mc_tx_hash
         .map(|b| McTxHash::try_from(b).map_err(|e| sqlx::Error::Decode(Box::new(e))))
         .transpose()?;
-    let midnight_tx_hash = MidnightTxHash::try_from(midnight_tx_hash)
-        .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+    let midnight_tx_hash =
+        MidnightTxHash::try_from(midnight_tx_hash).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
     let recipient = recipient
         .map(|b| BridgeRecipient::new(b).map_err(|e| sqlx::Error::Decode(Box::new(e))))
         .transpose()?;
@@ -84,10 +84,7 @@ fn map_event_row(row: &<Db as sqlx::Database>::Row) -> Result<BridgeEvent, sqlx:
     })
 }
 
-fn push_filter<'a>(
-    builder: &mut QueryBuilder<'a, Db>,
-    filter: &'a BridgeEventFilter,
-) -> bool {
+fn push_filter<'a>(builder: &mut QueryBuilder<'a, Db>, filter: &'a BridgeEventFilter) -> bool {
     let mut started = false;
     let push_clause = |b: &mut QueryBuilder<'a, Db>, started: &mut bool| {
         if !*started {
@@ -104,7 +101,9 @@ fn push_filter<'a>(
     }
     if let Some(recipient) = &filter.recipient {
         push_clause(builder, &mut started);
-        builder.push("bpe.recipient = ").push_bind(recipient.as_ref().to_vec());
+        builder
+            .push("bpe.recipient = ")
+            .push_bind(recipient.as_ref().to_vec());
     }
     if let Some(from) = filter.block_height_from {
         push_clause(builder, &mut started);
@@ -156,7 +155,9 @@ impl BridgeStorage for Storage {
              JOIN blocks b ON b.id = t.block_id ",
         );
         if let Some(addr) = recipient {
-            builder.push(" WHERE bc.recipient = ").push_bind(addr.as_ref().to_vec());
+            builder
+                .push(" WHERE bc.recipient = ")
+                .push_bind(addr.as_ref().to_vec());
         }
         builder
             .push(" ORDER BY bc.id LIMIT ")
@@ -338,11 +339,12 @@ impl BridgeStorage for Storage {
             JOIN blocks b ON b.id = bpe.block_id
             WHERE b.height <= $1
         "};
-        let last_event_block_height: Option<i64> = sqlx::query_as::<_, (Option<i64>,)>(last_height_q)
-            .bind(bound)
-            .fetch_one(&*self.pool)
-            .await?
-            .0;
+        let last_event_block_height: Option<i64> =
+            sqlx::query_as::<_, (Option<i64>,)>(last_height_q)
+                .bind(bound)
+                .fetch_one(&*self.pool)
+                .await?
+                .0;
 
         Ok(BridgePoolSummary {
             reserve_total,

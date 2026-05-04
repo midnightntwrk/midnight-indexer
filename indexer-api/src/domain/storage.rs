@@ -29,10 +29,9 @@ pub mod wallet;
 
 use crate::domain::storage::{
     block::BlockStorage, bridge::BridgeStorage, contract_action::ContractActionStorage,
-    dust::DustStorage, dust_generations::DustGenerationsStorage,
-    ledger_events::LedgerEventStorage, ledger_state::LedgerStateStorage,
-    shielded_nullifiers::ShieldedNullifiersStorage, spo::SpoStorage,
-    system_parameters::SystemParametersStorage, transaction::TransactionStorage,
+    dust::DustStorage, dust_generations::DustGenerationsStorage, ledger_events::LedgerEventStorage,
+    ledger_state::LedgerStateStorage, shielded_nullifiers::ShieldedNullifiersStorage,
+    spo::SpoStorage, system_parameters::SystemParametersStorage, transaction::TransactionStorage,
     unshielded::UnshieldedUtxoStorage, wallet::WalletStorage,
 };
 

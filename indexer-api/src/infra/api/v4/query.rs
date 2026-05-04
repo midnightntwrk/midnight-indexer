@@ -40,10 +40,9 @@ use crate::{
         },
     },
 };
-use indexer_common::domain::UnshieldedAddress;
 use async_graphql::{Context, Object};
 use fastrace::trace;
-use indexer_common::domain::{LedgerVersion, ledger};
+use indexer_common::domain::{LedgerVersion, UnshieldedAddress, ledger};
 use std::marker::PhantomData;
 
 const DEFAULT_PERFORMANCE_LIMIT: i64 = 20;
@@ -815,7 +814,11 @@ where
             id_from: None,
         };
         let events = storage
-            .get_bridge_events(&filter, offset.unwrap_or(0), limit.unwrap_or(100).min(1_000))
+            .get_bridge_events(
+                &filter,
+                offset.unwrap_or(0),
+                limit.unwrap_or(100).min(1_000),
+            )
             .await
             .map_err_into_server_error(|| "get bridge events")?;
 
@@ -838,7 +841,11 @@ where
             .map_err_into_client_error(|| "invalid recipient address")?;
 
         let claims = storage
-            .get_bridge_claims(recipient, offset.unwrap_or(0), limit.unwrap_or(100).min(1_000))
+            .get_bridge_claims(
+                recipient,
+                offset.unwrap_or(0),
+                limit.unwrap_or(100).min(1_000),
+            )
             .await
             .map_err_into_server_error(|| "get bridge claims")?;
 

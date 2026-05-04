@@ -12,7 +12,10 @@
 // limitations under the License.
 
 use crate::{
-    domain::storage::{Storage, bridge::BridgeEventFilter},
+    domain::{
+        bridge as domain_bridge,
+        storage::{Storage, bridge::BridgeEventFilter},
+    },
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
         v4::{
@@ -24,7 +27,6 @@ use crate::{
 use async_graphql::{Context, SimpleObject, Subscription};
 use async_stream::try_stream;
 use futures::{Stream, TryStreamExt};
-use crate::domain::bridge as domain_bridge;
 use indexer_common::domain::{
     BridgeEventIndexed, Subscriber, UnshieldedAddress,
     bridge::{BridgePalletEvent, BridgePalletEventVariant},
@@ -77,7 +79,10 @@ pub struct BridgeEventsSubscription<S, B> {
 
 impl<S, B> Default for BridgeEventsSubscription<S, B> {
     fn default() -> Self {
-        Self { _s: PhantomData, _b: PhantomData }
+        Self {
+            _s: PhantomData,
+            _b: PhantomData,
+        }
     }
 }
 

@@ -12,14 +12,10 @@
 // limitations under the License.
 
 use crate::domain::{
-    bridge::{
-        BridgeBalance, BridgeClaim, BridgeEvent, BridgePoolSummary, TreasuryReason,
-    },
+    bridge::{BridgeBalance, BridgeClaim, BridgeEvent, BridgePoolSummary, TreasuryReason},
     storage::NoopStorage,
 };
-use indexer_common::domain::{
-    UnshieldedAddress, bridge::BridgePalletEventVariant,
-};
+use indexer_common::domain::{UnshieldedAddress, bridge::BridgePalletEventVariant};
 
 /// Filters for `get_bridge_events`. All fields combined with AND.
 #[derive(Debug, Default, Clone)]
@@ -108,7 +104,10 @@ impl BridgeStorage for NoopStorage {
         &self,
         recipient: UnshieldedAddress,
     ) -> Result<BridgeBalance, sqlx::Error> {
-        Ok(BridgeBalance { deposited: 0, claimed: 0 })
+        Ok(BridgeBalance {
+            deposited: 0,
+            claimed: 0,
+        })
     }
 
     async fn get_bridge_reserve_inflows(

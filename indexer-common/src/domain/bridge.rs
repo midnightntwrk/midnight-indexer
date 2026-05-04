@@ -97,7 +97,8 @@ pub enum BridgePalletEvent {
     },
 
     /// User deposit whose Cardano tx hash was not in `ApprovedTransactions` at observation time.
-    /// Funds redirected to treasury. The `recipient` is the would-be recipient parsed from metadata.
+    /// Funds redirected to treasury. The `recipient` is the would-be recipient parsed from
+    /// metadata.
     UnapprovedTransfer {
         mc_tx_hash: McTxHash,
         amount: u64,
@@ -105,8 +106,8 @@ pub enum BridgePalletEvent {
         midnight_tx_hash: MidnightTxHash,
     },
 
-    /// Aggregated subminimum transfers flushed to treasury when the accumulator threshold is reached.
-    /// `count` is the number of subminimum Cardano txs that contributed to this flush.
+    /// Aggregated subminimum transfers flushed to treasury when the accumulator threshold is
+    /// reached. `count` is the number of subminimum Cardano txs that contributed to this flush.
     SubminimalFlushTransfer {
         amount: u64,
         count: u32,
@@ -121,7 +122,9 @@ impl BridgePalletEvent {
             Self::ReserveTransfer { .. } => BridgePalletEventVariant::ReserveTransfer,
             Self::InvalidTransfer { .. } => BridgePalletEventVariant::InvalidTransfer,
             Self::UnapprovedTransfer { .. } => BridgePalletEventVariant::UnapprovedTransfer,
-            Self::SubminimalFlushTransfer { .. } => BridgePalletEventVariant::SubminimalFlushTransfer,
+            Self::SubminimalFlushTransfer { .. } => {
+                BridgePalletEventVariant::SubminimalFlushTransfer
+            }
         }
     }
 
@@ -137,7 +140,8 @@ impl BridgePalletEvent {
         }
     }
 
-    /// Returns the recipient address for variants that carry one (UserTransfer, UnapprovedTransfer).
+    /// Returns the recipient address for variants that carry one (UserTransfer,
+    /// UnapprovedTransfer).
     pub fn recipient(&self) -> Option<&BridgeRecipient> {
         match self {
             Self::UserTransfer { recipient, .. } | Self::UnapprovedTransfer { recipient, .. } => {
@@ -159,11 +163,21 @@ impl BridgePalletEvent {
 
     pub fn midnight_tx_hash(&self) -> &MidnightTxHash {
         match self {
-            Self::UserTransfer { midnight_tx_hash, .. }
-            | Self::ReserveTransfer { midnight_tx_hash, .. }
-            | Self::InvalidTransfer { midnight_tx_hash, .. }
-            | Self::UnapprovedTransfer { midnight_tx_hash, .. }
-            | Self::SubminimalFlushTransfer { midnight_tx_hash, .. } => midnight_tx_hash,
+            Self::UserTransfer {
+                midnight_tx_hash, ..
+            }
+            | Self::ReserveTransfer {
+                midnight_tx_hash, ..
+            }
+            | Self::InvalidTransfer {
+                midnight_tx_hash, ..
+            }
+            | Self::UnapprovedTransfer {
+                midnight_tx_hash, ..
+            }
+            | Self::SubminimalFlushTransfer {
+                midnight_tx_hash, ..
+            } => midnight_tx_hash,
         }
     }
 }
