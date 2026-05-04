@@ -22,6 +22,7 @@ use indexer_common::{
         BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
         LedgerEventAttributes, ProtocolVersion, SerializedLedgerStateKey, TermsAndConditionsHash,
         UnshieldedUtxo,
+        bridge::BridgePalletEvent,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -301,6 +302,8 @@ async fn save_block(
     let max_transaction_id = save_transactions(transactions, block_id, tx).await?;
 
     save_dust_registration_events(dust_registration_events, block_id, block.timestamp, tx).await?;
+
+    save_bridge_pallet_events(&block.bridge_pallet_events, block_id, tx).await?;
 
     Ok(max_transaction_id)
 }
@@ -1068,6 +1071,78 @@ async fn save_system_parameters_change(
             .bind(change.timestamp as i64)
             .bind(terms_and_conditions.hash.as_ref())
             .bind(&terms_and_conditions.url)
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    Ok(())
+}
+
+/// Save a bridge claim parsed from a regular `ClaimRewardsTransaction` with
+/// `ClaimKind::CardanoBridge`.
+///
+/// Currently called only when the chain-indexer detects a CardanoBridge claim during
+/// regular-transaction parsing; that detection path is TODO until the wallet-side claim flow
+/// stabilises (see ticket #940).
+#[allow(dead_code)]
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn save_bridge_claim(
+    transaction_id: i64,
+    recipient: &[u8],
+    amount: u128,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO bridge_claims (transaction_id, recipient, amount)
+        VALUES ($1, $2, $3)
+    "};
+
+    sqlx::query(query)
+        .bind(transaction_id)
+        .bind(recipient)
+        .bind(U128BeBytes::from(amount))
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace(properties = { "block_id": "{block_id}" })]
+async fn save_bridge_pallet_events(
+    events: &[BridgePalletEvent],
+    block_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    for event in events {
+        let query = indoc! {"
+            INSERT INTO bridge_pallet_events (
+                block_id,
+                transaction_id,
+                variant,
+                mc_tx_hash,
+                amount,
+                recipient,
+                midnight_tx_hash,
+                count
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "};
+
+        let amount_bytes = event.amount().to_be_bytes().to_vec();
+        let count_value = match event {
+            BridgePalletEvent::SubminimalFlushTransfer { count, .. } => Some(*count as i32),
+            _ => None,
+        };
+
+        sqlx::query(query)
+            .bind(block_id)
+            .bind::<Option<i64>>(None)
+            .bind(event.variant())
+            .bind(event.mc_tx_hash().map(|h| h.as_ref()))
+            .bind(amount_bytes)
+            .bind(event.recipient().map(|r| r.as_bytes()))
+            .bind(event.midnight_tx_hash().as_ref())
+            .bind(count_value)
             .execute(&mut **tx)
             .await?;
     }

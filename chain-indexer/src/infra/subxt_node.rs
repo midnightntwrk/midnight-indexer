@@ -239,6 +239,9 @@ impl SubxtNode {
             ledger_state_root,
             transactions,
             dust_registration_events,
+            // TODO(bridge): populate from c2m-bridge pallet events once metadata is regenerated
+            // for the c-to-m-subminimal-transfers-accumulation branch.
+            bridge_pallet_events: Vec::new(),
         };
 
         debug!(
