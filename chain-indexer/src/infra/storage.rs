@@ -1136,21 +1136,23 @@ async fn save_bridge_pallet_events(
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "};
 
-        let amount_bytes = event.amount().to_be_bytes().to_vec();
-        let count_value = match event {
+        let amount = event.amount().to_be_bytes().to_vec();
+        let count = match event {
             BridgePalletEvent::SubminimalFlushTransfer { count, .. } => Some(*count as i32),
             _ => None,
         };
+        // System tx linkage is filled in once event-to-tx correlation lands; see ticket #940.
+        let transaction_id: Option<i64> = None;
 
         sqlx::query(query)
             .bind(block_id)
-            .bind::<Option<i64>>(None)
+            .bind(transaction_id)
             .bind(event.variant())
             .bind(event.mc_tx_hash().map(|h| h.as_ref()))
-            .bind(amount_bytes)
+            .bind(amount)
             .bind(event.recipient().map(|r| r.as_bytes()))
             .bind(event.midnight_tx_hash().as_ref())
-            .bind(count_value)
+            .bind(count)
             .execute(&mut **tx)
             .await?;
     }

@@ -167,6 +167,15 @@ pub async fn make_block_details(
             // pallet (index 33) appears in `runtime_1_0_0::Event`. Until then this match arm is
             // commented out because the type `Event::C2MBridge` does not exist in metadata.
             //
+            // NOTE: the exact `.0` chain on `mc_tx_hash`, `recipient`, and `midnight_tx_hash`
+            // depends on how subxt unwraps the upstream types
+            // (`sidechain_domain::McTxHash`, `midnight_primitives::BridgeRecipient`,
+            //  `pallet_c2m_bridge::MidnightTxHash`). The lines below mirror the dust pattern
+            // (`event.dust_public_key.0.0.into()`); when uncommenting, verify against the
+            // regenerated metadata, in particular whether `recipient.0.0` is already
+            // `Vec<u8>` (drop the trailing `.into_inner()`) or a `BoundedVec` wrapper
+            // (keep `.into_inner()`).
+            //
             // Matching shape (see indexer-common::domain::bridge::BridgePalletEvent):
             //   UserTransfer            { mc_tx_hash, amount, recipient, midnight_tx_hash }
             //   ReserveTransfer         { mc_tx_hash, amount, midnight_tx_hash }

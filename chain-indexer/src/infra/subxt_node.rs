@@ -240,13 +240,13 @@ impl SubxtNode {
             transactions,
             dust_registration_events,
             // TODO(bridge): once metadata regenerates for the
-            // `c-to-m-subminimal-transfers-accumulation` branch, replace `Vec::new()` with the
-            // commented line below and uncomment the supporting code in
+            // `c-to-m-subminimal-transfers-accumulation` branch, replace `Default::default()`
+            // with the commented line below and uncomment the supporting code in
             // `chain-indexer/src/infra/subxt_node/runtimes.rs` (BlockDetails field) and
             // `chain-indexer/src/infra/subxt_node/runtimes/v1_0_0.rs` (decoding loop).
             //
             // bridge_pallet_events: block_details.bridge_pallet_events,
-            bridge_pallet_events: Vec::new(),
+            bridge_pallet_events: Default::default(),
         };
 
         debug!(
