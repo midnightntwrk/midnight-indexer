@@ -89,6 +89,13 @@ pub async fn make_block_details(
 
     let mut dust_registration_events = vec![];
     let mut system_transactions_from_events = vec![];
+    // TODO(bridge): uncomment alongside the C2MBridge match arm below and the
+    // `bridge_pallet_events` field in `BlockDetails` once the
+    // `c-to-m-subminimal-transfers-accumulation` branch lands.
+    //
+    // let mut bridge_pallet_events: Vec<
+    //     indexer_common::domain::bridge::BridgePalletEvent,
+    // > = vec![];
 
     let events = block
         .events()
@@ -153,6 +160,97 @@ pub async fn make_block_details(
                 _ => {}
             },
 
+            // c2m-bridge pallet events.
+            //
+            // The decoding block below is the intended shape once the runtime metadata for the
+            // `c-to-m-subminimal-transfers-accumulation` branch is regenerated and the C2MBridge
+            // pallet (index 33) appears in `runtime_1_0_0::Event`. Until then this match arm is
+            // commented out because the type `Event::C2MBridge` does not exist in metadata.
+            //
+            // Matching shape (see indexer-common::domain::bridge::BridgePalletEvent):
+            //   UserTransfer            { mc_tx_hash, amount, recipient, midnight_tx_hash }
+            //   ReserveTransfer         { mc_tx_hash, amount, midnight_tx_hash }
+            //   InvalidTransfer         { mc_tx_hash, amount, midnight_tx_hash }
+            //   UnapprovedTransfer      { mc_tx_hash, amount, recipient, midnight_tx_hash }
+            //   SubminimalFlushTransfer { amount, count, midnight_tx_hash }
+            //
+            // ```rust
+            // Event::C2MBridge(bridge_event) => {
+            //     use super::runtime_1_0_0::runtime_types::pallet_c2m_bridge::pallet::Event
+            //         as C2MBridgeEvent;
+            //     use indexer_common::domain::bridge::{
+            //         BridgePalletEvent, BridgeRecipient,
+            //     };
+            //
+            //     match bridge_event {
+            //         C2MBridgeEvent::UserTransfer {
+            //             mc_tx_hash,
+            //             amount,
+            //             recipient,
+            //             midnight_tx_hash,
+            //         } => {
+            //             let recipient = BridgeRecipient::new(recipient.0.0.into_inner())
+            //                 .map_err(|error| SubxtNodeError::DecodeEvent(error.into()))?;
+            //             bridge_pallet_events.push(BridgePalletEvent::UserTransfer {
+            //                 mc_tx_hash: mc_tx_hash.0.into(),
+            //                 amount,
+            //                 recipient,
+            //                 midnight_tx_hash: midnight_tx_hash.into(),
+            //             });
+            //         }
+            //         C2MBridgeEvent::ReserveTransfer {
+            //             mc_tx_hash,
+            //             amount,
+            //             midnight_tx_hash,
+            //         } => {
+            //             bridge_pallet_events.push(BridgePalletEvent::ReserveTransfer {
+            //                 mc_tx_hash: mc_tx_hash.0.into(),
+            //                 amount,
+            //                 midnight_tx_hash: midnight_tx_hash.into(),
+            //             });
+            //         }
+            //         C2MBridgeEvent::InvalidTransfer {
+            //             mc_tx_hash,
+            //             amount,
+            //             midnight_tx_hash,
+            //         } => {
+            //             bridge_pallet_events.push(BridgePalletEvent::InvalidTransfer {
+            //                 mc_tx_hash: mc_tx_hash.0.into(),
+            //                 amount,
+            //                 midnight_tx_hash: midnight_tx_hash.into(),
+            //             });
+            //         }
+            //         C2MBridgeEvent::UnapprovedTransfer {
+            //             mc_tx_hash,
+            //             amount,
+            //             recipient,
+            //             midnight_tx_hash,
+            //         } => {
+            //             let recipient = BridgeRecipient::new(recipient.0.0.into_inner())
+            //                 .map_err(|error| SubxtNodeError::DecodeEvent(error.into()))?;
+            //             bridge_pallet_events.push(BridgePalletEvent::UnapprovedTransfer {
+            //                 mc_tx_hash: mc_tx_hash.0.into(),
+            //                 amount,
+            //                 recipient,
+            //                 midnight_tx_hash: midnight_tx_hash.into(),
+            //             });
+            //         }
+            //         C2MBridgeEvent::SubminimalFlushTransfer {
+            //             amount,
+            //             count,
+            //             midnight_tx_hash,
+            //         } => {
+            //             bridge_pallet_events.push(BridgePalletEvent::SubminimalFlushTransfer {
+            //                 amount,
+            //                 count,
+            //                 midnight_tx_hash: midnight_tx_hash.into(),
+            //             });
+            //         }
+            //         _ => {}
+            //     }
+            // }
+            // ```
+
             _ => {}
         }
     }
@@ -166,6 +264,9 @@ pub async fn make_block_details(
         timestamp,
         transactions,
         dust_registration_events,
+        // TODO(bridge): uncomment alongside the BlockDetails field in `runtimes.rs`.
+        //
+        // bridge_pallet_events,
     })
 }
 

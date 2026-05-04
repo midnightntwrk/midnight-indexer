@@ -99,6 +99,15 @@ pub struct RegularTransaction {
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     #[debug(skip)]
     pub ledger_events: Vec<LedgerEvent>,
+    // TODO(bridge): populated when the underlying transaction is a
+    // `TransactionV8::ClaimRewards(claim)` with `claim.kind == ClaimKind::CardanoBridge`.
+    // The detection lives in indexer-common's apply path
+    // (`indexer-common/src/domain/ledger/ledger_state.rs`, near the existing ClaimRewards arm).
+    // Uncomment alongside the indexer-common change and the corresponding
+    // `save_bridge_claim` call in `chain-indexer/src/infra/storage.rs::save_regular_transaction`.
+    //
+    // #[debug(skip)]
+    // pub bridge_claim: Option<indexer_common::domain::bridge::BridgeClaim>,
 }
 
 impl From<node::RegularTransaction> for RegularTransaction {
@@ -122,6 +131,9 @@ impl From<node::RegularTransaction> for RegularTransaction {
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
             ledger_events: Default::default(),
+            // TODO(bridge): see RegularTransaction::bridge_claim above.
+            //
+            // bridge_claim: None,
         }
     }
 }
