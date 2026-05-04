@@ -790,6 +790,7 @@ where
 
     /// List c2m-bridge pallet events with optional filters.
     #[trace]
+    #[allow(clippy::too_many_arguments)]
     async fn bridge_events(
         &self,
         cx: &Context<'_>,
@@ -941,6 +942,7 @@ where
     /// List treasury-redirected events (Invalid, Unapproved, SubminimalFlush), optionally
     /// filtered by reason and block range.
     #[trace]
+    #[allow(clippy::too_many_arguments)]
     async fn bridge_treasury_inflows(
         &self,
         cx: &Context<'_>,
