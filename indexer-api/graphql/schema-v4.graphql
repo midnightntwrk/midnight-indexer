@@ -146,6 +146,17 @@ type BridgePoolSummary {
 }
 
 """
+Pair of latest bridge event and refreshed pool summary, emitted by `bridgePoolUpdates`.
+"""
+type BridgePoolUpdate {
+	"""
+	The triggering event, or None for the initial snapshot on subscribe.
+	"""
+	newEvent: BridgeEvent
+	pool: BridgePoolSummary!
+}
+
+"""
 Reserve top-up. NIGHT credited to the protocol Reserve pool.
 """
 type BridgeReserveTransfer implements BridgeEvent {
@@ -1328,6 +1339,12 @@ type Subscription {
 	phases.
 	"""
 	bridgeEvents(from: Int, recipient: HexEncoded, variant: BridgeEventVariant): BridgeEvent!
+	"""
+	Subscribe to bridge pool updates. Emits a snapshot of the pool summary alongside each
+	pool-affecting event (Reserve, Invalid, Unapproved, SubminimalFlush). Useful for
+	observability dashboards.
+	"""
+	bridgePoolUpdates: BridgePoolUpdate!
 	"""
 	Subscribe to a recipient's bridge balance. Emits the current balance on subscribe and
 	re-emits whenever a relevant bridge event indexes.

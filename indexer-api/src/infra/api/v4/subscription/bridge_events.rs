@@ -17,17 +17,58 @@ use crate::{
         ApiError, ApiResult, ContextExt, ResultExt,
         v4::{
             HexEncoded,
-            bridge::{BridgeBalance, BridgeEvent, BridgeEventVariant},
+            bridge::{BridgeBalance, BridgeEvent, BridgeEventVariant, BridgePoolSummary},
         },
     },
 };
-use async_graphql::{Context, Subscription};
+use async_graphql::{Context, SimpleObject, Subscription};
 use async_stream::try_stream;
 use futures::{Stream, TryStreamExt};
-use indexer_common::domain::{BridgeEventIndexed, Subscriber, UnshieldedAddress};
+use crate::domain::bridge as domain_bridge;
+use indexer_common::domain::{
+    BridgeEventIndexed, Subscriber, UnshieldedAddress,
+    bridge::{BridgePalletEvent, BridgePalletEventVariant},
+};
 use std::{future::ready, marker::PhantomData, pin::pin};
 
 const BACKFILL_BATCH: u64 = 100;
+
+/// Pair of latest bridge event and refreshed pool summary, emitted by `bridgePoolUpdates`.
+#[derive(Debug, Clone, SimpleObject)]
+pub struct BridgePoolUpdate {
+    /// The triggering event, or None for the initial snapshot on subscribe.
+    pub new_event: Option<BridgeEvent>,
+    pub pool: BridgePoolSummary,
+}
+
+/// Synthesise a `domain_bridge::BridgeEvent` from a pub-sub message so the subscription can emit
+/// the same `BridgeEvent` interface used elsewhere. The `id`/`block_height`/`transaction_id`
+/// fields are zero-valued when sourced from pub-sub since the message carries the pallet-event
+/// payload but not the persisted-row identifiers; consumers needing them should read from the
+/// live tail of `bridgeEvents` instead.
+fn synthesise_event(msg: BridgeEventIndexed) -> domain_bridge::BridgeEvent {
+    let variant = msg.event.variant();
+    let mc_tx_hash = msg.event.mc_tx_hash().cloned();
+    let amount = msg.event.amount();
+    let recipient = msg.event.recipient().cloned();
+    let midnight_tx_hash = *msg.event.midnight_tx_hash();
+    let count = match msg.event {
+        BridgePalletEvent::SubminimalFlushTransfer { count, .. } => Some(count),
+        _ => None,
+    };
+    let _ = BridgePalletEventVariant::UserTransfer;
+    domain_bridge::BridgeEvent {
+        id: 0,
+        block_height: msg.block_id,
+        transaction_id: None,
+        variant,
+        mc_tx_hash,
+        amount,
+        recipient,
+        midnight_tx_hash,
+        count,
+    }
+}
 
 pub struct BridgeEventsSubscription<S, B> {
     _s: PhantomData<S>,
@@ -121,6 +162,52 @@ where
                     last_id = last_id.max(event.id);
                     yield BridgeEvent::from(event);
                 }
+            }
+        };
+
+        Ok(stream)
+    }
+
+    /// Subscribe to bridge pool updates. Emits a snapshot of the pool summary alongside each
+    /// pool-affecting event (Reserve, Invalid, Unapproved, SubminimalFlush). Useful for
+    /// observability dashboards.
+    async fn bridge_pool_updates<'a>(
+        &self,
+        cx: &'a Context<'a>,
+    ) -> Result<impl Stream<Item = ApiResult<BridgePoolUpdate>> + use<'a, S, B>, ApiError> {
+        let storage = cx.get_storage::<S>();
+        let subscriber = cx.get_subscriber::<B>();
+
+        let stream = try_stream! {
+            // Initial snapshot.
+            let initial = storage
+                .get_bridge_pool_summary(None)
+                .await
+                .map_err_into_server_error(|| "get bridge pool summary")?;
+            yield BridgePoolUpdate { new_event: None, pool: BridgePoolSummary::from(initial) };
+
+            let live = subscriber
+                .subscribe::<BridgeEventIndexed>()
+                .try_filter(|evt| {
+                    use indexer_common::domain::bridge::BridgePalletEventVariant::*;
+                    let interesting = matches!(
+                        evt.event.variant(),
+                        ReserveTransfer | InvalidTransfer | UnapprovedTransfer | SubminimalFlushTransfer
+                    );
+                    ready(interesting)
+                });
+            let mut live = pin!(live);
+            while let Some(msg) = live.try_next().await
+                .map_err_into_server_error(|| "subscribe BridgeEventIndexed")?
+            {
+                let pool = storage
+                    .get_bridge_pool_summary(None)
+                    .await
+                    .map_err_into_server_error(|| "get bridge pool summary (live)")?;
+                yield BridgePoolUpdate {
+                    new_event: Some(BridgeEvent::from(synthesise_event(msg))),
+                    pool: BridgePoolSummary::from(pool),
+                };
             }
         };
 
