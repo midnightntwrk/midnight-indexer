@@ -1,5 +1,5 @@
 import path from 'path';
-import type { RootField } from './types.ts';
+import type { RootField, VitestJsonResult } from './types.ts';
 import { listFiles, readJson, readText } from './io.ts';
 
 interface StaticMethodMap {
@@ -10,21 +10,8 @@ export interface StaticEvidenceByTest {
   [testId: string]: RootField[];
 }
 
-interface VitestAssertionResult {
-  fullName: string;
-}
-
-interface VitestSuiteResult {
-  name: string;
-  assertionResults: VitestAssertionResult[];
-}
-
-interface VitestJsonResult {
-  testResults: VitestSuiteResult[];
-}
-
 const findMethodsInFile = (fileContent: string, methodNames: string[]): string[] =>
-  methodNames.filter((method) => fileContent.includes(`.${method}(`) || fileContent.includes(`${method}(`));
+  methodNames.filter((method) => fileContent.includes(`.${method}(`));
 
 export const readStaticEvidence = async (
   qaTestsRoot: string,

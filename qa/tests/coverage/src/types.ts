@@ -119,3 +119,23 @@ export interface CriticalFieldRule extends RootField {
   requiredFacets: Facet[];
   minimumProjects: number;
 }
+
+export interface VitestAssertionResult {
+  fullName: string;
+  title: string;
+  status: string;
+  ancestorTitles?: string[];
+  meta?: Record<string, unknown>;
+}
+
+export interface VitestSuiteResult {
+  name: string;
+  assertionResults: VitestAssertionResult[];
+}
+
+export interface VitestJsonResult {
+  numTotalTestSuites: number;
+  numTotalTests: number;
+  success: boolean;
+  testResults: VitestSuiteResult[];
+}

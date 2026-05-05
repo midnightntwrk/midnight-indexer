@@ -34,5 +34,5 @@ export const listFiles = async (dirPath: string): Promise<string[]> => {
       return [fullPath];
     }),
   );
-  return files.flat();
+  return files.flat().sort();
 };

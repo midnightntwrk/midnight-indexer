@@ -24,13 +24,18 @@ export interface CheckOptions {
 const fieldKey = (rootType: string, field: string): string => `${rootType}.${field}`;
 
 export const runCoverageChecks = async (options: CheckOptions): Promise<void> => {
-  let reportPath = path.join(options.outputDir, 'coverage.json');
   const latestRunPath = path.join(options.outputDir, 'latest-run.json');
-  if (await pathExists(latestRunPath)) {
+  const hasLatestRun = await pathExists(latestRunPath);
+  let reportPath = path.join(options.outputDir, 'coverage.json');
+  if (hasLatestRun) {
     const latest = await readJson<{ outputDir: string }>(latestRunPath);
     reportPath = path.join(options.repoRoot, latest.outputDir, 'coverage.json');
-  }
-  if (!(await pathExists(reportPath))) {
+    if (!(await pathExists(reportPath))) {
+      throw new Error(
+        `latest-run.json points at ${reportPath} which doesn't exist - re-run coverage:generate.`,
+      );
+    }
+  } else if (!(await pathExists(reportPath))) {
     throw new Error(`coverage.json not found at ${reportPath}. Run coverage generation first.`);
   }
 

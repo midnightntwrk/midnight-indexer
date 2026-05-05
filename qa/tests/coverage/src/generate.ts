@@ -8,6 +8,7 @@ import type {
   FieldCoverage,
   RootField,
   TestEvidence,
+  VitestJsonResult,
 } from './types.ts';
 import { classifyFacets, type FacetKeywordConfig } from './classify.ts';
 import { getBranchName, getCommitSha } from './git.ts';
@@ -21,26 +22,6 @@ import {
 } from './parser.ts';
 import { readStaticEvidence } from './static-evidence.ts';
 import { normalizeText, sha256, toKebabTokens, toRelativeFromRepo, toUtcCompact, unique } from './utils.ts';
-
-interface VitestAssertionResult {
-  fullName: string;
-  title: string;
-  status: string;
-  ancestorTitles?: string[];
-  meta?: Record<string, unknown>;
-}
-
-interface VitestSuiteResult {
-  name: string;
-  assertionResults: VitestAssertionResult[];
-}
-
-interface VitestJsonResult {
-  numTotalTestSuites: number;
-  numTotalTests: number;
-  success: boolean;
-  testResults: VitestSuiteResult[];
-}
 
 interface SchemaFieldVariant {
   rootType: RootField['rootType'];

@@ -8,6 +8,10 @@
       { "rootType": "Query", "field": "zswapMerkleTreeCollapsedUpdate" }
     ],
     "getDustGenerationStatus": [{ "rootType": "Query", "field": "dustGenerationStatus" }],
+    "getDustGenerations": [{ "rootType": "Query", "field": "dustGenerations" }],
+    "getDustCommitmentMerkleTreeUpdate": [
+      { "rootType": "Query", "field": "dustCommitmentMerkleTreeUpdate" }
+    ],
     "subscribeToBlockEvents": [{ "rootType": "Subscription", "field": "blocks" }],
     "subscribeToUnshieldedTransactionEvents": [
       { "rootType": "Subscription", "field": "unshieldedTransactions" }
@@ -19,6 +23,10 @@
     "closeWalletSession": [{ "rootType": "Mutation", "field": "disconnect" }],
     "subscribeToContractActionEvents": [{ "rootType": "Subscription", "field": "contractActions" }],
     "subscribeToDustLedgerEvents": [{ "rootType": "Subscription", "field": "dustLedgerEvents" }],
-    "subscribeToZswapLedgerEvents": [{ "rootType": "Subscription", "field": "zswapLedgerEvents" }]
+    "subscribeToZswapLedgerEvents": [{ "rootType": "Subscription", "field": "zswapLedgerEvents" }],
+    "subscribeToDustGenerations": [{ "rootType": "Subscription", "field": "dustGenerations" }],
+    "subscribeToDustNullifierTransactions": [
+      { "rootType": "Subscription", "field": "dustNullifierTransactions" }
+    ]
   }
 }
