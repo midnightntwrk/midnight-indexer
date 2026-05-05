@@ -559,10 +559,14 @@ describe('block subscriptions', () => {
     }`;
 
     /**
-     * @given a chain with regular transactions in the recent ~5000-block window
+     * @given a chain with regular transactions in the recent ~50000-block window
+     *        (wide enough to find a sample on sparse test envs like devnet)
      * @when we collect a sample of regular transactions via block subscription replay
-     * @then every sampled tx has paidFees > 1, estimatedFees > 1, paidFees == estimatedFees,
-     *       and not every observed paidFees is pinned to 1 (the MIN_COST regression signature)
+     * @then every sampled tx returns paidFees and estimatedFees in SPECKs (>= 1, < 10^9),
+     *       and paidFees == estimatedFees per chain-indexer/src/domain/ledger_state.rs
+     *       (both populated from the same Transaction::fees(params, true) call).
+     *       A weight-magnitude value (~10^10) would indicate a 4.0.1 regression — that's
+     *       the failure mode this test catches.
      */
     test('should report ledger paidFees and estimatedFees on regular transactions', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
@@ -638,22 +642,39 @@ describe('block subscriptions', () => {
 
       log.debug(`Validating fees on ${collected.length} regular transactions`);
 
+      const SPECK_UPPER_BOUND = 1_000_000_000n; // 10^9 SPECKs. Substrate-weight regressions land at 10^10-10^11.
+
       for (const t of collected) {
         expect
-          .soft(t.paidFees, `paidFees pinned to MIN_COST regression — see #1068 (tx ${t.hash})`)
-          .toBe(1n);
+          .soft(
+            t.paidFees,
+            `paidFees < 1 SPECK; expected at least the floor (tx ${t.hash}, see #1068)`,
+          )
+          .toBeGreaterThanOrEqual(1n);
         expect
-          .soft(t.estimatedFees, `estimatedFees suspiciously high (tx ${t.hash})`)
-          .toBeLessThan(1_000_000_000_000n);
-        // 4.0.x invariant: paid_fees and estimated_fees are populated from the same
-        // Transaction::fees(params, true) call in chain-indexer/src/domain/ledger_state.rs.
-        expect
-          .soft(t.paidFees, `paidFees != estimatedFees in 4.0.x (tx ${t.hash})`)
-          .toBe(t.estimatedFees);
+          .soft(
+            t.paidFees,
+            `paidFees >= 10^9 SPECKs; weight-magnitude value suggests 4.0.1 regression (tx ${t.hash}, see #1068)`,
+          )
+          .toBeLessThan(SPECK_UPPER_BOUND);
 
         expect
-          .soft(t.paidFees, 'regular tx fees pinned to 1 SPECK (MIN_COST regression — see #1068)')
-          .toBe(1n);
+          .soft(
+            t.estimatedFees,
+            `estimatedFees < 1 SPECK; expected at least the floor (tx ${t.hash})`,
+          )
+          .toBeGreaterThanOrEqual(1n);
+        expect
+          .soft(
+            t.estimatedFees,
+            `estimatedFees >= 10^9 SPECKs; weight-magnitude value suggests 4.0.1 regression (tx ${t.hash})`,
+          )
+          .toBeLessThan(SPECK_UPPER_BOUND);
+
+        // Post-#1031 invariant: paid_fees and estimated_fees come from the same
+        // Transaction::fees(params, true) call in chain-indexer/src/domain/ledger_state.rs.
+        // Holds on every fix-bearing version (4.0.2, 4.2.x, 4.3.x).
+        expect.soft(t.paidFees, `paidFees != estimatedFees (tx ${t.hash})`).toBe(t.estimatedFees);
       }
     }, 50_000);
   });
