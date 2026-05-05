@@ -113,10 +113,18 @@ Write to `release-notes-VERSION.md` in repo root. No markdownlint pass (Giles co
 12. `## Breaking Changes or Required Actions` — from `feat!:` / `BREAKING CHANGE:`. If empty, write "None." (auditors want this affirmatively)
 13. `## Known Issues` — Description / Issue link / Workaround. Omit for RCs.
 14. `## Fixed Defects` — table (Defect / PR | Description), separator `| --- | --- |`
-15. `## Links and References` — all PR/issue links as markdown. Plus full changelog, schema, GH release URLs.
-16. `## Full Change Details` — verbatim CHANGELOG.md section for this version.
+15. `## Links and References` — meta-links only: full changelog, GH release URL, GraphQL schema, indexer API docs URL, bundle tracking issue (when applicable). **Do not** repeat per-PR links here, they are already embedded in `What Changed` and `Fixed Defects` tables and in the per-feature `## New Features` headings. End the section with a one-line note like "(Per-PR links are embedded in the What changed and Fixed defect tables above.)" so readers see the omission is intentional.
 
 Omit empty sections except Breaking Changes (always include affirmatively).
+
+### Anti-duplication rule
+
+Each PR appears at most **twice** in the formatted notes: once in `What Changed` (table row) and once in its detail section (`New Features` heading or `Fixed Defects` row). If you find yourself listing the same PR a third time, remove it.
+
+What we explicitly drop from the node template:
+
+- **No `Full Change Details` verbatim CHANGELOG section.** Node skill includes one because node's auto-generated content has rich `<details>`/`<summary>` HTML blocks per change. Indexer's git-cliff CHANGELOG is a flat bullet list, so a verbatim copy duplicates `What Changed` + `Fixed Defects` without adding signal. The full-changelog link in step 15 covers it.
+- **No per-PR list under `Links and References`.** Each PR is already linked once in `What Changed` and once in the relevant detail section. A third list under Links is pure repetition. Limit Links to meta-resources (changelog, GH release, schema, docs, bundle issue).
 
 ## 8. Offer to Update GitHub Release
 
@@ -145,6 +153,12 @@ Never run without explicit confirmation.
 | Images | 2 (node, toolkit) | 5 (chain-indexer, indexer-api, wallet-indexer, indexer-standalone, spo-indexer) |
 | Known Issues | JIRA (Highest/Blocker) | GH issues (priority:critical/high) |
 | Markdownlint | Required | Skipped |
-| Release type / Dependencies / Compatibility note | Not in node skill yet | Indexer-specific (1 May 2026) |
+| Release type / Dependencies / Compatibility note | Not in node skill yet | Indexer-specific (5 May 2026) |
+| Full Change Details (verbatim) | Required (HTML details blocks) | Dropped (flat bullet list, duplicates other sections) |
+| Per-PR list under Links | Yes | No (duplicates table rows) |
 
-The Release type / Dependencies / Compatibility note fields are indexer-specific responses to parallel-release-line situations (4.0.x maintenance + 4.x.y dev). May be added to the node skill on Giles's next iteration; re-align this skill at that point. Tracked in `docs/interactions/release-notes-thiago/thiago-discussions-full-arc.md`.
+The Release type / Dependencies / Compatibility note fields are indexer-specific responses to parallel-release-line situations (4.0.x maintenance + 4.x.y dev). May be added to the node skill on Giles's next iteration; re-align this skill at that point.
+
+The Full Change Details drop and the per-PR-list-under-Links drop are anti-duplication rules added 5 May after applying the skill to the v4.3.0 release notes and seeing the same PR repeated up to four times.
+
+Tracked in `docs/interactions/release-notes-thiago/thiago-discussions-full-arc.md`.
