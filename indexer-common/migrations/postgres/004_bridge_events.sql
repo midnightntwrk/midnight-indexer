@@ -46,7 +46,6 @@ CREATE TABLE bridge_pallet_events (
 
 CREATE INDEX ON bridge_pallet_events (block_id);
 CREATE INDEX ON bridge_pallet_events (transaction_id);
-CREATE INDEX ON bridge_pallet_events (variant);
 CREATE INDEX ON bridge_pallet_events (mc_tx_hash) WHERE mc_tx_hash IS NOT NULL;
 CREATE INDEX ON bridge_pallet_events (midnight_tx_hash);
 CREATE INDEX ON bridge_pallet_events (recipient) WHERE recipient IS NOT NULL;

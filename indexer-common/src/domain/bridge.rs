@@ -22,7 +22,7 @@ pub type McTxHash = ByteArray<32>;
 /// Hash of the Midnight system transaction produced by a bridge handler.
 pub type MidnightTxHash = ByteArray<32>;
 
-/// Maximum length in bytes of a Midnight recipient encoded in the bridge datum.
+/// Maximum length in bytes of a Midnight recipient encoded in the bridge metadata.
 pub const BRIDGE_RECIPIENT_MAX_BYTES: usize = 32;
 
 /// Recipient address parsed from Cardano bridge metadata, bounded to 32 bytes.

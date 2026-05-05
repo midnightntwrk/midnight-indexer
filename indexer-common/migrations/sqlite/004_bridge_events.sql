@@ -27,7 +27,6 @@ CREATE TABLE bridge_pallet_events (
 
 CREATE INDEX bridge_pallet_events_block_id_idx          ON bridge_pallet_events (block_id);
 CREATE INDEX bridge_pallet_events_transaction_id_idx    ON bridge_pallet_events (transaction_id);
-CREATE INDEX bridge_pallet_events_variant_idx           ON bridge_pallet_events (variant);
 CREATE INDEX bridge_pallet_events_mc_tx_hash_idx        ON bridge_pallet_events (mc_tx_hash) WHERE mc_tx_hash IS NOT NULL;
 CREATE INDEX bridge_pallet_events_midnight_tx_hash_idx  ON bridge_pallet_events (midnight_tx_hash);
 CREATE INDEX bridge_pallet_events_recipient_idx         ON bridge_pallet_events (recipient) WHERE recipient IS NOT NULL;
