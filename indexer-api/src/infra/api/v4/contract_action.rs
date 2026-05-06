@@ -201,12 +201,23 @@ where
             .map_err_into_server_error(|| {
                 format!("get contract deploy by address {}", self.raw_address)
             })?
-            .expect("contract call has contract deploy");
+            .some_or_server_error(|| {
+                format!(
+                    "no contract deploy for contract call address {}",
+                    self.raw_address
+                )
+            })?;
 
         let deploy = match ContractAction::from(action) {
-            ContractAction::Deploy(deploy) => deploy,
-            _ => panic!("unexpected contract action"),
-        };
+            ContractAction::Deploy(deploy) => Some(deploy),
+            _ => None,
+        }
+        .some_or_server_error(|| {
+            format!(
+                "expected ContractDeploy variant for contract call address {}",
+                self.raw_address
+            )
+        })?;
 
         Ok(deploy)
     }

@@ -89,6 +89,9 @@ pub enum Error {
 
     #[error("cannot translate ledger state from {0} to {1}")]
     LedgerStateTranslation(LedgerVersion, LedgerVersion, #[source] io::Error),
+
+    #[error("unsupported EventDetailsV8 variant: {0}")]
+    UnsupportedEventVariant(String),
 }
 
 /// Extension methods for `Serializable` implementations.

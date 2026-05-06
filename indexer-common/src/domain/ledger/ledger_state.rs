@@ -634,7 +634,7 @@ where
                 commitment.0.0.to_bytes_le().to_vec().into(),
             ))),
 
-            other => panic!("unexpected EventDetailsV8 variant {other:?}"),
+            other => Some(Err(Error::UnsupportedEventVariant(format!("{other:?}")))),
         })
         .flatten()
         .collect::<Result<_, _>>()
