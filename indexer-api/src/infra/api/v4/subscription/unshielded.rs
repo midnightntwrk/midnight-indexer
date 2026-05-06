@@ -24,6 +24,7 @@ use crate::{
 use async_graphql::{Context, SimpleObject, Subscription, Union};
 use async_stream::try_stream;
 use derive_more::Debug;
+use drop_stream::DropStreamExt;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::domain::{NetworkId, Subscriber, UnshieldedUtxoIndexed};
@@ -102,6 +103,11 @@ where
             .try_into_domain(cx.get_network_id())
             .map_err_into_client_error(|| "invalid address")?;
 
+        let quota_guard = cx
+            .get_subscription_quotas()
+            .try_acquire(cx.get_per_connection_counter(), None)
+            .map_err_into_client_error(|| "subscription limit exceeded")?;
+
         // Build a stream of unshielded transaction events by merging ViewingUpdates and
         // ProgressUpdates. The ViewingUpdates stream should be infinite by definition (see
         // the trait). However, if it nevertheless completes, we use a Tripwire to ensure
@@ -117,7 +123,10 @@ where
             .take_until_if(tripwire)
             .map_ok(UnshieldedTransactionsEvent::UnshieldedTransactionsProgress);
 
-        let events = tokio_stream::StreamExt::merge(unshielded_transactions, progress_updates);
+        let events = tokio_stream::StreamExt::merge(unshielded_transactions, progress_updates)
+            .on_drop(move || {
+                drop(quota_guard);
+            });
 
         Ok(events)
     }

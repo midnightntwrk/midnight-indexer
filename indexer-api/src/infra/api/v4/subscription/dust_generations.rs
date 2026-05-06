@@ -127,10 +127,16 @@ where
         let ledger_state_cache = cx.get_ledger_state_cache();
         let batch_size = cx.get_subscription_config().dust_generations.batch_size;
         let network_id = cx.get_network_id();
+        let quotas = cx.get_subscription_quotas();
+        let per_connection_counter = cx.get_per_connection_counter();
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
 
         try_stream! {
+            let _quota_guard = quotas
+                .try_acquire(per_connection_counter, None)
+                .map_err_into_client_error(|| "subscription limit exceeded")?;
+
             let dust_address_bytes = dust_address
                 .try_into_domain(network_id)
                 .map_err_into_client_error(|| "invalid bech32m dust address")?;
