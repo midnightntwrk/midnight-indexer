@@ -92,30 +92,30 @@ export type ContractAction = ContractDeploy | ContractCall | ContractUpdate;
 export interface ContractDeploy {
   __typename: "ContractDeploy";
   address: string;
-  state: string;
-  zswapState: string;
-  transaction: Transaction;
-  unshieldedBalances: ContractBalance[];
+  state?: string;
+  zswapState?: string;
+  transaction?: Transaction;
+  unshieldedBalances?: ContractBalance[];
 }
 
 export interface ContractCall {
   __typename: "ContractCall";
   address: string;
-  state: string;
-  zswapState: string;
-  transaction: Transaction;
-  entryPoint: string;
-  deploy: ContractDeploy;
-  unshieldedBalances: ContractBalance[];
+  state?: string;
+  zswapState?: string;
+  transaction?: Transaction;
+  entryPoint?: string;
+  deploy?: ContractDeploy;
+  unshieldedBalances?: ContractBalance[];
 }
 
 export interface ContractUpdate {
   __typename: "ContractUpdate";
   address: string;
-  state: string;
-  zswapState: string;
-  transaction: Transaction;
-  unshieldedBalances: ContractBalance[];
+  state?: string;
+  zswapState?: string;
+  transaction?: Transaction;
+  unshieldedBalances?: ContractBalance[];
 }
 
 export interface ContractBalance {
@@ -125,12 +125,12 @@ export interface ContractBalance {
 
 export interface ZswapLedgerEvent {
   id: number;
-  raw: string;
+  raw?: string;
   maxId: number;
 }
 
 export interface DustLedgerEvent {
   id: number;
-  raw: string;
+  raw?: string;
   maxId: number;
 }
