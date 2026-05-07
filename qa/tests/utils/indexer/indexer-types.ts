@@ -319,6 +319,17 @@ export type DustCommitmentMerkleTreeUpdateResponse = GraphQLResponse<{
   dustCommitmentMerkleTreeUpdate: DustCommitmentMerkleTreeUpdateResult;
 }>;
 
+export interface DustGenerationMerkleTreeUpdateResult {
+  startIndex: number;
+  endIndex: number;
+  update: string;
+  protocolVersion: number;
+}
+
+export type DustGenerationMerkleTreeUpdateResponse = GraphQLResponse<{
+  dustGenerationMerkleTreeUpdate: DustGenerationMerkleTreeUpdateResult;
+}>;
+
 export interface CollapsedMerkleTree {
   startIndex: number;
   endIndex: number;

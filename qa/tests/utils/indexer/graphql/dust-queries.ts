@@ -62,3 +62,13 @@ query GetDustCommitmentMerkleTreeUpdate($START_INDEX: Int!, $END_INDEX: Int!) {
     protocolVersion
   }
 }`;
+
+export const GET_DUST_GENERATION_MERKLE_TREE_UPDATE = `
+query GetDustGenerationMerkleTreeUpdate($START_INDEX: Int!, $END_INDEX: Int!) {
+  dustGenerationMerkleTreeUpdate(startIndex: $START_INDEX, endIndex: $END_INDEX) {
+    startIndex
+    endIndex
+    update
+    protocolVersion
+  }
+}`;
