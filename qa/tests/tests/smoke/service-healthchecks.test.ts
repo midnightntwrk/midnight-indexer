@@ -36,4 +36,45 @@ describe(`service health checks`, () => {
       expect(response.ok).toBe(true);
     });
   });
+
+  describe(`a request to an unrecognised path under /api/v4`, () => {
+    const unknownPath = '/api/v4/__regression_unknown_path';
+
+    /**
+     * Regression test for midnight-indexer#1085: unrecognised paths under
+     * /api/v4 must not respond with a 308 whose Location double-prepends
+     * /api/v4 (e.g. /api/v4/schema -> /api/v4/v4/schema), which causes any
+     * client that follows redirects to loop until its redirect cap is hit.
+     *
+     * @When a GET is sent to an unrecognised path under /api/v4
+     * @Then the response is NOT a 308 redirect whose Location starts with
+     *       /api/v4/v4 (a 404, or any non-prefix-doubling response, is fine)
+     */
+    test('should not 308 to a /api/v4-double-prefixed Location', async () => {
+      const targetUrl = baseUrl + unknownPath;
+      log.debug(`Target URL: ${targetUrl}`);
+      const response = await fetch(targetUrl, { redirect: 'manual' });
+      log.debug(`Status: ${response.status}`);
+
+      if (response.status === 308 || response.status === 301 || response.status === 302) {
+        const location = response.headers.get('location') ?? '';
+        log.debug(`Location: ${location}`);
+        expect(location.startsWith('/api/v4/v4')).toBe(false);
+      } else {
+        expect(response.status).toBeGreaterThanOrEqual(400);
+      }
+    });
+
+    /**
+     * Regression test for midnight-indexer#1085: when redirects are followed,
+     * the request must terminate (no infinite redirect loop).
+     *
+     * @When a GET to an unrecognised /api/v4 path follows redirects
+     * @Then fetch resolves without exceeding its redirect cap
+     */
+    test('should terminate when redirects are followed', async () => {
+      const targetUrl = baseUrl + unknownPath;
+      await expect(fetch(targetUrl, { redirect: 'follow' })).resolves.toBeDefined();
+    });
+  });
 });
