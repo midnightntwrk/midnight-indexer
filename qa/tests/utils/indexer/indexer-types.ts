@@ -131,6 +131,7 @@ export interface RegularTransaction extends Transaction {
   dustCommitmentEndIndex?: number;
   dustGenerationStartIndex?: number;
   dustGenerationEndIndex?: number;
+  fee?: string;
   fees?: TransactionFees;
   transactionResult?: TransactionResult;
 }

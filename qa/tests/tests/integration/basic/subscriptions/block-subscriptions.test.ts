@@ -539,7 +539,8 @@ describe('block subscriptions', () => {
   describe('regular transaction fees', () => {
     // Slim subscription document scoped to this test: drops zswapLedgerEvents,
     // dustLedgerEvents, contractActions, and other heavy fields we don't need.
-    // We only need __typename, hash, and the RegularTransaction.fees payload.
+    // We only need __typename, hash, the new top-level RegularTransaction.fee
+    // (added in PR #1036 / issue #1032), and the deprecated fees wrapper.
     // Substantially reduces per-block payload size and replay time.
     const SLIM_BLOCKS_SUBSCRIPTION = `subscription BlocksSubscriptionFromBlockByOffset($OFFSET: BlockOffset) {
       blocks(offset: $OFFSET) {
@@ -549,6 +550,7 @@ describe('block subscriptions', () => {
           hash
           __typename
           ... on RegularTransaction {
+            fee
             fees {
               paidFees
               estimatedFees
@@ -567,6 +569,10 @@ describe('block subscriptions', () => {
      *       (both populated from the same Transaction::fees(params, true) call).
      *       A weight-magnitude value (~10^10) would indicate a 4.0.1 regression — that's
      *       the failure mode this test catches.
+     *
+     *       Also asserts the post-#1036 invariant for issue #1032: the new
+     *       canonical `fee` field on RegularTransaction returns the same
+     *       SPECK value as the deprecated `fees.paidFees`.
      */
     test('should report ledger paidFees and estimatedFees on regular transactions', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
@@ -589,7 +595,12 @@ describe('block subscriptions', () => {
       // the #1061 drift bug accumulates over time, so it surfaces in current state.
       const startHeight = Math.max(1, latestHeight! - HISTORY_WINDOW_BLOCKS);
       log.debug(`Start height: ${startHeight}`);
-      const collected: { paidFees: bigint; estimatedFees: bigint; hash?: string }[] = [];
+      const collected: {
+        fee: bigint;
+        paidFees: bigint;
+        estimatedFees: bigint;
+        hash?: string;
+      }[] = [];
       const sampleReadyEvent = `${SAMPLE_TARGET} regular transactions collected`;
 
       const handler: SubscriptionHandlers<BlockSubscriptionResponse> = {
@@ -599,8 +610,9 @@ describe('block subscriptions', () => {
           for (const tx of block.transactions) {
             if (tx.__typename !== 'RegularTransaction') continue;
             const reg = tx as RegularTransaction;
-            if (!reg.fees) continue;
+            if (!reg.fees || reg.fee == null) continue;
             collected.push({
+              fee: BigInt(reg.fee),
               paidFees: BigInt(reg.fees.paidFees),
               estimatedFees: BigInt(reg.fees.estimatedFees),
               hash: reg.hash,
@@ -675,6 +687,12 @@ describe('block subscriptions', () => {
         // Transaction::fees(params, true) call in chain-indexer/src/domain/ledger_state.rs.
         // Holds on every fix-bearing version (4.0.2, 4.2.x, 4.3.x).
         expect.soft(t.paidFees, `paidFees != estimatedFees (tx ${t.hash})`).toBe(t.estimatedFees);
+
+        // Post-#1036 invariant (issue #1032): the new top-level `fee` field is
+        // the canonical replacement for the deprecated `fees` wrapper, and
+        // returns the same SPECK value as `fees.paidFees`. This locks in the
+        // equivalence so a future regression that diverges them is caught.
+        expect.soft(t.fee, `fee != paidFees (tx ${t.hash}, see #1032)`).toBe(t.paidFees);
       }
     }, 50_000);
   });
