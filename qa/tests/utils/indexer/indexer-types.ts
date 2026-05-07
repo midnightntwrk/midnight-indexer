@@ -345,7 +345,20 @@ export interface DustGenerationsProgress {
   collapsedMerkleTree: CollapsedMerkleTree | null;
 }
 
-export type DustGenerationsEvent = DustGenerationsItem | DustGenerationsProgress;
+export interface DustGenerationDtimeUpdateItem {
+  __typename: 'DustGenerationDtimeUpdateItem';
+  generationMtIndex: number;
+  owner: string;
+  nightUtxoHash: string;
+  newDtime: number;
+  transactionId: number;
+  treeInsertionPath: string;
+}
+
+export type DustGenerationsEvent =
+  | DustGenerationsItem
+  | DustGenerationsProgress
+  | DustGenerationDtimeUpdateItem;
 
 export interface DustNullifierTransaction {
   nullifier: string;

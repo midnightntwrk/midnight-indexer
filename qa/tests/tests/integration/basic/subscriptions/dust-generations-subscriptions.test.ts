@@ -21,7 +21,10 @@ import {
   IndexerWsClient,
   DustGenerationsSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
-import { DustGenerationsEventSchema } from '@utils/indexer/graphql/schema';
+import {
+  DustGenerationsEventSchema,
+  DustGenerationDtimeUpdateItemSchema,
+} from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { env } from 'environment/model';
 import dataProvider from '@utils/testdata-provider';
@@ -159,6 +162,25 @@ describe('dust generations subscription', () => {
       // The last event should be a DustGenerationsProgress
       const lastEvent = received[received.length - 1].data!.dustGenerations;
       expect(lastEvent.__typename).toBe('DustGenerationsProgress');
+
+      // Wire-format coverage for DustGenerationDtimeUpdateItem (issue #1078).
+      // Presence is environment-dependent (requires the wallet's backing
+      // NIGHT/cNIGHT UTXO to have been spent on chain, and `startIndex` to be
+      // past the wallet's first owned entry to trigger historical replay).
+      // When no event arrives we just record a debug line; when at least one
+      // arrives we validate its shape with the dedicated schema, which acts as
+      // a regression guard on the new union variant's field set.
+      const dtimeUpdates = received.filter(
+        (msg) => msg.data?.dustGenerations?.__typename === 'DustGenerationDtimeUpdateItem',
+      );
+      log.debug(`Received ${dtimeUpdates.length} DustGenerationDtimeUpdateItem event(s)`);
+      for (const msg of dtimeUpdates) {
+        const parsed = DustGenerationDtimeUpdateItemSchema.safeParse(msg.data!.dustGenerations);
+        expect(
+          parsed.success,
+          `DustGenerationDtimeUpdateItem shape validation failed: ${JSON.stringify(parsed.error, null, 2)}`,
+        ).toBe(true);
+      }
     }, 30_000);
   });
 
