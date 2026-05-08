@@ -371,6 +371,15 @@ export const DUST_GENERATIONS_SUBSCRIPTION = `
           protocolVersion
         }
       }
+      ... on DustGenerationDtimeUpdateItem {
+        __typename
+        generationMtIndex
+        owner
+        nightUtxoHash
+        newDtime
+        transactionId
+        treeInsertionPath
+      }
     }
   }
 `;

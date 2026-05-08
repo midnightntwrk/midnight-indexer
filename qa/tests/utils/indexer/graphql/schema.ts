@@ -388,9 +388,20 @@ export const DustGenerationsProgressSchema = z.object({
   collapsedMerkleTree: CollapsedMerkleTreeSchema.nullable(),
 });
 
+export const DustGenerationDtimeUpdateItemSchema = z.object({
+  __typename: z.literal('DustGenerationDtimeUpdateItem'),
+  generationMtIndex: z.number(),
+  owner: VarLenghtHex,
+  nightUtxoHash: VarLenghtHex,
+  newDtime: z.number(),
+  transactionId: z.number(),
+  treeInsertionPath: VarLenghtHex,
+});
+
 export const DustGenerationsEventSchema = z.discriminatedUnion('__typename', [
   DustGenerationsItemSchema,
   DustGenerationsProgressSchema,
+  DustGenerationDtimeUpdateItemSchema,
 ]);
 
 export const DustNullifierTransactionSchema = z.object({

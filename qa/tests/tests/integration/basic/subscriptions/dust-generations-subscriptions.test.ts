@@ -159,6 +159,21 @@ describe('dust generations subscription', () => {
       // The last event should be a DustGenerationsProgress
       const lastEvent = received[received.length - 1].data!.dustGenerations;
       expect(lastEvent.__typename).toBe('DustGenerationsProgress');
+
+      // Wire-format coverage for DustGenerationDtimeUpdateItem (issue #1078).
+      // The discriminated-union schema above (DustGenerationsEventSchema) is
+      // the actual regression guard: any payload whose `__typename` is
+      // `DustGenerationDtimeUpdateItem` is validated against
+      // DustGenerationDtimeUpdateItemSchema as part of the union match, so a
+      // drift in the new variant's field set would already have failed there.
+      // Here we only count occurrences for visibility — presence is
+      // environment-dependent (requires the wallet's backing NIGHT/cNIGHT UTXO
+      // to have been spent on chain, and `startIndex` past the wallet's first
+      // owned entry to trigger historical replay).
+      const dtimeUpdateCount = received.filter(
+        (msg) => msg.data?.dustGenerations?.__typename === 'DustGenerationDtimeUpdateItem',
+      ).length;
+      log.debug(`Received ${dtimeUpdateCount} DustGenerationDtimeUpdateItem event(s)`);
     }, 30_000);
   });
 
