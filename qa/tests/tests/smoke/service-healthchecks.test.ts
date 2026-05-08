@@ -47,7 +47,7 @@ describe(`service health checks`, () => {
      * client that follows redirects to loop until its redirect cap is hit.
      *
      * @When a GET is sent to an unrecognised path under /api/v4
-     * @Then the response is NOT a 308 redirect whose Location starts with
+     * @Then the response is NOT a 308 redirect whose Location contains
      *       /api/v4/v4 (a 404, or any non-prefix-doubling response, is fine)
      */
     test('should not 308 to a /api/v4-double-prefixed Location', async () => {
@@ -59,7 +59,7 @@ describe(`service health checks`, () => {
       if (response.status === 308 || response.status === 301 || response.status === 302) {
         const location = response.headers.get('location') ?? '';
         log.debug(`Location: ${location}`);
-        expect(location.startsWith('/api/v4/v4')).toBe(false);
+        expect(location.includes('/api/v4/v4')).toBe(false);
       } else {
         expect(response.status).toBeGreaterThanOrEqual(400);
       }
@@ -70,11 +70,13 @@ describe(`service health checks`, () => {
      * the request must terminate (no infinite redirect loop).
      *
      * @When a GET to an unrecognised /api/v4 path follows redirects
-     * @Then fetch resolves without exceeding its redirect cap
+     * @Then fetch resolves with a 4xx (no redirect-cap exhaustion)
      */
     test('should terminate when redirects are followed', async () => {
       const targetUrl = baseUrl + unknownPath;
-      await expect(fetch(targetUrl, { redirect: 'follow' })).resolves.toBeDefined();
+      const response = await fetch(targetUrl, { redirect: 'follow' });
+      log.debug(`Status (after redirects): ${response.status}`);
+      expect(response.status).toBeGreaterThanOrEqual(400);
     });
   });
 });
