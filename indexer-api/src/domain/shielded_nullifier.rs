@@ -11,12 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::ByteVec;
+use indexer_common::domain::{ByteVec, TransactionHash};
 
 /// A shielded nullifier transaction for the subscription stream.
 #[derive(Debug, Clone)]
 pub struct ShieldedNullifierTransaction {
     pub transaction_id: u64,
+    pub transaction_hash: TransactionHash,
     pub block_hash: ByteVec,
     pub block_height: u32,
     pub nullifier: ByteVec,
