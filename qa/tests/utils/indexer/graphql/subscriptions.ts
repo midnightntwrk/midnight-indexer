@@ -395,3 +395,14 @@ export const DUST_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
     }
   }
 `;
+
+export const SHIELDED_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
+  subscription ShieldedNullifierTransactions($nullifierPrefixes: [HexEncoded!]!, $fromBlock: Int, $toBlock: Int) {
+    shieldedNullifierTransactions(nullifierPrefixes: $nullifierPrefixes, fromBlock: $fromBlock, toBlock: $toBlock) {
+      transactionId
+      blockHash
+      blockHeight
+      nullifier
+    }
+  }
+`;

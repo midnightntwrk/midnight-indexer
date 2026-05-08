@@ -23,6 +23,7 @@ import type {
   DustLedgerEvent,
   DustGenerationsEvent,
   DustNullifierTransaction,
+  ShieldedNullifierTransaction,
   ZswapLedgerEvent,
   ShieldedTransactionsEvent,
   UnshieldedTransactionEvent,
@@ -41,6 +42,7 @@ import {
   DUST_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID,
   DUST_GENERATIONS_SUBSCRIPTION,
   DUST_NULLIFIER_TRANSACTIONS_SUBSCRIPTION,
+  SHIELDED_NULLIFIER_TRANSACTIONS_SUBSCRIPTION,
   ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT,
   ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID,
 } from './graphql/subscriptions';
@@ -69,6 +71,10 @@ export type DustGenerationsSubscriptionResponse = GraphQLResponse<{
 
 export type DustNullifierTransactionSubscriptionResponse = GraphQLResponse<{
   dustNullifierTransactions: DustNullifierTransaction;
+}>;
+
+export type ShieldedNullifierTransactionSubscriptionResponse = GraphQLResponse<{
+  shieldedNullifierTransactions: ShieldedNullifierTransaction;
 }>;
 
 export type ZswapLedgerEventSubscriptionResponse = GraphQLResponse<{
@@ -1036,6 +1042,64 @@ export class IndexerWsClient {
     };
 
     log.debug(`Dust Nullifier Transactions payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = {
+          id: subscriptionId,
+          type: 'stop',
+        };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
+    };
+  }
+
+  /**
+   * Subscribes to transactions containing shielded (Zswap) nullifiers matching
+   * the provided prefixes.
+   *
+   * Mirrors `subscribeToDustNullifierTransactions` but operates on the shielded
+   * nullifier surface. Returns transaction and block references the wallet can
+   * use to fetch the full transaction. If `toBlock` is supplied, the
+   * subscription completes once that block is reached.
+   *
+   * @param handlers - Callback functions for handling incoming nullifier
+   *   transaction events
+   * @param nullifierPrefixes - Array of hex-encoded nullifier prefixes to match
+   * @param fromBlock - Optional starting block height
+   * @param toBlock - Optional ending block height (subscription finishes after
+   *   this)
+   * @param queryOverride - Optional custom GraphQL subscription query
+   *
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToShieldedNullifierTransactions(
+    handlers: SubscriptionHandlers<ShieldedNullifierTransactionSubscriptionResponse>,
+    nullifierPrefixes: string[],
+    fromBlock?: number,
+    toBlock?: number,
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const query = queryOverride || SHIELDED_NULLIFIER_TRANSACTIONS_SUBSCRIPTION;
+    const variables = { nullifierPrefixes, fromBlock, toBlock };
+
+    const subscriptionId = this.getNextId();
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: {
+        query,
+        variables,
+      },
+    };
+
+    log.debug(`Shielded Nullifier Transactions payload:\n${JSON.stringify(payload, null, 2)}`);
 
     this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
     this.getWs().send(JSON.stringify(payload));
