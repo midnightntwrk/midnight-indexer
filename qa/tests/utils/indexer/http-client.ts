@@ -317,7 +317,7 @@ export class IndexerHttpClient {
   /**
    * Retrieves a collapsed Merkle tree update for the dust generation tree
    * @param startIndex - Start index of the range
-   * @param endIndex - Optional end index of the range
+   * @param endIndex - End index of the range (inclusive)
    * @param queryOverride - Optional custom GraphQL query
    * @returns Promise resolving to the hex-encoded collapsed update
    */
