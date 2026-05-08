@@ -21,10 +21,7 @@ import {
   IndexerWsClient,
   DustGenerationsSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
-import {
-  DustGenerationsEventSchema,
-  DustGenerationDtimeUpdateItemSchema,
-} from '@utils/indexer/graphql/schema';
+import { DustGenerationsEventSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { env } from 'environment/model';
 import dataProvider from '@utils/testdata-provider';
@@ -164,23 +161,19 @@ describe('dust generations subscription', () => {
       expect(lastEvent.__typename).toBe('DustGenerationsProgress');
 
       // Wire-format coverage for DustGenerationDtimeUpdateItem (issue #1078).
-      // Presence is environment-dependent (requires the wallet's backing
-      // NIGHT/cNIGHT UTXO to have been spent on chain, and `startIndex` to be
-      // past the wallet's first owned entry to trigger historical replay).
-      // When no event arrives we just record a debug line; when at least one
-      // arrives we validate its shape with the dedicated schema, which acts as
-      // a regression guard on the new union variant's field set.
-      const dtimeUpdates = received.filter(
+      // The discriminated-union schema above (DustGenerationsEventSchema) is
+      // the actual regression guard: any payload whose `__typename` is
+      // `DustGenerationDtimeUpdateItem` is validated against
+      // DustGenerationDtimeUpdateItemSchema as part of the union match, so a
+      // drift in the new variant's field set would already have failed there.
+      // Here we only count occurrences for visibility — presence is
+      // environment-dependent (requires the wallet's backing NIGHT/cNIGHT UTXO
+      // to have been spent on chain, and `startIndex` past the wallet's first
+      // owned entry to trigger historical replay).
+      const dtimeUpdateCount = received.filter(
         (msg) => msg.data?.dustGenerations?.__typename === 'DustGenerationDtimeUpdateItem',
-      );
-      log.debug(`Received ${dtimeUpdates.length} DustGenerationDtimeUpdateItem event(s)`);
-      for (const msg of dtimeUpdates) {
-        const parsed = DustGenerationDtimeUpdateItemSchema.safeParse(msg.data!.dustGenerations);
-        expect(
-          parsed.success,
-          `DustGenerationDtimeUpdateItem shape validation failed: ${JSON.stringify(parsed.error, null, 2)}`,
-        ).toBe(true);
-      }
+      ).length;
+      log.debug(`Received ${dtimeUpdateCount} DustGenerationDtimeUpdateItem event(s)`);
     }, 30_000);
   });
 
