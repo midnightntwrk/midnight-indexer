@@ -32,6 +32,8 @@ import type {
   DustGenerationsResponse,
   DustCommitmentMerkleTreeUpdateResult,
   DustCommitmentMerkleTreeUpdateResponse,
+  DustGenerationMerkleTreeUpdateResult,
+  DustGenerationMerkleTreeUpdateResponse,
   ZswapMerkleTreeCollapsedUpdateResponse,
   ZswapMerkleTreeCollapsedUpdateResult,
 } from './indexer-types';
@@ -46,6 +48,7 @@ import {
   GET_DUST_GENERATION_STATUS,
   GET_DUST_GENERATIONS,
   GET_DUST_COMMITMENT_MERKLE_TREE_UPDATE,
+  GET_DUST_GENERATION_MERKLE_TREE_UPDATE,
 } from './graphql/dust-queries';
 
 /**
@@ -304,6 +307,35 @@ export class IndexerHttpClient {
 
     const response = await this.client.rawRequest<{
       dustCommitmentMerkleTreeUpdate: DustCommitmentMerkleTreeUpdateResult;
+    }>(query, variables);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  /**
+   * Retrieves a collapsed Merkle tree update for the dust generation tree
+   * @param startIndex - Start index of the range
+   * @param endIndex - End index of the range (inclusive)
+   * @param queryOverride - Optional custom GraphQL query
+   * @returns Promise resolving to the hex-encoded collapsed update
+   */
+  async getDustGenerationMerkleTreeUpdate(
+    startIndex: number,
+    endIndex: number,
+    queryOverride?: string,
+  ): Promise<DustGenerationMerkleTreeUpdateResponse> {
+    log.debug(`Target URL endpoint ${this.getTargetUrl()}`);
+
+    const query = queryOverride || GET_DUST_GENERATION_MERKLE_TREE_UPDATE;
+    const variables = { START_INDEX: startIndex, END_INDEX: endIndex };
+
+    log.debug(`Using query\n${query}`);
+    log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
+
+    const response = await this.client.rawRequest<{
+      dustGenerationMerkleTreeUpdate: DustGenerationMerkleTreeUpdateResult;
     }>(query, variables);
 
     log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
