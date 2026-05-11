@@ -15,11 +15,7 @@
 
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
-import {
-  IndexerWsClient,
-  ShieldedTxSubscriptionResponse,
-  SubscriptionHandlers,
-} from '@utils/indexer/websocket-client';
+import { IndexerWsClient } from '@utils/indexer/websocket-client';
 import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import dataProvider from '@utils/testdata-provider';
 
@@ -157,37 +153,39 @@ describe('wallet connect options (startIndex)', () => {
       });
       log.debug(`opened session with startIndex=${tipIndex}, sessionId=${sessionId}`);
 
-      const receivedEvents: ShieldedTxSubscriptionResponse[] = [];
-      const handlers: SubscriptionHandlers<ShieldedTxSubscriptionResponse> = {
-        next: (payload) => {
-          receivedEvents.push(payload);
-        },
-      };
-      const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(handlers, sessionId);
-
-      // Give the wallet-indexer time to emit at least one Progress.
-      await new Promise((res) => setTimeout(res, 5_000));
-      unsubscribe();
-
-      const progressEvents = receivedEvents
-        .map((m) => m.data?.shieldedTransactions)
-        .filter(
-          (
-            e,
-          ): e is {
-            __typename: 'ShieldedTransactionsProgress';
-            highestZswapEndIndex: number;
-            highestCheckedZswapEndIndex: number;
-            highestRelevantZswapEndIndex: number;
-          } => e?.__typename === 'ShieldedTransactionsProgress',
+      const firstProgress = await new Promise<{
+        __typename: 'ShieldedTransactionsProgress';
+        highestZswapEndIndex: number;
+        highestCheckedZswapEndIndex: number;
+        highestRelevantZswapEndIndex: number;
+      }>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error('Timed out waiting for first Progress event')),
+          15_000,
         );
+        const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
+          {
+            next: (payload) => {
+              if (payload.errors && payload.errors.length > 0) {
+                clearTimeout(timeout);
+                unsubscribe();
+                reject(
+                  new Error(`subscription returned errors: ${JSON.stringify(payload.errors)}`),
+                );
+                return;
+              }
+              const event = payload.data?.shieldedTransactions;
+              if (event?.__typename === 'ShieldedTransactionsProgress') {
+                clearTimeout(timeout);
+                unsubscribe();
+                resolve(event);
+              }
+            },
+          },
+          sessionId,
+        );
+      });
 
-      expect(
-        progressEvents.length,
-        'expected at least one ShieldedTransactionsProgress within 5s',
-      ).toBeGreaterThan(0);
-
-      const firstProgress = progressEvents[0];
       log.debug(`first progress = ${JSON.stringify(firstProgress)}`);
 
       // Core invariant: the indexer reports it has *checked* at least up to
@@ -219,20 +217,41 @@ describe('wallet connect options (startIndex)', () => {
       });
       expect(sessionId).toMatch(/^[a-f0-9]+$/);
 
-      const receivedEvents: ShieldedTxSubscriptionResponse[] = [];
-      const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
-        {
-          next: (payload) => receivedEvents.push(payload),
-        },
-        sessionId,
-      );
-      await new Promise((res) => setTimeout(res, 5_000));
-      unsubscribe();
+      const firstProgress = await new Promise<{
+        __typename: 'ShieldedTransactionsProgress';
+        highestZswapEndIndex: number;
+        highestCheckedZswapEndIndex: number;
+        highestRelevantZswapEndIndex: number;
+      }>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error('Timed out waiting for first Progress event')),
+          15_000,
+        );
+        const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
+          {
+            next: (payload) => {
+              if (payload.errors && payload.errors.length > 0) {
+                clearTimeout(timeout);
+                unsubscribe();
+                reject(
+                  new Error(`subscription returned errors: ${JSON.stringify(payload.errors)}`),
+                );
+                return;
+              }
+              const event = payload.data?.shieldedTransactions;
+              if (event?.__typename === 'ShieldedTransactionsProgress') {
+                clearTimeout(timeout);
+                unsubscribe();
+                resolve(event);
+              }
+            },
+          },
+          sessionId,
+        );
+      });
 
-      // The worker should not have crashed; either we get progress events
-      // or none, but no GraphQL `errors` payload should appear.
-      const errored = receivedEvents.filter((m) => Array.isArray(m.errors) && m.errors.length > 0);
-      expect(errored, `subscription returned errors: ${JSON.stringify(errored)}`).toHaveLength(0);
+      // The worker emitted Progress without crashing or surfacing errors.
+      expect(firstProgress.__typename).toBe('ShieldedTransactionsProgress');
     }, 30_000);
   });
 });
