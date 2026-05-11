@@ -610,7 +610,7 @@ describe('block subscriptions', () => {
           for (const tx of block.transactions) {
             if (tx.__typename !== 'RegularTransaction') continue;
             const reg = tx as RegularTransaction;
-            if (!reg.fees || reg.fee == null) continue;
+            if (reg.fees == null || reg.fee == null) continue;
             collected.push({
               fee: BigInt(reg.fee),
               paidFees: BigInt(reg.fees.paidFees),
