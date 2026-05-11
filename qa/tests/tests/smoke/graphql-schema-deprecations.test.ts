@@ -15,7 +15,7 @@
 
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
-import { IndexerHttpClient } from '@utils/indexer/http-client';
+import { env } from 'environment/model';
 
 /**
  * Schema-level deprecation guards. The indexer GraphQL schema carries
@@ -124,8 +124,6 @@ type TypeFieldsResponse = {
 };
 
 describe('graphql schema deprecations', () => {
-  const httpClient = new IndexerHttpClient();
-
   for (const { parentType, fieldName, expectedReason, source } of DEPRECATED_FIELDS) {
     describe(`${parentType}.${fieldName}`, () => {
       /**
@@ -136,18 +134,13 @@ describe('graphql schema deprecations', () => {
       test(`should be marked deprecated with reason "${expectedReason}"`, async () => {
         log.debug(`Introspecting ${parentType} for field ${fieldName} (${source})`);
 
-        const response = await (
-          httpClient as unknown as {
-            client: {
-              rawRequest: (
-                query: string,
-                variables: Record<string, unknown>,
-              ) => Promise<{ data: TypeFieldsResponse }>;
-            };
-          }
-        ).client.rawRequest(TYPE_FIELDS_QUERY, { name: parentType });
-
-        const type = response.data.__type;
+        const response = await fetch(env.getIndexerHttpBaseURL() + '/api/v4/graphql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: TYPE_FIELDS_QUERY, variables: { name: parentType } }),
+        });
+        const json = (await response.json()) as { data: TypeFieldsResponse };
+        const type = json.data.__type;
         expect(type, `type "${parentType}" not found in schema`).not.toBeNull();
         const field = type!.fields.find((f) => f.name === fieldName);
         expect(field, `field "${parentType}.${fieldName}" not found in schema`).toBeDefined();
