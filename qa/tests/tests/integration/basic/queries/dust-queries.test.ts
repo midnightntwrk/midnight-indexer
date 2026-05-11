@@ -19,7 +19,7 @@ import log from '@utils/logging/logger';
 import { env } from 'environment/model';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
-import dataProvider from '@utils/testdata-provider';
+import dataProvider, { type MultiUtxoCandidate } from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import { DustGenerationStatusSchema } from '@utils/indexer/graphql/schema';
@@ -52,6 +52,51 @@ function generateRewardAddress(
 }
 
 const TOOLKIT_STARTUP_TIMEOUT = 60_000;
+
+/**
+ * Drift handling for the #926 aggregation test: a candidate's snapshot is
+ * considered intact if the indexer's `dustGenerationStatus.nightBalance`
+ * either equals the snapshotted aggregate (post-fix or single-UTXO collapse)
+ * or matches one of the snapshotted per-UTXO amounts (pre-fix LIMIT 1
+ * reading any of the stored UTXOs). Anything else means the holder has
+ * moved or spent UTXOs since the snapshot was taken — skip and try next.
+ */
+async function pickViableMultiUtxoSnapshot(): Promise<{
+  candidate: MultiUtxoCandidate;
+  statusBalance: bigint;
+}> {
+  const candidates = dataProvider.getMultiUtxoCandidates();
+  if (candidates.length === 0) {
+    throw new Error('No multi-UTXO candidates configured for this environment.');
+  }
+  const skipped: string[] = [];
+  for (const candidate of candidates) {
+    const response = await indexerHttpClient.getDustGenerationStatus([candidate.cardanoStakeKey]);
+    const result = response.data?.dustGenerationStatus?.[0];
+    if (!result?.registered) {
+      skipped.push(`${candidate.cardanoStakeKey} (not registered in indexer slice)`);
+      continue;
+    }
+    const statusBalance = BigInt(result.nightBalance);
+    const expectedTotal = BigInt(candidate.expectedTotalRaw);
+    const matchesAggregate = statusBalance === expectedTotal;
+    const matchesIndividual = candidate.individualAmountsRaw.some(
+      (amount) => BigInt(amount) === statusBalance,
+    );
+    if (matchesAggregate || matchesIndividual) {
+      return { candidate, statusBalance };
+    }
+    skipped.push(
+      `${candidate.cardanoStakeKey} (drifted: status.nightBalance=${statusBalance}, ` +
+        `not aggregate ${expectedTotal} nor any recorded UTXO)`,
+    );
+  }
+  throw new Error(
+    `No multi-UTXO snapshot is currently intact in the indexer's slice ` +
+      `(skipped: ${skipped.join('; ')}). Refresh the snapshot in ` +
+      `cardano-stake-addresses.jsonc against the current Cardano state.`,
+  );
+}
 
 describe('dust generation status queries', () => {
   let toolkit: ToolkitWrapper;
@@ -668,5 +713,51 @@ describe('dust generation status queries', () => {
         registeredRewardAddress!.toLowerCase(),
       );
     });
+  });
+
+  describe('aggregation across multiple cNIGHT UTXOs (#926)', () => {
+    /**
+     * Target: midnight-indexer#926 — `dustGenerationStatus` aggregates
+     * `nightBalance` across all active backing cNIGHT UTXOs per stake key.
+     *
+     * @given a registered Cardano reward address whose backing cNIGHT UTXOs
+     *        we snapshotted at discovery time (per-UTXO amounts + total)
+     * @when we query `dustGenerationStatus` for it
+     * @then `dustGenerationStatus.nightBalance` equals the snapshot's
+     *       `expectedTotalRaw` — i.e. the sum of all backing cNIGHT UTXOs
+     *
+     * Drift handling lives in `pickViableMultiUtxoSnapshot`: candidates whose
+     * holders have moved/spent UTXOs since the snapshot was taken are
+     * skipped, so the test only runs against intact snapshots. If every
+     * snapshot has drifted, the test skips with a "regenerate fixture"
+     * message rather than asserting against stale data.
+     */
+    test(
+      'dustGenerationStatus.nightBalance equals snapshotted total cNIGHT across backing UTXOs',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = {
+          labels: ['Query', 'Dust', 'GenerationStatus', 'Aggregation', '#926'],
+        };
+
+        let pick: { candidate: MultiUtxoCandidate; statusBalance: bigint };
+        try {
+          pick = await pickViableMultiUtxoSnapshot();
+        } catch (error) {
+          log.warn(error instanceof Error ? error.message : String(error));
+          ctx.skip();
+          return;
+        }
+
+        const expectedTotal = BigInt(pick.candidate.expectedTotalRaw);
+        log.debug(
+          `Asserting #926 aggregation against ${pick.candidate.cardanoStakeKey}: ` +
+            `expectedTotalRaw=${expectedTotal} across ` +
+            `${pick.candidate.expectedUtxoCount} backing UTXOs; ` +
+            `status.nightBalance=${pick.statusBalance}`,
+        );
+
+        expect(pick.statusBalance).toBe(expectedTotal);
+      },
+    );
   });
 });
