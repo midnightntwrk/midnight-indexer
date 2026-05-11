@@ -70,8 +70,10 @@ pub struct DustGenerationsItem {
     pub backing_night: HexEncoded,
     /// The creation timestamp.
     pub ctime: u64,
-    /// The originating transaction ID.
+    /// The originating transaction ID (indexer-internal BIGSERIAL).
     pub transaction_id: u64,
+    /// The hex-encoded originating transaction hash (32-byte chain identifier).
+    pub transaction_hash: HexEncoded,
     /// Collapsed Merkle tree update filling the gap before this entry.
     pub collapsed_merkle_tree: Option<MerkleTreeCollapsedUpdate>,
 }
@@ -97,8 +99,10 @@ pub struct DustGenerationDtimeUpdateItem {
     pub night_utxo_hash: HexEncoded,
     /// The decay time as observed in this ledger event.
     pub new_dtime: u64,
-    /// The originating transaction ID.
+    /// The originating transaction ID (indexer-internal BIGSERIAL).
     pub transaction_id: u64,
+    /// The hex-encoded originating transaction hash (32-byte chain identifier).
+    pub transaction_hash: HexEncoded,
     /// Hex-encoded tagged-serialised `TreeInsertionPath<DustGenerationInfo>`
     /// from the originating ledger event. Wallets deserialise this and hand
     /// it to `generating_tree.update_from_evidence(...)`.
@@ -201,6 +205,7 @@ where
                     backing_night: entry.backing_night.hex_encode(),
                     ctime: entry.ctime,
                     transaction_id: entry.transaction_id,
+                    transaction_hash: entry.transaction_hash.hex_encode(),
                     collapsed_merkle_tree,
                 });
             }
@@ -253,6 +258,7 @@ where
                         backing_night: entry.backing_night.hex_encode(),
                         ctime: entry.ctime,
                         transaction_id: entry.transaction_id,
+                        transaction_hash: entry.transaction_hash.hex_encode(),
                         collapsed_merkle_tree,
                     });
                 }
@@ -364,6 +370,7 @@ fn dtime_update_item(update: DustGenerationDtimeUpdateEntry) -> DustGenerationDt
         night_utxo_hash: update.night_utxo_hash.hex_encode(),
         new_dtime: update.new_dtime,
         transaction_id: update.transaction_id,
+        transaction_hash: update.transaction_hash.hex_encode(),
         tree_insertion_path: update.tree_insertion_path.hex_encode(),
     }
 }

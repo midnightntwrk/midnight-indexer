@@ -42,8 +42,10 @@ impl<S, B> Default for ShieldedNullifierTransactionsSubscription<S, B> {
 /// A transaction containing a shielded (zswap) nullifier match with block context.
 #[derive(Debug, Clone, SimpleObject)]
 pub struct ShieldedNullifierTransaction {
-    /// The transaction ID (use to query full transaction via `transaction` query).
+    /// The transaction ID (indexer-internal BIGSERIAL, use as resumption cursor).
     pub transaction_id: u64,
+    /// The hex-encoded transaction hash (32-byte chain identifier).
+    pub transaction_hash: HexEncoded,
     /// The hex-encoded block hash (use to query block with ledger parameters).
     pub block_hash: HexEncoded,
     /// The block height containing this transaction.
@@ -56,6 +58,7 @@ impl From<crate::domain::ShieldedNullifierTransaction> for ShieldedNullifierTran
     fn from(t: crate::domain::ShieldedNullifierTransaction) -> Self {
         Self {
             transaction_id: t.transaction_id,
+            transaction_hash: t.transaction_hash.hex_encode(),
             block_hash: t.block_hash.hex_encode(),
             block_height: t.block_height,
             nullifier: t.nullifier.hex_encode(),

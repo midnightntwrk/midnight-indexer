@@ -323,9 +323,13 @@ type DustGenerationDtimeUpdateItem {
 	"""
 	newDtime: Int!
 	"""
-	The originating transaction ID.
+	The originating transaction ID (indexer-internal BIGSERIAL).
 	"""
 	transactionId: Int!
+	"""
+	The hex-encoded originating transaction hash (32-byte chain identifier).
+	"""
+	transactionHash: HexEncoded!
 	"""
 	Hex-encoded tagged-serialised `TreeInsertionPath<DustGenerationInfo>`
 	from the originating ledger event. Wallets deserialise this and hand
@@ -428,9 +432,13 @@ type DustGenerationsItem {
 	"""
 	ctime: Int!
 	"""
-	The originating transaction ID.
+	The originating transaction ID (indexer-internal BIGSERIAL).
 	"""
 	transactionId: Int!
+	"""
+	The hex-encoded originating transaction hash (32-byte chain identifier).
+	"""
+	transactionHash: HexEncoded!
 	"""
 	Collapsed Merkle tree update filling the gap before this entry.
 	"""
@@ -497,9 +505,13 @@ type DustNullifierTransaction {
 	"""
 	commitment: HexEncoded!
 	"""
-	The transaction ID (use to query full transaction via `transaction` query).
+	The transaction ID (indexer-internal BIGSERIAL, use as resumption cursor).
 	"""
 	transactionId: Int!
+	"""
+	The hex-encoded transaction hash (32-byte chain identifier).
+	"""
+	transactionHash: HexEncoded!
 	"""
 	The block height containing this transaction.
 	"""
@@ -972,9 +984,13 @@ A transaction containing a shielded (zswap) nullifier match with block context.
 """
 type ShieldedNullifierTransaction {
 	"""
-	The transaction ID (use to query full transaction via `transaction` query).
+	The transaction ID (indexer-internal BIGSERIAL, use as resumption cursor).
 	"""
 	transactionId: Int!
+	"""
+	The hex-encoded transaction hash (32-byte chain identifier).
+	"""
+	transactionHash: HexEncoded!
 	"""
 	The hex-encoded block hash (use to query block with ledger parameters).
 	"""

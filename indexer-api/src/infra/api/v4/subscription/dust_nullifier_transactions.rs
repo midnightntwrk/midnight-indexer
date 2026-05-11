@@ -46,8 +46,10 @@ pub struct DustNullifierTransaction {
     pub nullifier: HexEncoded,
     /// The hex-encoded commitment.
     pub commitment: HexEncoded,
-    /// The transaction ID (use to query full transaction via `transaction` query).
+    /// The transaction ID (indexer-internal BIGSERIAL, use as resumption cursor).
     pub transaction_id: u64,
+    /// The hex-encoded transaction hash (32-byte chain identifier).
+    pub transaction_hash: HexEncoded,
     /// The block height containing this transaction.
     pub block_height: u32,
     /// The hex-encoded block hash (use to query block with ledger parameters).
@@ -116,6 +118,7 @@ where
                     nullifier: entry.nullifier.hex_encode(),
                     commitment: entry.commitment.hex_encode(),
                     transaction_id: entry.transaction_id,
+                    transaction_hash: entry.transaction_hash.hex_encode(),
                     block_height: entry.block_height,
                     block_hash: entry.block_hash.hex_encode(),
                 };
@@ -155,6 +158,7 @@ where
                         nullifier: entry.nullifier.hex_encode(),
                         commitment: entry.commitment.hex_encode(),
                         transaction_id: entry.transaction_id,
+                        transaction_hash: entry.transaction_hash.hex_encode(),
                         block_height: entry.block_height,
                         block_hash: entry.block_hash.hex_encode(),
                     };
