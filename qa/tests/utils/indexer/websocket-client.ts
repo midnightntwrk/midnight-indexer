@@ -612,14 +612,19 @@ export class IndexerWsClient {
    * when starting a subscription
    *
    * @param viewingKey - The viewing key for the wallet
+   * @param options - Optional `ConnectOptions`. `startIndex` lets the wallet skip
+   *   historical transaction scanning by telling the indexer to begin scanning from
+   *   the given transaction index (see midnight-indexer#984 / PR #1039).
    *
    * @returns A session ID in case of success
    */
-  async openWalletSession(viewingKey: string): Promise<string> {
+  async openWalletSession(viewingKey: string, options?: { startIndex?: number }): Promise<string> {
     const id = this.getNextId();
 
+    const optionsClause =
+      options?.startIndex !== undefined ? `, options: { startIndex: ${options.startIndex} }` : '';
     const connectMutation = `mutation OpenWalletSession {
-      connect (viewingKey: "${viewingKey}")
+      connect (viewingKey: "${viewingKey}"${optionsClause})
     }`;
 
     const payload: GraphQLStartMessage = {
