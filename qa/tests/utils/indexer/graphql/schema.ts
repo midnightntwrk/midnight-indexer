@@ -379,6 +379,7 @@ export const DustGenerationsItemSchema = z.object({
   backingNight: VarLenghtHex,
   ctime: z.number(),
   transactionId: z.number(),
+  transactionHash: Hash64,
   collapsedMerkleTree: CollapsedMerkleTreeSchema.nullable(),
 });
 
@@ -395,6 +396,7 @@ export const DustGenerationDtimeUpdateItemSchema = z.object({
   nightUtxoHash: VarLenghtHex,
   newDtime: z.number(),
   transactionId: z.number(),
+  transactionHash: Hash64,
   treeInsertionPath: VarLenghtHex,
 });
 
@@ -408,12 +410,14 @@ export const DustNullifierTransactionSchema = z.object({
   nullifier: VarLenghtHex,
   commitment: VarLenghtHex,
   transactionId: z.number(),
+  transactionHash: Hash64,
   blockHeight: z.number(),
   blockHash: Hash64,
 });
 
 export const ShieldedNullifierTransactionSchema = z.object({
   transactionId: z.number(),
+  transactionHash: Hash64,
   blockHash: Hash64,
   blockHeight: z.number(),
   nullifier: VarLenghtHex,

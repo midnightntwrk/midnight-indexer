@@ -354,6 +354,7 @@ export const DUST_GENERATIONS_SUBSCRIPTION = `
         backingNight
         ctime
         transactionId
+        transactionHash
         collapsedMerkleTree {
           startIndex
           endIndex
@@ -378,6 +379,7 @@ export const DUST_GENERATIONS_SUBSCRIPTION = `
         nightUtxoHash
         newDtime
         transactionId
+        transactionHash
         treeInsertionPath
       }
     }
@@ -390,6 +392,7 @@ export const DUST_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
       nullifier
       commitment
       transactionId
+      transactionHash
       blockHeight
       blockHash
     }
@@ -400,6 +403,7 @@ export const SHIELDED_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
   subscription ShieldedNullifierTransactions($nullifierPrefixes: [HexEncoded!]!, $fromBlock: Int, $toBlock: Int) {
     shieldedNullifierTransactions(nullifierPrefixes: $nullifierPrefixes, fromBlock: $fromBlock, toBlock: $toBlock) {
       transactionId
+      transactionHash
       blockHash
       blockHeight
       nullifier
