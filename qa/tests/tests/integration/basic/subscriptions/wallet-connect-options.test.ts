@@ -138,7 +138,7 @@ describe('wallet connect options (startIndex)', () => {
      *       wallet-indexer skipped scanning the historical portion of the
      *       chain instead of catching up incrementally from 0.
      */
-    test('should skip historical scan when startIndex equals the current tip', async () => {
+    test('should skip historical scan when startIndex equals the current tip', async (ctx) => {
       const seed = dataProvider.getFundingSeed();
       const viewingKey = await toolkit.showViewingKey(seed);
 
@@ -149,7 +149,7 @@ describe('wallet connect options (startIndex)', () => {
       // skip with a clear message rather than passing trivially.
       if (tipIndex === 0) {
         log.warn('chain has no shielded transactions; skipping startIndex optimisation check');
-        return;
+        ctx.skip();
       }
 
       const sessionId = await indexerWsClient.openWalletSession(viewingKey, {
