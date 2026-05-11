@@ -208,6 +208,8 @@ describe('shielded nullifier transactions subscription', () => {
       // surface has gained validation and this test should be reworked to
       // assert the new error message (see header comment).
       expect(settled.error).toBeNull();
+      expect(settled.eventCount).toBe(0);
+      expect(settled.completed).toBe(true);
     });
 
     /**
@@ -264,6 +266,8 @@ describe('shielded nullifier transactions subscription', () => {
 
       log.debug(`fromBlock>toBlock shielded outcome: ${JSON.stringify(settled)}`);
       expect(settled.error).toBeNull();
+      expect(settled.eventCount).toBe(0);
+      expect(settled.completed).toBe(true);
     });
   });
 });
