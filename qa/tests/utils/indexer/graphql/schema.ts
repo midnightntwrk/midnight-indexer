@@ -411,3 +411,10 @@ export const DustNullifierTransactionSchema = z.object({
   blockHeight: z.number(),
   blockHash: Hash64,
 });
+
+export const ShieldedNullifierTransactionSchema = z.object({
+  transactionId: z.number(),
+  blockHash: Hash64,
+  blockHeight: z.number(),
+  nullifier: VarLenghtHex,
+});
