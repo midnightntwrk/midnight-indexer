@@ -1114,8 +1114,51 @@ async fn test_dust_generations_subscription(ws_api_url: &str) -> anyhow::Result<
     Ok(())
 }
 
-/// Test the shieldedNullifierTransactions subscription with a non-matching prefix.
+/// Test the shieldedNullifierTransactions subscription. Verifies the input-validation
+/// guards added in #1119 to mirror dust (empty array, empty-string element, and
+/// fromBlock > toBlock all error), plus a valid non-matching prefix with a bounded
+/// range completes empty. Each error case is wrapped in a defensive timeout so the
+/// test fails fast rather than hanging if the server doesn't behave as expected.
 async fn test_shielded_nullifier_transactions_subscription(ws_api_url: &str) -> anyhow::Result<()> {
+    // Empty nullifierPrefixes array → client error per #1119.
+    let variables = shielded_nullifier_transactions_subscription::Variables {
+        nullifier_prefixes: vec![],
+        from_block: Some(0),
+        to_block: Some(0),
+    };
+    let stream = graphql_ws_client::subscribe::<ShieldedNullifierTransactionsSubscription>(
+        ws_api_url, variables,
+    )
+    .await
+    .context("subscribe with empty nullifierPrefixes")?;
+    let result = tokio::time::timeout(Duration::from_secs(3), stream.try_collect::<Vec<_>>())
+        .await
+        .context("expected client error within 3s for empty nullifierPrefixes")?;
+    assert!(
+        result.is_err(),
+        "expected client error for empty nullifierPrefixes, got: {result:?}"
+    );
+
+    // Empty-string prefix element → also client error per #1119.
+    let variables = shielded_nullifier_transactions_subscription::Variables {
+        nullifier_prefixes: vec!["".to_string().try_into().unwrap()],
+        from_block: Some(0),
+        to_block: Some(0),
+    };
+    let stream = graphql_ws_client::subscribe::<ShieldedNullifierTransactionsSubscription>(
+        ws_api_url, variables,
+    )
+    .await
+    .context("subscribe with empty-string prefix")?;
+    let result = tokio::time::timeout(Duration::from_secs(3), stream.try_collect::<Vec<_>>())
+        .await
+        .context("expected client error within 3s for empty-string prefix")?;
+    assert!(
+        result.is_err(),
+        "expected client error for empty-string prefix, got: {result:?}"
+    );
+
+    // Valid non-matching prefix with bounded range → completes empty.
     let variables = shielded_nullifier_transactions_subscription::Variables {
         nullifier_prefixes: vec!["00".to_string().try_into().unwrap()],
         from_block: Some(0),
@@ -1135,6 +1178,25 @@ async fn test_shielded_nullifier_transactions_subscription(ws_api_url: &str) -> 
 
     // No matching nullifiers expected in test data.
     assert!(events.is_empty());
+
+    // fromBlock > toBlock → client error per #1119.
+    let variables = shielded_nullifier_transactions_subscription::Variables {
+        nullifier_prefixes: vec!["00".to_string().try_into().unwrap()],
+        from_block: Some(10),
+        to_block: Some(5),
+    };
+    let stream = graphql_ws_client::subscribe::<ShieldedNullifierTransactionsSubscription>(
+        ws_api_url, variables,
+    )
+    .await
+    .context("subscribe with fromBlock > toBlock")?;
+    let result = tokio::time::timeout(Duration::from_secs(3), stream.try_collect::<Vec<_>>())
+        .await
+        .context("expected client error within 3s for fromBlock > toBlock")?;
+    assert!(
+        result.is_err(),
+        "expected client error for fromBlock > toBlock, got: {result:?}"
+    );
 
     Ok(())
 }
