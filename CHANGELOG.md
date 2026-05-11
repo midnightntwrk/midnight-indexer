@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.1] - 2026-05-11
+
+### 🚀 Features
+
+- *(indexer-api)* Add transactionHash to event subscription response types (#1116)
+
+### 🐛 Bug Fixes
+
+- Replace remaining production panics with error returns (#1105)
+
 ## [4.3.0] - 2026-04-30
 
 ### 🚀 Features
