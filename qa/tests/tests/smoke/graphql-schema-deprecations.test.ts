@@ -35,6 +35,50 @@ type DeprecatedFieldExpectation = {
 };
 
 const DEPRECATED_FIELDS: DeprecatedFieldExpectation[] = [
+  // Pre-existing v4 deprecations: zswap-prefixed renames across the shielded
+  // transaction and progress surfaces.
+  {
+    parentType: 'RegularTransaction',
+    fieldName: 'merkleTreeRoot',
+    expectedReason: 'Use zswapMerkleTreeRoot instead',
+    source: 'v4 schema',
+  },
+  {
+    parentType: 'RegularTransaction',
+    fieldName: 'startIndex',
+    expectedReason: 'Use zswapStartIndex instead',
+    source: 'v4 schema',
+  },
+  {
+    parentType: 'RegularTransaction',
+    fieldName: 'endIndex',
+    expectedReason: 'Use zswapEndIndex instead',
+    source: 'v4 schema',
+  },
+  {
+    parentType: 'RelevantTransaction',
+    fieldName: 'collapsedMerkleTree',
+    expectedReason: 'Use zswapCollapsedUpdate instead',
+    source: 'v4 schema',
+  },
+  {
+    parentType: 'ShieldedTransactionsProgress',
+    fieldName: 'highestEndIndex',
+    expectedReason: 'Use highestZswapEndIndex instead',
+    source: 'v4 schema',
+  },
+  {
+    parentType: 'ShieldedTransactionsProgress',
+    fieldName: 'highestCheckedEndIndex',
+    expectedReason: 'Use highestCheckedZswapEndIndex instead',
+    source: 'v4 schema',
+  },
+  {
+    parentType: 'ShieldedTransactionsProgress',
+    fieldName: 'highestRelevantEndIndex',
+    expectedReason: 'Use highestRelevantZswapEndIndex instead',
+    source: 'v4 schema',
+  },
   // Issue #1032 / PR #1036: deprecate the `fees` wrapper in favour of the new
   // top-level `fee` field on RegularTransaction.
   {
