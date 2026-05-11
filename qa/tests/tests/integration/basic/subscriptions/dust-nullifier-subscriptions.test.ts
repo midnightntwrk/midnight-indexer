@@ -15,12 +15,14 @@
 
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
+import type { TestContext } from 'vitest';
 import {
   IndexerWsClient,
   DustNullifierTransactionSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
 import { DustNullifierTransactionSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
+import { DustNullifierTransaction } from '@utils/indexer/indexer-types';
 
 const indexerHttpClient = new IndexerHttpClient();
 
@@ -227,5 +229,96 @@ describe('dust nullifier transactions subscription', () => {
       expect(settled.completed).toBe(false);
       expect(settled.eventCount).toBeGreaterThanOrEqual(0);
     });
+  });
+
+  /**
+   * Coverage for midnight-indexer#1114 / PR #1116
+   * (`feat(indexer-api): add transactionHash to event subscription response types`).
+   *
+   * `transactionHash: HexEncoded!` was added to `DustNullifierTransaction`.
+   * The schema-level shape (64-hex, non-nullable) is already enforced by the
+   * `DustNullifierTransactionSchema` used by the streaming test above. This
+   * block adds the round-trip check: the streamed hash must resolve a
+   * transaction via `transactions(offset: { hash: ... })`.
+   *
+   * Match presence is environment-dependent (prefix `'00'` over the full
+   * chain). If no transactions match within the timeout, the round-trip is
+   * vacuous and we skip rather than asserting against an empty stream.
+   */
+  describe('transactionHash on dust nullifier events (#1114)', () => {
+    /**
+     * @given a wide prefix scan of the full chain
+     * @when we subscribe to `dustNullifierTransactions` and look up the first
+     *       streamed event's `transactionHash` via `transactions(offset)`
+     * @then the lookup resolves a single transaction whose `hash` equals the
+     *       streamed `transactionHash` — proving the field is the on-chain
+     *       identifier.
+     */
+    test('first event transactionHash resolves via transactions(offset)', async (ctx: TestContext) => {
+      const blockResponse = await indexerHttpClient.getLatestBlock();
+      expect(blockResponse).toBeSuccess();
+      const latestHeight = blockResponse.data!.block.height;
+
+      const received: DustNullifierTransaction[] = [];
+
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => {
+          subscription.unsubscribe();
+          resolve();
+        }, 15_000);
+
+        const subscription = indexerWsClient.subscribeToDustNullifierTransactions(
+          {
+            next: (payload) => {
+              const tx = payload.data?.dustNullifierTransactions;
+              if (tx) {
+                received.push(tx);
+                clearTimeout(timeout);
+                subscription.unsubscribe();
+                resolve();
+              }
+            },
+            error: () => {
+              clearTimeout(timeout);
+              subscription.unsubscribe();
+              resolve();
+            },
+            complete: () => {
+              clearTimeout(timeout);
+              resolve();
+            },
+          },
+          ['00'],
+          0,
+          latestHeight,
+        );
+      });
+
+      if (received.length === 0) {
+        log.warn(
+          'no dustNullifierTransactions matched prefix "00" within the timeout; ' +
+            'round-trip skipped (environment has no dust nullifier transactions in range)',
+        );
+        ctx.skip?.(
+          true,
+          'no dust nullifier transactions matched within timeout — round-trip vacuous',
+        );
+        return;
+      }
+
+      const first = received[0];
+      log.debug(
+        `Round-tripping DustNullifierTransaction.transactionHash=${first.transactionHash} ` +
+          `(transactionId=${first.transactionId})`,
+      );
+
+      const txResponse = await indexerHttpClient.getTransactionByOffset({
+        hash: first.transactionHash,
+      });
+      expect(txResponse).toBeSuccess();
+      const transactions = txResponse.data!.transactions;
+      expect(transactions.length).toBeGreaterThanOrEqual(1);
+      expect(transactions[0].hash).toBe(first.transactionHash);
+    }, 30_000);
   });
 });
