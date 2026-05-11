@@ -35,9 +35,7 @@ const TOOLKIT_STARTUP_TIMEOUT = 60_000;
  *
  * Observable contract on `shieldedTransactions(sessionId)`:
  *   - the wallet's `ShieldedTransactionsProgress.highestCheckedZswapEndIndex`
- *     advances at least to `startIndex` immediately, and
- *   - no historical `RelevantTransaction` events are emitted for transactions
- *     with `endIndex <= startIndex` because they were never scanned.
+ *     advances at least to `startIndex` immediately.
  */
 describe('wallet connect options (startIndex)', () => {
   let toolkit: ToolkitWrapper;
