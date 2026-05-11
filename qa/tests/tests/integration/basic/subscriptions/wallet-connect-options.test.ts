@@ -208,6 +208,8 @@ describe('wallet connect options (startIndex)', () => {
       const viewingKey = await toolkit.showViewingKey(seed);
 
       const tipIndex = await readCurrentZswapTipIndex(viewingKey);
+      // 1M past tip is well beyond any realistic chain depth: exercises the
+      // fast-forward semantics, not "near tip" semantics.
       const fastForward = tipIndex + 1_000_000;
 
       const sessionId = await indexerWsClient.openWalletSession(viewingKey, {
