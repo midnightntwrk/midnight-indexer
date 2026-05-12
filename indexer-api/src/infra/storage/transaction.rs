@@ -449,13 +449,19 @@ impl TransactionStorage for Storage {
         &self,
         address: UnshieldedAddress,
     ) -> Result<Option<u64>, sqlx::Error> {
+        // Max transaction id across both link columns for the owner. Each
+        // branch is an index scan on unshielded_utxos(owner, …); aggregate
+        // MAX skips NULL spending_transaction_id values from unspent rows.
         let query = indoc! {"
-            SELECT MAX(transactions.id)
-            FROM transactions
-            INNER JOIN unshielded_utxos ON
-                unshielded_utxos.creating_transaction_id = transactions.id OR
-                unshielded_utxos.spending_transaction_id = transactions.id
-            WHERE unshielded_utxos.owner = $1
+            SELECT MAX(tx_id) FROM (
+                SELECT creating_transaction_id AS tx_id
+                FROM unshielded_utxos
+                WHERE owner = $1
+                UNION ALL
+                SELECT spending_transaction_id AS tx_id
+                FROM unshielded_utxos
+                WHERE owner = $1
+            ) AS t
         "};
 
         let (id,) = sqlx::query_as::<_, (Option<i64>,)>(query)
@@ -616,129 +622,88 @@ impl Storage {
         transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
+        // Collect matching tx ids in a deduplicated UNION subquery over both
+        // link columns, then probe transactions by primary key. LEFT JOIN
+        // regular_transactions yields populated regular_* fields for Regular
+        // rows and NULL fields for System rows.
         #[cfg(feature = "cloud")]
         let query = indoc! {"
-            SELECT DISTINCT *
-            FROM (
-                SELECT
-                    transactions.id,
-                    transactions.variant,
-                    transactions.hash,
-                    transactions.protocol_version,
-                    transactions.raw,
-                    blocks.hash AS block_hash,
-                    regular_transactions.transaction_result,
-                    regular_transactions.zswap_merkle_tree_root,
-                    regular_transactions.zswap_start_index,
-                    regular_transactions.zswap_end_index,
-                    regular_transactions.dust_commitment_start_index,
-                    regular_transactions.dust_commitment_end_index,
-                    regular_transactions.dust_generation_start_index,
-                    regular_transactions.dust_generation_end_index,
-                    regular_transactions.paid_fees,
-                    regular_transactions.estimated_fees,
-                    regular_transactions.identifiers
-                FROM transactions
-                INNER JOIN blocks ON blocks.id = transactions.block_id
-                INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
-                INNER JOIN unshielded_utxos ON
-                    unshielded_utxos.creating_transaction_id = transactions.id OR
-                    unshielded_utxos.spending_transaction_id = transactions.id
-                WHERE unshielded_utxos.owner = $1
-                AND transactions.id >= $2
+            SELECT
+                transactions.id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees,
+                regular_transactions.identifiers
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            LEFT JOIN regular_transactions ON regular_transactions.id = transactions.id
+            WHERE transactions.id IN (
+                SELECT creating_transaction_id
+                FROM unshielded_utxos
+                WHERE owner = $1
+                AND creating_transaction_id >= $2
 
-                UNION ALL
+                UNION
 
-                SELECT
-                    transactions.id,
-                    transactions.variant,
-                    transactions.hash,
-                    transactions.protocol_version,
-                    transactions.raw,
-                    blocks.hash AS block_hash,
-                    NULL AS transaction_result,
-                    NULL AS zswap_merkle_tree_root,
-                    NULL AS zswap_start_index,
-                    NULL AS zswap_end_index,
-                    NULL AS dust_commitment_start_index,
-                    NULL AS dust_commitment_end_index,
-                    NULL AS dust_generation_start_index,
-                    NULL AS dust_generation_end_index,
-                    NULL AS paid_fees,
-                    NULL AS estimated_fees,
-                    NULL AS identifiers
-                FROM transactions
-                INNER JOIN blocks ON blocks.id = transactions.block_id
-                INNER JOIN unshielded_utxos ON
-                    unshielded_utxos.creating_transaction_id = transactions.id OR
-                    unshielded_utxos.spending_transaction_id = transactions.id
-                WHERE unshielded_utxos.owner = $1
-                AND transactions.id >= $2
-                AND transactions.variant = 'System'
+                SELECT spending_transaction_id
+                FROM unshielded_utxos
+                WHERE owner = $1
+                AND spending_transaction_id IS NOT NULL
+                AND spending_transaction_id >= $2
             )
-            ORDER BY id
+            ORDER BY transactions.id
             LIMIT $3
         "};
 
         #[cfg(feature = "standalone")]
         let query = indoc! {"
-            SELECT DISTINCT *
-            FROM (
-                SELECT
-                    transactions.id,
-                    transactions.variant,
-                    transactions.hash,
-                    transactions.protocol_version,
-                    transactions.raw,
-                    blocks.hash AS block_hash,
-                    regular_transactions.transaction_result,
-                    regular_transactions.zswap_merkle_tree_root,
-                    regular_transactions.zswap_start_index,
-                    regular_transactions.zswap_end_index,
-                    regular_transactions.dust_commitment_start_index,
-                    regular_transactions.dust_commitment_end_index,
-                    regular_transactions.dust_generation_start_index,
-                    regular_transactions.dust_generation_end_index,
-                    regular_transactions.paid_fees,
-                    regular_transactions.estimated_fees
-                FROM transactions
-                INNER JOIN blocks ON blocks.id = transactions.block_id
-                INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
-                INNER JOIN unshielded_utxos ON
-                    unshielded_utxos.creating_transaction_id = transactions.id OR
-                    unshielded_utxos.spending_transaction_id = transactions.id
-                WHERE unshielded_utxos.owner = $1
-                AND transactions.id >= $2
+            SELECT
+                transactions.id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            LEFT JOIN regular_transactions ON regular_transactions.id = transactions.id
+            WHERE transactions.id IN (
+                SELECT creating_transaction_id
+                FROM unshielded_utxos
+                WHERE owner = $1
+                AND creating_transaction_id >= $2
 
-                UNION ALL
+                UNION
 
-                SELECT
-                    transactions.id,
-                    transactions.variant,
-                    transactions.hash,
-                    transactions.protocol_version,
-                    transactions.raw,
-                    blocks.hash AS block_hash,
-                    NULL AS transaction_result,
-                    NULL AS zswap_merkle_tree_root,
-                    NULL AS zswap_start_index,
-                    NULL AS zswap_end_index,
-                    NULL AS dust_commitment_start_index,
-                    NULL AS dust_commitment_end_index,
-                    NULL AS dust_generation_start_index,
-                    NULL AS dust_generation_end_index,
-                    NULL AS paid_fees,
-                    NULL AS estimated_fees
-                FROM transactions
-                INNER JOIN blocks ON blocks.id = transactions.block_id
-                INNER JOIN unshielded_utxos ON
-                    unshielded_utxos.creating_transaction_id = transactions.id OR
-                    unshielded_utxos.spending_transaction_id = transactions.id
-                WHERE unshielded_utxos.owner = $1
-                AND transactions.id >= $2
-                AND transactions.variant = 'System'
+                SELECT spending_transaction_id
+                FROM unshielded_utxos
+                WHERE owner = $1
+                AND spending_transaction_id IS NOT NULL
+                AND spending_transaction_id >= $2
             )
-            ORDER BY id
+            ORDER BY transactions.id
             LIMIT $3
         "};
 
