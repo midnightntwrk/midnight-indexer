@@ -58,10 +58,14 @@ export class EventCoordinator {
    * Waits for multiple events to occur, with optional timeout
    *
    * @param eventNames - Array of event names to wait for
-   * @param timeout - Optional timeout in milliseconds (default 3 seconds)
+   * @param timeout - Optional timeout in milliseconds (default 30 seconds).
+   *   Subscription/streaming tests against deployed indexer environments
+   *   need headroom for cold WS handshake + remote delivery under parallel
+   *   load. The previous 3s default was tight for the indexer happy path
+   *   and routinely starved under contention.
    * @returns Promise that resolves when all events occur or rejects on timeout
    */
-  waitForAll(eventNames: string[], timeout: number = 3000): Promise<void> {
+  waitForAll(eventNames: string[], timeout: number = 30000): Promise<void> {
     const promises = eventNames.map((name) => this.waitFor(name));
 
     return Promise.race([
@@ -79,10 +83,11 @@ export class EventCoordinator {
    * Waits for any of the specified events to occur, with optional timeout
    *
    * @param eventNames - Array of event names to wait for
-   * @param timeout - Optional timeout in milliseconds (default 3 seconds)
+   * @param timeout - Optional timeout in milliseconds (default 30 seconds —
+   *   see `waitForAll` for the rationale on the new default).
    * @returns Promise that resolves when any event occurs or rejects on timeout
    */
-  waitForAny(eventNames: string[], timeout: number = 3000): Promise<string> {
+  waitForAny(eventNames: string[], timeout: number = 30000): Promise<string> {
     const promises = eventNames.map((name) => this.waitFor(name).then(() => name));
 
     return Promise.race([
