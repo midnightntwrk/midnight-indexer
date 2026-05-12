@@ -40,6 +40,37 @@ let toolkit: ToolkitWrapper;
 let indexerWsClient: IndexerWsClient;
 
 /**
+ * Stop condition for unshielded-transaction subscriptions that want to
+ * deterministically wait for the indexer to catch up to its own reported
+ * head.
+ *
+ * Returns true when the stream has delivered a `UnshieldedTransactionsProgress`
+ * message AND every `UnshieldedTransaction` we've collected so far reaches
+ * (or exceeds) the `highestTransactionId` reported by that progress message.
+ *
+ * Use this instead of `() => false` or `messages[0].errors !== undefined`
+ * — both of which never actually trigger on the happy path and force the
+ * subscription to be cut off by the helper's wall-clock timeout, which
+ * fails the equality assertion against a moving head on busy addresses.
+ */
+function isCaughtUpToHighestTxId(messages: UnshieldedTxSubscriptionResponse[]): boolean {
+  let progressTxId = -1;
+  let sawProgress = false;
+  let highestFound = -1;
+  for (const m of messages) {
+    const ev = m.data?.unshieldedTransactions as UnshieldedTransactionEvent | undefined;
+    if (!ev) continue;
+    if (ev.__typename === 'UnshieldedTransactionsProgress') {
+      progressTxId = ev.highestTransactionId;
+      sawProgress = true;
+    } else if (ev.__typename === 'UnshieldedTransaction' && ev.transaction.id != null) {
+      highestFound = Math.max(highestFound, ev.transaction.id);
+    }
+  }
+  return sawProgress && highestFound >= progressTxId;
+}
+
+/**
  * Utility function to subscribe to unshielded transaction events by address and/or transaction id.
  * This is to help to reuse the login and the handler in multiple places.
  *
@@ -172,13 +203,17 @@ describe('unshielded transaction subscriptions', async () => {
       expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
       const unshieldedAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
 
-      // Here when subscribing we need to take into accounta that we are using a funding seed
-      // so the number of transactions can be massive. So we need to wait for the indexer
-      // to stream all the events and make sure it receives a progress message and they
-      // match in numbers. This is the same mechanism used by the wallet to sync transactions
+      // Here when subscribing we need to take into account that we are using a
+      // funding seed so the number of transactions can be massive. The
+      // `isCaughtUpToHighestTxId` stop condition lets us stop deterministically
+      // when the indexer's progress message and our collected events line up,
+      // rather than relying on a wall-clock cutoff that would truncate mid-stream
+      // for busy addresses. The 60s timeout is a safety ceiling — under healthy
+      // conditions the indexer delivers progress within seconds.
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
-        () => false,
+        isCaughtUpToHighestTxId,
+        60_000,
       );
 
       messages.forEach((message) => {
@@ -389,9 +424,15 @@ describe('unshielded transaction subscriptions', async () => {
       expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
       const targetAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
 
+      // Same caught-up stop condition as the sibling test — see
+      // `isCaughtUpToHighestTxId` for rationale. The previous condition
+      // (`messages[0].errors !== undefined`) never fired on the happy path,
+      // so the helper's 5s wall-clock timeout truncated the stream and the
+      // equality assertion against the moving head failed on busy addresses.
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
-        (messages) => messages[0].errors !== undefined,
+        isCaughtUpToHighestTxId,
+        60_000,
       );
 
       expect(messages.length).toBeGreaterThanOrEqual(2);
