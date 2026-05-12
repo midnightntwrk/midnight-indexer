@@ -101,6 +101,11 @@ describe('dust generations subscription', () => {
           handler();
         };
 
+        // 60s ceiling. Under healthy conditions the indexer responds with
+        // historical events + a Progress message in well under a second; the
+        // previous 12s window was too tight when qanet was loaded or
+        // recovering from a 503 burst, causing the stream's first event to
+        // arrive late and the test to fail with zero events received.
         const timeout = setTimeout(() => {
           safeUnsubscribe(unsubscribe);
           // It's OK if we received some events before timeout
@@ -109,7 +114,7 @@ describe('dust generations subscription', () => {
           } else {
             settle(() => reject(new Error('Timed out waiting for dust generations events')));
           }
-        }, 12_000);
+        }, 60_000);
 
         const subscription = indexerWsClient.subscribeToDustGenerations(
           {
@@ -174,7 +179,9 @@ describe('dust generations subscription', () => {
         (msg) => msg.data?.dustGenerations?.__typename === 'DustGenerationDtimeUpdateItem',
       ).length;
       log.debug(`Received ${dtimeUpdateCount} DustGenerationDtimeUpdateItem event(s)`);
-    }, 30_000);
+      // Test-level timeout must comfortably exceed the internal 60s ceiling
+      // for the dust-generations subscription wait, plus query + teardown.
+    }, 90_000);
   });
 
   describe('subscription error handling', () => {
