@@ -5,6 +5,7 @@
     "clean": "rm -rf logs/ dist tmp_scan",
     "format": "bun run prettier --write '**/*.{js,jsx,json,ts,tsx,graphql,gql}'",
     "format:check": "bun run prettier --check '**/*.{js,jsx,json,ts,tsx,graphql,gql}'",
+    "lint": "tsc",
     "audit": "bun audit --audit-level=high",
     "build:scanner": "bun build src/scanner.ts --compile --outfile scanner",
     "scan": "bun run src/scanner.ts",
@@ -18,6 +19,7 @@
   "devDependencies": {
     "@types/bun": "^1.2.23",
     "@types/ws": "^8.18.1",
-    "prettier": "^3.5.3"
+    "prettier": "^3.5.3",
+    "typescript": "^6.0.3"
   }
 }

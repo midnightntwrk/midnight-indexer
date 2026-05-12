@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   qa-tests:
-    name: qa/tests — lint, format, audit
+    name: tests — lint, format, audit
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -57,7 +57,7 @@ jobs:
         run: yarn audit
 
   block-scanner:
-    name: qa/tools/block-scanner — format, audit
+    name: tools/block-scanner — lint, format, audit
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -74,6 +74,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Lint (typecheck)
+        run: bun run lint
+
       - name: Format check
         run: bun run format:check
 
@@ -81,7 +84,7 @@ jobs:
         run: bun run audit
 
   scripts:
-    name: qa/scripts — shellcheck
+    name: scripts — shellcheck
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
