@@ -336,3 +336,5 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 yarn test:integration
 - **Dynamic Data Fetching**: Use the block scraper to fetch recent block data to execute the test against (potentially) different test data every run
 
 - **Log file per test**: Right now the test execution is per test file, having log files per test will allow concurrent test execution.
+
+<!-- ci-path-filter-test: qa-only -->
