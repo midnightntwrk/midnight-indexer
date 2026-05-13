@@ -216,3 +216,114 @@ function isNameConflict(message: string): boolean {
     message.includes('already exists')
   );
 }
+
+// ---------------------------------------------------------------------------
+// Progress reporter
+// ---------------------------------------------------------------------------
+
+const PROGRESS_INTERVAL_MS = 10_000;
+
+interface ChainProgress {
+  chainId: string;
+  blockCount: number;
+  highestBlock: number;
+}
+
+export interface CacheProgressReporter {
+  stop: () => void;
+}
+
+/**
+ * Start a periodic reporter that prints cache sync progress to the console.
+ * Polls highest_verified and raw_block_data_v2 every 10 s, showing block
+ * counts per chain_id and flagging any stale chains left over from past
+ * env resets.
+ *
+ * Returns a handle whose stop() must be called when warmup completes.
+ */
+export function startCacheProgressReporter(label: string = 'cache'): CacheProgressReporter {
+  const prev = new Map<string, number>();
+
+  const tick = async () => {
+    try {
+      const chains = await queryChainProgress();
+      if (chains.length === 0) {
+        console.log(`[CACHE:${label}] Waiting for first blocks…`);
+        return;
+      }
+
+      // Newest active chain = highest block_count (most writes)
+      const active = chains.reduce((a, b) => (a.blockCount >= b.blockCount ? a : b));
+
+      for (const c of chains) {
+        const delta = c.blockCount - (prev.get(c.chainId) ?? 0);
+        prev.set(c.chainId, c.blockCount);
+        const tag = c.chainId === active.chainId ? '' : ' ⚠ stale';
+        console.log(
+          `[CACHE:${label}] chain ${c.chainId}${tag} — ${c.blockCount.toLocaleString()} blocks` +
+            ` (Δ +${delta.toLocaleString()} in ${PROGRESS_INTERVAL_MS / 1000}s)` +
+            ` — highest: ${c.highestBlock.toLocaleString()}`,
+        );
+      }
+
+      const staleCount = chains.length - 1;
+      if (staleCount > 0) {
+        console.warn(
+          `[CACHE:${label}] ⚠  ${staleCount} stale chain(s) detected from past env resets.` +
+            ` Run \`docker rm -f ${CONTAINER_NAME}\` and delete \`.tmp/toolkit-postgres-data\`` +
+            ` to reclaim space.`,
+        );
+      }
+    } catch {
+      // Non-fatal — reporter runs best-effort alongside warmup
+    }
+  };
+
+  const handle = setInterval(() => void tick(), PROGRESS_INTERVAL_MS);
+  // Fire an initial tick after a short delay so the first row has time to appear
+  setTimeout(() => void tick(), 3_000);
+
+  return { stop: () => clearInterval(handle) };
+}
+
+async function queryChainProgress(): Promise<ChainProgress[]> {
+  const sql = `
+    SELECT
+      encode(r.chain_id, 'hex') AS chain_id,
+      COUNT(*)::bigint            AS block_count,
+      COALESCE(h.height, 0)       AS highest_block
+    FROM raw_block_data_v2 r
+    LEFT JOIN highest_verified h USING (chain_id)
+    GROUP BY r.chain_id, h.height
+    ORDER BY block_count DESC;
+  `.trim();
+
+  const { stdout } = await execFileAsync('docker', [
+    'exec',
+    CONTAINER_NAME,
+    'psql',
+    '-U',
+    POSTGRES_USER,
+    '-d',
+    POSTGRES_DB,
+    '-t',
+    '-A',
+    '-F',
+    '|',
+    '-c',
+    sql,
+  ]);
+
+  return stdout
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [chainId, blockCountStr, highestBlockStr] = line.split('|');
+      return {
+        chainId: `0x${chainId.slice(0, 8)}…`,
+        blockCount: parseInt(blockCountStr, 10),
+        highestBlock: parseInt(highestBlockStr, 10),
+      };
+    });
+}

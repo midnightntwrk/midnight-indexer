@@ -15,12 +15,14 @@
 
 // global-setup.ts
 import { ToolkitWrapper } from '../utils/toolkit/toolkit-wrapper';
+import { startCacheProgressReporter, CacheProgressReporter } from '../utils/toolkit/toolkit-cache';
 
 let warmupToolkit: ToolkitWrapper | undefined;
 
 export async function setup() {
   console.log('[SETUP] Warming up toolkit cache (this may take several minutes)...');
 
+  let reporter: CacheProgressReporter | undefined;
   try {
     const startTime = Date.now();
 
@@ -32,6 +34,8 @@ export async function setup() {
     console.log('[SETUP] Starting toolkit container...');
     await warmupToolkit.start();
 
+    reporter = startCacheProgressReporter(process.env.TARGET_ENV ?? 'cache');
+
     console.log('[SETUP] Syncing cache (please wait, this will take time)...');
     await warmupToolkit.warmupCache();
 
@@ -41,6 +45,7 @@ export async function setup() {
     console.error('[SETUP] Failed to warmup toolkit cache:', error);
     throw error;
   } finally {
+    reporter?.stop();
     if (warmupToolkit) {
       await warmupToolkit.stop();
     }
