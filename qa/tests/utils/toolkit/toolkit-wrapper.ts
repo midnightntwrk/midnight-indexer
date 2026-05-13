@@ -57,9 +57,7 @@ interface ToolkitConfig {
   chain?: string;
   nodeTag?: string;
   nodeToolkitTag?: string;
-  syncCacheDir?: string;
   coinSeed?: string;
-  warmupCache?: boolean;
 }
 
 export interface ToolkitTransactionResult {
@@ -321,74 +319,36 @@ class ToolkitWrapper {
     const envName = env.getCurrentEnvironmentName();
 
     this.config.containerName = config.containerName || `mn-toolkit-${envName}-${randomId}`;
-    this.config.targetDir = config.targetDir || resolve('./.tmp/toolkit');
+    this.config.targetDir = config.targetDir || resolve(`./.tmp/toolkit/${envName}-${randomId}`);
     this.config.nodeTag = config.nodeTag || env.getNodeVersion();
     this.config.nodeToolkitTag =
       config.nodeToolkitTag || process.env.NODE_TOOLKIT_TAG || 'latest-main';
-    this.config.warmupCache = config.warmupCache || false;
 
-    // Ensure the target directory exists
-    if (!fs.existsSync(this.config.targetDir)) {
-      fs.mkdirSync(this.config.targetDir, { recursive: true });
-      console.debug(`[SETUP]Created target directory: ${this.config.targetDir}`);
-    }
-
-    // This block is making sure that if a golden cache directory is available, we use it.
-    if (this.config.warmupCache) {
-      log.debug('Warmup cache is enabled, using the golden cache directory');
-      this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${envName}`;
-
-      // Check if there is any .bin file in the golden cache directory
-      if (
-        fs.existsSync(this.config.syncCacheDir) &&
-        fs.readdirSync(this.config.syncCacheDir).some((file) => file.endsWith('.bin'))
-      ) {
-        console.debug(`[SETUP] Golden cache file found at: ${this.config.syncCacheDir}, using it`);
-      } else {
-        console.debug(`[SETUP] Golden cache directory not found at: ${this.config.syncCacheDir}`);
-      }
-    } else {
-      this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${envName}-${randomId}`;
-      // copy the golden sync cache directory to the instance-specific cache
-      const goldenCacheDir = `${this.config.targetDir}/.sync_cache-${envName}`;
-
-      if (!fs.existsSync(goldenCacheDir)) {
-        fs.mkdirSync(goldenCacheDir);
-        log.warn(
-          `Golden cache directory not found at: ${goldenCacheDir}\n` +
-            `Please ensure the global setup has run to warm up the cache, or run with warmupCache: true first.`,
-        );
-      }
-
-      fs.cpSync(goldenCacheDir, this.config.syncCacheDir, { recursive: true });
-      log.debug(
-        `Copied sync cache from golden cache to instance cache: ${this.config.syncCacheDir}`,
-      );
-    }
+    fs.mkdirSync(this.config.targetDir, { recursive: true });
+    fs.mkdirSync(join(this.config.targetDir, 'cache'), { recursive: true });
 
     log.debug(`NODE_TAG         : ${this.config.nodeTag}`);
     log.debug(`NODE_TOOLKIT_TAG : ${this.config.nodeToolkitTag}`);
     log.debug(`Toolkit target dir     : ${this.config.targetDir}`);
     log.debug(`Toolkit container name : ${this.config.containerName}`);
-    log.debug(`Toolkit sync cache dir : ${this.config.syncCacheDir}`);
 
     this.container = new GenericContainer(
       `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`,
     )
       .withName(this.config.containerName)
-      .withNetworkMode('host') // equivalent to --network host
-      .withEntrypoint([]) // equivalent to --entrypoint ""
+      .withNetworkMode('host')
+      .withEntrypoint([])
       .withBindMounts([
         {
           source: this.config.targetDir,
           target: '/out',
         },
         {
-          source: this.config.syncCacheDir,
-          target: `/.cache`,
+          source: join(this.config.targetDir, 'cache'),
+          target: '/.cache',
         },
       ])
-      .withCommand(['sleep', 'infinity']); // equivalent to sleep infinity
+      .withCommand(['sleep', 'infinity']);
   }
 
   /**
@@ -400,18 +360,6 @@ class ToolkitWrapper {
    * @throws Error if the container fails to start after the maximum number of retries
    */
   async start() {
-    // Clean up output directory from previous runs (excluding sync cache)
-    if (this.config.targetDir && fs.existsSync(this.config.targetDir)) {
-      const files = fs.readdirSync(this.config.targetDir);
-      for (const file of files) {
-        if (!file.startsWith('.sync_cache')) {
-          const filePath = join(this.config.targetDir, file);
-          fs.rmSync(filePath, { recursive: true, force: true });
-        }
-      }
-      log.debug(`Cleaned output directory: ${this.config.targetDir}`);
-    }
-
     const cache = await ensureToolkitCachePostgres();
     log.debug(`Toolkit fetch cache    : ${cache.host}:${cache.port}/${cache.database}`);
     this.container.withEnvironment({ MN_FETCH_CACHE: cache.fetchCacheUrl });
@@ -423,58 +371,63 @@ class ToolkitWrapper {
     });
   }
 
-  /**
-   * Stop the toolkit container and cleanup resources
-   *
-   * This method stops the running Docker container and removes the instance-specific sync cache
-   * directory (unless warmupCache is enabled). Cleanup errors are logged as warnings but do not
-   * throw exceptions.
-   *
-   * @returns A promise that resolves when the container has stopped and cleanup is complete
-   */
   async stop() {
     if (this.startedContainer) {
       await this.startedContainer.stop();
     }
-
-    // Cleanup instance-specific cache directory (not the golden cache)
-    if (!this.config.warmupCache && this.config.syncCacheDir) {
+    if (this.config.targetDir) {
       try {
-        fs.rmSync(this.config.syncCacheDir, { recursive: true, force: true });
-        log.debug(`Cleaned up instance-specific sync cache: ${this.config.syncCacheDir}`);
+        fs.rmSync(this.config.targetDir, { recursive: true, force: true });
+        log.debug(`Cleaned up toolkit target dir: ${this.config.targetDir}`);
       } catch (error) {
-        log.warn(`Failed to cleanup sync cache: ${error}`);
+        log.warn(`Failed to clean up toolkit target dir: ${error}`);
       }
     }
   }
 
   /**
-   * Warm up the cache by generating a single unshielded transaction
-   * This method displays sync progress to the console during warmup.
+   * Warm up the cache by generating a single unshielded transaction, retrying on RPC timeouts.
    *
-   * @returns void
+   * The toolkit syncs the postgres fetch-cache before attempting the tx. If it hits a
+   * RequestTimeout mid-sync it exits with code 1 without writing highest_verified, so the
+   * next run replays from block 0 (cache hits are fast). We retry until the toolkit exits
+   * for a non-timeout reason, which means the sync completed and the tx failed as expected
+   * (invalid seed / insufficient funds).
    */
   async warmupCache() {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
 
-    // We use generate single tx to warm up the cache because it will try to sync the cache
-    // before it gets to validate the arguments that are wrong on purpose.
-    let output: ToolkitTransactionResult;
-    try {
-      output = await this.generateSingleTx(
-        '0'.repeat(64), // Invalid seed
-        'unshielded',
-        (await this.showAddress('0'.repeat(63) + '9')).unshielded,
-        1,
-      );
-      console.debug(`[SETUP] Warmup cache output:\n${JSON.stringify(output, null, 2)}`);
-    } catch (_error) {
-      log.debug(
-        'Heads up, we are expecting an error here, the following log message is only reported for debugging purposes',
-      );
-      console.debug(`${_error}`);
+    const RETRY_DELAY_MS = 5_000;
+    // Resolve destination address once — it is stable across retries.
+    const destinationAddress = (await this.showAddress('0'.repeat(63) + '9')).unshielded;
+
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const output = await this.generateSingleTx(
+          '0'.repeat(64), // Invalid seed — forces a full cache sync before the tx is attempted
+          'unshielded',
+          destinationAddress,
+          1,
+        );
+        console.debug(`[SETUP] Warmup cache output:\n${JSON.stringify(output, null, 2)}`);
+        return;
+      } catch (error) {
+        if (String(error).includes('RequestTimeout')) {
+          console.log(
+            `[SETUP] Cache sync interrupted by RPC timeout (attempt ${attempt}), ` +
+              `retrying in ${RETRY_DELAY_MS / 1_000}s…`,
+          );
+          await new Promise((res) => setTimeout(res, RETRY_DELAY_MS));
+          continue;
+        }
+        // Any non-timeout error means the sync completed and the tx failed for an expected
+        // reason (invalid seed, insufficient funds, etc.) — warmup is done.
+        log.debug('Warmup completed — expected toolkit error after cache sync');
+        console.debug(`${error}`);
+        return;
+      }
     }
   }
 

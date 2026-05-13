@@ -68,6 +68,7 @@ async function bootstrap(): Promise<ToolkitCacheConnection> {
 
   const port = await ensureContainer();
   await waitForReady();
+  await ensureChainNamesTable();
 
   // The toolkit container runs with --network host on Linux, which means it
   // shares the host network stack. host.docker.internal does not resolve in
@@ -81,6 +82,24 @@ async function bootstrap(): Promise<ToolkitCacheConnection> {
     database: POSTGRES_DB,
     fetchCacheUrl,
   };
+}
+
+async function ensureChainNamesTable(): Promise<void> {
+  await execFileAsync('docker', [
+    'exec',
+    CONTAINER_NAME,
+    'psql',
+    '-U',
+    POSTGRES_USER,
+    '-d',
+    POSTGRES_DB,
+    '-c',
+    `CREATE TABLE IF NOT EXISTS chain_names (
+       chain_id      BYTEA PRIMARY KEY,
+       env_name      TEXT NOT NULL,
+       registered_at TIMESTAMPTZ DEFAULT now()
+     );`,
+  ]);
 }
 
 async function ensureContainer(): Promise<number> {
@@ -227,9 +246,11 @@ function isNameConflict(message: string): boolean {
 const PROGRESS_INTERVAL_MS = 10_000;
 
 interface ChainProgress {
-  chainId: string;
+  chainId: string; // abbreviated display form, e.g. "0x3c238ca2…"
+  chainIdHex: string; // full 64-char hex, used for chain_names registration
   blockCount: number;
   highestBlock: number;
+  envName?: string; // populated from chain_names once registered
 }
 
 export interface CacheProgressReporter {
@@ -242,46 +263,106 @@ export interface CacheProgressReporter {
  * counts per chain_id and flagging any stale chains left over from past
  * env resets.
  *
+ * @param label      - Label shown in log prefix, e.g. the TARGET_ENV name.
+ * @param nodeRpcUrl - HTTP URL of the Substrate node RPC (e.g.
+ *                     https://rpc.preview.midnight.network). When provided, the
+ *                     reporter fetches the live chain tip and shows a percentage.
+ *
  * Returns a handle whose stop() must be called when warmup completes.
  */
-export function startCacheProgressReporter(label: string = 'cache'): CacheProgressReporter {
+export function startCacheProgressReporter(
+  label: string = 'cache',
+  nodeRpcUrl?: string,
+): CacheProgressReporter {
   const prev = new Map<string, number>();
+  let chainTip: number | undefined;
+
+  const fetchChainTip = async (): Promise<void> => {
+    if (!nodeRpcUrl) return;
+    try {
+      const res = await fetch(nodeRpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 1, jsonrpc: '2.0', method: 'chain_getHeader', params: [] }),
+      });
+      const json = (await res.json()) as { result?: { number?: string } };
+      const hex = json?.result?.number;
+      if (hex) chainTip = parseInt(hex, 16);
+    } catch {
+      // Non-fatal
+    }
+  };
 
   const tick = async () => {
     try {
+      await fetchChainTip();
       const chains = await queryChainProgress();
       if (chains.length === 0) {
         console.log(`[CACHE:${label}] Waiting for first blocks…`);
         return;
       }
 
-      // Newest active chain = highest block_count (most writes)
-      const active = chains.reduce((a, b) => (a.blockCount >= b.blockCount ? a : b));
-
+      // Update deltas for all chains (needed for stale detection regardless of display).
       for (const c of chains) {
-        const delta = c.blockCount - (prev.get(c.chainId) ?? 0);
         prev.set(c.chainId, c.blockCount);
-        const tag = c.chainId === active.chainId ? '' : ' ⚠ stale';
-        console.log(
-          `[CACHE:${label}] chain ${c.chainId}${tag} — ${c.blockCount.toLocaleString()} blocks` +
-            ` (Δ +${delta.toLocaleString()} in ${PROGRESS_INTERVAL_MS / 1000}s)` +
-            ` — highest: ${c.highestBlock.toLocaleString()}`,
-        );
       }
 
-      const staleCount = chains.length - 1;
-      if (staleCount > 0) {
-        console.warn(
-          `[CACHE:${label}] ⚠  ${staleCount} stale chain(s) detected from past env resets.` +
-            ` Run \`docker rm -f ${CONTAINER_NAME}\` and delete \`.tmp/toolkit-postgres-data\`` +
-            ` to reclaim space.`,
+      // Split into current-env chains and foreign-env chains.
+      // Unregistered chains (no envName) are treated as belonging to the current env
+      // until we know otherwise — they'll get registered below once they start growing.
+      const currentChains = chains.filter((c) => !c.envName || c.envName === label);
+      const foreignChains = chains.filter((c) => c.envName && c.envName !== label);
+
+      // Register unregistered growing chains with the current env label.
+      for (const c of currentChains) {
+        if (!c.envName && c.blockCount - (prev.get(c.chainId) ?? 0) > 0) {
+          await registerChainName(c.chainIdHex, label).catch(() => undefined);
+        }
+      }
+
+      if (currentChains.length === 0) {
+        console.log(`[CACHE:${label}] Waiting for first blocks…`);
+      } else {
+        // Active chain within the current env = one currently growing; fall back to highest count.
+        const growingIds = new Set(
+          currentChains
+            .filter((c) => c.blockCount - (prev.get(c.chainId) ?? 0) > 0)
+            .map((c) => c.chainId),
         );
+        const activeChainId =
+          growingIds.size > 0
+            ? [...growingIds][0]
+            : currentChains.reduce((a, b) => (a.blockCount >= b.blockCount ? a : b)).chainId;
+
+        for (const c of currentChains) {
+          const delta = c.blockCount - (prev.get(c.chainId) ?? 0);
+          const isActive = c.chainId === activeChainId;
+          const tag = isActive ? '' : ' ⚠ stale';
+
+          const progress =
+            chainTip !== undefined && chainTip > 0
+              ? `fetch progress: ${c.blockCount.toLocaleString()}/${chainTip.toLocaleString()} (${((c.blockCount / chainTip) * 100).toFixed(1)}%) blocks complete`
+              : `${c.blockCount.toLocaleString()} blocks fetched (Δ +${delta.toLocaleString()} in ${PROGRESS_INTERVAL_MS / 1000}s)`;
+
+          console.log(`[CACHE:${label}] chain ${c.chainId}${tag} — ${progress}`);
+        }
+
+        const staleCurrentCount = currentChains.length - 1;
+        if (staleCurrentCount > 0) {
+          console.warn(
+            `[CACHE:${label}] ⚠  ${staleCurrentCount} stale ${label} chain(s) detected from past env resets.` +
+              ` Run \`docker rm -f ${CONTAINER_NAME}\` and delete \`.tmp/toolkit-postgres-data\`` +
+              ` to reclaim space.`,
+          );
+        }
       }
     } catch {
       // Non-fatal — reporter runs best-effort alongside warmup
     }
   };
 
+  // Fetch tip immediately so the first tick has a denominator
+  void fetchChainTip();
   const handle = setInterval(() => void tick(), PROGRESS_INTERVAL_MS);
   // Fire an initial tick after a short delay so the first row has time to appear
   setTimeout(() => void tick(), 3_000);
@@ -292,12 +373,14 @@ export function startCacheProgressReporter(label: string = 'cache'): CacheProgre
 async function queryChainProgress(): Promise<ChainProgress[]> {
   const sql = `
     SELECT
-      encode(r.chain_id, 'hex') AS chain_id,
+      encode(r.chain_id, 'hex')  AS chain_id,
       COUNT(*)::bigint            AS block_count,
-      COALESCE(h.height, 0)       AS highest_block
+      COALESCE(h.height, 0)       AS highest_block,
+      COALESCE(n.env_name, '')    AS env_name
     FROM raw_block_data_v2 r
     LEFT JOIN highest_verified h USING (chain_id)
-    GROUP BY r.chain_id, h.height
+    LEFT JOIN chain_names n USING (chain_id)
+    GROUP BY r.chain_id, h.height, n.env_name
     ORDER BY block_count DESC;
   `.trim();
 
@@ -322,11 +405,29 @@ async function queryChainProgress(): Promise<ChainProgress[]> {
     .split('\n')
     .filter(Boolean)
     .map((line) => {
-      const [chainId, blockCountStr, highestBlockStr] = line.split('|');
+      const [chainIdHex, blockCountStr, highestBlockStr, envName] = line.split('|');
       return {
-        chainId: `0x${chainId.slice(0, 8)}…`,
+        chainId: `0x${chainIdHex.slice(0, 8)}…`,
+        chainIdHex,
         blockCount: parseInt(blockCountStr, 10),
         highestBlock: parseInt(highestBlockStr, 10),
+        envName: envName || undefined,
       };
     });
+}
+
+async function registerChainName(chainIdHex: string, envName: string): Promise<void> {
+  await execFileAsync('docker', [
+    'exec',
+    CONTAINER_NAME,
+    'psql',
+    '-U',
+    POSTGRES_USER,
+    '-d',
+    POSTGRES_DB,
+    '-c',
+    `INSERT INTO chain_names (chain_id, env_name)
+     VALUES (decode('${chainIdHex}', 'hex'), '${envName}')
+     ON CONFLICT (chain_id) DO NOTHING;`,
+  ]);
 }

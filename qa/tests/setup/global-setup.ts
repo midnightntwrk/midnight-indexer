@@ -16,6 +16,7 @@
 // global-setup.ts
 import { ToolkitWrapper } from '../utils/toolkit/toolkit-wrapper';
 import { startCacheProgressReporter, CacheProgressReporter } from '../utils/toolkit/toolkit-cache';
+import { env } from '../environment/model';
 
 let warmupToolkit: ToolkitWrapper | undefined;
 
@@ -34,7 +35,13 @@ export async function setup() {
     console.log('[SETUP] Starting toolkit container...');
     await warmupToolkit.start();
 
-    reporter = startCacheProgressReporter(process.env.TARGET_ENV ?? 'cache');
+    // Derive the node HTTP RPC URL from the websocket URL so the reporter
+    // can show a live percentage (e.g. "fetch progress: 39,485/715,051 (5.5%) blocks complete").
+    const nodeRpcUrl = env
+      .getNodeWebsocketBaseURL()
+      .replace(/^wss:\/\//, 'https://')
+      .replace(/^ws:\/\//, 'http://');
+    reporter = startCacheProgressReporter(process.env.TARGET_ENV ?? 'cache', nodeRpcUrl);
 
     console.log('[SETUP] Syncing cache (please wait, this will take time)...');
     await warmupToolkit.warmupCache();
