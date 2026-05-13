@@ -20,6 +20,7 @@ import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
 import { getContractDeploymentHashes } from '../../tests/e2e/test-utils';
+import { ensureToolkitCachePostgres } from './toolkit-cache';
 import { z } from 'zod';
 import {
   Coin,
@@ -387,9 +388,6 @@ class ToolkitWrapper {
           target: `/.cache`,
         },
       ])
-      .withEnvironment({
-        MN_FETCH_CACHE: 'postgres://toolkit:toolkit@host.docker.internal:5434/toolkit',
-      })
       .withCommand(['sleep', 'infinity']); // equivalent to sleep infinity
   }
 
@@ -413,6 +411,10 @@ class ToolkitWrapper {
       }
       log.debug(`Cleaned output directory: ${this.config.targetDir}`);
     }
+
+    const cache = await ensureToolkitCachePostgres();
+    log.debug(`Toolkit fetch cache    : ${cache.host}:${cache.port}/${cache.database}`);
+    this.container.withEnvironment({ MN_FETCH_CACHE: cache.fetchCacheUrl });
 
     this.startedContainer = await retry(async () => this.container.start(), {
       maxRetries: 2,

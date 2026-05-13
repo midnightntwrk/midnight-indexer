@@ -97,14 +97,14 @@ source .envrc
 By default, the node and indexer version to use will be determined based on the value in `NODE_VERSION` file and the SHA-1 of the commit where that file was updated (which indicates when a working indexer/node pair has been identified).
 Alternatively, you can override versions before running tests, depending on the target environment.
 
-### 4a) Start Toolkit Postgres (required for E2E tests)
+### 4a) Toolkit fetch cache (Postgres)
 
-E2E tests use the Node Toolkit fetch cache backed by Postgres.  
-Before running **any E2E tests** (local or deployed), start the Toolkit Postgres service in the root of the project:
-
-```bash
-bash qa/scripts/start-toolkit-postgres.sh
-```
+E2E and integration tests that use the Node Toolkit fetch a Postgres-backed
+cache (`MN_FETCH_CACHE`). The test harness brings the `toolkit-postgres`
+container up automatically on a dynamically chosen host port — no manual
+step is required. Cache data persists between runs under
+`qa/tests/.tmp/toolkit-postgres-data/`. To start fresh, stop and remove the
+container: `docker rm -f toolkit-postgres`.
 
 #### Undeployed / local environment
 
@@ -312,13 +312,9 @@ There are a number of deployed environments that are used for testing components
 - preview
 
 When running **E2E tests** against deployed environments (devnet, qanet, preview, etc.),
-Toolkit Postgres must still be running locally:
-
-```bash
-bash qa/scripts/start-toolkit-postgres.sh
-```
-
-To execute the tests against these environments just change the TARGET_ENV variable accordingly (NOTE: use lower case for environment names)
+the test harness auto-starts the toolkit fetch cache locally (see “Toolkit
+fetch cache (Postgres)” above). Just change the `TARGET_ENV` variable accordingly
+(NOTE: use lower case for environment names):
 
 ```bash
 TARGET_ENV=devnet yarn test       # devnet
