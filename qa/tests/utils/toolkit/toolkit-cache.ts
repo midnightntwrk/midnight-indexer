@@ -69,9 +69,12 @@ async function bootstrap(): Promise<ToolkitCacheConnection> {
   const port = await ensureContainer();
   await waitForReady();
 
-  const fetchCacheUrl = `postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@host.docker.internal:${port}/${POSTGRES_DB}`;
+  // The toolkit container runs with --network host on Linux, which means it
+  // shares the host network stack. host.docker.internal does not resolve in
+  // that mode; 127.0.0.1 reaches the host-bound postgres port directly.
+  const fetchCacheUrl = `postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${port}/${POSTGRES_DB}`;
   return {
-    host: 'host.docker.internal',
+    host: '127.0.0.1',
     port,
     user: POSTGRES_USER,
     password: POSTGRES_PASSWORD,
