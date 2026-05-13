@@ -210,7 +210,14 @@ where
                 });
             }
 
-            if cursor > end_index {
+            // Terminate on chain progress, not the subscriber's `cursor`,
+            // which only crosses `end_index` when the wallet owns an
+            // entry there.
+            let chain_first_free = storage
+                .get_dust_generations_chain_first_free()
+                .await
+                .map_err_into_server_error(|| "get dust generations chain first free")?;
+            if chain_first_free > end_index {
                 let final_update = make_final_collapsed_update(
                     cursor, end_index, storage, ledger_state_cache,
                 ).await?;
@@ -288,8 +295,11 @@ where
                     }
                 }
 
-                // Check if we've now reached end_index.
-                if cursor > end_index {
+                let chain_first_free = storage
+                    .get_dust_generations_chain_first_free()
+                    .await
+                    .map_err_into_server_error(|| "get dust generations chain first free")?;
+                if chain_first_free > end_index {
                     let final_update = make_final_collapsed_update(
                         cursor, end_index, storage, ledger_state_cache,
                     ).await?;
