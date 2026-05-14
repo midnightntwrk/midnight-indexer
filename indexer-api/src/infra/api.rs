@@ -264,9 +264,6 @@ where
     Router::new()
         .route("/live", get(live))
         .route("/ready", get(ready))
-        // TEMPORARY: end-to-end probe-loop validation only. Revert with the trigger commit after
-        // qanet validation.
-        .route("/trigger-live-failure", get(trigger_live_failure))
         .nest("/api/v3", v4_app.clone()) // v3 is an alias to v4 for backwards compatibility.
         .nest("/api/v4", v4_app)
         .route("/api/{*rest}", any(redirect_api_to_latest))
@@ -280,28 +277,11 @@ where
         .layer(CorsLayer::permissive())
 }
 
-// TEMPORARY (revert after qanet probe-loop validation): backing flag and trigger
-// handler for `/trigger-live-failure`. Not feature-gated, so any caller who knows
-// the URL can hang a pod's `/live` handler and force a restart.
-static LIVE_FAILURE_TRIGGERED: AtomicBool = AtomicBool::new(false);
-
 // Returns 200 when reachable. If the runtime is parked (e.g. storage-core deadlock during
 // `creating dust generations collapsed update`), this handler does not run; kubelet's
 // liveness probe times out and the pod is terminated and recreated.
 async fn live() -> impl IntoResponse {
-    // TEMPORARY: remove together with the trigger handler below.
-    // Hang indefinitely instead of returning 503 so kubelet sees a probe timeout,
-    // mimicking the real parked-runtime case rather than a clean status response.
-    if LIVE_FAILURE_TRIGGERED.load(Ordering::Acquire) {
-        std::future::pending::<()>().await;
-    }
     StatusCode::OK.into_response()
-}
-
-// TEMPORARY: see note on LIVE_FAILURE_TRIGGERED above.
-async fn trigger_live_failure() -> impl IntoResponse {
-    LIVE_FAILURE_TRIGGERED.store(true, Ordering::Release);
-    StatusCode::OK
 }
 
 async fn ready(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
