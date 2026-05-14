@@ -264,7 +264,8 @@ where
     Router::new()
         .route("/live", get(live))
         .route("/ready", get(ready))
-        // TEMPORARY: end-to-end probe-loop validation only. Revert with the trigger commit after qanet validation.
+        // TEMPORARY: end-to-end probe-loop validation only. Revert with the trigger commit after
+        // qanet validation.
         .route("/trigger-live-failure", get(trigger_live_failure))
         .nest("/api/v3", v4_app.clone()) // v3 is an alias to v4 for backwards compatibility.
         .nest("/api/v4", v4_app)
