@@ -262,6 +262,7 @@ where
     // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a
     // ServiceBuilder together, so we use `Router::layer` with the inverted (bottom to top) order.
     Router::new()
+        .route("/live", get(live))
         .route("/ready", get(ready))
         .nest("/api/v3", v4_app.clone()) // v3 is an alias to v4 for backwards compatibility.
         .nest("/api/v4", v4_app)
@@ -274,6 +275,13 @@ where
                 .and_then(transform_lentgh_limit_exceeded),
         )
         .layer(CorsLayer::permissive())
+}
+
+// Returns 200 when reachable. If the runtime is parked (e.g. storage-core deadlock during
+// `creating dust generations collapsed update`), this handler does not run; kubelet's
+// liveness probe times out and the pod is terminated and recreated.
+async fn live() -> impl IntoResponse {
+    StatusCode::OK.into_response()
 }
 
 async fn ready(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
