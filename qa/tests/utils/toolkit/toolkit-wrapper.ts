@@ -397,10 +397,19 @@ class ToolkitWrapper {
   }
 
   /**
+   * Returns true when the toolkit error message indicates an RPC-level request timeout,
+   * regardless of how it is spelled (camelCase "RequestTimeout" from the substrate client
+   * or spaced "Request timeout" from the compute-task error path).
+   */
+  private isRpcTimeoutError(error: unknown): boolean {
+    return String(error).toLowerCase().includes('request timeout');
+  }
+
+  /**
    * Warm up the cache by generating a single unshielded transaction, retrying on RPC timeouts.
    *
-   * The toolkit syncs the postgres fetch-cache before attempting the tx. If it hits a
-   * RequestTimeout mid-sync it exits with code 1 without writing highest_verified, so the
+   * The toolkit syncs the postgres fetch-cache before attempting the tx. If it hits an
+   * RPC timeout mid-sync it exits with code 1 without writing highest_verified, so the
    * next run replays from block 0 (cache hits are fast). We retry until the toolkit exits
    * for a non-timeout reason, which means the sync completed and the tx failed as expected
    * (invalid seed / insufficient funds).
@@ -425,7 +434,7 @@ class ToolkitWrapper {
         console.debug(`[SETUP] Warmup cache output:\n${JSON.stringify(output, null, 2)}`);
         return;
       } catch (error) {
-        if (String(error).includes('RequestTimeout')) {
+        if (this.isRpcTimeoutError(error)) {
           console.log(
             `[SETUP] Cache sync interrupted by RPC timeout (attempt ${attempt}), ` +
               `retrying in ${RETRY_DELAY_MS / 1_000}s…`,

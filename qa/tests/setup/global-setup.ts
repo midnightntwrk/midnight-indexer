@@ -55,7 +55,7 @@ async function prewarmFundingSeed(toolkit: ToolkitWrapper, seed: string): Promis
       return;
     } catch (error) {
       const msg = String(error);
-      if (msg.includes('RequestTimeout')) {
+      if (msg.toLowerCase().includes('request timeout')) {
         if (attempt < PREWARM_MAX_ATTEMPTS) {
           console.warn(
             `[SETUP] Funding seed pre-warm interrupted by RPC timeout ` +
