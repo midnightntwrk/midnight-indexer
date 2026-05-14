@@ -36,6 +36,47 @@ function cleanupOrphanedToolkitDirs(): void {
   }
 }
 
+const PREWARM_RETRY_DELAY_MS = 5_000;
+const PREWARM_MAX_ATTEMPTS = 5;
+
+/**
+ * Pre-warms the funding seed's wallet state so tests don't replay the full ledger
+ * on the first generateSingleTx call.
+ *
+ * Mirrors the retry logic in ToolkitWrapper.warmupCache: RPC timeouts are transient
+ * and worth retrying; all other errors are unexpected and logged prominently but not
+ * thrown (pre-warming is an optimisation, not a hard requirement for test execution).
+ */
+async function prewarmFundingSeed(toolkit: ToolkitWrapper, seed: string): Promise<void> {
+  for (let attempt = 1; attempt <= PREWARM_MAX_ATTEMPTS; attempt++) {
+    try {
+      await toolkit.getDustBalance(seed);
+      console.log('[SETUP] Funding seed wallet state cached');
+      return;
+    } catch (error) {
+      const msg = String(error);
+      if (msg.includes('RequestTimeout')) {
+        if (attempt < PREWARM_MAX_ATTEMPTS) {
+          console.warn(
+            `[SETUP] Funding seed pre-warm interrupted by RPC timeout ` +
+              `(attempt ${attempt}/${PREWARM_MAX_ATTEMPTS}), retrying in ${PREWARM_RETRY_DELAY_MS / 1_000}s…`,
+          );
+          await new Promise((res) => setTimeout(res, PREWARM_RETRY_DELAY_MS));
+          continue;
+        }
+      }
+      // Non-retriable error or max retries exhausted — warn visibly but don't abort setup.
+      // Tests can still run; the first generateSingleTx will just be slower.
+      console.warn(
+        `[SETUP] Funding seed wallet pre-warm failed after ${attempt} attempt(s) — ` +
+          `tests will proceed but first generateSingleTx may be slow.\n` +
+          `  Cause: ${msg.slice(0, 300)}`,
+      );
+      return;
+    }
+  }
+}
+
 export async function setup() {
   cleanupOrphanedToolkitDirs();
   console.log('[SETUP] Warming up toolkit cache (this may take several minutes)...');
@@ -64,13 +105,7 @@ export async function setup() {
     const fundingSeed = dataProvider.getFundingSeed();
     if (fundingSeed) {
       console.log('[SETUP] Pre-warming funding seed wallet state...');
-      try {
-        await warmupToolkit.getDustBalance(fundingSeed);
-        console.log('[SETUP] Funding seed wallet state cached');
-      } catch {
-        // getDustBalance syncs ledger state for the seed; error here is non-fatal
-        console.log('[SETUP] Funding seed wallet state pre-warmed (error ignored)');
-      }
+      await prewarmFundingSeed(warmupToolkit, fundingSeed);
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
