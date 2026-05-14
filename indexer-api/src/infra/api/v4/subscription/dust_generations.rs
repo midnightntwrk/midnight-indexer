@@ -218,6 +218,40 @@ where
                 .await
                 .map_err_into_server_error(|| "get dust generations chain first free")?;
             if chain_first_free > end_index {
+                // Re-drain to catch entries committed in the window between
+                // the backfill drain ending and the chain-progress read.
+                let entries = storage
+                    .get_dust_generation_entries(&dust_address_bytes, cursor, end_index, batch_size)
+                    .await;
+                let mut entries = pin!(entries);
+                while let Some(entry) = entries
+                    .try_next()
+                    .await
+                    .map_err_into_server_error(|| "get next dust generation entry")?
+                {
+                    let collapsed_merkle_tree = make_collapsed_update(
+                        cursor,
+                        entry.generation_mt_index,
+                        storage,
+                        ledger_state_cache,
+                    ).await?;
+
+                    cursor = entry.generation_mt_index + 1;
+
+                    yield DustGenerationsEvent::DustGenerationsItem(DustGenerationsItem {
+                        commitment_mt_index: entry.commitment_mt_index,
+                        generation_mt_index: entry.generation_mt_index,
+                        owner: entry.owner.hex_encode(),
+                        value: entry.value.to_string(),
+                        initial_value: entry.initial_value.to_string(),
+                        backing_night: entry.backing_night.hex_encode(),
+                        ctime: entry.ctime,
+                        transaction_id: entry.transaction_id,
+                        transaction_hash: entry.transaction_hash.hex_encode(),
+                        collapsed_merkle_tree,
+                    });
+                }
+
                 let final_update = make_final_collapsed_update(
                     cursor, end_index, storage, ledger_state_cache,
                 ).await?;
@@ -300,6 +334,40 @@ where
                     .await
                     .map_err_into_server_error(|| "get dust generations chain first free")?;
                 if chain_first_free > end_index {
+                    // Re-drain to catch entries committed in the window between
+                    // the live-tail drain ending and the chain-progress read.
+                    let entries = storage
+                        .get_dust_generation_entries(&dust_address_bytes, cursor, end_index, batch_size)
+                        .await;
+                    let mut entries = pin!(entries);
+                    while let Some(entry) = entries
+                        .try_next()
+                        .await
+                        .map_err_into_server_error(|| "get next dust generation entry")?
+                    {
+                        let collapsed_merkle_tree = make_collapsed_update(
+                            cursor,
+                            entry.generation_mt_index,
+                            storage,
+                            ledger_state_cache,
+                        ).await?;
+
+                        cursor = entry.generation_mt_index + 1;
+
+                        yield DustGenerationsEvent::DustGenerationsItem(DustGenerationsItem {
+                            commitment_mt_index: entry.commitment_mt_index,
+                            generation_mt_index: entry.generation_mt_index,
+                            owner: entry.owner.hex_encode(),
+                            value: entry.value.to_string(),
+                            initial_value: entry.initial_value.to_string(),
+                            backing_night: entry.backing_night.hex_encode(),
+                            ctime: entry.ctime,
+                            transaction_id: entry.transaction_id,
+                            transaction_hash: entry.transaction_hash.hex_encode(),
+                            collapsed_merkle_tree,
+                        });
+                    }
+
                     let final_update = make_final_collapsed_update(
                         cursor, end_index, storage, ledger_state_cache,
                     ).await?;
