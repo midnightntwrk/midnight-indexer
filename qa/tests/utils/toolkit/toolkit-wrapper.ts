@@ -324,13 +324,19 @@ class ToolkitWrapper {
     this.config.nodeToolkitTag =
       config.nodeToolkitTag || process.env.NODE_TOOLKIT_TAG || 'latest-main';
 
+    // Shared, env-specific ledger state cache — persists across runs so the toolkit can restore
+    // from a snapshot rather than replaying the full chain on every warmup.
+    const ledgerCacheDir = resolve(`./.tmp/toolkit-ledger-cache/${envName}`);
+
     fs.mkdirSync(this.config.targetDir, { recursive: true });
     fs.mkdirSync(join(this.config.targetDir, 'cache'), { recursive: true });
+    fs.mkdirSync(ledgerCacheDir, { recursive: true });
 
     log.debug(`NODE_TAG         : ${this.config.nodeTag}`);
     log.debug(`NODE_TOOLKIT_TAG : ${this.config.nodeToolkitTag}`);
     log.debug(`Toolkit target dir     : ${this.config.targetDir}`);
     log.debug(`Toolkit container name : ${this.config.containerName}`);
+    log.debug(`Toolkit ledger cache   : ${ledgerCacheDir}`);
 
     this.container = new GenericContainer(
       `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`,
@@ -347,7 +353,12 @@ class ToolkitWrapper {
           source: join(this.config.targetDir, 'cache'),
           target: '/.cache',
         },
+        {
+          source: ledgerCacheDir,
+          target: '/ledger-cache',
+        },
       ])
+      .withEnvironment({ MN_LEDGER_CACHE_DB: '/ledger-cache' })
       .withCommand(['sleep', 'infinity']);
   }
 

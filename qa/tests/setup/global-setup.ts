@@ -14,13 +14,29 @@
 // limitations under the License.
 
 // global-setup.ts
+import fs from 'fs';
+import path from 'path';
 import { ToolkitWrapper } from '../utils/toolkit/toolkit-wrapper';
 import { startCacheProgressReporter, CacheProgressReporter } from '../utils/toolkit/toolkit-cache';
 import { env } from '../environment/model';
 
 let warmupToolkit: ToolkitWrapper | undefined;
 
+function cleanupOrphanedToolkitDirs(): void {
+  const root = path.resolve('./.tmp/toolkit');
+  if (!fs.existsSync(root)) return;
+  for (const entry of fs.readdirSync(root)) {
+    const full = path.join(root, entry);
+    try {
+      fs.rmSync(full, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`[SETUP] Could not remove orphan toolkit dir ${full}: ${error}`);
+    }
+  }
+}
+
 export async function setup() {
+  cleanupOrphanedToolkitDirs();
   console.log('[SETUP] Warming up toolkit cache (this may take several minutes)...');
 
   let reporter: CacheProgressReporter | undefined;
@@ -28,9 +44,7 @@ export async function setup() {
     const startTime = Date.now();
 
     console.log('[SETUP] Creating warmup toolkit instance...');
-    warmupToolkit = new ToolkitWrapper({
-      warmupCache: true, // This creates/uses the golden cache
-    });
+    warmupToolkit = new ToolkitWrapper({});
 
     console.log('[SETUP] Starting toolkit container...');
     await warmupToolkit.start();
