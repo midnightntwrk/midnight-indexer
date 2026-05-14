@@ -122,8 +122,10 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
     log.debug(`Previous max dust ID before tx = ${previousMaxDustId}`);
 
     // Capture the highest dustCommitmentEndIndex before the transaction from genesis block.
+    // Guard against null data: older indexer deployments return a GraphQL validation error when
+    // the query includes schema fields not yet in that version, which sets data to null.
     const genesisResponse = await indexerHttpClient.getBlockByOffset({ height: 0 });
-    const genesisTxs = genesisResponse.data!.block.transactions;
+    const genesisTxs = genesisResponse.data?.block?.transactions ?? [];
     dustCommitmentEndIndexBeforeTx = genesisTxs.reduce((max, tx) => {
       const regularTx = tx as RegularTransaction;
       return regularTx.dustCommitmentEndIndex != null && regularTx.dustCommitmentEndIndex > max

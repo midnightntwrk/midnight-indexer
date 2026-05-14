@@ -13,12 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  BlockResponse,
-  RegularTransaction,
-  TransactionResponse,
-  TransactionResultStatus,
-} from '@utils/indexer/indexer-types';
+import { BlockResponse, TransactionResponse } from '@utils/indexer/indexer-types';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { z } from 'zod';
 import log from '@utils/logging/logger';
@@ -65,6 +60,18 @@ export function retrySimple<T>(
   return retry(fn, (result) => result !== null, maxAttempts, delayMs) as Promise<T>;
 }
 
+// Minimal query used only to resolve a block hash — omits new schema fields so it
+// works against older indexer deployments that would return data:null for the full fragment.
+const RESOLVE_BLOCK_HASH_QUERY = `
+query GetTransactionByOffset($OFFSET: TransactionOffset!) {
+  transactions(offset: $OFFSET) {
+    hash
+    block {
+      hash
+    }
+  }
+}`;
+
 /**
  * When the toolkit doesn't provide a block hash (newer output format),
  * resolve it from the indexer by looking up the transaction.
@@ -74,13 +81,17 @@ export async function resolveBlockHash(result: ToolkitTransactionResult): Promis
   log.debug(
     `Block hash missing from toolkit output, resolving from indexer for tx ${result.txHash}`,
   );
-  const txResponse = await getTransactionByHashWithRetry(result.txHash);
+  const client = new IndexerHttpClient();
+  const offset = { hash: result.txHash };
+  const txResponse = await retry(
+    () => client.getTransactionByOffset(offset, RESOLVE_BLOCK_HASH_QUERY),
+    (response) =>
+      response.data?.transactions != null && response.data.transactions.length > 0,
+    30,
+    2000,
+  );
   const transactions = txResponse?.data?.transactions ?? [];
-  const tx =
-    transactions.find(
-      (t) =>
-        (t as RegularTransaction).transactionResult?.status === TransactionResultStatus.SUCCESS,
-    ) ?? transactions[0];
+  const tx = transactions[0];
   if (tx?.block?.hash) {
     result.blockHash = tx.block.hash;
     log.debug(`Resolved block hash: ${result.blockHash}`);

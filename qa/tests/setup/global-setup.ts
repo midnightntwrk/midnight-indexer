@@ -19,6 +19,7 @@ import path from 'path';
 import { ToolkitWrapper } from '../utils/toolkit/toolkit-wrapper';
 import { startCacheProgressReporter, CacheProgressReporter } from '../utils/toolkit/toolkit-cache';
 import { env } from '../environment/model';
+import dataProvider from '../utils/testdata-provider';
 
 let warmupToolkit: ToolkitWrapper | undefined;
 
@@ -59,6 +60,18 @@ export async function setup() {
 
     console.log('[SETUP] Syncing cache (please wait, this will take time)...');
     await warmupToolkit.warmupCache();
+
+    const fundingSeed = dataProvider.getFundingSeed();
+    if (fundingSeed) {
+      console.log('[SETUP] Pre-warming funding seed wallet state...');
+      try {
+        await warmupToolkit.getDustBalance(fundingSeed);
+        console.log('[SETUP] Funding seed wallet state cached');
+      } catch {
+        // getDustBalance syncs ledger state for the seed; error here is non-fatal
+        console.log('[SETUP] Funding seed wallet state pre-warmed (error ignored)');
+      }
+    }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`[SETUP] Toolkit cache warmup complete (${duration}s)`);
