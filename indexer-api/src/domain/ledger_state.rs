@@ -18,10 +18,15 @@ use indexer_common::domain::{
 };
 use log::debug;
 use thiserror::Error;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
+/// `merkle_op_lock` serialises the synchronous merkle-tree walks so
+/// concurrent walks don't deadlock on the storage-core arena locks.
 #[derive(Debug, Default)]
-pub struct LedgerStateCache(RwLock<Option<LedgerState>>);
+pub struct LedgerStateCache {
+    state: RwLock<Option<LedgerState>>,
+    merkle_op_lock: Mutex<()>,
+}
 
 impl LedgerStateCache {
     /// Create a zswap state Merkle tree collapsed update. Only load the ledger state if it is
@@ -34,7 +39,7 @@ impl LedgerStateCache {
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, LedgerStateCacheError> {
         // Acquire a read lock.
-        let mut ledger_state_read = self.0.read().await;
+        let mut ledger_state_read = self.state.read().await;
 
         // Check if the current ledger state is stale and needs to be updated.
         let first_free = ledger_state_read
@@ -44,7 +49,7 @@ impl LedgerStateCache {
         if end_index >= first_free {
             // Release the read lock and acquire a write lock.
             drop(ledger_state_read);
-            let mut ledger_state_write = self.0.write().await;
+            let mut ledger_state_write = self.state.write().await;
 
             // Check if the ledger state has been updated in the meantime.
             let first_free = ledger_state_write
@@ -70,6 +75,7 @@ impl LedgerStateCache {
 
         debug!(start_index, end_index; "creating collapsed update");
 
+        let _merkle_op_guard = self.merkle_op_lock.lock().await;
         let update = ledger_state_read
             .as_ref()
             .expect("ledger state should exist after loading")
@@ -86,7 +92,7 @@ impl LedgerStateCache {
         storage: &impl Storage,
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, LedgerStateCacheError> {
-        let mut ledger_state_read = self.0.read().await;
+        let mut ledger_state_read = self.state.read().await;
 
         let first_free = ledger_state_read
             .as_ref()
@@ -94,7 +100,7 @@ impl LedgerStateCache {
             .unwrap_or_default();
         if end_index >= first_free {
             drop(ledger_state_read);
-            let mut ledger_state_write = self.0.write().await;
+            let mut ledger_state_write = self.state.write().await;
 
             let first_free = ledger_state_write
                 .as_ref()
@@ -119,6 +125,7 @@ impl LedgerStateCache {
 
         debug!(start_index, end_index; "creating dust generations collapsed update");
 
+        let _merkle_op_guard = self.merkle_op_lock.lock().await;
         let collapsed_update = ledger_state_read
             .as_ref()
             .expect("ledger state should exist after loading")
@@ -135,7 +142,7 @@ impl LedgerStateCache {
         storage: &impl Storage,
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, LedgerStateCacheError> {
-        let mut ledger_state_read = self.0.read().await;
+        let mut ledger_state_read = self.state.read().await;
 
         let first_free = ledger_state_read
             .as_ref()
@@ -143,7 +150,7 @@ impl LedgerStateCache {
             .unwrap_or_default();
         if end_index >= first_free {
             drop(ledger_state_read);
-            let mut ledger_state_write = self.0.write().await;
+            let mut ledger_state_write = self.state.write().await;
 
             let first_free = ledger_state_write
                 .as_ref()
@@ -168,6 +175,7 @@ impl LedgerStateCache {
 
         debug!(start_index, end_index; "creating dust commitments collapsed update");
 
+        let _merkle_op_guard = self.merkle_op_lock.lock().await;
         let collapsed_update = ledger_state_read
             .as_ref()
             .expect("ledger state should exist after loading")
@@ -181,11 +189,11 @@ impl LedgerStateCache {
         &self,
         storage: &impl Storage,
     ) -> Result<DustMerkleTreeRoots, LedgerStateCacheError> {
-        let mut ledger_state_read = self.0.read().await;
+        let mut ledger_state_read = self.state.read().await;
 
         if ledger_state_read.is_none() {
             drop(ledger_state_read);
-            let mut ledger_state_write = self.0.write().await;
+            let mut ledger_state_write = self.state.write().await;
 
             if ledger_state_write.is_none() {
                 let Some((protocol_version, ledger_state_key)) =
@@ -205,6 +213,8 @@ impl LedgerStateCache {
         let ledger_state = ledger_state_read
             .as_ref()
             .expect("ledger state should exist after loading");
+
+        let _merkle_op_guard = self.merkle_op_lock.lock().await;
         let commitment_root = ledger_state.dust_commitment_merkle_tree_root()?;
         let generation_root = ledger_state.dust_generation_merkle_tree_root()?;
 
