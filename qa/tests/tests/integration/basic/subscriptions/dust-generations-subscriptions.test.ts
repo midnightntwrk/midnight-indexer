@@ -492,7 +492,7 @@ describe('dust generations subscription', () => {
       });
       expect(txResponse).toBeSuccess();
       const transactions = txResponse.data!.transactions;
-      expect(transactions.length).toBeGreaterThanOrEqual(1);
+      expect(transactions).toHaveLength(1);
       expect(transactions[0].hash).toBe(firstItem.transactionHash);
     }, 30_000);
   });

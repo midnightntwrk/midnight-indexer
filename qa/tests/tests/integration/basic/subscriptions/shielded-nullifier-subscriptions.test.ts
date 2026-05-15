@@ -303,7 +303,7 @@ describe('shielded nullifier transactions subscription', () => {
 
       const received: ShieldedNullifierTransaction[] = [];
 
-      await new Promise<void>((resolve) => {
+      await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           subscription.unsubscribe();
           resolve();
@@ -359,7 +359,7 @@ describe('shielded nullifier transactions subscription', () => {
       });
       expect(txResponse).toBeSuccess();
       const transactions = txResponse.data!.transactions;
-      expect(transactions.length).toBeGreaterThanOrEqual(1);
+      expect(transactions).toHaveLength(1);
       expect(transactions[0].hash).toBe(first.transactionHash);
     }, 30_000);
   });
