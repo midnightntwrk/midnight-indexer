@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.2] - 2026-05-15
+
+### 🚀 Features
+
+- *(indexer-api)* Add /live HTTP endpoint for kubernetes liveness probe (#1145)
+
+### 🐛 Bug Fixes
+
+- *(indexer-api)* DustGenerations subscription terminates on chain progress, not per-wallet cursor (#1137)
+
+### 📚 Documentation
+
+- *(indexer-standalone)* Document mandatory APP__INFRA__SPO_NODE__BLOCKFROST_ID (#1149)
+
 ## [4.3.1] - 2026-05-11
 
 ### 🚀 Features
