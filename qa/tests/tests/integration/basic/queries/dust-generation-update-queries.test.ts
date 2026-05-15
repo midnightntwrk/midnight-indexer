@@ -15,6 +15,7 @@
 
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
+import { env } from 'environment/model';
 import { MerkleTreeCollapsedUpdateSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import type { RegularTransaction } from '@utils/indexer/indexer-types';
@@ -78,7 +79,10 @@ async function findFirstBeyondRangeEndIndex(): Promise<number> {
   return hi;
 }
 
-describe('dust generation merkle tree update queries', () => {
+// Dust generation registrations require a Cardano-side mapping which has no
+// counterpart in the `undeployed` environment. Skip the whole surface there;
+// re-enable once #1152 lands local Cardano test-data provisioning.
+describe.skipIf(env.isUndeployedEnv())('dust generation merkle tree update queries', () => {
   describe('a collapsed update query with valid index range', () => {
     /**
      * A dust generation update query with a valid index range returns the expected result
