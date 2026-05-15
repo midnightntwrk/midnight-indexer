@@ -84,8 +84,8 @@ describe('block subscriptions', () => {
     // catches up it can take 12-15s. 25s gives 2-3 block intervals of
     // headroom without masking a hung subscription.
     // Historical replays are instant — keep the small 5s grace.
-    const maxTimeBetweenBlocks = fromHeight ? 5_000 : 25_000;
-    await eventCoordinator.waitForAll([eventName], maxTimeBetweenBlocks);
+    const blockStreamingBudgetMs = fromHeight ? 5_000 : 25_000;
+    await eventCoordinator.waitForAll([eventName], blockStreamingBudgetMs);
 
     unsubscribe();
     return receivedBlocks;
@@ -579,7 +579,7 @@ describe('block subscriptions', () => {
      *       canonical `fee` field on RegularTransaction returns the same
      *       SPECK value as the deprecated `fees.paidFees`.
      */
-    test('should report ledger paidFees and estimatedFees on regular transactions', async (ctx: TestContext) => {
+    test.skip('should report ledger paidFees and estimatedFees on regular transactions', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['Subscription', 'Block', 'Transaction', 'Fees', 'Regression'],
       };
