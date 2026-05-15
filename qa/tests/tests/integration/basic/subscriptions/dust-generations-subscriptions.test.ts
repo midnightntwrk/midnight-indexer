@@ -468,7 +468,7 @@ describe('dust generations subscription', () => {
           },
           dustAddress,
           0,
-          10,
+          2_147_483_647,
         );
         unsubscribe = subscription.unsubscribe;
       });
