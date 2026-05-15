@@ -16,10 +16,12 @@
 import log from '@utils/logging/logger';
 import { env } from 'environment/model';
 import { GraphQLClient } from 'graphql-request';
+import { retry } from '@utils/retry-helper';
 import type {
   Block,
   BlockOffset,
   BlockResponse,
+  GraphQLResponse,
   Transaction,
   TransactionOffset,
   TransactionResponse,
@@ -50,6 +52,20 @@ import {
   GET_DUST_COMMITMENT_MERKLE_TREE_UPDATE,
   GET_DUST_GENERATION_MERKLE_TREE_UPDATE,
 } from './graphql/dust-queries';
+
+/**
+ * Recognise operation-level GraphQL errors that look like *server* failures
+ * (vs. legitimate domain errors that negative tests assert on). These are
+ * the kinds of failures that are worth retrying — the request was processed
+ * but the server failed, and qanet has been observed returning them
+ * transiently under load or while re-syncing.
+ */
+function isTransientServerError(err: { message?: string }): boolean {
+  if (typeof err?.message !== 'string') return false;
+  return /(internal server error|service unavailable|gateway timeout|panic|deadlock|connection reset|temporarily unavailable)/i.test(
+    err.message,
+  );
+}
 
 /**
  * HTTP client for interacting with the Midnight Indexer GraphQL API
@@ -91,6 +107,51 @@ export class IndexerHttpClient {
   }
 
   /**
+   * Wraps `client.rawRequest` with retry semantics. graphql-request throws on
+   * transport errors (network failures, DNS, ECONN*, TLS) and on non-2xx HTTP
+   * responses (e.g. 502/503/504 from the gateway). With `errorPolicy: 'all'`,
+   * GraphQL data errors are returned inside the body and NOT thrown.
+   *
+   * The retry policy is:
+   *   - Retry on thrown errors (transport / 5xx / connection-level).
+   *   - Retry on HTTP-200 responses whose `errors[]` contain an
+   *     operation-level server failure (e.g. "Internal Server Error",
+   *     "panic", "timeout"). These are equivalent in spirit to a 5xx —
+   *     the request was processed but the server failed on it — and we've
+   *     observed qanet returning them transiently under load / sync hiccups.
+   *   - Do NOT retry on legitimate GraphQL data errors (e.g. "invalid hash",
+   *     "block not found"). Those are what negative tests assert on.
+   *
+   * Retry budget is intentionally small: it shields against brief upstream
+   * blips without masking sustained outages or hiding indexer regressions.
+   */
+  private rawRequestWithRetry<T>(
+    query: string,
+    variables?: Record<string, unknown>,
+    retryLabel?: string,
+  ): Promise<GraphQLResponse<T>> {
+    return retry(
+      async () => {
+        const response = (await this.client.rawRequest<T>(
+          query,
+          variables,
+        )) as unknown as GraphQLResponse<T>;
+        if (response.errors && response.errors.some(isTransientServerError)) {
+          throw new Error(
+            `Transient server-side GraphQL error (will retry): ${JSON.stringify(response.errors)}`,
+          );
+        }
+        return response;
+      },
+      {
+        maxRetries: 2,
+        delayMs: 1000,
+        retryLabel: retryLabel ?? 'GraphQL HTTP request',
+      },
+    );
+  }
+
+  /**
    * Retrieves the latest block from the indexer
    *
    * @param queryOverride - Optional custom GraphQL query to override the default latest block query
@@ -103,7 +164,7 @@ export class IndexerHttpClient {
     const query = queryOverride || GET_LATEST_BLOCK;
     log.debug(`Using query\n${query}`);
 
-    const response = await this.client.rawRequest<{ block: Block }>(query);
+    const response = await this.rawRequestWithRetry<{ block: Block }>(query);
 
     log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
 
@@ -127,7 +188,7 @@ export class IndexerHttpClient {
     log.debug(`Using query\n${query}`);
     log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
 
-    const response = await this.client.rawRequest<{ block: Block }>(query, variables);
+    const response = await this.rawRequestWithRetry<{ block: Block }>(query, variables);
 
     log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
 
@@ -154,7 +215,7 @@ export class IndexerHttpClient {
     log.debug(`Using query\n${query}`);
     log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
 
-    const response = await this.client.rawRequest<{ transactions: Transaction[] }>(
+    const response = await this.rawRequestWithRetry<{ transactions: Transaction[] }>(
       query,
       variables,
     );
@@ -190,7 +251,7 @@ export class IndexerHttpClient {
     log.debug(`Using query\n${query}`);
     log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
 
-    const response = await this.client.rawRequest<{ contractAction: ContractAction }>(
+    const response = await this.rawRequestWithRetry<{ contractAction: ContractAction }>(
       query,
       variables,
     );
@@ -222,7 +283,7 @@ export class IndexerHttpClient {
     log.debug(`Using query\n${query}`);
     log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
 
-    const response = await this.client.rawRequest<{
+    const response = await this.rawRequestWithRetry<{
       zswapMerkleTreeCollapsedUpdate: ZswapMerkleTreeCollapsedUpdateResult;
     }>(query, variables);
 
@@ -249,7 +310,7 @@ export class IndexerHttpClient {
     log.debug(`Using query\n${query}`);
     log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
 
-    const response = await this.client.rawRequest<{
+    const response = await this.rawRequestWithRetry<{
       dustGenerationStatus: DustGenerationStatus[];
     }>(query, variables);
 
@@ -276,7 +337,7 @@ export class IndexerHttpClient {
     log.debug(`Using query\n${query}`);
     log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
 
-    const response = await this.client.rawRequest<{
+    const response = await this.rawRequestWithRetry<{
       dustGenerations: DustGenerations[];
     }>(query, variables);
 
@@ -305,7 +366,7 @@ export class IndexerHttpClient {
     log.debug(`Using query\n${query}`);
     log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
 
-    const response = await this.client.rawRequest<{
+    const response = await this.rawRequestWithRetry<{
       dustCommitmentMerkleTreeUpdate: DustCommitmentMerkleTreeUpdateResult;
     }>(query, variables);
 
@@ -334,7 +395,7 @@ export class IndexerHttpClient {
     log.debug(`Using query\n${query}`);
     log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
 
-    const response = await this.client.rawRequest<{
+    const response = await this.rawRequestWithRetry<{
       dustGenerationMerkleTreeUpdate: DustGenerationMerkleTreeUpdateResult;
     }>(query, variables);
 

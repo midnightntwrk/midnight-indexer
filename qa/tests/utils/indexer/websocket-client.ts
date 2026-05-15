@@ -215,6 +215,21 @@ export class IndexerWsClient {
 
   /** Creates a new WebSocket, attaches handlers, and assigns to this.ws */
   private createWebSocket(): void {
+    // A previous failed connection attempt may have left a socket in CONNECTING
+    // or OPEN. Detach handlers and close it so a retry does not leak orphan
+    // sockets that keep handshaking against the gateway and add to load.
+    if (this.ws !== null) {
+      const stale = this.ws;
+      stale.onmessage = null;
+      stale.onerror = null;
+      stale.onclose = null;
+      try {
+        stale.close();
+      } catch (error) {
+        log.debug(`Ignoring close() error during stale-socket cleanup: ${String(error)}`);
+      }
+      this.ws = null;
+    }
     this.ws = this.attachWsHandlers(new WebSocket(this.targetUrl, 'graphql-transport-ws'));
   }
 
@@ -301,14 +316,21 @@ export class IndexerWsClient {
   async connectionClose(): Promise<void> {
     if (this.ws === null) return;
 
-    const closePromise = new Promise<void>((resolve, _reject) => {
+    // Capture the socket reference so a late onClose firing after
+    // `this.ws = null` (set below or on a parallel teardown path) does
+    // not dereference null — the original source of the
+    // "Cannot read properties of null (reading 'removeEventListener')"
+    // uncaught exception under parallel test execution.
+    const ws = this.ws;
+
+    const closePromise = new Promise<void>((resolve) => {
       const onClose = () => {
-        this.ws!.removeEventListener('close', onClose);
+        ws.removeEventListener('close', onClose);
         resolve();
       };
 
-      this.ws!.addEventListener('close', onClose);
-      this.ws!.close(); // initiate close
+      ws.addEventListener('close', onClose);
+      ws.close(); // initiate close
     });
 
     const timeoutPromise = new Promise<void>((resolve) =>
@@ -635,9 +657,14 @@ export class IndexerWsClient {
       },
     };
 
+    // Capture the socket once. If `this.ws` is reassigned during the
+    // session lifetime (reconnect / teardown), the deferred cleanup still
+    // targets the socket the listener was actually attached to.
+    const ws = this.getWs();
+
     log.debug(connectMutation);
     log.debug(`${JSON.stringify(payload, null, 2)}`);
-    this.getWs().send(JSON.stringify(payload));
+    ws.send(JSON.stringify(payload));
 
     return new Promise<string>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -680,12 +707,17 @@ export class IndexerWsClient {
 
       const cleanup = () => {
         clearTimeout(timeout);
-        if (this.ws == null) return;
-        this.ws.removeEventListener('message', handleMessage);
-        this.ws.send(JSON.stringify({ id, type: 'stop' }));
+        ws.removeEventListener('message', handleMessage);
+        try {
+          ws.send(JSON.stringify({ id, type: 'stop' }));
+        } catch (error) {
+          log.debug(
+            `Ignoring send() error during session cleanup (socket likely CLOSED): ${String(error)}`,
+          );
+        }
       };
 
-      this.getWs().addEventListener('message', handleMessage);
+      ws.addEventListener('message', handleMessage);
     });
   }
 
@@ -711,9 +743,12 @@ export class IndexerWsClient {
       },
     };
 
+    // Capture the socket once — see openWalletSession for rationale.
+    const ws = this.getWs();
+
     log.debug(disconnectMutation);
     log.debug(`${JSON.stringify(payload, null, 2)}`);
-    this.getWs().send(JSON.stringify(payload));
+    ws.send(JSON.stringify(payload));
 
     return new Promise<GraphQLCloseSessionMessage>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -757,12 +792,17 @@ export class IndexerWsClient {
 
       const cleanup = () => {
         clearTimeout(timeout);
-        if (this.ws == null) return;
-        this.ws.removeEventListener('message', handleMessage);
-        this.ws.send(JSON.stringify({ id, type: 'stop' }));
+        ws.removeEventListener('message', handleMessage);
+        try {
+          ws.send(JSON.stringify({ id, type: 'stop' }));
+        } catch (error) {
+          log.debug(
+            `Ignoring send() error during session cleanup (socket likely CLOSED): ${String(error)}`,
+          );
+        }
       };
 
-      this.getWs().addEventListener('message', handleMessage);
+      ws.addEventListener('message', handleMessage);
     });
   }
 

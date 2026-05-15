@@ -147,6 +147,20 @@ export INDEXER_API_VERSION=v3
 
 This controls the version segment in the API endpoint paths (e.g. `/api/v3/graphql` and `/api/v3/graphql/ws`). If not set, the clients will use `/api/v4/graphql` and `/api/v4/graphql/ws`.
 
+#### Vitest Worker Pool Cap
+
+By default Vitest sizes its worker pool to all available parallelism (≈ `os.cpus().length`), so on a typical CI runner each test run drives 4–8 forked workers concurrently against the indexer. To cap that — for example when characterising load-induced flakiness against a shared environment — set the `VITEST_MAX_WORKERS` environment variable:
+
+```bash
+# Cap to a single worker (serial file execution)
+VITEST_MAX_WORKERS=1 TARGET_ENV=qanet yarn test:integration
+
+# Or a percentage of available CPUs
+VITEST_MAX_WORKERS=50% TARGET_ENV=qanet yarn test:integration
+```
+
+Accepted values: a positive integer (`1`, `2`, …) or a `"<n>%"` percentage. Invalid values fail fast at config load with a clear error rather than crashing inside the worker pool. When the variable is unset, Vitest falls back to its default (all available parallelism), so local and unconstrained CI runs are unaffected.
+
 For full instructions on updating the Node version, see the [Updating Node Version Guide](../../docs/updating-node-version.md)
 
 ## Running Test Projects on undeployed/local environment 
