@@ -90,6 +90,7 @@ export default [
       '**/*.config.ts',
       '**/*.config.mjs',
       'data/**',
+      '.tmp/**',
     ],
   },
 ];
