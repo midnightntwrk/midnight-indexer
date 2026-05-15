@@ -85,8 +85,7 @@ export async function resolveBlockHash(result: ToolkitTransactionResult): Promis
   const offset = { hash: result.txHash };
   const txResponse = await retry(
     () => client.getTransactionByOffset(offset, RESOLVE_BLOCK_HASH_QUERY),
-    (response) =>
-      response.data?.transactions != null && response.data.transactions.length > 0,
+    (response) => response.data?.transactions != null && response.data.transactions.length > 0,
     30,
     2000,
   );
