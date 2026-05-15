@@ -434,6 +434,18 @@ impl DustGenerationsStorage for Storage {
             }
         }
     }
+
+    #[trace]
+    async fn get_dust_generations_chain_first_free(&self) -> Result<u64, sqlx::Error> {
+        // `IS NOT NULL` skips legacy rows pre-dating the generation/commitment split.
+        let (max_index,) = sqlx::query_as::<_, (Option<i64>,)>(
+            "SELECT MAX(generation_index) FROM dust_generation_info WHERE generation_index IS NOT NULL",
+        )
+        .fetch_one(&*self.pool)
+        .await?;
+
+        Ok(max_index.map(|i| i as u64 + 1).unwrap_or(0))
+    }
 }
 
 /// Row shape returned by the dtime-updates query. The `attributes` JSONB
