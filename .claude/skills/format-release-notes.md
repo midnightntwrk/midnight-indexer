@@ -99,12 +99,12 @@ Write to `release-notes-VERSION.md` in repo root. No markdownlint pass (Giles co
    - `**Tree hash:** <git rev-parse output>`
    - `**Environment:** All public networks (mainnet, preprod, preview, devnet, qanet)` (adjust for maintenance-line scope)
 3. **(Dev line + maintenance line both active)** — Compatibility note as a top-of-body blockquote, e.g. "> Note: This release pairs with node 1.0.0 and ships as part of the May release bundle. Refer to MNF advisories for current deployment recommendations."
-4. `## Dependencies` — per step 5
-5. `## Docker Images` — list per what's actually built at this release tag. The image set has changed over time; check `.github/workflows/build-indexer-images.yaml` at the release tag to confirm which images publish. Reference points:
+4. `## Summary` — 1-3 sentences. Goes here, above Dependencies, per Thiago's 6 May feedback on the 4.3.0 RN ("the summary I feel like should be higher up, below the initial metadata and above dependencies"). Don't move it lower.
+5. `## Dependencies` — per step 5. **Always include the bundle tracking issue link explicitly** when this is a Bundle component release (e.g. `**Bundle tracking issue:** [Midnight Release 1.1](https://github.com/midnightntwrk/midnight-engineering/issues/1)`); the Dependencies section is the first place a reader looks for "what bundle is this part of".
+6. `## Docker Images` — list per what's actually built at this release tag. The image set has changed over time; check `.github/workflows/build-indexer-images.yaml` at the release tag to confirm which images publish. Reference points:
    - **4 images** for v4.0.x maintenance backports (no spo-indexer yet): chain-indexer, indexer-api, wallet-indexer, indexer-standalone
    - **5 images** for current development line (with spo-indexer): chain-indexer, indexer-api, wallet-indexer, indexer-standalone, spo-indexer
    - Format each as `midnightntwrk/<name>:VERSION`. Annotate any image-count change in the release notes (e.g. "spo-indexer image is new in this release").
-6. `## Summary` — 1-3 sentences
 7. `## Audience` — checklist (operators on public networks, testnet admins, DApp devs against the API, QA/release managers)
 8. `## What Changed` — table (Change | Type | PR), separator `| --- | --- | --- |`
 9. `## New Features` — from `feat:` commits, with operator/developer notes
