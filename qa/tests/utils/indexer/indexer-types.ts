@@ -348,6 +348,7 @@ export interface DustGenerationsItem {
   backingNight: string;
   ctime: number;
   transactionId: number;
+  transactionHash: string;
   collapsedMerkleTree: CollapsedMerkleTree | null;
 }
 
@@ -364,6 +365,7 @@ export interface DustGenerationDtimeUpdateItem {
   nightUtxoHash: string;
   newDtime: number;
   transactionId: number;
+  transactionHash: string;
   treeInsertionPath: string;
 }
 
@@ -376,12 +378,14 @@ export interface DustNullifierTransaction {
   nullifier: string;
   commitment: string;
   transactionId: number;
+  transactionHash: string;
   blockHeight: number;
   blockHash: string;
 }
 
 export interface ShieldedNullifierTransaction {
   transactionId: number;
+  transactionHash: string;
   blockHash: string;
   blockHeight: number;
   nullifier: string;

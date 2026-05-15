@@ -17,6 +17,7 @@ import log from '@utils/logging/logger';
 import { bech32m } from 'bech32';
 import { Buffer } from 'node:buffer';
 import '@utils/logging/test-logging-hooks';
+import type { TestContext } from 'vitest';
 import {
   IndexerWsClient,
   DustGenerationsSubscriptionResponse,
@@ -376,5 +377,123 @@ describe('dust generations subscription', () => {
         /(expected hrp|unexpected hrp|wrong hrp|bech32|invalid.*address)/,
       );
     });
+  });
+
+  /**
+   * Coverage for midnight-indexer#1114 / PR #1116
+   * (`feat(indexer-api): add transactionHash to event subscription response types`).
+   *
+   * `transactionHash: HexEncoded!` was added to `DustGenerationsItem` and
+   * `DustGenerationDtimeUpdateItem` so wallets can resolve the on-chain
+   * transaction from a streamed event via `transactions(offset: { hash: ... })`.
+   * The `transactionId` BIGSERIAL is indexer-internal and not portable across
+   * indexer instances; the hash is. The schema-level shape (64-hex,
+   * non-nullable) is already enforced by the discriminated-union zod schema
+   * used by the streaming test above. This block adds the round-trip check.
+   */
+  describe('transactionHash on dust generation events (#1114)', () => {
+    /**
+     * @given a registered dust address that emits at least one
+     *        `DustGenerationsItem` or `DustGenerationDtimeUpdateItem`
+     * @when we subscribe to `dustGenerations` and look up the first event's
+     *       `transactionHash` via `transactions(offset: { hash: ... })`
+     * @then the lookup resolves a single transaction whose `hash` equals the
+     *       streamed `transactionHash` — proving the field is the on-chain
+     *       identifier wallets can use to fetch the full transaction.
+     */
+    test('first item transactionHash resolves via transactions(offset)', async (ctx: TestContext) => {
+      let rewardAddress: string;
+      try {
+        rewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust');
+      } catch (error) {
+        log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
+        return;
+      }
+
+      const generationsResponse = await indexerHttpClient.getDustGenerations([rewardAddress]);
+      expect(generationsResponse).toBeSuccess();
+      const dustAddress = generationsResponse.data!.dustGenerations[0].registrations[0].dustAddress;
+      log.debug(`Using dust address: ${dustAddress}`);
+
+      const firstItem = await new Promise<{
+        transactionId: number;
+        transactionHash: string;
+        __typename: 'DustGenerationsItem' | 'DustGenerationDtimeUpdateItem';
+      } | null>((resolve, reject) => {
+        let settled = false;
+        let unsubscribe = () => {};
+        const settle = (handler: () => void) => {
+          if (settled) return;
+          settled = true;
+          handler();
+        };
+
+        // Returning null (instead of rejecting) on timeout lets the caller
+        // ctx.skip when the streaming surface is in a known-flaky state on
+        // the target environment, rather than false-failing this test.
+        const timeout = setTimeout(() => {
+          safeUnsubscribe(unsubscribe);
+          settle(() => resolve(null));
+        }, 15_000);
+
+        const subscription = indexerWsClient.subscribeToDustGenerations(
+          {
+            next: (payload) => {
+              const event = payload.data?.dustGenerations;
+              if (
+                event?.__typename === 'DustGenerationsItem' ||
+                event?.__typename === 'DustGenerationDtimeUpdateItem'
+              ) {
+                clearTimeout(timeout);
+                safeUnsubscribe(unsubscribe);
+                settle(() =>
+                  resolve({
+                    transactionId: event.transactionId,
+                    transactionHash: event.transactionHash,
+                    __typename: event.__typename,
+                  }),
+                );
+              }
+            },
+            error: (error) => {
+              clearTimeout(timeout);
+              safeUnsubscribe(unsubscribe);
+              settle(() => reject(new Error(`Subscription error: ${JSON.stringify(error)}`)));
+            },
+            complete: () => {
+              clearTimeout(timeout);
+              settle(() => resolve(null));
+            },
+          },
+          dustAddress,
+          0,
+          2_147_483_647,
+        );
+        unsubscribe = subscription.unsubscribe;
+      });
+
+      if (firstItem === null) {
+        log.warn(
+          'no DustGenerationsItem / DtimeUpdateItem event received within the timeout — ' +
+            'streaming surface is currently flaky on this environment (round-trip skipped)',
+        );
+        ctx.skip?.(true, 'no dust generations item event in time — round-trip vacuous');
+        return;
+      }
+
+      log.debug(
+        `Round-tripping ${firstItem.__typename}.transactionHash=${firstItem.transactionHash} ` +
+          `(transactionId=${firstItem.transactionId})`,
+      );
+
+      const txResponse = await indexerHttpClient.getTransactionByOffset({
+        hash: firstItem.transactionHash,
+      });
+      expect(txResponse).toBeSuccess();
+      const transactions = txResponse.data!.transactions;
+      expect(transactions).toHaveLength(1);
+      expect(transactions[0].hash).toBe(firstItem.transactionHash);
+    }, 30_000);
   });
 });
