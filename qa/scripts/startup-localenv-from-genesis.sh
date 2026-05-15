@@ -124,6 +124,13 @@ echo "Plase make sure all the services are running and healthy"
 echo "Deleting toolkit cache..."
 rm -rf qa/tests/.tmp/toolkit/.sync_cache-undeployed/
 
+# Block-scanner keeps a per-env scan cursor + block cache. Stale entries from
+# a previous run would otherwise cause generate:data to skip the current
+# chain's blocks and write outdated hashes into the test data files.
+echo "Clearing block-scanner cache for undeployed..."
+rm -f qa/tools/block-scanner/tmp_scan/undeployed_*.jsonl
+rm -f qa/tools/block-scanner/stats/undeployed_*.json
+
 echo "Regenarating new test data... "
 pushd qa/tools/block-scanner
 bun run generate:data
