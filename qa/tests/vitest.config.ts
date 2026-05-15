@@ -24,7 +24,15 @@ import CustomJUnitReporter from './utils/reporters/custom-junit/custom-junit-rep
 // envs (#1135).
 function parseMaxWorkers(raw: string | undefined): number | string | undefined {
   if (!raw) return undefined;
-  if (raw.endsWith('%')) return raw;
+  if (raw.endsWith('%')) {
+    const n = Number(raw.slice(0, -1));
+    if (!Number.isInteger(n) || n < 1) {
+      throw new Error(
+        `VITEST_MAX_WORKERS must be a positive integer or "<n>%" percentage, got: ${JSON.stringify(raw)}`,
+      );
+    }
+    return raw;
+  }
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1) {
     throw new Error(
