@@ -40,34 +40,35 @@ let toolkit: ToolkitWrapper;
 let indexerWsClient: IndexerWsClient;
 
 /**
- * Stop condition for unshielded-transaction subscriptions that want to
- * deterministically wait for the indexer to catch up to its own reported
- * head.
+ * Factory that returns a stateful stop-condition predicate for
+ * unshielded-transaction subscriptions.
  *
- * Returns true when the stream has delivered a `UnshieldedTransactionsProgress`
- * message AND every `UnshieldedTransaction` we've collected so far reaches
- * (or exceeds) the `highestTransactionId` reported by that progress message.
+ * Each call to the returned predicate inspects only the *last* message
+ * (O(1)), updating running state rather than sweeping the full array.
+ * Returns true once a `UnshieldedTransactionsProgress` message has been
+ * seen AND the highest `UnshieldedTransaction` id collected so far meets
+ * or exceeds the progress message's `highestTransactionId`.
  *
  * Use this instead of `() => false` or `messages[0].errors !== undefined`
  * — both of which never actually trigger on the happy path and force the
  * subscription to be cut off by the helper's wall-clock timeout, which
  * fails the equality assertion against a moving head on busy addresses.
  */
-function isCaughtUpToHighestTxId(messages: UnshieldedTxSubscriptionResponse[]): boolean {
+function makeCaughtUpPredicate(): (messages: UnshieldedTxSubscriptionResponse[]) => boolean {
   let progressTxId = -1;
   let sawProgress = false;
   let highestFound = -1;
-  for (const m of messages) {
-    const ev = m.data?.unshieldedTransactions as UnshieldedTransactionEvent | undefined;
-    if (!ev) continue;
-    if (ev.__typename === 'UnshieldedTransactionsProgress') {
+  return (messages: UnshieldedTxSubscriptionResponse[]): boolean => {
+    const last = messages[messages.length - 1];
+    const ev = last?.data?.unshieldedTransactions as UnshieldedTransactionEvent | undefined;
+    if (ev?.__typename === 'UnshieldedTransactionsProgress') {
       progressTxId = ev.highestTransactionId;
       sawProgress = true;
-    } else if (ev.__typename === 'UnshieldedTransaction' && ev.transaction.id != null) {
-      highestFound = Math.max(highestFound, ev.transaction.id);
+    } else if (ev?.__typename === 'UnshieldedTransaction' && ev.transaction.id != null) {
+      if (ev.transaction.id > highestFound) highestFound = ev.transaction.id;
     }
-  }
-  return sawProgress && highestFound >= progressTxId;
+    return sawProgress && highestFound >= progressTxId;
+  };
 }
 
 /**
@@ -205,14 +206,14 @@ describe('unshielded transaction subscriptions', async () => {
 
       // Here when subscribing we need to take into account that we are using a
       // funding seed so the number of transactions can be massive. The
-      // `isCaughtUpToHighestTxId` stop condition lets us stop deterministically
+      // `makeCaughtUpPredicate` stop condition lets us stop deterministically
       // when the indexer's progress message and our collected events line up,
       // rather than relying on a wall-clock cutoff that would truncate mid-stream
       // for busy addresses. The 60s timeout is a safety ceiling — under healthy
       // conditions the indexer delivers progress within seconds.
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
-        isCaughtUpToHighestTxId,
+        makeCaughtUpPredicate(),
         60_000,
       );
 
@@ -425,13 +426,13 @@ describe('unshielded transaction subscriptions', async () => {
       const targetAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
 
       // Same caught-up stop condition as the sibling test — see
-      // `isCaughtUpToHighestTxId` for rationale. The previous condition
+      // `makeCaughtUpPredicate` for rationale. The previous condition
       // (`messages[0].errors !== undefined`) never fired on the happy path,
       // so the helper's 5s wall-clock timeout truncated the stream and the
       // equality assertion against the moving head failed on busy addresses.
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
-        isCaughtUpToHighestTxId,
+        makeCaughtUpPredicate(),
         60_000,
       );
 
