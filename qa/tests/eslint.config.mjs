@@ -41,6 +41,7 @@ export default [
         fetch: 'readonly',
         WebSocket: 'readonly',
         MessageEvent: 'readonly',
+        AbortSignal: 'readonly',
       },
     },
     plugins: {

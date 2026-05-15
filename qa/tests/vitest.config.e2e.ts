@@ -24,6 +24,7 @@ export default defineConfig({
     environment: 'node',
     setupFiles: [path.resolve(__dirname, './utils/custom-matchers.ts')],
     globalSetup: [
+      path.resolve(__dirname, './setup/undeployed-genesis-setup.ts'),
       path.resolve(__dirname, './utils/logging/setup.ts'),
       path.resolve(__dirname, './setup/global-setup.ts'),
     ],
