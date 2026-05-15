@@ -15,15 +15,6 @@ on:
         description: "Node tag to use for testing (e.g., 0.13.2-rc.1)"
         required: false
         type: string
-      profile:
-        description: "Cargo profile. `auto` keeps the default (release for v* tags, dev otherwise)."
-        required: false
-        type: choice
-        options:
-          - auto
-          - dev
-          - release
-        default: auto
 
 concurrency:
   group: build-indexer-images
@@ -103,7 +94,7 @@ jobs:
       - name: Build and push Docker Image
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         env:
-          PROFILE: ${{ (inputs.profile != null && inputs.profile != 'auto') && inputs.profile || (startsWith(github.ref, 'refs/tags/v') && 'release' || 'dev') }}
+          PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'dev' }}
         with:
           context: .
           file: ./${{ matrix.name }}/Dockerfile
