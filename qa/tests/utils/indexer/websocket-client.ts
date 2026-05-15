@@ -225,8 +225,8 @@ export class IndexerWsClient {
       stale.onclose = null;
       try {
         stale.close();
-      } catch {
-        // socket may already be CLOSED; ignore
+      } catch (error) {
+        log.debug(`Ignoring close() error during stale-socket cleanup: ${String(error)}`);
       }
       this.ws = null;
     }
@@ -710,8 +710,10 @@ export class IndexerWsClient {
         ws.removeEventListener('message', handleMessage);
         try {
           ws.send(JSON.stringify({ id, type: 'stop' }));
-        } catch {
-          // socket may already be CLOSED; nothing actionable for cleanup
+        } catch (error) {
+          log.debug(
+            `Ignoring send() error during session cleanup (socket likely CLOSED): ${String(error)}`,
+          );
         }
       };
 
@@ -793,8 +795,10 @@ export class IndexerWsClient {
         ws.removeEventListener('message', handleMessage);
         try {
           ws.send(JSON.stringify({ id, type: 'stop' }));
-        } catch {
-          // socket may already be CLOSED; nothing actionable for cleanup
+        } catch (error) {
+          log.debug(
+            `Ignoring send() error during session cleanup (socket likely CLOSED): ${String(error)}`,
+          );
         }
       };
 
