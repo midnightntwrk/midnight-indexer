@@ -320,10 +320,10 @@ describe('shielded nullifier transactions subscription', () => {
                 resolve();
               }
             },
-            error: () => {
+            error: (err) => {
               clearTimeout(timeout);
               subscription.unsubscribe();
-              resolve();
+              reject(new Error(`Subscription error: ${JSON.stringify(err)}`));
             },
             complete: () => {
               clearTimeout(timeout);
