@@ -307,11 +307,9 @@ export function startCacheProgressReporter(
         prev.set(c.chainId, c.blockCount);
       }
 
-      // Split into current-env chains and foreign-env chains.
       // Unregistered chains (no envName) are treated as belonging to the current env
       // until we know otherwise — they'll get registered below once they start growing.
       const currentChains = chains.filter((c) => !c.envName || c.envName === label);
-      const foreignChains = chains.filter((c) => c.envName && c.envName !== label);
 
       // Register unregistered growing chains with the current env label.
       for (const c of currentChains) {

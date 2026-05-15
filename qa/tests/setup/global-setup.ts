@@ -26,13 +26,20 @@ let warmupToolkit: ToolkitWrapper | undefined;
 function cleanupOrphanedToolkitDirs(): void {
   const root = path.resolve('./.tmp/toolkit');
   if (!fs.existsSync(root)) return;
+  const skipped: string[] = [];
   for (const entry of fs.readdirSync(root)) {
     const full = path.join(root, entry);
     try {
       fs.rmSync(full, { recursive: true, force: true });
-    } catch (error) {
-      console.warn(`[SETUP] Could not remove orphan toolkit dir ${full}: ${error}`);
+    } catch {
+      skipped.push(entry);
     }
+  }
+  if (skipped.length > 0) {
+    console.warn(
+      `[SETUP] ${skipped.length} orphaned toolkit dir(s) could not be removed (root-owned files from a previous run): ${skipped.join(', ')}. ` +
+        `Run \`sudo rm -rf .tmp/toolkit\` to clear them.`,
+    );
   }
 }
 

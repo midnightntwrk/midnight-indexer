@@ -328,15 +328,22 @@ class ToolkitWrapper {
     // from a snapshot rather than replaying the full chain on every warmup.
     const ledgerCacheDir = resolve(`./.tmp/toolkit-ledger-cache/${envName}`);
 
+    // Shared ZK params cache — scoped by toolkit tag so different versions don't overwrite each
+    // other's circuit parameters. Kept outside targetDir so it is never deleted between runs
+    // (root-owned files written by the container would prevent host-side cleanup of per-run
+    // targetDirs otherwise).
+    const zkCacheDir = resolve(`./.tmp/toolkit-zk-cache/${this.config.nodeToolkitTag}`);
+
     fs.mkdirSync(this.config.targetDir, { recursive: true });
-    fs.mkdirSync(join(this.config.targetDir, 'cache'), { recursive: true });
     fs.mkdirSync(ledgerCacheDir, { recursive: true });
+    fs.mkdirSync(zkCacheDir, { recursive: true });
 
     log.debug(`NODE_TAG         : ${this.config.nodeTag}`);
     log.debug(`NODE_TOOLKIT_TAG : ${this.config.nodeToolkitTag}`);
     log.debug(`Toolkit target dir     : ${this.config.targetDir}`);
     log.debug(`Toolkit container name : ${this.config.containerName}`);
     log.debug(`Toolkit ledger cache   : ${ledgerCacheDir}`);
+    log.debug(`Toolkit ZK cache       : ${zkCacheDir}`);
 
     this.container = new GenericContainer(
       `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`,
@@ -350,7 +357,7 @@ class ToolkitWrapper {
           target: '/out',
         },
         {
-          source: join(this.config.targetDir, 'cache'),
+          source: zkCacheDir,
           target: '/.cache',
         },
         {
@@ -384,6 +391,13 @@ class ToolkitWrapper {
 
   async stop() {
     if (this.startedContainer) {
+      // Make /out world-writable before stopping so the host process can delete root-owned
+      // files that the container wrote there (e.g. transaction files).
+      try {
+        await this.startedContainer.exec(['chmod', '-R', '777', '/out']);
+      } catch {
+        // Best-effort; cleanup below may still warn if files remain root-owned.
+      }
       await this.startedContainer.stop();
     }
     if (this.config.targetDir) {
