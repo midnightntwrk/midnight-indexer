@@ -1,18 +1,23 @@
 #!/bin/bash
 
-if [ -n "$(docker ps -a|grep -e ghcr.io -e nats -e postgres|awk -F " " '{print $1}'
-)" ]; then
-    docker rm -f $(docker ps -a|grep -e ghcr.io -e nats -e postgres|awk -F " " '{print $1}')
-    echo "All Midnight containers removed."
-else
-    echo "No Midnight containers to remove."
-    echo "Everything is clear!"
-fi
-
 # Derive Docker Compose project name from directory basename (same way Docker Compose does)
 # Docker Compose normalizes: lowercase, remove dots, keep hyphens
 PROJECT_DIR=$(basename "$(pwd)")
 DOCKER_PROJECT_NAME=$(echo "$PROJECT_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/\.//g')
+
+# Tear down any prior stack (covers all images including midnightntwrk/midnight-node,
+# which the previous image-name grep was missing).
+echo "Tearing down any prior compose stack..."
+docker compose --profile cloud down --remove-orphans 2>/dev/null || true
+
+# Belt-and-suspenders: stop any container still holding the node_data volume.
+# `docker volume rm` has no force flag — the volume can only be removed once no
+# container references it.
+VOLUME_USERS=$(docker ps -a -q --filter volume="${DOCKER_PROJECT_NAME}_node_data" 2>/dev/null)
+if [ -n "$VOLUME_USERS" ]; then
+    echo "Removing containers still holding node_data volume..."
+    docker rm -f $VOLUME_USERS
+fi
 
 # Remove the named volume to ensure fresh node data
 if docker volume ls | grep -q "${DOCKER_PROJECT_NAME}_node_data"; then
@@ -125,15 +130,24 @@ echo " NODE_TOOLKIT_TAG: $NODE_TOOLKIT_TAG"
 
 docker compose --profile cloud up -d
 
-echo "Waiting for indexer API to become ready..."
-for i in {1..30}; do
+echo "Waiting for indexer API to become ready (20s budget)..."
+INDEXER_READY=0
+for i in {1..10}; do
   if curl -sf http://localhost:8088/ready >/dev/null; then
     echo "Indexer API is ready"
+    INDEXER_READY=1
     break
   fi
-  echo "Not ready yet... ($i)"
+  echo "Not ready yet... ($i/10)"
   sleep 2
 done
+if [ "$INDEXER_READY" -ne 1 ]; then
+  echo "ERROR: Indexer API did not become ready within 20s. Dumping container state:"
+  docker compose --profile cloud ps
+  echo "Last 50 lines of indexer-api logs:"
+  docker compose --profile cloud logs --tail=50 indexer-api 2>&1 || true
+  exit 1
+fi
 
 echo "Chain startup info:"
 docker compose --profile cloud logs | grep "Highest known block"

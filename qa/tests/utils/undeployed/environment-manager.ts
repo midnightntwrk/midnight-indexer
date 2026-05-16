@@ -25,7 +25,10 @@ export interface UndeployedEnvironmentOptions {
 }
 
 const READY_URL = 'http://localhost:8088/ready';
-const HEALTH_CHECK_ATTEMPTS = 30;
+// Bash provisioning script already enforces its own ~20s readiness budget and
+// exits non-zero on failure. This is a belt-and-suspenders post-script check
+// for the narrow window between script exit and the first test query.
+const HEALTH_CHECK_ATTEMPTS = 10;
 const HEALTH_CHECK_INTERVAL_MS = 2000;
 
 /**
