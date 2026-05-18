@@ -1158,10 +1158,9 @@ type Subscription {
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
 	"""
-	Subscribe to dust generation entries for a dust address within an index range.
-	Entries are interleaved with collapsed Merkle tree updates and
-	`DustGenerationDtimeUpdateItem` events for entries the subscriber owns.
-	The subscription finishes after reaching the end index with a final collapsed update.
+	Subscribe to dust generation entries for a dust address in `[start_index, end_index]`
+	inclusive. `dustGenerationEndIndex` is exclusive, pass `dustGenerationEndIndex - 1`.
+	Entries interleaved with collapsed Merkle tree updates and owned-entry dtime updates.
 	"""
 	dustGenerations(dustAddress: DustAddress!, startIndex: Int!, endIndex: Int!): DustGenerationsEvent!
 	"""
