@@ -88,10 +88,16 @@ where
             .get_subscription_config()
             .shielded_nullifier_transactions
             .batch_size;
+        let quotas = cx.get_subscription_quotas();
+        let per_connection_counter = cx.get_per_connection_counter();
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
 
         try_stream! {
+            let _quota_guard = quotas
+                .try_acquire(per_connection_counter, None)
+                .map_err_into_client_error(|| "subscription limit exceeded")?;
+
             (nullifier_prefixes.len() <= 10)
                 .then_some(())
                 .some_or_client_error(|| "maximum of ten nullifier prefixes allowed")?;

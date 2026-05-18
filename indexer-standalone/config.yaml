@@ -71,6 +71,9 @@ infra:
         progress_update_interval: "30s"
       zswap_ledger_events:
         batch_size: 20
+    quota:
+      max_concurrent_per_connection: 20
+      max_session_subscriptions_per_minute: 10
 
 telemetry:
   tracing:

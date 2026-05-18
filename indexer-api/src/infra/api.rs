@@ -11,13 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod quota;
 pub mod v4;
 
 use crate::{
     domain::{Api, LedgerStateCache, storage::Storage},
-    infra::api::v4::dataloader::{
-        BlockByHashLoader, ContractActionsByTransactionIdLoader, TransactionByIdLoader,
-        TransactionsByBlockIdLoader,
+    infra::api::{
+        quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
+        v4::dataloader::{
+            BlockByHashLoader, ContractActionsByTransactionIdLoader, TransactionByIdLoader,
+            TransactionsByBlockIdLoader,
+        },
     },
 };
 use async_graphql::{Context, dataloader::DataLoader};
@@ -47,7 +51,7 @@ use std::{
     num::NonZeroU32,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -100,6 +104,7 @@ where
             max_complexity,
             max_depth,
             subscription_config,
+            quota_config,
         } = self.config;
 
         let app = make_app(
@@ -111,6 +116,7 @@ where
             max_complexity,
             max_depth,
             subscription_config,
+            quota_config,
         );
 
         let listener = TcpListener::bind((address, port))
@@ -139,6 +145,9 @@ pub struct Config {
 
     #[serde(rename = "subscription")]
     pub subscription_config: SubscriptionConfig,
+
+    #[serde(rename = "quota")]
+    pub quota_config: QuotaConfig,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -242,12 +251,14 @@ fn make_app<S, B>(
     max_complexity: usize,
     max_depth: usize,
     subscription_config: SubscriptionConfig,
+    quota_config: QuotaConfig,
 ) -> Router
 where
     S: Storage,
     B: Subscriber,
 {
     let ledger_state_cache = LedgerStateCache::default();
+    let quotas = SubscriptionQuotas::new(quota_config);
 
     let v4_app = v4::make_app(
         network_id,
@@ -257,6 +268,7 @@ where
         max_complexity,
         max_depth,
         subscription_config,
+        quotas,
     );
 
     // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a
@@ -386,6 +398,10 @@ trait ContextExt {
     fn get_metrics(&self) -> &Metrics;
 
     fn get_subscription_config(&self) -> &SubscriptionConfig;
+
+    fn get_subscription_quotas(&self) -> &SubscriptionQuotas;
+
+    fn get_per_connection_counter(&self) -> &Arc<AtomicUsize>;
 }
 
 impl ContextExt for Context<'_> {
@@ -455,6 +471,18 @@ impl ContextExt for Context<'_> {
     fn get_subscription_config(&self) -> &SubscriptionConfig {
         self.data::<SubscriptionConfig>()
             .expect("SubscriptionConfig is stored in Context")
+    }
+
+    fn get_subscription_quotas(&self) -> &SubscriptionQuotas {
+        self.data::<SubscriptionQuotas>()
+            .expect("SubscriptionQuotas is stored in Context")
+    }
+
+    fn get_per_connection_counter(&self) -> &Arc<AtomicUsize> {
+        &self
+            .data::<PerConnectionCounter>()
+            .expect("PerConnectionCounter is stored in per-connection Data via on_connection_init")
+            .0
     }
 }
 
