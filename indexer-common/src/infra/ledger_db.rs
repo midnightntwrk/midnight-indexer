@@ -36,7 +36,16 @@ pub async fn init(config: Config) -> Result<(), Error> {
         cnn_url,
     } = config;
 
-    let pool = sqlite::SqlitePool::new(sqlite::Config::with_url(cnn_url)).await?;
+    // storage-core assumes a single writer: `flush_*` reads root counts and
+    // then writes new ones, and that read-then-write must observe its own
+    // in-progress state. With max_connections > 1, sqlx can route the read to
+    // a different connection whose WAL snapshot predates the writer, breaking
+    // the invariant and producing "roots counts can't be negative" panics.
+    let pool = sqlite::SqlitePool::new(sqlite::Config {
+        cnn_url,
+        max_connections: 1,
+    })
+    .await?;
     migrations::sqlite::run_for_ledger_db(&pool).await?;
 
     let db = v1_1::LedgerDb::new(pool);
