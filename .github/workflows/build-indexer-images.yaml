@@ -53,11 +53,15 @@ jobs:
           version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
           echo "VERSION=$version" | tee -a "$GITHUB_ENV"
 
-      - name: Login to DockerHub
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        with:
-          username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
-          password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
+      # Docker Hub publish disabled 2026-05-19: org access token is dead and
+      # the account may be tied to a decommissioned IOHK email. Mirrors Giles's
+      # removal in midnight-node PR #1538. Restore once SRE resolves the
+      # org-account/token situation.
+      # - name: Login to DockerHub
+      #   uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      #   with:
+      #     username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
+      #     password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
 
       - name: Login to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
@@ -74,7 +78,9 @@ jobs:
         with:
           images: |
             ghcr.io/midnight-ntwrk/${{ matrix.name }}
-            ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.name) || '' }}
+            # Docker Hub publish disabled 2026-05-19, restore line below once
+            # SRE resolves the org account/token situation:
+            # ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.name) || '' }}
           tags: |
             type=semver,pattern={{version}}
             ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
