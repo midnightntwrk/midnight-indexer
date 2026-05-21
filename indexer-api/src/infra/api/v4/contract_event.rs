@@ -372,7 +372,7 @@ pub struct MiscContractEvent {
 // ============================================================================
 
 impl TryFrom<ContractEventRow> for ContractEvent {
-    type Error = UnexpectedContractEvent;
+    type Error = Box<UnexpectedContractEvent>;
 
     fn try_from(row: ContractEventRow) -> Result<Self, Self::Error> {
         use LedgerEventAttributes::*;
@@ -597,7 +597,7 @@ impl TryFrom<ContractEventRow> for ContractEvent {
                 }))
             }
 
-            other => Err(UnexpectedContractEvent(other.clone())),
+            other => Err(Box::new(UnexpectedContractEvent(other.clone()))),
         }
     }
 }

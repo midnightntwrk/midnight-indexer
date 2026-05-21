@@ -18,6 +18,7 @@ use crate::{
         v4::{
             HexEncodable, HexEncoded,
             block::BlockOffset,
+            contract_event::ContractEvent,
             transaction::{Transaction, TransactionOffset},
             unshielded::ContractBalance,
         },
@@ -236,6 +237,40 @@ where
             })?;
 
         Ok(balances.into_iter().map(Into::into).collect())
+    }
+
+    /// Contract events emitted by this contract call.
+    ///
+    /// Only `ContractCall` exposes this field — `ContractDeploy` and
+    /// `ContractUpdate` don't execute circuits with the `log()` expression.
+    /// Per Andrzej's 12 May design call (#feat-public-events).
+    ///
+    /// Returns an empty list until ticket #1162 populates the
+    /// `ledger_events.contract_action_id` column from the chain-indexer's
+    /// `make_ledger_events_v9` path (currently rows have NULL).
+    async fn contract_events(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractEvent>> {
+        let storage = cx.get_storage::<S>();
+        let pairs = storage
+            .get_contract_events_by_contract_action_ids(&[self.contract_action_id])
+            .await
+            .map_err_into_server_error(|| {
+                format!(
+                    "get contract events by contract action id {}",
+                    self.contract_action_id
+                )
+            })?;
+
+        pairs
+            .into_iter()
+            .filter(|(id, _)| *id == self.contract_action_id)
+            .map(|(_, row)| ContractEvent::try_from(row))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err_into_server_error(|| {
+                format!(
+                    "convert contract event row for contract action id {}",
+                    self.contract_action_id
+                )
+            })
     }
 }
 

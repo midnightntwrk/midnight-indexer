@@ -211,6 +211,18 @@ type ContractCall implements ContractAction {
 	Unshielded token balances held by this contract.
 	"""
 	unshieldedBalances: [ContractBalance!]!
+	"""
+	Contract events emitted by this contract call.
+	
+	Only `ContractCall` exposes this field — `ContractDeploy` and
+	`ContractUpdate` don't execute circuits with the `log()` expression.
+	Per Andrzej's 12 May design call (#feat-public-events).
+	
+	Returns an empty list until ticket #1162 populates the
+	`ledger_events.contract_action_id` column from the chain-indexer's
+	`make_ledger_events_v9` path (currently rows have NULL).
+	"""
+	contractEvents: [ContractEvent!]!
 }
 
 """
