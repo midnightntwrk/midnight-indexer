@@ -813,3 +813,177 @@ mod tests {
         assert_eq!(domain.contract_address.len(), 32);
     }
 }
+
+#[cfg(test)]
+mod more_tests {
+    use super::*;
+    use indexer_common::domain::{
+        AddressOrContract as DomainAOC, ByteVec, ProtocolVersion, SerializedLedgerEvent,
+    };
+
+    fn bv(bytes: &[u8]) -> ByteVec {
+        ByteVec::from(bytes.to_vec())
+    }
+
+    fn make_row(attributes: LedgerEventAttributes) -> ContractEventRow {
+        ContractEventRow {
+            id: 1,
+            contract_address: bv(&[0x01; 32]),
+            transaction_id: 1,
+            contract_action_id: Some(1),
+            raw: SerializedLedgerEvent::from(vec![0]),
+            attributes,
+            max_id: 1,
+            protocol_version: ProtocolVersion::V1_0(0),
+        }
+    }
+
+    #[test]
+    #[allow(clippy::type_complexity)]
+    fn try_from_every_variant_succeeds() {
+        let cases: Vec<(LedgerEventAttributes, fn(&ContractEvent) -> bool)> = vec![
+            (
+                LedgerEventAttributes::ContractShieldedSpend {
+                    version: 1,
+                    entry_point: bv(b""),
+                    nullifier: bv(&[0; 32]),
+                },
+                |e| matches!(e, ContractEvent::ShieldedSpend(_)),
+            ),
+            (
+                LedgerEventAttributes::ContractShieldedReceive {
+                    version: 1,
+                    entry_point: bv(b""),
+                    commitment: bv(&[0; 32]),
+                    ciphertext: None,
+                    receiving_contract_address: None,
+                },
+                |e| matches!(e, ContractEvent::ShieldedReceive(_)),
+            ),
+            (
+                LedgerEventAttributes::ContractShieldedMint {
+                    version: 1,
+                    entry_point: bv(b""),
+                    commitment: bv(&[0; 32]),
+                    domain_sep: bv(&[0; 32]),
+                    amount: None,
+                },
+                |e| matches!(e, ContractEvent::ShieldedMint(_)),
+            ),
+            (
+                LedgerEventAttributes::ContractShieldedBurn {
+                    version: 1,
+                    entry_point: bv(b""),
+                    nullifier: bv(&[0; 32]),
+                    amount: None,
+                },
+                |e| matches!(e, ContractEvent::ShieldedBurn(_)),
+            ),
+            (
+                LedgerEventAttributes::ContractUnshieldedSpend {
+                    version: 1,
+                    entry_point: bv(b""),
+                    sender: DomainAOC::User(bv(&[0; 32])),
+                    domain_sep: bv(&[0; 32]),
+                    token_type: bv(&[0; 32]),
+                    amount: "0".into(),
+                },
+                |e| matches!(e, ContractEvent::UnshieldedSpend(_)),
+            ),
+            (
+                LedgerEventAttributes::ContractUnshieldedReceive {
+                    version: 1,
+                    entry_point: bv(b""),
+                    recipient: DomainAOC::Contract(bv(&[0; 32])),
+                    domain_sep: bv(&[0; 32]),
+                    token_type: bv(&[0; 32]),
+                    amount: "0".into(),
+                },
+                |e| matches!(e, ContractEvent::UnshieldedReceive(_)),
+            ),
+            (
+                LedgerEventAttributes::ContractUnshieldedMint {
+                    version: 1,
+                    entry_point: bv(b""),
+                    domain_sep: bv(&[0; 32]),
+                    token_type: bv(&[0; 32]),
+                    amount: "0".into(),
+                },
+                |e| matches!(e, ContractEvent::UnshieldedMint(_)),
+            ),
+            (
+                LedgerEventAttributes::ContractUnshieldedBurn {
+                    version: 1,
+                    entry_point: bv(b""),
+                    sender: DomainAOC::User(bv(&[0; 32])),
+                    token_type: bv(&[0; 32]),
+                    amount: "0".into(),
+                },
+                |e| matches!(e, ContractEvent::UnshieldedBurn(_)),
+            ),
+            (
+                LedgerEventAttributes::ContractPaused {
+                    version: 1,
+                    entry_point: bv(b""),
+                },
+                |e| matches!(e, ContractEvent::Paused(_)),
+            ),
+            (
+                LedgerEventAttributes::ContractUnpaused {
+                    version: 1,
+                    entry_point: bv(b""),
+                },
+                |e| matches!(e, ContractEvent::Unpaused(_)),
+            ),
+            (
+                LedgerEventAttributes::ContractMisc {
+                    version: 1,
+                    entry_point: bv(b""),
+                    name: bv(&[0; 32]),
+                    payload: bv(&[0; 32]),
+                },
+                |e| matches!(e, ContractEvent::Misc(_)),
+            ),
+        ];
+
+        for (attrs, check) in cases {
+            let row = make_row(attrs.clone());
+            let event = ContractEvent::try_from(row).unwrap_or_else(|_| {
+                panic!("try_from failed for {:?}", attrs);
+            });
+            assert!(check(&event), "wrong variant for {:?}", attrs);
+        }
+    }
+
+    #[test]
+    fn address_or_contract_kind_round_trip_through_graphql_conversion() {
+        let user_gql: AddressOrContract = DomainAOC::User(bv(&[0xab; 32])).into();
+        let contract_gql: AddressOrContract = DomainAOC::Contract(bv(&[0xcd; 32])).into();
+
+        assert!(matches!(user_gql.kind, AddressOrContractKind::User));
+        assert!(user_gql.user_address.is_some());
+        assert!(user_gql.contract_address.is_none());
+
+        assert!(matches!(contract_gql.kind, AddressOrContractKind::Contract));
+        assert!(contract_gql.user_address.is_none());
+        assert!(contract_gql.contract_address.is_some());
+    }
+
+    #[test]
+    fn shielded_receive_with_all_optional_fields_present() {
+        let attrs = LedgerEventAttributes::ContractShieldedReceive {
+            version: 1,
+            entry_point: bv(b"r"),
+            commitment: bv(&[0x11; 32]),
+            ciphertext: Some(bv(&[0x22; 64])),
+            receiving_contract_address: Some(bv(&[0x33; 32])),
+        };
+        let event = ContractEvent::try_from(make_row(attrs)).unwrap();
+        if let ContractEvent::ShieldedReceive(e) = event {
+            assert!(e.ciphertext.is_some());
+            assert!(e.receiving_contract_address.is_some());
+        } else {
+            panic!("wrong variant");
+        }
+    }
+}
