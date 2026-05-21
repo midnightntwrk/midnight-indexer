@@ -585,3 +585,249 @@ pub enum LedgerEventGrouping {
     Dust,
     Contract,
 }
+
+#[cfg(test)]
+mod contract_event_tests {
+    use super::*;
+
+    fn bv(bytes: &[u8]) -> ByteVec {
+        ByteVec::from(bytes.to_vec())
+    }
+
+    fn shielded_spend_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractShieldedSpend {
+            version: 1,
+            entry_point: bv(b"spend"),
+            nullifier: bv(&[0xaa; 32]),
+        }
+    }
+
+    fn shielded_receive_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractShieldedReceive {
+            version: 1,
+            entry_point: bv(b"receive"),
+            commitment: bv(&[0xbb; 32]),
+            ciphertext: Some(bv(&[0xcc; 64])),
+            receiving_contract_address: None,
+        }
+    }
+
+    fn shielded_mint_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractShieldedMint {
+            version: 1,
+            entry_point: bv(b"mint"),
+            commitment: bv(&[0x11; 32]),
+            domain_sep: bv(&[0x22; 32]),
+            amount: Some("1000".to_string()),
+        }
+    }
+
+    fn shielded_burn_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractShieldedBurn {
+            version: 1,
+            entry_point: bv(b"burn"),
+            nullifier: bv(&[0x33; 32]),
+            amount: None,
+        }
+    }
+
+    fn unshielded_spend_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractUnshieldedSpend {
+            version: 1,
+            entry_point: bv(b"u_spend"),
+            sender: AddressOrContract::User(bv(&[0x44; 32])),
+            domain_sep: bv(&[0x55; 32]),
+            token_type: bv(&[0x66; 32]),
+            amount: "500".to_string(),
+        }
+    }
+
+    fn unshielded_receive_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractUnshieldedReceive {
+            version: 1,
+            entry_point: bv(b"u_recv"),
+            recipient: AddressOrContract::Contract(bv(&[0x77; 32])),
+            domain_sep: bv(&[0x88; 32]),
+            token_type: bv(&[0x99; 32]),
+            amount: "501".to_string(),
+        }
+    }
+
+    fn unshielded_mint_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractUnshieldedMint {
+            version: 1,
+            entry_point: bv(b"u_mint"),
+            domain_sep: bv(&[0xaa; 32]),
+            token_type: bv(&[0xbb; 32]),
+            amount: "502".to_string(),
+        }
+    }
+
+    fn unshielded_burn_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractUnshieldedBurn {
+            version: 1,
+            entry_point: bv(b"u_burn"),
+            sender: AddressOrContract::User(bv(&[0xcc; 32])),
+            token_type: bv(&[0xdd; 32]),
+            amount: "503".to_string(),
+        }
+    }
+
+    fn paused_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractPaused {
+            version: 1,
+            entry_point: bv(b"pause"),
+        }
+    }
+
+    fn unpaused_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractUnpaused {
+            version: 1,
+            entry_point: bv(b"unpause"),
+        }
+    }
+
+    fn misc_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractMisc {
+            version: 1,
+            entry_point: bv(b"misc"),
+            name: bv(&[0xee; 32]),
+            payload: bv(&[0xff; 64]),
+        }
+    }
+
+    #[test]
+    fn contract_event_constructor_sets_contract_grouping() {
+        let attrs = shielded_spend_attrs();
+        let event = LedgerEvent::contract_event(
+            bv(b"raw"),
+            bv(&[0x01; 32]),
+            attrs.clone(),
+        );
+        assert!(matches!(event.grouping, LedgerEventGrouping::Contract));
+        assert_eq!(event.contract_address, Some(bv(&[0x01; 32])));
+        assert_eq!(event.attributes, attrs);
+    }
+
+    #[test]
+    fn existing_event_constructors_leave_contract_address_unset() {
+        let zswap_in = LedgerEvent::zswap_input(bv(b"raw"), bv(&[0; 32]));
+        let zswap_out = LedgerEvent::zswap_output(bv(b"raw"));
+        let param = LedgerEvent::param_change(bv(b"raw"));
+        let dust_spend = LedgerEvent::dust_spend_processed(bv(b"raw"), bv(&[0; 32]), bv(&[0; 32]));
+
+        assert!(zswap_in.contract_address.is_none());
+        assert!(zswap_out.contract_address.is_none());
+        assert!(param.contract_address.is_none());
+        assert!(dust_spend.contract_address.is_none());
+
+        assert!(matches!(zswap_in.grouping, LedgerEventGrouping::Zswap));
+        assert!(matches!(zswap_out.grouping, LedgerEventGrouping::Zswap));
+        assert!(matches!(param.grouping, LedgerEventGrouping::Dust));
+        assert!(matches!(dust_spend.grouping, LedgerEventGrouping::Dust));
+    }
+
+    #[test]
+    fn indexable_contract_fields_shielded_spend_returns_nullifier_only() {
+        let event = LedgerEvent::contract_event(
+            bv(b"raw"),
+            bv(&[0x01; 32]),
+            shielded_spend_attrs(),
+        );
+        let fields = event.indexable_contract_fields();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].0, "nullifier");
+    }
+
+    #[test]
+    fn indexable_contract_fields_shielded_receive_includes_ciphertext_when_present() {
+        let with_ct = LedgerEvent::contract_event(
+            bv(b"raw"),
+            bv(&[0x01; 32]),
+            shielded_receive_attrs(),
+        );
+        let names: Vec<_> = with_ct
+            .indexable_contract_fields()
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, vec!["commitment", "ciphertext"]);
+
+        let no_ct_attrs = LedgerEventAttributes::ContractShieldedReceive {
+            version: 1,
+            entry_point: bv(b"r"),
+            commitment: bv(&[0; 32]),
+            ciphertext: None,
+            receiving_contract_address: None,
+        };
+        let no_ct = LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), no_ct_attrs);
+        let names: Vec<_> = no_ct
+            .indexable_contract_fields()
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, vec!["commitment"]);
+    }
+
+    #[test]
+    fn indexable_contract_fields_unshielded_spend_three_fields() {
+        let event = LedgerEvent::contract_event(
+            bv(b"raw"),
+            bv(&[0x01; 32]),
+            unshielded_spend_attrs(),
+        );
+        let names: Vec<_> = event
+            .indexable_contract_fields()
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, vec!["sender", "domainSep", "tokenType"]);
+    }
+
+    #[test]
+    fn indexable_contract_fields_paused_unpaused_misc_are_empty() {
+        for attrs in [paused_attrs(), unpaused_attrs(), misc_attrs()] {
+            let event = LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), attrs);
+            assert!(event.indexable_contract_fields().is_empty());
+        }
+    }
+
+    #[test]
+    fn indexable_contract_fields_legacy_event_types_are_empty() {
+        let zswap_in = LedgerEvent::zswap_input(bv(b"raw"), bv(&[0; 32]));
+        let param = LedgerEvent::param_change(bv(b"raw"));
+        assert!(zswap_in.indexable_contract_fields().is_empty());
+        assert!(param.indexable_contract_fields().is_empty());
+    }
+
+    #[test]
+    fn address_or_contract_as_bytes_returns_inner() {
+        let user = AddressOrContract::User(bv(&[0xab; 32]));
+        let contract = AddressOrContract::Contract(bv(&[0xcd; 32]));
+        assert_eq!(user.as_bytes().as_ref(), &[0xab; 32]);
+        assert_eq!(contract.as_bytes().as_ref(), &[0xcd; 32]);
+    }
+
+    #[test]
+    fn ledger_event_attributes_roundtrip_via_json() {
+        let attrs = [
+            shielded_spend_attrs(),
+            shielded_receive_attrs(),
+            shielded_mint_attrs(),
+            shielded_burn_attrs(),
+            unshielded_spend_attrs(),
+            unshielded_receive_attrs(),
+            unshielded_mint_attrs(),
+            unshielded_burn_attrs(),
+            paused_attrs(),
+            unpaused_attrs(),
+            misc_attrs(),
+        ];
+        for original in attrs {
+            let json = serde_json::to_string(&original).expect("serialize");
+            let decoded: LedgerEventAttributes =
+                serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(original, decoded, "round-trip mismatch");
+        }
+    }
+}

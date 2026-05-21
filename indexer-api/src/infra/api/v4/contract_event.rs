@@ -681,3 +681,135 @@ pub enum ContractEventFilterError {
     #[error("invalid fieldPrefix.prefix: {0}")]
     InvalidFieldPrefix(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indexer_common::domain::{ByteVec, ProtocolVersion, SerializedLedgerEvent};
+
+    fn bv(bytes: &[u8]) -> ByteVec {
+        ByteVec::from(bytes.to_vec())
+    }
+
+    fn make_row(attributes: LedgerEventAttributes) -> ContractEventRow {
+        ContractEventRow {
+            id: 42,
+            contract_address: bv(&[0x01; 32]),
+            transaction_id: 7,
+            contract_action_id: Some(99),
+            raw: SerializedLedgerEvent::from(vec![0xab, 0xcd]),
+            attributes,
+            max_id: 100,
+            protocol_version: ProtocolVersion::V1_0(0),
+        }
+    }
+
+    #[test]
+    fn try_from_shielded_spend_yields_correct_variant() {
+        let row = make_row(LedgerEventAttributes::ContractShieldedSpend {
+            version: 1,
+            entry_point: bv(b"spend"),
+            nullifier: bv(&[0xaa; 32]),
+        });
+
+        let event = ContractEvent::try_from(row).expect("try_from");
+        assert!(matches!(event, ContractEvent::ShieldedSpend(_)));
+        if let ContractEvent::ShieldedSpend(e) = event {
+            assert_eq!(e.id, 42);
+            assert_eq!(e.version, 1);
+            assert_eq!(e.transaction_id, 7);
+            assert_eq!(e.max_id, 100);
+        }
+    }
+
+    #[test]
+    fn try_from_unshielded_receive_includes_domain_sep() {
+        let row = make_row(LedgerEventAttributes::ContractUnshieldedReceive {
+            version: 2,
+            entry_point: bv(b"recv"),
+            recipient: indexer_common::domain::AddressOrContract::Contract(bv(&[0xbb; 32])),
+            domain_sep: bv(&[0xcc; 32]),
+            token_type: bv(&[0xdd; 32]),
+            amount: "1000".into(),
+        });
+
+        let event = ContractEvent::try_from(row).expect("try_from");
+        if let ContractEvent::UnshieldedReceive(e) = event {
+            assert_eq!(e.version, 2);
+            assert_eq!(e.amount, "1000");
+            assert!(matches!(e.recipient.kind, AddressOrContractKind::Contract));
+            assert!(e.recipient.user_address.is_none());
+            assert!(e.recipient.contract_address.is_some());
+        } else {
+            panic!("expected UnshieldedReceive");
+        }
+    }
+
+    #[test]
+    fn try_from_paused_carries_only_interface_fields() {
+        let row = make_row(LedgerEventAttributes::ContractPaused {
+            version: 1,
+            entry_point: bv(b"pause"),
+        });
+        let event = ContractEvent::try_from(row).expect("try_from");
+        assert!(matches!(event, ContractEvent::Paused(_)));
+    }
+
+    #[test]
+    fn try_from_non_contract_attribute_returns_error() {
+        let row = make_row(LedgerEventAttributes::ZswapOutput);
+        let err = ContractEvent::try_from(row).expect_err("must error");
+        assert!(format!("{err}").contains("unexpected ledger event"));
+    }
+
+    #[test]
+    fn contract_event_type_variant_name_is_stable() {
+        assert_eq!(
+            contract_event_type_variant_name(ContractEventType::ShieldedSpend),
+            "ShieldedSpend"
+        );
+        assert_eq!(
+            contract_event_type_variant_name(ContractEventType::Misc),
+            "Misc"
+        );
+        assert_eq!(
+            contract_event_type_variant_name(ContractEventType::UnshieldedReceive),
+            "UnshieldedReceive"
+        );
+    }
+
+    #[test]
+    fn filter_into_domain_rejects_empty_contract_address() {
+        let filter = ContractEventFilter {
+            contract_address: HexEncoded::try_from(String::new()).expect("empty hex parses"),
+            types: None,
+            field_prefixes: None,
+            from_block: None,
+            to_block: None,
+        };
+        let err = filter.into_domain().expect_err("should reject");
+        assert!(matches!(err, ContractEventFilterError::EmptyContractAddress));
+    }
+
+    #[test]
+    fn filter_into_domain_threads_block_range_and_types() {
+        let filter = ContractEventFilter {
+            contract_address: HexEncoded::try_from("ab".repeat(32)).expect("valid hex"),
+            types: Some(vec![
+                ContractEventType::ShieldedSpend,
+                ContractEventType::Misc,
+            ]),
+            field_prefixes: None,
+            from_block: Some(100),
+            to_block: Some(200),
+        };
+        let domain = filter.into_domain().expect("valid");
+        assert_eq!(domain.from_block, Some(100));
+        assert_eq!(domain.to_block, Some(200));
+        assert_eq!(
+            domain.variants.as_deref(),
+            Some(&["ShieldedSpend", "Misc"][..])
+        );
+        assert_eq!(domain.contract_address.len(), 32);
+    }
+}

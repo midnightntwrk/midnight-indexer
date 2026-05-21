@@ -1173,3 +1173,148 @@ async fn save_system_parameters_change(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod contract_event_variant_tests {
+    use super::*;
+    use indexer_common::domain::{AddressOrContract, ByteVec};
+
+    fn bv(bytes: &[u8]) -> ByteVec {
+        ByteVec::from(bytes.to_vec())
+    }
+
+    // The From impl maps each ContractEvent attribute variant to the matching
+    // SQL LedgerEventVariant. A missing arm would fail the match exhaustively;
+    // this test pins the mapping so renames don't silently shift names.
+    #[test]
+    fn from_attributes_to_variant_covers_every_contract_event_variant() {
+        let cases: Vec<(LedgerEventAttributes, LedgerEventVariant)> = vec![
+            (
+                LedgerEventAttributes::ContractShieldedSpend {
+                    version: 1,
+                    entry_point: bv(b""),
+                    nullifier: bv(&[0; 32]),
+                },
+                LedgerEventVariant::ShieldedSpend,
+            ),
+            (
+                LedgerEventAttributes::ContractShieldedReceive {
+                    version: 1,
+                    entry_point: bv(b""),
+                    commitment: bv(&[0; 32]),
+                    ciphertext: None,
+                    receiving_contract_address: None,
+                },
+                LedgerEventVariant::ShieldedReceive,
+            ),
+            (
+                LedgerEventAttributes::ContractShieldedMint {
+                    version: 1,
+                    entry_point: bv(b""),
+                    commitment: bv(&[0; 32]),
+                    domain_sep: bv(&[0; 32]),
+                    amount: None,
+                },
+                LedgerEventVariant::ShieldedMint,
+            ),
+            (
+                LedgerEventAttributes::ContractShieldedBurn {
+                    version: 1,
+                    entry_point: bv(b""),
+                    nullifier: bv(&[0; 32]),
+                    amount: None,
+                },
+                LedgerEventVariant::ShieldedBurn,
+            ),
+            (
+                LedgerEventAttributes::ContractUnshieldedSpend {
+                    version: 1,
+                    entry_point: bv(b""),
+                    sender: AddressOrContract::User(bv(&[0; 32])),
+                    domain_sep: bv(&[0; 32]),
+                    token_type: bv(&[0; 32]),
+                    amount: "0".into(),
+                },
+                LedgerEventVariant::UnshieldedSpend,
+            ),
+            (
+                LedgerEventAttributes::ContractUnshieldedReceive {
+                    version: 1,
+                    entry_point: bv(b""),
+                    recipient: AddressOrContract::Contract(bv(&[0; 32])),
+                    domain_sep: bv(&[0; 32]),
+                    token_type: bv(&[0; 32]),
+                    amount: "0".into(),
+                },
+                LedgerEventVariant::UnshieldedReceive,
+            ),
+            (
+                LedgerEventAttributes::ContractUnshieldedMint {
+                    version: 1,
+                    entry_point: bv(b""),
+                    domain_sep: bv(&[0; 32]),
+                    token_type: bv(&[0; 32]),
+                    amount: "0".into(),
+                },
+                LedgerEventVariant::UnshieldedMint,
+            ),
+            (
+                LedgerEventAttributes::ContractUnshieldedBurn {
+                    version: 1,
+                    entry_point: bv(b""),
+                    sender: AddressOrContract::User(bv(&[0; 32])),
+                    token_type: bv(&[0; 32]),
+                    amount: "0".into(),
+                },
+                LedgerEventVariant::UnshieldedBurn,
+            ),
+            (
+                LedgerEventAttributes::ContractPaused {
+                    version: 1,
+                    entry_point: bv(b""),
+                },
+                LedgerEventVariant::Paused,
+            ),
+            (
+                LedgerEventAttributes::ContractUnpaused {
+                    version: 1,
+                    entry_point: bv(b""),
+                },
+                LedgerEventVariant::Unpaused,
+            ),
+            (
+                LedgerEventAttributes::ContractMisc {
+                    version: 1,
+                    entry_point: bv(b""),
+                    name: bv(&[0; 32]),
+                    payload: bv(&[0; 32]),
+                },
+                LedgerEventVariant::Misc,
+            ),
+        ];
+
+        for (attrs, expected) in cases {
+            let got = LedgerEventVariant::from(&attrs);
+            assert_eq!(got, expected, "wrong variant for {:?}", attrs);
+        }
+    }
+
+    // Sanity: existing zswap/dust mappings still work after the new arms.
+    #[test]
+    fn from_attributes_existing_variants_still_mapped() {
+        let zi = LedgerEventVariant::from(&LedgerEventAttributes::ZswapInput {
+            nullifier: bv(&[0; 32]),
+        });
+        let zo = LedgerEventVariant::from(&LedgerEventAttributes::ZswapOutput);
+        let pc = LedgerEventVariant::from(&LedgerEventAttributes::ParamChange);
+        let dsp = LedgerEventVariant::from(&LedgerEventAttributes::DustSpendProcessed {
+            nullifier: bv(&[0; 32]),
+            commitment: bv(&[0; 32]),
+        });
+
+        assert_eq!(zi, LedgerEventVariant::ZswapInput);
+        assert_eq!(zo, LedgerEventVariant::ZswapOutput);
+        assert_eq!(pc, LedgerEventVariant::ParamChange);
+        assert_eq!(dsp, LedgerEventVariant::DustSpendProcessed);
+    }
+}
