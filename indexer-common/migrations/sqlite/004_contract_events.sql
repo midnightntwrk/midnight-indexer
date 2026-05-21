@@ -37,7 +37,8 @@ CREATE TABLE ledger_events_new (
   grouping TEXT CHECK (grouping IN ('Zswap', 'Dust', 'Contract')) NOT NULL,
   raw BYTEA NOT NULL,
   attributes TEXT NOT NULL,
-  contract_address BLOB
+  contract_address BLOB,
+  contract_action_id INTEGER REFERENCES contract_actions (id)
 );
 
 INSERT INTO ledger_events_new (id, transaction_id, variant, grouping, raw, attributes)
@@ -59,6 +60,7 @@ CREATE INDEX ledger_events_id_grouping_idx ON ledger_events (id, grouping);
 CREATE INDEX ledger_events_transaction_id_grouping_idx ON ledger_events (transaction_id, grouping);
 CREATE INDEX ledger_events_contract_address_idx ON ledger_events (contract_address);
 CREATE INDEX ledger_events_grouping_contract_address_idx ON ledger_events (grouping, contract_address);
+CREATE INDEX ledger_events_contract_action_id_idx ON ledger_events (contract_action_id);
 
 --------------------------------------------------------------------------------
 -- contract_event_indexed_fields (sidecar)

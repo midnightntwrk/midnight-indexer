@@ -37,6 +37,22 @@ CREATE INDEX ON ledger_events (contract_address);
 CREATE INDEX ON ledger_events (grouping, contract_address);
 
 --------------------------------------------------------------------------------
+-- contract_action_id on ledger_events
+--
+-- Nullable to preserve existing zswap/dust rows. For contract events, the
+-- column links the event to the specific ContractCall (contract_actions.id)
+-- that emitted it. Powers the nested ContractCall.contractEvents GraphQL
+-- field (#1162) via DataLoader batching.
+--
+-- Chain-indexer populates this when the v9 parser writes contract events
+-- (gated on #1157). Pre-#1157 contract events do not flow at all so this
+-- column being NULL doesn't impact correctness today.
+--------------------------------------------------------------------------------
+ALTER TABLE ledger_events
+  ADD COLUMN contract_action_id BIGINT REFERENCES contract_actions (id);
+CREATE INDEX ON ledger_events (contract_action_id);
+
+--------------------------------------------------------------------------------
 -- contract_event_indexed_fields (sidecar)
 --
 -- Per-row indexed field values for standard contract events, supporting
