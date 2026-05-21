@@ -13,6 +13,7 @@
 
 mod block;
 mod contract_action;
+mod contract_event;
 mod dust_generations;
 mod dust_ledger_events;
 mod dust_nullifier_transactions;
@@ -25,6 +26,7 @@ use crate::{
     domain::storage::Storage,
     infra::api::v4::subscription::{
         block::BlockSubscription, contract_action::ContractActionSubscription,
+        contract_event::ContractEventsSubscription,
         dust_generations::DustGenerationsSubscription,
         dust_ledger_events::DustLedgerEventsSubscription,
         dust_nullifier_transactions::DustNullifierTransactionsSubscription,
@@ -41,6 +43,7 @@ use indexer_common::domain::Subscriber;
 pub struct Subscription<S, B>(
     BlockSubscription<S, B>,
     ContractActionSubscription<S, B>,
+    ContractEventsSubscription<S, B>,
     DustGenerationsSubscription<S, B>,
     DustLedgerEventsSubscription<S, B>,
     DustNullifierTransactionsSubscription<S, B>,
@@ -62,6 +65,7 @@ where
         Subscription(
             BlockSubscription::default(),
             ContractActionSubscription::default(),
+            ContractEventsSubscription::default(),
             DustGenerationsSubscription::default(),
             DustLedgerEventsSubscription::default(),
             DustNullifierTransactionsSubscription::default(),

@@ -21,11 +21,18 @@
 //! for the canonical reference shape.
 
 use crate::{
-    domain::ContractEventRow,
+    domain::{
+        ContractEventRow,
+        storage::contract_event::{
+            ContractEventFilter as DomainContractEventFilter, FieldPrefix as DomainFieldPrefix,
+        },
+    },
     infra::api::v4::{HexEncodable, HexEncoded},
 };
 use async_graphql::{Enum, InputObject, Interface, SimpleObject};
-use indexer_common::domain::{AddressOrContract as DomainAddressOrContract, LedgerEventAttributes};
+use indexer_common::domain::{
+    AddressOrContract as DomainAddressOrContract, ByteVec, LedgerEventAttributes,
+};
 use thiserror::Error;
 
 /// Tagged-union helper for fields like `Either<ZswapCoinPublicKey, ContractAddress>`
@@ -598,3 +605,79 @@ impl TryFrom<ContractEventRow> for ContractEvent {
 #[derive(Debug, Error)]
 #[error("unexpected ledger event for contract events surface: {0:?}")]
 pub struct UnexpectedContractEvent(LedgerEventAttributes);
+
+// ============================================================================
+// GraphQL filter → domain filter conversion.
+// ============================================================================
+
+impl ContractEventFilter {
+    /// Convert into the domain filter shape consumed by the storage layer.
+    /// Validates that `contract_address` is non-empty and hex-decodable.
+    pub fn into_domain(self) -> Result<DomainContractEventFilter, ContractEventFilterError> {
+        let contract_address: ByteVec = self
+            .contract_address
+            .hex_decode()
+            .map_err(|e| ContractEventFilterError::InvalidContractAddress(e.to_string()))?;
+        if contract_address.as_ref().is_empty() {
+            return Err(ContractEventFilterError::EmptyContractAddress);
+        }
+
+        let variants = self.types.map(|ts| {
+            ts.into_iter()
+                .map(contract_event_type_variant_name)
+                .collect::<Vec<_>>()
+        });
+
+        let field_prefixes = match self.field_prefixes {
+            None => Vec::new(),
+            Some(fps) => fps
+                .into_iter()
+                .map(|fp| {
+                    let prefix: ByteVec = fp.prefix.hex_decode().map_err(|e| {
+                        ContractEventFilterError::InvalidFieldPrefix(e.to_string())
+                    })?;
+                    Ok(DomainFieldPrefix {
+                        field_name: fp.field_name,
+                        prefix: prefix.as_ref().to_vec(),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+
+        Ok(DomainContractEventFilter {
+            contract_address: contract_address.as_ref().to_vec(),
+            variants,
+            field_prefixes,
+            from_block: self.from_block,
+            to_block: self.to_block,
+        })
+    }
+}
+
+fn contract_event_type_variant_name(t: ContractEventType) -> &'static str {
+    match t {
+        ContractEventType::ShieldedSpend => "ShieldedSpend",
+        ContractEventType::ShieldedReceive => "ShieldedReceive",
+        ContractEventType::ShieldedMint => "ShieldedMint",
+        ContractEventType::ShieldedBurn => "ShieldedBurn",
+        ContractEventType::UnshieldedSpend => "UnshieldedSpend",
+        ContractEventType::UnshieldedReceive => "UnshieldedReceive",
+        ContractEventType::UnshieldedMint => "UnshieldedMint",
+        ContractEventType::UnshieldedBurn => "UnshieldedBurn",
+        ContractEventType::Paused => "Paused",
+        ContractEventType::Unpaused => "Unpaused",
+        ContractEventType::Misc => "Misc",
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ContractEventFilterError {
+    #[error("invalid contractAddress: {0}")]
+    InvalidContractAddress(String),
+
+    #[error("contractAddress is required and must be non-empty")]
+    EmptyContractAddress,
+
+    #[error("invalid fieldPrefix.prefix: {0}")]
+    InvalidFieldPrefix(String),
+}

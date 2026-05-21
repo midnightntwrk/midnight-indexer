@@ -1,4 +1,29 @@
 """
+Tagged-union helper for fields like `Either<ZswapCoinPublicKey, ContractAddress>`
+used in standard unshielded events.
+
+Exactly one of `userAddress` or `contractAddress` is non-null; the `kind`
+discriminator says which.
+"""
+type AddressOrContract {
+	kind: AddressOrContractKind!
+	"""
+	Bech32m-encoded user address; populated when kind = USER.
+	Hex-encoded here at the wire level; clients re-encode if needed.
+	"""
+	userAddress: HexEncoded
+	"""
+	Hex-encoded contract address; populated when kind = CONTRACT.
+	"""
+	contractAddress: HexEncoded
+}
+
+enum AddressOrContractKind {
+	USER
+	CONTRACT
+}
+
+"""
 A block with its relevant data.
 """
 type Block {
@@ -212,6 +237,68 @@ type ContractDeploy implements ContractAction {
 	Unshielded token balances held by this contract.
 	"""
 	unshieldedBalances: [ContractBalance!]!
+}
+
+"""
+Common interface implemented by every concrete contract event type.
+"""
+interface ContractEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+	protocolVersion: Int!
+	version: Int!
+	contractAddress: HexEncoded!
+	transactionId: Int!
+}
+
+"""
+Filter for contract events queries and subscriptions. Block-range bounds
+live here so the same shape works for both (per Andrzej 21 May review).
+"""
+input ContractEventFilter {
+	"""
+	Required: the contract address to filter events for.
+	"""
+	contractAddress: HexEncoded!
+	"""
+	Optional: filter to a subset of contract event types. Indexer translates
+	to `variant = ANY(...)` against the indexed variant column.
+	"""
+	types: [ContractEventType!]
+	"""
+	Optional: prefix-match on indexed fields of the event. Standard events only.
+	"""
+	fieldPrefixes: [FieldPrefixFilter!]
+	"""
+	Optional: lower bound on the block height an event was emitted in. On
+	subscription, acts as a starting cursor (alternative to `id`).
+	"""
+	fromBlock: Int
+	"""
+	Optional: upper bound on the block height an event was emitted in. On
+	subscription, terminates the stream once the chain reaches this block.
+	"""
+	toBlock: Int
+}
+
+"""
+Closed enum of contract event types the indexer surfaces. Used in filter
+input only, response discrimination is via `__typename`. Mirrors the
+11 variants of `LogEventType` (onchain-vm/src/ops.rs, ledger-9 alpha).
+"""
+enum ContractEventType {
+	SHIELDED_SPEND
+	SHIELDED_RECEIVE
+	SHIELDED_MINT
+	SHIELDED_BURN
+	UNSHIELDED_SPEND
+	UNSHIELDED_RECEIVE
+	UNSHIELDED_MINT
+	UNSHIELDED_BURN
+	PAUSED
+	UNPAUSED
+	MISC
 }
 
 """
@@ -613,6 +700,25 @@ type EpochPerf {
 }
 
 """
+Prefix filter on an indexed field of a standard event. Indexer resolves
+`fieldName` for all standard events from the variant; no descriptor needed.
+Not supported on Misc events.
+"""
+input FieldPrefixFilter {
+	"""
+	Field name (e.g. `nullifier`, `commitment`, `sender`). Must match an
+	indexed field of the filtered event type.
+	"""
+	fieldName: String!
+	"""
+	Hex-encoded prefix bytes. Empty string matches all values; otherwise
+	the indexer returns events whose field value starts with this prefix,
+	client filters to exact match if needed.
+	"""
+	prefix: HexEncoded!
+}
+
+"""
 First valid epoch for an SPO identity.
 """
 type FirstValidEpoch {
@@ -644,6 +750,25 @@ type MerkleTreeCollapsedUpdate {
 	protocolVersion: Int!
 }
 
+type MiscContractEvent implements ContractEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+	protocolVersion: Int!
+	version: Int!
+	contractAddress: HexEncoded!
+	transactionId: Int!
+	"""
+	Hex-encoded contract-defined event name (Compact Bytes<32>).
+	"""
+	name: HexEncoded!
+	"""
+	Hex-encoded opaque payload (Compact Bytes<256>); consumer brings
+	descriptor to decode.
+	"""
+	payload: HexEncoded!
+}
+
 type Mutation {
 	"""
 	Connect the wallet with the given viewing key and return a session ID.
@@ -672,6 +797,16 @@ type ParamChange implements DustLedgerEvent {
 	The protocol version.
 	"""
 	protocolVersion: Int!
+}
+
+type PausedEvent implements ContractEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+	protocolVersion: Int!
+	version: Int!
+	contractAddress: HexEncoded!
+	transactionId: Int!
 }
 
 """
@@ -730,6 +865,13 @@ type Query {
 	Get a collapsed Merkle tree update for the dust generation tree.
 	"""
 	dustGenerationMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!
+	"""
+	Find contract events matching the filter, with optional pagination.
+	
+	Block-range bounds (`fromBlock`, `toBlock`) live on `ContractEventFilter`
+	for symmetry with the subscription. `limit`/`offset` are top-level args.
+	"""
+	contractEvents(filter: ContractEventFilter!, limit: Int, offset: Int): [ContractEvent!]!
 	"""
 	Get the full history of D-parameter changes for governance auditability.
 	"""
@@ -979,6 +1121,46 @@ type Segment {
 	success: Boolean!
 }
 
+type ShieldedBurnEvent implements ContractEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+	protocolVersion: Int!
+	version: Int!
+	contractAddress: HexEncoded!
+	transactionId: Int!
+	"""
+	Indexed.
+	"""
+	nullifier: HexEncoded!
+	"""
+	Optional, hidden in some shielded burns (Maybe<Uint<128>>).
+	"""
+	amount: String
+}
+
+type ShieldedMintEvent implements ContractEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+	protocolVersion: Int!
+	version: Int!
+	contractAddress: HexEncoded!
+	transactionId: Int!
+	"""
+	Indexed.
+	"""
+	commitment: HexEncoded!
+	"""
+	Indexed (per Andrzej, useful for token-type queries).
+	"""
+	domainSep: HexEncoded!
+	"""
+	Optional, hidden in some shielded mints (Maybe<Uint<128>>).
+	"""
+	amount: String
+}
+
 """
 A transaction containing a shielded (zswap) nullifier match with block context.
 """
@@ -1001,6 +1183,46 @@ type ShieldedNullifierTransaction {
 	blockHeight: Int!
 	"""
 	The hex-encoded matched nullifier.
+	"""
+	nullifier: HexEncoded!
+}
+
+type ShieldedReceiveEvent implements ContractEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+	protocolVersion: Int!
+	version: Int!
+	contractAddress: HexEncoded!
+	transactionId: Int!
+	"""
+	Indexed.
+	"""
+	commitment: HexEncoded!
+	"""
+	Indexed. Optional ciphertext for shielded coin receipt
+	(Maybe<Bytes<512>>). Hex-encoded, up to 512 bytes.
+	"""
+	ciphertext: HexEncoded
+	"""
+	Set when received by a contract; null for user recipients
+	(Maybe<ContractAddress>). Renamed from `contractAddress` in the CoIP
+	to avoid collision with the top-level emitting `contractAddress`
+	inherited from the ContractEvent interface.
+	"""
+	receivingContractAddress: HexEncoded
+}
+
+type ShieldedSpendEvent implements ContractEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+	protocolVersion: Int!
+	version: Int!
+	contractAddress: HexEncoded!
+	transactionId: Int!
+	"""
+	Indexed.
 	"""
 	nullifier: HexEncoded!
 }
@@ -1157,6 +1379,11 @@ type Subscription {
 	latest block if the offset is omitted.
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
+	"""
+	Subscribe to contract events matching the given filter, returning
+	events in monotonic `id` order.
+	"""
+	contractEvents(filter: ContractEventFilter!, id: Int): ContractEvent!
 	"""
 	Subscribe to dust generation entries for a dust address within an index range.
 	Entries are interleaved with collapsed Merkle tree updates and
@@ -1360,7 +1587,101 @@ enum TransactionResultStatus {
 
 scalar Unit
 
+type UnpausedEvent implements ContractEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+	protocolVersion: Int!
+	version: Int!
+	contractAddress: HexEncoded!
+	transactionId: Int!
+}
+
 scalar UnshieldedAddress
+
+type UnshieldedBurnEvent implements ContractEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+	protocolVersion: Int!
+	version: Int!
+	contractAddress: HexEncoded!
+	transactionId: Int!
+	"""
+	Indexed.
+	"""
+	sender: AddressOrContract!
+	"""
+	Indexed; matches existing unshielded_utxos.token_type index.
+	"""
+	tokenType: HexEncoded!
+	amount: String!
+}
+
+type UnshieldedMintEvent implements ContractEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+	protocolVersion: Int!
+	version: Int!
+	contractAddress: HexEncoded!
+	transactionId: Int!
+	"""
+	Indexed.
+	"""
+	domainSep: HexEncoded!
+	"""
+	Indexed; matches existing unshielded_utxos.token_type index.
+	"""
+	tokenType: HexEncoded!
+	amount: String!
+}
+
+type UnshieldedReceiveEvent implements ContractEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+	protocolVersion: Int!
+	version: Int!
+	contractAddress: HexEncoded!
+	transactionId: Int!
+	"""
+	Indexed.
+	"""
+	recipient: AddressOrContract!
+	"""
+	Indexed.
+	"""
+	domainSep: HexEncoded!
+	"""
+	Indexed; matches existing unshielded_utxos.token_type index.
+	"""
+	tokenType: HexEncoded!
+	amount: String!
+}
+
+type UnshieldedSpendEvent implements ContractEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+	protocolVersion: Int!
+	version: Int!
+	contractAddress: HexEncoded!
+	transactionId: Int!
+	"""
+	Indexed.
+	"""
+	sender: AddressOrContract!
+	"""
+	Indexed.
+	"""
+	domainSep: HexEncoded!
+	"""
+	Indexed; matches existing unshielded_utxos.token_type index.
+	"""
+	tokenType: HexEncoded!
+	amount: String!
+}
 
 """
 A transaction that created and/or spent UTXOs alongside these and other information.

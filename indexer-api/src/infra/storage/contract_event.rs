@@ -187,17 +187,17 @@ fn base_query_builder<'a>(
     qb.push(" AND le.contract_address = ")
         .push_bind(filter.contract_address.clone());
 
-    if let Some(variants) = &filter.variants {
-        if !variants.is_empty() {
-            qb.push(" AND le.variant::text = ANY(")
-                .push_bind(
-                    variants
-                        .iter()
-                        .map(|v| v.to_string())
-                        .collect::<Vec<_>>(),
-                )
-                .push(") ");
-        }
+    if let Some(variants) = &filter.variants
+        && !variants.is_empty()
+    {
+        qb.push(" AND le.variant::text = ANY(")
+            .push_bind(
+                variants
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .push(") ");
     }
 
     if let Some(from) = filter.from_block {
@@ -249,15 +249,15 @@ fn base_query_builder<'a>(
     qb.push(" AND le.contract_address = ")
         .push_bind(filter.contract_address.clone());
 
-    if let Some(variants) = &filter.variants {
-        if !variants.is_empty() {
-            qb.push(" AND le.variant IN (");
-            let mut sep = qb.separated(", ");
-            for v in variants {
-                sep.push_bind(v.to_string());
-            }
-            qb.push(") ");
+    if let Some(variants) = &filter.variants
+        && !variants.is_empty()
+    {
+        qb.push(" AND le.variant IN (");
+        let mut sep = qb.separated(", ");
+        for v in variants {
+            sep.push_bind(v.to_string());
         }
+        qb.push(") ");
     }
 
     if let Some(from) = filter.from_block {
