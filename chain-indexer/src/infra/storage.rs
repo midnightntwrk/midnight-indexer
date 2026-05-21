@@ -695,83 +695,92 @@ async fn save_ledger_events(
         )
     "};
 
-    QueryBuilder::new(query)
-        .push_values(ledger_events.iter(), |mut q, ledger_event| {
-            q.push_bind(transaction_id)
-                .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
-                .push_bind(ledger_event.grouping)
-                .push_bind(ledger_event.raw.as_ref())
-                .push_bind(Json(&ledger_event.attributes))
-                .push_bind(
-                    ledger_event
-                        .contract_address
-                        .as_ref()
-                        .map(|a| a.as_ref().to_vec()),
-                );
-        })
-        .build()
-        .execute(&mut **tx)
+    let mut qb = QueryBuilder::new(query);
+    qb.push_values(ledger_events.iter(), |mut q, ledger_event| {
+        q.push_bind(transaction_id)
+            .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
+            .push_bind(ledger_event.grouping)
+            .push_bind(ledger_event.raw.as_ref())
+            .push_bind(Json(&ledger_event.attributes))
+            .push_bind(
+                ledger_event
+                    .contract_address
+                    .as_ref()
+                    .map(|a| a.as_ref().to_vec()),
+            );
+    });
+    qb.push(" RETURNING id");
+
+    // SQLite + Postgres both return RETURNING rows in the order the rows
+    // were inserted (the multi-row INSERT is one statement so row order is
+    // deterministic), so we can zip ids back onto ledger_events by index.
+    let inserted_ids: Vec<(i64,)> = qb
+        .build_query_as::<(i64,)>()
+        .fetch_all(&mut **tx)
         .await?;
 
-    save_contract_event_indexed_fields(ledger_events, tx).await?;
+    if inserted_ids.len() != ledger_events.len() {
+        return Err(sqlx::Error::Protocol(format!(
+            "save_ledger_events: expected {} RETURNING ids but got {}",
+            ledger_events.len(),
+            inserted_ids.len()
+        )));
+    }
+
+    save_contract_event_indexed_fields(
+        ledger_events,
+        inserted_ids.iter().map(|(id,)| *id),
+        tx,
+    )
+    .await?;
 
     Ok(())
 }
 
 /// Populate the `contract_event_indexed_fields` sidecar for any contract
 /// events in this batch. No-op for zswap/dust events. Called inside the same
-/// transaction as `save_ledger_events`.
+/// transaction as `save_ledger_events` with the freshly captured RETURNING ids.
 ///
-/// Implementation note: queries the persisted `ledger_events.id` via a CTE
-/// keyed on `(transaction_id, raw)` since the BIGSERIAL ids are not known at
-/// insert time without `RETURNING`. This matches the existing pattern used
-/// by `save_dust_generation_info` (which keys on `transaction_id` only).
+/// `ids` must be in the same order as `ledger_events`; the function pairs them
+/// by index to associate each contract event with its persisted id.
 #[trace]
-async fn save_contract_event_indexed_fields(
+async fn save_contract_event_indexed_fields<I: IntoIterator<Item = i64>>(
     ledger_events: &[LedgerEvent],
+    ids: I,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    let rows: Vec<(&LedgerEvent, Vec<(&'static str, indexer_common::domain::ByteVec)>)> =
-        ledger_events
-            .iter()
-            .filter(|e| matches!(e.grouping, LedgerEventGrouping::Contract))
-            .map(|e| (e, e.indexable_contract_fields()))
-            .filter(|(_, fields)| !fields.is_empty())
-            .collect();
+    let pairs: Vec<(i64, Vec<(&'static str, indexer_common::domain::ByteVec)>)> = ledger_events
+        .iter()
+        .zip(ids)
+        .filter(|(e, _)| matches!(e.grouping, LedgerEventGrouping::Contract))
+        .map(|(e, id)| (id, e.indexable_contract_fields()))
+        .filter(|(_, fields)| !fields.is_empty())
+        .collect();
 
-    if rows.is_empty() {
+    if pairs.is_empty() {
         return Ok(());
     }
 
-    // Re-query the ledger_events.id values for the just-inserted rows by
-    // (transaction_id, raw). Same pattern as save_dust_generation_info.
-    // TODO(#1159): switch to RETURNING-based id capture from save_ledger_events
-    // once the chain-indexer's insert pattern is refactored.
-    for (event, fields) in rows {
-        let id_row: (i64,) = sqlx::query_as(indoc! {"
-            SELECT id FROM ledger_events
-            WHERE raw = $1
-            ORDER BY id DESC
-            LIMIT 1
-        "})
-        .bind(event.raw.as_ref())
-        .fetch_one(&mut **tx)
-        .await?;
-
-        let mut qb = QueryBuilder::new(indoc! {"
-            INSERT INTO contract_event_indexed_fields (
-                ledger_event_id,
-                field_name,
-                field_value
-            )
-        "});
-        qb.push_values(fields.iter(), |mut q, (name, value)| {
-            q.push_bind(id_row.0)
+    // Multi-row insert across all contract events in the batch, one row per
+    // (ledger_event_id, field_name, field_value).
+    let mut qb = QueryBuilder::new(indoc! {"
+        INSERT INTO contract_event_indexed_fields (
+            ledger_event_id,
+            field_name,
+            field_value
+        )
+    "});
+    qb.push_values(
+        pairs
+            .iter()
+            .flat_map(|(id, fields)| fields.iter().map(move |f| (*id, f))),
+        |mut q, (id, (name, value))| {
+            q.push_bind(id)
                 .push_bind(*name)
                 .push_bind(value.as_ref().to_vec());
-        });
-        qb.build().execute(&mut **tx).await?;
-    }
+        },
+    );
+    qb.build().execute(&mut **tx).await?;
 
     Ok(())
 }

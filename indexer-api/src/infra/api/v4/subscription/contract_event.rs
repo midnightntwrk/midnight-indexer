@@ -85,32 +85,14 @@ where
                 .into_domain()
                 .map_err(|e| ApiError::client("invalid ContractEventFilter", e))?;
 
-            // Reconcile starting cursor: `id` arg vs `filter.fromBlock`. The
-            // latter is translated to the lowest `ledger_events.id` whose
-            // associated block_height >= from_block. Indexer takes the later
-            // of the two when both are set.
+            // Starting cursor: explicit `id` arg only. `filter.fromBlock` is
+            // applied via the storage layer's WHERE clause (`blocks.height >=
+            // from_block`), so we don't need to translate it to an id here.
+            // If both are set, the WHERE clause + id cursor combine — the
+            // effective cursor is "id >= id_arg AND blocks.height >=
+            // from_block", which is exactly the "later of the two" semantics
+            // requested in v0.7.
             let mut id = id.unwrap_or(0);
-            if let Some(from_block) = domain_filter.from_block {
-                let from_block_id = storage
-                    .get_contract_events(
-                        crate::domain::storage::contract_event::ContractEventFilter {
-                            from_block: Some(from_block),
-                            to_block: domain_filter.to_block,
-                            ..domain_filter.clone()
-                        },
-                        Some(1),
-                        None,
-                    )
-                    .await
-                    .map_err_into_server_error(|| "resolve fromBlock starting cursor")?
-                    .into_iter()
-                    .next()
-                    .map(|r| r.id)
-                    .unwrap_or(id);
-                if from_block_id > id {
-                    id = from_block_id;
-                }
-            }
 
             // Bounded-subscription terminator: if filter.toBlock is set, we
             // stop once the chain's latest block height crosses it. The check

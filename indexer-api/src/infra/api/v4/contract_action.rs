@@ -245,25 +245,24 @@ where
     /// `ContractUpdate` don't execute circuits with the `log()` expression.
     /// Per Andrzej's 12 May design call (#feat-public-events).
     ///
-    /// Returns an empty list until ticket #1162 populates the
-    /// `ledger_events.contract_action_id` column from the chain-indexer's
-    /// `make_ledger_events_v9` path (currently rows have NULL).
+    /// Returns an empty list until the chain-indexer populates the
+    /// `ledger_events.contract_action_id` column from the v9 parse path
+    /// (gated on ticket #1157).
     async fn contract_events(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractEvent>> {
-        let storage = cx.get_storage::<S>();
-        let pairs = storage
-            .get_contract_events_by_contract_action_ids(&[self.contract_action_id])
+        let rows = cx
+            .get_contract_events_by_contract_action_id_loader::<S>()
+            .load_one(self.contract_action_id)
             .await
             .map_err_into_server_error(|| {
                 format!(
-                    "get contract events by contract action id {}",
+                    "load contract events for contract action id {}",
                     self.contract_action_id
                 )
-            })?;
+            })?
+            .unwrap_or_default();
 
-        pairs
-            .into_iter()
-            .filter(|(id, _)| *id == self.contract_action_id)
-            .map(|(_, row)| ContractEvent::try_from(row))
+        rows.into_iter()
+            .map(ContractEvent::try_from)
             .collect::<Result<Vec<_>, _>>()
             .map_err_into_server_error(|| {
                 format!(

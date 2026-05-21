@@ -19,7 +19,8 @@ use crate::{
     infra::api::{
         quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
         v4::dataloader::{
-            BlockByHashLoader, ContractActionsByTransactionIdLoader, TransactionByIdLoader,
+            BlockByHashLoader, ContractActionsByTransactionIdLoader,
+            ContractEventsByContractActionIdLoader, TransactionByIdLoader,
             TransactionsByBlockIdLoader,
         },
     },
@@ -389,6 +390,12 @@ trait ContextExt {
     where
         S: Storage;
 
+    fn get_contract_events_by_contract_action_id_loader<S>(
+        &self,
+    ) -> &DataLoader<ContractEventsByContractActionIdLoader<S>>
+    where
+        S: Storage;
+
     fn get_subscriber<B>(&self) -> &B
     where
         B: Subscriber;
@@ -449,6 +456,16 @@ impl ContextExt for Context<'_> {
     {
         self.data::<DataLoader<ContractActionsByTransactionIdLoader<S>>>()
             .expect("ContractActionsByTransactionIdLoader is stored in Context")
+    }
+
+    fn get_contract_events_by_contract_action_id_loader<S>(
+        &self,
+    ) -> &DataLoader<ContractEventsByContractActionIdLoader<S>>
+    where
+        S: Storage,
+    {
+        self.data::<DataLoader<ContractEventsByContractActionIdLoader<S>>>()
+            .expect("ContractEventsByContractActionIdLoader is stored in Context")
     }
 
     fn get_subscriber<B>(&self) -> &B
