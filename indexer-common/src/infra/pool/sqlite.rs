@@ -162,7 +162,7 @@ mod pool_concurrency {
             seq
         ));
         let url = format!("sqlite://{}", path.display());
-        SqlitePool::new(Config { cnn_url: url })
+        SqlitePool::new(Config::with_url(url))
             .await
             .expect("create pool")
     }
