@@ -13,6 +13,7 @@
 
 pub mod block;
 pub mod contract_action;
+pub mod contract_event;
 pub mod dataloader;
 pub mod dust;
 pub mod dust_generations;
