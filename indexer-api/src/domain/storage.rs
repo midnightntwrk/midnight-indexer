@@ -15,6 +15,7 @@
 
 pub mod block;
 pub mod contract_action;
+pub mod contract_event;
 pub mod dust;
 pub mod dust_generations;
 pub mod ledger_events;
@@ -27,7 +28,8 @@ pub mod unshielded;
 pub mod wallet;
 
 use crate::domain::storage::{
-    block::BlockStorage, contract_action::ContractActionStorage, dust::DustStorage,
+    block::BlockStorage, contract_action::ContractActionStorage,
+    contract_event::ContractEventStorage, dust::DustStorage,
     dust_generations::DustGenerationsStorage, ledger_events::LedgerEventStorage,
     ledger_state::LedgerStateStorage, shielded_nullifiers::ShieldedNullifiersStorage,
     spo::SpoStorage, system_parameters::SystemParametersStorage, transaction::TransactionStorage,
@@ -40,6 +42,7 @@ pub trait Storage
 where
     Self: BlockStorage
         + ContractActionStorage
+        + ContractEventStorage
         + DustStorage
         + DustGenerationsStorage
         + LedgerEventStorage
