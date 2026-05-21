@@ -56,7 +56,7 @@ describe('subscription quotas (HAL-03 / SSE-196)', () => {
      * @then the 21st subscription returns a client error mentioning the limit
      * @and the WebSocket connection stays open
      */
-    test(`rejects the ${PER_CONNECTION_CAP + 1}th concurrent subscription on one connection`, async () => {
+    test('should reject a subscription beyond the per-connection cap', async () => {
       const cleanups: Array<() => void> = [];
 
       for (let i = 0; i < PER_CONNECTION_CAP; i++) {
@@ -114,7 +114,7 @@ describe('subscription quotas (HAL-03 / SSE-196)', () => {
      * @when one of the active subscriptions is closed
      * @then a new subscription opened on the same connection succeeds
      */
-    test('frees a slot when an active subscription is closed', async () => {
+    test('should free a slot when an active subscription is closed', async () => {
       const cleanups: Array<() => void> = [];
 
       for (let i = 0; i < PER_CONNECTION_CAP; i++) {
