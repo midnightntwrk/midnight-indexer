@@ -691,7 +691,8 @@ async fn save_ledger_events(
             grouping,
             raw,
             attributes,
-            contract_address
+            contract_address,
+            contract_action_id
         )
     "};
 
@@ -707,7 +708,8 @@ async fn save_ledger_events(
                     .contract_address
                     .as_ref()
                     .map(|a| a.as_ref().to_vec()),
-            );
+            )
+            .push_bind(ledger_event.contract_action_id.map(|id| id as i64));
     });
     qb.push(" RETURNING id");
 

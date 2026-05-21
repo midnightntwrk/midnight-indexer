@@ -232,6 +232,12 @@ pub struct LedgerEvent {
     pub grouping: LedgerEventGrouping,
     pub raw: SerializedLedgerEvent,
     pub attributes: LedgerEventAttributes,
+    /// Emitting `ContractCall.id` (from `contract_actions.id`) for contract
+    /// events; `None` for zswap/dust events and for contract events whose
+    /// originating action is not yet correlated. Mapped onto the indexed
+    /// `ledger_events.contract_action_id` column; powers the nested
+    /// `ContractCall.contractEvents` GraphQL surface (ticket #1162).
+    pub contract_action_id: Option<u64>,
     /// Emitting contract address. Populated only for contract events
     /// (`LedgerEventGrouping::Contract`); `None` for zswap/dust events. Mapped
     /// onto the indexed `ledger_events.contract_address` column for fast
@@ -245,6 +251,7 @@ impl LedgerEvent {
             grouping: LedgerEventGrouping::Zswap,
             raw,
             attributes: LedgerEventAttributes::ZswapInput { nullifier },
+            contract_action_id: None,
             contract_address: None,
         }
     }
@@ -254,6 +261,7 @@ impl LedgerEvent {
             grouping: LedgerEventGrouping::Zswap,
             raw,
             attributes: LedgerEventAttributes::ZswapOutput,
+            contract_action_id: None,
             contract_address: None,
         }
     }
@@ -263,6 +271,7 @@ impl LedgerEvent {
             grouping: LedgerEventGrouping::Dust,
             raw,
             attributes: LedgerEventAttributes::ParamChange,
+            contract_action_id: None,
             contract_address: None,
         }
     }
@@ -281,6 +290,7 @@ impl LedgerEvent {
                 generation_info,
                 generation_index,
             },
+            contract_action_id: None,
             contract_address: None,
         }
     }
@@ -299,6 +309,7 @@ impl LedgerEvent {
                 generation_index,
                 tree_insertion_path,
             },
+            contract_action_id: None,
             contract_address: None,
         }
     }
@@ -315,6 +326,7 @@ impl LedgerEvent {
                 nullifier,
                 commitment,
             },
+            contract_action_id: None,
             contract_address: None,
         }
     }
@@ -322,9 +334,16 @@ impl LedgerEvent {
     /// Construct a contract event from already-typed attributes. Use when the
     /// chain-indexer has parsed `VersionedLogItem` into a known `LogEventType`
     /// variant via `make_ledger_events_v9` (see ticket #1158).
+    ///
+    /// `contract_action_id` is the `contract_actions.id` of the originating
+    /// `ContractCall` — populated by the caller (chain-indexer) when it
+    /// applies the transaction. `None` permitted for paths that don't yet
+    /// have the correlation; populates the indexed `ledger_events.contract_action_id`
+    /// column which powers `ContractCall.contractEvents` (ticket #1162).
     pub fn contract_event(
         raw: SerializedLedgerEvent,
         contract_address: ByteVec,
+        contract_action_id: Option<u64>,
         attributes: LedgerEventAttributes,
     ) -> Self {
         debug_assert!(
@@ -348,6 +367,7 @@ impl LedgerEvent {
             grouping: LedgerEventGrouping::Contract,
             raw,
             attributes,
+            contract_action_id,
             contract_address: Some(contract_address),
         }
     }
@@ -702,24 +722,38 @@ mod contract_event_tests {
         let event = LedgerEvent::contract_event(
             bv(b"raw"),
             bv(&[0x01; 32]),
+            Some(42),
             attrs.clone(),
         );
         assert!(matches!(event.grouping, LedgerEventGrouping::Contract));
         assert_eq!(event.contract_address, Some(bv(&[0x01; 32])));
+        assert_eq!(event.contract_action_id, Some(42));
         assert_eq!(event.attributes, attrs);
     }
 
     #[test]
-    fn existing_event_constructors_leave_contract_address_unset() {
+    fn contract_event_constructor_accepts_none_contract_action_id() {
+        let event = LedgerEvent::contract_event(
+            bv(b"raw"),
+            bv(&[0x02; 32]),
+            None,
+            shielded_spend_attrs(),
+        );
+        assert!(matches!(event.grouping, LedgerEventGrouping::Contract));
+        assert!(event.contract_action_id.is_none());
+    }
+
+    #[test]
+    fn existing_event_constructors_leave_contract_envelope_fields_unset() {
         let zswap_in = LedgerEvent::zswap_input(bv(b"raw"), bv(&[0; 32]));
         let zswap_out = LedgerEvent::zswap_output(bv(b"raw"));
         let param = LedgerEvent::param_change(bv(b"raw"));
         let dust_spend = LedgerEvent::dust_spend_processed(bv(b"raw"), bv(&[0; 32]), bv(&[0; 32]));
 
-        assert!(zswap_in.contract_address.is_none());
-        assert!(zswap_out.contract_address.is_none());
-        assert!(param.contract_address.is_none());
-        assert!(dust_spend.contract_address.is_none());
+        for e in [&zswap_in, &zswap_out, &param, &dust_spend] {
+            assert!(e.contract_address.is_none());
+            assert!(e.contract_action_id.is_none());
+        }
 
         assert!(matches!(zswap_in.grouping, LedgerEventGrouping::Zswap));
         assert!(matches!(zswap_out.grouping, LedgerEventGrouping::Zswap));
@@ -732,6 +766,7 @@ mod contract_event_tests {
         let event = LedgerEvent::contract_event(
             bv(b"raw"),
             bv(&[0x01; 32]),
+            None,
             shielded_spend_attrs(),
         );
         let fields = event.indexable_contract_fields();
@@ -744,6 +779,7 @@ mod contract_event_tests {
         let with_ct = LedgerEvent::contract_event(
             bv(b"raw"),
             bv(&[0x01; 32]),
+            None,
             shielded_receive_attrs(),
         );
         let names: Vec<_> = with_ct
@@ -760,7 +796,7 @@ mod contract_event_tests {
             ciphertext: None,
             receiving_contract_address: None,
         };
-        let no_ct = LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), no_ct_attrs);
+        let no_ct = LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), None, no_ct_attrs);
         let names: Vec<_> = no_ct
             .indexable_contract_fields()
             .into_iter()
@@ -774,6 +810,7 @@ mod contract_event_tests {
         let event = LedgerEvent::contract_event(
             bv(b"raw"),
             bv(&[0x01; 32]),
+            None,
             unshielded_spend_attrs(),
         );
         let names: Vec<_> = event
@@ -787,7 +824,7 @@ mod contract_event_tests {
     #[test]
     fn indexable_contract_fields_paused_unpaused_misc_are_empty() {
         for attrs in [paused_attrs(), unpaused_attrs(), misc_attrs()] {
-            let event = LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), attrs);
+            let event = LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), None, attrs);
             assert!(event.indexable_contract_fields().is_empty());
         }
     }
