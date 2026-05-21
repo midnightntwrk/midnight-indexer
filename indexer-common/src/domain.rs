@@ -232,6 +232,11 @@ pub struct LedgerEvent {
     pub grouping: LedgerEventGrouping,
     pub raw: SerializedLedgerEvent,
     pub attributes: LedgerEventAttributes,
+    /// Emitting contract address. Populated only for contract events
+    /// (`LedgerEventGrouping::Contract`); `None` for zswap/dust events. Mapped
+    /// onto the indexed `ledger_events.contract_address` column for fast
+    /// filtering on the `contractEvents` query/subscription surface.
+    pub contract_address: Option<ByteVec>,
 }
 
 impl LedgerEvent {
@@ -240,6 +245,7 @@ impl LedgerEvent {
             grouping: LedgerEventGrouping::Zswap,
             raw,
             attributes: LedgerEventAttributes::ZswapInput { nullifier },
+            contract_address: None,
         }
     }
 
@@ -248,6 +254,7 @@ impl LedgerEvent {
             grouping: LedgerEventGrouping::Zswap,
             raw,
             attributes: LedgerEventAttributes::ZswapOutput,
+            contract_address: None,
         }
     }
 
@@ -256,6 +263,7 @@ impl LedgerEvent {
             grouping: LedgerEventGrouping::Dust,
             raw,
             attributes: LedgerEventAttributes::ParamChange,
+            contract_address: None,
         }
     }
 
@@ -273,6 +281,7 @@ impl LedgerEvent {
                 generation_info,
                 generation_index,
             },
+            contract_address: None,
         }
     }
 
@@ -290,6 +299,7 @@ impl LedgerEvent {
                 generation_index,
                 tree_insertion_path,
             },
+            contract_address: None,
         }
     }
 
@@ -305,6 +315,131 @@ impl LedgerEvent {
                 nullifier,
                 commitment,
             },
+            contract_address: None,
+        }
+    }
+
+    /// Construct a contract event from already-typed attributes. Use when the
+    /// chain-indexer has parsed `VersionedLogItem` into a known `LogEventType`
+    /// variant via `make_ledger_events_v9` (see ticket #1158).
+    pub fn contract_event(
+        raw: SerializedLedgerEvent,
+        contract_address: ByteVec,
+        attributes: LedgerEventAttributes,
+    ) -> Self {
+        debug_assert!(
+            matches!(
+                attributes,
+                LedgerEventAttributes::ContractShieldedSpend { .. }
+                    | LedgerEventAttributes::ContractShieldedReceive { .. }
+                    | LedgerEventAttributes::ContractShieldedMint { .. }
+                    | LedgerEventAttributes::ContractShieldedBurn { .. }
+                    | LedgerEventAttributes::ContractUnshieldedSpend { .. }
+                    | LedgerEventAttributes::ContractUnshieldedReceive { .. }
+                    | LedgerEventAttributes::ContractUnshieldedMint { .. }
+                    | LedgerEventAttributes::ContractUnshieldedBurn { .. }
+                    | LedgerEventAttributes::ContractPaused { .. }
+                    | LedgerEventAttributes::ContractUnpaused { .. }
+                    | LedgerEventAttributes::ContractMisc { .. }
+            ),
+            "contract_event() called with non-contract attributes"
+        );
+        Self {
+            grouping: LedgerEventGrouping::Contract,
+            raw,
+            attributes,
+            contract_address: Some(contract_address),
+        }
+    }
+
+    /// Extract the indexed-field rows for the sidecar storage. Returns
+    /// `(field_name, field_value)` pairs covering every "hint: indexed" field
+    /// from CoIP-442 Appendix A for the matching variant. Empty for
+    /// non-contract events and for `Paused`/`Unpaused`/`Misc` (no indexable
+    /// fields per the design).
+    pub fn indexable_contract_fields(&self) -> Vec<(&'static str, ByteVec)> {
+        use LedgerEventAttributes::*;
+        match &self.attributes {
+            ContractShieldedSpend { nullifier, .. } => {
+                vec![("nullifier", nullifier.clone())]
+            }
+            ContractShieldedReceive {
+                commitment,
+                ciphertext,
+                ..
+            } => {
+                let mut out = vec![("commitment", commitment.clone())];
+                if let Some(c) = ciphertext {
+                    out.push(("ciphertext", c.clone()));
+                }
+                out
+            }
+            ContractShieldedMint {
+                commitment,
+                domain_sep,
+                ..
+            } => vec![
+                ("commitment", commitment.clone()),
+                ("domainSep", domain_sep.clone()),
+            ],
+            ContractShieldedBurn { nullifier, .. } => {
+                vec![("nullifier", nullifier.clone())]
+            }
+            ContractUnshieldedSpend {
+                sender,
+                domain_sep,
+                token_type,
+                ..
+            } => vec![
+                ("sender", sender.as_bytes()),
+                ("domainSep", domain_sep.clone()),
+                ("tokenType", token_type.clone()),
+            ],
+            ContractUnshieldedReceive {
+                recipient,
+                domain_sep,
+                token_type,
+                ..
+            } => vec![
+                ("recipient", recipient.as_bytes()),
+                ("domainSep", domain_sep.clone()),
+                ("tokenType", token_type.clone()),
+            ],
+            ContractUnshieldedMint {
+                domain_sep,
+                token_type,
+                ..
+            } => vec![
+                ("domainSep", domain_sep.clone()),
+                ("tokenType", token_type.clone()),
+            ],
+            ContractUnshieldedBurn {
+                sender, token_type, ..
+            } => vec![
+                ("sender", sender.as_bytes()),
+                ("tokenType", token_type.clone()),
+            ],
+            ContractPaused { .. }
+            | ContractUnpaused { .. }
+            | ContractMisc { .. }
+            | ZswapInput { .. }
+            | ZswapOutput
+            | ParamChange
+            | DustInitialUtxo { .. }
+            | DustGenerationDtimeUpdate { .. }
+            | DustSpendProcessed { .. } => vec![],
+        }
+    }
+}
+
+impl AddressOrContract {
+    /// Flat byte representation for sidecar storage (32 bytes). Indexer
+    /// filters by the raw bytes regardless of whether the address is a user
+    /// or contract; the `kind` discriminator is in the JSONB payload only.
+    pub fn as_bytes(&self) -> ByteVec {
+        match self {
+            AddressOrContract::User(b) => b.clone(),
+            AddressOrContract::Contract(b) => b.clone(),
         }
     }
 }
@@ -338,6 +473,103 @@ pub enum LedgerEventAttributes {
         nullifier: ByteVec,
         commitment: ByteVec,
     },
+
+    // ------------------------------------------------------------------------
+    // Contract events (MIP-107 / CoIP-442). One variant per `LogEventType` from
+    // `onchain-vm/src/ops.rs`. Field shapes follow CoIP-442 Appendix A head.
+    // `entry_point` is the originating call's entry point (from
+    // `EventDetailsV9::ContractLog.entry_point`), used by the nested
+    // ContractCall.contractEvents surface for correlation.
+    // ------------------------------------------------------------------------
+    ContractShieldedSpend {
+        version: u32,
+        entry_point: ByteVec,
+        nullifier: ByteVec,
+    },
+
+    ContractShieldedReceive {
+        version: u32,
+        entry_point: ByteVec,
+        commitment: ByteVec,
+        ciphertext: Option<ByteVec>,
+        receiving_contract_address: Option<ByteVec>,
+    },
+
+    ContractShieldedMint {
+        version: u32,
+        entry_point: ByteVec,
+        commitment: ByteVec,
+        domain_sep: ByteVec,
+        amount: Option<String>,
+    },
+
+    ContractShieldedBurn {
+        version: u32,
+        entry_point: ByteVec,
+        nullifier: ByteVec,
+        amount: Option<String>,
+    },
+
+    ContractUnshieldedSpend {
+        version: u32,
+        entry_point: ByteVec,
+        sender: AddressOrContract,
+        domain_sep: ByteVec,
+        token_type: ByteVec,
+        amount: String,
+    },
+
+    ContractUnshieldedReceive {
+        version: u32,
+        entry_point: ByteVec,
+        recipient: AddressOrContract,
+        domain_sep: ByteVec,
+        token_type: ByteVec,
+        amount: String,
+    },
+
+    ContractUnshieldedMint {
+        version: u32,
+        entry_point: ByteVec,
+        domain_sep: ByteVec,
+        token_type: ByteVec,
+        amount: String,
+    },
+
+    ContractUnshieldedBurn {
+        version: u32,
+        entry_point: ByteVec,
+        sender: AddressOrContract,
+        token_type: ByteVec,
+        amount: String,
+    },
+
+    ContractPaused {
+        version: u32,
+        entry_point: ByteVec,
+    },
+
+    ContractUnpaused {
+        version: u32,
+        entry_point: ByteVec,
+    },
+
+    ContractMisc {
+        version: u32,
+        entry_point: ByteVec,
+        name: ByteVec,
+        payload: ByteVec,
+    },
+}
+
+/// Tagged union for fields like `Either<ZswapCoinPublicKey, ContractAddress>`
+/// used in standard unshielded contract events.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AddressOrContract {
+    /// User wallet address (Zswap coin public key).
+    User(ByteVec),
+    /// Contract address.
+    Contract(ByteVec),
 }
 
 /// Minimal DUST output info for backwards compatibility.
@@ -351,4 +583,5 @@ pub struct DustOutput {
 pub enum LedgerEventGrouping {
     Zswap,
     Dust,
+    Contract,
 }

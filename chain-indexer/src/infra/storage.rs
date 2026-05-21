@@ -20,8 +20,8 @@ use futures::TryFutureExt;
 use indexer_common::{
     domain::{
         BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
-        LedgerEventAttributes, ProtocolVersion, SerializedLedgerStateKey, TermsAndConditionsHash,
-        UnshieldedUtxo,
+        LedgerEventAttributes, LedgerEventGrouping, ProtocolVersion, SerializedLedgerStateKey,
+        TermsAndConditionsHash, UnshieldedUtxo,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -229,6 +229,18 @@ pub enum LedgerEventVariant {
     DustInitialUtxo,
     DustGenerationDtimeUpdate,
     DustSpendProcessed,
+    // Contract event variants (per MIP-107 / CoIP-442 LogEventType enum).
+    ShieldedSpend,
+    ShieldedReceive,
+    ShieldedMint,
+    ShieldedBurn,
+    UnshieldedSpend,
+    UnshieldedReceive,
+    UnshieldedMint,
+    UnshieldedBurn,
+    Paused,
+    Unpaused,
+    Misc,
 }
 
 impl From<&LedgerEventAttributes> for LedgerEventVariant {
@@ -242,6 +254,17 @@ impl From<&LedgerEventAttributes> for LedgerEventVariant {
                 Self::DustGenerationDtimeUpdate
             }
             LedgerEventAttributes::DustSpendProcessed { .. } => Self::DustSpendProcessed,
+            LedgerEventAttributes::ContractShieldedSpend { .. } => Self::ShieldedSpend,
+            LedgerEventAttributes::ContractShieldedReceive { .. } => Self::ShieldedReceive,
+            LedgerEventAttributes::ContractShieldedMint { .. } => Self::ShieldedMint,
+            LedgerEventAttributes::ContractShieldedBurn { .. } => Self::ShieldedBurn,
+            LedgerEventAttributes::ContractUnshieldedSpend { .. } => Self::UnshieldedSpend,
+            LedgerEventAttributes::ContractUnshieldedReceive { .. } => Self::UnshieldedReceive,
+            LedgerEventAttributes::ContractUnshieldedMint { .. } => Self::UnshieldedMint,
+            LedgerEventAttributes::ContractUnshieldedBurn { .. } => Self::UnshieldedBurn,
+            LedgerEventAttributes::ContractPaused { .. } => Self::Paused,
+            LedgerEventAttributes::ContractUnpaused { .. } => Self::Unpaused,
+            LedgerEventAttributes::ContractMisc { .. } => Self::Misc,
         }
     }
 }
@@ -667,7 +690,8 @@ async fn save_ledger_events(
             variant,
             grouping,
             raw,
-            attributes
+            attributes,
+            contract_address
         )
     "};
 
@@ -677,11 +701,77 @@ async fn save_ledger_events(
                 .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
                 .push_bind(ledger_event.grouping)
                 .push_bind(ledger_event.raw.as_ref())
-                .push_bind(Json(&ledger_event.attributes));
+                .push_bind(Json(&ledger_event.attributes))
+                .push_bind(
+                    ledger_event
+                        .contract_address
+                        .as_ref()
+                        .map(|a| a.as_ref().to_vec()),
+                );
         })
         .build()
         .execute(&mut **tx)
         .await?;
+
+    save_contract_event_indexed_fields(ledger_events, tx).await?;
+
+    Ok(())
+}
+
+/// Populate the `contract_event_indexed_fields` sidecar for any contract
+/// events in this batch. No-op for zswap/dust events. Called inside the same
+/// transaction as `save_ledger_events`.
+///
+/// Implementation note: queries the persisted `ledger_events.id` via a CTE
+/// keyed on `(transaction_id, raw)` since the BIGSERIAL ids are not known at
+/// insert time without `RETURNING`. This matches the existing pattern used
+/// by `save_dust_generation_info` (which keys on `transaction_id` only).
+#[trace]
+async fn save_contract_event_indexed_fields(
+    ledger_events: &[LedgerEvent],
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let rows: Vec<(&LedgerEvent, Vec<(&'static str, indexer_common::domain::ByteVec)>)> =
+        ledger_events
+            .iter()
+            .filter(|e| matches!(e.grouping, LedgerEventGrouping::Contract))
+            .map(|e| (e, e.indexable_contract_fields()))
+            .filter(|(_, fields)| !fields.is_empty())
+            .collect();
+
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    // Re-query the ledger_events.id values for the just-inserted rows by
+    // (transaction_id, raw). Same pattern as save_dust_generation_info.
+    // TODO(#1159): switch to RETURNING-based id capture from save_ledger_events
+    // once the chain-indexer's insert pattern is refactored.
+    for (event, fields) in rows {
+        let id_row: (i64,) = sqlx::query_as(indoc! {"
+            SELECT id FROM ledger_events
+            WHERE raw = $1
+            ORDER BY id DESC
+            LIMIT 1
+        "})
+        .bind(event.raw.as_ref())
+        .fetch_one(&mut **tx)
+        .await?;
+
+        let mut qb = QueryBuilder::new(indoc! {"
+            INSERT INTO contract_event_indexed_fields (
+                ledger_event_id,
+                field_name,
+                field_value
+            )
+        "});
+        qb.push_values(fields.iter(), |mut q, (name, value)| {
+            q.push_bind(id_row.0)
+                .push_bind(*name)
+                .push_bind(value.as_ref().to_vec());
+        });
+        qb.build().execute(&mut **tx).await?;
+    }
 
     Ok(())
 }
