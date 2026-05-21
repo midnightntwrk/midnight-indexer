@@ -630,18 +630,19 @@ impl ContractEventFilter {
 
         let field_prefixes = match self.field_prefixes {
             None => Vec::new(),
-            Some(fps) => fps
-                .into_iter()
-                .map(|fp| {
-                    let prefix: ByteVec = fp.prefix.hex_decode().map_err(|e| {
-                        ContractEventFilterError::InvalidFieldPrefix(e.to_string())
-                    })?;
-                    Ok(DomainFieldPrefix {
-                        field_name: fp.field_name,
-                        prefix: prefix.as_ref().to_vec(),
+            Some(fps) => {
+                fps.into_iter()
+                    .map(|fp| {
+                        let prefix: ByteVec = fp.prefix.hex_decode().map_err(|e| {
+                            ContractEventFilterError::InvalidFieldPrefix(e.to_string())
+                        })?;
+                        Ok(DomainFieldPrefix {
+                            field_name: fp.field_name,
+                            prefix: prefix.as_ref().to_vec(),
+                        })
                     })
-                })
-                .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<Vec<_>, _>>()?
+            }
         };
 
         Ok(DomainContractEventFilter {
@@ -788,7 +789,10 @@ mod tests {
             to_block: None,
         };
         let err = filter.into_domain().expect_err("should reject");
-        assert!(matches!(err, ContractEventFilterError::EmptyContractAddress));
+        assert!(matches!(
+            err,
+            ContractEventFilterError::EmptyContractAddress
+        ));
     }
 
     #[test]

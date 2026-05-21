@@ -191,12 +191,7 @@ fn base_query_builder<'a>(
         && !variants.is_empty()
     {
         qb.push(" AND le.variant::text = ANY(")
-            .push_bind(
-                variants
-                    .iter()
-                    .map(|v| v.to_string())
-                    .collect::<Vec<_>>(),
-            )
+            .push_bind(variants.iter().map(|v| v.to_string()).collect::<Vec<_>>())
             .push(") ");
     }
 
@@ -227,9 +222,7 @@ fn base_query_builder<'a>(
 }
 
 #[cfg(feature = "standalone")]
-fn base_query_builder<'a>(
-    filter: &'a ContractEventFilter,
-) -> sqlx::QueryBuilder<'a, sqlx::Sqlite> {
+fn base_query_builder<'a>(filter: &'a ContractEventFilter) -> sqlx::QueryBuilder<'a, sqlx::Sqlite> {
     use sqlx::QueryBuilder;
     let mut qb = QueryBuilder::<sqlx::Sqlite>::new(indoc::indoc! {"
         SELECT

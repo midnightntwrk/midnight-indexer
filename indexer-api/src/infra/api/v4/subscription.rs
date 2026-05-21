@@ -26,8 +26,7 @@ use crate::{
     domain::storage::Storage,
     infra::api::v4::subscription::{
         block::BlockSubscription, contract_action::ContractActionSubscription,
-        contract_event::ContractEventsSubscription,
-        dust_generations::DustGenerationsSubscription,
+        contract_event::ContractEventsSubscription, dust_generations::DustGenerationsSubscription,
         dust_ledger_events::DustLedgerEventsSubscription,
         dust_nullifier_transactions::DustNullifierTransactionsSubscription,
         shielded::ShieldedTransactionsSubscription,

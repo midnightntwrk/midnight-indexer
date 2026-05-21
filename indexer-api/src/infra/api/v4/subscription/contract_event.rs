@@ -26,9 +26,7 @@ use crate::{
     domain::{ContractEventRow, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
-        v4::contract_event::{
-            ContractEvent, ContractEventFilter as GraphQLContractEventFilter,
-        },
+        v4::contract_event::{ContractEvent, ContractEventFilter as GraphQLContractEventFilter},
     },
 };
 use async_graphql::{Context, Subscription};
@@ -165,10 +163,7 @@ async fn get_next_row<E>(
         .await
 }
 
-async fn reached_to_block<S: Storage>(
-    storage: &S,
-    to_block: Option<u32>,
-) -> ApiResult<bool> {
+async fn reached_to_block<S: Storage>(storage: &S, to_block: Option<u32>) -> ApiResult<bool> {
     let Some(to_block) = to_block else {
         return Ok(false);
     };
@@ -176,5 +171,7 @@ async fn reached_to_block<S: Storage>(
         .get_latest_block()
         .await
         .map_err_into_server_error(|| "get latest block to evaluate toBlock terminator")?;
-    Ok(latest.map(|b| b.height as u64 >= to_block as u64).unwrap_or(false))
+    Ok(latest
+        .map(|b| b.height as u64 >= to_block as u64)
+        .unwrap_or(false))
 }

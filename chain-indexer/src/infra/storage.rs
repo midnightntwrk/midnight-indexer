@@ -716,10 +716,7 @@ async fn save_ledger_events(
     // SQLite + Postgres both return RETURNING rows in the order the rows
     // were inserted (the multi-row INSERT is one statement so row order is
     // deterministic), so we can zip ids back onto ledger_events by index.
-    let inserted_ids: Vec<(i64,)> = qb
-        .build_query_as::<(i64,)>()
-        .fetch_all(&mut **tx)
-        .await?;
+    let inserted_ids: Vec<(i64,)> = qb.build_query_as::<(i64,)>().fetch_all(&mut **tx).await?;
 
     if inserted_ids.len() != ledger_events.len() {
         return Err(sqlx::Error::Protocol(format!(
@@ -729,12 +726,8 @@ async fn save_ledger_events(
         )));
     }
 
-    save_contract_event_indexed_fields(
-        ledger_events,
-        inserted_ids.iter().map(|(id,)| *id),
-        tx,
-    )
-    .await?;
+    save_contract_event_indexed_fields(ledger_events, inserted_ids.iter().map(|(id,)| *id), tx)
+        .await?;
 
     Ok(())
 }

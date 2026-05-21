@@ -719,12 +719,8 @@ mod contract_event_tests {
     #[test]
     fn contract_event_constructor_sets_contract_grouping() {
         let attrs = shielded_spend_attrs();
-        let event = LedgerEvent::contract_event(
-            bv(b"raw"),
-            bv(&[0x01; 32]),
-            Some(42),
-            attrs.clone(),
-        );
+        let event =
+            LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), Some(42), attrs.clone());
         assert!(matches!(event.grouping, LedgerEventGrouping::Contract));
         assert_eq!(event.contract_address, Some(bv(&[0x01; 32])));
         assert_eq!(event.contract_action_id, Some(42));
@@ -733,12 +729,8 @@ mod contract_event_tests {
 
     #[test]
     fn contract_event_constructor_accepts_none_contract_action_id() {
-        let event = LedgerEvent::contract_event(
-            bv(b"raw"),
-            bv(&[0x02; 32]),
-            None,
-            shielded_spend_attrs(),
-        );
+        let event =
+            LedgerEvent::contract_event(bv(b"raw"), bv(&[0x02; 32]), None, shielded_spend_attrs());
         assert!(matches!(event.grouping, LedgerEventGrouping::Contract));
         assert!(event.contract_action_id.is_none());
     }
@@ -763,12 +755,8 @@ mod contract_event_tests {
 
     #[test]
     fn indexable_contract_fields_shielded_spend_returns_nullifier_only() {
-        let event = LedgerEvent::contract_event(
-            bv(b"raw"),
-            bv(&[0x01; 32]),
-            None,
-            shielded_spend_attrs(),
-        );
+        let event =
+            LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), None, shielded_spend_attrs());
         let fields = event.indexable_contract_fields();
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].0, "nullifier");
@@ -862,8 +850,7 @@ mod contract_event_tests {
         ];
         for original in attrs {
             let json = serde_json::to_string(&original).expect("serialize");
-            let decoded: LedgerEventAttributes =
-                serde_json::from_str(&json).expect("deserialize");
+            let decoded: LedgerEventAttributes = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(original, decoded, "round-trip mismatch");
         }
     }
