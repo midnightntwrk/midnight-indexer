@@ -128,38 +128,25 @@ describe('shielded nullifier transactions subscription', () => {
   });
 
   /**
-   * Behaviour divergence vs `dustNullifierTransactions`:
+   * Coverage for midnight-indexer#1119 / PR #1126
+   * (`feat(indexer-api): tighten shielded nullifier transactions input validation`).
    *
-   * `dustNullifierTransactions` (since midnight-indexer#1089 / PR #1090)
-   * rejects two malformed inputs as client errors:
-   *   - empty `nullifierPrefixes` array (`[]`)
-   *   - `fromBlock > toBlock`
+   * `shieldedNullifierTransactions` now rejects the same malformed inputs as
+   * `dustNullifierTransactions` (hardened in #1089 / PR #1090), restoring
+   * parity between the two surfaces:
+   *   - empty `nullifierPrefixes` array → `"nullifierPrefixes must not be empty"`
+   *   - empty-string element after hex decode → `"nullifierPrefixes elements must not be empty"`
+   *   - `fromBlock > toBlock` → `"fromBlock must not exceed toBlock"`
    *
-   * `shieldedNullifierTransactions` does NOT enforce either guard at the time
-   * of writing. The tests below intentionally record the current behaviour
-   * (subscription accepts the input without surfacing an error) so that:
-   *   1. Future symmetric hardening on the shielded surface is caught — these
-   *      tests will start failing when validation is added, prompting an
-   *      update to mirror the dust pattern.
-   *   2. The asymmetry is visible in the QA suite rather than silently
-   *      tolerated.
-   *
-   * If/when an issue is filed to harden the shielded validation, link it
-   * here and convert the assertions to expect the matching client errors.
+   * Mirrors the dust-side cases in `dust-nullifier-subscriptions.test.ts`.
    */
-  describe('input handling (currently permissive vs dust)', () => {
+  describe('subscription error handling', () => {
     /**
      * @given an empty array of nullifier prefixes
-     * @when we subscribe to shieldedNullifierTransactions with toBlock set
-     * @then the subscription does NOT raise a client error (recorded
-     *       behaviour; dust rejects this since #1089). It either completes
-     *       cleanly or stays open without emitting an event for the
-     *       observation window.
+     * @when we subscribe to shieldedNullifierTransactions
+     * @then the subscription should return a client error about empty prefixes
      */
-    test('should not raise an error for empty nullifier prefixes (records divergence from dust)', async () => {
-      const blockResponse = await indexerHttpClient.getLatestBlock();
-      const toBlock = Math.min(blockResponse.data!.block.height, 5);
-
+    test('should return an error for empty nullifier prefixes', async () => {
       const settled = await new Promise<{
         completed: boolean;
         error: string | null;
@@ -201,26 +188,20 @@ describe('shielded nullifier transactions subscription', () => {
           },
           [],
           0,
-          toBlock,
         );
       });
 
-      log.debug(`empty-prefix shielded outcome: ${JSON.stringify(settled)}`);
-      // Permissive: no error message surfaced. If this changes, the shielded
-      // surface has gained validation and this test should be reworked to
-      // assert the new error message (see header comment).
-      expect(settled.error).toBeNull();
-      expect(settled.eventCount).toBe(0);
-      expect(settled.completed).toBe(true);
+      expect(settled.error).toContain('nullifierPrefixes must not be empty');
+      expect(settled.completed).toBe(false);
+      expect(settled.eventCount).toBeGreaterThanOrEqual(0);
     });
 
     /**
-     * @given fromBlock greater than toBlock
+     * @given a nullifier prefixes array containing an empty-string element
      * @when we subscribe to shieldedNullifierTransactions
-     * @then the subscription does NOT raise a client error (recorded
-     *       behaviour; dust rejects this since #1089).
+     * @then the subscription should return a client error about empty elements
      */
-    test('should not raise an error when fromBlock is greater than toBlock (records divergence from dust)', async () => {
+    test('should return an error for an empty-string nullifier prefix element', async () => {
       const settled = await new Promise<{
         completed: boolean;
         error: string | null;
@@ -260,16 +241,70 @@ describe('shielded nullifier transactions subscription', () => {
               resolve({ completed: true, error: null, eventCount });
             },
           },
+          [''],
+          0,
+        );
+      });
+
+      expect(settled.error).toContain('nullifierPrefixes elements must not be empty');
+      expect(settled.completed).toBe(false);
+      expect(settled.eventCount).toBeGreaterThanOrEqual(0);
+    });
+
+    /**
+     * @given fromBlock greater than toBlock
+     * @when we subscribe to shieldedNullifierTransactions
+     * @then the subscription should return a client error about the block range
+     */
+    test('should return an error when fromBlock is greater than toBlock', async () => {
+      const settled = await new Promise<{
+        completed: boolean;
+        error: string | null;
+        eventCount: number;
+      }>((resolve, reject) => {
+        let eventCount = 0;
+        const timeout = setTimeout(() => {
+          subscription.unsubscribe();
+          reject(new Error('Timed out waiting for completion'));
+        }, 10_000);
+
+        const subscription = indexerWsClient.subscribeToShieldedNullifierTransactions(
+          {
+            next: (payload) => {
+              eventCount++;
+              if (payload.errors && payload.errors.length > 0) {
+                clearTimeout(timeout);
+                subscription.unsubscribe();
+                resolve({
+                  completed: false,
+                  error: payload.errors[0].message,
+                  eventCount,
+                });
+              }
+            },
+            error: (error) => {
+              clearTimeout(timeout);
+              subscription.unsubscribe();
+              resolve({
+                completed: false,
+                error: typeof error === 'string' ? error : JSON.stringify(error),
+                eventCount,
+              });
+            },
+            complete: () => {
+              clearTimeout(timeout);
+              resolve({ completed: true, error: null, eventCount });
+            },
+          },
           ['00'],
           10,
           5,
         );
       });
 
-      log.debug(`fromBlock>toBlock shielded outcome: ${JSON.stringify(settled)}`);
-      expect(settled.error).toBeNull();
-      expect(settled.eventCount).toBe(0);
-      expect(settled.completed).toBe(true);
+      expect(settled.error).toContain('fromBlock must not exceed toBlock');
+      expect(settled.completed).toBe(false);
+      expect(settled.eventCount).toBeGreaterThanOrEqual(0);
     });
   });
 
