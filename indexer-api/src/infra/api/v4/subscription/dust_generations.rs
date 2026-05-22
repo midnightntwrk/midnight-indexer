@@ -81,6 +81,7 @@ pub struct DustGenerationsItem {
 
 /// Progress indicator for dust generations subscription (includes final collapsed update).
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct DustGenerationsProgress {
     /// The highest index processed so far.
     pub highest_index: u64,

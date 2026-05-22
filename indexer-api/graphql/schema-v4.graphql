@@ -448,7 +448,7 @@ type DustGenerationsItem @beta {
 """
 Progress indicator for dust generations subscription (includes final collapsed update).
 """
-type DustGenerationsProgress {
+type DustGenerationsProgress @beta {
 	"""
 	The highest index processed so far.
 	"""
@@ -499,11 +499,11 @@ type DustNullifierTransaction {
 	"""
 	The hex-encoded matched nullifier.
 	"""
-	nullifier: HexEncoded!
+	nullifier: HexEncoded! @beta
 	"""
 	The hex-encoded commitment.
 	"""
-	commitment: HexEncoded!
+	commitment: HexEncoded! @beta
 	"""
 	The transaction ID (indexer-internal BIGSERIAL, use as resumption cursor).
 	"""
