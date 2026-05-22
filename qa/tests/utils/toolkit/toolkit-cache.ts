@@ -302,8 +302,11 @@ export function startCacheProgressReporter(
         return;
       }
 
-      // Update deltas for all chains (needed for stale detection regardless of display).
+      // Capture deltas against the previous snapshot before mutating `prev`,
+      // otherwise every later `c.blockCount - prev.get(c.chainId)` is 0.
+      const deltas = new Map<string, number>();
       for (const c of chains) {
+        deltas.set(c.chainId, c.blockCount - (prev.get(c.chainId) ?? 0));
         prev.set(c.chainId, c.blockCount);
       }
 
@@ -313,7 +316,7 @@ export function startCacheProgressReporter(
 
       // Register unregistered growing chains with the current env label.
       for (const c of currentChains) {
-        if (!c.envName && c.blockCount - (prev.get(c.chainId) ?? 0) > 0) {
+        if (!c.envName && (deltas.get(c.chainId) ?? 0) > 0) {
           await registerChainName(c.chainIdHex, label).catch(() => undefined);
         }
       }
@@ -323,9 +326,7 @@ export function startCacheProgressReporter(
       } else {
         // Active chain within the current env = one currently growing; fall back to highest count.
         const growingIds = new Set(
-          currentChains
-            .filter((c) => c.blockCount - (prev.get(c.chainId) ?? 0) > 0)
-            .map((c) => c.chainId),
+          currentChains.filter((c) => (deltas.get(c.chainId) ?? 0) > 0).map((c) => c.chainId),
         );
         const activeChainId =
           growingIds.size > 0
@@ -333,7 +334,7 @@ export function startCacheProgressReporter(
             : currentChains.reduce((a, b) => (a.blockCount >= b.blockCount ? a : b)).chainId;
 
         for (const c of currentChains) {
-          const delta = c.blockCount - (prev.get(c.chainId) ?? 0);
+          const delta = deltas.get(c.chainId) ?? 0;
           const isActive = c.chainId === activeChainId;
           const tag = isActive ? '' : ' ⚠ stale';
 

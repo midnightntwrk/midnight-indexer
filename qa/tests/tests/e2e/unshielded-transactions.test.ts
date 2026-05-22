@@ -599,5 +599,4 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       ]);
     });
   });
-
 });
