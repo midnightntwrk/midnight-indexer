@@ -305,7 +305,7 @@ type DustGenerationDtimeUpdate implements DustLedgerEvent {
 A dust generation dtime update emitted when the backing Night UTXO is
 spent and the entry's decay time is set.
 """
-type DustGenerationDtimeUpdateItem {
+type DustGenerationDtimeUpdateItem @beta {
 	"""
 	Generation-tree index of the entry whose dtime changed.
 	"""
@@ -402,7 +402,7 @@ union DustGenerationsEvent = DustGenerationsItem | DustGenerationsProgress | Dus
 """
 A dust generations item with optional collapsed Merkle tree update.
 """
-type DustGenerationsItem {
+type DustGenerationsItem @beta {
 	"""
 	Index of this output in the dust commitment Merkle tree.
 	"""
@@ -725,11 +725,11 @@ type Query {
 	"""
 	Get a collapsed Merkle tree update for the dust commitment tree.
 	"""
-	dustCommitmentMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!
+	dustCommitmentMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate! @beta
 	"""
 	Get a collapsed Merkle tree update for the dust generation tree.
 	"""
-	dustGenerationMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!
+	dustGenerationMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate! @beta
 	"""
 	Get the full history of D-parameter changes for governance auditability.
 	"""
@@ -896,19 +896,19 @@ type RegularTransaction implements Transaction {
 	"""
 	The dust commitment tree start index.
 	"""
-	dustCommitmentStartIndex: Int!
+	dustCommitmentStartIndex: Int! @beta
 	"""
 	The dust commitment tree end index.
 	"""
-	dustCommitmentEndIndex: Int!
+	dustCommitmentEndIndex: Int! @beta
 	"""
 	The dust generation tree start index.
 	"""
-	dustGenerationStartIndex: Int!
+	dustGenerationStartIndex: Int! @beta
 	"""
 	The dust generation tree end index.
 	"""
-	dustGenerationEndIndex: Int!
+	dustGenerationEndIndex: Int! @beta
 	"""
 	The fee for this transaction in SPECK (atomic unit of DUST).
 	"""
@@ -1163,7 +1163,7 @@ type Subscription {
 	`DustGenerationDtimeUpdateItem` events for entries the subscriber owns.
 	The subscription finishes after reaching the end index with a final collapsed update.
 	"""
-	dustGenerations(dustAddress: DustAddress!, startIndex: Int!, endIndex: Int!): DustGenerationsEvent!
+	dustGenerations(dustAddress: DustAddress!, startIndex: Int!, endIndex: Int!): DustGenerationsEvent! @beta
 	"""
 	Subscribe to dust ledger events starting at the given ID or at the very start if omitted.
 	"""
@@ -1465,6 +1465,15 @@ type ZswapLedgerEvent {
 	protocolVersion: Int!
 }
 
+"""
+Marks a schema field or type as in-flight / unstable. Consumers should
+expect the marked surface to change without notice; stability is signalled
+by removal of the directive.
+
+Currently used for the dust-generation API surface that's in mid-redesign
+pending #1181. See #1173.
+"""
+directive @beta on FIELD_DEFINITION | OBJECT
 """
 Marks an element of a GraphQL schema as no longer supported.
 """
