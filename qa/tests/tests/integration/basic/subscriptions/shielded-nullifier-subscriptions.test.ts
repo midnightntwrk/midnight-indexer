@@ -230,9 +230,7 @@ describe('shielded nullifier transactions subscription', () => {
      * @when we subscribe to shieldedNullifierTransactions
      * @then the subscription should return a client error about empty elements
      */
-    test('should return an error for an empty-string nullifier prefix element', async (
-      ctx: TestContext,
-    ) => {
+    test('should return an error for an empty-string nullifier prefix element', async (ctx: TestContext) => {
       const settled = await collectSubscriptionError((handlers) =>
         indexerWsClient.subscribeToShieldedNullifierTransactions(handlers, [''], 0),
       );
@@ -259,9 +257,7 @@ describe('shielded nullifier transactions subscription', () => {
      * @when we subscribe to shieldedNullifierTransactions
      * @then the subscription should return a client error about the block range
      */
-    test('should return an error when fromBlock is greater than toBlock', async (
-      ctx: TestContext,
-    ) => {
+    test('should return an error when fromBlock is greater than toBlock', async (ctx: TestContext) => {
       const settled = await collectSubscriptionError((handlers) =>
         indexerWsClient.subscribeToShieldedNullifierTransactions(handlers, ['00'], 10, 5),
       );

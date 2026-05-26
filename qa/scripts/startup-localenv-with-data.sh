@@ -1,35 +1,11 @@
 #!/bin/bash
 
-# Derive Docker Compose project name from directory basename (same way Docker Compose does)
-# Docker Compose normalizes: lowercase, remove dots, keep hyphens
-PROJECT_DIR=$(basename "$(pwd)")
-DOCKER_PROJECT_NAME=$(echo "$PROJECT_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/\.//g')
+# shellcheck source=qa/scripts/_lib.sh
+. "$(dirname "$0")/_lib.sh"
 
-# Tear down any prior stack (covers all images including midnightntwrk/midnight-node,
-# which the previous image-name grep was missing).
-echo "Tearing down any prior compose stack..."
-docker compose --profile cloud down --remove-orphans 2>&1 \
-  || echo "[startup] No prior stack to remove (normal on first run; if docker daemon is down, subsequent steps will fail)."
+DOCKER_PROJECT_NAME=$(derive_docker_project_name)
 
-# Belt-and-suspenders: stop any container still holding the node_data volume.
-# `docker volume rm` has no force flag — the volume can only be removed once no
-# container references it.
-VOLUME_USERS=$(docker ps -a -q --filter volume="${DOCKER_PROJECT_NAME}_node_data" 2>/dev/null)
-if [ -n "$VOLUME_USERS" ]; then
-    echo "Removing containers still holding node_data volume..."
-    docker rm -f $VOLUME_USERS
-fi
-
-# Remove the named volume to ensure fresh node data
-if docker volume ls | grep -q "${DOCKER_PROJECT_NAME}_node_data"; then
-    volumes=$(docker volume ls | grep "${DOCKER_PROJECT_NAME}_node_data" | awk -F " " '{print $2}')
-    for volume in $volumes; do
-        docker volume rm $volume
-    done
-    echo "Named volumes removed."
-else
-    echo "No named volumes to remove."
-fi
+teardown_prior_stack "$DOCKER_PROJECT_NAME"
 
 # Use docker to clean postgres and nats data (avoids sudo issues)
 if [ -d "target/data/postgres" ] || [ -d "target/data/nats" ]; then
@@ -98,7 +74,7 @@ echo "      We explicitly manage the node volume externally to inject fresh test
 if [ -z "${INDEXER_TAG:-}" ]; then
     # Find the commit where NODE_VERSION was set to the current NODE_TAG
     COMMIT_SHA=$(git log --all --format=%H --max-count=1 -S"$NODE_TAG" -- NODE_VERSION)
-    
+
     if [ -n "$COMMIT_SHA" ]; then
         TMP_INDEXER_TAG="3.0.0-$(git rev-parse --short=8 $COMMIT_SHA)"
         echo "Found NODE_VERSION=$NODE_TAG in commit $COMMIT_SHA"
@@ -127,28 +103,11 @@ fi
 echo "Using the following tags:"
 echo " NODE_TAG: $NODE_TAG"
 echo " INDEXER_TAG: $INDEXER_TAG"
-echo " NODE_TOOLKIT_TAG: $NODE_TOOLKIT_TAG" 
+echo " NODE_TOOLKIT_TAG: $NODE_TOOLKIT_TAG"
 
 docker compose --profile cloud up -d
 
-echo "Waiting for indexer API to become ready (20s budget)..."
-INDEXER_READY=0
-for i in {1..10}; do
-  if curl -sf http://localhost:8088/ready >/dev/null; then
-    echo "Indexer API is ready"
-    INDEXER_READY=1
-    break
-  fi
-  echo "Not ready yet... ($i/10)"
-  sleep 2
-done
-if [ "$INDEXER_READY" -ne 1 ]; then
-  echo "ERROR: Indexer API did not become ready within 20s. Dumping container state:"
-  docker compose --profile cloud ps
-  echo "Last 50 lines of indexer-api logs:"
-  docker compose --profile cloud logs --tail=50 indexer-api 2>&1 || true
-  exit 1
-fi
+wait_for_indexer_ready
 
 echo "Chain startup info:"
 docker compose --profile cloud logs | grep "Highest known block"
@@ -158,15 +117,7 @@ docker ps --format "table {{.Image}}\t{{.Names}}\t{{.Status}}"
 
 echo "Plase make sure all the services are running and healthy"
 
-echo "Deleting toolkit cache..."
-rm -rf qa/tests/.tmp/toolkit/.sync_cache-undeployed/
-
-# Block-scanner keeps a per-env scan cursor + block cache. Stale entries from
-# a previous run would otherwise cause generate:data to skip the current
-# chain's blocks and write outdated hashes into the test data files.
-echo "Clearing block-scanner cache for undeployed..."
-rm -f qa/tools/block-scanner/tmp_scan/undeployed_*.jsonl
-rm -f qa/tools/block-scanner/stats/undeployed_*.json
+clear_block_scanner_cache
 
 echo "Regenarating new test data... "
 pushd qa/tools/block-scanner

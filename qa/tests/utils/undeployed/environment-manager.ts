@@ -14,6 +14,7 @@
 // limitations under the License.
 
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -90,6 +91,9 @@ export class UndeployedEnvironmentManager {
     this.assertRequiredEnvVars();
 
     const repoRoot = this.resolveRepoRoot();
+    if (this.withData) {
+      this.assertNodeDataDirExists(repoRoot);
+    }
     const scriptName = this.withData
       ? 'qa/scripts/startup-localenv-with-data.sh'
       : 'qa/scripts/startup-localenv-from-genesis.sh';
@@ -153,6 +157,40 @@ export class UndeployedEnvironmentManager {
           'Set NODE_TAG and INDEXER_TAG explicitly when TARGET_ENV=undeployed.',
       );
     }
+  }
+
+  /**
+   * Preflight: the with-data provisioning script requires a pre-seeded node data
+   * directory under `.node/`. It looks for `.node/<NODE_VERSION_BASE>` (the X.Y.Z
+   * prefix of NODE_TAG) first, then falls back to `.node/<NODE_TAG>`. If neither
+   * exists the bash script exits 1 mid-provisioning, which surfaces as an opaque
+   * "exited with status 1" in test output. Catch it here with a clear message
+   * before docker is touched.
+   */
+  private assertNodeDataDirExists(repoRoot: string): void {
+    const nodeTag = process.env.NODE_TAG as string;
+    const nodeVersionBase = nodeTag.replace(/-.*$/, '');
+    const candidates = Array.from(new Set([nodeVersionBase, nodeTag]));
+    const found = candidates.find((c) => fs.existsSync(path.join(repoRoot, '.node', c)));
+    if (found) return;
+
+    const nodeDir = path.join(repoRoot, '.node');
+    let available: string[] = [];
+    try {
+      available = fs
+        .readdirSync(nodeDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
+    } catch {
+      // .node dir missing entirely — handled in the error message below.
+    }
+
+    throw new Error(
+      `[undeployed] No node data directory matching NODE_TAG=${nodeTag}. ` +
+        `Expected one of: ${candidates.map((c) => `.node/${c}`).join(', ')}. ` +
+        `Available under .node/: ${available.length > 0 ? available.join(', ') : '(none)'}. ` +
+        'Populate the missing directory or set NODE_TAG to an available version.',
+    );
   }
 
   private resolveRepoRoot(): string {
