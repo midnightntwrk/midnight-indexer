@@ -19,9 +19,13 @@ import { fileURLToPath } from 'node:url';
 
 export type Flavour = 'cloud' | 'standalone';
 
+const KNOWN_FLAVOURS: readonly Flavour[] = ['cloud', 'standalone'];
+
 export interface UndeployedEnvironmentOptions {
   withData: boolean;
-  flavour?: Flavour;
+  // Accept `string` (not just `Flavour`) so callers can forward an unvalidated
+  // env var; the constructor performs the runtime check.
+  flavour?: string;
 }
 
 const READY_URL = 'http://localhost:8088/ready';
@@ -49,7 +53,14 @@ export class UndeployedEnvironmentManager {
 
   constructor(options: UndeployedEnvironmentOptions) {
     this.withData = options.withData;
-    this.flavour = options.flavour ?? 'cloud';
+    const requested = options.flavour ?? 'cloud';
+    if (!KNOWN_FLAVOURS.includes(requested as Flavour)) {
+      throw new Error(
+        `[undeployed] Unknown FLAVOUR='${requested}'. ` +
+          `Expected one of: ${KNOWN_FLAVOURS.join(', ')}.`,
+      );
+    }
+    this.flavour = requested as Flavour;
     if (this.flavour === 'standalone') {
       // TODO: phase 2 — the existing scripts hardcode `--profile cloud`. Wiring
       // standalone requires either a script modification or a Node-side docker

@@ -13,10 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  UndeployedEnvironmentManager,
-  type Flavour,
-} from '../utils/undeployed/environment-manager';
+import { UndeployedEnvironmentManager } from '../utils/undeployed/environment-manager';
 
 // vitest globalSetup file for the integration suite. Always registered;
 // no-ops outside `TARGET_ENV=undeployed`. Provisions the stack with pre-seeded
@@ -30,7 +27,7 @@ export async function setup(): Promise<void> {
 
   manager = new UndeployedEnvironmentManager({
     withData: true,
-    flavour: (process.env.FLAVOUR as Flavour | undefined) ?? 'cloud',
+    flavour: process.env.FLAVOUR,
   });
   await manager.ensureRunning();
 }
