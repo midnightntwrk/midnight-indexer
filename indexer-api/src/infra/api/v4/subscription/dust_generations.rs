@@ -16,7 +16,7 @@ use crate::{
     infra::api::{
         ApiResult, ContextExt, ResultExt,
         v4::{
-            HexEncodable, HexEncoded, dust::DustAddress,
+            HexEncodable, HexEncoded, directives::beta, dust::DustAddress,
             merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate,
         },
     },
@@ -55,6 +55,7 @@ impl<S, B> Default for DustGenerationsSubscription<S, B> {
 
 /// A dust generations item with optional collapsed Merkle tree update.
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct DustGenerationsItem {
     /// Index of this output in the dust commitment Merkle tree.
     pub commitment_mt_index: u64,
@@ -80,6 +81,7 @@ pub struct DustGenerationsItem {
 
 /// Progress indicator for dust generations subscription (includes final collapsed update).
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct DustGenerationsProgress {
     /// The highest index processed so far.
     pub highest_index: u64,
@@ -90,6 +92,7 @@ pub struct DustGenerationsProgress {
 /// A dust generation dtime update emitted when the backing Night UTXO is
 /// spent and the entry's decay time is set.
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct DustGenerationDtimeUpdateItem {
     /// Generation-tree index of the entry whose dtime changed.
     pub generation_mt_index: u64,
@@ -119,6 +122,7 @@ where
     /// Entries are interleaved with collapsed Merkle tree updates and
     /// `DustGenerationDtimeUpdateItem` events for entries the subscriber owns.
     /// The subscription finishes after reaching the end index with a final collapsed update.
+    #[graphql(directive = beta::apply())]
     async fn dust_generations<'a>(
         &self,
         cx: &'a Context<'a>,

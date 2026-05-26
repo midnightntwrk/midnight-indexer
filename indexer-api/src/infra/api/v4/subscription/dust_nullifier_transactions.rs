@@ -15,7 +15,7 @@ use crate::{
     domain::storage::Storage,
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
-        v4::{HexEncodable, HexEncoded},
+        v4::{HexEncodable, HexEncoded, directives::beta},
     },
 };
 use async_graphql::{Context, SimpleObject, Subscription};
@@ -43,8 +43,10 @@ impl<S, B> Default for DustNullifierTransactionsSubscription<S, B> {
 #[derive(Debug, Clone, SimpleObject)]
 pub struct DustNullifierTransaction {
     /// The hex-encoded matched nullifier.
+    #[graphql(directive = beta::apply())]
     pub nullifier: HexEncoded,
     /// The hex-encoded commitment.
+    #[graphql(directive = beta::apply())]
     pub commitment: HexEncoded,
     /// The transaction ID (indexer-internal BIGSERIAL, use as resumption cursor).
     pub transaction_id: u64,
