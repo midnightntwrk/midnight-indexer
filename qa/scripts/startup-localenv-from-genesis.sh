@@ -8,7 +8,8 @@ DOCKER_PROJECT_NAME=$(echo "$PROJECT_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/
 # Tear down any prior stack (covers all images including midnightntwrk/midnight-node,
 # which the previous image-name grep was missing).
 echo "Tearing down any prior compose stack..."
-docker compose --profile cloud down --remove-orphans 2>/dev/null || true
+docker compose --profile cloud down --remove-orphans 2>&1 \
+  || echo "[startup] No prior stack to remove (normal on first run; if docker daemon is down, subsequent steps will fail)."
 
 # Belt-and-suspenders: stop any container still holding the node_data volume.
 # `docker volume rm` has no force flag — the volume can only be removed once no
