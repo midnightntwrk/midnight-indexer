@@ -23,7 +23,10 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: [path.resolve(__dirname, './utils/custom-matchers.ts')],
-    globalSetup: [path.resolve(__dirname, './utils/logging/setup.ts')],
+    globalSetup: [
+      path.resolve(__dirname, './setup/undeployed-with-data-setup.ts'),
+      path.resolve(__dirname, './utils/logging/setup.ts'),
+    ],
     coverage: {
       reporter: ['text', 'json', 'html'],
     },

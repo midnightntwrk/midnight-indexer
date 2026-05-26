@@ -163,55 +163,74 @@ Accepted values: a positive integer (`1`, `2`, …) or a `"<n>%"` percentage. In
 
 For full instructions on updating the Node version, see the [Updating Node Version Guide](../../docs/updating-node-version.md)
 
-## Running Test Projects on undeployed/local environment 
+## Running Test Projects on undeployed/local environment
 
-### Integration tests on undeployed/local environment (with pre-existing data)
+When `TARGET_ENV=undeployed`, the test framework provisions the local Docker
+stack automatically as a vitest `globalSetup` step and tears it down when the
+suite finishes. **No manual script invocation is required.**
 
-Running the tests on your local/undeployed environment has some prerequisites, depending on the type of tests you want to run. The integration tests require test data to be available for the tests to run, to do so you can use one of the scripts available in the QA folder that will help spin up a local environment with a Midnight chain with some pre-existing data:
+> ⚠️ **Required env vars**
+>
+> `NODE_TAG` and `INDEXER_TAG` must be set explicitly when
+> `TARGET_ENV=undeployed`. There is no auto-derivation. `NODE_TOOLKIT_TAG`
+> defaults to `latest-main` if unset.
 
-> ⚠️ **Important**
->  
-> Make sure to set the correct versions of **Node / Indexer / Toolkit** **before running the startup script**.  
-> See **“Getting Started – Set versions”**.
+Stack flavour by suite:
+
+| Suite | Provisioning script invoked | Chain state |
+|-------|----------------------------|-------------|
+| `smoke` | `qa/scripts/startup-localenv-with-data.sh` | pre-seeded from `.node/<NODE_TAG>/` |
+| `integration` | `qa/scripts/startup-localenv-with-data.sh` | pre-seeded from `.node/<NODE_TAG>/` |
+| `e2e` | `qa/scripts/startup-localenv-from-genesis.sh` | fresh (toolkit generates data dynamically) |
+
+> ℹ️ **`.node/<NODE_TAG>/` must exist** for the with-data flavour. Generate it
+> via `./generate_node_data.sh <NODE_TAG>` from the repo root if it isn't there.
+
+### Smoke and integration
 
 ```bash
-# Startup a local environment with test data (transactions + contract actions)
-
-# NOTE: Set Node / Indexer / Toolkit versions first (see “Getting Started – Set versions”
-bash qa/scripts/startup-localenv-with-data.sh
 cd qa/tests
-TARGET_ENV=undeployed yarn test:integration
+NODE_TAG=1.0.0-rc.8 INDEXER_TAG=4.3.2-rc.1 TARGET_ENV=undeployed yarn test:smoke
+NODE_TAG=1.0.0-rc.8 INDEXER_TAG=4.3.2-rc.1 TARGET_ENV=undeployed yarn test:integration
 ```
 
+Smoke uses the same with-data stack as integration, so a smoke pass is a
+meaningful precursor to integration.
 
-### E2E tests on undeployed/local environment (from genesis without pre-existing data)
+### E2E
 
-The e2e tests don't require any pre-existing data to be executed, in fact they perform some
-actions themselves so that they can assert on the outcome of those actions.
-
-> ⚠️ **Important**
->  
-> Make sure to set the correct versions of **Node / Indexer / Toolkit** **before running the startup script**.  
-> See **“Getting Started – Set versions”**.
-
+E2E still requires the Toolkit Postgres container (used for the toolkit fetch
+cache). Start it once before running:
 
 ```bash
-# Startup a local environment from genesis block, without test data
-bash qa/scripts/startup-localenv-from-genesis.sh
-
-# Start Toolkit Postgres before running E2E tests
 bash qa/scripts/start-toolkit-postgres.sh
+
 cd qa/tests
-TARGET_ENV=undeployed yarn test:e2e
+NODE_TAG=1.0.0-rc.8 INDEXER_TAG=4.3.2-rc.1 TARGET_ENV=undeployed yarn test:e2e
 ```
 
-### Smoke tests on undeployed/local environment
+### Clash safety
 
-Smoke tests don't require any pre-existing data so just use the following
+If the indexer is already reachable on `http://localhost:8088/ready` when the
+framework starts, it treats this as a manually-managed stack: it **skips
+provisioning** and **skips teardown**. You can keep a stack running between
+runs by spinning it up yourself first.
+
+### Manual stack management (optional)
+
+The provisioning scripts remain available for direct invocation if you prefer
+to manage the stack yourself (e.g. to keep it up across many `yarn test:*`
+runs, or for debugging):
 
 ```bash
-bash qa/scripts/startup-localenv-from-genesis.sh
-TARGET_ENV=undeployed yarn test:smoke
+# pre-seeded data flavour
+NODE_TAG=1.0.0-rc.8 INDEXER_TAG=4.3.2-rc.1 bash qa/scripts/startup-localenv-with-data.sh
+
+# fresh-from-genesis flavour
+NODE_TAG=1.0.0-rc.8 INDEXER_TAG=4.3.2-rc.1 bash qa/scripts/startup-localenv-from-genesis.sh
+
+# teardown
+docker compose --profile cloud down
 ```
 
 See the individual project README files for detailed information about each test suite.
@@ -283,9 +302,6 @@ TARGET_ENV=undeployed yarn test:integration
 - The compose override file `docker-compose.runtime-upgrade.yaml` is used to mount the chain-spec into the node container.
 
 ---
-
-Indexer can be executed locally (this is known as `undeployed` environment). You can start it in two ways, depending on whether you want a clean or pre-seeded environment:
-
 
 ## 🌐 Running Against Deployed Environments
 

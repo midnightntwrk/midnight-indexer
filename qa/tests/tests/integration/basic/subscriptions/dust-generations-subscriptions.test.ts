@@ -49,7 +49,10 @@ function safeUnsubscribe(unsubscribe: () => void): void {
   }
 }
 
-describe('dust generations subscription', () => {
+// Dust generation registrations require a Cardano-side mapping which has no
+// counterpart in the `undeployed` environment. Skip the whole surface there;
+// re-enable once #1152 lands local Cardano test-data provisioning.
+describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
   let indexerWsClient: IndexerWsClient;
 
   beforeEach(async () => {
