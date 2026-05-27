@@ -424,9 +424,15 @@ async function registerChainName(chainIdHex: string, envName: string): Promise<v
     POSTGRES_USER,
     '-d',
     POSTGRES_DB,
+    // Pass values as psql variables rather than interpolating into the SQL text,
+    // so chain_id_hex/env can never be parsed as SQL regardless of their content.
+    '-v',
+    `chain_id_hex=${chainIdHex}`,
+    '-v',
+    `env=${envName}`,
     '-c',
     `INSERT INTO chain_names (chain_id, env_name)
-     VALUES (decode('${chainIdHex}', 'hex'), '${envName}')
+     VALUES (decode(:'chain_id_hex', 'hex'), :'env')
      ON CONFLICT (chain_id) DO NOTHING;`,
   ]);
 }
