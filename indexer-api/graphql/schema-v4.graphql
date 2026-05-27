@@ -31,6 +31,18 @@ type Block {
 	"""
 	ledgerParameters: HexEncoded!
 	"""
+	The zswap commitment tree end index at this block; exclusive, i.e. the next free index.
+	"""
+	zswapEndIndex: Int!
+	"""
+	The dust commitment tree end index at this block; exclusive, i.e. the next free index.
+	"""
+	dustCommitmentEndIndex: Int! @beta
+	"""
+	The dust generation tree end index at this block; exclusive, i.e. the next free index.
+	"""
+	dustGenerationEndIndex: Int! @beta
+	"""
 	The parent of this block.
 	"""
 	parent: Block
