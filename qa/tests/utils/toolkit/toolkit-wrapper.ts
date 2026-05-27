@@ -438,10 +438,11 @@ class ToolkitWrapper {
     }
 
     const RETRY_DELAY_MS = 5_000;
+    const MAX_ATTEMPTS = 20;
     // Resolve destination address once — it is stable across retries.
     const destinationAddress = (await this.showAddress('0'.repeat(63) + '9')).unshielded;
 
-    for (let attempt = 1; ; attempt++) {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
         const output = await this.generateSingleTx(
           '0'.repeat(64), // Invalid seed — forces a full cache sync before the tx is attempted
@@ -452,13 +453,21 @@ class ToolkitWrapper {
         console.debug(`[SETUP] Warmup cache output:\n${JSON.stringify(output, null, 2)}`);
         return;
       } catch (error) {
-        if (this.isRpcTimeoutError(error)) {
+        if (this.isRpcTimeoutError(error) && attempt < MAX_ATTEMPTS) {
           console.log(
-            `[SETUP] Cache sync interrupted by RPC timeout (attempt ${attempt}), ` +
+            `[SETUP] Cache sync interrupted by RPC timeout (attempt ${attempt}/${MAX_ATTEMPTS}), ` +
               `retrying in ${RETRY_DELAY_MS / 1_000}s…`,
           );
           await new Promise((res) => setTimeout(res, RETRY_DELAY_MS));
           continue;
+        }
+        if (this.isRpcTimeoutError(error)) {
+          // Persistent timeout (node down / wedged): give up with a clear error rather
+          // than looping until the CI job-level timeout kills the run.
+          throw new Error(
+            `[SETUP] Cache warmup exhausted ${MAX_ATTEMPTS} RPC-timeout retries; ` +
+              `node RPC appears unreachable. Last error: ${error}`,
+          );
         }
         // Any non-timeout error means the sync completed and the tx failed for an expected
         // reason (invalid seed, insufficient funds, etc.) — warmup is done.
