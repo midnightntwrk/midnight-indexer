@@ -416,7 +416,11 @@ class ToolkitWrapper {
    * or spaced "Request timeout" from the compute-task error path).
    */
   private isRpcTimeoutError(error: unknown): boolean {
-    return String(error).toLowerCase().includes('request timeout');
+    // Match both the camelCase "RequestTimeout" from the substrate client and the
+    // spaced "Request timeout" from the compute-task error path. A plain
+    // toLowerCase().includes('request timeout') misses the camelCase form, which
+    // would silently treat a mid-sync timeout as a completed warmup.
+    return /request[\s_]?timeout/i.test(String(error));
   }
 
   /**
