@@ -71,8 +71,10 @@ describe('shielded transactions', () => {
 
     // Capture the highest zswapEndIndex before the transaction from genesis block.
     // E2E tests run on a fresh environment, so genesis provides the baseline zswap state.
+    // Guard against null data: older indexer deployments return a GraphQL validation error when
+    // the query includes schema fields not yet in that version, which sets data to null.
     const genesisResponse = await indexerHttpClient.getBlockByOffset({ height: 0 });
-    const genesisTxs = genesisResponse.data!.block.transactions;
+    const genesisTxs = genesisResponse.data?.block?.transactions ?? [];
     zswapEndIndexBeforeTx = genesisTxs.reduce((max, tx) => {
       const regularTx = tx as RegularTransaction;
       return regularTx.zswapEndIndex != null && regularTx.zswapEndIndex > max
