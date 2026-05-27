@@ -497,13 +497,13 @@ A transaction containing a dust nullifier match with block context.
 """
 type DustNullifierTransaction {
 	"""
-	The hex-encoded matched nullifier.
+	The hex-encoded matched nullifier, in 32-byte little-endian form.
 	"""
-	nullifier: HexEncoded! @beta
+	nullifierLeBytes: HexEncoded! @beta
 	"""
-	The hex-encoded commitment.
+	The hex-encoded commitment, in 32-byte little-endian form.
 	"""
-	commitment: HexEncoded! @beta
+	commitmentLeBytes: HexEncoded! @beta
 	"""
 	The transaction ID (indexer-internal BIGSERIAL, use as resumption cursor).
 	"""
@@ -1168,11 +1168,12 @@ type Subscription {
 	"""
 	dustLedgerEvents(id: Int): DustLedgerEvent!
 	"""
-	Subscribe to transactions containing dust nullifiers matching the provided prefixes.
-	Returns transaction and block references for wallet to fetch full data.
-	If `toBlock` is specified, the subscription finishes after reaching that block.
+	Subscribe to transactions containing dust nullifiers whose 32-byte little-endian form
+	starts with one of the provided prefixes. Returns transaction and block references for
+	the wallet to fetch full data. If `toBlock` is specified, the subscription finishes
+	after reaching that block.
 	"""
-	dustNullifierTransactions(nullifierPrefixes: [HexEncoded!]!, fromBlock: Int, toBlock: Int): DustNullifierTransaction!
+	dustNullifierTransactions(nullifierLeBytesPrefixes: [HexEncoded!]!, fromBlock: Int, toBlock: Int): DustNullifierTransaction!
 	"""
 	Subscribe to transactions containing shielded (zswap) nullifiers matching the provided
 	prefixes. Returns transaction and block references for wallet to fetch full data.

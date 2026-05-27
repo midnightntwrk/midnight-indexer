@@ -1058,7 +1058,7 @@ export class IndexerWsClient {
    * If `toBlock` is specified, the subscription finishes after reaching that block.
    *
    * @param handlers - Callback functions for handling incoming nullifier transaction events
-   * @param nullifierPrefixes - Array of hex-encoded nullifier prefixes to match
+   * @param nullifierLeBytesPrefixes - Array of hex-encoded 32-byte little-endian nullifier prefixes to match
    * @param fromBlock - Optional starting block height
    * @param toBlock - Optional ending block height (subscription finishes after this)
    * @param queryOverride - Optional custom GraphQL subscription query
@@ -1067,13 +1067,13 @@ export class IndexerWsClient {
    */
   subscribeToDustNullifierTransactions(
     handlers: SubscriptionHandlers<DustNullifierTransactionSubscriptionResponse>,
-    nullifierPrefixes: string[],
+    nullifierLeBytesPrefixes: string[],
     fromBlock?: number,
     toBlock?: number,
     queryOverride?: string,
   ): { unsubscribe: () => void; id: string } {
     const query = queryOverride || DUST_NULLIFIER_TRANSACTIONS_SUBSCRIPTION;
-    const variables = { nullifierPrefixes, fromBlock, toBlock };
+    const variables = { nullifierLeBytesPrefixes, fromBlock, toBlock };
 
     const subscriptionId = this.getNextId();
 

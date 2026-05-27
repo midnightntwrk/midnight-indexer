@@ -56,10 +56,10 @@ describe('dust nullifier transactions subscription', () => {
 
       // Use a broad prefix to increase chance of matches, bounded to first 10 blocks
       const toBlock = Math.min(latestHeight, 10);
-      const nullifierPrefixes = ['00'];
+      const nullifierLeBytesPrefixes = ['00'];
 
       log.debug(
-        `Subscribing to dust nullifier transactions with prefixes=${nullifierPrefixes}, fromBlock=0, toBlock=${toBlock}`,
+        `Subscribing to dust nullifier transactions with prefixes=${nullifierLeBytesPrefixes}, fromBlock=0, toBlock=${toBlock}`,
       );
 
       const received: DustNullifierTransactionSubscriptionResponse[] = [];
@@ -89,7 +89,7 @@ describe('dust nullifier transactions subscription', () => {
               resolve();
             },
           },
-          nullifierPrefixes,
+          nullifierLeBytesPrefixes,
           0,
           toBlock,
         );
@@ -167,7 +167,7 @@ describe('dust nullifier transactions subscription', () => {
         );
       });
 
-      expect(settled.error).toContain('nullifierPrefixes must not be empty');
+      expect(settled.error).toContain('nullifierLeBytesPrefixes must not be empty');
       expect(settled.completed).toBe(false);
       expect(settled.eventCount).toBeGreaterThanOrEqual(0);
     });
