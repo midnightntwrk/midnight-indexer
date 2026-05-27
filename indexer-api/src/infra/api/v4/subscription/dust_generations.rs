@@ -118,10 +118,9 @@ where
     S: Storage,
     B: Subscriber,
 {
-    /// Subscribe to dust generation entries for a dust address within an index range.
-    /// Entries are interleaved with collapsed Merkle tree updates and
-    /// `DustGenerationDtimeUpdateItem` events for entries the subscriber owns.
-    /// The subscription finishes after reaching the end index with a final collapsed update.
+    /// Subscribe to dust generation entries for a dust address in `[start_index, end_index]`
+    /// inclusive. `dustGenerationEndIndex` is exclusive, pass `dustGenerationEndIndex - 1`.
+    /// Entries interleaved with collapsed Merkle tree updates and owned-entry dtime updates.
     #[graphql(directive = beta::apply())]
     async fn dust_generations<'a>(
         &self,
@@ -150,40 +149,39 @@ where
                 .map_err_into_client_error(|| "invalid bech32m dust address")?;
             let mut cursor = start_index;
 
-            // Derive the dtime cutoff from the wallet's most recent owned
-            // entry below `start_index`. `None` for fresh subscriptions; we
-            // skip historical dtime backfill in that case.
+            // Fall back to 0 (= replay all dtime updates for this address) when
+            // the wallet has no entry below `start_index`. The dtime SQL filters
+            // by owner and per-stream event-id cursor, so cutoff = 0 is safe.
             let dtime_cutoff_block_id = storage
                 .get_dust_generation_dtime_cutoff_block_id(&dust_address_bytes, start_index)
                 .await
-                .map_err_into_server_error(|| "get dtime cutoff block id")?;
+                .map_err_into_server_error(|| "get dtime cutoff block id")?
+                .unwrap_or(0);
 
             // Single dtime cursor across initial backfill and live tail. It
             // advances past every emitted DustGenerationDtimeUpdateItem so
             // subsequent block-driven polls don't re-emit.
             let mut dtime_after_event_id = 0u64;
 
-            if let Some(cutoff) = dtime_cutoff_block_id {
-                debug!(cutoff; "replaying dtime updates after cutoff");
-                let updates = storage
-                    .get_dust_generation_dtime_updates(
-                        &dust_address_bytes,
-                        cutoff,
-                        dtime_after_event_id,
-                        batch_size,
-                    )
-                    .await;
-                let mut updates = pin!(updates);
-                while let Some(update) = updates
-                    .try_next()
-                    .await
-                    .map_err_into_server_error(|| "get next dtime update")?
-                {
-                    dtime_after_event_id = update.ledger_event_id;
-                    yield DustGenerationsEvent::DustGenerationDtimeUpdateItem(
-                        dtime_update_item(update),
-                    );
-                }
+            debug!(cutoff = dtime_cutoff_block_id; "replaying dtime updates after cutoff");
+            let updates = storage
+                .get_dust_generation_dtime_updates(
+                    &dust_address_bytes,
+                    dtime_cutoff_block_id,
+                    dtime_after_event_id,
+                    batch_size,
+                )
+                .await;
+            let mut updates = pin!(updates);
+            while let Some(update) = updates
+                .try_next()
+                .await
+                .map_err_into_server_error(|| "get next dtime update")?
+            {
+                dtime_after_event_id = update.ledger_event_id;
+                yield DustGenerationsEvent::DustGenerationDtimeUpdateItem(
+                    dtime_update_item(update),
+                );
             }
 
             debug!(start_index, end_index; "streaming existing dust generation entries");
@@ -317,26 +315,24 @@ where
                 // Drain any new dtime updates for entries the subscriber
                 // owns. Reuses the same cutoff (initial entry-block anchor)
                 // and the running event cursor so we don't re-emit.
-                if let Some(cutoff) = dtime_cutoff_block_id {
-                    let updates = storage
-                        .get_dust_generation_dtime_updates(
-                            &dust_address_bytes,
-                            cutoff,
-                            dtime_after_event_id,
-                            batch_size,
-                        )
-                        .await;
-                    let mut updates = pin!(updates);
-                    while let Some(update) = updates
-                        .try_next()
-                        .await
-                        .map_err_into_server_error(|| "get next dtime update")?
-                    {
-                        dtime_after_event_id = update.ledger_event_id;
-                        yield DustGenerationsEvent::DustGenerationDtimeUpdateItem(
-                            dtime_update_item(update),
-                        );
-                    }
+                let updates = storage
+                    .get_dust_generation_dtime_updates(
+                        &dust_address_bytes,
+                        dtime_cutoff_block_id,
+                        dtime_after_event_id,
+                        batch_size,
+                    )
+                    .await;
+                let mut updates = pin!(updates);
+                while let Some(update) = updates
+                    .try_next()
+                    .await
+                    .map_err_into_server_error(|| "get next dtime update")?
+                {
+                    dtime_after_event_id = update.ledger_event_id;
+                    yield DustGenerationsEvent::DustGenerationDtimeUpdateItem(
+                        dtime_update_item(update),
+                    );
                 }
 
                 let chain_first_free = storage
