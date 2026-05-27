@@ -36,6 +36,12 @@ const READY_URL = 'http://localhost:8088/ready';
 const HEALTH_CHECK_ATTEMPTS = 10;
 const HEALTH_CHECK_INTERVAL_MS = 2000;
 
+// A from-genesis stack starts with an empty chain: the indexer reports ready as
+// soon as it has indexed the genesis block, but tests that read recent blocks
+// need a few real blocks on chain first. Give the node time to author a handful
+// (~5 at the default ~6s block time) before the suite starts querying.
+const GENESIS_BLOCK_PRODUCTION_WAIT_MS = 30_000;
+
 /**
  * Provisions the local `undeployed` docker stack from within the test framework.
  *
@@ -118,6 +124,18 @@ export class UndeployedEnvironmentManager {
 
     await this.waitForIndexerReady();
     console.log('[undeployed] Stack is up and reachable.');
+
+    // Only a from-genesis stack (withData: false) starts with an empty chain and
+    // needs to author blocks before tests run. A with-data stack is pre-seeded, and
+    // a manually-managed stack (detected above, returns early) has been running for
+    // a while — neither needs the wait.
+    if (!this.withData) {
+      console.log(
+        `[undeployed] Genesis stack — waiting ${GENESIS_BLOCK_PRODUCTION_WAIT_MS / 1000}s ` +
+          'for the node to produce a few blocks before tests start...',
+      );
+      await new Promise((resolve) => setTimeout(resolve, GENESIS_BLOCK_PRODUCTION_WAIT_MS));
+    }
   }
 
   /**
