@@ -90,6 +90,10 @@ export async function resolveBlockHash(result: ToolkitTransactionResult): Promis
     2000,
   );
   const transactions = txResponse?.data?.transactions ?? [];
+  // Callers of resolveBlockHash invoke it only on success-path txs that haven't
+  // been retried, so we don't expect multiple records per hash. If a caller adds
+  // a path that can produce multiple records (e.g. a failed retry sharing the
+  // hash), restore the SUCCESS-preferring filter or pick a different signal.
   const tx = transactions[0];
   if (tx?.block?.hash) {
     result.blockHash = tx.block.hash;
