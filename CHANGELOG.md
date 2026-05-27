@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.3-rc.2] - 2026-05-27
+
+### 🚀 Features
+
+- *(indexer-api)* Add subscription quotas to graphql websocket (#1104)
+- *(indexer-api)* Tighten shielded nullifier transactions input validation (#1126)
+- *(indexer-api)* Introduce @beta GraphQL directive for in-flight API fields (#1186)
+
+### 🐛 Bug Fixes
+
+- *(indexer-api)* Deliver DustGenerationDtimeUpdate items on fresh dustGenerations subscriptions (#1166)
+
 ## [4.3.2] - 2026-05-15
 
 ### 🚀 Features

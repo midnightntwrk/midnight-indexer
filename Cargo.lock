@@ -1123,7 +1123,7 @@ dependencies = [
 
 [[package]]
 name = "chain-indexer"
-version = "4.3.2"
+version = "4.3.3"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3158,7 +3158,7 @@ dependencies = [
 
 [[package]]
 name = "indexer-api"
-version = "4.3.2"
+version = "4.3.3"
 dependencies = [
  "anyhow",
  "async-graphql",
@@ -3254,7 +3254,7 @@ dependencies = [
 
 [[package]]
 name = "indexer-standalone"
-version = "4.3.2"
+version = "4.3.3"
 dependencies = [
  "anyhow",
  "byte-unit-serde",
@@ -3272,7 +3272,7 @@ dependencies = [
 
 [[package]]
 name = "indexer-tests"
-version = "4.3.2"
+version = "4.3.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -6745,7 +6745,7 @@ dependencies = [
 
 [[package]]
 name = "spo-indexer"
-version = "4.3.2"
+version = "4.3.3"
 dependencies = [
  "anyhow",
  "blake2",
@@ -8237,7 +8237,7 @@ dependencies = [
 
 [[package]]
 name = "wallet-indexer"
-version = "4.3.2"
+version = "4.3.3"
 dependencies = [
  "anyhow",
  "async-stream",
