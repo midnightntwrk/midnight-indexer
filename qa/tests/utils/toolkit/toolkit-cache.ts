@@ -112,7 +112,6 @@ async function ensureContainer(): Promise<number> {
     if (!port) {
       throw new Error(`Could not determine host port for existing ${CONTAINER_NAME} container`);
     }
-    console.log(`[CACHE] Reusing ${CONTAINER_NAME} on host port ${port}`);
     return port;
   }
 
