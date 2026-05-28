@@ -19,6 +19,7 @@ import { IntrospectionQuery } from 'graphql';
 import { GraphQLResponse } from '@utils/indexer/indexer-types';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
+import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import {
   SCHEMA_QUERY,
   INTROSPECTION_QUERY,
@@ -83,17 +84,33 @@ describe('graphql health checks', () => {
     test('should return an error, given the depth of the query is > 15', async () => {
       const query = BIG_INTROSPECTION_QUERY;
 
+      // The server may deliver the recursion-depth rejection either as a
+      // legacy `next` frame carrying `{data: null, errors: [...]}` or — under
+      // async-graphql 7.2 — as the `errors`-in-`next` shape that
+      // `IndexerWsClient` routes to the `error` handler. Normalize both
+      // paths into a `GraphQLResponse` shape so `toBeError()` works the same
+      // way regardless of which route the server picked.
       const response = await new Promise<GraphQLResponse<IntrospectionQuery>>((resolve, reject) => {
-        let dataReceived = false;
-        const unsubscribe = client.subscribe(query, {
+        let settled = false;
+        let unsubscribe = () => {};
+        const settle = (value: GraphQLResponse<IntrospectionQuery>) => {
+          if (settled) return;
+          settled = true;
+          unsubscribe();
+          resolve(value);
+        };
+        unsubscribe = client.subscribe(query, {
           next: (data: GraphQLResponse<IntrospectionQuery>) => {
-            dataReceived = true;
-            unsubscribe();
-            resolve(data);
+            settle(data);
           },
-          error: reject,
+          error: (err) => {
+            settle({
+              data: null,
+              errors: [{ message: extractSubscriptionErrorMessage(err) }],
+            } as unknown as GraphQLResponse<IntrospectionQuery>);
+          },
           complete: () => {
-            if (!dataReceived) {
+            if (!settled) {
               reject(new Error('No data received before completion'));
             }
           },

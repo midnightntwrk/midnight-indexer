@@ -23,6 +23,7 @@ import {
   BlockSubscriptionResponse,
   GraphQLCompleteMessage,
 } from '@utils/indexer/websocket-client';
+import { buildErrorPayload } from '@utils/indexer/subscription-error';
 import { EventCoordinator } from '@utils/event-coordinator';
 import type { TestContext } from 'vitest';
 import { BlockSchema } from '@utils/indexer/graphql/schema';
@@ -238,6 +239,12 @@ describe('block subscriptions', () => {
             eventCoordinator.notify('error');
           }
         },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          messagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
+        },
         complete: (message) => {
           log.debug(`Complete message: ${JSON.stringify(message)}`);
           completionMessage = message;
@@ -288,6 +295,12 @@ describe('block subscriptions', () => {
             log.debug('Received the expected error message');
             eventCoordinator.notify('error');
           }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          messagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
         complete: (message) => {
           log.debug(`Complete message: ${JSON.stringify(message)}`);
@@ -411,6 +424,12 @@ describe('block subscriptions', () => {
             eventCoordinator.notify('error');
           }
         },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          blockMessagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
+        },
       };
 
       indexerWsClient.subscribeToBlockEvents(blockSubscriptionHandler, blockOffset);
@@ -449,6 +468,12 @@ describe('block subscriptions', () => {
             log.debug('Received the expected error message');
             eventCoordinator.notify('error');
           }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          blockMessagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
         complete: (message) => {
           log.debug(`Complete message: ${JSON.stringify(message)}`);
@@ -500,6 +525,12 @@ describe('block subscriptions', () => {
             log.debug('Received the expected error message');
             eventCoordinator.notify('error');
           }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          blockMessagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
         complete: (message) => {
           log.debug(`Complete message: ${JSON.stringify(message)}`);

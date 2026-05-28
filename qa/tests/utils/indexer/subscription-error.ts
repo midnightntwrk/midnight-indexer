@@ -62,3 +62,23 @@ export function extractSubscriptionErrorMessage(error: unknown): string {
   }
   return JSON.stringify(error);
 }
+
+/**
+ * Build a synthetic `{ data: null, errors: [{ message }] }` payload from
+ * whatever `IndexerWsClient`'s `error` handler received. Used in tests that
+ * were written before PR #1198 to collect error frames out of the `next`
+ * callback: registering this on the `error` callback funnels both routes
+ * (legacy `next` errors and the new `errors`-in-`next` route) into the same
+ * collected-payload shape, so existing assertions on `payload.errors[0].message`
+ * keep working.
+ *
+ * The generic parameter exists only to let call sites assign the result back
+ * into their typed subscription-response array without a separate cast at
+ * each call site.
+ */
+export function buildErrorPayload<T>(error: unknown): T {
+  return {
+    data: null,
+    errors: [{ message: extractSubscriptionErrorMessage(error) }],
+  } as unknown as T;
+}
