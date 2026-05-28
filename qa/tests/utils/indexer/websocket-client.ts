@@ -364,7 +364,18 @@ export class IndexerWsClient {
 
     switch (type) {
       case 'next':
-        handlers.next?.(payload);
+        // async-graphql 7.2 emits subscription errors (e.g. quota rejections)
+        // as `{type: 'next', payload: {data: null, errors: [...]}}` rather than
+        // the legacy `{type: 'error', payload: [...]}`. Both shapes are valid
+        // in graphql-transport-ws; route errors-inside-next to the error
+        // handler so tests don't silently treat rejections as successes.
+        const errors = (payload as { errors?: Array<{ message?: string }> } | null)?.errors;
+        if (Array.isArray(errors) && errors.length > 0) {
+          const message = errors[0]?.message ?? 'GraphQL subscription error';
+          handlers.error?.(new Error(message));
+        } else {
+          handlers.next?.(payload);
+        }
         break;
       case 'error':
         handlers.error?.(payload);
