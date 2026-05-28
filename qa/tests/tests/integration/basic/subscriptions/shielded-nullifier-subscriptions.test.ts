@@ -22,6 +22,7 @@ import {
   ShieldedNullifierTransactionSubscriptionResponse,
   SubscriptionHandlers,
 } from '@utils/indexer/websocket-client';
+import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import { ShieldedNullifierTransactionSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ShieldedNullifierTransaction } from '@utils/indexer/indexer-types';
@@ -67,7 +68,7 @@ function collectSubscriptionError(
       error: (error) => {
         clearTimeout(timeout);
         subscription.unsubscribe();
-        const message = typeof error === 'string' ? error : JSON.stringify(error);
+        const message = extractSubscriptionErrorMessage(error);
         resolve({
           payload: {
             data: null,
