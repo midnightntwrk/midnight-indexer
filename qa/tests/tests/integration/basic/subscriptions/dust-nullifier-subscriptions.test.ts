@@ -137,17 +137,8 @@ describe('dust nullifier transactions subscription', () => {
 
         const subscription = indexerWsClient.subscribeToDustNullifierTransactions(
           {
-            next: (payload) => {
+            next: () => {
               eventCount++;
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                subscription.unsubscribe();
-                resolve({
-                  completed: false,
-                  error: payload.errors[0].message,
-                  eventCount,
-                });
-              }
             },
             error: (error) => {
               clearTimeout(timeout);
@@ -194,17 +185,8 @@ describe('dust nullifier transactions subscription', () => {
 
         const subscription = indexerWsClient.subscribeToDustNullifierTransactions(
           {
-            next: (payload) => {
+            next: () => {
               eventCount++;
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                subscription.unsubscribe();
-                resolve({
-                  completed: false,
-                  error: payload.errors[0].message,
-                  eventCount,
-                });
-              }
             },
             error: (error) => {
               clearTimeout(timeout);

@@ -207,13 +207,6 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
 
         const subscription = indexerWsClient.subscribeToDustGenerations(
           {
-            next: (payload) => {
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                safeUnsubscribe(unsubscribe);
-                resolve(payload.errors[0].message);
-              }
-            },
             error: (error) => {
               clearTimeout(timeout);
               safeUnsubscribe(unsubscribe);
@@ -278,17 +271,6 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
 
           const subscription = indexerWsClient.subscribeToDustGenerations(
             {
-              next: (payload) => {
-                if (payload.errors && payload.errors.length > 0) {
-                  clearTimeout(timeout);
-                  safeUnsubscribe(unsubscribe);
-                  settle({
-                    error: payload.errors[0].message,
-                    completed: false,
-                    timedOut: false,
-                  });
-                }
-              },
               error: (error) => {
                 clearTimeout(timeout);
                 safeUnsubscribe(unsubscribe);
@@ -352,13 +334,6 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
 
         const subscription = indexerWsClient.subscribeToDustGenerations(
           {
-            next: (payload) => {
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                safeUnsubscribe(unsubscribe);
-                resolve(payload.errors[0].message);
-              }
-            },
             error: (error) => {
               clearTimeout(timeout);
               safeUnsubscribe(unsubscribe);

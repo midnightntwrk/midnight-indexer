@@ -57,13 +57,8 @@ function collectSubscriptionError(
     }, timeoutMs);
 
     const subscription = start({
-      next: (payload) => {
+      next: () => {
         eventCount++;
-        if (payload.errors && payload.errors.length > 0) {
-          clearTimeout(timeout);
-          subscription.unsubscribe();
-          resolve({ payload, completed: false, eventCount });
-        }
       },
       error: (error) => {
         clearTimeout(timeout);
