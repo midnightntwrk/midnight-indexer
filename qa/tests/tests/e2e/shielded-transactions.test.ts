@@ -27,10 +27,55 @@ import {
 } from './test-utils';
 import { TestContext } from 'vitest';
 import { collectValidZswapEvents } from 'tests/shared/zswap-events-utils';
-import { RegularTransactionSchema, ZswapLedgerEventSchema } from '@utils/indexer/graphql/schema';
+import {
+  RegularTransactionSchema,
+  RelevantTransactionSchema,
+  ZswapLedgerEventSchema,
+} from '@utils/indexer/graphql/schema';
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
 import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
+
+/**
+ * Subscribe to shielded transaction events for an open wallet session and resolve `true` as soon
+ * as a `RelevantTransaction` whose transaction hash equals `expectedTxHash` is delivered, or
+ * `false` if no such event arrives within `timeoutMs`.
+ *
+ * The shielded subscription replays relevant history from the beginning, so a transaction
+ * confirmed before the subscription opened is still delivered. The indexer never exposes
+ * decrypted shielded amounts, so identity (the transaction hash) is the correctness handle:
+ * matching it proves the indexer streamed *the* transaction, not merely *a* transaction. The
+ * helper is used both to assert delivery to the involved viewing keys (expect `true`) and to
+ * assert non-delivery to an unrelated viewing key (expect `false`).
+ */
+async function awaitRelevantTransaction(
+  ws: IndexerWsClient,
+  sessionId: string,
+  expectedTxHash: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let unsubscribe = () => {};
+    const timeout = setTimeout(() => {
+      unsubscribe();
+      resolve(false);
+    }, timeoutMs);
+
+    unsubscribe = ws.subscribeToShieldedTransactionEvents(
+      {
+        next: (payload) => {
+          const parsed = RelevantTransactionSchema.safeParse(payload.data?.shieldedTransactions);
+          if (parsed.success && parsed.data.transaction.hash === expectedTxHash) {
+            clearTimeout(timeout);
+            unsubscribe();
+            resolve(true);
+          }
+        },
+      },
+      sessionId,
+    );
+  });
+}
 
 describe('shielded transactions', () => {
   let indexerWsClient: IndexerWsClient;
@@ -319,50 +364,129 @@ describe('shielded transactions', () => {
         `dustCommitmentEndIndex before tx: ${dustCommitmentEndIndexBeforeTx}, after tx: ${regularTx.dustCommitmentEndIndex}`,
       );
     });
+  });
+
+  describe('a confirmed shielded transfer streamed to wallet sessions by viewing key', () => {
+    // A third seed that is NOT party to the source->destination transfer, used as a negative
+    // control for the indexer's relevance filtering / shielded privacy guarantee.
+    const unrelatedSeed = '0'.repeat(56) + 'deadbeef';
 
     /**
-     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
-     * that transaction through an shielded transaction event for the source viewing key.
+     * The indexer streams a confirmed shielded transaction to the wallet session of the source
+     * viewing key. The indexer never exposes decrypted shielded value, so identity is the
+     * assertion: the streamed RelevantTransaction must carry the same hash the toolkit submitted.
      *
-     * @given we subscribe to shielded transaction events for the source viewing key
-     * @when we submit an shielded transaction to node
-     * @then we should receive a transaction event that includes transaction details for the source viewing key
+     * @given a confirmed shielded transaction and a session opened with the source viewing key
+     * @when we subscribe to shielded transaction events for that session
+     * @then a RelevantTransaction whose hash matches the submitted transaction is delivered
      */
-    test.todo(
-      'should be reported by the indexer through an shielded transaction event for the source address',
-      async () => {
-        // Implement me
+    test(
+      'should stream the transaction to the source viewing key with a matching hash',
+      { timeout: 60_000 },
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = {
+          labels: ['Subscription', 'ShieldedTransaction', 'ViewingKey', 'Source'],
+        };
+
+        ctx.skip?.(
+          transactionResult.status !== 'confirmed',
+          "Toolkit transaction hasn't been confirmed",
+        );
+
+        // Reconnect WS client - the connection may have gone stale during the long toolkit transaction
+        await indexerWsClient.connectionClose();
+        await indexerWsClient.connectionInit();
+
+        const viewingKey = await toolkit.showViewingKey(sourceSeed);
+        const sessionId = await indexerWsClient.openWalletSession(viewingKey);
+
+        const delivered = await awaitRelevantTransaction(
+          indexerWsClient,
+          sessionId,
+          transactionResult.txHash!,
+          30_000,
+        );
+        expect(delivered).toBe(true);
       },
     );
 
     /**
-     * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
-     * that transaction through an shielded transaction event for the destination viewing key.
+     * The same confirmed transaction is also relevant to the destination wallet (via the output
+     * addressed to it), so the indexer must stream it to the destination viewing key too.
      *
-     * @given we subscribe to shielded transaction events for the destination viewing key
-     * @when we submit an shielded transaction to node
-     * @then we should receive a transaction event that includes transaction details for the destination viewing key
+     * @given a confirmed shielded transaction and a session opened with the destination viewing key
+     * @when we subscribe to shielded transaction events for that session
+     * @then a RelevantTransaction whose hash matches the submitted transaction is delivered
      */
-    test.todo(
-      'should be reported by the indexer through an shielded transaction event for the destination address',
-      async () => {
-        // Implement me
+    test(
+      'should stream the transaction to the destination viewing key with a matching hash',
+      { timeout: 60_000 },
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = {
+          labels: ['Subscription', 'ShieldedTransaction', 'ViewingKey', 'Destination'],
+        };
+
+        ctx.skip?.(
+          transactionResult.status !== 'confirmed',
+          "Toolkit transaction hasn't been confirmed",
+        );
+
+        // Reconnect WS client - the connection may have gone stale during the long toolkit transaction
+        await indexerWsClient.connectionClose();
+        await indexerWsClient.connectionInit();
+
+        const viewingKey = await toolkit.showViewingKey(destinationSeed);
+        const sessionId = await indexerWsClient.openWalletSession(viewingKey);
+
+        const delivered = await awaitRelevantTransaction(
+          indexerWsClient,
+          sessionId,
+          transactionResult.txHash!,
+          30_000,
+        );
+        expect(delivered).toBe(true);
       },
     );
 
     /**
-     * Once an shielded transaction has been submitted to node and confirmed, we should see the transaction
-     * giving 1 shielded token to the destination address.
+     * The indexer must publish the transaction only to the viewing keys it concerns. A viewing
+     * key not party to the transfer must not receive it. This is the negative control that, paired
+     * with the two delivery cases above, proves the indexer routes the right transaction to the
+     * right parties and only them. Asserting decrypted amounts is intentionally out of scope: the
+     * indexer is privacy-preserving and never exposes plaintext shielded value (a 1-token balance
+     * change is a wallet-side concern, not the indexer's).
      *
-     * @given a confirmed shielded transaction between two wallets
-     * @when we inspect the containing block for shielded transaction details
-     * @then there should be a balance change that reflects the transfer of 1 shielded token
+     * @given a confirmed shielded transaction and a session opened with an unrelated viewing key
+     * @when we subscribe to shielded transaction events for that session
+     * @then no RelevantTransaction matching the submitted transaction is delivered
      */
-    test.todo(
-      'should have transferred 1 token from the source to the destination address',
-      async () => {
-        // Implement me but... can we really implement this test? We need to be able to view the transaction details in
-        // the block and use the viewing key for that. Does the toolkit offer that level of support?
+    test(
+      'should not stream the transaction to an unrelated viewing key',
+      { timeout: 40_000 },
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = {
+          labels: ['Subscription', 'ShieldedTransaction', 'ViewingKey', 'Privacy'],
+        };
+
+        ctx.skip?.(
+          transactionResult.status !== 'confirmed',
+          "Toolkit transaction hasn't been confirmed",
+        );
+
+        // Reconnect WS client - the connection may have gone stale during the long toolkit transaction
+        await indexerWsClient.connectionClose();
+        await indexerWsClient.connectionInit();
+
+        const viewingKey = await toolkit.showViewingKey(unrelatedSeed);
+        const sessionId = await indexerWsClient.openWalletSession(viewingKey);
+
+        const delivered = await awaitRelevantTransaction(
+          indexerWsClient,
+          sessionId,
+          transactionResult.txHash!,
+          20_000,
+        );
+        expect(delivered).toBe(false);
       },
     );
   });

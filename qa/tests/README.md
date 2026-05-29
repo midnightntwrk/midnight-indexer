@@ -103,8 +103,27 @@ E2E and integration tests that use the Node Toolkit fetch a Postgres-backed
 cache (`MN_FETCH_CACHE`). The test harness brings the `toolkit-postgres`
 container up automatically on a dynamically chosen host port — no manual
 step is required. Cache data persists between runs under
-`qa/tests/.tmp/toolkit-postgres-data/`. To start fresh, stop and remove the
-container: `docker rm -f toolkit-postgres`.
+`qa/tests/.tmp/toolkit-postgres-data/`.
+
+The cache is **shared across every target environment**: each chain lives in
+the same Postgres keyed by its `chain_id`, so a single volume can hold the
+multi-million-block `qanet` and `preview` chains alongside ephemeral
+`undeployed` chains. Because `undeployed` provisions a fresh genesis (a new
+`chain_id`) on every run, the warmup reporter auto-prunes superseded
+`undeployed` chains per-`chain_id` — it never deletes another env's data.
+
+> **Do not** `docker rm -f toolkit-postgres` / delete `.tmp/toolkit-postgres-data`
+> to clear "stale" chains: that wipes **all** environments' caches, forcing a
+> multi-hour re-sync of `qanet`/`preview`. To reclaim a single chain, prune just
+> its rows (the reporter prints the exact command when it flags an unexpected
+> chain):
+>
+> ```bash
+> docker exec toolkit-postgres psql -U toolkit -d toolkit \
+>   -c "DELETE FROM raw_block_data_v2 WHERE chain_id = decode('<chain_id_hex>','hex'); \
+>       DELETE FROM highest_verified  WHERE chain_id = decode('<chain_id_hex>','hex'); \
+>       DELETE FROM chain_names       WHERE chain_id = decode('<chain_id_hex>','hex');"
+> ```
 
 #### Undeployed / local environment
 
@@ -118,6 +137,7 @@ export NODE_TOOLKIT_TAG=latest-main
 ```
 
 Note: if you need to match a particular toolkit version:
+
 ```bash
 export NODE_TOOLKIT_TAG=0.18.0-rc.7
 ```
@@ -133,6 +153,7 @@ export NODE_TOOLKIT_TAG=latest-main
 ```
 
 Note: if you need to match a particular toolkit version:
+
 ```bash
 export NODE_TOOLKIT_TAG=0.17.0-rc.4
 ```
@@ -177,11 +198,11 @@ suite finishes. **No manual script invocation is required.**
 
 Stack flavour by suite:
 
-| Suite | Provisioning script invoked | Chain state |
-|-------|----------------------------|-------------|
-| `smoke` | `qa/scripts/startup-localenv-with-data.sh` | pre-seeded from `.node/<NODE_TAG>/` |
-| `integration` | `qa/scripts/startup-localenv-with-data.sh` | pre-seeded from `.node/<NODE_TAG>/` |
-| `e2e` | `qa/scripts/startup-localenv-from-genesis.sh` | fresh (toolkit generates data dynamically) |
+| Suite         | Provisioning script invoked                   | Chain state                                |
+| ------------- | --------------------------------------------- | ------------------------------------------ |
+| `smoke`       | `qa/scripts/startup-localenv-with-data.sh`    | pre-seeded from `.node/<NODE_TAG>/`        |
+| `integration` | `qa/scripts/startup-localenv-with-data.sh`    | pre-seeded from `.node/<NODE_TAG>/`        |
+| `e2e`         | `qa/scripts/startup-localenv-from-genesis.sh` | fresh (toolkit generates data dynamically) |
 
 > ℹ️ **`.node/<NODE_TAG>/` must exist** for the with-data flavour. Generate it
 > via `./generate_node_data.sh <NODE_TAG>` from the repo root if it isn't there.
@@ -287,13 +308,13 @@ TARGET_ENV=undeployed yarn test:integration
 
 #### Environment variables
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `FROM_NODE_TAG` | Yes | — | Old node version (e.g. `0.21.0`) |
-| `TO_NODE_TAG` | Yes | — | New node version (e.g. `0.22.2`) |
-| `INDEXER_TAG` | Yes | — | Indexer image tag to test |
-| `NODE_TOOLKIT_TAG` | No | `latest-main` | Node toolkit version for the governance upgrade |
-| `IMAGE_REGISTRY` | No | `midnightntwrk` | Docker image registry (use `ghcr.io/midnight-ntwrk` for GHCR images) |
+| Variable           | Required | Default         | Description                                                          |
+| ------------------ | -------- | --------------- | -------------------------------------------------------------------- |
+| `FROM_NODE_TAG`    | Yes      | —               | Old node version (e.g. `0.21.0`)                                     |
+| `TO_NODE_TAG`      | Yes      | —               | New node version (e.g. `0.22.2`)                                     |
+| `INDEXER_TAG`      | Yes      | —               | Indexer image tag to test                                            |
+| `NODE_TOOLKIT_TAG` | No       | `latest-main`   | Node toolkit version for the governance upgrade                      |
+| `IMAGE_REGISTRY`   | No       | `midnightntwrk` | Docker image registry (use `ghcr.io/midnight-ntwrk` for GHCR images) |
 
 #### Notes
 
