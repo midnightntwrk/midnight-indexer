@@ -16,13 +16,12 @@
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import type { TestContext } from 'vitest';
-import type { GraphQLError } from 'graphql';
 import {
   IndexerWsClient,
   ShieldedNullifierTransactionSubscriptionResponse,
   SubscriptionHandlers,
 } from '@utils/indexer/websocket-client';
-import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
+import { buildErrorPayload } from '@utils/indexer/subscription-error';
 import { ShieldedNullifierTransactionSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ShieldedNullifierTransaction } from '@utils/indexer/indexer-types';
@@ -63,12 +62,8 @@ function collectSubscriptionError(
       error: (error) => {
         clearTimeout(timeout);
         subscription.unsubscribe();
-        const message = extractSubscriptionErrorMessage(error);
         resolve({
-          payload: {
-            data: null,
-            errors: [{ message } as GraphQLError],
-          },
+          payload: buildErrorPayload<ShieldedNullifierTransactionSubscriptionResponse>(error),
           completed: false,
           eventCount,
         });
