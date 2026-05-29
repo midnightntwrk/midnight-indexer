@@ -45,4 +45,13 @@ pub struct Block {
     pub zswap_merkle_tree_root: SerializedZswapMerkleTreeRoot,
 
     pub ledger_parameters: SerializedLedgerParameters,
+
+    #[sqlx(try_from = "i64")]
+    pub zswap_end_index: u64,
+
+    #[sqlx(try_from = "i64")]
+    pub dust_commitment_end_index: u64,
+
+    #[sqlx(try_from = "i64")]
+    pub dust_generation_end_index: u64,
 }

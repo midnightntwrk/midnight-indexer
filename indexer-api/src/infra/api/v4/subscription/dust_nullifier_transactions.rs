@@ -42,12 +42,12 @@ impl<S, B> Default for DustNullifierTransactionsSubscription<S, B> {
 /// A transaction containing a dust nullifier match with block context.
 #[derive(Debug, Clone, SimpleObject)]
 pub struct DustNullifierTransaction {
-    /// The hex-encoded matched nullifier.
+    /// The hex-encoded matched nullifier, in 32-byte little-endian form.
     #[graphql(directive = beta::apply())]
-    pub nullifier: HexEncoded,
-    /// The hex-encoded commitment.
+    pub nullifier_le_bytes: HexEncoded,
+    /// The hex-encoded commitment, in 32-byte little-endian form.
     #[graphql(directive = beta::apply())]
-    pub commitment: HexEncoded,
+    pub commitment_le_bytes: HexEncoded,
     /// The transaction ID (indexer-internal BIGSERIAL, use as resumption cursor).
     pub transaction_id: u64,
     /// The hex-encoded transaction hash (32-byte chain identifier).
@@ -64,13 +64,14 @@ where
     S: Storage,
     B: Subscriber,
 {
-    /// Subscribe to transactions containing dust nullifiers matching the provided prefixes.
-    /// Returns transaction and block references for wallet to fetch full data.
-    /// If `toBlock` is specified, the subscription finishes after reaching that block.
+    /// Subscribe to transactions containing dust nullifiers whose 32-byte little-endian form
+    /// starts with one of the provided prefixes. Returns transaction and block references for
+    /// the wallet to fetch full data. If `toBlock` is specified, the subscription finishes
+    /// after reaching that block.
     async fn dust_nullifier_transactions<'a>(
         &self,
         cx: &'a Context<'a>,
-        nullifier_prefixes: Vec<HexEncoded>,
+        nullifier_le_bytes_prefixes: Vec<HexEncoded>,
         from_block: Option<u64>,
         to_block: Option<u64>,
     ) -> impl Stream<Item = ApiResult<DustNullifierTransaction>> {
@@ -90,11 +91,11 @@ where
                 .try_acquire(per_connection_counter, None)
                 .map_err_into_client_error(|| "subscription limit exceeded")?;
 
-            (!nullifier_prefixes.is_empty())
+            (!nullifier_le_bytes_prefixes.is_empty())
                 .then_some(())
-                .some_or_client_error(|| "nullifierPrefixes must not be empty")?;
+                .some_or_client_error(|| "nullifierLeBytesPrefixes must not be empty")?;
 
-            let prefix_bytes = nullifier_prefixes
+            let prefix_bytes = nullifier_le_bytes_prefixes
                 .iter()
                 .map(|p| const_hex::decode(p.as_ref()))
                 .collect::<Result<Vec<_>, _>>()
@@ -104,7 +105,7 @@ where
                 .iter()
                 .all(|b| !b.is_empty())
                 .then_some(())
-                .some_or_client_error(|| "nullifierPrefixes elements must not be empty")?;
+                .some_or_client_error(|| "nullifierLeBytesPrefixes elements must not be empty")?;
 
             let from = from_block.unwrap_or(0);
             let to = to_block.unwrap_or(u64::MAX);
@@ -123,8 +124,8 @@ where
                 .map_err_into_server_error(|| "get next dust nullifier transaction")?
             {
                 yield DustNullifierTransaction {
-                    nullifier: entry.nullifier.hex_encode(),
-                    commitment: entry.commitment.hex_encode(),
+                    nullifier_le_bytes: entry.nullifier_le_bytes.hex_encode(),
+                    commitment_le_bytes: entry.commitment_le_bytes.hex_encode(),
                     transaction_id: entry.transaction_id,
                     transaction_hash: entry.transaction_hash.hex_encode(),
                     block_height: entry.block_height,
@@ -163,8 +164,8 @@ where
                     .map_err_into_server_error(|| "get next dust nullifier transaction")?
                 {
                     yield DustNullifierTransaction {
-                        nullifier: entry.nullifier.hex_encode(),
-                        commitment: entry.commitment.hex_encode(),
+                        nullifier_le_bytes: entry.nullifier_le_bytes.hex_encode(),
+                        commitment_le_bytes: entry.commitment_le_bytes.hex_encode(),
                         transaction_id: entry.transaction_id,
                         transaction_hash: entry.transaction_hash.hex_encode(),
                         block_height: entry.block_height,

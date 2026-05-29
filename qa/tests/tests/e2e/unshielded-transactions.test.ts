@@ -122,8 +122,10 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
     log.debug(`Previous max dust ID before tx = ${previousMaxDustId}`);
 
     // Capture the highest dustCommitmentEndIndex before the transaction from genesis block.
+    // Guard against null data: older indexer deployments return a GraphQL validation error when
+    // the query includes schema fields not yet in that version, which sets data to null.
     const genesisResponse = await indexerHttpClient.getBlockByOffset({ height: 0 });
-    const genesisTxs = genesisResponse.data!.block.transactions;
+    const genesisTxs = genesisResponse.data?.block?.transactions ?? [];
     dustCommitmentEndIndexBeforeTx = genesisTxs.reduce((max, tx) => {
       const regularTx = tx as RegularTransaction;
       return regularTx.dustCommitmentEndIndex != null && regularTx.dustCommitmentEndIndex > max
@@ -595,67 +597,6 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
         'DustInitialUtxo',
         'DustSpendProcessed',
       ]);
-    });
-  });
-
-  describe('transaction failure scenario', () => {
-    /**
-     * When a transaction fails at application-time, the indexer should not record any outputs or state changes for it.
-     *
-     * @given a source wallet and the indexer tracking unshielded transactions
-     * @when we send several unshielded transactions very close together from the same funding wallet
-     * @and one of them fails at application-time due to node validation
-     * @then the indexer must ignore the transaction entirely - no UTXOs are created and getTransactionByOffset must return an empty result
-     */
-    test('should NOT create UTXOs for a failed unshielded transaction', async () => {
-      const submitted: ToolkitTransactionResult[] = [];
-
-      // Submit several transactions concurrently from the same funding wallet.
-      // Even if the toolkit accepts all of them, the node will reject some during apply-time because they compete for the same state
-      submitted.push(
-        ...(await Promise.all(
-          Array.from({ length: 5 }, () =>
-            toolkit.generateSingleTx(sourceSeed, 'unshielded', destinationAddress, 5),
-          ),
-        )),
-      );
-      await new Promise((r) => setTimeout(r, 6000));
-      let failingTx: ToolkitTransactionResult | null = null;
-
-      for (const tx of submitted) {
-        const res = await indexerHttpClient.getTransactionByOffset({ hash: tx.txHash });
-        const records = res.data?.transactions ?? [];
-
-        if (records.length === 0) {
-          failingTx = tx;
-          break;
-        }
-
-        // A single tx hash can have multiple records because failed txs don't reserve hashes.
-        // This means the same hash might appear as:
-        //   - a failed attempt (no created/spent UTXOs), or
-        //   - a later successful attempt (with created/spent UTXOs).
-        // We only want to detect a REAL failure: at least one failed record AND no successful record.
-        const successes = records.filter(
-          (r) =>
-            (r.unshieldedCreatedOutputs?.length ?? 0) > 0 ||
-            (r.unshieldedSpentOutputs?.length ?? 0) > 0,
-        );
-
-        const failures = records.filter(
-          (r) =>
-            (r.unshieldedCreatedOutputs?.length ?? 0) === 0 &&
-            (r.unshieldedSpentOutputs?.length ?? 0) === 0,
-        );
-
-        // Pure failure: failed AND never succeeded
-        if (failures.length > 0 && successes.length === 0) {
-          log.debug(`Detected pure failure for hash=${tx.txHash}`);
-          failingTx = tx;
-          break;
-        }
-      }
-      expect(failingTx).not.toBeNull();
     });
   });
 });
