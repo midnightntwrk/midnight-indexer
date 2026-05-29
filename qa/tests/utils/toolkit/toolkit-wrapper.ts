@@ -19,7 +19,7 @@ import { retry } from '../retry-helper';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
-import { getContractDeploymentHashes } from '../../tests/e2e/test-utils';
+import { getContractDeploymentHashes, resolveBlockHash } from '../../tests/e2e/test-utils';
 import { ensureToolkitCachePostgres } from './toolkit-cache';
 import { z } from 'zod';
 import {
@@ -834,7 +834,9 @@ class ToolkitWrapper {
 
     log.info('Submitting transaction to network...');
     const rawOutput = await this.sendGeneratedTx(txFileName);
-    return this.parseTransactionOutput(rawOutput);
+    const result = this.parseTransactionOutput(rawOutput);
+    await resolveBlockHash(result);
+    return result;
   }
 
   /**
@@ -884,8 +886,10 @@ class ToolkitWrapper {
     }
 
     log.info('Running contract maintenance (update)...');
-    const result = await this.execToolkit(maintenanceArgs, 'contract maintenance failed');
-    return this.parseTransactionOutput(result.output.trim());
+    const execResult = await this.execToolkit(maintenanceArgs, 'contract maintenance failed');
+    const result = this.parseTransactionOutput(execResult.output.trim());
+    await resolveBlockHash(result);
+    return result;
   }
 
   /**
