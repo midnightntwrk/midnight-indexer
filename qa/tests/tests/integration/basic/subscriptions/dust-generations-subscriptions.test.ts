@@ -22,6 +22,7 @@ import {
   IndexerWsClient,
   DustGenerationsSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
+import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import { DustGenerationsEventSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { env } from 'environment/model';
@@ -206,17 +207,10 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
 
         const subscription = indexerWsClient.subscribeToDustGenerations(
           {
-            next: (payload) => {
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                safeUnsubscribe(unsubscribe);
-                resolve(payload.errors[0].message);
-              }
-            },
             error: (error) => {
               clearTimeout(timeout);
               safeUnsubscribe(unsubscribe);
-              resolve(typeof error === 'string' ? error : JSON.stringify(error));
+              resolve(extractSubscriptionErrorMessage(error));
             },
             complete: () => {
               clearTimeout(timeout);
@@ -277,22 +271,11 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
 
           const subscription = indexerWsClient.subscribeToDustGenerations(
             {
-              next: (payload) => {
-                if (payload.errors && payload.errors.length > 0) {
-                  clearTimeout(timeout);
-                  safeUnsubscribe(unsubscribe);
-                  settle({
-                    error: payload.errors[0].message,
-                    completed: false,
-                    timedOut: false,
-                  });
-                }
-              },
               error: (error) => {
                 clearTimeout(timeout);
                 safeUnsubscribe(unsubscribe);
                 settle({
-                  error: typeof error === 'string' ? error : JSON.stringify(error),
+                  error: extractSubscriptionErrorMessage(error),
                   completed: false,
                   timedOut: false,
                 });
@@ -351,17 +334,10 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
 
         const subscription = indexerWsClient.subscribeToDustGenerations(
           {
-            next: (payload) => {
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                safeUnsubscribe(unsubscribe);
-                resolve(payload.errors[0].message);
-              }
-            },
             error: (error) => {
               clearTimeout(timeout);
               safeUnsubscribe(unsubscribe);
-              resolve(typeof error === 'string' ? error : JSON.stringify(error));
+              resolve(extractSubscriptionErrorMessage(error));
             },
             complete: () => {
               clearTimeout(timeout);

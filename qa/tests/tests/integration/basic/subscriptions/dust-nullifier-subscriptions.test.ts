@@ -20,6 +20,7 @@ import {
   IndexerWsClient,
   DustNullifierTransactionSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
+import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import { DustNullifierTransactionSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { DustNullifierTransaction } from '@utils/indexer/indexer-types';
@@ -136,24 +137,15 @@ describe('dust nullifier transactions subscription', () => {
 
         const subscription = indexerWsClient.subscribeToDustNullifierTransactions(
           {
-            next: (payload) => {
+            next: () => {
               eventCount++;
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                subscription.unsubscribe();
-                resolve({
-                  completed: false,
-                  error: payload.errors[0].message,
-                  eventCount,
-                });
-              }
             },
             error: (error) => {
               clearTimeout(timeout);
               subscription.unsubscribe();
               resolve({
                 completed: false,
-                error: typeof error === 'string' ? error : JSON.stringify(error),
+                error: extractSubscriptionErrorMessage(error),
                 eventCount,
               });
             },
@@ -193,24 +185,15 @@ describe('dust nullifier transactions subscription', () => {
 
         const subscription = indexerWsClient.subscribeToDustNullifierTransactions(
           {
-            next: (payload) => {
+            next: () => {
               eventCount++;
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                subscription.unsubscribe();
-                resolve({
-                  completed: false,
-                  error: payload.errors[0].message,
-                  eventCount,
-                });
-              }
             },
             error: (error) => {
               clearTimeout(timeout);
               subscription.unsubscribe();
               resolve({
                 completed: false,
-                error: typeof error === 'string' ? error : JSON.stringify(error),
+                error: extractSubscriptionErrorMessage(error),
                 eventCount,
               });
             },

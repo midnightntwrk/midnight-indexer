@@ -17,6 +17,7 @@ import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import { env } from 'environment/model';
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
+import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import dataProvider from '@utils/testdata-provider';
 
@@ -168,20 +169,19 @@ describe.skipIf(env.isUndeployedEnv())('wallet connect options (startIndex)', ()
         const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
           {
             next: (payload) => {
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                unsubscribe();
-                reject(
-                  new Error(`subscription returned errors: ${JSON.stringify(payload.errors)}`),
-                );
-                return;
-              }
               const event = payload.data?.shieldedTransactions;
               if (event?.__typename === 'ShieldedTransactionsProgress') {
                 clearTimeout(timeout);
                 unsubscribe();
                 resolve(event);
               }
+            },
+            error: (err) => {
+              clearTimeout(timeout);
+              unsubscribe();
+              reject(
+                new Error(`subscription returned errors: ${extractSubscriptionErrorMessage(err)}`),
+              );
             },
           },
           sessionId,
@@ -234,20 +234,19 @@ describe.skipIf(env.isUndeployedEnv())('wallet connect options (startIndex)', ()
         const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
           {
             next: (payload) => {
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                unsubscribe();
-                reject(
-                  new Error(`subscription returned errors: ${JSON.stringify(payload.errors)}`),
-                );
-                return;
-              }
               const event = payload.data?.shieldedTransactions;
               if (event?.__typename === 'ShieldedTransactionsProgress') {
                 clearTimeout(timeout);
                 unsubscribe();
                 resolve(event);
               }
+            },
+            error: (err) => {
+              clearTimeout(timeout);
+              unsubscribe();
+              reject(
+                new Error(`subscription returned errors: ${extractSubscriptionErrorMessage(err)}`),
+              );
             },
           },
           sessionId,

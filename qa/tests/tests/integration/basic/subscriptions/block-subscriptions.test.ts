@@ -23,6 +23,7 @@ import {
   BlockSubscriptionResponse,
   GraphQLCompleteMessage,
 } from '@utils/indexer/websocket-client';
+import { buildErrorPayload } from '@utils/indexer/subscription-error';
 import { EventCoordinator } from '@utils/event-coordinator';
 import type { TestContext } from 'vitest';
 import { BlockSchema } from '@utils/indexer/graphql/schema';
@@ -174,18 +175,17 @@ describe('block subscriptions', () => {
       const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
         next: (payload: BlockSubscriptionResponse) => {
           log.debug(`Received data: ${JSON.stringify(payload)}`);
-
           messagesReceived.push(payload);
-
-          if (payload.errors) {
-            eventCoordinator.notify('error');
-            log.error(`Error received: ${JSON.stringify(payload.errors)}`);
-          }
-
           if (messagesReceived.length === 10) {
             eventCoordinator.notify('expectedBlocksReceived');
             log.debug('Expected # of blocks received');
           }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.error(`Unexpected error frame: ${JSON.stringify(synthetic)}`);
+          messagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
       };
 
@@ -233,10 +233,12 @@ describe('block subscriptions', () => {
         next: (payload: BlockSubscriptionResponse) => {
           log.debug(`Received data: ${JSON.stringify(payload)}`);
           messagesReceived.push(payload);
-          if (payload.errors !== undefined) {
-            log.debug('Received the expected error message');
-            eventCoordinator.notify('error');
-          }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          messagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
         complete: (message) => {
           log.debug(`Complete message: ${JSON.stringify(message)}`);
@@ -284,10 +286,12 @@ describe('block subscriptions', () => {
         next: (payload: BlockSubscriptionResponse) => {
           log.debug(`Received data: ${JSON.stringify(payload)}`);
           messagesReceived.push(payload);
-          if (payload.errors !== undefined) {
-            log.debug('Received the expected error message');
-            eventCoordinator.notify('error');
-          }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          messagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
         complete: (message) => {
           log.debug(`Complete message: ${JSON.stringify(message)}`);
@@ -406,10 +410,12 @@ describe('block subscriptions', () => {
         next: (payload) => {
           blockMessagesReceived.push(payload);
           log.debug(`Received data: ${JSON.stringify(payload)}`);
-          if (payload.errors !== undefined) {
-            log.debug('Received the expected error message');
-            eventCoordinator.notify('error');
-          }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          blockMessagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
       };
 
@@ -445,10 +451,12 @@ describe('block subscriptions', () => {
         next: (payload) => {
           blockMessagesReceived.push(payload);
           log.debug(`Received data: ${JSON.stringify(payload)}`);
-          if (payload.errors !== undefined) {
-            log.debug('Received the expected error message');
-            eventCoordinator.notify('error');
-          }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          blockMessagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
         complete: (message) => {
           log.debug(`Complete message: ${JSON.stringify(message)}`);
@@ -496,10 +504,12 @@ describe('block subscriptions', () => {
         next: (payload) => {
           blockMessagesReceived.push(payload);
           log.debug(`Received data: ${JSON.stringify(payload)}`);
-          if (payload.errors !== undefined) {
-            log.debug('Received the expected error message');
-            eventCoordinator.notify('error');
-          }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          blockMessagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
         complete: (message) => {
           log.debug(`Complete message: ${JSON.stringify(message)}`);

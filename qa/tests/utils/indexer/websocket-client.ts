@@ -369,6 +369,12 @@ export class IndexerWsClient {
         // the legacy `{type: 'error', payload: [...]}`. Both shapes are valid
         // in graphql-transport-ws; route errors-inside-next to the error
         // handler so tests don't silently treat rejections as successes.
+        //
+        // Consequence: `handlers.error` receives an `Error` from this branch
+        // and the raw payload (string or `Array<GraphQLError>`) from the
+        // legacy `case 'error'` branch below. Helpers that need the bare
+        // server message must coerce both — use
+        // `extractSubscriptionErrorMessage()` from `./subscription-error`.
         const errors = (payload as { errors?: Array<{ message?: string }> } | null)?.errors;
         if (Array.isArray(errors) && errors.length > 0) {
           const message = errors[0]?.message ?? 'GraphQL subscription error';
