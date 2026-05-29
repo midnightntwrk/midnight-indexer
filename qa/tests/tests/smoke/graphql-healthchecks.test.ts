@@ -19,7 +19,7 @@ import { IntrospectionQuery } from 'graphql';
 import { GraphQLResponse } from '@utils/indexer/indexer-types';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
-import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
+import { buildErrorPayload } from '@utils/indexer/subscription-error';
 import {
   SCHEMA_QUERY,
   INTROSPECTION_QUERY,
@@ -104,10 +104,7 @@ describe('graphql health checks', () => {
             settle(data);
           },
           error: (err) => {
-            settle({
-              data: null,
-              errors: [{ message: extractSubscriptionErrorMessage(err) }],
-            } as unknown as GraphQLResponse<IntrospectionQuery>);
+            settle(buildErrorPayload<GraphQLResponse<IntrospectionQuery>>(err));
           },
           complete: () => {
             if (!settled) {
