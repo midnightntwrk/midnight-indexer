@@ -168,6 +168,20 @@ export INDEXER_API_VERSION=v3
 
 This controls the version segment in the API endpoint paths (e.g. `/api/v3/graphql` and `/api/v3/graphql/ws`). If not set, the clients will use `/api/v4/graphql` and `/api/v4/graphql/ws`.
 
+#### Indexer Blue/Green Instance
+
+Each deployed environment runs two indexer instances behind the public `indexer.<env>.midnight.network` URL (blue/green). In normal conditions that URL points at whichever instance is currently primary; a new indexer version is rolled out to the secondary instance first, so QA can validate it before it is promoted. To target a specific instance, set the `INDEXER_INSTANCE` environment variable:
+
+```bash
+# Target the blue instance
+INDEXER_INSTANCE=blue TARGET_ENV=qanet yarn test:smoke
+
+# Target the green instance
+INDEXER_INSTANCE=green TARGET_ENV=qanet yarn test:smoke
+```
+
+This rewrites the indexer host to `indexer-blue.<env>.midnight.network` / `indexer-green.<env>.midnight.network` for both the HTTP and WebSocket clients. If not set, the clients use the primary `indexer.<env>.midnight.network` URL. The value is case-insensitive and accepts only `blue` or `green`; any other value fails fast. It has no effect on `TARGET_ENV=undeployed` (localhost has no blue/green split).
+
 #### Vitest Worker Pool Cap
 
 By default Vitest sizes its worker pool to all available parallelism (≈ `os.cpus().length`), so on a typical CI runner each test run drives 4–8 forked workers concurrently against the indexer. To cap that — for example when characterising load-induced flakiness against a shared environment — set the `VITEST_MAX_WORKERS` environment variable:
