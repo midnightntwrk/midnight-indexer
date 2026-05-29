@@ -407,8 +407,8 @@ export const DustGenerationsEventSchema = z.discriminatedUnion('__typename', [
 ]);
 
 export const DustNullifierTransactionSchema = z.object({
-  nullifier: VarLenghtHex,
-  commitment: VarLenghtHex,
+  nullifierLeBytes: VarLenghtHex,
+  commitmentLeBytes: VarLenghtHex,
   transactionId: z.number(),
   transactionHash: Hash64,
   blockHeight: z.number(),
