@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.3-rc.3] - 2026-05-29
+
+### 🚀 Features
+
+- *(indexer-api)* Add per-tree end indexes to Block (#1197)
+- *(indexer-api)* Rename DustNullifier byte fields with LeBytes suffix (#1199)
+
+### ⚙️ Dependencies
+
+- Bump node to 1.0.0 (#1204). Test data regenerated against the 1.0.0 release tag (previously 1.0.0-rc.3); no functional change for the indexer.
+
 ## [4.3.3-rc.2] - 2026-05-27
 
 ### 🚀 Features
@@ -15,6 +26,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### 🐛 Bug Fixes
 
 - *(indexer-api)* Deliver DustGenerationDtimeUpdate items on fresh dustGenerations subscriptions (#1166)
+
+### ⚙️ Dependencies
+
+- Bump midnight-ledger to 8.1.0 (#1141). Version bump only from 8.1.0-rc.1, no functional change for the indexer.
 
 ## [4.3.2] - 2026-05-15
 
