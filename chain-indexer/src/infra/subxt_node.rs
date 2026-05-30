@@ -336,7 +336,7 @@ impl Node for SubxtNode {
                 // is verified against it too.
                 let mut last_forward_hash = after_height.map(|_| H256(after_hash.0));
                 for height in start_height..safe_height {
-                    if height % CATCH_UP_LOG_INTERVAL == 0 {
+                    if height.is_multiple_of(CATCH_UP_LOG_INTERVAL) {
                         info!(
                             highest_stored_height:? = after_height,
                             current_height = height,
