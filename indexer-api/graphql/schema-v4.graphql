@@ -532,6 +532,10 @@ type DustNullifierTransaction {
 	The hex-encoded block hash (use to query block with ledger parameters).
 	"""
 	blockHash: HexEncoded!
+	"""
+	The transaction containing this nullifier match.
+	"""
+	transaction: Transaction! @beta
 }
 
 """
@@ -1015,6 +1019,10 @@ type ShieldedNullifierTransaction {
 	The hex-encoded matched nullifier.
 	"""
 	nullifier: HexEncoded!
+	"""
+	The transaction containing this nullifier match.
+	"""
+	transaction: Transaction! @beta
 }
 
 """

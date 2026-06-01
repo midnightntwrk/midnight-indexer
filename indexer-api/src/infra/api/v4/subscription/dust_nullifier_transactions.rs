@@ -15,10 +15,10 @@ use crate::{
     domain::storage::Storage,
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
-        v4::{HexEncodable, HexEncoded, directives::beta},
+        v4::{HexEncodable, HexEncoded, directives::beta, transaction::Transaction},
     },
 };
-use async_graphql::{Context, SimpleObject, Subscription};
+use async_graphql::{ComplexObject, Context, SimpleObject, Subscription};
 use async_stream::try_stream;
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};
@@ -41,7 +41,11 @@ impl<S, B> Default for DustNullifierTransactionsSubscription<S, B> {
 
 /// A transaction containing a dust nullifier match with block context.
 #[derive(Debug, Clone, SimpleObject)]
-pub struct DustNullifierTransaction {
+#[graphql(complex)]
+pub struct DustNullifierTransaction<S>
+where
+    S: Storage,
+{
     /// The hex-encoded matched nullifier, in 32-byte little-endian form.
     #[graphql(directive = beta::apply())]
     pub nullifier_le_bytes: HexEncoded,
@@ -56,6 +60,29 @@ pub struct DustNullifierTransaction {
     pub block_height: u32,
     /// The hex-encoded block hash (use to query block with ledger parameters).
     pub block_hash: HexEncoded,
+
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S> DustNullifierTransaction<S>
+where
+    S: Storage,
+{
+    /// The transaction containing this nullifier match.
+    #[graphql(directive = beta::apply())]
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        let id = self.transaction_id;
+        let transaction = cx
+            .get_transaction_by_id_loader::<S>()
+            .load_one(id)
+            .await
+            .map_err_into_server_error(|| format!("get transaction by id {id}"))?
+            .some_or_server_error(|| format!("transaction with id {id} not found"))?;
+
+        Ok(transaction.into())
+    }
 }
 
 #[Subscription]
@@ -74,7 +101,7 @@ where
         nullifier_le_bytes_prefixes: Vec<HexEncoded>,
         from_block: Option<u64>,
         to_block: Option<u64>,
-    ) -> impl Stream<Item = ApiResult<DustNullifierTransaction>> {
+    ) -> impl Stream<Item = ApiResult<DustNullifierTransaction<S>>> {
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
         let batch_size = cx
@@ -130,6 +157,7 @@ where
                     transaction_hash: entry.transaction_hash.hex_encode(),
                     block_height: entry.block_height,
                     block_hash: entry.block_hash.hex_encode(),
+                    _s: PhantomData,
                 };
             }
 
@@ -170,6 +198,7 @@ where
                         transaction_hash: entry.transaction_hash.hex_encode(),
                         block_height: entry.block_height,
                         block_hash: entry.block_hash.hex_encode(),
+                        _s: PhantomData,
                     };
                 }
 
