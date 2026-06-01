@@ -387,10 +387,10 @@ export const DUST_GENERATIONS_SUBSCRIPTION = `
 `;
 
 export const DUST_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
-  subscription DustNullifierTransactions($nullifierPrefixes: [HexEncoded!]!, $fromBlock: Int, $toBlock: Int) {
-    dustNullifierTransactions(nullifierPrefixes: $nullifierPrefixes, fromBlock: $fromBlock, toBlock: $toBlock) {
-      nullifier
-      commitment
+  subscription DustNullifierTransactions($nullifierLeBytesPrefixes: [HexEncoded!]!, $fromBlock: Int, $toBlock: Int) {
+    dustNullifierTransactions(nullifierLeBytesPrefixes: $nullifierLeBytesPrefixes, fromBlock: $fromBlock, toBlock: $toBlock) {
+      nullifierLeBytes
+      commitmentLeBytes
       transactionId
       transactionHash
       blockHeight

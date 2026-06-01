@@ -24,6 +24,7 @@ import {
   UnshieldedTransactionSubscriptionParams,
   UnshieldedTxSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
+import { buildErrorPayload } from '@utils/indexer/subscription-error';
 import type {
   UnshieldedTransaction,
   UnshieldedTransactionEvent,
@@ -107,6 +108,14 @@ async function subscribeToUnshieldedTransactionEvents(
       next: (payload) => {
         log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
         receivedUnshieldedTransactions.push(payload);
+        if (stopCondition(receivedUnshieldedTransactions)) {
+          stopListening();
+        }
+      },
+      error: (err) => {
+        const synthetic = buildErrorPayload<UnshieldedTxSubscriptionResponse>(err);
+        log.debug(`Received error frame:\n${JSON.stringify(synthetic, null, 2)}`);
+        receivedUnshieldedTransactions.push(synthetic);
         if (stopCondition(receivedUnshieldedTransactions)) {
           stopListening();
         }

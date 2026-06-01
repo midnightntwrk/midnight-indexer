@@ -420,10 +420,10 @@ impl DustGenerationsStorage for Storage {
                         None => break,
                     }
 
-                    for (_, nullifier, commitment, transaction_id, transaction_hash, block_height, block_hash) in rows {
+                    for (_, nullifier_le_bytes, commitment_le_bytes, transaction_id, transaction_hash, block_height, block_hash) in rows {
                         yield DustNullifierTransaction {
-                            nullifier,
-                            commitment,
+                            nullifier_le_bytes,
+                            commitment_le_bytes,
                             transaction_id: transaction_id as u64,
                             transaction_hash,
                             block_height: block_height as u32,

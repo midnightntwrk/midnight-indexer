@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { createServer } from 'net';
 import fs from 'fs';
 import path from 'path';
@@ -112,7 +112,6 @@ async function ensureContainer(): Promise<number> {
     if (!port) {
       throw new Error(`Could not determine host port for existing ${CONTAINER_NAME} container`);
     }
-    console.log(`[CACHE] Reusing ${CONTAINER_NAME} on host port ${port}`);
     return port;
   }
 
@@ -275,83 +274,181 @@ export function startCacheProgressReporter(
   nodeRpcUrl?: string,
 ): CacheProgressReporter {
   const prev = new Map<string, number>();
-  let chainTip: number | undefined;
+  // Chains already pruned in this process, so we don't re-issue DELETEs every tick.
+  const pruned = new Set<string>();
+  // `undeployed` provisions a fresh genesis (new chain_id) on every run, so superseded
+  // undeployed chains in the shared cache are garbage and safe to reclaim. Persistent
+  // networks (qanet, preview, …) have a single stable chain_id, so a second chain under
+  // their label means mis-attribution, not a reset — never auto-prune those; surface
+  // them for a targeted manual prune instead.
+  const autoPrune = label === 'undeployed';
 
-  const fetchChainTip = async (): Promise<void> => {
-    if (!nodeRpcUrl) return;
+  let chainTip: number | undefined;
+  // Hash of block height 1 on the live node. In the toolkit fetch cache the chain_id *is*
+  // the block-1 hash (verified against the qanet/preview indexers), NOT the genesis hash:
+  // block 1 incorporates its own content (timestamp/author) on top of genesis, so a chain
+  // reset from the SAME genesis still yields a different block-1 hash → a new chain_id.
+  // Genesis hash would collide across resets and mis-match a freshly-synced chain to an old
+  // one. This is the authoritative identity of the chain THIS run is fetching — far more
+  // reliable than guessing from block counts or growth, which let a larger leftover chain
+  // win the "active" race (e.g. 601 cached blocks vs a tip of 7 → 8585%).
+  let currentChainIdHex: string | undefined;
+  let registeredCurrent = false;
+
+  const rpc = async <T>(method: string, params: unknown[]): Promise<T | undefined> => {
+    if (!nodeRpcUrl) return undefined;
     try {
       const res = await fetch(nodeRpcUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: 1, jsonrpc: '2.0', method: 'chain_getHeader', params: [] }),
+        body: JSON.stringify({ id: 1, jsonrpc: '2.0', method, params }),
       });
-      const json = (await res.json()) as { result?: { number?: string } };
-      const hex = json?.result?.number;
-      if (hex) chainTip = parseInt(hex, 16);
+      const json = (await res.json()) as { result?: T };
+      return json?.result;
     } catch {
-      // Non-fatal
+      return undefined; // Non-fatal — the reporter is best-effort.
     }
+  };
+
+  const fetchChainTip = async (): Promise<void> => {
+    const header = await rpc<{ number?: string }>('chain_getHeader', []);
+    if (header?.number) chainTip = parseInt(header.number, 16);
+  };
+
+  const fetchCurrentChainId = async (): Promise<void> => {
+    if (currentChainIdHex) return; // block-1 hash is stable for the life of the run
+    // Block height 1 (not 0): see the currentChainIdHex comment. Returns null until the
+    // node has authored block 1 — harmless, we just retry on the next tick. The 30s
+    // genesis settle in the undeployed provisioner ensures block 1 exists well before.
+    const hash = await rpc<string>('chain_getBlockHash', [1]);
+    const hex = hash?.replace(/^0x/, '').toLowerCase();
+    if (hex && /^[0-9a-f]+$/.test(hex)) currentChainIdHex = hex;
   };
 
   const tick = async () => {
     try {
-      await fetchChainTip();
+      await Promise.all([fetchChainTip(), fetchCurrentChainId()]);
       const chains = await queryChainProgress();
       if (chains.length === 0) {
         console.log(`[CACHE:${label}] Waiting for first blocks…`);
         return;
       }
 
-      // Capture deltas against the previous snapshot before mutating `prev`,
-      // otherwise every later `c.blockCount - prev.get(c.chainId)` is 0.
+      // Per-interval deltas, used only for the Δ display and the active-chain fallback.
       const deltas = new Map<string, number>();
       for (const c of chains) {
-        deltas.set(c.chainId, c.blockCount - (prev.get(c.chainId) ?? 0));
+        const seen = prev.has(c.chainId);
+        deltas.set(c.chainId, seen ? c.blockCount - (prev.get(c.chainId) ?? 0) : 0);
         prev.set(c.chainId, c.blockCount);
       }
 
-      // Unregistered chains (no envName) are treated as belonging to the current env
-      // until we know otherwise — they'll get registered below once they start growing.
-      const currentChains = chains.filter((c) => !c.envName || c.envName === label);
+      // The chain THIS run is fetching, identified by its block-1 hash when available.
+      const current = currentChainIdHex
+        ? chains.find((c) => c.chainIdHex === currentChainIdHex)
+        : undefined;
 
-      // Register unregistered growing chains with the current env label.
-      for (const c of currentChains) {
-        if (!c.envName && (deltas.get(c.chainId) ?? 0) > 0) {
-          await registerChainName(c.chainIdHex, label).catch(() => undefined);
-        }
+      // Register the current chain to this env deterministically — no need to watch it
+      // grow, which a fast (few-second) undeployed warmup never gives us time to observe.
+      if (current && !registeredCurrent && current.envName !== label) {
+        await registerChainName(current.chainIdHex, label).catch(() => undefined);
+        registeredCurrent = true;
+        current.envName = label;
       }
 
-      if (currentChains.length === 0) {
+      // Chains relevant to this env: the current chain plus same-label / untagged ones.
+      const candidates = chains.filter((c) => !c.envName || c.envName === label);
+      if (!current && candidates.length === 0) {
         console.log(`[CACHE:${label}] Waiting for first blocks…`);
-      } else {
-        // Active chain within the current env = one currently growing; fall back to highest count.
-        const growingIds = new Set(
-          currentChains.filter((c) => (deltas.get(c.chainId) ?? 0) > 0).map((c) => c.chainId),
-        );
-        const activeChainId =
-          growingIds.size > 0
-            ? [...growingIds][0]
-            : currentChains.reduce((a, b) => (a.blockCount >= b.blockCount ? a : b)).chainId;
+        return;
+      }
 
-        for (const c of currentChains) {
-          const delta = deltas.get(c.chainId) ?? 0;
-          const isActive = c.chainId === activeChainId;
-          const tag = isActive ? '' : ' ⚠ stale';
+      // Active chain: the block-1-hash-matched current chain when known; otherwise fall
+      // back to a currently-growing chain, then the highest block count (display guess).
+      const growing = candidates.filter((c) => (deltas.get(c.chainId) ?? 0) > 0);
+      const activeChainId =
+        current?.chainId ??
+        (growing.length > 0
+          ? growing[0].chainId
+          : candidates.reduce((a, b) => (a.blockCount >= b.blockCount ? a : b)).chainId);
 
-          const progress =
-            chainTip !== undefined && chainTip > 0
-              ? `fetch progress: ${c.blockCount.toLocaleString()}/${chainTip.toLocaleString()} (${((c.blockCount / chainTip) * 100).toFixed(1)}%) blocks complete`
-              : `${c.blockCount.toLocaleString()} blocks fetched (Δ +${delta.toLocaleString()} in ${PROGRESS_INTERVAL_MS / 1000}s)`;
+      // ---- display ----
+      const denom = chainTip !== undefined ? chainTip + 1 : undefined; // heights are 0-indexed
+      for (const c of chains) {
+        // Skip foreign-env chains (a different label) — noise during this run.
+        if (c.envName && c.envName !== label && c.chainId !== activeChainId) continue;
+        const delta = deltas.get(c.chainId) ?? 0;
+        const isActive = c.chainId === activeChainId;
+        const tag = isActive
+          ? ''
+          : c.envName === label
+            ? ' ⚠ stale'
+            : ' ↪ unattributed (another env?)';
+        // A percentage against the live tip is only meaningful for the current chain;
+        // showing it for an unrelated leftover yields nonsense like 8585%.
+        const progress =
+          isActive && denom !== undefined && denom > 0
+            ? `fetch progress: ${c.blockCount.toLocaleString()}/${denom.toLocaleString()} (${Math.min(100, (c.blockCount / denom) * 100).toFixed(1)}%) blocks complete`
+            : `${c.blockCount.toLocaleString()} blocks fetched (Δ +${delta.toLocaleString()} in ${PROGRESS_INTERVAL_MS / 1000}s)`;
+        console.log(`[CACHE:${label}] chain ${c.chainId}${tag} — ${progress}`);
+      }
 
-          console.log(`[CACHE:${label}] chain ${c.chainId}${tag} — ${progress}`);
+      // ---- reclaim / warn ----
+      if (autoPrune) {
+        // Deterministic identity is REQUIRED before deleting anything: if the genesis
+        // hash could not be read, skip pruning rather than risk the wrong chain.
+        if (current) {
+          // Only reclaim chains explicitly tagged with THIS env. We deliberately do NOT
+          // touch untagged chains: a `withData` undeployed run (integration/smoke) loads
+          // pre-seeded node data, so its block-1 hash — and thus chain_id — is STABLE across
+          // runs, but those suites never run this reporter, so that chain sits UNTAGGED in
+          // the shared cache. Pruning untagged chains here would evict that reusable
+          // pre-seeded cache on every from-genesis e2e run. From-genesis chains are tagged
+          // deterministically (above), so tag-scoped pruning still clears superseded runs.
+          const reclaim = chains.filter(
+            (c) => c.chainIdHex !== current.chainIdHex && c.envName === label,
+          );
+          for (const c of reclaim) {
+            if (pruned.has(c.chainIdHex)) continue;
+            pruned.add(c.chainIdHex);
+            const ok = await pruneChain(c.chainIdHex)
+              .then(() => true)
+              .catch((err) => {
+                console.warn(`[CACHE:${label}] failed to prune ${c.chainId}: ${err}`);
+                return false;
+              });
+            if (ok) {
+              console.log(
+                `[CACHE:${label}] reclaimed superseded chain ${c.chainId}` +
+                  ` (${c.blockCount.toLocaleString()} blocks) — kept current chain ${current.chainId}.`,
+              );
+            }
+          }
         }
-
-        const staleCurrentCount = currentChains.length - 1;
-        if (staleCurrentCount > 0) {
+      } else {
+        // Persistent network: a second chain tagged with this env is mis-attribution,
+        // not a reset. Never touch the shared data dir (that wipes every env's cache);
+        // surface the exact chains with a scoped prune command instead.
+        const mislabeled = chains.filter(
+          (c) =>
+            c.envName === label &&
+            c.chainIdHex !== currentChainIdHex &&
+            c.chainId !== activeChainId,
+        );
+        if (mislabeled.length > 0) {
+          const ids = mislabeled.map((c) => `${c.chainId} (${c.chainIdHex})`).join(', ');
           console.warn(
-            `[CACHE:${label}] ⚠  ${staleCurrentCount} stale ${label} chain(s) detected from past env resets.` +
-              ` Run \`docker rm -f ${CONTAINER_NAME}\` and delete \`.tmp/toolkit-postgres-data\`` +
-              ` to reclaim space.`,
+            `[CACHE:${label}] ⚠  ${mislabeled.length} unexpected chain(s) tagged \`${label}\`: ${ids}. ` +
+              `These look mis-attributed, not ${label} data. ` +
+              `Prune only those chains (do NOT delete .tmp/toolkit-postgres-data — that wipes every env's cache):\n` +
+              mislabeled
+                .map(
+                  (c) =>
+                    `    docker exec ${CONTAINER_NAME} psql -U ${POSTGRES_USER} -d ${POSTGRES_DB} ` +
+                    `-c "DELETE FROM raw_block_data_v2 WHERE chain_id = decode('${c.chainIdHex}','hex'); ` +
+                    `DELETE FROM highest_verified WHERE chain_id = decode('${c.chainIdHex}','hex'); ` +
+                    `DELETE FROM chain_names WHERE chain_id = decode('${c.chainIdHex}','hex');"`,
+                )
+                .join('\n'),
           );
         }
       }
@@ -415,24 +512,76 @@ async function queryChainProgress(): Promise<ChainProgress[]> {
     });
 }
 
+/**
+ * Remove a single chain's blocks from the shared fetch cache.
+ *
+ * Deletes only the rows keyed by this `chain_id` across `raw_block_data_v2`,
+ * `highest_verified`, and `chain_names`. The shared Postgres container and its
+ * `.tmp/toolkit-postgres-data` volume (which holds every env's cache, including
+ * the multi-million-block qanet/preview chains) are left fully intact — this is
+ * the surgical alternative to wiping the whole data dir.
+ *
+ * Exported so it can be driven from a one-off cleanup script or test if needed.
+ */
+export async function pruneChain(chainIdHex: string): Promise<void> {
+  await runPsqlScript(
+    `DELETE FROM raw_block_data_v2 WHERE chain_id = decode(:'chain_id_hex', 'hex');
+     DELETE FROM highest_verified WHERE chain_id = decode(:'chain_id_hex', 'hex');
+     DELETE FROM chain_names      WHERE chain_id = decode(:'chain_id_hex', 'hex');`,
+    { chain_id_hex: chainIdHex },
+  );
+}
+
 async function registerChainName(chainIdHex: string, envName: string): Promise<void> {
-  await execFileAsync('docker', [
-    'exec',
-    CONTAINER_NAME,
-    'psql',
-    '-U',
-    POSTGRES_USER,
-    '-d',
-    POSTGRES_DB,
-    // Pass values as psql variables rather than interpolating into the SQL text,
-    // so chain_id_hex/env can never be parsed as SQL regardless of their content.
-    '-v',
-    `chain_id_hex=${chainIdHex}`,
-    '-v',
-    `env=${envName}`,
-    '-c',
+  await runPsqlScript(
     `INSERT INTO chain_names (chain_id, env_name)
      VALUES (decode(:'chain_id_hex', 'hex'), :'env')
      ON CONFLICT (chain_id) DO NOTHING;`,
-  ]);
+    { chain_id_hex: chainIdHex, env: envName },
+  );
+}
+
+/**
+ * Run a psql script inside the cache container, with values passed as psql
+ * variables (interpolated via `:'name'`) so they can never be parsed as SQL.
+ *
+ * The script is fed on stdin (`-f -`) rather than via `-c`: psql performs
+ * `:'var'` interpolation only for scripts read from a file/stdin, NOT for `-c`
+ * command strings. Using `-c` here silently produced a `syntax error at or
+ * near ":"`, which — because callers swallowed the error — meant chain
+ * registration and pruning never actually ran. `ON_ERROR_STOP=1` makes any
+ * failure surface as a non-zero exit instead of a partial, ignored result.
+ */
+async function runPsqlScript(sql: string, vars: Record<string, string> = {}): Promise<void> {
+  const varArgs = Object.entries(vars).flatMap(([k, v]) => ['-v', `${k}=${v}`]);
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(
+      'docker',
+      [
+        'exec',
+        '-i',
+        CONTAINER_NAME,
+        'psql',
+        '-U',
+        POSTGRES_USER,
+        '-d',
+        POSTGRES_DB,
+        '-v',
+        'ON_ERROR_STOP=1',
+        ...varArgs,
+        '-f',
+        '-',
+      ],
+      { stdio: ['pipe', 'ignore', 'pipe'] },
+    );
+    let stderr = '';
+    child.stderr.on('data', (d) => (stderr += String(d)));
+    child.on('error', reject);
+    child.on('close', (code) =>
+      code === 0
+        ? resolve()
+        : reject(new Error(`psql exited with code ${code}${stderr ? `: ${stderr.trim()}` : ''}`)),
+    );
+    child.stdin.end(sql);
+  });
 }

@@ -375,8 +375,8 @@ export type DustGenerationsEvent =
   | DustGenerationDtimeUpdateItem;
 
 export interface DustNullifierTransaction {
-  nullifier: string;
-  commitment: string;
+  nullifierLeBytes: string;
+  commitmentLeBytes: string;
   transactionId: number;
   transactionHash: string;
   blockHeight: number;

@@ -20,6 +20,7 @@ import {
   IndexerWsClient,
   DustNullifierTransactionSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
+import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import { DustNullifierTransactionSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { DustNullifierTransaction } from '@utils/indexer/indexer-types';
@@ -56,10 +57,10 @@ describe('dust nullifier transactions subscription', () => {
 
       // Use a broad prefix to increase chance of matches, bounded to first 10 blocks
       const toBlock = Math.min(latestHeight, 10);
-      const nullifierPrefixes = ['00'];
+      const nullifierLeBytesPrefixes = ['00'];
 
       log.debug(
-        `Subscribing to dust nullifier transactions with prefixes=${nullifierPrefixes}, fromBlock=0, toBlock=${toBlock}`,
+        `Subscribing to dust nullifier transactions with prefixes=${nullifierLeBytesPrefixes}, fromBlock=0, toBlock=${toBlock}`,
       );
 
       const received: DustNullifierTransactionSubscriptionResponse[] = [];
@@ -89,7 +90,7 @@ describe('dust nullifier transactions subscription', () => {
               resolve();
             },
           },
-          nullifierPrefixes,
+          nullifierLeBytesPrefixes,
           0,
           toBlock,
         );
@@ -136,24 +137,15 @@ describe('dust nullifier transactions subscription', () => {
 
         const subscription = indexerWsClient.subscribeToDustNullifierTransactions(
           {
-            next: (payload) => {
+            next: () => {
               eventCount++;
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                subscription.unsubscribe();
-                resolve({
-                  completed: false,
-                  error: payload.errors[0].message,
-                  eventCount,
-                });
-              }
             },
             error: (error) => {
               clearTimeout(timeout);
               subscription.unsubscribe();
               resolve({
                 completed: false,
-                error: typeof error === 'string' ? error : JSON.stringify(error),
+                error: extractSubscriptionErrorMessage(error),
                 eventCount,
               });
             },
@@ -167,7 +159,7 @@ describe('dust nullifier transactions subscription', () => {
         );
       });
 
-      expect(settled.error).toContain('nullifierPrefixes must not be empty');
+      expect(settled.error).toContain('nullifierLeBytesPrefixes must not be empty');
       expect(settled.completed).toBe(false);
       expect(settled.eventCount).toBeGreaterThanOrEqual(0);
     });
@@ -193,24 +185,15 @@ describe('dust nullifier transactions subscription', () => {
 
         const subscription = indexerWsClient.subscribeToDustNullifierTransactions(
           {
-            next: (payload) => {
+            next: () => {
               eventCount++;
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                subscription.unsubscribe();
-                resolve({
-                  completed: false,
-                  error: payload.errors[0].message,
-                  eventCount,
-                });
-              }
             },
             error: (error) => {
               clearTimeout(timeout);
               subscription.unsubscribe();
               resolve({
                 completed: false,
-                error: typeof error === 'string' ? error : JSON.stringify(error),
+                error: extractSubscriptionErrorMessage(error),
                 eventCount,
               });
             },
