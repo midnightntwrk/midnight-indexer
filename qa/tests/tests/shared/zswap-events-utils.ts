@@ -18,6 +18,7 @@ import {
   IndexerWsClient,
   SubscriptionHandlers,
 } from '@utils/indexer/websocket-client';
+import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import { EventCoordinator } from '@utils/event-coordinator';
 import log from '@utils/logging/logger';
 
@@ -95,7 +96,7 @@ export async function collectZswapEventError(
         resolved = true;
         subscription.unsubscribe();
         clearTimeout(timeout);
-        resolve(String(err));
+        resolve(extractSubscriptionErrorMessage(err));
       },
     };
 
