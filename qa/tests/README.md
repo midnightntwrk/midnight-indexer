@@ -2,18 +2,46 @@
 
 ## Table of Contents
 
+- [⚡ Quick Start](#-quick-start)
 - [📦 Prerequisites](#-prerequisites)
 - [🧰 Install Dependencies](#-install-dependencies)
-- [🔐 Environmental Setup](#-environment-setup)
-- [🏢 Organization Access](#-organization-access)
+- [🔐 Environment Setup](#-environment-setup)
 - [🧪 Test Framework Organization](#-test-framework-organization)
-- [🚀 Getting Started (Local Undeployed Environment)](#-getting-started-local-undeployed-environment)
+- [🚀 Getting Started](#-getting-started)
 - [🌐 Running Against Deployed Environments](#-running-against-deployed-environments)
+- [🔧 Environment Variables Reference](#-environment-variables-reference)
 - [✨ Features](#-features)
 - [🛠️ Future Developments & Test Ideas](#-future-developments-improvements--test-ideas)
 
 A test suite for validating and experimenting with the Midnight Indexer component through its GraphQL API.
 This project provides a structured environment for running smoke and integration tests, covering both GraphQL queries and subscriptions, against various target environments (including local/undeployed), supporting rapid development and testing for the Midnight Indexer component.
+
+---
+
+## ⚡ Quick Start
+
+> First time here? Complete the one-time [Environment Setup](#-environment-setup) below before your first run.
+
+```bash
+# 1) Install dependencies
+cd qa/tests
+yarn install --immutable
+
+# 2) Load shared env from the repo root
+cd ../.. && source .envrc
+
+# 3a) Run against a LOCAL/undeployed stack (Docker auto-provisioned & torn down)
+#     NODE_TAG and INDEXER_TAG are REQUIRED for undeployed — there is no auto-derivation.
+#     NODE_TAG must be one of the values listed in NODE_VERSIONS (repo root);
+#     INDEXER_TAG must be an indexer version compatible with that node version.
+cd qa/tests
+NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed yarn test:smoke
+
+# 3b) Or run against a DEPLOYED environment (versions are fixed by the env — do NOT set NODE_TAG/INDEXER_TAG)
+TARGET_ENV=qanet yarn test:integration
+```
+
+See [Test Framework Organization](#-test-framework-organization) for the difference between `test:smoke`, `test:integration`, and `test:e2e`, and the [Environment Variables](#-environment-variables-reference) reference table for every supported variable.
 
 ---
 
@@ -43,21 +71,45 @@ yarn install --immutable
 
 > Your GitHub account must be a member of the midnight-ntwrk organization to read private repositories and pull images: https://github.com/midnight-ntwrk/
 
-Before running the QA tests, make sure your local environment is configured according to the setup steps described in the main project README.
+Before running the QA tests, make sure your local environment is configured according to the setup steps described in the main project README. The steps are summarized below — follow the links for full details.
 
 #### Step 1 — [Environment Variables](../../README.md#environment-variables)
 
+Define the build/runtime secrets (sourced via `~/.midnight-indexer.envrc` or `./.envrc.local`):
+
+```bash
+export APP__INFRA__STORAGE__PASSWORD=postgres
+export APP__INFRA__PUB_SUB__PASSWORD=nats
+export APP__INFRA__SECRET=303132333435363738393031323334353637383930313233343536373839303132  # hex-encoded 32-byte value
+```
+
 #### Step 2 — [Required Configuration for Private Repositories](../../README.md#required-configuration-for-private-repositories)
+
+You need access to private Midnight repos and the GHCR container registry (steps 3–5 cover the credentials).
 
 #### Step 3 — [GitHub Personal Access Token (PAT)](../../README.md#github-personal-access-token-pat)
 
+Create a **classic** PAT with scopes: `repo` (all), `read:packages`, `read:org`.
+
 #### Step 4 — [~/.netrc Setup](../../README.md#netrc-setup)
+
+```
+machine github.com
+login <YOUR_GITHUB_ID>
+password <YOUR_GITHUB_PAT>
+```
 
 #### Step 5 — [Docker Authentication](../../README.md#docker-authentication)
 
+```bash
+echo $GITHUB_TOKEN | docker login ghcr.io -u <YOUR_GITHUB_ID> --password-stdin
+```
+
 #### Step 6 — [GPG Setup (Signed Git Commits)](../../README.md#gpg-setup-signed-git-commits)
 
-> This is required to push signed commits to Midnight repositories
+Generate an ed25519 key and configure Git to sign commits/tags (`commit.gpgsign = true`); add `export GPG_TTY=$(tty)` to your shell config so the passphrase prompt works.
+
+> This is required to push signed commits to Midnight repositories.
 
 ---
 
@@ -131,15 +183,17 @@ When running against undeployed (local) environments, you may override Node, Ind
 
 ```bash
 # Set desired versions of Indexer + Node + Toolkit (must be done BEFORE running the startup scripts)
-export NODE_TAG=0.17.0-rc.4
-export INDEXER_TAG=3.0.0-alpha.5
-export NODE_TOOLKIT_TAG=latest-main
+export NODE_TAG=1.0.0
+export INDEXER_TAG=4.3.2
+export NODE_TOOLKIT_TAG=1.0.0
 ```
+
+> ⚠️ **`NODE_TAG` must be one of the versions listed in [`NODE_VERSIONS`](../../NODE_VERSIONS)** (in the repo root) — only those node versions have published images and prepared chain data. The chosen **`INDEXER_TAG` must be an indexer version compatible with the selected node version**; an incompatible pair will fail to index.
 
 Note: if you need to match a particular toolkit version:
 
 ```bash
-export NODE_TOOLKIT_TAG=0.18.0-rc.7
+export NODE_TOOLKIT_TAG=1.0.0
 ```
 
 #### Deployed environment (devnet, qanet, preview, etc)
@@ -155,7 +209,7 @@ export NODE_TOOLKIT_TAG=latest-main
 Note: if you need to match a particular toolkit version:
 
 ```bash
-export NODE_TOOLKIT_TAG=0.17.0-rc.4
+export NODE_TOOLKIT_TAG=1.0.0
 ```
 
 #### Indexer API Version
@@ -215,8 +269,10 @@ suite finishes. **No manual script invocation is required.**
 > ⚠️ **Required env vars**
 >
 > `NODE_TAG` and `INDEXER_TAG` must be set explicitly when
-> `TARGET_ENV=undeployed`. There is no auto-derivation. `NODE_TOOLKIT_TAG`
-> defaults to `latest-main` if unset.
+> `TARGET_ENV=undeployed`. There is no auto-derivation. `NODE_TAG` must be one
+> of the versions listed in [`NODE_VERSIONS`](../../NODE_VERSIONS) (repo root),
+> and `INDEXER_TAG` must be an indexer version compatible with that node
+> version. `NODE_TOOLKIT_TAG` defaults to `latest-main` if unset.
 
 Stack flavour by suite:
 
@@ -233,8 +289,8 @@ Stack flavour by suite:
 
 ```bash
 cd qa/tests
-NODE_TAG=1.0.0-rc.8 INDEXER_TAG=4.3.2-rc.1 TARGET_ENV=undeployed yarn test:smoke
-NODE_TAG=1.0.0-rc.8 INDEXER_TAG=4.3.2-rc.1 TARGET_ENV=undeployed yarn test:integration
+NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed yarn test:smoke
+NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed yarn test:integration
 ```
 
 Smoke uses the same with-data stack as integration, so a smoke pass is a
@@ -249,7 +305,7 @@ cache). Start it once before running:
 bash qa/scripts/start-toolkit-postgres.sh
 
 cd qa/tests
-NODE_TAG=1.0.0-rc.8 INDEXER_TAG=4.3.2-rc.1 TARGET_ENV=undeployed yarn test:e2e
+NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed yarn test:e2e
 ```
 
 ### Clash safety
@@ -267,10 +323,10 @@ runs, or for debugging):
 
 ```bash
 # pre-seeded data flavour
-NODE_TAG=1.0.0-rc.8 INDEXER_TAG=4.3.2-rc.1 bash qa/scripts/startup-localenv-with-data.sh
+NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 bash qa/scripts/startup-localenv-with-data.sh
 
 # fresh-from-genesis flavour
-NODE_TAG=1.0.0-rc.8 INDEXER_TAG=4.3.2-rc.1 bash qa/scripts/startup-localenv-from-genesis.sh
+NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 bash qa/scripts/startup-localenv-from-genesis.sh
 
 # teardown
 docker compose --profile cloud down
@@ -353,10 +409,13 @@ There are a number of deployed environments that are used for testing components
 - devnet
 - qanet
 - preview
+- preprod
 
-When running **E2E tests** against deployed environments (devnet, qanet, preview, etc.),
-the test harness auto-starts the toolkit fetch cache locally (see “Toolkit
-fetch cache (Postgres)” above). Just change the `TARGET_ENV` variable accordingly
+Endpoints are derived automatically from the `TARGET_ENV` name (e.g. `qanet.midnight.network`), so you do **not** need to configure URLs manually. (`testnet` is a Cardano network type, not a `TARGET_ENV` value.)
+
+When running **E2E tests** against deployed environments,
+the test harness auto-starts the toolkit fetch cache (Postgres) container locally (see “Toolkit
+fetch cache (Postgres)” above) — unlike the **undeployed** e2e flow, which currently requires you to start it manually with `bash qa/scripts/start-toolkit-postgres.sh`. Just change the `TARGET_ENV` variable accordingly
 (NOTE: use lower case for environment names):
 
 ```bash
@@ -369,6 +428,32 @@ If the target environment uses a different indexer API version than the default 
 ```bash
 TARGET_ENV=preprod INDEXER_API_VERSION=v3 yarn test:integration
 ```
+
+---
+
+## 🔧 Environment Variables Reference
+
+| Variable              | Required                          | Default                | Description                                                                                          |
+| --------------------- | --------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------- |
+| `TARGET_ENV`          | Effectively yes                   | `undeployed`           | Target environment: `undeployed`, `devnet`, `qanet`, `preview`, `preprod` (lower case).              |
+| `NODE_TAG`            | Yes (undeployed only)             | —                      | Node image tag. **Must be a value listed in [`NODE_VERSIONS`](../../NODE_VERSIONS) (repo root).** No auto-derivation. Must NOT be set for deployed envs (fixed by the env). |
+| `INDEXER_TAG`         | Yes (undeployed only)             | —                      | Indexer image tag. **Must be compatible with the selected `NODE_TAG`.** Must NOT be set for deployed envs (fixed by the env). |
+| `NODE_TOOLKIT_TAG`    | No                                | `latest-main`          | Node Toolkit version used by e2e/integration tests.                                                  |
+| `INDEXER_API_VERSION` | No                                | `v4`                   | GraphQL API version segment, e.g. `v3` → `/api/v3/graphql`.                                            |
+| `VITEST_MAX_WORKERS`  | No                                | all available CPUs     | Cap the Vitest worker pool. Accepts a positive integer (`1`, `2`, …) or a percentage (`"50%"`).       |
+| `MN_FETCH_CACHE`      | No (managed by harness)           | auto                   | Postgres-backed toolkit fetch cache. The `toolkit-postgres` container is started automatically.       |
+
+**Runtime-upgrade test only** (`qa/scripts/test-runtime-upgrade.sh`):
+
+| Variable           | Required | Default         | Description                                                          |
+| ------------------ | -------- | --------------- | -------------------------------------------------------------------- |
+| `FROM_NODE_TAG`    | Yes      | —               | Old node version (e.g. `0.21.0`).                                    |
+| `TO_NODE_TAG`      | Yes      | —               | New node version (e.g. `0.22.2`).                                    |
+| `INDEXER_TAG`      | Yes      | —               | Indexer image tag to test.                                           |
+| `NODE_TOOLKIT_TAG` | No       | `latest-main`   | Node toolkit version for the governance upgrade.                     |
+| `IMAGE_REGISTRY`   | No       | `midnightntwrk` | Docker image registry (use `ghcr.io/midnight-ntwrk` for GHCR images).|
+
+---
 
 ## ✨ Features
 
