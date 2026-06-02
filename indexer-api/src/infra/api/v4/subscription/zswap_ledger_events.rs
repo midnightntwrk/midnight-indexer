@@ -75,9 +75,9 @@ where
             {
                 let ledger_event_id = ledger_event.id;
                 id = ledger_event_id + 1;
-                yield ledger_event.try_into().map_err_into_server_error(|| {
-                    format!("unexpected zswap ledger event with ID {ledger_event_id}")
-                })?
+                if let Some(ledger_event) = ZswapLedgerEvent::from_ledger_event(ledger_event) {
+                    yield ledger_event;
+                }
             }
 
             debug!(id; "streaming live events");
@@ -100,9 +100,9 @@ where
                 {
                     let ledger_event_id = ledger_event.id;
                     id = ledger_event_id + 1;
-                    yield ledger_event.try_into().map_err_into_server_error(|| {
-                        format!("unexpected zswap ledger event with ID {ledger_event_id}")
-                    })?
+                    if let Some(ledger_event) = ZswapLedgerEvent::from_ledger_event(ledger_event) {
+                        yield ledger_event;
+                    }
                 }
             }
 

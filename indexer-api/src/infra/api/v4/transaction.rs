@@ -523,12 +523,8 @@ where
             format!("cannot get zswap ledger events for transaction with ID {id}")
         })?
         .into_iter()
-        .map(|event| {
-            event
-                .try_into()
-                .map_err_into_server_error(|| "unexpected zswap ledger event")
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+        .filter_map(ZswapLedgerEvent::from_ledger_event)
+        .collect();
 
     Ok(zswap_ledger_events)
 }
@@ -545,12 +541,8 @@ where
             format!("cannot get dust ledger events for transaction with ID {id}")
         })?
         .into_iter()
-        .map(|event| {
-            event
-                .try_into()
-                .map_err_into_server_error(|| "unexpected dust ledger event")
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+        .filter_map(DustLedgerEvent::from_ledger_event)
+        .collect();
 
     Ok(dust_ledger_events)
 }

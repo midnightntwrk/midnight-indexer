@@ -54,6 +54,19 @@ impl TryFrom<LedgerEvent> for ZswapLedgerEvent {
     }
 }
 
+impl ZswapLedgerEvent {
+    pub fn from_ledger_event(ledger_event: LedgerEvent) -> Option<Self> {
+        let id = ledger_event.id;
+        match ledger_event.try_into() {
+            Ok(event) => Some(event),
+            Err(error) => {
+                log::warn!("skipping unexpected zswap ledger event with ID {id}: {error}");
+                None
+            }
+        }
+    }
+}
+
 /// A dust related ledger event.
 #[derive(Debug, Interface)]
 #[allow(clippy::duplicated_attributes)]
@@ -121,6 +134,19 @@ impl TryFrom<LedgerEvent> for DustLedgerEvent {
             }
 
             other => Err(UnexpectedLedgerEvent(other)),
+        }
+    }
+}
+
+impl DustLedgerEvent {
+    pub fn from_ledger_event(ledger_event: LedgerEvent) -> Option<Self> {
+        let id = ledger_event.id;
+        match ledger_event.try_into() {
+            Ok(event) => Some(event),
+            Err(error) => {
+                log::warn!("skipping unexpected dust ledger event with ID {id}: {error}");
+                None
+            }
         }
     }
 }
@@ -209,5 +235,35 @@ impl From<indexer_common::domain::DustOutput> for DustOutput {
         Self {
             nonce: dust_output.nonce.hex_encode(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indexer_common::domain::{ByteVec, ProtocolVersion};
+
+    fn ledger_event(attributes: LedgerEventAttributes) -> LedgerEvent {
+        LedgerEvent {
+            id: 1,
+            raw: ByteVec::from(vec![0]),
+            attributes,
+            max_id: 1,
+            protocol_version: ProtocolVersion::V0_22(22_000),
+        }
+    }
+
+    #[test]
+    fn dust_event_conversion_skips_unexpected_zswap_event() {
+        let event = ledger_event(LedgerEventAttributes::ZswapOutput);
+
+        assert!(DustLedgerEvent::from_ledger_event(event).is_none());
+    }
+
+    #[test]
+    fn zswap_event_conversion_skips_unexpected_dust_event() {
+        let event = ledger_event(LedgerEventAttributes::ParamChange);
+
+        assert!(ZswapLedgerEvent::from_ledger_event(event).is_none());
     }
 }
