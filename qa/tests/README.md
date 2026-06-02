@@ -170,7 +170,7 @@ This controls the version segment in the API endpoint paths (e.g. `/api/v3/graph
 
 #### Indexer Blue/Green Instance
 
-Each deployed environment runs two indexer instances behind the public `indexer.<env>.midnight.network` URL (blue/green). In normal conditions that URL points at whichever instance is currently primary; a new indexer version is rolled out to the secondary instance first, so QA can validate it before it is promoted. To target a specific instance, set the `INDEXER_INSTANCE` environment variable:
+The blue/green environments run two indexer instances behind the public `indexer.<env>.midnight.network` URL. In normal conditions that URL points at whichever instance is currently primary; a new indexer version is rolled out to the secondary instance first, so QA can validate it before it is promoted. To target a specific instance, set the `INDEXER_INSTANCE` environment variable:
 
 ```bash
 # Target the blue instance
@@ -180,7 +180,9 @@ INDEXER_INSTANCE=blue TARGET_ENV=qanet yarn test:smoke
 INDEXER_INSTANCE=green TARGET_ENV=qanet yarn test:smoke
 ```
 
-This rewrites the indexer host to `indexer-blue.<env>.midnight.network` / `indexer-green.<env>.midnight.network` for both the HTTP and WebSocket clients. If not set, the clients use the primary `indexer.<env>.midnight.network` URL. The value is case-insensitive and accepts only `blue` or `green`; any other value fails fast. It has no effect on `TARGET_ENV=undeployed` (localhost has no blue/green split).
+This rewrites the indexer host to `indexer-blue.<env>.midnight.network` / `indexer-green.<env>.midnight.network` for both the HTTP and WebSocket clients. If not set, the clients use the primary `indexer.<env>.midnight.network` URL. The value is case-insensitive and accepts only `blue` or `green`; any other value fails fast.
+
+**Supported environments:** `INDEXER_INSTANCE` is only meaningful on the blue/green environments — `qanet`, `preview`, and `preprod`. It is ignored on `undeployed` (localhost has no blue/green split) and has no usable target on `devnet` (single instance) — see the preflight behaviour below.
 
 When `INDEXER_INSTANCE` is set, a preflight check hits the resolved host's `/ready` endpoint before any tests run and fails fast with a clear message if the target isn't usable:
 
