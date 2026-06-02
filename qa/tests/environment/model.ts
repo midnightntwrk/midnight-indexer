@@ -304,6 +304,54 @@ export class Environment {
   getNodeToolkitVersion(): string {
     return this.nodeToolkitTag;
   }
+
+  /**
+   * When INDEXER_INSTANCE targets a blue/green colour, verify the resolved host
+   * is actually routed and ready before any tests run.
+   *
+   * An unrouted colour host does NOT fail at the transport layer: deployed
+   * environments use wildcard DNS plus a default ingress backend, so a colour
+   * with no ingress rule answers `/ready` with HTTP 404 rather than refusing
+   * the connection. We therefore discriminate on the HTTP status:
+   *   - 200 → routed and ready, proceed.
+   *   - 503 → routed but not caught up yet (instance still syncing).
+   *   - 404 / any other status / transport error → no ingress for this colour,
+   *     so it is almost certainly the primary (served at the bare host).
+   *
+   * No-op when INDEXER_INSTANCE is unset or the env has no blue/green split.
+   */
+  async preflightInstanceSelection(): Promise<void> {
+    const instance = process.env.INDEXER_INSTANCE?.trim();
+    if (!instance || this.isUndeployed) return;
+
+    const url = `${this.getIndexerHttpBaseURL()}/ready`;
+    let status: number;
+    try {
+      status = (await fetch(url, { signal: AbortSignal.timeout(10_000) })).status;
+    } catch (err) {
+      throw new Error(
+        `INDEXER_INSTANCE="${instance}": could not reach ${this.indexerHost} ` +
+          `(${(err as Error).message}). Unset INDEXER_INSTANCE to target the primary instance.`,
+      );
+    }
+
+    if (status === 200) {
+      log.info(`INDEXER_INSTANCE="${instance}" → ${this.indexerHost} is routed and ready.`);
+      return;
+    }
+    if (status === 503) {
+      throw new Error(
+        `INDEXER_INSTANCE="${instance}" (${this.indexerHost}) is routed but NOT caught up yet ` +
+          `(HTTP 503). Wait for it to finish syncing before testing against it.`,
+      );
+    }
+    throw new Error(
+      `INDEXER_INSTANCE="${instance}" (${this.indexerHost}) returned HTTP ${status} on /ready — ` +
+        `no ingress for this colour, so it is almost certainly the PRIMARY (served at the bare ` +
+        `indexer.${this.envName}.midnight.network). Target the other colour, or unset ` +
+        `INDEXER_INSTANCE to use the primary.`,
+    );
+  }
 }
 
 export const env = new Environment();

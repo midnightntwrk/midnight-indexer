@@ -182,6 +182,12 @@ INDEXER_INSTANCE=green TARGET_ENV=qanet yarn test:smoke
 
 This rewrites the indexer host to `indexer-blue.<env>.midnight.network` / `indexer-green.<env>.midnight.network` for both the HTTP and WebSocket clients. If not set, the clients use the primary `indexer.<env>.midnight.network` URL. The value is case-insensitive and accepts only `blue` or `green`; any other value fails fast. It has no effect on `TARGET_ENV=undeployed` (localhost has no blue/green split).
 
+When `INDEXER_INSTANCE` is set, a preflight check hits the resolved host's `/ready` endpoint before any tests run and fails fast with a clear message if the target isn't usable:
+
+- **HTTP 200** — routed and ready; tests proceed.
+- **HTTP 503** — routed but the instance hasn't caught up yet; wait for it to finish syncing.
+- **HTTP 404 / anything else** — no ingress for that colour. Only the *secondary* instance gets a colour-suffixed host; the *primary* is served at the bare `indexer.<env>` URL and flips colour on promotion. A 404 therefore means the chosen colour is currently the primary — target the other colour, or unset `INDEXER_INSTANCE`. (This also covers single-instance environments like `devnet`.)
+
 #### Vitest Worker Pool Cap
 
 By default Vitest sizes its worker pool to all available parallelism (≈ `os.cpus().length`), so on a typical CI runner each test run drives 4–8 forked workers concurrently against the indexer. To cap that — for example when characterising load-induced flakiness against a shared environment — set the `VITEST_MAX_WORKERS` environment variable:
