@@ -381,6 +381,7 @@ export interface DustNullifierTransaction {
   transactionHash: string;
   blockHeight: number;
   blockHash: string;
+  transaction: { hash: string };
 }
 
 export interface ShieldedNullifierTransaction {
@@ -389,6 +390,7 @@ export interface ShieldedNullifierTransaction {
   blockHash: string;
   blockHeight: number;
   nullifier: string;
+  transaction: { hash: string };
 }
 
 export type ViewingKey = string & { __brand: 'ViewingKey' };

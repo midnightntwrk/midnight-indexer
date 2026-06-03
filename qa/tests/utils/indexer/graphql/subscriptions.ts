@@ -395,6 +395,9 @@ export const DUST_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
       transactionHash
       blockHeight
       blockHash
+      transaction {
+        hash
+      }
     }
   }
 `;
@@ -407,6 +410,9 @@ export const SHIELDED_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
       blockHash
       blockHeight
       nullifier
+      transaction {
+        hash
+      }
     }
   }
 `;
