@@ -378,6 +378,89 @@ describe('block queries', () => {
       }
     });
   });
+
+  /**
+   * Coverage for midnight-indexer#1139.
+   *
+   * Three new fields were added to the `Block` GraphQL type:
+   *   - `zswapEndIndex: Int!`
+   *   - `dustCommitmentEndIndex: Int! @beta`
+   *   - `dustGenerationEndIndex: Int! @beta`
+   *
+   * These carry the chain's per-tree first-free index as of each block,
+   * monotonically non-decreasing, letting wallets bound their sync range
+   * directly from a block query instead of scanning transactions.
+   */
+  describe('block-level tree end indexes (#1139)', () => {
+    /**
+     * @given the latest block is queried
+     * @when we inspect its tree end index fields
+     * @then zswapEndIndex, dustCommitmentEndIndex and dustGenerationEndIndex
+     *       are all present as non-negative integers
+     */
+    test('should expose non-negative zswapEndIndex, dustCommitmentEndIndex and dustGenerationEndIndex on the latest block', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'EndIndex', '#1139'],
+      };
+
+      const response = await indexerHttpClient.getLatestBlock();
+      expect(response).toBeSuccess();
+      const block = response.data!.block;
+
+      log.debug(
+        `Latest block ${block.hash} (height=${block.height}): ` +
+          `zswapEndIndex=${block.zswapEndIndex}, ` +
+          `dustCommitmentEndIndex=${block.dustCommitmentEndIndex}, ` +
+          `dustGenerationEndIndex=${block.dustGenerationEndIndex}`,
+      );
+
+      expect(block.zswapEndIndex).toBeGreaterThanOrEqual(0);
+      expect(Number.isInteger(block.zswapEndIndex)).toBe(true);
+
+      expect(block.dustCommitmentEndIndex).toBeGreaterThanOrEqual(0);
+      expect(Number.isInteger(block.dustCommitmentEndIndex)).toBe(true);
+
+      expect(block.dustGenerationEndIndex).toBeGreaterThanOrEqual(0);
+      expect(Number.isInteger(block.dustGenerationEndIndex)).toBe(true);
+    });
+
+    /**
+     * @given two consecutive blocks are queried (latest and its parent)
+     * @when we compare their tree end indexes
+     * @then each end index of the parent must be <= the end index of the child,
+     *       confirming the monotonic non-decreasing guarantee
+     */
+    test('should have non-decreasing end indexes across consecutive blocks', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'EndIndex', 'Monotonicity', '#1139'],
+      };
+
+      const latestResponse = await indexerHttpClient.getLatestBlock();
+      expect(latestResponse).toBeSuccess();
+      const latest = latestResponse.data!.block;
+
+      if (latest.height === 0) {
+        log.warn('Only genesis block available — skipping monotonicity check');
+        ctx.skip?.();
+        return;
+      }
+
+      const parentResponse = await indexerHttpClient.getBlockByOffset({
+        height: latest.height - 1,
+      });
+      expect(parentResponse).toBeSuccess();
+      const parent = parentResponse.data!.block;
+
+      log.debug(
+        `Monotonicity: parent(h=${parent.height}) zswap=${parent.zswapEndIndex} dustC=${parent.dustCommitmentEndIndex} dustG=${parent.dustGenerationEndIndex}` +
+          ` ≤ child(h=${latest.height}) zswap=${latest.zswapEndIndex} dustC=${latest.dustCommitmentEndIndex} dustG=${latest.dustGenerationEndIndex}`,
+      );
+
+      expect(latest.zswapEndIndex).toBeGreaterThanOrEqual(parent.zswapEndIndex);
+      expect(latest.dustCommitmentEndIndex).toBeGreaterThanOrEqual(parent.dustCommitmentEndIndex);
+      expect(latest.dustGenerationEndIndex).toBeGreaterThanOrEqual(parent.dustGenerationEndIndex);
+    });
+  });
 });
 
 /**
@@ -591,6 +674,47 @@ describe(`genesis block`, () => {
         expect(tx.dustCommitmentEndIndex!).toBeGreaterThanOrEqual(tx.dustCommitmentStartIndex!);
         expect(tx.dustGenerationEndIndex!).toBeGreaterThanOrEqual(tx.dustGenerationStartIndex!);
       }
+    });
+
+    /**
+     * Coverage for midnight-indexer#1139 — consistency between block-level and
+     * transaction-level end indexes.
+     *
+     * The genesis block is guaranteed to have RegularTransactions (pre-fund
+     * wallet UTXOs), making it the most reliable fixture for this check.
+     *
+     * @given the genesis block is queried
+     * @when we compare its block-level end indexes with those of its RegularTransactions
+     * @then Block.zswapEndIndex equals the highest RegularTransaction.zswapEndIndex
+     *       in that block, and similarly for dustCommitmentEndIndex and
+     *       dustGenerationEndIndex — confirming the block field carries the
+     *       correct cumulative value
+     */
+    test('should have block end indexes matching the highest RegularTransaction end indexes (#1139)', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'EndIndex', 'Consistency', '#1139'],
+      };
+
+      const genesisTransactions = await extractGenesisTransactions(genesisBlock);
+      const regularTxs = genesisTransactions.filter(
+        (tx) => tx.__typename === 'RegularTransaction',
+      ) as RegularTransaction[];
+
+      expect(regularTxs.length).toBeGreaterThan(0);
+
+      const maxZswap = Math.max(...regularTxs.map((tx) => tx.zswapEndIndex ?? 0));
+      const maxDustCommitment = Math.max(...regularTxs.map((tx) => tx.dustCommitmentEndIndex ?? 0));
+      const maxDustGeneration = Math.max(...regularTxs.map((tx) => tx.dustGenerationEndIndex ?? 0));
+
+      log.debug(
+        `Genesis block end indexes — block: zswap=${genesisBlock.zswapEndIndex}, ` +
+          `dustC=${genesisBlock.dustCommitmentEndIndex}, dustG=${genesisBlock.dustGenerationEndIndex} | ` +
+          `max tx: zswap=${maxZswap}, dustC=${maxDustCommitment}, dustG=${maxDustGeneration}`,
+      );
+
+      expect(genesisBlock.zswapEndIndex).toBe(maxZswap);
+      expect(genesisBlock.dustCommitmentEndIndex).toBe(maxDustCommitment);
+      expect(genesisBlock.dustGenerationEndIndex).toBe(maxDustGeneration);
     });
   });
 });
