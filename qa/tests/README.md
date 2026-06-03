@@ -435,13 +435,14 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 yarn test:integration
 
 | Variable              | Required                          | Default                | Description                                                                                          |
 | --------------------- | --------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------- |
-| `TARGET_ENV`          | Effectively yes                   | `undeployed`           | Target environment: `undeployed`, `devnet`, `qanet`, `preview`, `preprod` (lower case).              |
+| `TARGET_ENV`          | Yes                               | —                      | Target environment: `undeployed`, `devnet`, `qanet`, `preview`, `preprod` (lower case). Required; unset or invalid throws. |
 | `NODE_TAG`            | Yes (undeployed only)             | —                      | Node image tag. **Must be a value listed in [`NODE_VERSIONS`](../../NODE_VERSIONS) (repo root).** No auto-derivation. Must NOT be set for deployed envs (fixed by the env). |
 | `INDEXER_TAG`         | Yes (undeployed only)             | —                      | Indexer image tag. **Must be compatible with the selected `NODE_TAG`.** Must NOT be set for deployed envs (fixed by the env). |
 | `NODE_TOOLKIT_TAG`    | No                                | `latest-main`          | Node Toolkit version used by e2e/integration tests.                                                  |
 | `INDEXER_API_VERSION` | No                                | `v4`                   | GraphQL API version segment, e.g. `v3` → `/api/v3/graphql`.                                            |
 | `VITEST_MAX_WORKERS`  | No                                | all available CPUs     | Cap the Vitest worker pool. Accepts a positive integer (`1`, `2`, …) or a percentage (`"50%"`).       |
 | `MN_FETCH_CACHE`      | No (managed by harness)           | auto                   | Postgres-backed toolkit fetch cache. The `toolkit-postgres` container is started automatically.       |
+| `INDEXER_INSTANCE`    | No                                | (primary)              | Blue/green indexer instance to target: `blue` / `green`. Unset → primary (bare `indexer.<env>`). Only meaningful on `qanet`/`preview`/`preprod`; ignored for `undeployed`. A `/ready` preflight fails fast if the colour isn't routed. |
 
 **Runtime-upgrade test only** (`qa/scripts/test-runtime-upgrade.sh`):
 
