@@ -330,7 +330,6 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      *        startIndex=559 leaves one entry at mtIndex 283 below the window)
      * @when we subscribe to dustGenerations with startIndex=559
      * @then all DustGenerationsItem events have generationMtIndex >= 559
-     * @and the subscription completes with a DustGenerationsProgress event
      * @and every event passes schema validation
      */
     test('resumption startIndex>0 delivers only in-range items and completes correctly', async (ctx: TestContext) => {
