@@ -37,6 +37,9 @@ query GetLatestBlock{
     zswapMerkleTreeRoot
     dustCommitmentMerkleTreeRoot
     dustGenerationMerkleTreeRoot
+    zswapEndIndex
+    dustCommitmentEndIndex
+    dustGenerationEndIndex
     parent {
         hash
         height
@@ -59,6 +62,9 @@ query GetBlock($OFFSET: BlockOffset!){
     zswapMerkleTreeRoot
     dustCommitmentMerkleTreeRoot
     dustGenerationMerkleTreeRoot
+    zswapEndIndex
+    dustCommitmentEndIndex
+    dustGenerationEndIndex
     parent {
       hash
       height

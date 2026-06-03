@@ -68,6 +68,9 @@ export interface Block {
   zswapMerkleTreeRoot: string;
   dustCommitmentMerkleTreeRoot: string | null;
   dustGenerationMerkleTreeRoot: string | null;
+  zswapEndIndex: number;
+  dustCommitmentEndIndex: number;
+  dustGenerationEndIndex: number;
   parent: Block;
   transactions: Transaction[];
 }
