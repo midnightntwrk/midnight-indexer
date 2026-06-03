@@ -391,14 +391,16 @@ describe('block queries', () => {
    * monotonically non-decreasing, letting wallets bound their sync range
    * directly from a block query instead of scanning transactions.
    */
-  describe('block-level tree end indexes (#1139)', () => {
+  describe('block-level tree end indexes', () => {
     /**
-     * @given the latest block is queried
-     * @when we inspect its tree end index fields
+     * @given the latest indexed block
+     * @when tree end index fields are read
      * @then zswapEndIndex, dustCommitmentEndIndex and dustGenerationEndIndex
-     *       are all present as non-negative integers
+     *       are non-negative integers
+     *
+     * midnight-indexer#1139
      */
-    test('should expose non-negative zswapEndIndex, dustCommitmentEndIndex and dustGenerationEndIndex on the latest block', async (ctx: TestContext) => {
+    test('should return non-negative integers for all three tree end index fields', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'EndIndex', '#1139'],
       };
@@ -425,12 +427,11 @@ describe('block queries', () => {
     });
 
     /**
-     * @given two consecutive blocks are queried (latest and its parent)
-     * @when we compare their tree end indexes
-     * @then each end index of the parent must be <= the end index of the child,
-     *       confirming the monotonic non-decreasing guarantee
+     * @given two consecutive blocks — the latest block and its parent
+     * @when tree end indexes are compared between parent and child
+     * @then each index on the parent is <= the same index on the child
      */
-    test('should have non-decreasing end indexes across consecutive blocks', async (ctx: TestContext) => {
+    test('should return non-decreasing tree end indexes from parent to child block', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'EndIndex', 'Monotonicity', '#1139'],
       };
@@ -677,21 +678,16 @@ describe(`genesis block`, () => {
     });
 
     /**
-     * Coverage for midnight-indexer#1139 — consistency between block-level and
-     * transaction-level end indexes.
+     * @given the genesis block containing RegularTransactions and a SystemTransaction
+     * @when block-level end indexes are compared to the max RegularTransaction end indexes
+     * @then each block-level end index is >= the RegularTransaction max
+     *       (the SystemTransaction seeding dust generation advances the block
+     *       index beyond what RegularTransactions alone contribute,
+     *       e.g. dustGenerationEndIndex 85 vs RegularTransaction max 20)
      *
-     * The genesis block is guaranteed to have RegularTransactions (pre-fund
-     * wallet UTXOs), making it the most reliable fixture for this check.
-     *
-     * @given the genesis block is queried
-     * @when we compare its block-level end indexes with those of its RegularTransactions
-     * @then Block.zswapEndIndex is >= the highest RegularTransaction.zswapEndIndex
-     *       in that block, and similarly for dustCommitmentEndIndex and
-     *       dustGenerationEndIndex — Block carries the true ledger-state value
-     *       (including SystemTransaction contributions) which is always >=
-     *       the RegularTransaction-only max
+     * midnight-indexer#1139
      */
-    test('should have block end indexes matching the highest RegularTransaction end indexes (#1139)', async (ctx: TestContext) => {
+    test('should return block-level end indexes >= max RegularTransaction end indexes', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'EndIndex', 'Consistency', '#1139'],
       };
