@@ -15,7 +15,6 @@ all-features = true
 rustdoc-args = [ "--cfg", "docsrs" ]
 
 [dependencies]
-# ledger v8 + shared
 midnight-base-crypto_v1      = { workspace = true }
 midnight-coin-structure_v2   = { workspace = true }
 midnight-ledger_v8           = { workspace = true }
@@ -24,11 +23,6 @@ midnight-serialize_v1        = { workspace = true }
 midnight-storage-core_v1     = { workspace = true, features = [ "layout-v2" ] }
 midnight-transient-crypto_v2 = { workspace = true }
 midnight-zswap_v8            = { workspace = true }
-# ledger v9 alpha (base-crypto, coin-structure, transient-crypto, serialize and
-# storage-core are unified across v8 and v9, so no separate v9 alias is needed)
-midnight-ledger_v9           = { workspace = true }
-midnight-onchain-runtime_v4  = { workspace = true }
-midnight-zswap_v9            = { workspace = true }
 async-nats                   = { workspace = true, optional = true }
 byte-unit-serde              = { workspace = true }
 chacha20poly1305             = { workspace = true, features = [ "std" ] }
