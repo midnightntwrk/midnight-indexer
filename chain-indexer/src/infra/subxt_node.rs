@@ -573,9 +573,6 @@ pub enum SubxtNodeError {
     #[error("cannot decode genesis cNight registrations")]
     DecodeGenesisCnightRegistrations(#[source] Box<subxt::error::StorageValueError>),
 
-    #[error("cannot decode genesis cNight registration key")]
-    DecodeGenesisCnightRegistrationKey(#[source] Box<subxt::error::StorageKeyError>),
-
     #[error("cannot get contract state for address {0}")]
     GetContractState(SerializedContractAddress, #[source] BoxError),
 
