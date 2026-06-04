@@ -11,12 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod progress_cache;
 pub mod quota;
 pub mod v4;
 
 use crate::{
     domain::{Api, LedgerStateCache, storage::Storage},
     infra::api::{
+        progress_cache::{ProgressCache, ProgressCacheConfig},
         quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
         v4::dataloader::{
             BlockByHashLoader, ContractActionsByTransactionIdLoader, TransactionByIdLoader,
@@ -157,6 +159,7 @@ pub struct SubscriptionConfig {
     pub dust_generations: DustGenerationsSubscriptionConfig,
     dust_ledger_events: DustLedgerEventsSubscriptionConfig,
     pub dust_nullifier_transactions: DustNullifierTransactionsSubscriptionConfig,
+    progress_cache: ProgressCacheConfig,
     pub shielded_nullifier_transactions: ShieldedNullifierTransactionsSubscriptionConfig,
     shielded_transactions: ShieldedTransactionsSubscriptionConfig,
     unshielded_transactions: UnshieldedTransactionsSubscriptionConfig,
@@ -259,6 +262,8 @@ where
 {
     let ledger_state_cache = LedgerStateCache::default();
     let quotas = SubscriptionQuotas::new(quota_config);
+    let progress_cache = ProgressCache::new(subscription_config.progress_cache);
+    tokio::spawn(progress_cache.clone().run_invalidation(subscriber.clone()));
 
     let v4_app = v4::make_app(
         network_id,
@@ -269,6 +274,7 @@ where
         max_depth,
         subscription_config,
         quotas,
+        progress_cache,
     );
 
     // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a
@@ -401,6 +407,8 @@ trait ContextExt {
 
     fn get_subscription_quotas(&self) -> &SubscriptionQuotas;
 
+    fn get_progress_cache(&self) -> &ProgressCache;
+
     fn get_per_connection_counter(&self) -> &Arc<AtomicUsize>;
 }
 
@@ -476,6 +484,11 @@ impl ContextExt for Context<'_> {
     fn get_subscription_quotas(&self) -> &SubscriptionQuotas {
         self.data::<SubscriptionQuotas>()
             .expect("SubscriptionQuotas is stored in Context")
+    }
+
+    fn get_progress_cache(&self) -> &ProgressCache {
+        self.data::<ProgressCache>()
+            .expect("ProgressCache is stored in Context")
     }
 
     fn get_per_connection_counter(&self) -> &Arc<AtomicUsize> {

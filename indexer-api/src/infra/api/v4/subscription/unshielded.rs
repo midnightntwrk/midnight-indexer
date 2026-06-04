@@ -270,6 +270,7 @@ where
     S: Storage,
 {
     let storage = cx.get_storage::<S>();
+    let progress_cache = cx.get_progress_cache();
     let base = cx
         .get_subscription_config()
         .unshielded_transactions
@@ -277,15 +278,20 @@ where
 
     // Emit progress immediately, then re-poll after a jittered interval that
     // backs off while the highest transaction ID is unchanged (idle) and resets
-    // when it moves.
+    // when it moves. The cache lets concurrent subscribers for the same address
+    // share one query.
     let mut current_interval = base;
     let mut last_highest_transaction_id = None;
     try_stream! {
         loop {
-            let highest_transaction_id = storage
-                .get_highest_transaction_id_for_unshielded_address(address)
-                .await
-                .map_err_into_server_error(|| "get highest transaction ID for address")?
+            let highest_transaction_id = progress_cache
+                .unshielded_highest_transaction_id(address, async {
+                    storage
+                        .get_highest_transaction_id_for_unshielded_address(address)
+                        .await
+                        .map_err_into_server_error(|| "get highest transaction ID for address")
+                })
+                .await?
                 .unwrap_or(0);
             current_interval = next_poll_interval(
                 current_interval,
