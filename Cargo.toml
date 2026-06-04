@@ -44,7 +44,7 @@ anyhow                      = { version = "1.0" }
 assert_matches              = { version = "1.5" }
 async-graphql               = { version = "7.2" }
 async-graphql-axum          = { version = "7.2" }
-async-nats                  = { version = "0.47" }
+async-nats                  = { version = "0.49" }
 async-stream                = { version = "0.3" }
 axum                        = { version = "0.8" }
 bech32                      = { version = "0.11" }
@@ -62,7 +62,7 @@ drop-stream                 = { version = "0.3" }
 fake                        = { version = "2.10" }
 fastrace                    = { version = "0.7" }
 fastrace-axum               = { version = "0.2" }
-fastrace-opentelemetry      = { version = "0.16" }
+fastrace-opentelemetry      = { version = "0.18" }
 fastrace-tracing            = { version = "0.1" }
 figment                     = { version = "0.10" }
 fs_extra                    = { version = "1.3" }
@@ -77,9 +77,9 @@ logforth                    = { version = "0.29" }
 metrics                     = { version = "0.24" }
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 nix                         = { version = "0.31" }
-opentelemetry               = { version = "0.31" }
-opentelemetry-otlp          = { version = "0.31" }
-opentelemetry_sdk           = { version = "0.31" }
+opentelemetry               = { version = "0.32" }
+opentelemetry-otlp          = { version = "0.32" }
+opentelemetry_sdk           = { version = "0.32" }
 parity-scale-codec          = { version = "3.7" }
 parking_lot                 = { version = "0.12" }
 reqwest                     = { version = "0.13", default-features = false }
@@ -88,7 +88,7 @@ serde                       = { version = "1.0" }
 serde_json                  = { version = "1.0" }
 serde_with                  = { version = "3.18" }
 sha2                        = { version = "0.11" }
-sqlx                        = { version = "0.8" }
+sqlx                        = { version = "0.9" }
 stream-cancel               = { version = "0.8" }
 subxt                       = { version = "0.50" }
 tempfile                    = { version = "3.27" }
