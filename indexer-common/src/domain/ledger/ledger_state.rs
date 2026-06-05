@@ -2175,11 +2175,22 @@ fn clamp_and_normalize(
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{LedgerVersion, ledger::LedgerState},
+        domain::{
+            AddressOrContract, LedgerEventAttributes, LedgerVersion,
+            ledger::{LedgerState, ledger_state::make_contract_event_attributes},
+        },
         error::BoxError,
     };
     use anyhow::Context;
-    use midnight_base_crypto_v1::cost_model::SyntheticCost;
+    use midnight_base_crypto_v1::{
+        cost_model::SyntheticCost,
+        fab::{AlignedValue, Alignment, Value, ValueAtom},
+    };
+    use midnight_onchain_runtime_v4::{
+        ops::{LogEventType, VersionedLogItem},
+        state::{EntryPointBuf, StateValue},
+    };
+    use midnight_storage_core_v1::{arena::Sp, db::InMemoryDB};
 
     #[cfg(any(feature = "cloud", feature = "standalone"))]
     #[tokio::test(flavor = "multi_thread")]
@@ -2350,10 +2361,6 @@ mod tests {
 
     #[test]
     fn make_contract_event_attributes_dispatches_each_log_event_type() {
-        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
-        use crate::domain::LedgerEventAttributes;
-        use midnight_onchain_runtime_v4::state::{EntryPointBuf, StateValue};
-        use midnight_storage_core_v1::db::InMemoryDB;
 
         let entry_point = EntryPointBuf(b"ep".to_vec());
         let dispatch = |t: LogEventType| {
@@ -2415,9 +2422,6 @@ mod tests {
 
     #[test]
     fn decodes_shielded_spend_nullifier() {
-        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
-        use crate::domain::LedgerEventAttributes;
-        use midnight_onchain_runtime_v4::state::EntryPointBuf;
         let nullifier_bytes = vec![0xAA; 32];
         let item = VersionedLogItem {
             version: 1,
@@ -2443,9 +2447,6 @@ mod tests {
     fn decodes_shielded_receive_canonical_mip_0002_order() {
         // Canonical layout per merged MIP-0002 (main):
         // (commitment, ciphertext: Maybe<Bytes<512>>, contractAddress: Maybe<ContractAddress>).
-        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
-        use crate::domain::LedgerEventAttributes;
-        use midnight_onchain_runtime_v4::state::EntryPointBuf;
         let mut bytes = Vec::with_capacity(578);
         bytes.extend_from_slice(&[0xAA; 32]); // commitment
         bytes.push(1); // ciphertext.is_some = true
@@ -2483,9 +2484,6 @@ mod tests {
         // two zero tag bytes on the wire. Trailing-zero stripping reduces
         // atom to 32 bytes (commitment alone). Decoder pads to 578 with
         // zeros; ciphertext and contractAddress tags both 0 → None.
-        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
-        use crate::domain::LedgerEventAttributes;
-        use midnight_onchain_runtime_v4::state::EntryPointBuf;
         let bytes = vec![0xDD; 32]; // commitment only
         let item = VersionedLogItem {
             version: 1,
@@ -2510,9 +2508,6 @@ mod tests {
 
     #[test]
     fn decodes_shielded_mint_with_optional_amount_some() {
-        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
-        use crate::domain::LedgerEventAttributes;
-        use midnight_onchain_runtime_v4::state::EntryPointBuf;
         let mut bytes = Vec::with_capacity(81);
         bytes.extend_from_slice(&[0xC1; 32]); // commitment
         bytes.extend_from_slice(&[0xD2; 32]); // domain_sep
@@ -2541,9 +2536,6 @@ mod tests {
 
     #[test]
     fn decodes_shielded_burn_with_optional_amount_none() {
-        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
-        use crate::domain::LedgerEventAttributes;
-        use midnight_onchain_runtime_v4::state::EntryPointBuf;
         let mut bytes = Vec::with_capacity(49);
         bytes.extend_from_slice(&[0xBB; 32]); // nullifier
         bytes.push(0); // amount.is_some = false
@@ -2567,9 +2559,6 @@ mod tests {
 
     #[test]
     fn decodes_unshielded_spend_with_domain_sep_per_spec() {
-        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
-        use crate::domain::{AddressOrContract, LedgerEventAttributes};
-        use midnight_onchain_runtime_v4::state::EntryPointBuf;
         let mut bytes = Vec::with_capacity(113);
         bytes.push(1); // sender tag = Contract
         bytes.extend_from_slice(&[0xCC; 32]); // sender value
@@ -2604,9 +2593,6 @@ mod tests {
 
     #[test]
     fn decodes_unshielded_mint_amount_le() {
-        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
-        use crate::domain::LedgerEventAttributes;
-        use midnight_onchain_runtime_v4::state::EntryPointBuf;
         let mut bytes = Vec::with_capacity(80);
         bytes.extend_from_slice(&[0x11; 32]); // domain_sep
         bytes.extend_from_slice(&[0x22; 32]); // token_type
@@ -2634,9 +2620,6 @@ mod tests {
 
     #[test]
     fn decodes_misc_name_and_payload() {
-        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
-        use crate::domain::LedgerEventAttributes;
-        use midnight_onchain_runtime_v4::state::EntryPointBuf;
         let mut bytes = Vec::with_capacity(288);
         bytes.extend_from_slice(&[0x55; 32]); // name
         bytes.extend_from_slice(&[0x66; 256]); // payload
@@ -2660,9 +2643,6 @@ mod tests {
     fn falls_back_to_empty_when_data_exceeds_max() {
         // Atom longer than the canonical max for the event type. Decoder
         // logs warning + falls back to empty payload fields.
-        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
-        use crate::domain::{AddressOrContract, LedgerEventAttributes};
-        use midnight_onchain_runtime_v4::state::EntryPointBuf;
         let bytes = vec![0xFF; 200]; // larger than the expected 113-byte spec size
         let item = VersionedLogItem {
             version: 1,
@@ -2695,9 +2675,6 @@ mod tests {
         // back to empty rather than misinterpret the bytes as a 113-byte
         // payload with shifted fields (which would silently corrupt
         // domain_sep / token_type / amount).
-        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
-        use crate::domain::{AddressOrContract, LedgerEventAttributes};
-        use midnight_onchain_runtime_v4::state::EntryPointBuf;
         let mut bytes = Vec::with_capacity(81);
         bytes.push(0); // sender tag = User
         bytes.extend_from_slice(&[0xAA; 32]); // sender value
@@ -2733,9 +2710,6 @@ mod tests {
         // Spec-compliant 113-byte UnshieldedSpend with amount=0 strips the
         // entire u128 (16 trailing zeros), leaving 97 bytes on the wire.
         // The decoder pads back to 113 and decodes correctly.
-        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
-        use crate::domain::{AddressOrContract, LedgerEventAttributes};
-        use midnight_onchain_runtime_v4::state::EntryPointBuf;
         let mut bytes = Vec::with_capacity(97);
         bytes.push(0); // sender tag = User
         bytes.extend_from_slice(&[0x11; 32]); // sender value
@@ -2771,10 +2745,6 @@ mod tests {
 
     #[test]
     fn falls_back_to_empty_when_data_is_not_cell() {
-        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
-        use crate::domain::LedgerEventAttributes;
-        use midnight_onchain_runtime_v4::state::{EntryPointBuf, StateValue};
-        use midnight_storage_core_v1::db::InMemoryDB;
         let item = VersionedLogItem::<InMemoryDB> {
             version: 1,
             event_type: LogEventType::ShieldedSpend,
@@ -2793,10 +2763,7 @@ mod tests {
     /// payload, matching the wire shape produced by Compact's
     /// `serialize<T, n>` lowering of `emit(StructValue)`. The decoder only
     /// reads `aligned.value.0[0].0`, so the alignment field is left empty.
-    fn make_cell_data(bytes: Vec<u8>) -> midnight_onchain_runtime_v4::state::StateValue {
-        use midnight_base_crypto_v1::fab::{AlignedValue, Alignment, Value, ValueAtom};
-        use midnight_onchain_runtime_v4::state::StateValue;
-        use midnight_storage_core_v1::arena::Sp;
+    fn make_cell_data(bytes: Vec<u8>) -> StateValue {
         let aligned = AlignedValue {
             value: Value(vec![ValueAtom(bytes)]),
             alignment: Alignment(vec![]),
