@@ -1434,16 +1434,14 @@ where
 /// Wire format assumptions (verified against the onchain-vm
 /// `try_decode_event` path, Compact compiler `serialize<T, n>` circuit, and
 /// the `midnight-events.ss` per-event size table):
-/// - `VersionedLogItem.data` is `StateValue::Cell(AlignedValue)` with a single
-///   `ValueAtom` containing the flat concatenated bytes of the event struct.
-/// - `ValueAtom` strips trailing zeros; the decoder pads back to the expected
-///   size before slicing.
+/// - `VersionedLogItem.data` is `StateValue::Cell(AlignedValue)` with a single `ValueAtom`
+///   containing the flat concatenated bytes of the event struct.
+/// - `ValueAtom` strips trailing zeros; the decoder pads back to the expected size before slicing.
 /// - `Bytes<N>` = N raw bytes.
 /// - `Uint<128>` = 16 bytes, little-endian.
-/// - `Maybe<T>` = 1 tag byte (0=None, 1=Some) + sizeof(T) value bytes; value
-///   is zeroed in the wire when `is_some=false`.
-/// - `Either<A,B>` = 1 tag byte (0=Left/User, 1=Right/Contract) + sizeof(max(A,B))
-///   value bytes.
+/// - `Maybe<T>` = 1 tag byte (0=None, 1=Some) + sizeof(T) value bytes; value is zeroed in the wire
+///   when `is_some=false`.
+/// - `Either<A,B>` = 1 tag byte (0=Left/User, 1=Right/Contract) + sizeof(max(A,B)) value bytes.
 ///
 /// If the wire shape diverges (non-Cell, wrong size, multi-atom, etc.), the
 /// decoder logs a warning and returns the variant with empty/default payload
@@ -1550,9 +1548,10 @@ where
             }
         }
         LogEventType::UnshieldedSpend => {
-            // Spec layout: (sender Either<32,32> 33, domain_sep 32, token_type 32, amount u128 16). 113 bytes.
-            // Min = 97 (= 113 - 16, only the amount u128 fully stripped to zero).
-            // Compact issue-377 emits 81 bytes (no domain_sep); 81 < 97 → fallback.
+            // Spec layout: (sender Either<32,32> 33, domain_sep 32, token_type 32, amount u128 16).
+            // 113 bytes. Min = 97 (= 113 - 16, only the amount u128 fully stripped to
+            // zero). Compact issue-377 emits 81 bytes (no domain_sep); 81 < 97 →
+            // fallback.
             let bytes = extract_flat_bytes(
                 &item.data,
                 UNSHIELDED_SPEND_SIZE - UINT_128_SIZE,
@@ -1704,12 +1703,12 @@ where
 /// padding with trailing zeros if Compact stripped them on the wire. Returns
 /// `None` on any structural mismatch:
 /// - non-Cell `StateValue`
-/// - multi-atom `AlignedValue` (Compact's `serialize<T, n>` produces a single
-///   atom for the flat byte payload)
+/// - multi-atom `AlignedValue` (Compact's `serialize<T, n>` produces a single atom for the flat
+///   byte payload)
 /// - atom longer than `max` (oversize — wrong event type or unexpected layout)
-/// - atom shorter than `min` (undersize — likely a different event-struct
-///   layout, e.g. spec/Compact divergence on UnshieldedSpend/Receive where
-///   Compact issue-377 emits 81 bytes vs the spec's 113-byte layout)
+/// - atom shorter than `min` (undersize — likely a different event-struct layout, e.g. spec/Compact
+///   divergence on UnshieldedSpend/Receive where Compact issue-377 emits 81 bytes vs the spec's
+///   113-byte layout)
 ///
 /// `min` is the per-event minimum atom-byte length after maximum trailing-zero
 /// stripping of the last variable-width field. `max` is the canonical full
@@ -1751,10 +1750,7 @@ fn take_bytes(bytes: &[u8], offset: usize, len: usize) -> Option<ByteVec> {
 }
 
 fn take_uint_128_le(bytes: &[u8], offset: usize) -> Option<String> {
-    let slice: [u8; UINT_128_SIZE] = bytes
-        .get(offset..offset + UINT_128_SIZE)?
-        .try_into()
-        .ok()?;
+    let slice: [u8; UINT_128_SIZE] = bytes.get(offset..offset + UINT_128_SIZE)?.try_into().ok()?;
     Some(u128::from_le_bytes(slice).to_string())
 }
 
@@ -2360,7 +2356,6 @@ mod tests {
 
     #[test]
     fn make_contract_event_attributes_dispatches_each_log_event_type() {
-
         let entry_point = EntryPointBuf(b"ep".to_vec());
         let dispatch = |t: LogEventType| {
             make_contract_event_attributes(
