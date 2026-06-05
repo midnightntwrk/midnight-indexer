@@ -58,7 +58,7 @@ CREATE INDEX ON ledger_events (contract_action_id);
 -- Per-row indexed field values for standard contract events, supporting
 -- prefix-match queries from the contractEvents query/subscription surface.
 -- Shape mirrors dust_nullifiers / zswap_nullifiers (BYTEA values, B-tree
--- index for prefix lookup via LIKE / bytea_pattern_ops).
+-- index for prefix lookup via LIKE).
 --
 -- field_name identifies which event field this row represents
 -- (e.g. 'nullifier', 'commitment', 'sender', 'tokenType'), the indexer
@@ -71,6 +71,5 @@ CREATE TABLE contract_event_indexed_fields (
   field_value BYTEA NOT NULL
 );
 CREATE INDEX ON contract_event_indexed_fields (field_value);
-CREATE INDEX ON contract_event_indexed_fields (field_value bytea_pattern_ops);
 CREATE INDEX ON contract_event_indexed_fields (ledger_event_id);
 CREATE INDEX ON contract_event_indexed_fields (field_name, field_value);
