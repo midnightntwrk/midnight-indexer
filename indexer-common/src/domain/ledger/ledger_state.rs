@@ -28,7 +28,7 @@ use crate::{
 };
 use fastrace::trace;
 use itertools::Itertools;
-use log::{error, info};
+use log::{error, info, warn};
 use midnight_base_crypto_v1::{
     cost_model::{FixedPoint, NormalizedCost, SyntheticCost},
     hash::{HashOutput, persistent_commit},
@@ -1722,39 +1722,28 @@ where
     let aligned = match data {
         StateValue::Cell(sp) => sp,
         other => {
-            log::warn!(
-                "ContractLog data: expected StateValue::Cell, got {:?}",
-                std::mem::discriminant(other)
-            );
+            let got = std::mem::discriminant(other);
+            warn!(got:?; "contract log data: expected StateValue::Cell");
             return None;
         }
     };
-    if aligned.value.0.len() != 1 {
-        log::warn!(
-            "ContractLog data: expected single ValueAtom, got {} atoms",
-            aligned.value.0.len()
-        );
+    let atoms = aligned.value.0.len();
+    if atoms != 1 {
+        warn!(atoms; "contract log data: expected single ValueAtom");
         return None;
     }
     let atom_bytes = &aligned.value.0[0].0;
-    if atom_bytes.len() > max {
-        log::warn!(
-            "ContractLog data: atom length {} exceeds expected max {}",
-            atom_bytes.len(),
-            max
-        );
+    let atom_len = atom_bytes.len();
+    if atom_len > max {
+        warn!(atom_len, max; "contract log data: atom length exceeds expected max");
         return None;
     }
-    if atom_bytes.len() < min {
-        log::warn!(
-            "ContractLog data: atom length {} below expected min {} (likely wrong event-struct layout)",
-            atom_bytes.len(),
-            min
-        );
+    if atom_len < min {
+        warn!(atom_len, min; "contract log data: atom length below expected min, likely wrong event-struct layout");
         return None;
     }
     let mut buf = vec![0u8; max];
-    buf[..atom_bytes.len()].copy_from_slice(atom_bytes);
+    buf[..atom_len].copy_from_slice(atom_bytes);
     Some(buf)
 }
 
@@ -2424,22 +2413,6 @@ mod tests {
         ));
     }
 
-    /// Build a `StateValue::Cell(AlignedValue)` carrying the given flat-byte
-    /// payload, matching the wire shape produced by Compact's
-    /// `serialize<T, n>` lowering of `emit(StructValue)`. The decoder only
-    /// reads `aligned.value.0[0].0`, so the alignment field is left empty.
-    #[cfg(test)]
-    fn make_cell_data(bytes: Vec<u8>) -> midnight_onchain_runtime_v4::state::StateValue {
-        use midnight_base_crypto_v1::fab::{AlignedValue, Alignment, Value, ValueAtom};
-        use midnight_onchain_runtime_v4::state::StateValue;
-        use midnight_storage_core_v1::arena::Sp;
-        let aligned = AlignedValue {
-            value: Value(vec![ValueAtom(bytes)]),
-            alignment: Alignment(vec![]),
-        };
-        StateValue::Cell(Sp::new(aligned))
-    }
-
     #[test]
     fn decodes_shielded_spend_nullifier() {
         use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
@@ -2814,5 +2787,20 @@ mod tests {
             }
             other => panic!("unexpected variant {other:?}"),
         }
+    }
+
+    /// Build a `StateValue::Cell(AlignedValue)` carrying the given flat-byte
+    /// payload, matching the wire shape produced by Compact's
+    /// `serialize<T, n>` lowering of `emit(StructValue)`. The decoder only
+    /// reads `aligned.value.0[0].0`, so the alignment field is left empty.
+    fn make_cell_data(bytes: Vec<u8>) -> midnight_onchain_runtime_v4::state::StateValue {
+        use midnight_base_crypto_v1::fab::{AlignedValue, Alignment, Value, ValueAtom};
+        use midnight_onchain_runtime_v4::state::StateValue;
+        use midnight_storage_core_v1::arena::Sp;
+        let aligned = AlignedValue {
+            value: Value(vec![ValueAtom(bytes)]),
+            alignment: Alignment(vec![]),
+        };
+        StateValue::Cell(Sp::new(aligned))
     }
 }
