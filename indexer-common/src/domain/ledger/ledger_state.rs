@@ -1456,7 +1456,6 @@ fn make_contract_event_attributes<D>(
 where
     D: DB,
 {
-    use LedgerEventAttributes::*;
     let version = item.version;
     let entry_point: ByteVec = entry_point.0.into();
     // Per-event minimum atom-bytes lengths after Compact's trailing-zero
@@ -1473,7 +1472,7 @@ where
             let nullifier = bytes
                 .and_then(|bytes| take_bytes(&bytes, 0, BYTES_32_SIZE))
                 .unwrap_or_default();
-            ContractShieldedSpend {
+            LedgerEventAttributes::ContractShieldedSpend {
                 version,
                 entry_point,
                 nullifier,
@@ -1501,7 +1500,7 @@ where
             let receiving_contract_address = bytes
                 .as_deref()
                 .and_then(|b| take_maybe_bytes(b, BYTES_32_SIZE + MAYBE_512_SIZE, BYTES_32_SIZE));
-            ContractShieldedReceive {
+            LedgerEventAttributes::ContractShieldedReceive {
                 version,
                 entry_point,
                 commitment,
@@ -1525,7 +1524,7 @@ where
             let amount = bytes
                 .as_deref()
                 .and_then(|b| take_maybe_uint_128_le(b, 2 * BYTES_32_SIZE));
-            ContractShieldedMint {
+            LedgerEventAttributes::ContractShieldedMint {
                 version,
                 entry_point,
                 commitment,
@@ -1543,7 +1542,7 @@ where
             let amount = bytes
                 .as_deref()
                 .and_then(|b| take_maybe_uint_128_le(b, BYTES_32_SIZE));
-            ContractShieldedBurn {
+            LedgerEventAttributes::ContractShieldedBurn {
                 version,
                 entry_point,
                 nullifier,
@@ -1575,7 +1574,7 @@ where
                 .as_deref()
                 .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + 2 * BYTES_32_SIZE))
                 .unwrap_or_else(|| "0".to_string());
-            ContractUnshieldedSpend {
+            LedgerEventAttributes::ContractUnshieldedSpend {
                 version,
                 entry_point,
                 sender,
@@ -1607,7 +1606,7 @@ where
                 .as_deref()
                 .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + 2 * BYTES_32_SIZE))
                 .unwrap_or_else(|| "0".to_string());
-            ContractUnshieldedReceive {
+            LedgerEventAttributes::ContractUnshieldedReceive {
                 version,
                 entry_point,
                 recipient,
@@ -1636,7 +1635,7 @@ where
                 .as_deref()
                 .and_then(|b| take_uint_128_le(b, 2 * BYTES_32_SIZE))
                 .unwrap_or_else(|| "0".to_string());
-            ContractUnshieldedMint {
+            LedgerEventAttributes::ContractUnshieldedMint {
                 version,
                 entry_point,
                 domain_sep,
@@ -1664,7 +1663,7 @@ where
                 .as_deref()
                 .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + BYTES_32_SIZE))
                 .unwrap_or_else(|| "0".to_string());
-            ContractUnshieldedBurn {
+            LedgerEventAttributes::ContractUnshieldedBurn {
                 version,
                 entry_point,
                 sender,
@@ -1672,11 +1671,11 @@ where
                 amount,
             }
         }
-        LogEventType::Paused => ContractPaused {
+        LogEventType::Paused => LedgerEventAttributes::ContractPaused {
             version,
             entry_point,
         },
-        LogEventType::Unpaused => ContractUnpaused {
+        LogEventType::Unpaused => LedgerEventAttributes::ContractUnpaused {
             version,
             entry_point,
         },
@@ -1691,7 +1690,7 @@ where
                 .as_deref()
                 .and_then(|b| take_bytes(b, BYTES_32_SIZE, 256))
                 .unwrap_or_default();
-            ContractMisc {
+            LedgerEventAttributes::ContractMisc {
                 version,
                 entry_point,
                 name,
