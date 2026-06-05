@@ -1425,7 +1425,7 @@ const MISC_SIZE: usize = 288; // 32 + 256
 const BYTES_32: usize = 32;
 const UINT_128_SIZE: usize = 16;
 const EITHER_32_SIZE: usize = 1 + 32;
-const MAYBE_32_SIZE: usize = 1 + 32;
+const MAYBE_512_SIZE: usize = 1 + 512;
 
 /// Map a v9 `VersionedLogItem` to the corresponding `LedgerEventAttributes`
 /// variant based on its `LogEventType` and decode the per-event payload from
@@ -1480,28 +1480,27 @@ where
             }
         }
         LogEventType::ShieldedReceive => {
-            // Spec layout per MIP-107 Appendix A: (commitment, contractAddress: Maybe, ciphertext: Maybe).
-            // Compact issue-377 matches this order. CoIP-442 has a different
-            // field order (commitment, ciphertext, contractAddress) but the
-            // SCALE wire reflects what Compact actually emits, so the decoder
-            // follows MIP order. GraphQL surface order is cosmetic.
+            // Canonical MIP-0002 (mips/mip-0002-public-contract-log-emission.md
+            // Appendix A on main): (commitment, ciphertext: Maybe<Bytes<512>>,
+            // contractAddress: Maybe<ContractAddress>). The CoIP-442 head agrees
+            // (commit e537fc9 "Reorder ShieldedReceive fields"). Compact issue-377
+            // currently emits the older (commitment, contractAddress, ciphertext)
+            // order; that's a Compact-side catch-up issue, not the indexer's.
             //
-            // Both Maybe values can have all their bytes stripped (Maybe<Bytes<512>>
-            // is 513 bytes of which up to 512 can be trailing zeros, plus the
-            // ciphertext's value-when-Some can itself end in zeros). Accept anywhere
-            // from commitment-only (32 bytes) to full (578 bytes).
-            let bytes =
-                extract_flat_bytes(&item.data, BYTES_32, SHIELDED_RECEIVE_SIZE);
+            // Trailing-zero stripping can strip the entire trailing
+            // contractAddress (33 bytes) + the ciphertext value bytes
+            // (up to 512), so min = 32 (commitment only).
+            let bytes = extract_flat_bytes(&item.data, BYTES_32, SHIELDED_RECEIVE_SIZE);
             let commitment = bytes
                 .as_deref()
                 .and_then(|b| take_bytes(b, 0, BYTES_32))
                 .unwrap_or_default();
-            let receiving_contract_address = bytes
-                .as_deref()
-                .and_then(|b| take_maybe_bytes(b, BYTES_32, BYTES_32));
             let ciphertext = bytes
                 .as_deref()
-                .and_then(|b| take_maybe_bytes(b, BYTES_32 + MAYBE_32_SIZE, 512));
+                .and_then(|b| take_maybe_bytes(b, BYTES_32, 512));
+            let receiving_contract_address = bytes
+                .as_deref()
+                .and_then(|b| take_maybe_bytes(b, BYTES_32 + MAYBE_512_SIZE, BYTES_32));
             ContractShieldedReceive {
                 version,
                 entry_point,
@@ -2462,6 +2461,75 @@ mod tests {
                 assert_eq!(version, 1);
                 assert_eq!(&*entry_point, b"spend");
                 assert_eq!(&*nullifier, nullifier_bytes.as_slice());
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_shielded_receive_canonical_mip_0002_order() {
+        // Canonical layout per merged MIP-0002 (main):
+        // (commitment, ciphertext: Maybe<Bytes<512>>, contractAddress: Maybe<ContractAddress>).
+        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
+        use crate::domain::LedgerEventAttributes;
+        use midnight_onchain_runtime_v4::state::EntryPointBuf;
+        let mut bytes = Vec::with_capacity(578);
+        bytes.extend_from_slice(&[0xAA; 32]); // commitment
+        bytes.push(1); // ciphertext.is_some = true
+        bytes.extend_from_slice(&[0xBB; 512]); // ciphertext value
+        bytes.push(1); // contractAddress.is_some = true
+        bytes.extend_from_slice(&[0xCC; 32]); // contractAddress value
+        assert_eq!(bytes.len(), 578);
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::ShieldedReceive,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"receive".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractShieldedReceive {
+                commitment,
+                ciphertext,
+                receiving_contract_address,
+                ..
+            } => {
+                assert_eq!(&*commitment, &[0xAA; 32]);
+                let ct = ciphertext.expect("ciphertext should be Some");
+                assert_eq!(ct.len(), 512);
+                assert!(ct.iter().all(|&b| b == 0xBB));
+                let rca = receiving_contract_address.expect("contractAddress should be Some");
+                assert_eq!(&*rca, &[0xCC; 32]);
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_shielded_receive_with_both_maybes_none() {
+        // Spec-compliant emission with both Maybes None: only commitment +
+        // two zero tag bytes on the wire. Trailing-zero stripping reduces
+        // atom to 32 bytes (commitment alone). Decoder pads to 578 with
+        // zeros; ciphertext and contractAddress tags both 0 → None.
+        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
+        use crate::domain::LedgerEventAttributes;
+        use midnight_onchain_runtime_v4::state::EntryPointBuf;
+        let bytes = vec![0xDD; 32]; // commitment only
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::ShieldedReceive,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"receive".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractShieldedReceive {
+                commitment,
+                ciphertext,
+                receiving_contract_address,
+                ..
+            } => {
+                assert_eq!(&*commitment, &[0xDD; 32]);
+                assert!(ciphertext.is_none());
+                assert!(receiving_contract_address.is_none());
             }
             other => panic!("unexpected variant {other:?}"),
         }
