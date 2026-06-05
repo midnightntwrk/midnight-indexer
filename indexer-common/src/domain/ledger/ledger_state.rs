@@ -1429,7 +1429,7 @@ where
 
 /// Map a v9 `VersionedLogItem` to the corresponding `LedgerEventAttributes`
 /// variant based on its `LogEventType` and decode the per-event payload from
-/// `StateValue<D>`. The decoder follows the CoIP-442 + MIP-107 spec exactly.
+/// `StateValue<D>`. The decoder follows the CoIP-442 + MIP-0002 spec exactly.
 ///
 /// Wire format assumptions (verified against the onchain-vm
 /// `try_decode_event` path, Compact compiler `serialize<T, n>` circuit, and
@@ -1713,7 +1713,7 @@ where
 ///
 /// `min` is the per-event minimum atom-byte length after maximum trailing-zero
 /// stripping of the last variable-width field. `max` is the canonical full
-/// size per CoIP-442 + MIP-107.
+/// size per CoIP-442 + MIP-0002.
 fn extract_flat_bytes<D>(data: &StateValue<D>, min: usize, max: usize) -> Option<Vec<u8>>
 where
     D: DB,
