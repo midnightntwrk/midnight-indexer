@@ -1459,9 +1459,18 @@ where
     use LedgerEventAttributes::*;
     let version = item.version;
     let entry_point: ByteVec = entry_point.0.into();
+    // Per-event minimum atom-bytes lengths after Compact's trailing-zero
+    // stripping. Set so that an emission whose only-trailing-zero stripping
+    // is the final value field still decodes correctly, while an emission
+    // with a missing (truncated) leading field falls back. Crucial for the
+    // UnshieldedSpend / UnshieldedReceive spec/Compact divergence: spec is
+    // 113 bytes, Compact issue-377 is 81 bytes; min 97 (=113-16, only the
+    // u128 amount fully stripped) rejects 81-byte emissions cleanly.
     match item.event_type {
         LogEventType::ShieldedSpend => {
-            let nullifier = extract_flat_bytes(&item.data, SHIELDED_SPEND_SIZE)
+            // nullifier is a 32-byte hash; require all 32 bytes.
+            let bytes = extract_flat_bytes(&item.data, SHIELDED_SPEND_SIZE, SHIELDED_SPEND_SIZE);
+            let nullifier = bytes
                 .and_then(|bytes| take_bytes(&bytes, 0, BYTES_32))
                 .unwrap_or_default();
             ContractShieldedSpend {
@@ -1476,7 +1485,13 @@ where
             // field order (commitment, ciphertext, contractAddress) but the
             // SCALE wire reflects what Compact actually emits, so the decoder
             // follows MIP order. GraphQL surface order is cosmetic.
-            let bytes = extract_flat_bytes(&item.data, SHIELDED_RECEIVE_SIZE);
+            //
+            // Both Maybe values can have all their bytes stripped (Maybe<Bytes<512>>
+            // is 513 bytes of which up to 512 can be trailing zeros, plus the
+            // ciphertext's value-when-Some can itself end in zeros). Accept anywhere
+            // from commitment-only (32 bytes) to full (578 bytes).
+            let bytes =
+                extract_flat_bytes(&item.data, BYTES_32, SHIELDED_RECEIVE_SIZE);
             let commitment = bytes
                 .as_deref()
                 .and_then(|b| take_bytes(b, 0, BYTES_32))
@@ -1496,7 +1511,10 @@ where
             }
         }
         LogEventType::ShieldedMint => {
-            let bytes = extract_flat_bytes(&item.data, SHIELDED_MINT_SIZE);
+            // (commitment 32, domain_sep 32, amount Maybe<Uint128> 17).
+            // Min = 32+32 (commitment+domain_sep) since amount Maybe can be
+            // fully stripped (tag byte 0 + 16 zero bytes = 17 strippable).
+            let bytes = extract_flat_bytes(&item.data, 2 * BYTES_32, SHIELDED_MINT_SIZE);
             let commitment = bytes
                 .as_deref()
                 .and_then(|b| take_bytes(b, 0, BYTES_32))
@@ -1517,7 +1535,8 @@ where
             }
         }
         LogEventType::ShieldedBurn => {
-            let bytes = extract_flat_bytes(&item.data, SHIELDED_BURN_SIZE);
+            // (nullifier 32, amount Maybe<Uint128> 17). Min = 32.
+            let bytes = extract_flat_bytes(&item.data, BYTES_32, SHIELDED_BURN_SIZE);
             let nullifier = bytes
                 .as_deref()
                 .and_then(|b| take_bytes(b, 0, BYTES_32))
@@ -1533,7 +1552,14 @@ where
             }
         }
         LogEventType::UnshieldedSpend => {
-            let bytes = extract_flat_bytes(&item.data, UNSHIELDED_SPEND_SIZE);
+            // Spec layout: (sender Either<32,32> 33, domain_sep 32, token_type 32, amount u128 16). 113 bytes.
+            // Min = 97 (= 113 - 16, only the amount u128 fully stripped to zero).
+            // Compact issue-377 emits 81 bytes (no domain_sep); 81 < 97 → fallback.
+            let bytes = extract_flat_bytes(
+                &item.data,
+                UNSHIELDED_SPEND_SIZE - UINT_128_SIZE,
+                UNSHIELDED_SPEND_SIZE,
+            );
             let sender = bytes
                 .as_deref()
                 .and_then(|b| take_either_address(b, 0))
@@ -1560,7 +1586,12 @@ where
             }
         }
         LogEventType::UnshieldedReceive => {
-            let bytes = extract_flat_bytes(&item.data, UNSHIELDED_RECEIVE_SIZE);
+            // Same shape and min as UnshieldedSpend (recipient instead of sender).
+            let bytes = extract_flat_bytes(
+                &item.data,
+                UNSHIELDED_RECEIVE_SIZE - UINT_128_SIZE,
+                UNSHIELDED_RECEIVE_SIZE,
+            );
             let recipient = bytes
                 .as_deref()
                 .and_then(|b| take_either_address(b, 0))
@@ -1587,7 +1618,13 @@ where
             }
         }
         LogEventType::UnshieldedMint => {
-            let bytes = extract_flat_bytes(&item.data, UNSHIELDED_MINT_SIZE);
+            // (domain_sep 32, token_type 32, amount u128 16). 80 bytes.
+            // Min = 64 (amount fully stripped to zero).
+            let bytes = extract_flat_bytes(
+                &item.data,
+                UNSHIELDED_MINT_SIZE - UINT_128_SIZE,
+                UNSHIELDED_MINT_SIZE,
+            );
             let domain_sep = bytes
                 .as_deref()
                 .and_then(|b| take_bytes(b, 0, BYTES_32))
@@ -1609,7 +1646,13 @@ where
             }
         }
         LogEventType::UnshieldedBurn => {
-            let bytes = extract_flat_bytes(&item.data, UNSHIELDED_BURN_SIZE);
+            // (sender Either<32,32> 33, token_type 32, amount u128 16). 81 bytes.
+            // Min = 65 (amount fully stripped to zero).
+            let bytes = extract_flat_bytes(
+                &item.data,
+                UNSHIELDED_BURN_SIZE - UINT_128_SIZE,
+                UNSHIELDED_BURN_SIZE,
+            );
             let sender = bytes
                 .as_deref()
                 .and_then(|b| take_either_address(b, 0))
@@ -1639,7 +1682,8 @@ where
             entry_point,
         },
         LogEventType::Misc => {
-            let bytes = extract_flat_bytes(&item.data, MISC_SIZE);
+            // (name 32, payload 256). Min = 32 (payload all-zero strippable).
+            let bytes = extract_flat_bytes(&item.data, BYTES_32, MISC_SIZE);
             let name = bytes
                 .as_deref()
                 .and_then(|b| take_bytes(b, 0, BYTES_32))
@@ -1658,11 +1702,21 @@ where
     }
 }
 
-/// Extract a `Vec<u8>` of exactly `expected` bytes from a `StateValue::Cell`,
+/// Extract a `Vec<u8>` of exactly `max` bytes from a `StateValue::Cell`,
 /// padding with trailing zeros if Compact stripped them on the wire. Returns
-/// `None` on any structural mismatch (non-Cell, multi-atom, or atom longer
-/// than `expected`) so the per-event decoder can fall back to default values.
-fn extract_flat_bytes<D>(data: &StateValue<D>, expected: usize) -> Option<Vec<u8>>
+/// `None` on any structural mismatch:
+/// - non-Cell `StateValue`
+/// - multi-atom `AlignedValue` (Compact's `serialize<T, n>` produces a single
+///   atom for the flat byte payload)
+/// - atom longer than `max` (oversize — wrong event type or unexpected layout)
+/// - atom shorter than `min` (undersize — likely a different event-struct
+///   layout, e.g. spec/Compact divergence on UnshieldedSpend/Receive where
+///   Compact issue-377 emits 81 bytes vs the spec's 113-byte layout)
+///
+/// `min` is the per-event minimum atom-byte length after maximum trailing-zero
+/// stripping of the last variable-width field. `max` is the canonical full
+/// size per CoIP-442 + MIP-107.
+fn extract_flat_bytes<D>(data: &StateValue<D>, min: usize, max: usize) -> Option<Vec<u8>>
 where
     D: DB,
 {
@@ -1684,15 +1738,23 @@ where
         return None;
     }
     let atom_bytes = &aligned.value.0[0].0;
-    if atom_bytes.len() > expected {
+    if atom_bytes.len() > max {
         log::warn!(
-            "ContractLog data: atom length {} exceeds expected {}",
+            "ContractLog data: atom length {} exceeds expected max {}",
             atom_bytes.len(),
-            expected
+            max
         );
         return None;
     }
-    let mut buf = vec![0u8; expected];
+    if atom_bytes.len() < min {
+        log::warn!(
+            "ContractLog data: atom length {} below expected min {} (likely wrong event-struct layout)",
+            atom_bytes.len(),
+            min
+        );
+        return None;
+    }
+    let mut buf = vec![0u8; max];
     buf[..atom_bytes.len()].copy_from_slice(atom_bytes);
     Some(buf)
 }
@@ -2554,10 +2616,9 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_empty_when_data_size_mismatches() {
-        // Compact issue-377 emits UnshieldedSpend at 81 bytes (no domain_sep);
-        // the spec expects 113 bytes. The decoder should warn and fall back
-        // to empty payload fields, not panic.
+    fn falls_back_to_empty_when_data_exceeds_max() {
+        // Atom longer than the canonical max for the event type. Decoder
+        // logs warning + falls back to empty payload fields.
         use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
         use crate::domain::{AddressOrContract, LedgerEventAttributes};
         use midnight_onchain_runtime_v4::state::EntryPointBuf;
@@ -2579,6 +2640,88 @@ mod tests {
                 assert!(matches!(sender, AddressOrContract::User(b) if b.is_empty()));
                 assert!(domain_sep.is_empty());
                 assert!(token_type.is_empty());
+                assert_eq!(amount, "0");
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn falls_back_to_empty_on_compact_issue_377_unshielded_spend_layout() {
+        // Compact issue-377 emits UnshieldedSpend at 81 bytes (no domain_sep).
+        // Spec is 113 bytes. The 81-byte payload is BELOW the 97-byte min
+        // (= 113 - 16 amount strip), so the decoder must reject it and fall
+        // back to empty rather than misinterpret the bytes as a 113-byte
+        // payload with shifted fields (which would silently corrupt
+        // domain_sep / token_type / amount).
+        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
+        use crate::domain::{AddressOrContract, LedgerEventAttributes};
+        use midnight_onchain_runtime_v4::state::EntryPointBuf;
+        let mut bytes = Vec::with_capacity(81);
+        bytes.push(0); // sender tag = User
+        bytes.extend_from_slice(&[0xAA; 32]); // sender value
+        bytes.extend_from_slice(&[0xBB; 32]); // token_type per Compact issue-377 (no domain_sep here)
+        bytes.extend_from_slice(&999u128.to_le_bytes()); // amount
+        assert_eq!(bytes.len(), 81);
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::UnshieldedSpend,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"u_spend".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractUnshieldedSpend {
+                sender,
+                domain_sep,
+                token_type,
+                amount,
+                ..
+            } => {
+                // All fields default, not partial-corrupt.
+                assert!(matches!(sender, AddressOrContract::User(b) if b.is_empty()));
+                assert!(domain_sep.is_empty());
+                assert!(token_type.is_empty());
+                assert_eq!(amount, "0");
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_unshielded_spend_with_amount_zero_fully_stripped() {
+        // Spec-compliant 113-byte UnshieldedSpend with amount=0 strips the
+        // entire u128 (16 trailing zeros), leaving 97 bytes on the wire.
+        // The decoder pads back to 113 and decodes correctly.
+        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
+        use crate::domain::{AddressOrContract, LedgerEventAttributes};
+        use midnight_onchain_runtime_v4::state::EntryPointBuf;
+        let mut bytes = Vec::with_capacity(97);
+        bytes.push(0); // sender tag = User
+        bytes.extend_from_slice(&[0x11; 32]); // sender value
+        bytes.extend_from_slice(&[0x22; 32]); // domain_sep
+        bytes.extend_from_slice(&[0x33; 32]); // token_type
+        // amount = 0, all 16 bytes stripped by ValueAtom
+        assert_eq!(bytes.len(), 97);
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::UnshieldedSpend,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"u_spend".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractUnshieldedSpend {
+                sender,
+                domain_sep,
+                token_type,
+                amount,
+                ..
+            } => {
+                assert!(matches!(sender, AddressOrContract::User(_)));
+                if let AddressOrContract::User(b) = sender {
+                    assert_eq!(&*b, &[0x11; 32]);
+                }
+                assert_eq!(&*domain_sep, &[0x22; 32]);
+                assert_eq!(&*token_type, &[0x33; 32]);
                 assert_eq!(amount, "0");
             }
             other => panic!("unexpected variant {other:?}"),
