@@ -13,11 +13,11 @@
 
 use crate::{
     domain::{
-        ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, ByteArray, ByteVec,
-        IntentHash, LedgerEvent, LedgerVersion, NetworkId, Nonce, SerializedContractAddress,
-        SerializedLedgerParameters, SerializedLedgerStateKey, SerializedTransaction,
-        SerializedZswapMerkleTreeRoot, SerializedZswapState, TokenType, TransactionResult,
-        UnshieldedUtxo,
+        AddressOrContract, ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome,
+        ByteArray, ByteVec, IntentHash, LedgerEvent, LedgerEventAttributes, LedgerVersion,
+        NetworkId, Nonce, SerializedContractAddress, SerializedLedgerParameters,
+        SerializedLedgerStateKey, SerializedTransaction, SerializedZswapMerkleTreeRoot,
+        SerializedZswapState, TokenType, TransactionResult, UnshieldedUtxo,
         dust::{self},
         ledger::{
             Error, IntentV8, IntentV9, SerializableExt, TaggedSerializableExt, TransactionV8,
@@ -71,7 +71,11 @@ use midnight_ledger_v9::{
     verify::WellFormedStrictness as WellFormedStrictnessV9,
 };
 use midnight_onchain_runtime_v3::context::BlockContext as BlockContextV3;
-use midnight_onchain_runtime_v4::context::BlockContext as BlockContextV4;
+use midnight_onchain_runtime_v4::{
+    context::BlockContext as BlockContextV4,
+    ops::{LogEventType, VersionedLogItem},
+    state::EntryPointBuf,
+};
 use midnight_serialize_v1::{Deserializable, tagged_deserialize};
 use midnight_storage_core_v1::{
     arena::{Sp, TypedArenaKey},
@@ -1354,7 +1358,19 @@ where
 
             EventDetailsV9::ContractDeploy { .. } => None,
 
-            EventDetailsV9::ContractLog { .. } => None,
+            EventDetailsV9::ContractLog {
+                address,
+                entry_point,
+                logged_item,
+            } => {
+                let attributes = make_contract_event_attributes(&logged_item, entry_point);
+                Some(Ok(LedgerEvent::contract_event(
+                    raw,
+                    address.0.0.to_vec().into(),
+                    None,
+                    attributes,
+                )))
+            }
 
             EventDetailsV9::ParamChange(..) => Some(Ok(LedgerEvent::param_change(raw))),
 
@@ -1388,6 +1404,94 @@ where
         })
         .flatten()
         .collect::<Result<_, _>>()
+}
+
+/// Map a v9 `VersionedLogItem` to the corresponding `LedgerEventAttributes`
+/// variant based on its `LogEventType`. Payload fields are left at default
+/// values, the per-variant `StateValue<D>` decoder lands once Compact PR #470
+/// ships standard event emission (Compact 0.32.0). The dispatch shape mirrors
+/// CoIP-442 + MIP-107 head exactly.
+fn make_contract_event_attributes<D>(
+    item: &VersionedLogItem<D>,
+    entry_point: EntryPointBuf,
+) -> LedgerEventAttributes
+where
+    D: DB,
+{
+    use LedgerEventAttributes::*;
+    let version = item.version;
+    let entry_point: ByteVec = entry_point.0.into();
+    match item.event_type {
+        LogEventType::ShieldedSpend => ContractShieldedSpend {
+            version,
+            entry_point,
+            nullifier: ByteVec::default(),
+        },
+        LogEventType::ShieldedReceive => ContractShieldedReceive {
+            version,
+            entry_point,
+            commitment: ByteVec::default(),
+            ciphertext: None,
+            receiving_contract_address: None,
+        },
+        LogEventType::ShieldedMint => ContractShieldedMint {
+            version,
+            entry_point,
+            commitment: ByteVec::default(),
+            domain_sep: ByteVec::default(),
+            amount: None,
+        },
+        LogEventType::ShieldedBurn => ContractShieldedBurn {
+            version,
+            entry_point,
+            nullifier: ByteVec::default(),
+            amount: None,
+        },
+        LogEventType::UnshieldedSpend => ContractUnshieldedSpend {
+            version,
+            entry_point,
+            sender: AddressOrContract::User(ByteVec::default()),
+            domain_sep: ByteVec::default(),
+            token_type: ByteVec::default(),
+            amount: "0".to_string(),
+        },
+        LogEventType::UnshieldedReceive => ContractUnshieldedReceive {
+            version,
+            entry_point,
+            recipient: AddressOrContract::User(ByteVec::default()),
+            domain_sep: ByteVec::default(),
+            token_type: ByteVec::default(),
+            amount: "0".to_string(),
+        },
+        LogEventType::UnshieldedMint => ContractUnshieldedMint {
+            version,
+            entry_point,
+            domain_sep: ByteVec::default(),
+            token_type: ByteVec::default(),
+            amount: "0".to_string(),
+        },
+        LogEventType::UnshieldedBurn => ContractUnshieldedBurn {
+            version,
+            entry_point,
+            sender: AddressOrContract::User(ByteVec::default()),
+            token_type: ByteVec::default(),
+            amount: "0".to_string(),
+        },
+        LogEventType::Paused => ContractPaused {
+            version,
+            entry_point,
+        },
+        LogEventType::Unpaused => ContractUnpaused {
+            version,
+            entry_point,
+        },
+        LogEventType::Misc => ContractMisc {
+            version,
+            entry_point,
+            name: ByteVec::default(),
+            payload: ByteVec::default(),
+        },
+    }
 }
 
 fn make_dust_initial_utxo_v9(
@@ -1942,5 +2046,81 @@ mod tests {
         assert_eq!(normalized.block_usage, half);
         assert_eq!(normalized.bytes_written, half);
         assert_eq!(normalized.bytes_churned, half);
+    }
+
+    #[test]
+    fn make_contract_event_attributes_dispatches_each_log_event_type() {
+        use super::{LogEventType, VersionedLogItem, make_contract_event_attributes};
+        use crate::domain::{AddressOrContract, LedgerEventAttributes};
+        use midnight_onchain_runtime_v4::state::{EntryPointBuf, StateValue};
+        use midnight_storage_core_v1::db::InMemoryDB;
+
+        let entry_point = EntryPointBuf(b"ep".to_vec());
+        let dispatch = |t: LogEventType| {
+            make_contract_event_attributes(
+                &VersionedLogItem::<InMemoryDB> {
+                    version: 1,
+                    event_type: t,
+                    data: StateValue::Null,
+                },
+                entry_point.clone(),
+            )
+        };
+
+        assert!(matches!(
+            dispatch(LogEventType::ShieldedSpend),
+            LedgerEventAttributes::ContractShieldedSpend { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::ShieldedReceive),
+            LedgerEventAttributes::ContractShieldedReceive { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::ShieldedMint),
+            LedgerEventAttributes::ContractShieldedMint { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::ShieldedBurn),
+            LedgerEventAttributes::ContractShieldedBurn { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::UnshieldedSpend),
+            LedgerEventAttributes::ContractUnshieldedSpend { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::UnshieldedReceive),
+            LedgerEventAttributes::ContractUnshieldedReceive { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::UnshieldedMint),
+            LedgerEventAttributes::ContractUnshieldedMint { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::UnshieldedBurn),
+            LedgerEventAttributes::ContractUnshieldedBurn { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::Paused),
+            LedgerEventAttributes::ContractPaused { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::Unpaused),
+            LedgerEventAttributes::ContractUnpaused { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::Misc),
+            LedgerEventAttributes::ContractMisc { .. }
+        ));
+
+        // Unshielded variants default `sender`/`recipient` to
+        // AddressOrContract::User, amount stays "0", domain_sep / token_type
+        // empty until the StateValue<D> decoder lands.
+        match dispatch(LogEventType::UnshieldedSpend) {
+            LedgerEventAttributes::ContractUnshieldedSpend { sender, amount, .. } => {
+                assert!(matches!(sender, AddressOrContract::User(_)));
+                assert_eq!(amount, "0");
+            }
+            other => panic!("expected ContractUnshieldedSpend, got {other:?}"),
+        }
     }
 }
