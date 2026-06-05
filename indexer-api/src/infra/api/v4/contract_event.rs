@@ -207,10 +207,10 @@ pub struct ShieldedReceiveEvent {
     /// Indexed.
     pub commitment: HexEncoded,
     /// Indexed. Optional ciphertext for shielded coin receipt
-    /// (Maybe<Bytes<512>>). Hex-encoded, up to 512 bytes.
+    /// (`Maybe<Bytes<512>>`). Hex-encoded, up to 512 bytes.
     pub ciphertext: Option<HexEncoded>,
     /// Set when received by a contract; null for user recipients
-    /// (Maybe<ContractAddress>). Renamed from `contractAddress` in the CoIP
+    /// (`Maybe<ContractAddress>`). Renamed from `contractAddress` in the CoIP
     /// to avoid collision with the top-level emitting `contractAddress`
     /// inherited from the ContractEvent interface.
     pub receiving_contract_address: Option<HexEncoded>,
@@ -229,7 +229,7 @@ pub struct ShieldedMintEvent {
     pub commitment: HexEncoded,
     /// Indexed (per Andrzej, useful for token-type queries).
     pub domain_sep: HexEncoded,
-    /// Optional, hidden in some shielded mints (Maybe<Uint<128>>).
+    /// Optional, hidden in some shielded mints (`Maybe<Uint<128>>`).
     pub amount: Option<String>,
 }
 
@@ -244,7 +244,7 @@ pub struct ShieldedBurnEvent {
     pub transaction_id: u64,
     /// Indexed.
     pub nullifier: HexEncoded,
-    /// Optional, hidden in some shielded burns (Maybe<Uint<128>>).
+    /// Optional, hidden in some shielded burns (`Maybe<Uint<128>>`).
     pub amount: Option<String>,
 }
 
