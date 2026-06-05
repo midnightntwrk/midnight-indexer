@@ -287,7 +287,10 @@ async fn save_block(
             timestamp,
             zswap_merkle_tree_root,
             ledger_parameters,
-            ledger_state_key
+            ledger_state_key,
+            zswap_end_index,
+            dust_commitment_end_index,
+            dust_generation_end_index
         )
     "};
 
@@ -302,6 +305,9 @@ async fn save_block(
                 timestamp,
                 zswap_merkle_tree_root,
                 ledger_parameters,
+                zswap_end_index,
+                dust_commitment_end_index,
+                dust_generation_end_index,
                 ..
             } = block;
 
@@ -313,7 +319,10 @@ async fn save_block(
                 .push_bind(*timestamp as i64)
                 .push_bind(zswap_merkle_tree_root.as_ref())
                 .push_bind(ledger_parameters.as_ref())
-                .push_bind(ledger_state_key);
+                .push_bind(ledger_state_key)
+                .push_bind(*zswap_end_index as i64)
+                .push_bind(*dust_commitment_end_index as i64)
+                .push_bind(*dust_generation_end_index as i64);
         })
         .push(" RETURNING id")
         .build_query_as::<(i64,)>()

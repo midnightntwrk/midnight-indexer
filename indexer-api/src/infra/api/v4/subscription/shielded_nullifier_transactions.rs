@@ -15,10 +15,10 @@ use crate::{
     domain::storage::Storage,
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
-        v4::{HexEncodable, HexEncoded},
+        v4::{HexEncodable, HexEncoded, directives::beta, transaction::Transaction},
     },
 };
-use async_graphql::{Context, SimpleObject, Subscription};
+use async_graphql::{ComplexObject, Context, SimpleObject, Subscription};
 use async_stream::try_stream;
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};
@@ -41,7 +41,11 @@ impl<S, B> Default for ShieldedNullifierTransactionsSubscription<S, B> {
 
 /// A transaction containing a shielded (zswap) nullifier match with block context.
 #[derive(Debug, Clone, SimpleObject)]
-pub struct ShieldedNullifierTransaction {
+#[graphql(complex)]
+pub struct ShieldedNullifierTransaction<S>
+where
+    S: Storage,
+{
     /// The transaction ID (indexer-internal BIGSERIAL, use as resumption cursor).
     pub transaction_id: u64,
     /// The hex-encoded transaction hash (32-byte chain identifier).
@@ -52,9 +56,15 @@ pub struct ShieldedNullifierTransaction {
     pub block_height: u32,
     /// The hex-encoded matched nullifier.
     pub nullifier: HexEncoded,
+
+    #[graphql(skip)]
+    _s: PhantomData<S>,
 }
 
-impl From<crate::domain::ShieldedNullifierTransaction> for ShieldedNullifierTransaction {
+impl<S> From<crate::domain::ShieldedNullifierTransaction> for ShieldedNullifierTransaction<S>
+where
+    S: Storage,
+{
     fn from(t: crate::domain::ShieldedNullifierTransaction) -> Self {
         Self {
             transaction_id: t.transaction_id,
@@ -62,7 +72,28 @@ impl From<crate::domain::ShieldedNullifierTransaction> for ShieldedNullifierTran
             block_hash: t.block_hash.hex_encode(),
             block_height: t.block_height,
             nullifier: t.nullifier.hex_encode(),
+            _s: PhantomData,
         }
+    }
+}
+
+#[ComplexObject]
+impl<S> ShieldedNullifierTransaction<S>
+where
+    S: Storage,
+{
+    /// The transaction containing this nullifier match.
+    #[graphql(directive = beta::apply())]
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        let id = self.transaction_id;
+        let transaction = cx
+            .get_transaction_by_id_loader::<S>()
+            .load_one(id)
+            .await
+            .map_err_into_server_error(|| format!("get transaction by id {id}"))?
+            .some_or_server_error(|| format!("transaction with id {id} not found"))?;
+
+        Ok(transaction.into())
     }
 }
 
@@ -81,7 +112,7 @@ where
         nullifier_prefixes: Vec<HexEncoded>,
         from_block: Option<u64>,
         to_block: Option<u64>,
-    ) -> impl Stream<Item = ApiResult<ShieldedNullifierTransaction>> {
+    ) -> impl Stream<Item = ApiResult<ShieldedNullifierTransaction<S>>> {
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
         let batch_size = cx

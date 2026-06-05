@@ -117,6 +117,9 @@ export const BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription BlocksSubscri
     zswapMerkleTreeRoot
     dustCommitmentMerkleTreeRoot
     dustGenerationMerkleTreeRoot
+    zswapEndIndex
+    dustCommitmentEndIndex
+    dustGenerationEndIndex
     parent {
       hash
       height
@@ -151,6 +154,9 @@ export const BLOCKS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription BlocksSubs
     zswapMerkleTreeRoot
     dustCommitmentMerkleTreeRoot
     dustGenerationMerkleTreeRoot
+    zswapEndIndex
+    dustCommitmentEndIndex
+    dustGenerationEndIndex
     parent {
       hash
       height
@@ -387,14 +393,17 @@ export const DUST_GENERATIONS_SUBSCRIPTION = `
 `;
 
 export const DUST_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
-  subscription DustNullifierTransactions($nullifierPrefixes: [HexEncoded!]!, $fromBlock: Int, $toBlock: Int) {
-    dustNullifierTransactions(nullifierPrefixes: $nullifierPrefixes, fromBlock: $fromBlock, toBlock: $toBlock) {
-      nullifier
-      commitment
+  subscription DustNullifierTransactions($nullifierLeBytesPrefixes: [HexEncoded!]!, $fromBlock: Int, $toBlock: Int) {
+    dustNullifierTransactions(nullifierLeBytesPrefixes: $nullifierLeBytesPrefixes, fromBlock: $fromBlock, toBlock: $toBlock) {
+      nullifierLeBytes
+      commitmentLeBytes
       transactionId
       transactionHash
       blockHeight
       blockHash
+      transaction {
+        hash
+      }
     }
   }
 `;
@@ -407,6 +416,9 @@ export const SHIELDED_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
       blockHash
       blockHeight
       nullifier
+      transaction {
+        hash
+      }
     }
   }
 `;

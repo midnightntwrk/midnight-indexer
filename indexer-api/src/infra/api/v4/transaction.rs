@@ -19,6 +19,7 @@ use crate::{
             HexEncodable, HexEncoded,
             block::Block,
             contract_action::ContractAction,
+            directives::beta,
             ledger_events::{DustLedgerEvent, ZswapLedgerEvent},
             unshielded::UnshieldedUtxo,
         },
@@ -124,15 +125,19 @@ where
     end_index: u64,
 
     /// The dust commitment tree start index.
+    #[graphql(directive = beta::apply())]
     dust_commitment_start_index: u64,
 
     /// The dust commitment tree end index.
+    #[graphql(directive = beta::apply())]
     dust_commitment_end_index: u64,
 
     /// The dust generation tree start index.
+    #[graphql(directive = beta::apply())]
     dust_generation_start_index: u64,
 
     /// The dust generation tree end index.
+    #[graphql(directive = beta::apply())]
     dust_generation_end_index: u64,
 
     /// The fee for this transaction in SPECK (atomic unit of DUST).

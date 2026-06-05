@@ -20,6 +20,7 @@ use crate::{
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
             contract_event::{ContractEvent, ContractEventFilter as GraphQLContractEventFilter},
+            directives::beta,
             dust::DustGenerationStatus,
             dust_generations::DustGenerations,
             merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate,
@@ -312,6 +313,7 @@ where
 
     /// Get a collapsed Merkle tree update for the dust commitment tree.
     #[trace(properties = { "start_index": "{start_index}", "end_index": "{end_index}" })]
+    #[graphql(directive = beta::apply())]
     async fn dust_commitment_merkle_tree_update(
         &self,
         cx: &Context<'_>,
@@ -341,6 +343,7 @@ where
 
     /// Get a collapsed Merkle tree update for the dust generation tree.
     #[trace(properties = { "start_index": "{start_index}", "end_index": "{end_index}" })]
+    #[graphql(directive = beta::apply())]
     async fn dust_generation_merkle_tree_update(
         &self,
         cx: &Context<'_>,

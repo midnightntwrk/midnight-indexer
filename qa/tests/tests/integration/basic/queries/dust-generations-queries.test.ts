@@ -74,7 +74,10 @@ async function pickViableMultiUtxoCandidate(): Promise<MultiUtxoCandidate> {
   );
 }
 
-describe('dust generations queries', () => {
+// Dust generation registrations require a Cardano-side mapping which has no
+// counterpart in the `undeployed` environment. Skip the whole surface there;
+// re-enable once #1152 lands local Cardano test-data provisioning.
+describe.skipIf(env.isUndeployedEnv())('dust generations queries', () => {
   describe('a dust generations query with a valid Cardano reward address', () => {
     /**
      * A dust generations query for a valid registered address returns registrations

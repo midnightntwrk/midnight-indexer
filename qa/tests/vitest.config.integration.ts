@@ -23,7 +23,10 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: [path.resolve(__dirname, './utils/custom-matchers.ts')],
-    globalSetup: [path.resolve(__dirname, './utils/logging/setup.ts')],
+    globalSetup: [
+      path.resolve(__dirname, './setup/undeployed-with-data-setup.ts'),
+      path.resolve(__dirname, './utils/logging/setup.ts'),
+    ],
     coverage: {
       reporter: ['text', 'json', 'html'],
     },
@@ -48,6 +51,11 @@ export default defineConfig({
       graphql: path.resolve(__dirname, 'node_modules/graphql'),
       '@utils': path.resolve(__dirname, './utils'),
       environment: path.resolve(__dirname, './environment'),
+      // Bare, root-relative specifiers (tsconfig `baseUrl: "."`). Vitest 3's
+      // bundled Vite resolved these implicitly; Vite 7 (vitest 4) does not,
+      // so they must be aliased explicitly.
+      utils: path.resolve(__dirname, './utils'),
+      tests: path.resolve(__dirname, './tests'),
     },
     conditions: ['node'],
     mainFields: ['module', 'main'],

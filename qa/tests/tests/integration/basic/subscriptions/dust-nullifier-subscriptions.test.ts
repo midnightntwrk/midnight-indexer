@@ -20,6 +20,7 @@ import {
   IndexerWsClient,
   DustNullifierTransactionSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
+import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import { DustNullifierTransactionSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { DustNullifierTransaction } from '@utils/indexer/indexer-types';
@@ -56,10 +57,10 @@ describe('dust nullifier transactions subscription', () => {
 
       // Use a broad prefix to increase chance of matches, bounded to first 10 blocks
       const toBlock = Math.min(latestHeight, 10);
-      const nullifierPrefixes = ['00'];
+      const nullifierLeBytesPrefixes = ['00'];
 
       log.debug(
-        `Subscribing to dust nullifier transactions with prefixes=${nullifierPrefixes}, fromBlock=0, toBlock=${toBlock}`,
+        `Subscribing to dust nullifier transactions with prefixes=${nullifierLeBytesPrefixes}, fromBlock=0, toBlock=${toBlock}`,
       );
 
       const received: DustNullifierTransactionSubscriptionResponse[] = [];
@@ -89,7 +90,7 @@ describe('dust nullifier transactions subscription', () => {
               resolve();
             },
           },
-          nullifierPrefixes,
+          nullifierLeBytesPrefixes,
           0,
           toBlock,
         );
@@ -136,24 +137,15 @@ describe('dust nullifier transactions subscription', () => {
 
         const subscription = indexerWsClient.subscribeToDustNullifierTransactions(
           {
-            next: (payload) => {
+            next: () => {
               eventCount++;
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                subscription.unsubscribe();
-                resolve({
-                  completed: false,
-                  error: payload.errors[0].message,
-                  eventCount,
-                });
-              }
             },
             error: (error) => {
               clearTimeout(timeout);
               subscription.unsubscribe();
               resolve({
                 completed: false,
-                error: typeof error === 'string' ? error : JSON.stringify(error),
+                error: extractSubscriptionErrorMessage(error),
                 eventCount,
               });
             },
@@ -167,7 +159,7 @@ describe('dust nullifier transactions subscription', () => {
         );
       });
 
-      expect(settled.error).toContain('nullifierPrefixes must not be empty');
+      expect(settled.error).toContain('nullifierLeBytesPrefixes must not be empty');
       expect(settled.completed).toBe(false);
       expect(settled.eventCount).toBeGreaterThanOrEqual(0);
     });
@@ -193,24 +185,15 @@ describe('dust nullifier transactions subscription', () => {
 
         const subscription = indexerWsClient.subscribeToDustNullifierTransactions(
           {
-            next: (payload) => {
+            next: () => {
               eventCount++;
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                subscription.unsubscribe();
-                resolve({
-                  completed: false,
-                  error: payload.errors[0].message,
-                  eventCount,
-                });
-              }
             },
             error: (error) => {
               clearTimeout(timeout);
               subscription.unsubscribe();
               resolve({
                 completed: false,
-                error: typeof error === 'string' ? error : JSON.stringify(error),
+                error: extractSubscriptionErrorMessage(error),
                 eventCount,
               });
             },
@@ -319,6 +302,83 @@ describe('dust nullifier transactions subscription', () => {
       const transactions = txResponse.data!.transactions;
       expect(transactions).toHaveLength(1);
       expect(transactions[0].hash).toBe(first.transactionHash);
+    }, 30_000);
+  });
+
+  /**
+   * Coverage for midnight-indexer#1115
+   * (`feat: add transaction reference field for event subscription navigation`).
+   *
+   * `transaction: Transaction! @beta` was added to `DustNullifierTransaction`
+   * so consumers can navigate to all Transaction fields directly from the
+   * streamed event without a separate lookup. The Zod schema enforces the
+   * field shape; this block adds the consistency check: `transaction.hash`
+   * must equal `transactionHash` on the same event.
+   */
+  describe('transaction reference on dust nullifier events (#1115)', () => {
+    /**
+     * @given a wide prefix scan of the full chain
+     * @when we subscribe to dustNullifierTransactions and receive the first event
+     * @then event.transaction.hash equals event.transactionHash, confirming the
+     *       reference field is wired to the same on-chain transaction
+     */
+    test('first event transaction.hash matches transactionHash', async (ctx: TestContext) => {
+      const blockResponse = await indexerHttpClient.getLatestBlock();
+      expect(blockResponse).toBeSuccess();
+      const latestHeight = blockResponse.data!.block.height;
+
+      const received: DustNullifierTransaction[] = [];
+
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          subscription.unsubscribe();
+          resolve();
+        }, 15_000);
+
+        const subscription = indexerWsClient.subscribeToDustNullifierTransactions(
+          {
+            next: (payload) => {
+              const tx = payload.data?.dustNullifierTransactions;
+              if (tx) {
+                received.push(tx);
+                clearTimeout(timeout);
+                subscription.unsubscribe();
+                resolve();
+              }
+            },
+            error: (err) => {
+              clearTimeout(timeout);
+              subscription.unsubscribe();
+              reject(new Error(`Subscription error: ${JSON.stringify(err)}`));
+            },
+            complete: () => {
+              clearTimeout(timeout);
+              resolve();
+            },
+          },
+          ['00'],
+          0,
+          latestHeight,
+        );
+      });
+
+      if (received.length === 0) {
+        log.warn(
+          'no dustNullifierTransactions matched prefix "00" within the timeout; ' +
+            'transaction reference check skipped',
+        );
+        ctx.skip?.(true, 'no dust nullifier transactions matched — check vacuous');
+        return;
+      }
+
+      const first = received[0];
+      log.debug(
+        `Checking DustNullifierTransaction.transaction.hash=${first.transaction.hash} ` +
+          `against transactionHash=${first.transactionHash}`,
+      );
+
+      expect(first.transaction.hash).toBeDefined();
+      expect(first.transaction.hash).toBe(first.transactionHash);
     }, 30_000);
   });
 });

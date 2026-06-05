@@ -13,6 +13,12 @@
   // Expected status: registered=false, dustAddress=null, nightBalance="0", generationRate="0", currentCapacity="0"
   // Note: This differs from non-registered in the execution path (deregistration vs never registered), but the status is the same
   "deregistered": "stake_test1uqu5f7ctsrrfqys5rqf9843nwmrf2w0ea8hae0xe3f9fdcqucy6a8",
+  // A cardano address that is registered for dust production and has had backing NIGHT UTXOs spent
+  // on the Midnight chain, so a fresh dustGenerations(startIndex=0) subscription returns at least
+  // one DustGenerationDtimeUpdateItem. Used as the regression fixture for #1167.
+  // Observed on 2026-06-03: 19 DustGenerationsItem + 9 DustGenerationDtimeUpdateItem events.
+  // Also present in the multi-utxo array (first entry); duplicated here for named access.
+  "registered-with-dust-and-spent": "stake_test1uqg6d2c4nmmf8088j8cejsxdcanms5x6et5x87rg6v5x03shyhyd8",
 
   // ---------------------------------------------------------------------------
   // Multi-UTXO candidates for the #926 aggregation test (best-effort fixture).

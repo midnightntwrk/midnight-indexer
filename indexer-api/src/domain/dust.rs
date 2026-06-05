@@ -142,8 +142,8 @@ pub struct DustGenerationDtimeUpdateEntry {
 /// A dust nullifier transaction for the subscription stream.
 #[derive(Debug, Clone)]
 pub struct DustNullifierTransaction {
-    pub nullifier: ByteVec,
-    pub commitment: ByteVec,
+    pub nullifier_le_bytes: ByteVec,
+    pub commitment_le_bytes: ByteVec,
     pub transaction_id: u64,
     pub transaction_hash: TransactionHash,
     pub block_height: u32,

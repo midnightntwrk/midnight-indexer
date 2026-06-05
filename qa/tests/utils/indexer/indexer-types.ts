@@ -68,6 +68,9 @@ export interface Block {
   zswapMerkleTreeRoot: string;
   dustCommitmentMerkleTreeRoot: string | null;
   dustGenerationMerkleTreeRoot: string | null;
+  zswapEndIndex: number;
+  dustCommitmentEndIndex: number;
+  dustGenerationEndIndex: number;
   parent: Block;
   transactions: Transaction[];
 }
@@ -375,12 +378,13 @@ export type DustGenerationsEvent =
   | DustGenerationDtimeUpdateItem;
 
 export interface DustNullifierTransaction {
-  nullifier: string;
-  commitment: string;
+  nullifierLeBytes: string;
+  commitmentLeBytes: string;
   transactionId: number;
   transactionHash: string;
   blockHeight: number;
   blockHash: string;
+  transaction: { hash: string };
 }
 
 export interface ShieldedNullifierTransaction {
@@ -389,6 +393,7 @@ export interface ShieldedNullifierTransaction {
   blockHash: string;
   blockHeight: number;
   nullifier: string;
+  transaction: { hash: string };
 }
 
 export type ViewingKey = string & { __brand: 'ViewingKey' };

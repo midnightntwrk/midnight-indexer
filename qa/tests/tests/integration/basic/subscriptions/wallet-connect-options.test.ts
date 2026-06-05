@@ -15,7 +15,9 @@
 
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
+import { env } from 'environment/model';
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
+import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import dataProvider from '@utils/testdata-provider';
 
@@ -37,7 +39,10 @@ const TOOLKIT_STARTUP_TIMEOUT = 60_000;
  *   - the wallet's `ShieldedTransactionsProgress.highestCheckedZswapEndIndex`
  *     advances at least to `startIndex` immediately.
  */
-describe('wallet connect options (startIndex)', () => {
+// Skipped on `undeployed`: the local chain has too few zswap events to assert
+// startIndex-based offset behaviour meaningfully. Re-enable once #1152 makes
+// local chain data rich enough (or the test derives startIndex from the tip).
+describe.skipIf(env.isUndeployedEnv())('wallet connect options (startIndex)', () => {
   let toolkit: ToolkitWrapper;
   let indexerWsClient: IndexerWsClient;
 
@@ -164,20 +169,19 @@ describe('wallet connect options (startIndex)', () => {
         const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
           {
             next: (payload) => {
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                unsubscribe();
-                reject(
-                  new Error(`subscription returned errors: ${JSON.stringify(payload.errors)}`),
-                );
-                return;
-              }
               const event = payload.data?.shieldedTransactions;
               if (event?.__typename === 'ShieldedTransactionsProgress') {
                 clearTimeout(timeout);
                 unsubscribe();
                 resolve(event);
               }
+            },
+            error: (err) => {
+              clearTimeout(timeout);
+              unsubscribe();
+              reject(
+                new Error(`subscription returned errors: ${extractSubscriptionErrorMessage(err)}`),
+              );
             },
           },
           sessionId,
@@ -230,20 +234,19 @@ describe('wallet connect options (startIndex)', () => {
         const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
           {
             next: (payload) => {
-              if (payload.errors && payload.errors.length > 0) {
-                clearTimeout(timeout);
-                unsubscribe();
-                reject(
-                  new Error(`subscription returned errors: ${JSON.stringify(payload.errors)}`),
-                );
-                return;
-              }
               const event = payload.data?.shieldedTransactions;
               if (event?.__typename === 'ShieldedTransactionsProgress') {
                 clearTimeout(timeout);
                 unsubscribe();
                 resolve(event);
               }
+            },
+            error: (err) => {
+              clearTimeout(timeout);
+              unsubscribe();
+              reject(
+                new Error(`subscription returned errors: ${extractSubscriptionErrorMessage(err)}`),
+              );
             },
           },
           sessionId,

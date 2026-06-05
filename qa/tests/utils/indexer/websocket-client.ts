@@ -364,7 +364,24 @@ export class IndexerWsClient {
 
     switch (type) {
       case 'next':
-        handlers.next?.(payload);
+        // async-graphql 7.2 emits subscription errors (e.g. quota rejections)
+        // as `{type: 'next', payload: {data: null, errors: [...]}}` rather than
+        // the legacy `{type: 'error', payload: [...]}`. Both shapes are valid
+        // in graphql-transport-ws; route errors-inside-next to the error
+        // handler so tests don't silently treat rejections as successes.
+        //
+        // Consequence: `handlers.error` receives an `Error` from this branch
+        // and the raw payload (string or `Array<GraphQLError>`) from the
+        // legacy `case 'error'` branch below. Helpers that need the bare
+        // server message must coerce both — use
+        // `extractSubscriptionErrorMessage()` from `./subscription-error`.
+        const errors = (payload as { errors?: Array<{ message?: string }> } | null)?.errors;
+        if (Array.isArray(errors) && errors.length > 0) {
+          const message = errors[0]?.message ?? 'GraphQL subscription error';
+          handlers.error?.(new Error(message));
+        } else {
+          handlers.next?.(payload);
+        }
         break;
       case 'error':
         handlers.error?.(payload);
@@ -1058,7 +1075,7 @@ export class IndexerWsClient {
    * If `toBlock` is specified, the subscription finishes after reaching that block.
    *
    * @param handlers - Callback functions for handling incoming nullifier transaction events
-   * @param nullifierPrefixes - Array of hex-encoded nullifier prefixes to match
+   * @param nullifierLeBytesPrefixes - Array of hex-encoded 32-byte little-endian nullifier prefixes to match
    * @param fromBlock - Optional starting block height
    * @param toBlock - Optional ending block height (subscription finishes after this)
    * @param queryOverride - Optional custom GraphQL subscription query
@@ -1067,13 +1084,13 @@ export class IndexerWsClient {
    */
   subscribeToDustNullifierTransactions(
     handlers: SubscriptionHandlers<DustNullifierTransactionSubscriptionResponse>,
-    nullifierPrefixes: string[],
+    nullifierLeBytesPrefixes: string[],
     fromBlock?: number,
     toBlock?: number,
     queryOverride?: string,
   ): { unsubscribe: () => void; id: string } {
     const query = queryOverride || DUST_NULLIFIER_TRANSACTIONS_SUBSCRIPTION;
-    const variables = { nullifierPrefixes, fromBlock, toBlock };
+    const variables = { nullifierLeBytesPrefixes, fromBlock, toBlock };
 
     const subscriptionId = this.getNextId();
 
