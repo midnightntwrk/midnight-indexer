@@ -91,6 +91,27 @@ use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 const OUTPUT_INDEX_ZERO: u32 = 0;
 
+/// Canonical serialized payload sizes per `LogEventType` variant, matching
+/// CoIP-442 + MIP-0002 head. For `UnshieldedSpend` / `UnshieldedReceive` the
+/// spec includes `domain_sep` (113 bytes). Compact `issue-377` currently
+/// emits 81 bytes without `domain_sep`; when that catches up to the spec,
+/// no indexer change is needed. Until then, the size assertion below logs
+/// a warning and the decoder falls back to empty fields.
+const SHIELDED_SPEND_SIZE: usize = 32;
+const SHIELDED_RECEIVE_SIZE: usize = 578; // 32 + (1 + 32) + (1 + 512).
+const SHIELDED_MINT_SIZE: usize = 81; // 32 + 32 + (1 + 16).
+const SHIELDED_BURN_SIZE: usize = 49; // 32 + (1 + 16).
+const UNSHIELDED_SPEND_SIZE: usize = 113; // (1 + 32) + 32 + 32 + 16.
+const UNSHIELDED_RECEIVE_SIZE: usize = 113; // (1 + 32) + 32 + 32 + 16.
+const UNSHIELDED_MINT_SIZE: usize = 80; // 32 + 32 + 16.
+const UNSHIELDED_BURN_SIZE: usize = 81; // (1 + 32) + 32 + 16.
+const MISC_SIZE: usize = 288; // 32 + 256.
+
+const BYTES_32_SIZE: usize = 32;
+const UINT_128_SIZE: usize = 16;
+const EITHER_32_SIZE: usize = 1 + 32;
+const MAYBE_512_SIZE: usize = 1 + 512;
+
 static STRICTNESS_V8: LazyLock<WellFormedStrictnessV8> = LazyLock::new(|| {
     let mut strictness = WellFormedStrictnessV8::default();
     strictness.enforce_balancing = false;
@@ -1406,27 +1427,6 @@ where
         .collect::<Result<_, _>>()
 }
 
-/// Canonical serialized payload sizes per LogEventType variant, matching
-/// CoIP-442 + MIP-107 head. For UnshieldedSpend / UnshieldedReceive the spec
-/// includes `domain_sep` (113 bytes). Compact `issue-377` currently emits
-/// 81 bytes without `domain_sep`; when that catches up to the spec, no
-/// indexer change is needed. Until then, the size assertion below logs a
-/// warning and the decoder falls back to empty fields.
-const SHIELDED_SPEND_SIZE: usize = 32;
-const SHIELDED_RECEIVE_SIZE: usize = 578; // 32 + (1 + 32) + (1 + 512)
-const SHIELDED_MINT_SIZE: usize = 81; // 32 + 32 + (1 + 16)
-const SHIELDED_BURN_SIZE: usize = 49; // 32 + (1 + 16)
-const UNSHIELDED_SPEND_SIZE: usize = 113; // (1 + 32) + 32 + 32 + 16
-const UNSHIELDED_RECEIVE_SIZE: usize = 113; // (1 + 32) + 32 + 32 + 16
-const UNSHIELDED_MINT_SIZE: usize = 80; // 32 + 32 + 16
-const UNSHIELDED_BURN_SIZE: usize = 81; // (1 + 32) + 32 + 16
-const MISC_SIZE: usize = 288; // 32 + 256
-
-const BYTES_32: usize = 32;
-const UINT_128_SIZE: usize = 16;
-const EITHER_32_SIZE: usize = 1 + 32;
-const MAYBE_512_SIZE: usize = 1 + 512;
-
 /// Map a v9 `VersionedLogItem` to the corresponding `LedgerEventAttributes`
 /// variant based on its `LogEventType` and decode the per-event payload from
 /// `StateValue<D>`. The decoder follows the CoIP-442 + MIP-107 spec exactly.
@@ -1471,7 +1471,7 @@ where
             // nullifier is a 32-byte hash; require all 32 bytes.
             let bytes = extract_flat_bytes(&item.data, SHIELDED_SPEND_SIZE, SHIELDED_SPEND_SIZE);
             let nullifier = bytes
-                .and_then(|bytes| take_bytes(&bytes, 0, BYTES_32))
+                .and_then(|bytes| take_bytes(&bytes, 0, BYTES_32_SIZE))
                 .unwrap_or_default();
             ContractShieldedSpend {
                 version,
@@ -1490,17 +1490,17 @@ where
             // Trailing-zero stripping can strip the entire trailing
             // contractAddress (33 bytes) + the ciphertext value bytes
             // (up to 512), so min = 32 (commitment only).
-            let bytes = extract_flat_bytes(&item.data, BYTES_32, SHIELDED_RECEIVE_SIZE);
+            let bytes = extract_flat_bytes(&item.data, BYTES_32_SIZE, SHIELDED_RECEIVE_SIZE);
             let commitment = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, 0, BYTES_32))
+                .and_then(|b| take_bytes(b, 0, BYTES_32_SIZE))
                 .unwrap_or_default();
             let ciphertext = bytes
                 .as_deref()
-                .and_then(|b| take_maybe_bytes(b, BYTES_32, 512));
+                .and_then(|b| take_maybe_bytes(b, BYTES_32_SIZE, 512));
             let receiving_contract_address = bytes
                 .as_deref()
-                .and_then(|b| take_maybe_bytes(b, BYTES_32 + MAYBE_512_SIZE, BYTES_32));
+                .and_then(|b| take_maybe_bytes(b, BYTES_32_SIZE + MAYBE_512_SIZE, BYTES_32_SIZE));
             ContractShieldedReceive {
                 version,
                 entry_point,
@@ -1513,18 +1513,18 @@ where
             // (commitment 32, domain_sep 32, amount Maybe<Uint128> 17).
             // Min = 32+32 (commitment+domain_sep) since amount Maybe can be
             // fully stripped (tag byte 0 + 16 zero bytes = 17 strippable).
-            let bytes = extract_flat_bytes(&item.data, 2 * BYTES_32, SHIELDED_MINT_SIZE);
+            let bytes = extract_flat_bytes(&item.data, 2 * BYTES_32_SIZE, SHIELDED_MINT_SIZE);
             let commitment = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, 0, BYTES_32))
+                .and_then(|b| take_bytes(b, 0, BYTES_32_SIZE))
                 .unwrap_or_default();
             let domain_sep = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, BYTES_32, BYTES_32))
+                .and_then(|b| take_bytes(b, BYTES_32_SIZE, BYTES_32_SIZE))
                 .unwrap_or_default();
             let amount = bytes
                 .as_deref()
-                .and_then(|b| take_maybe_uint_128_le(b, 2 * BYTES_32));
+                .and_then(|b| take_maybe_uint_128_le(b, 2 * BYTES_32_SIZE));
             ContractShieldedMint {
                 version,
                 entry_point,
@@ -1535,14 +1535,14 @@ where
         }
         LogEventType::ShieldedBurn => {
             // (nullifier 32, amount Maybe<Uint128> 17). Min = 32.
-            let bytes = extract_flat_bytes(&item.data, BYTES_32, SHIELDED_BURN_SIZE);
+            let bytes = extract_flat_bytes(&item.data, BYTES_32_SIZE, SHIELDED_BURN_SIZE);
             let nullifier = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, 0, BYTES_32))
+                .and_then(|b| take_bytes(b, 0, BYTES_32_SIZE))
                 .unwrap_or_default();
             let amount = bytes
                 .as_deref()
-                .and_then(|b| take_maybe_uint_128_le(b, BYTES_32));
+                .and_then(|b| take_maybe_uint_128_le(b, BYTES_32_SIZE));
             ContractShieldedBurn {
                 version,
                 entry_point,
@@ -1565,15 +1565,15 @@ where
                 .unwrap_or_else(|| AddressOrContract::User(ByteVec::default()));
             let domain_sep = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, EITHER_32_SIZE, BYTES_32))
+                .and_then(|b| take_bytes(b, EITHER_32_SIZE, BYTES_32_SIZE))
                 .unwrap_or_default();
             let token_type = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, EITHER_32_SIZE + BYTES_32, BYTES_32))
+                .and_then(|b| take_bytes(b, EITHER_32_SIZE + BYTES_32_SIZE, BYTES_32_SIZE))
                 .unwrap_or_default();
             let amount = bytes
                 .as_deref()
-                .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + 2 * BYTES_32))
+                .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + 2 * BYTES_32_SIZE))
                 .unwrap_or_else(|| "0".to_string());
             ContractUnshieldedSpend {
                 version,
@@ -1597,15 +1597,15 @@ where
                 .unwrap_or_else(|| AddressOrContract::User(ByteVec::default()));
             let domain_sep = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, EITHER_32_SIZE, BYTES_32))
+                .and_then(|b| take_bytes(b, EITHER_32_SIZE, BYTES_32_SIZE))
                 .unwrap_or_default();
             let token_type = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, EITHER_32_SIZE + BYTES_32, BYTES_32))
+                .and_then(|b| take_bytes(b, EITHER_32_SIZE + BYTES_32_SIZE, BYTES_32_SIZE))
                 .unwrap_or_default();
             let amount = bytes
                 .as_deref()
-                .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + 2 * BYTES_32))
+                .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + 2 * BYTES_32_SIZE))
                 .unwrap_or_else(|| "0".to_string());
             ContractUnshieldedReceive {
                 version,
@@ -1626,15 +1626,15 @@ where
             );
             let domain_sep = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, 0, BYTES_32))
+                .and_then(|b| take_bytes(b, 0, BYTES_32_SIZE))
                 .unwrap_or_default();
             let token_type = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, BYTES_32, BYTES_32))
+                .and_then(|b| take_bytes(b, BYTES_32_SIZE, BYTES_32_SIZE))
                 .unwrap_or_default();
             let amount = bytes
                 .as_deref()
-                .and_then(|b| take_uint_128_le(b, 2 * BYTES_32))
+                .and_then(|b| take_uint_128_le(b, 2 * BYTES_32_SIZE))
                 .unwrap_or_else(|| "0".to_string());
             ContractUnshieldedMint {
                 version,
@@ -1658,11 +1658,11 @@ where
                 .unwrap_or_else(|| AddressOrContract::User(ByteVec::default()));
             let token_type = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, EITHER_32_SIZE, BYTES_32))
+                .and_then(|b| take_bytes(b, EITHER_32_SIZE, BYTES_32_SIZE))
                 .unwrap_or_default();
             let amount = bytes
                 .as_deref()
-                .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + BYTES_32))
+                .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + BYTES_32_SIZE))
                 .unwrap_or_else(|| "0".to_string());
             ContractUnshieldedBurn {
                 version,
@@ -1682,14 +1682,14 @@ where
         },
         LogEventType::Misc => {
             // (name 32, payload 256). Min = 32 (payload all-zero strippable).
-            let bytes = extract_flat_bytes(&item.data, BYTES_32, MISC_SIZE);
+            let bytes = extract_flat_bytes(&item.data, BYTES_32_SIZE, MISC_SIZE);
             let name = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, 0, BYTES_32))
+                .and_then(|b| take_bytes(b, 0, BYTES_32_SIZE))
                 .unwrap_or_default();
             let payload = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, BYTES_32, 256))
+                .and_then(|b| take_bytes(b, BYTES_32_SIZE, 256))
                 .unwrap_or_default();
             ContractMisc {
                 version,
@@ -1795,7 +1795,7 @@ fn take_maybe_uint_128_le(bytes: &[u8], offset: usize) -> Option<String> {
 fn take_either_address(bytes: &[u8], offset: usize) -> Option<AddressOrContract> {
     let tag = *bytes.get(offset)?;
     let value: ByteVec = bytes
-        .get(offset + 1..offset + 1 + BYTES_32)?
+        .get(offset + 1..offset + 1 + BYTES_32_SIZE)?
         .to_vec()
         .into();
     Some(if tag == 0 {
