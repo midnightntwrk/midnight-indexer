@@ -446,13 +446,11 @@ async fn save_regular_transaction(
 
     save_zswap_nullifiers(&transaction.ledger_events, transaction_id, block_id, tx).await?;
 
-    // TODO(bridge): once `RegularTransaction::bridge_claim` is populated by indexer-common's
-    // apply path (when `TransactionV8::ClaimRewards { kind: ClaimKind::CardanoBridge, .. }` is
-    // detected), persist the claim with the line below. See `save_bridge_claim` further down.
-    //
-    // if let Some(claim) = &transaction.bridge_claim {
-    //     save_bridge_claim(transaction_id, claim.recipient.as_ref(), claim.amount, tx).await?;
-    // }
+    // Persist a Cardano-bridge claim when the regular transaction is a `ClaimRewards` with
+    // `ClaimKind::CardanoBridge` (populated by indexer-common's apply path).
+    if let Some(claim) = &transaction.bridge_claim {
+        save_bridge_claim(transaction_id, claim.recipient.as_ref(), claim.amount, tx).await?;
+    }
 
     Ok(transaction_id as u64)
 }

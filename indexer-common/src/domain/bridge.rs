@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ByteArray, ByteVec};
+use crate::domain::{ByteArray, ByteVec, UnshieldedAddress};
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
 use thiserror::Error;
@@ -185,11 +185,12 @@ impl BridgePalletEvent {
 /// A claim of bridged NIGHT, parsed from a regular `ClaimRewardsTransaction` with
 /// `ClaimKind::CardanoBridge`.
 ///
-/// The `kind` discriminator is read from the raw transaction bytes (see
-/// `indexer-common/src/domain/ledger/ledger_state.rs:794-800`).
+/// Extracted in the ledger-9 apply path (`LedgerState::apply_regular_transaction`): the `kind`
+/// discriminator is read from the deserialized claim, the `recipient` is the claim owner's
+/// address, and the `amount` is the claim value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BridgeClaim {
-    pub recipient: ByteArray<32>,
+    pub recipient: UnshieldedAddress,
     pub amount: u128,
 }
 

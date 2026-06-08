@@ -18,6 +18,7 @@ use crate::{
         SerializedLedgerParameters, SerializedLedgerStateKey, SerializedTransaction,
         SerializedZswapMerkleTreeRoot, SerializedZswapState, TokenType, TransactionResult,
         UnshieldedUtxo,
+        bridge::BridgeClaim,
         dust::{self},
         ledger::{
             Error, IntentV8, IntentV9, SerializableExt, TaggedSerializableExt, TransactionV8,
@@ -64,8 +65,8 @@ use midnight_ledger_v9::{
         TransactionContext as TransactionContextV9, TransactionResult as TransactionResultV9,
     },
     structure::{
-        LedgerParameters as LedgerParametersV9, LedgerState as LedgerStateV9,
-        OutputInstructionUnshielded as OutputInstructionUnshieldedV9,
+        ClaimKind as ClaimKindV9, LedgerParameters as LedgerParametersV9,
+        LedgerState as LedgerStateV9, OutputInstructionUnshielded as OutputInstructionUnshieldedV9,
         SystemTransaction as SystemTransactionV9, Utxo as UtxoV9,
     },
     verify::WellFormedStrictness as WellFormedStrictnessV9,
@@ -395,6 +396,9 @@ impl LedgerState {
                     spent_unshielded_utxos,
                     ledger_events,
                     fees,
+                    // The bridge relies on ledger 9 primitives, so a `CardanoBridge` claim cannot
+                    // occur on a ledger 8 chain; there is never a bridge claim to extract here.
+                    bridge_claim: None,
                 })
             }
 
@@ -452,6 +456,22 @@ impl LedgerState {
                     *block_fullness
                 };
 
+                // Extract a Cardano-bridge claim before `transaction` is moved into
+                // `make_unshielded_utxos_for_regular_transaction_v9`. A `ClaimRewards` with
+                // `ClaimKind::CardanoBridge` is a user claiming bridged NIGHT: the recipient is the
+                // claim owner and the amount is the claim value.
+                let bridge_claim = match &transaction {
+                    TransactionV9::ClaimRewards(claim)
+                        if claim.kind == ClaimKindV9::CardanoBridge =>
+                    {
+                        Some(BridgeClaim {
+                            recipient: UserAddress::from(claim.owner.clone()).0.0.into(),
+                            amount: claim.value,
+                        })
+                    }
+                    _ => None,
+                };
+
                 let (created_unshielded_utxos, spent_unshielded_utxos) =
                     make_unshielded_utxos_for_regular_transaction_v9(
                         transaction,
@@ -472,6 +492,7 @@ impl LedgerState {
                     spent_unshielded_utxos,
                     ledger_events,
                     fees,
+                    bridge_claim,
                 })
             }
         }
