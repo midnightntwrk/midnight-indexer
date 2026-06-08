@@ -38,6 +38,10 @@ infra:
     url: "ws://localhost:9944"
     reconnect_max_delay: "10s"
     reconnect_max_attempts: 30
+    # blockfrost_id is required (must be a non-empty string). Set it via the
+    # APP__INFRA__SPO_NODE__BLOCKFROST_ID env var. If you are not exercising
+    # SPO features locally, any non-empty placeholder is accepted at startup,
+    # e.g. APP__INFRA__SPO_NODE__BLOCKFROST_ID=dummy-not-using-spo
 
   api:
     address: "0.0.0.0"
@@ -67,6 +71,9 @@ infra:
         progress_update_interval: "30s"
       zswap_ledger_events:
         batch_size: 20
+    quota:
+      max_concurrent_per_connection: 20
+      max_session_subscriptions_per_minute: 10
 
 telemetry:
   tracing:

@@ -68,6 +68,9 @@ export interface Block {
   zswapMerkleTreeRoot: string;
   dustCommitmentMerkleTreeRoot: string | null;
   dustGenerationMerkleTreeRoot: string | null;
+  zswapEndIndex: number;
+  dustCommitmentEndIndex: number;
+  dustGenerationEndIndex: number;
   parent: Block;
   transactions: Transaction[];
 }
@@ -131,6 +134,7 @@ export interface RegularTransaction extends Transaction {
   dustCommitmentEndIndex?: number;
   dustGenerationStartIndex?: number;
   dustGenerationEndIndex?: number;
+  fee?: string;
   fees?: TransactionFees;
   transactionResult?: TransactionResult;
 }
@@ -319,6 +323,17 @@ export type DustCommitmentMerkleTreeUpdateResponse = GraphQLResponse<{
   dustCommitmentMerkleTreeUpdate: DustCommitmentMerkleTreeUpdateResult;
 }>;
 
+export interface DustGenerationMerkleTreeUpdateResult {
+  startIndex: number;
+  endIndex: number;
+  update: string;
+  protocolVersion: number;
+}
+
+export type DustGenerationMerkleTreeUpdateResponse = GraphQLResponse<{
+  dustGenerationMerkleTreeUpdate: DustGenerationMerkleTreeUpdateResult;
+}>;
+
 export interface CollapsedMerkleTree {
   startIndex: number;
   endIndex: number;
@@ -336,6 +351,7 @@ export interface DustGenerationsItem {
   backingNight: string;
   ctime: number;
   transactionId: number;
+  transactionHash: string;
   collapsedMerkleTree: CollapsedMerkleTree | null;
 }
 
@@ -345,14 +361,39 @@ export interface DustGenerationsProgress {
   collapsedMerkleTree: CollapsedMerkleTree | null;
 }
 
-export type DustGenerationsEvent = DustGenerationsItem | DustGenerationsProgress;
+export interface DustGenerationDtimeUpdateItem {
+  __typename: 'DustGenerationDtimeUpdateItem';
+  generationMtIndex: number;
+  owner: string;
+  nightUtxoHash: string;
+  newDtime: number;
+  transactionId: number;
+  transactionHash: string;
+  treeInsertionPath: string;
+}
+
+export type DustGenerationsEvent =
+  | DustGenerationsItem
+  | DustGenerationsProgress
+  | DustGenerationDtimeUpdateItem;
 
 export interface DustNullifierTransaction {
-  nullifier: string;
-  commitment: string;
+  nullifierLeBytes: string;
+  commitmentLeBytes: string;
   transactionId: number;
+  transactionHash: string;
   blockHeight: number;
   blockHash: string;
+  transaction: { hash: string };
+}
+
+export interface ShieldedNullifierTransaction {
+  transactionId: number;
+  transactionHash: string;
+  blockHash: string;
+  blockHeight: number;
+  nullifier: string;
+  transaction: { hash: string };
 }
 
 export type ViewingKey = string & { __brand: 'ViewingKey' };

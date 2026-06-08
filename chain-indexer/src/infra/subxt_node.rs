@@ -173,7 +173,7 @@ impl SubxtNode {
         let parent_hash = header.parent_hash.0.into();
         let protocol_version = header
             .protocol_version()?
-            .expect("protocol version header is present");
+            .ok_or(SubxtNodeError::MissingProtocolVersionHeader)?;
         let node_version = protocol_version.node_version();
         let ledger_version = protocol_version.ledger_version();
 
@@ -554,6 +554,9 @@ pub enum SubxtNodeError {
     #[error("cannot get block header")]
     GetBlockHeader(#[source] Box<subxt::error::BlockError>),
 
+    #[error("protocol version header missing from block")]
+    MissingProtocolVersionHeader,
+
     #[error("cannot get next extrinsic")]
     GetNextExtrinsic(#[source] Box<subxt::error::ExtrinsicDecodeErrorAt>),
 
@@ -577,6 +580,9 @@ pub enum SubxtNodeError {
 
     #[error("cannot decode genesis cNight registrations")]
     DecodeGenesisCnightRegistrations(#[source] Box<subxt::error::StorageValueError>),
+
+    #[error("cannot decode genesis cNight registration key")]
+    DecodeGenesisCnightRegistrationKey(#[source] Box<subxt::error::StorageKeyError>),
 
     #[error("cannot get contract state for address {0}")]
     GetContractState(SerializedContractAddress, #[source] BoxError),

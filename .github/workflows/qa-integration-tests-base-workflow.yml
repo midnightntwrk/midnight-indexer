@@ -94,6 +94,7 @@ jobs:
       TARGET_ENV: ${{ inputs.target_env }}
       GITHUB_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
       NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+      LOG_LEVEL: DEBUG
       XRAY_COMPONENT: "indexer"
       XRAY_PROJECT_KEY: "PM"
       XRAY_TEST_PLAN_KEY: "PM-19197"
@@ -152,6 +153,13 @@ jobs:
         working-directory: qa/tests
         run: yarn test integration
 
+      - name: Generate API coverage report (non-blocking)
+        if: always()
+        continue-on-error: true
+        working-directory: qa/tests
+        run: |
+          yarn coverage:generate --target-env=${{ inputs.target_env }} --indexer-api-version=v4
+
       - name: Publish to Xray
         if: always() && inputs.publish_to_xray == true
         uses: GiuseppeSalvatoreShielded/TestActions/xray-upload@e5cf0c100e61b96f5bc73963312fc8064d7b2d2d
@@ -183,3 +191,11 @@ jobs:
           name: qa-integration-tests-${{ inputs.target_env }}-logs
           path: |
             ./qa/tests/logs
+
+      - name: Upload API coverage report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: qa-api-coverage-${{ inputs.target_env }}
+          path: ./qa/tests/coverage/output/**
+          if-no-files-found: warn

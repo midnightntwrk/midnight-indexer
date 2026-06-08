@@ -143,6 +143,12 @@ where
 
         let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
+
+        let quota_guard = cx
+            .get_subscription_quotas()
+            .try_acquire(cx.get_per_connection_counter(), Some(session_id))
+            .map_err_into_client_error(|| "subscription limit exceeded")?;
+
         let wallet_id = cx
             .get_storage::<S>()
             .resolve_session_id(session_id)
@@ -186,6 +192,7 @@ where
             .try_filter_map(ok)
             .on_drop(move || {
                 cx.get_metrics().wallets_connected.decrement(1);
+                drop(quota_guard);
                 debug!(wallet_id:%; "shielded transaction subscription ended");
             });
 

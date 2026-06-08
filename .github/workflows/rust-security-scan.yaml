@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@5f57d6cb7cd20b14a8a27f522884c4bc8a187458 # v2.75.19
+        uses: taiki-e/install-action@213ccc1a076163c093f914550b94feb90fab916d # v2.79.2
         with:
           tool: cargo-deny
 
@@ -44,12 +44,19 @@ jobs:
           username: MidnightCI
           password: ${{ secrets.MIDNIGHTCI_REPO }}
 
-      - name: Run cargo-deny
-        # cargo-deny 0.19.0+ includes fix for empty locations in SARIF output
-        run: cargo deny -f sarif check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed | tee scan.sarif || true
-        # TODO: once everything's open sourced remove -Aunlicensed
+      - name: Run cargo-deny (produce SARIF for Security tab)
+        # `-f sarif` always exits 0 since findings are encoded in the SARIF, not the exit code.
+        # So this step never fails CI; advisory gating is in the second cargo-deny invocation below.
+        run: cargo deny -f sarif check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed | tee scan.sarif
+        # `-Aunlicensed` allows upstream ledger crates without `license = ...` fields (e.g. midnight-circuits, midnight-zk-stdlib).
+        # Remove this flag once those upstream crates ship with explicit license fields.
 
       - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@7273f08caa1dcf2c2837f362f1982de0ab4dc344
         with:
           sarif_file: scan.sarif
+
+      - name: Run cargo-deny (gate CI on advisories)
+        # Re-runs cargo-deny without `-f sarif` so it exits non-zero on findings, gating CI.
+        # `--disable-fetch` reuses the cached advisory DB; `-Aunlicensed` rationale as above.
+        run: cargo deny check --disable-fetch -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed

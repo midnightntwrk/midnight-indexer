@@ -12,7 +12,10 @@
 // limitations under the License.
 
 use indexer_common::{
-    domain::{ByteVec, CardanoRewardAddress, DustPublicKey, SerializedDustTreeInsertionPath},
+    domain::{
+        ByteVec, CardanoRewardAddress, DustPublicKey, SerializedDustTreeInsertionPath,
+        TransactionHash,
+    },
     infra::sqlx::U128BeBytes,
 };
 use serde::{Deserialize, Serialize};
@@ -99,6 +102,8 @@ pub struct DustGenerationEntry {
 
     #[sqlx(try_from = "i64")]
     pub transaction_id: u64,
+
+    pub transaction_hash: TransactionHash,
 }
 
 /// A dust generation dtime update entry for the subscription stream.
@@ -126,6 +131,8 @@ pub struct DustGenerationDtimeUpdateEntry {
 
     pub transaction_id: u64,
 
+    pub transaction_hash: TransactionHash,
+
     /// Tagged-serialised `TreeInsertionPath<DustGenerationInfo>` from the
     /// originating ledger event. Surfaced verbatim on the GraphQL API so
     /// wallets can hand it to `generating_tree.update_from_evidence(...)`.
@@ -135,9 +142,10 @@ pub struct DustGenerationDtimeUpdateEntry {
 /// A dust nullifier transaction for the subscription stream.
 #[derive(Debug, Clone)]
 pub struct DustNullifierTransaction {
-    pub nullifier: ByteVec,
-    pub commitment: ByteVec,
+    pub nullifier_le_bytes: ByteVec,
+    pub commitment_le_bytes: ByteVec,
     pub transaction_id: u64,
+    pub transaction_hash: TransactionHash,
     pub block_height: u32,
     pub block_hash: ByteVec,
 }

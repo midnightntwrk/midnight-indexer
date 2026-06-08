@@ -78,6 +78,10 @@ where
         to_block: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustNullifierTransaction, sqlx::Error>> + Send;
+
+    /// Returns the chain's current dust-generation first-free index
+    /// (`MAX(generation_index) + 1`, or `0` for an empty table).
+    async fn get_dust_generations_chain_first_free(&self) -> Result<u64, sqlx::Error>;
 }
 
 #[allow(unused_variables)]
@@ -126,5 +130,9 @@ impl DustGenerationsStorage for NoopStorage {
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustNullifierTransaction, sqlx::Error>> + Send {
         stream::empty()
+    }
+
+    async fn get_dust_generations_chain_first_free(&self) -> Result<u64, sqlx::Error> {
+        Ok(0)
     }
 }

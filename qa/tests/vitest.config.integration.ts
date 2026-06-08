@@ -23,11 +23,26 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: [path.resolve(__dirname, './utils/custom-matchers.ts')],
-    globalSetup: [path.resolve(__dirname, './utils/logging/setup.ts')],
+    globalSetup: [
+      path.resolve(__dirname, './setup/undeployed-with-data-setup.ts'),
+      path.resolve(__dirname, './utils/logging/setup.ts'),
+    ],
     coverage: {
       reporter: ['text', 'json', 'html'],
     },
-    testTimeout: 15000,
+    // 60s per test. Measured against qanet under parallel load: individual
+    // HTTP queries can take 20-30s and many tests cluster at the previous
+    // 30s budget — they passed only because `retry: 1` re-ran them in a
+    // calmer window. 60s gives single-attempt headroom for the slow path
+    // and, combined with `retry: 1`, a 120s overall budget per test.
+    // Outright sustained outages still surface as failures, just later.
+    testTimeout: 60000,
+    // Hooks (`beforeEach`/`beforeAll`/etc.) hit the indexer the same way
+    // the test bodies do — a slow GraphQL response in a `beforeEach` was
+    // exhausting vitest's 10s default hook budget on serial runs against
+    // a loaded qanet. Match the test budget so hooks have equivalent
+    // headroom and don't fail-by-timeout while the indexer is just slow.
+    hookTimeout: 60000,
     retry: 1,
     include: ['tests/integration/**/*.test.ts'],
   },
@@ -36,6 +51,11 @@ export default defineConfig({
       graphql: path.resolve(__dirname, 'node_modules/graphql'),
       '@utils': path.resolve(__dirname, './utils'),
       environment: path.resolve(__dirname, './environment'),
+      // Bare, root-relative specifiers (tsconfig `baseUrl: "."`). Vitest 3's
+      // bundled Vite resolved these implicitly; Vite 7 (vitest 4) does not,
+      // so they must be aliased explicitly.
+      utils: path.resolve(__dirname, './utils'),
+      tests: path.resolve(__dirname, './tests'),
     },
     conditions: ['node'],
     mainFields: ['module', 'main'],

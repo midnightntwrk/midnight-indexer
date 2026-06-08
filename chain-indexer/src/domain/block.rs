@@ -38,6 +38,9 @@ pub struct Block {
 
     // These fields are set after applying all transactions of this block to the ledger state.
     pub ledger_parameters: SerializedLedgerParameters,
+    pub zswap_end_index: u64,
+    pub dust_commitment_end_index: u64,
+    pub dust_generation_end_index: u64,
 }
 
 #[derive(Debug, Clone, Copy)]

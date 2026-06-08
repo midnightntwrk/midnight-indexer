@@ -4,6 +4,50 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.3] - 2026-06-04
+
+### 🚀 Features
+
+- *(indexer-api)* Add subscription quotas to graphql websocket (#1104)
+- *(indexer-api)* Tighten shielded nullifier transactions input validation (#1126)
+- *(indexer-api)* Introduce @beta GraphQL directive for in-flight API fields (#1186)
+- *(indexer-api)* Add per-tree end indexes to Block (#1197)
+- *(indexer-api)* Rename DustNullifier byte fields with LeBytes suffix (#1199)
+- *(indexer-api)* Add transaction reference to nullifier event types (#1208)
+
+### 🐛 Bug Fixes
+
+- *(indexer-api)* Deliver DustGenerationDtimeUpdate items on fresh dustGenerations subscriptions (#1166)
+
+### ⚙️ Dependencies
+
+- Bump midnight-ledger to 8.1.0 (#1141). Version bump only from 8.1.0-rc.1, no functional change for the indexer.
+- Bump node to 1.0.0 (#1204). Test data regenerated against the 1.0.0 release tag (previously 1.0.0-rc.3); no functional change for the indexer.
+
+## [4.3.2] - 2026-05-15
+
+### 🚀 Features
+
+- *(indexer-api)* Add /live HTTP endpoint for kubernetes liveness probe (#1145)
+
+### 🐛 Bug Fixes
+
+- *(indexer-api)* DustGenerations subscription terminates on chain progress, not per-wallet cursor (#1137)
+
+### 📚 Documentation
+
+- *(indexer-standalone)* Document mandatory APP__INFRA__SPO_NODE__BLOCKFROST_ID (#1149)
+
+## [4.3.1] - 2026-05-11
+
+### 🚀 Features
+
+- *(indexer-api)* Add transactionHash to event subscription response types (#1116)
+
+### 🐛 Bug Fixes
+
+- Replace remaining production panics with error returns (#1105)
+
 ## [4.3.0] - 2026-04-30
 
 ### 🚀 Features

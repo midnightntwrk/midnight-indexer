@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version       = "4.3.0"
+version       = "4.3.3"
 edition       = "2024"
 license       = "Apache-2.0"
 readme        = "README.md"
@@ -21,14 +21,24 @@ documentation = "https://github.com/midnightntwrk/midnight-indexer"
 publish       = false
 
 [workspace.dependencies]
-midnight-base-crypto_v1      = { package = "midnight-base-crypto", version = "1.0" }
-midnight-coin-structure_v2   = { package = "midnight-coin-structure", version = "2.0" }
-midnight-ledger_v8           = { package = "midnight-ledger", version = "8.1.0-rc.1" }
-midnight-onchain-runtime_v3  = { package = "midnight-onchain-runtime", version = "3.1.0" }
-midnight-serialize_v1        = { package = "midnight-serialize", version = "1.1.0" }
+# v8 + shared crates come from crates.io. Cargo unifies same-major to one
+# version under semver, so v8 code links cleanly against the v9 alpha minor
+# bumps for base-crypto and coin-structure (additive per the v9 changelog).
+midnight-base-crypto_v1      = { package = "midnight-base-crypto", version = "1" }
+midnight-coin-structure_v2   = { package = "midnight-coin-structure", version = "2" }
+midnight-ledger_v8           = { package = "midnight-ledger", version = "8" }
+midnight-onchain-runtime_v3  = { package = "midnight-onchain-runtime", version = "3" }
+midnight-serialize_v1        = { package = "midnight-serialize", version = "1" }
 midnight-storage-core_v1     = { package = "midnight-storage-core", version = "1.2" }
-midnight-transient-crypto_v2 = { package = "midnight-transient-crypto", version = "2.0" }
-midnight-zswap_v8            = { package = "midnight-zswap", version = "8.1.0-rc.1" }
+midnight-transient-crypto_v2 = { package = "midnight-transient-crypto", version = "2" }
+midnight-zswap_v8            = { package = "midnight-zswap", version = "8" }
+# v9 alpha aliases. Cross-major against the v8 entries above; same-major
+# (base-crypto, coin-structure) unifies via the patches below.
+midnight-ledger_v9           = { package = "midnight-ledger-v9", version = "0.1" }
+midnight-onchain-runtime_v4  = { package = "midnight-onchain-runtime", version = "4" }
+midnight-onchain-state_v4    = { package = "midnight-onchain-state", version = "4" }
+midnight-onchain-vm_v4       = { package = "midnight-onchain-vm", version = "4" }
+midnight-zswap_v9            = { package = "midnight-zswap", version = "9" }
 # Other dependencies.
 anyhow                      = { version = "1.0" }
 assert_matches              = { version = "1.5" }
@@ -96,12 +106,16 @@ trait-variant               = { version = "0.1" }
 uuid                        = { version = "1.23", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }
 
+# v8 + shared crates resolve from crates.io directly (published per Thomas).
+# Only the v9 alpha needs patching (not on crates.io). Within-major bumps
+# (base-crypto, coin-structure) point at the v9 alpha tag; cargo unifies v8
+# and v9 to the higher version under semver. Cross-major crates use the
+# `package + version` recipe for disambiguation.
 [patch.crates-io]
-midnight-ledger           = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "crate-ledger-8.1.0-rc.1" }
-midnight-zswap            = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zswap-8.1.0-rc.1" }
-midnight-transient-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.1.0-rc.1" }
-midnight-onchain-vm       = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-vm-3.1.0-rc.1" }
-midnight-onchain-state    = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-state-3.1.0-rc.1" }
-midnight-onchain-runtime  = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-runtime-3.1.0-rc.1" }
-midnight-serialize        = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "serialize-1.1.0-rc.1" }
-midnight-storage-core     = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "storage-core-1.2.0-rc.3" }
+midnight-base-crypto         = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-1.1.0-alpha.1" }
+midnight-coin-structure      = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "coin-structure-2.1.0-alpha.1" }
+midnight-ledger-v9           = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "crate-ledger-9.0.1.0-alpha.1" }
+midnight-zswap_v9            = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zswap-9.0.0-alpha.1",           package = "midnight-zswap",           version = "9.0.0" }
+midnight-onchain-runtime_v4  = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-runtime-4.0.0-alpha.1", package = "midnight-onchain-runtime", version = "4.0.0" }
+midnight-onchain-state_v4    = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-state-4.0.0-alpha.1",   package = "midnight-onchain-state",   version = "4.0.0" }
+midnight-onchain-vm_v4       = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-vm-4.0.0-alpha.1",      package = "midnight-onchain-vm",      version = "4.0.0" }

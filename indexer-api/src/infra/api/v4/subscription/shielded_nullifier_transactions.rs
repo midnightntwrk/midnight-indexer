@@ -15,10 +15,10 @@ use crate::{
     domain::storage::Storage,
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
-        v4::{HexEncodable, HexEncoded},
+        v4::{HexEncodable, HexEncoded, directives::beta, transaction::Transaction},
     },
 };
-use async_graphql::{Context, SimpleObject, Subscription};
+use async_graphql::{ComplexObject, Context, SimpleObject, Subscription};
 use async_stream::try_stream;
 use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{BlockIndexed, Subscriber};
@@ -41,25 +41,59 @@ impl<S, B> Default for ShieldedNullifierTransactionsSubscription<S, B> {
 
 /// A transaction containing a shielded (zswap) nullifier match with block context.
 #[derive(Debug, Clone, SimpleObject)]
-pub struct ShieldedNullifierTransaction {
-    /// The transaction ID (use to query full transaction via `transaction` query).
+#[graphql(complex)]
+pub struct ShieldedNullifierTransaction<S>
+where
+    S: Storage,
+{
+    /// The transaction ID (indexer-internal BIGSERIAL, use as resumption cursor).
     pub transaction_id: u64,
+    /// The hex-encoded transaction hash (32-byte chain identifier).
+    pub transaction_hash: HexEncoded,
     /// The hex-encoded block hash (use to query block with ledger parameters).
     pub block_hash: HexEncoded,
     /// The block height containing this transaction.
     pub block_height: u32,
     /// The hex-encoded matched nullifier.
     pub nullifier: HexEncoded,
+
+    #[graphql(skip)]
+    _s: PhantomData<S>,
 }
 
-impl From<crate::domain::ShieldedNullifierTransaction> for ShieldedNullifierTransaction {
+impl<S> From<crate::domain::ShieldedNullifierTransaction> for ShieldedNullifierTransaction<S>
+where
+    S: Storage,
+{
     fn from(t: crate::domain::ShieldedNullifierTransaction) -> Self {
         Self {
             transaction_id: t.transaction_id,
+            transaction_hash: t.transaction_hash.hex_encode(),
             block_hash: t.block_hash.hex_encode(),
             block_height: t.block_height,
             nullifier: t.nullifier.hex_encode(),
+            _s: PhantomData,
         }
+    }
+}
+
+#[ComplexObject]
+impl<S> ShieldedNullifierTransaction<S>
+where
+    S: Storage,
+{
+    /// The transaction containing this nullifier match.
+    #[graphql(directive = beta::apply())]
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        let id = self.transaction_id;
+        let transaction = cx
+            .get_transaction_by_id_loader::<S>()
+            .load_one(id)
+            .await
+            .map_err_into_server_error(|| format!("get transaction by id {id}"))?
+            .some_or_server_error(|| format!("transaction with id {id} not found"))?;
+
+        Ok(transaction.into())
     }
 }
 
@@ -78,17 +112,27 @@ where
         nullifier_prefixes: Vec<HexEncoded>,
         from_block: Option<u64>,
         to_block: Option<u64>,
-    ) -> impl Stream<Item = ApiResult<ShieldedNullifierTransaction>> {
+    ) -> impl Stream<Item = ApiResult<ShieldedNullifierTransaction<S>>> {
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
         let batch_size = cx
             .get_subscription_config()
             .shielded_nullifier_transactions
             .batch_size;
+        let quotas = cx.get_subscription_quotas();
+        let per_connection_counter = cx.get_per_connection_counter();
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
 
         try_stream! {
+            let _quota_guard = quotas
+                .try_acquire(per_connection_counter, None)
+                .map_err_into_client_error(|| "subscription limit exceeded")?;
+
+            (!nullifier_prefixes.is_empty())
+                .then_some(())
+                .some_or_client_error(|| "nullifierPrefixes must not be empty")?;
+
             (nullifier_prefixes.len() <= 10)
                 .then_some(())
                 .some_or_client_error(|| "maximum of ten nullifier prefixes allowed")?;
@@ -99,8 +143,16 @@ where
                 .collect::<Result<Vec<_>, _>>()
                 .map_err_into_client_error(|| "invalid hex-encoded nullifier prefix")?;
 
+            prefix_bytes
+                .iter()
+                .all(|b| !b.is_empty())
+                .then_some(())
+                .some_or_client_error(|| "nullifierPrefixes elements must not be empty")?;
+
             let from = from_block.unwrap_or(0);
             let to = to_block.unwrap_or(u64::MAX);
+
+            validate_block_range(from, to)?;
 
             debug!("streaming existing shielded nullifier transactions");
 
@@ -165,5 +217,33 @@ where
 
             warn!("stream of BlockIndexed events completed unexpectedly");
         }
+    }
+}
+
+/// Reject `fromBlock > toBlock` with a client error so callers get a clear
+/// signal that they likely have a bug in their request rather than thinking
+/// their query just happens to match nothing (#1095).
+fn validate_block_range(from: u64, to: u64) -> ApiResult<()> {
+    (from <= to)
+        .then_some(())
+        .some_or_client_error(|| "fromBlock must not exceed toBlock")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_block_range;
+
+    #[test]
+    fn test_validate_block_range_accepts_valid_ranges() {
+        assert!(validate_block_range(0, 0).is_ok());
+        assert!(validate_block_range(5, 10).is_ok());
+        assert!(validate_block_range(0, u64::MAX).is_ok());
+    }
+
+    #[test]
+    fn test_validate_block_range_rejects_from_greater_than_to() {
+        assert!(validate_block_range(1, 0).is_err());
+        assert!(validate_block_range(10, 5).is_err());
+        assert!(validate_block_range(u64::MAX, 0).is_err());
     }
 }

@@ -27,7 +27,7 @@ use futures::Stream;
 use indexer_common::{
     domain::{
         ByteVec, CardanoRewardAddress, LedgerEventAttributes, LedgerVersion, TimestampMs,
-        TimestampSecs, ledger,
+        TimestampSecs, TransactionHash, ledger,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -157,19 +157,21 @@ impl DustGenerationsStorage for Storage {
                 // to plumb Option fields through the domain layer.
                 let query = indoc! {"
                     SELECT
-                        merkle_index AS commitment_mt_index,
-                        generation_index AS generation_mt_index,
-                        owner,
-                        value,
-                        initial_value,
-                        backing_night,
-                        ctime,
-                        transaction_id
+                        dust_generation_info.merkle_index AS commitment_mt_index,
+                        dust_generation_info.generation_index AS generation_mt_index,
+                        dust_generation_info.owner,
+                        dust_generation_info.value,
+                        dust_generation_info.initial_value,
+                        dust_generation_info.backing_night,
+                        dust_generation_info.ctime,
+                        dust_generation_info.transaction_id,
+                        transactions.hash AS transaction_hash
                     FROM dust_generation_info
-                    WHERE owner = $1
-                    AND generation_index >= $2
-                    AND generation_index <= $3
-                    ORDER BY generation_index
+                    INNER JOIN transactions ON transactions.id = dust_generation_info.transaction_id
+                    WHERE dust_generation_info.owner = $1
+                    AND dust_generation_info.generation_index >= $2
+                    AND dust_generation_info.generation_index <= $3
+                    ORDER BY dust_generation_info.generation_index
                     LIMIT $4
                 "};
 
@@ -258,7 +260,8 @@ impl DustGenerationsStorage for Storage {
                         dgi.owner,
                         dgi.night_utxo_hash,
                         le.attributes,
-                        le.transaction_id
+                        le.transaction_id,
+                        t.hash AS transaction_hash
                     FROM ledger_events le
                     JOIN transactions t ON t.id = le.transaction_id
                     JOIN dust_generation_info dgi
@@ -297,7 +300,8 @@ impl DustGenerationsStorage for Storage {
                         dgi.owner,
                         dgi.night_utxo_hash,
                         e.attributes,
-                        e.transaction_id
+                        e.transaction_id,
+                        t.hash AS transaction_hash
                     FROM dtime_events e
                     JOIN transactions t ON t.id = e.transaction_id
                     JOIN dust_generation_info dgi
@@ -331,6 +335,7 @@ impl DustGenerationsStorage for Storage {
                         night_utxo_hash,
                         attributes,
                         transaction_id,
+                        transaction_hash,
                     } = row;
 
                     let LedgerEventAttributes::DustGenerationDtimeUpdate {
@@ -353,6 +358,7 @@ impl DustGenerationsStorage for Storage {
                         night_utxo_hash,
                         new_dtime: generation_info.dtime,
                         transaction_id: transaction_id as u64,
+                        transaction_hash,
                         tree_insertion_path,
                     };
                 }
@@ -387,7 +393,7 @@ impl DustGenerationsStorage for Storage {
 
                 loop {
                     let query = indoc! {"
-                        SELECT dn.id, dn.nullifier, dn.commitment, t.id, b.height, b.hash
+                        SELECT dn.id, dn.nullifier, dn.commitment, t.id, t.hash, b.height, b.hash
                         FROM dust_nullifiers dn
                         JOIN transactions t ON t.id = dn.transaction_id
                         JOIN blocks b ON b.id = dn.block_id
@@ -399,7 +405,7 @@ impl DustGenerationsStorage for Storage {
                         LIMIT $6
                     "};
 
-                    let rows = sqlx::query_as::<_, (i64, ByteVec, ByteVec, i64, i64, ByteVec)>(query)
+                    let rows = sqlx::query_as::<_, (i64, ByteVec, ByteVec, i64, TransactionHash, i64, ByteVec)>(query)
                         .bind(&prefix[..])
                         .bind(&next_prefix[..])
                         .bind(from_block as i64)
@@ -414,11 +420,12 @@ impl DustGenerationsStorage for Storage {
                         None => break,
                     }
 
-                    for (_, nullifier, commitment, transaction_id, block_height, block_hash) in rows {
+                    for (_, nullifier_le_bytes, commitment_le_bytes, transaction_id, transaction_hash, block_height, block_hash) in rows {
                         yield DustNullifierTransaction {
-                            nullifier,
-                            commitment,
+                            nullifier_le_bytes,
+                            commitment_le_bytes,
                             transaction_id: transaction_id as u64,
+                            transaction_hash,
                             block_height: block_height as u32,
                             block_hash,
                         };
@@ -426,6 +433,18 @@ impl DustGenerationsStorage for Storage {
                 }
             }
         }
+    }
+
+    #[trace]
+    async fn get_dust_generations_chain_first_free(&self) -> Result<u64, sqlx::Error> {
+        // `IS NOT NULL` skips legacy rows pre-dating the generation/commitment split.
+        let (max_index,) = sqlx::query_as::<_, (Option<i64>,)>(
+            "SELECT MAX(generation_index) FROM dust_generation_info WHERE generation_index IS NOT NULL",
+        )
+        .fetch_one(&*self.pool)
+        .await?;
+
+        Ok(max_index.map(|i| i as u64 + 1).unwrap_or(0))
     }
 }
 
@@ -444,4 +463,5 @@ struct DtimeUpdateRow {
     #[sqlx(json)]
     attributes: LedgerEventAttributes,
     transaction_id: i64,
+    transaction_hash: TransactionHash,
 }

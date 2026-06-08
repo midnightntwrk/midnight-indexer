@@ -41,6 +41,9 @@ export const BlockSchema = z.lazy(() =>
     zswapMerkleTreeRoot: VarLenghtHex,
     dustCommitmentMerkleTreeRoot: VarLenghtHex.nullable(),
     dustGenerationMerkleTreeRoot: VarLenghtHex.nullable(),
+    zswapEndIndex: z.number().int().nonnegative(),
+    dustCommitmentEndIndex: z.number().int().nonnegative(),
+    dustGenerationEndIndex: z.number().int().nonnegative(),
     parent: PartialBlockSchema,
     transactions: z.array(FullTransactionSchema).min(0),
   }),
@@ -379,6 +382,7 @@ export const DustGenerationsItemSchema = z.object({
   backingNight: VarLenghtHex,
   ctime: z.number(),
   transactionId: z.number(),
+  transactionHash: Hash64,
   collapsedMerkleTree: CollapsedMerkleTreeSchema.nullable(),
 });
 
@@ -388,15 +392,38 @@ export const DustGenerationsProgressSchema = z.object({
   collapsedMerkleTree: CollapsedMerkleTreeSchema.nullable(),
 });
 
+export const DustGenerationDtimeUpdateItemSchema = z.object({
+  __typename: z.literal('DustGenerationDtimeUpdateItem'),
+  generationMtIndex: z.number(),
+  owner: VarLenghtHex,
+  nightUtxoHash: VarLenghtHex,
+  newDtime: z.number(),
+  transactionId: z.number(),
+  transactionHash: Hash64,
+  treeInsertionPath: VarLenghtHex,
+});
+
 export const DustGenerationsEventSchema = z.discriminatedUnion('__typename', [
   DustGenerationsItemSchema,
   DustGenerationsProgressSchema,
+  DustGenerationDtimeUpdateItemSchema,
 ]);
 
 export const DustNullifierTransactionSchema = z.object({
-  nullifier: VarLenghtHex,
-  commitment: VarLenghtHex,
+  nullifierLeBytes: VarLenghtHex,
+  commitmentLeBytes: VarLenghtHex,
   transactionId: z.number(),
+  transactionHash: Hash64,
   blockHeight: z.number(),
   blockHash: Hash64,
+  transaction: z.object({ hash: Hash64 }),
+});
+
+export const ShieldedNullifierTransactionSchema = z.object({
+  transactionId: z.number(),
+  transactionHash: Hash64,
+  blockHash: Hash64,
+  blockHeight: z.number(),
+  nullifier: VarLenghtHex,
+  transaction: z.object({ hash: Hash64 }),
 });

@@ -15,8 +15,13 @@
 
 import { join } from 'path';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { env } from '../../environment/model';
 
-export default () => {
+export default async () => {
+  // Fail fast (with a clear message) if INDEXER_INSTANCE points at an
+  // unrouted/not-yet-synced blue/green host. No-op when unset or undeployed.
+  await env.preflightInstanceSelection();
+
   const BASE = 'logs';
   if (!existsSync(BASE)) {
     mkdirSync(BASE);

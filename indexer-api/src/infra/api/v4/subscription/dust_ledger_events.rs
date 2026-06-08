@@ -53,10 +53,16 @@ where
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
         let batch_size = cx.get_subscription_config().dust_ledger_events.batch_size;
+        let quotas = cx.get_subscription_quotas();
+        let per_connection_counter = cx.get_per_connection_counter();
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
 
         try_stream! {
+            let _quota_guard = quotas
+                .try_acquire(per_connection_counter, None)
+                .map_err_into_client_error(|| "subscription limit exceeded")?;
+
             debug!(id; "streaming existing events");
 
             let ledger_events = storage

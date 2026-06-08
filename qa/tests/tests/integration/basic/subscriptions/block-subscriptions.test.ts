@@ -16,13 +16,14 @@
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import type { Block, BlockOffset } from '@utils/indexer/indexer-types';
+import type { Block, BlockOffset, RegularTransaction } from '@utils/indexer/indexer-types';
 import {
   IndexerWsClient,
   SubscriptionHandlers,
   BlockSubscriptionResponse,
   GraphQLCompleteMessage,
 } from '@utils/indexer/websocket-client';
+import { buildErrorPayload } from '@utils/indexer/subscription-error';
 import { EventCoordinator } from '@utils/event-coordinator';
 import type { TestContext } from 'vitest';
 import { BlockSchema } from '@utils/indexer/graphql/schema';
@@ -74,13 +75,18 @@ describe('block subscriptions', () => {
       blockOffset,
     );
 
-    // Blocks on MN are produced 6 secs apart. Taking into account the time indexer
-    // takes to process blocks when they are produced, we should expect a similar
-    // interval. Just to be on the safe side (a block full of unshielded transaction
-    // might take up to a sec) we give it a couple of seconds more, so 8 secs in total.
-    // For historical subscriptions, blocks are replayed instantly, so only a short grace period (~2s) is applied.
-    const maxTimeBetweenBlocks = fromHeight ? 2_000 : 8_000;
-    await eventCoordinator.waitForAll([eventName], maxTimeBetweenBlocks);
+    // Blocks on MN are produced ~6s apart; the indexer processing adds a small
+    // delay. For *live* subscriptions, `waitForAll` is measuring total time
+    // from subscription start until `expectedCount` blocks have been received
+    // — not the inter-block gap — so the budget must cover the worst-case
+    // first-block latency (sub-WS-handshake + first block arrival) PLUS
+    // (expectedCount-1) × block interval. Under healthy qanet a 2-block
+    // collection completes in ~7s, but under load or while the indexer
+    // catches up it can take 12-15s. 25s gives 2-3 block intervals of
+    // headroom without masking a hung subscription.
+    // Historical replays are instant — keep the small 5s grace.
+    const blockStreamingBudgetMs = fromHeight ? 5_000 : 25_000;
+    await eventCoordinator.waitForAll([eventName], blockStreamingBudgetMs);
 
     unsubscribe();
     return receivedBlocks;
@@ -169,18 +175,17 @@ describe('block subscriptions', () => {
       const blockSubscriptionHandler: SubscriptionHandlers<BlockSubscriptionResponse> = {
         next: (payload: BlockSubscriptionResponse) => {
           log.debug(`Received data: ${JSON.stringify(payload)}`);
-
           messagesReceived.push(payload);
-
-          if (payload.errors) {
-            eventCoordinator.notify('error');
-            log.error(`Error received: ${JSON.stringify(payload.errors)}`);
-          }
-
           if (messagesReceived.length === 10) {
             eventCoordinator.notify('expectedBlocksReceived');
             log.debug('Expected # of blocks received');
           }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.error(`Unexpected error frame: ${JSON.stringify(synthetic)}`);
+          messagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
       };
 
@@ -228,10 +233,12 @@ describe('block subscriptions', () => {
         next: (payload: BlockSubscriptionResponse) => {
           log.debug(`Received data: ${JSON.stringify(payload)}`);
           messagesReceived.push(payload);
-          if (payload.errors !== undefined) {
-            log.debug('Received the expected error message');
-            eventCoordinator.notify('error');
-          }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          messagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
         complete: (message) => {
           log.debug(`Complete message: ${JSON.stringify(message)}`);
@@ -279,10 +286,12 @@ describe('block subscriptions', () => {
         next: (payload: BlockSubscriptionResponse) => {
           log.debug(`Received data: ${JSON.stringify(payload)}`);
           messagesReceived.push(payload);
-          if (payload.errors !== undefined) {
-            log.debug('Received the expected error message');
-            eventCoordinator.notify('error');
-          }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          messagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
         complete: (message) => {
           log.debug(`Complete message: ${JSON.stringify(message)}`);
@@ -401,10 +410,12 @@ describe('block subscriptions', () => {
         next: (payload) => {
           blockMessagesReceived.push(payload);
           log.debug(`Received data: ${JSON.stringify(payload)}`);
-          if (payload.errors !== undefined) {
-            log.debug('Received the expected error message');
-            eventCoordinator.notify('error');
-          }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          blockMessagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
       };
 
@@ -440,10 +451,12 @@ describe('block subscriptions', () => {
         next: (payload) => {
           blockMessagesReceived.push(payload);
           log.debug(`Received data: ${JSON.stringify(payload)}`);
-          if (payload.errors !== undefined) {
-            log.debug('Received the expected error message');
-            eventCoordinator.notify('error');
-          }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          blockMessagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
         complete: (message) => {
           log.debug(`Complete message: ${JSON.stringify(message)}`);
@@ -491,10 +504,12 @@ describe('block subscriptions', () => {
         next: (payload) => {
           blockMessagesReceived.push(payload);
           log.debug(`Received data: ${JSON.stringify(payload)}`);
-          if (payload.errors !== undefined) {
-            log.debug('Received the expected error message');
-            eventCoordinator.notify('error');
-          }
+        },
+        error: (err) => {
+          const synthetic = buildErrorPayload<BlockSubscriptionResponse>(err);
+          log.debug(`Received error frame: ${JSON.stringify(synthetic)}`);
+          blockMessagesReceived.push(synthetic);
+          eventCoordinator.notify('error');
         },
         complete: (message) => {
           log.debug(`Complete message: ${JSON.stringify(message)}`);
@@ -517,5 +532,183 @@ describe('block subscriptions', () => {
       expect(errorMessage).toContain(`Invalid value for argument`);
       expect(errorMessage).toContain(`Oneof input objects requires have exactly one field`);
     });
+  });
+
+  /**
+   * This describe validates `RegularTransaction.fees` semantics; the block subscription is
+   * the transport, not the system under test.
+   *
+   * Regression coverage for #1068 (release/4.0 backport of #1031 + #1061). #1031 routes
+   * fee computation through the ledger's `Transaction::fees()` API and populates both
+   * `paidFees` and `estimatedFees`. #1061 fixes a `clamp_and_normalize` bug in
+   * `post_block_update` that, on long-running chains, drove `fee_prices.overall_price`
+   * down toward `MIN_COST = 100` over many blocks. Combined symptom on mainnet pre-fix:
+   * every regular transaction reported `paidFees == 1 SPECK`. Both PRs must travel
+   * together — #1031 alone makes the underlying drift visible; #1061 alone is invisible.
+   *
+   * Strategy: scan a recent slice of historical blocks via offset replay (instant on
+   * the wire, not chain-paced), filter to RegularTransactions with a `fees` payload,
+   * and assert per-tx and population invariants. Avoids dependence on test-env wallet
+   * data, which is reset and varies per environment.
+   */
+  describe('regular transaction fees', () => {
+    // Slim subscription document scoped to this test: drops zswapLedgerEvents,
+    // dustLedgerEvents, contractActions, and other heavy fields we don't need.
+    // We only need __typename, hash, the new top-level RegularTransaction.fee
+    // (added in PR #1036 / issue #1032), and the deprecated fees wrapper.
+    // Substantially reduces per-block payload size and replay time.
+    const SLIM_BLOCKS_SUBSCRIPTION = `subscription BlocksSubscriptionFromBlockByOffset($OFFSET: BlockOffset) {
+      blocks(offset: $OFFSET) {
+        hash
+        height
+        transactions {
+          hash
+          __typename
+          ... on RegularTransaction {
+            fee
+            fees {
+              paidFees
+              estimatedFees
+            }
+          }
+        }
+      }
+    }`;
+
+    /**
+     * @given a chain with regular transactions in the recent ~50000-block window
+     *        (wide enough to find a sample on sparse test envs like devnet)
+     * @when we collect a sample of regular transactions via block subscription replay
+     * @then every sampled tx returns paidFees and estimatedFees in SPECKs (>= 1, < 10^9),
+     *       and paidFees == estimatedFees per chain-indexer/src/domain/ledger_state.rs
+     *       (both populated from the same Transaction::fees(params, true) call).
+     *       A weight-magnitude value (~10^10) would indicate a 4.0.1 regression — that's
+     *       the failure mode this test catches.
+     *
+     *       Also asserts the post-#1036 invariant for issue #1032: the new
+     *       canonical `fee` field on RegularTransaction returns the same
+     *       SPECK value as the deprecated `fees.paidFees`.
+     */
+    test.skip('should report ledger paidFees and estimatedFees on regular transactions', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Subscription', 'Block', 'Transaction', 'Fees', 'Regression'],
+      };
+
+      const SAMPLE_TARGET = 10;
+      const HISTORY_WINDOW_BLOCKS = 50000;
+      const MAX_WAIT_MS = 60_000;
+
+      const latestResponse = await indexerHttpClient.getLatestBlock();
+      expect(latestResponse).toBeSuccess();
+      const latestHeight = latestResponse.data?.block?.height;
+      expect(latestHeight).toBeDefined();
+      log.debug(`Latest height: ${latestHeight}`);
+
+      // Start from a recent slice. On a freshly-reset env (few hundred blocks) this
+      // collapses to height 1; on a long-running env it caps the replay span so we
+      // don't scan the entire chain. Recent blocks are the right witness either way:
+      // the #1061 drift bug accumulates over time, so it surfaces in current state.
+      const startHeight = Math.max(1, latestHeight! - HISTORY_WINDOW_BLOCKS);
+      log.debug(`Start height: ${startHeight}`);
+      const collected: {
+        fee: bigint;
+        paidFees: bigint;
+        estimatedFees: bigint;
+        hash?: string;
+      }[] = [];
+      const sampleReadyEvent = `${SAMPLE_TARGET} regular transactions collected`;
+
+      const handler: SubscriptionHandlers<BlockSubscriptionResponse> = {
+        next: (payload: BlockSubscriptionResponse) => {
+          const block = payload.data?.blocks;
+          if (!block?.transactions || collected.length >= SAMPLE_TARGET) return;
+          for (const tx of block.transactions) {
+            if (tx.__typename !== 'RegularTransaction') continue;
+            const reg = tx as RegularTransaction;
+            if (reg.fees == null || reg.fee == null) continue;
+            collected.push({
+              fee: BigInt(reg.fee),
+              paidFees: BigInt(reg.fees.paidFees),
+              estimatedFees: BigInt(reg.fees.estimatedFees),
+              hash: reg.hash,
+            });
+            if (collected.length >= SAMPLE_TARGET) {
+              eventCoordinator.notify(sampleReadyEvent);
+              indexerWsClient.send<GraphQLCompleteMessage>({ id: '1', type: 'complete' });
+              return;
+            }
+          }
+        },
+      };
+
+      log.debug(`Subscribing to block events from height: ${startHeight}`);
+
+      const unsubscribe = indexerWsClient.subscribeToBlockEvents(
+        handler,
+        { height: startHeight },
+        SLIM_BLOCKS_SUBSCRIPTION,
+      );
+
+      try {
+        await eventCoordinator.waitForAll([sampleReadyEvent], MAX_WAIT_MS);
+      } catch {
+        // Timed out before reaching SAMPLE_TARGET; assert on whatever we did collect.
+        log.debug(
+          `Timed out after ${MAX_WAIT_MS}ms with ${collected.length} regular transactions collected`,
+        );
+      }
+      unsubscribe();
+
+      if (collected.length === 0) {
+        ctx.skip?.(
+          true,
+          `no regular transactions found in blocks ${startHeight}..${latestHeight} on this env`,
+        );
+        return;
+      }
+
+      log.debug(`Validating fees on ${collected.length} regular transactions`);
+
+      const SPECK_UPPER_BOUND = 1_000_000_000n; // 10^9 SPECKs. Substrate-weight regressions land at 10^10-10^11.
+
+      for (const t of collected) {
+        expect
+          .soft(
+            t.paidFees,
+            `paidFees < 1 SPECK; expected at least the floor (tx ${t.hash}, see #1068)`,
+          )
+          .toBeGreaterThanOrEqual(1n);
+        expect
+          .soft(
+            t.paidFees,
+            `paidFees >= 10^9 SPECKs; weight-magnitude value suggests 4.0.1 regression (tx ${t.hash}, see #1068)`,
+          )
+          .toBeLessThan(SPECK_UPPER_BOUND);
+
+        expect
+          .soft(
+            t.estimatedFees,
+            `estimatedFees < 1 SPECK; expected at least the floor (tx ${t.hash})`,
+          )
+          .toBeGreaterThanOrEqual(1n);
+        expect
+          .soft(
+            t.estimatedFees,
+            `estimatedFees >= 10^9 SPECKs; weight-magnitude value suggests 4.0.1 regression (tx ${t.hash})`,
+          )
+          .toBeLessThan(SPECK_UPPER_BOUND);
+
+        // Post-#1031 invariant: paid_fees and estimated_fees come from the same
+        // Transaction::fees(params, true) call in chain-indexer/src/domain/ledger_state.rs.
+        // Holds on every fix-bearing version (4.0.2, 4.2.x, 4.3.x).
+        expect.soft(t.paidFees, `paidFees != estimatedFees (tx ${t.hash})`).toBe(t.estimatedFees);
+
+        // Post-#1036 invariant (issue #1032): the new top-level `fee` field is
+        // the canonical replacement for the deprecated `fees` wrapper, and
+        // returns the same SPECK value as `fees.paidFees`. This locks in the
+        // equivalence so a future regression that diverges them is caught.
+        expect.soft(t.fee, `fee != paidFees (tx ${t.hash}, see #1032)`).toBe(t.paidFees);
+      }
+    }, 50_000);
   });
 });

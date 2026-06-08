@@ -794,17 +794,17 @@ subscription ShieldedNullifierTransactionsSubscription(
 }
 
 subscription DustNullifierTransactionsSubscription(
-    $nullifierPrefixes: [HexEncoded!]!
+    $nullifierLeBytesPrefixes: [HexEncoded!]!
     $fromBlock: Int
     $toBlock: Int
 ) {
     dustNullifierTransactions(
-        nullifierPrefixes: $nullifierPrefixes
+        nullifierLeBytesPrefixes: $nullifierLeBytesPrefixes
         fromBlock: $fromBlock
         toBlock: $toBlock
     ) {
-        nullifier
-        commitment
+        nullifierLeBytes
+        commitmentLeBytes
         transactionId
         blockHeight
         blockHash

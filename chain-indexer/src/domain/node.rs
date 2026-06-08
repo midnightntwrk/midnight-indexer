@@ -92,6 +92,9 @@ impl TryFrom<Block> for (domain::Block, Vec<Transaction>) {
             dust_registration_events: block.dust_registration_events,
             bridge_pallet_events: block.bridge_pallet_events,
             ledger_parameters: Default::default(),
+            zswap_end_index: 0,
+            dust_commitment_end_index: 0,
+            dust_generation_end_index: 0,
         };
 
         Ok((block, transactions))

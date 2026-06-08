@@ -20,7 +20,7 @@ use crate::{
 };
 use async_stream::try_stream;
 use futures::Stream;
-use indexer_common::domain::ByteVec;
+use indexer_common::domain::{ByteVec, TransactionHash};
 use indoc::indoc;
 use std::num::NonZeroU32;
 
@@ -50,7 +50,7 @@ impl ShieldedNullifiersStorage for Storage {
 
                 loop {
                     let query = indoc! {"
-                        SELECT zn.id, zn.nullifier, t.id, b.height, b.hash
+                        SELECT zn.id, zn.nullifier, t.id, t.hash, b.height, b.hash
                         FROM zswap_nullifiers zn
                         JOIN transactions t ON t.id = zn.transaction_id
                         JOIN blocks b ON b.id = zn.block_id
@@ -62,7 +62,7 @@ impl ShieldedNullifiersStorage for Storage {
                         LIMIT $6
                     "};
 
-                    let rows = sqlx::query_as::<_, (i64, ByteVec, i64, i64, ByteVec)>(query)
+                    let rows = sqlx::query_as::<_, (i64, ByteVec, i64, TransactionHash, i64, ByteVec)>(query)
                         .bind(&prefix[..])
                         .bind(&next_prefix[..])
                         .bind(from_block as i64)
@@ -77,9 +77,10 @@ impl ShieldedNullifiersStorage for Storage {
                         None => break,
                     }
 
-                    for (_, nullifier, transaction_id, block_height, block_hash) in rows {
+                    for (_, nullifier, transaction_id, transaction_hash, block_height, block_hash) in rows {
                         yield ShieldedNullifierTransaction {
                             transaction_id: transaction_id as u64,
+                            transaction_hash,
                             block_hash,
                             block_height: block_height as u32,
                             nullifier,
