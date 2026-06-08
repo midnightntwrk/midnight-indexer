@@ -206,6 +206,7 @@ impl SubxtNode {
             timestamp,
             transactions,
             mut dust_registration_events,
+            bridge_pallet_events,
         } = runtimes::make_block_details(authorities, node_version, &block).await?;
 
         // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
@@ -239,14 +240,7 @@ impl SubxtNode {
             ledger_state_root,
             transactions,
             dust_registration_events,
-            // TODO(bridge): once metadata regenerates for the
-            // `c-to-m-subminimal-transfers-accumulation` branch, replace `Default::default()`
-            // with the commented line below and uncomment the supporting code in
-            // `chain-indexer/src/infra/subxt_node/runtimes.rs` (BlockDetails field) and
-            // `chain-indexer/src/infra/subxt_node/runtimes/v1_0_0.rs` (decoding loop).
-            //
-            // bridge_pallet_events: block_details.bridge_pallet_events,
-            bridge_pallet_events: Default::default(),
+            bridge_pallet_events,
         };
 
         debug!(
@@ -568,6 +562,9 @@ pub enum SubxtNodeError {
 
     #[error("cannot decode subxt event as midnight event")]
     DecodeEvent(#[source] Box<subxt::error::EventsError>),
+
+    #[error("cannot decode bridge recipient from c2m-bridge event")]
+    DecodeBridgeRecipient(#[from] indexer_common::domain::bridge::BridgeRecipientError),
 
     #[error("cannot fetch authorities")]
     FetchAuthorities(#[source] Box<subxt::error::StorageError>),

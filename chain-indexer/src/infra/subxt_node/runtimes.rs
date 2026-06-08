@@ -31,11 +31,10 @@ pub struct BlockDetails {
     pub timestamp: Option<u64>,
     pub transactions: Vec<Transaction>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
-    // TODO(bridge): once the `c-to-m-subminimal-transfers-accumulation` branch lands and
-    // runtime metadata regenerates, uncomment this field and the corresponding decoding in
-    // `runtimes/v1_0_0.rs::make_block_details` (commented block at the end of the event match).
-    //
-    // pub bridge_pallet_events: Vec<indexer_common::domain::bridge::BridgePalletEvent>,
+    /// c2m-bridge pallet events. Only populated for node 2.0+, where the
+    /// `c2m-bridge` pallet exists in the runtime metadata. Empty for earlier
+    /// node versions (the pallet did not yet exist there).
+    pub bridge_pallet_events: Vec<indexer_common::domain::bridge::BridgePalletEvent>,
 }
 
 /// Runtime specific (serialized) transaction.
