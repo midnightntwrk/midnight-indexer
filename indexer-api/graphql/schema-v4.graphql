@@ -97,17 +97,59 @@ type BridgeBalance {
 }
 
 """
-A claim of bridged NIGHT (regular transaction with ClaimKind::CardanoBridge).
+A claim of bridged NIGHT: a regular `ClaimRewards` transaction whose `ClaimKind` is
+`CardanoBridge`. Structurally a regular transaction, surfaced as its own type so consumers can
+tell it apart and read the bridged `recipient` and `amount` directly.
 """
-type BridgeClaim {
+type BridgeClaimTransaction implements Transaction {
+	"""
+	The transaction ID.
+	"""
 	id: Int!
-	transactionId: Int!
-	blockHeight: Int!
+	"""
+	The hex-encoded transaction hash.
+	"""
+	hash: HexEncoded!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The hex-encoded serialized transaction content.
+	"""
+	raw: HexEncoded!
+	"""
+	The Midnight address the bridged NIGHT is claimed to.
+	"""
 	recipient: HexEncoded!
 	"""
-	Amount as 16-byte big-endian u128.
+	The claimed amount as 16-byte big-endian u128.
 	"""
 	amount: HexEncoded!
+	"""
+	The block for this transaction.
+	"""
+	block: Block!
+	"""
+	The contract actions for this transaction.
+	"""
+	contractActions: [ContractAction!]!
+	"""
+	Unshielded UTXOs created by this transaction.
+	"""
+	unshieldedCreatedOutputs: [UnshieldedUtxo!]!
+	"""
+	Unshielded UTXOs spent (consumed) by this transaction.
+	"""
+	unshieldedSpentOutputs: [UnshieldedUtxo!]!
+	"""
+	Zswap ledger events of this transaction.
+	"""
+	zswapLedgerEvents: [ZswapLedgerEvent!]!
+	"""
+	Dust ledger events of this transaction.
+	"""
+	dustLedgerEvents: [DustLedgerEvent!]!
 }
 
 """
@@ -1004,10 +1046,6 @@ type Query {
 	List c2m-bridge pallet events with optional filters.
 	"""
 	bridgeEvents(recipient: HexEncoded, variant: BridgeEventVariant, blockHeightFrom: Int, blockHeightTo: Int, offset: Int, limit: Int): [BridgeEvent!]!
-	"""
-	List c2m-bridge claims (`ClaimRewardsTransaction` with `ClaimKind::CardanoBridge`).
-	"""
-	bridgeClaims(recipient: HexEncoded, offset: Int, limit: Int): [BridgeClaim!]!
 	"""
 	Get the c2m-bridge balance summary (deposited, claimed, balance) for an address.
 	"""

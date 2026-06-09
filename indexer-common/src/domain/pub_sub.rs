@@ -73,20 +73,6 @@ pub struct BridgeEventIndexed {
 }
 message!(BridgeEventIndexed);
 
-// TODO(bridge): pub-sub message for live bridge-claim updates. Parked pending a product
-// decision (Andrzej) on whether `bridgeClaims` needs a live subscription or the existing query
-// suffices. If a subscription is wanted, uncomment this and wire a publisher in chain-indexer
-// (`application.rs`, alongside `BridgeEventIndexed`) plus a subscriber in indexer-api. If
-// query-only is confirmed, delete this block.
-//
-// /// Emitted when a bridge claim (regular tx with `ClaimKind::CardanoBridge`) is indexed.
-// #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-// pub struct BridgeClaimIndexed {
-//     pub transaction_id: u64,
-//     pub recipient: UnshieldedAddress,
-// }
-// message!(BridgeClaimIndexed);
-
 /// A pub-sub publisher.
 #[trait_variant::make(Send)]
 pub trait Publisher

@@ -23,7 +23,7 @@ use crate::{
             CardanoNetworkId, CardanoRewardAddress, HexEncoded,
             block::{Block, BlockOffset},
             bridge::{
-                BridgeBalance, BridgeClaim, BridgeEvent, BridgeEventVariant, BridgePoolSummary,
+                BridgeBalance, BridgeEvent, BridgeEventVariant, BridgePoolSummary,
                 BridgeTreasuryReason,
             },
             contract_action::{ContractAction, ContractActionOffset},
@@ -826,33 +826,6 @@ where
             .map_err_into_server_error(|| "get bridge events")?;
 
         Ok(events.into_iter().map(Into::into).collect())
-    }
-
-    /// List c2m-bridge claims (`ClaimRewardsTransaction` with `ClaimKind::CardanoBridge`).
-    #[trace]
-    async fn bridge_claims(
-        &self,
-        cx: &Context<'_>,
-        recipient: Option<HexEncoded>,
-        offset: Option<u64>,
-        limit: Option<u64>,
-    ) -> ApiResult<Vec<BridgeClaim>> {
-        let storage = cx.get_storage::<S>();
-        let recipient = recipient
-            .map(|h| h.hex_decode::<UnshieldedAddress>())
-            .transpose()
-            .map_err_into_client_error(|| "invalid recipient address")?;
-
-        let claims = storage
-            .get_bridge_claims(
-                recipient,
-                offset.unwrap_or(0),
-                limit.unwrap_or(100).min(1_000),
-            )
-            .await
-            .map_err_into_server_error(|| "get bridge claims")?;
-
-        Ok(claims.into_iter().map(Into::into).collect())
     }
 
     /// Get the c2m-bridge balance summary (deposited, claimed, balance) for an address.

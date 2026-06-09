@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{
-    bridge::{BridgeBalance, BridgeClaim, BridgeEvent, BridgePoolSummary, TreasuryReason},
+    bridge::{BridgeBalance, BridgeEvent, BridgePoolSummary, TreasuryReason},
     storage::NoopStorage,
 };
 use indexer_common::domain::{UnshieldedAddress, bridge::BridgePalletEventVariant};
@@ -39,14 +39,6 @@ where
         offset: u64,
         limit: u64,
     ) -> Result<Vec<BridgeEvent>, sqlx::Error>;
-
-    /// Fetch bridge claims for a recipient (or all if recipient is None), paginated.
-    async fn get_bridge_claims(
-        &self,
-        recipient: Option<UnshieldedAddress>,
-        offset: u64,
-        limit: u64,
-    ) -> Result<Vec<BridgeClaim>, sqlx::Error>;
 
     /// Compute deposited and claimed totals for a recipient address.
     async fn get_bridge_balance(
@@ -88,15 +80,6 @@ impl BridgeStorage for NoopStorage {
         offset: u64,
         limit: u64,
     ) -> Result<Vec<BridgeEvent>, sqlx::Error> {
-        Ok(vec![])
-    }
-
-    async fn get_bridge_claims(
-        &self,
-        recipient: Option<UnshieldedAddress>,
-        offset: u64,
-        limit: u64,
-    ) -> Result<Vec<BridgeClaim>, sqlx::Error> {
         Ok(vec![])
     }
 

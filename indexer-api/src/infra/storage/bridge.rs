@@ -14,8 +14,7 @@
 use crate::{
     domain::{
         bridge::{
-            BridgeBalance, BridgeClaim, BridgeEvent, BridgePoolSummary, BridgeTreasuryAggregate,
-            TreasuryReason,
+            BridgeBalance, BridgeEvent, BridgePoolSummary, BridgeTreasuryAggregate, TreasuryReason,
         },
         storage::bridge::{BridgeEventFilter, BridgeStorage},
     },
@@ -139,50 +138,6 @@ impl BridgeStorage for Storage {
 
         let rows = builder.build().fetch_all(&*self.pool).await?;
         rows.iter().map(map_event_row).collect()
-    }
-
-    #[trace]
-    async fn get_bridge_claims(
-        &self,
-        recipient: Option<UnshieldedAddress>,
-        offset: u64,
-        limit: u64,
-    ) -> Result<Vec<BridgeClaim>, sqlx::Error> {
-        let mut builder: QueryBuilder<'_, Db> = QueryBuilder::new(
-            "SELECT bc.id, bc.transaction_id, b.height, bc.recipient, bc.amount \
-             FROM bridge_claims bc \
-             JOIN transactions t ON t.id = bc.transaction_id \
-             JOIN blocks b ON b.id = t.block_id ",
-        );
-        if let Some(addr) = recipient {
-            builder
-                .push(" WHERE bc.recipient = ")
-                .push_bind(addr.as_ref().to_vec());
-        }
-        builder
-            .push(" ORDER BY bc.id LIMIT ")
-            .push_bind(limit as i64)
-            .push(" OFFSET ")
-            .push_bind(offset as i64);
-
-        let rows = builder.build().fetch_all(&*self.pool).await?;
-        rows.iter()
-            .map(|row| {
-                let id: i64 = row.try_get(0)?;
-                let transaction_id: i64 = row.try_get(1)?;
-                let block_height: i64 = row.try_get(2)?;
-                let recipient_bytes: Vec<u8> = row.try_get(3)?;
-                let amount_bytes: U128BeBytes = row.try_get(4)?;
-                Ok(BridgeClaim {
-                    id: id as u64,
-                    transaction_id: transaction_id as u64,
-                    block_height: block_height as u64,
-                    recipient: UnshieldedAddress::try_from(recipient_bytes)
-                        .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
-                    amount: u128::from(amount_bytes),
-                })
-            })
-            .collect()
     }
 
     #[trace]

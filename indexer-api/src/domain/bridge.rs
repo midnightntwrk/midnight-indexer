@@ -39,12 +39,11 @@ pub struct BridgeEvent {
     pub count: Option<u32>,
 }
 
-/// A persisted bridge claim (regular `ClaimRewardsTransaction` with `ClaimKind::CardanoBridge`).
+/// The bridge-claim payload of a regular `ClaimRewardsTransaction` with `ClaimKind::CardanoBridge`,
+/// looked up from `bridge_claims` and attached to the owning `RegularTransaction` so the API can
+/// surface it as a `BridgeClaimTransaction`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeClaim {
-    pub id: u64,
-    pub transaction_id: u64,
-    pub block_height: u64,
     pub recipient: UnshieldedAddress,
     pub amount: u128,
 }

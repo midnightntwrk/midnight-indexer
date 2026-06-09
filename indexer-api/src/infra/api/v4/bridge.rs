@@ -217,29 +217,6 @@ impl From<domain_bridge::BridgeEvent> for BridgeEvent {
     }
 }
 
-/// A claim of bridged NIGHT (regular transaction with ClaimKind::CardanoBridge).
-#[derive(Debug, Clone, SimpleObject)]
-pub struct BridgeClaim {
-    pub id: u64,
-    pub transaction_id: u64,
-    pub block_height: u64,
-    pub recipient: HexEncoded,
-    /// Amount as 16-byte big-endian u128.
-    pub amount: HexEncoded,
-}
-
-impl From<domain_bridge::BridgeClaim> for BridgeClaim {
-    fn from(c: domain_bridge::BridgeClaim) -> Self {
-        Self {
-            id: c.id,
-            transaction_id: c.transaction_id,
-            block_height: c.block_height,
-            recipient: c.recipient.hex_encode(),
-            amount: c.amount.to_be_bytes().hex_encode(),
-        }
-    }
-}
-
 /// Per-address bridge balance.
 #[derive(Debug, Clone, SimpleObject)]
 pub struct BridgeBalance {

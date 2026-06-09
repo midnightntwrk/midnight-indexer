@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::domain::bridge::BridgeClaim;
 use derive_more::Debug;
 use indexer_common::{
     domain::{
@@ -84,6 +85,13 @@ pub struct RegularTransaction {
 
     #[sqlx(try_from = "SqlxOption<U128BeBytes>")]
     pub estimated_fees: Option<u128>,
+
+    /// Set after the row is read, by looking up `bridge_claims` for this transaction. `Some` when
+    /// the transaction is a `ClaimRewards` with `ClaimKind::CardanoBridge`, which the API surfaces
+    /// as a `BridgeClaimTransaction` rather than a `RegularTransaction`. Boxed because it is
+    /// `None` for all but bridge-claim transactions, keeping the common variant small.
+    #[sqlx(skip)]
+    pub bridge_claim: Option<Box<BridgeClaim>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]

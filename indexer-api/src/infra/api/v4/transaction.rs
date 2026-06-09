@@ -57,6 +57,9 @@ pub enum Transaction<S: Storage> {
 
     /// A system Midnight transaction.
     System(SystemTransaction<S>),
+
+    /// A claim of bridged NIGHT (a `ClaimRewards` transaction with `ClaimKind::CardanoBridge`).
+    BridgeClaim(Box<BridgeClaimTransaction<S>>),
 }
 
 impl<S> From<domain::Transaction> for Transaction<S>
@@ -65,6 +68,11 @@ where
 {
     fn from(transaction: domain::Transaction) -> Self {
         match transaction {
+            // A regular transaction carrying a bridge claim is surfaced as its own transaction type
+            // rather than as a generic regular transaction.
+            domain::Transaction::Regular(t) if t.bridge_claim.is_some() => {
+                Transaction::BridgeClaim(Box::new(t.into()))
+            }
             domain::Transaction::Regular(t) => Transaction::Regular(Box::new(t.into())),
             domain::Transaction::System(t) => Transaction::System(t.into()),
         }
@@ -352,6 +360,117 @@ where
             protocol_version: protocol_version.into(),
             raw: raw.hex_encode(),
             block_hash,
+            _s: PhantomData,
+        }
+    }
+}
+
+/// A claim of bridged NIGHT: a regular `ClaimRewards` transaction whose `ClaimKind` is
+/// `CardanoBridge`. Structurally a regular transaction, surfaced as its own type so consumers can
+/// tell it apart and read the bridged `recipient` and `amount` directly.
+#[derive(Debug, Clone, SimpleObject)]
+#[graphql(complex)]
+pub struct BridgeClaimTransaction<S>
+where
+    S: Storage,
+{
+    /// The transaction ID.
+    id: u64,
+
+    /// The hex-encoded transaction hash.
+    hash: HexEncoded,
+
+    /// The protocol version.
+    protocol_version: u32,
+
+    /// The hex-encoded serialized transaction content.
+    #[debug(skip)]
+    raw: HexEncoded,
+
+    #[graphql(skip)]
+    block_hash: BlockHash,
+
+    /// The Midnight address the bridged NIGHT is claimed to.
+    recipient: HexEncoded,
+
+    /// The claimed amount as 16-byte big-endian u128.
+    amount: HexEncoded,
+
+    #[graphql(skip)]
+    #[debug(skip)]
+    _s: PhantomData<S>,
+}
+
+// Duplicates the ComplexObject implementation of RegularTransaction/SystemTransaction, which is
+// necessary for async-graphql's #[ComplexObject] macro to work with GraphQL interface types.
+#[ComplexObject]
+impl<S> BridgeClaimTransaction<S>
+where
+    S: Storage,
+{
+    /// The block for this transaction.
+    async fn block(&self, cx: &Context<'_>) -> ApiResult<Block<S>> {
+        block(self.block_hash, cx).await
+    }
+
+    /// The contract actions for this transaction.
+    async fn contract_actions(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractAction<S>>> {
+        contract_actions(self.id, cx).await
+    }
+
+    /// Unshielded UTXOs created by this transaction.
+    async fn unshielded_created_outputs(
+        &self,
+        cx: &Context<'_>,
+    ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
+        unshielded_created_outputs(self.id, cx).await
+    }
+
+    /// Unshielded UTXOs spent (consumed) by this transaction.
+    async fn unshielded_spent_outputs(
+        &self,
+        cx: &Context<'_>,
+    ) -> ApiResult<Vec<UnshieldedUtxo<S>>> {
+        unshielded_spent_outputs(self.id, cx).await
+    }
+
+    /// Zswap ledger events of this transaction.
+    async fn zswap_ledger_events(&self, cx: &Context<'_>) -> ApiResult<Vec<ZswapLedgerEvent>> {
+        zswap_ledger_events::<S>(self.id, cx).await
+    }
+
+    /// Dust ledger events of this transaction.
+    async fn dust_ledger_events(&self, cx: &Context<'_>) -> ApiResult<Vec<DustLedgerEvent>> {
+        dust_ledger_events::<S>(self.id, cx).await
+    }
+}
+
+impl<S> From<domain::RegularTransaction> for BridgeClaimTransaction<S>
+where
+    S: Storage,
+{
+    fn from(transaction: domain::RegularTransaction) -> Self {
+        let domain::RegularTransaction {
+            id,
+            hash,
+            protocol_version,
+            raw,
+            block_hash,
+            bridge_claim,
+            ..
+        } = transaction;
+
+        // Only constructed from the `From<domain::Transaction>` arm guarded by `is_some()`.
+        let claim = *bridge_claim.expect("bridge claim transaction has a bridge claim");
+
+        Self {
+            id,
+            hash: hash.hex_encode(),
+            protocol_version: protocol_version.into(),
+            raw: raw.hex_encode(),
+            block_hash,
+            recipient: claim.recipient.hex_encode(),
+            amount: claim.amount.to_be_bytes().hex_encode(),
             _s: PhantomData,
         }
     }
