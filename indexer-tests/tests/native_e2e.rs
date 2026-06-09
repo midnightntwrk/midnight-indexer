@@ -63,6 +63,7 @@ static TARGET_DIR: LazyLock<String> = LazyLock::new(|| {
 /// is also intended to be used for test coverage measurements using `cargo llvm-cov`.
 #[cfg(feature = "cloud")]
 #[tokio::test]
+#[ignore = "node 2.0.0-alpha.1 (the latest in NODE_VERSIONS) produces ledger-9 alpha wire tags the rc.1 ledger cannot deserialize; un-ignore once a node 2.0.0-rc ships"]
 async fn main() -> anyhow::Result<()> {
     // Start PostgreSQL and NATS.
     let (_postgres_container, postgres_port) = start_postgres().await?;
@@ -125,6 +126,7 @@ async fn main() -> anyhow::Result<()> {
 /// measurements using `cargo llvm-cov`.
 #[cfg(feature = "standalone")]
 #[tokio::test]
+#[ignore = "node 2.0.0-alpha.1 (the latest in NODE_VERSIONS) produces ledger-9 alpha wire tags the rc.1 ledger cannot deserialize; un-ignore once a node 2.0.0-rc ships"]
 async fn main() -> anyhow::Result<()> {
     // Start node.
     let node_handle = start_node().await?;

@@ -22,6 +22,9 @@ use crate::{
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
 use midnight_coin_structure_v2::{coin::Info, contract::ContractAddress};
+use midnight_coin_structure_v2_1::{
+    coin::Info as InfoV9, contract::ContractAddress as ContractAddressV9,
+};
 use midnight_ledger_v8::structure::{
     ContractAction as ContractActionV8, StandardTransaction as StandardTransactionV8,
     SystemTransaction as LedgerSystemTransactionV8,
@@ -33,6 +36,9 @@ use midnight_ledger_v9::structure::{
 use midnight_serialize_v1::tagged_deserialize;
 use midnight_storage_core_v1::db::DB;
 use midnight_transient_crypto_v2::{encryption::SecretKey, proofs::Proof};
+use midnight_transient_crypto_v3::{
+    encryption::SecretKey as SecretKeyV9, proofs::Proof as ProofV9,
+};
 use midnight_zswap_v8::Offer as OfferV8;
 use midnight_zswap_v9::Offer as OfferV9;
 use std::error::Error as StdError;
@@ -179,7 +185,7 @@ impl Transaction {
                         .then(|(_, contract_action)| async {
                             match contract_action {
                                 ContractActionV9::Deploy(deploy) => {
-                                    let address = serialize_contract_address(deploy.address())?;
+                                    let address = serialize_contract_address_v9(deploy.address())?;
                                     let state = get_contract_state(address.clone()).await.map_err(
                                         |error| {
                                             Error::GetContractState(address.clone(), error.into())
@@ -194,7 +200,7 @@ impl Transaction {
                                 }
 
                                 ContractActionV9::Call(call) => {
-                                    let address = serialize_contract_address(call.address)?;
+                                    let address = serialize_contract_address_v9(call.address)?;
                                     let state = get_contract_state(address.clone()).await.map_err(
                                         |error| {
                                             Error::GetContractState(address.clone(), error.into())
@@ -214,7 +220,7 @@ impl Transaction {
                                 }
 
                                 ContractActionV9::Maintain(update) => {
-                                    let address = serialize_contract_address(update.address)?;
+                                    let address = serialize_contract_address_v9(update.address)?;
                                     let state = get_contract_state(address.clone()).await.map_err(
                                         |error| {
                                             Error::GetContractState(address.clone(), error.into())
@@ -275,7 +281,7 @@ impl Transaction {
                     fallible_coins,
                     ..
                 }) => {
-                    let secret_key = SecretKey::from_repr(&viewing_key.expose_secret().0)
+                    let secret_key = SecretKeyV9::from_repr(&viewing_key.expose_secret().0)
                         .expect("SecretKey can be created from repr");
 
                     let can_decrypt_guaranteed_coins = guaranteed_coins
@@ -344,6 +350,14 @@ fn serialize_contract_address(
         .map_err(|error| Error::Serialize("ContractAddress", error))
 }
 
+fn serialize_contract_address_v9(
+    address: ContractAddressV9,
+) -> Result<SerializedContractAddress, Error> {
+    address
+        .serialize()
+        .map_err(|error| Error::Serialize("ContractAddressV9", error))
+}
+
 fn can_decrypt_v8<D: DB>(key: &SecretKey, offer: &OfferV8<Proof, D>) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
@@ -355,13 +369,13 @@ fn can_decrypt_v8<D: DB>(key: &SecretKey, offer: &OfferV8<Proof, D>) -> bool {
     })
 }
 
-fn can_decrypt_v9<D: DB>(key: &SecretKey, offer: &OfferV9<Proof, D>) -> bool {
+fn can_decrypt_v9<D: DB>(key: &SecretKeyV9, offer: &OfferV9<ProofV9, D>) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
     let mut ciphertexts = outputs.chain(transient);
 
     ciphertexts.any(|ciphertext| {
-        key.decrypt::<Info>(&(*ciphertext).to_owned().into())
+        key.decrypt::<InfoV9>(&(*ciphertext).to_owned().into())
             .is_some()
     })
 }
@@ -380,6 +394,7 @@ mod tests {
     /// Notice: The raw test data is created with `generate_txs.sh`.
     #[cfg(any(feature = "cloud", feature = "standalone"))]
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "fixtures are ledger-9 alpha.1 era; regenerate once a node 2.0.0-rc image ships"]
     async fn test_deserialize_relevant() -> Result<(), BoxError> {
         #[cfg(feature = "cloud")]
         let _postgres_container = {
