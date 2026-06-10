@@ -26,7 +26,10 @@ use crate::{
     domain::{ContractEventRow, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
-        v4::contract_event::{ContractEvent, ContractEventFilter as GraphQLContractEventFilter},
+        v4::{
+            contract_event::{ContractEvent, ContractEventFilter as GraphQLContractEventFilter},
+            directives::beta,
+        },
     },
 };
 use async_graphql::{Context, Subscription};
@@ -59,6 +62,7 @@ where
 {
     /// Subscribe to contract events matching the given filter, returning
     /// events in monotonic `id` order.
+    #[graphql(directive = beta::apply())]
     async fn contract_events<'a>(
         &self,
         cx: &'a Context<'a>,

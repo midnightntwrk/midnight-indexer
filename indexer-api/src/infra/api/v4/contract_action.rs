@@ -19,6 +19,7 @@ use crate::{
             HexEncodable, HexEncoded,
             block::BlockOffset,
             contract_event::ContractEvent,
+            directives::beta,
             transaction::{Transaction, TransactionOffset},
             unshielded::ContractBalance,
         },
@@ -248,6 +249,7 @@ where
     /// Returns an empty list until the chain-indexer populates the
     /// `ledger_events.contract_action_id` column from the v9 parse path
     /// (gated on ticket #1157).
+    #[graphql(directive = beta::apply())]
     async fn contract_events(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractEvent>> {
         let rows = cx
             .get_contract_events_by_contract_action_id_loader::<S>()

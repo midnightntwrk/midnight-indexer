@@ -375,6 +375,7 @@ where
     ///
     /// Block-range bounds (`fromBlock`, `toBlock`) live on `ContractEventFilter`
     /// for symmetry with the subscription. `limit`/`offset` are top-level args.
+    #[graphql(directive = beta::apply())]
     #[trace(properties = { "limit": "{limit:?}", "offset": "{offset:?}" })]
     async fn contract_events(
         &self,
