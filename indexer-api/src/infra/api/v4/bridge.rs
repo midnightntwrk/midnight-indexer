@@ -15,7 +15,7 @@
 
 use crate::{
     domain::bridge as domain_bridge,
-    infra::api::v4::{HexEncodable, HexEncoded},
+    infra::api::v4::{HexEncodable, HexEncoded, directives::beta},
 };
 use async_graphql::{Enum, Interface, SimpleObject};
 use indexer_common::domain::bridge::BridgePalletEventVariant;
@@ -74,6 +74,7 @@ impl From<BridgeTreasuryReason> for domain_bridge::TreasuryReason {
 
 /// Approved user deposit. NIGHT credited to `recipient`.
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct BridgeUserTransfer {
     pub id: u64,
     pub block_height: u64,
@@ -86,6 +87,7 @@ pub struct BridgeUserTransfer {
 
 /// Reserve top-up. NIGHT credited to the protocol Reserve pool.
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct BridgeReserveTransfer {
     pub id: u64,
     pub block_height: u64,
@@ -96,6 +98,7 @@ pub struct BridgeReserveTransfer {
 
 /// Malformed bridge metadata. NIGHT redirected to treasury.
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct BridgeInvalidTransfer {
     pub id: u64,
     pub block_height: u64,
@@ -106,6 +109,7 @@ pub struct BridgeInvalidTransfer {
 
 /// User deposit not in `ApprovedTransactions` at observation time. NIGHT redirected to treasury.
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct BridgeUnapprovedTransfer {
     pub id: u64,
     pub block_height: u64,
@@ -118,6 +122,7 @@ pub struct BridgeUnapprovedTransfer {
 
 /// Aggregated subminimum transfers flushed to treasury.
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct BridgeSubminimalFlushTransfer {
     pub id: u64,
     pub block_height: u64,
@@ -219,6 +224,7 @@ impl From<domain_bridge::BridgeEvent> for BridgeEvent {
 
 /// Per-address bridge balance.
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct BridgeBalance {
     /// Sum of UserTransfer amounts for this address (16-byte big-endian u128).
     pub deposited: HexEncoded,
@@ -241,6 +247,7 @@ impl From<domain_bridge::BridgeBalance> for BridgeBalance {
 
 /// Treasury inflow aggregate by reason.
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct BridgeTreasuryAggregate {
     pub reason: BridgeTreasuryReason,
     /// Cumulative amount (16-byte big-endian u128).
@@ -250,6 +257,7 @@ pub struct BridgeTreasuryAggregate {
 
 /// Aggregate bridge inflows snapshot.
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct BridgePoolSummary {
     /// Cumulative ReserveTransfer amount (16-byte big-endian u128).
     pub reserve_total: HexEncoded,

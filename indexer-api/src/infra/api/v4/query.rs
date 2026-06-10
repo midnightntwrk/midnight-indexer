@@ -826,6 +826,7 @@ where
     /// List c2m-bridge pallet events with optional filters.
     #[trace]
     #[allow(clippy::too_many_arguments)]
+    #[graphql(directive = beta::apply())]
     async fn bridge_events(
         &self,
         cx: &Context<'_>,
@@ -863,6 +864,7 @@ where
 
     /// Get the c2m-bridge balance summary (deposited, claimed, balance) for an address.
     #[trace]
+    #[graphql(directive = beta::apply())]
     async fn bridge_balance(
         &self,
         cx: &Context<'_>,
@@ -884,6 +886,7 @@ where
     /// Convenience query for a recipient's deposit history. By default returns only successful
     /// `UserTransfer` events; pass `includeUnapproved: true` to also include `UnapprovedTransfer`.
     #[trace]
+    #[graphql(directive = beta::apply())]
     async fn bridge_deposits(
         &self,
         cx: &Context<'_>,
@@ -933,6 +936,7 @@ where
 
     /// List Reserve top-up events (ReserveTransfer), optionally bounded by block height.
     #[trace]
+    #[graphql(directive = beta::apply())]
     async fn bridge_reserve_inflows(
         &self,
         cx: &Context<'_>,
@@ -959,6 +963,7 @@ where
     /// filtered by reason and block range.
     #[trace]
     #[allow(clippy::too_many_arguments)]
+    #[graphql(directive = beta::apply())]
     async fn bridge_treasury_inflows(
         &self,
         cx: &Context<'_>,
@@ -986,6 +991,7 @@ where
 
     /// Aggregate snapshot of bridge inflows to protocol pools (Reserve and Treasury).
     #[trace]
+    #[graphql(directive = beta::apply())]
     async fn bridge_pool_summary(
         &self,
         cx: &Context<'_>,

@@ -21,6 +21,7 @@ use crate::{
         v4::{
             HexEncoded,
             bridge::{BridgeBalance, BridgeEvent, BridgeEventVariant, BridgePoolSummary},
+            directives::beta,
         },
     },
 };
@@ -37,6 +38,7 @@ const BACKFILL_BATCH: u64 = 100;
 
 /// Pair of latest bridge event and refreshed pool summary, emitted by `bridgePoolUpdates`.
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct BridgePoolUpdate {
     /// The triggering event, or None for the initial snapshot on subscribe.
     pub new_event: Option<BridgeEvent>,
@@ -96,6 +98,7 @@ where
     ///
     /// Backfills events with id > `from` then live-tails new events. Filters apply across both
     /// phases.
+    #[graphql(directive = beta::apply())]
     async fn bridge_events<'a>(
         &self,
         cx: &'a Context<'a>,
@@ -176,6 +179,7 @@ where
     /// Subscribe to bridge pool updates. Emits a snapshot of the pool summary alongside each
     /// pool-affecting event (Reserve, Invalid, Unapproved, SubminimalFlush). Useful for
     /// observability dashboards.
+    #[graphql(directive = beta::apply())]
     async fn bridge_pool_updates<'a>(
         &self,
         cx: &'a Context<'a>,
@@ -221,6 +225,7 @@ where
 
     /// Subscribe to a recipient's bridge balance. Emits the current balance on subscribe and
     /// re-emits whenever a relevant bridge event indexes.
+    #[graphql(directive = beta::apply())]
     async fn bridge_balance<'a>(
         &self,
         cx: &'a Context<'a>,
