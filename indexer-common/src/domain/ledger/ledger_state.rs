@@ -13,11 +13,11 @@
 
 use crate::{
     domain::{
-        ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, ByteArray, ByteVec,
-        IntentHash, LedgerEvent, LedgerVersion, NetworkId, Nonce, SerializedContractAddress,
-        SerializedLedgerParameters, SerializedLedgerStateKey, SerializedTransaction,
-        SerializedZswapMerkleTreeRoot, SerializedZswapState, TokenType, TransactionResult,
-        UnshieldedUtxo,
+        AddressOrContract, ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome,
+        ByteArray, ByteVec, IntentHash, LedgerEvent, LedgerEventAttributes, LedgerVersion,
+        NetworkId, Nonce, SerializedContractAddress, SerializedLedgerParameters,
+        SerializedLedgerStateKey, SerializedTransaction, SerializedZswapMerkleTreeRoot,
+        SerializedZswapState, TokenType, TransactionResult, UnshieldedUtxo,
         bridge::BridgeClaim,
         dust::{self},
         ledger::{
@@ -29,7 +29,7 @@ use crate::{
 };
 use fastrace::trace;
 use itertools::Itertools;
-use log::{error, info};
+use log::{error, info, warn};
 use midnight_base_crypto_v1::{
     cost_model::{FixedPoint, NormalizedCost, SyntheticCost},
     hash::{HashOutput, persistent_commit},
@@ -72,7 +72,11 @@ use midnight_ledger_v9::{
     verify::WellFormedStrictness as WellFormedStrictnessV9,
 };
 use midnight_onchain_runtime_v3::context::BlockContext as BlockContextV3;
-use midnight_onchain_runtime_v4::context::BlockContext as BlockContextV4;
+use midnight_onchain_runtime_v4::{
+    context::BlockContext as BlockContextV4,
+    ops::{LogEventType, VersionedLogItem},
+    state::{EntryPointBuf, StateValue},
+};
 use midnight_serialize_v1::{Deserializable, tagged_deserialize};
 use midnight_storage_core_v1::{
     arena::{Sp, TypedArenaKey},
@@ -87,6 +91,27 @@ use midnight_zswap_v9::ledger::State as ZswapStateV9;
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 const OUTPUT_INDEX_ZERO: u32 = 0;
+
+/// Canonical serialized payload sizes per `LogEventType` variant, matching
+/// CoIP-442 + MIP-0002 head. For `UnshieldedSpend` / `UnshieldedReceive` the
+/// spec includes `domain_sep` (113 bytes). Compact `issue-377` currently
+/// emits 81 bytes without `domain_sep`; when that catches up to the spec,
+/// no indexer change is needed. Until then, the size assertion below logs
+/// a warning and the decoder falls back to empty fields.
+const SHIELDED_SPEND_SIZE: usize = 32;
+const SHIELDED_RECEIVE_SIZE: usize = 578; // 32 + (1 + 32) + (1 + 512).
+const SHIELDED_MINT_SIZE: usize = 81; // 32 + 32 + (1 + 16).
+const SHIELDED_BURN_SIZE: usize = 49; // 32 + (1 + 16).
+const UNSHIELDED_SPEND_SIZE: usize = 113; // (1 + 32) + 32 + 32 + 16.
+const UNSHIELDED_RECEIVE_SIZE: usize = 113; // (1 + 32) + 32 + 32 + 16.
+const UNSHIELDED_MINT_SIZE: usize = 80; // 32 + 32 + 16.
+const UNSHIELDED_BURN_SIZE: usize = 81; // (1 + 32) + 32 + 16.
+const MISC_SIZE: usize = 288; // 32 + 256.
+
+const BYTES_32_SIZE: usize = 32;
+const UINT_128_SIZE: usize = 16;
+const EITHER_32_SIZE: usize = 1 + 32;
+const MAYBE_512_SIZE: usize = 1 + 512;
 
 static STRICTNESS_V8: LazyLock<WellFormedStrictnessV8> = LazyLock::new(|| {
     let mut strictness = WellFormedStrictnessV8::default();
@@ -1375,7 +1400,19 @@ where
 
             EventDetailsV9::ContractDeploy { .. } => None,
 
-            EventDetailsV9::ContractLog { .. } => None,
+            EventDetailsV9::ContractLog {
+                address,
+                entry_point,
+                logged_item,
+            } => {
+                let attributes = make_contract_event_attributes(&logged_item, entry_point);
+                Some(Ok(LedgerEvent::contract_event(
+                    raw,
+                    address.0.0.to_vec().into(),
+                    None,
+                    attributes,
+                )))
+            }
 
             EventDetailsV9::ParamChange(..) => Some(Ok(LedgerEvent::param_change(raw))),
 
@@ -1409,6 +1446,368 @@ where
         })
         .flatten()
         .collect::<Result<_, _>>()
+}
+
+/// Map a v9 `VersionedLogItem` to the corresponding `LedgerEventAttributes`
+/// variant based on its `LogEventType` and decode the per-event payload from
+/// `StateValue<D>`. The decoder follows the CoIP-442 + MIP-0002 spec exactly.
+///
+/// Wire format assumptions (verified against the onchain-vm
+/// `try_decode_event` path, Compact compiler `serialize<T, n>` circuit, and
+/// the `midnight-events.ss` per-event size table):
+/// - `VersionedLogItem.data` is `StateValue::Cell(AlignedValue)` with a single `ValueAtom`
+///   containing the flat concatenated bytes of the event struct.
+/// - `ValueAtom` strips trailing zeros; the decoder pads back to the expected size before slicing.
+/// - `Bytes<N>` = N raw bytes.
+/// - `Uint<128>` = 16 bytes, little-endian.
+/// - `Maybe<T>` = 1 tag byte (0=None, 1=Some) + sizeof(T) value bytes; value is zeroed in the wire
+///   when `is_some=false`.
+/// - `Either<A,B>` = 1 tag byte (0=Left/User, 1=Right/Contract) + sizeof(max(A,B)) value bytes.
+///
+/// If the wire shape diverges (non-Cell, wrong size, multi-atom, etc.), the
+/// decoder logs a warning and returns the variant with empty/default payload
+/// fields, so the event still flows through to the events surface without
+/// silent data corruption.
+fn make_contract_event_attributes<D>(
+    item: &VersionedLogItem<D>,
+    entry_point: EntryPointBuf,
+) -> LedgerEventAttributes
+where
+    D: DB,
+{
+    let version = item.version;
+    let entry_point: ByteVec = entry_point.0.into();
+    // Per-event minimum atom-bytes lengths after Compact's trailing-zero
+    // stripping. Set so that an emission whose only-trailing-zero stripping
+    // is the final value field still decodes correctly, while an emission
+    // with a missing (truncated) leading field falls back. Crucial for the
+    // UnshieldedSpend / UnshieldedReceive spec/Compact divergence: spec is
+    // 113 bytes, Compact issue-377 is 81 bytes; min 97 (=113-16, only the
+    // u128 amount fully stripped) rejects 81-byte emissions cleanly.
+    match item.event_type {
+        LogEventType::ShieldedSpend => {
+            // nullifier is a 32-byte hash; require all 32 bytes.
+            let bytes = extract_flat_bytes(&item.data, SHIELDED_SPEND_SIZE, SHIELDED_SPEND_SIZE);
+            let nullifier = bytes
+                .and_then(|bytes| take_bytes(&bytes, 0, BYTES_32_SIZE))
+                .unwrap_or_default();
+            LedgerEventAttributes::ContractShieldedSpend {
+                version,
+                entry_point,
+                nullifier,
+            }
+        }
+        LogEventType::ShieldedReceive => {
+            // Canonical MIP-0002 (mips/mip-0002-public-contract-log-emission.md
+            // Appendix A on main): (commitment, ciphertext: Maybe<Bytes<512>>,
+            // contractAddress: Maybe<ContractAddress>). The CoIP-442 head agrees
+            // (commit e537fc9 "Reorder ShieldedReceive fields"). Compact issue-377
+            // currently emits the older (commitment, contractAddress, ciphertext)
+            // order; that's a Compact-side catch-up issue, not the indexer's.
+            //
+            // Trailing-zero stripping can strip the entire trailing
+            // contractAddress (33 bytes) + the ciphertext value bytes
+            // (up to 512), so min = 32 (commitment only).
+            let bytes = extract_flat_bytes(&item.data, BYTES_32_SIZE, SHIELDED_RECEIVE_SIZE);
+            let commitment = bytes
+                .as_deref()
+                .and_then(|b| take_bytes(b, 0, BYTES_32_SIZE))
+                .unwrap_or_default();
+            let ciphertext = bytes
+                .as_deref()
+                .and_then(|b| take_maybe_bytes(b, BYTES_32_SIZE, 512));
+            let receiving_contract_address = bytes
+                .as_deref()
+                .and_then(|b| take_maybe_bytes(b, BYTES_32_SIZE + MAYBE_512_SIZE, BYTES_32_SIZE));
+            LedgerEventAttributes::ContractShieldedReceive {
+                version,
+                entry_point,
+                commitment,
+                ciphertext,
+                receiving_contract_address,
+            }
+        }
+        LogEventType::ShieldedMint => {
+            // (commitment 32, domain_sep 32, amount Maybe<Uint128> 17).
+            // Min = 32+32 (commitment+domain_sep) since amount Maybe can be
+            // fully stripped (tag byte 0 + 16 zero bytes = 17 strippable).
+            let bytes = extract_flat_bytes(&item.data, 2 * BYTES_32_SIZE, SHIELDED_MINT_SIZE);
+            let commitment = bytes
+                .as_deref()
+                .and_then(|b| take_bytes(b, 0, BYTES_32_SIZE))
+                .unwrap_or_default();
+            let domain_sep = bytes
+                .as_deref()
+                .and_then(|b| take_bytes(b, BYTES_32_SIZE, BYTES_32_SIZE))
+                .unwrap_or_default();
+            let amount = bytes
+                .as_deref()
+                .and_then(|b| take_maybe_uint_128_le(b, 2 * BYTES_32_SIZE));
+            LedgerEventAttributes::ContractShieldedMint {
+                version,
+                entry_point,
+                commitment,
+                domain_sep,
+                amount,
+            }
+        }
+        LogEventType::ShieldedBurn => {
+            // (nullifier 32, amount Maybe<Uint128> 17). Min = 32.
+            let bytes = extract_flat_bytes(&item.data, BYTES_32_SIZE, SHIELDED_BURN_SIZE);
+            let nullifier = bytes
+                .as_deref()
+                .and_then(|b| take_bytes(b, 0, BYTES_32_SIZE))
+                .unwrap_or_default();
+            let amount = bytes
+                .as_deref()
+                .and_then(|b| take_maybe_uint_128_le(b, BYTES_32_SIZE));
+            LedgerEventAttributes::ContractShieldedBurn {
+                version,
+                entry_point,
+                nullifier,
+                amount,
+            }
+        }
+        LogEventType::UnshieldedSpend => {
+            // Spec layout: (sender Either<32,32> 33, domain_sep 32, token_type 32, amount u128 16).
+            // 113 bytes. Min = 97 (= 113 - 16, only the amount u128 fully stripped to
+            // zero). Compact issue-377 emits 81 bytes (no domain_sep); 81 < 97 →
+            // fallback.
+            let bytes = extract_flat_bytes(
+                &item.data,
+                UNSHIELDED_SPEND_SIZE - UINT_128_SIZE,
+                UNSHIELDED_SPEND_SIZE,
+            );
+            let sender = bytes
+                .as_deref()
+                .and_then(|b| take_either_address(b, 0))
+                .unwrap_or_else(|| AddressOrContract::User(ByteVec::default()));
+            let domain_sep = bytes
+                .as_deref()
+                .and_then(|b| take_bytes(b, EITHER_32_SIZE, BYTES_32_SIZE))
+                .unwrap_or_default();
+            let token_type = bytes
+                .as_deref()
+                .and_then(|b| take_bytes(b, EITHER_32_SIZE + BYTES_32_SIZE, BYTES_32_SIZE))
+                .unwrap_or_default();
+            let amount = bytes
+                .as_deref()
+                .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + 2 * BYTES_32_SIZE))
+                .unwrap_or_else(|| "0".to_string());
+            LedgerEventAttributes::ContractUnshieldedSpend {
+                version,
+                entry_point,
+                sender,
+                domain_sep,
+                token_type,
+                amount,
+            }
+        }
+        LogEventType::UnshieldedReceive => {
+            // Same shape and min as UnshieldedSpend (recipient instead of sender).
+            let bytes = extract_flat_bytes(
+                &item.data,
+                UNSHIELDED_RECEIVE_SIZE - UINT_128_SIZE,
+                UNSHIELDED_RECEIVE_SIZE,
+            );
+            let recipient = bytes
+                .as_deref()
+                .and_then(|b| take_either_address(b, 0))
+                .unwrap_or_else(|| AddressOrContract::User(ByteVec::default()));
+            let domain_sep = bytes
+                .as_deref()
+                .and_then(|b| take_bytes(b, EITHER_32_SIZE, BYTES_32_SIZE))
+                .unwrap_or_default();
+            let token_type = bytes
+                .as_deref()
+                .and_then(|b| take_bytes(b, EITHER_32_SIZE + BYTES_32_SIZE, BYTES_32_SIZE))
+                .unwrap_or_default();
+            let amount = bytes
+                .as_deref()
+                .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + 2 * BYTES_32_SIZE))
+                .unwrap_or_else(|| "0".to_string());
+            LedgerEventAttributes::ContractUnshieldedReceive {
+                version,
+                entry_point,
+                recipient,
+                domain_sep,
+                token_type,
+                amount,
+            }
+        }
+        LogEventType::UnshieldedMint => {
+            // (domain_sep 32, token_type 32, amount u128 16). 80 bytes.
+            // Min = 64 (amount fully stripped to zero).
+            let bytes = extract_flat_bytes(
+                &item.data,
+                UNSHIELDED_MINT_SIZE - UINT_128_SIZE,
+                UNSHIELDED_MINT_SIZE,
+            );
+            let domain_sep = bytes
+                .as_deref()
+                .and_then(|b| take_bytes(b, 0, BYTES_32_SIZE))
+                .unwrap_or_default();
+            let token_type = bytes
+                .as_deref()
+                .and_then(|b| take_bytes(b, BYTES_32_SIZE, BYTES_32_SIZE))
+                .unwrap_or_default();
+            let amount = bytes
+                .as_deref()
+                .and_then(|b| take_uint_128_le(b, 2 * BYTES_32_SIZE))
+                .unwrap_or_else(|| "0".to_string());
+            LedgerEventAttributes::ContractUnshieldedMint {
+                version,
+                entry_point,
+                domain_sep,
+                token_type,
+                amount,
+            }
+        }
+        LogEventType::UnshieldedBurn => {
+            // (sender Either<32,32> 33, token_type 32, amount u128 16). 81 bytes.
+            // Min = 65 (amount fully stripped to zero).
+            let bytes = extract_flat_bytes(
+                &item.data,
+                UNSHIELDED_BURN_SIZE - UINT_128_SIZE,
+                UNSHIELDED_BURN_SIZE,
+            );
+            let sender = bytes
+                .as_deref()
+                .and_then(|b| take_either_address(b, 0))
+                .unwrap_or_else(|| AddressOrContract::User(ByteVec::default()));
+            let token_type = bytes
+                .as_deref()
+                .and_then(|b| take_bytes(b, EITHER_32_SIZE, BYTES_32_SIZE))
+                .unwrap_or_default();
+            let amount = bytes
+                .as_deref()
+                .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + BYTES_32_SIZE))
+                .unwrap_or_else(|| "0".to_string());
+            LedgerEventAttributes::ContractUnshieldedBurn {
+                version,
+                entry_point,
+                sender,
+                token_type,
+                amount,
+            }
+        }
+        LogEventType::Paused => LedgerEventAttributes::ContractPaused {
+            version,
+            entry_point,
+        },
+        LogEventType::Unpaused => LedgerEventAttributes::ContractUnpaused {
+            version,
+            entry_point,
+        },
+        LogEventType::Misc => {
+            // (name 32, payload 256). Min = 32 (payload all-zero strippable).
+            let bytes = extract_flat_bytes(&item.data, BYTES_32_SIZE, MISC_SIZE);
+            let name = bytes
+                .as_deref()
+                .and_then(|b| take_bytes(b, 0, BYTES_32_SIZE))
+                .unwrap_or_default();
+            let payload = bytes
+                .as_deref()
+                .and_then(|b| take_bytes(b, BYTES_32_SIZE, 256))
+                .unwrap_or_default();
+            LedgerEventAttributes::ContractMisc {
+                version,
+                entry_point,
+                name,
+                payload,
+            }
+        }
+    }
+}
+
+/// Extract a `Vec<u8>` of exactly `max` bytes from a `StateValue::Cell`,
+/// padding with trailing zeros if Compact stripped them on the wire. Returns
+/// `None` on any structural mismatch:
+/// - non-Cell `StateValue`
+/// - multi-atom `AlignedValue` (Compact's `serialize<T, n>` produces a single atom for the flat
+///   byte payload)
+/// - atom longer than `max` (oversize — wrong event type or unexpected layout)
+/// - atom shorter than `min` (undersize — likely a different event-struct layout, e.g. spec/Compact
+///   divergence on UnshieldedSpend/Receive where Compact issue-377 emits 81 bytes vs the spec's
+///   113-byte layout)
+///
+/// `min` is the per-event minimum atom-byte length after maximum trailing-zero
+/// stripping of the last variable-width field. `max` is the canonical full
+/// size per CoIP-442 + MIP-0002.
+fn extract_flat_bytes<D>(data: &StateValue<D>, min: usize, max: usize) -> Option<Vec<u8>>
+where
+    D: DB,
+{
+    let aligned = match data {
+        StateValue::Cell(sp) => sp,
+        other => {
+            let got = std::mem::discriminant(other);
+            warn!(got:?; "contract log data: expected StateValue::Cell");
+            return None;
+        }
+    };
+    let atoms = aligned.value.0.len();
+    if atoms != 1 {
+        warn!(atoms; "contract log data: expected single ValueAtom");
+        return None;
+    }
+    let atom_bytes = &aligned.value.0[0].0;
+    let atom_len = atom_bytes.len();
+    if atom_len > max {
+        warn!(atom_len, max; "contract log data: atom length exceeds expected max");
+        return None;
+    }
+    if atom_len < min {
+        warn!(atom_len, min; "contract log data: atom length below expected min, likely wrong event-struct layout");
+        return None;
+    }
+    let mut buf = vec![0u8; max];
+    buf[..atom_len].copy_from_slice(atom_bytes);
+    Some(buf)
+}
+
+fn take_bytes(bytes: &[u8], offset: usize, len: usize) -> Option<ByteVec> {
+    bytes.get(offset..offset + len).map(|s| s.to_vec().into())
+}
+
+fn take_uint_128_le(bytes: &[u8], offset: usize) -> Option<String> {
+    let slice: [u8; UINT_128_SIZE] = bytes.get(offset..offset + UINT_128_SIZE)?.try_into().ok()?;
+    Some(u128::from_le_bytes(slice).to_string())
+}
+
+fn take_maybe_bytes(bytes: &[u8], offset: usize, value_len: usize) -> Option<ByteVec> {
+    let tag = *bytes.get(offset)?;
+    if tag == 0 {
+        return None;
+    }
+    bytes
+        .get(offset + 1..offset + 1 + value_len)
+        .map(|s| s.to_vec().into())
+}
+
+fn take_maybe_uint_128_le(bytes: &[u8], offset: usize) -> Option<String> {
+    let tag = *bytes.get(offset)?;
+    if tag == 0 {
+        return None;
+    }
+    let slice: [u8; UINT_128_SIZE] = bytes
+        .get(offset + 1..offset + 1 + UINT_128_SIZE)?
+        .try_into()
+        .ok()?;
+    Some(u128::from_le_bytes(slice).to_string())
+}
+
+fn take_either_address(bytes: &[u8], offset: usize) -> Option<AddressOrContract> {
+    let tag = *bytes.get(offset)?;
+    let value: ByteVec = bytes
+        .get(offset + 1..offset + 1 + BYTES_32_SIZE)?
+        .to_vec()
+        .into();
+    Some(if tag == 0 {
+        AddressOrContract::User(value)
+    } else {
+        AddressOrContract::Contract(value)
+    })
 }
 
 fn make_dust_initial_utxo_v9(
@@ -1792,11 +2191,22 @@ fn clamp_and_normalize(
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{LedgerVersion, ledger::LedgerState},
+        domain::{
+            AddressOrContract, LedgerEventAttributes, LedgerVersion,
+            ledger::{LedgerState, ledger_state::make_contract_event_attributes},
+        },
         error::BoxError,
     };
     use anyhow::Context;
-    use midnight_base_crypto_v1::cost_model::SyntheticCost;
+    use midnight_base_crypto_v1::{
+        cost_model::SyntheticCost,
+        fab::{AlignedValue, Alignment, Value, ValueAtom},
+    };
+    use midnight_onchain_runtime_v4::{
+        ops::{LogEventType, VersionedLogItem},
+        state::{EntryPointBuf, StateValue},
+    };
+    use midnight_storage_core_v1::{arena::Sp, db::InMemoryDB};
 
     #[cfg(any(feature = "cloud", feature = "standalone"))]
     #[tokio::test(flavor = "multi_thread")]
@@ -1963,5 +2373,416 @@ mod tests {
         assert_eq!(normalized.block_usage, half);
         assert_eq!(normalized.bytes_written, half);
         assert_eq!(normalized.bytes_churned, half);
+    }
+
+    #[test]
+    fn make_contract_event_attributes_dispatches_each_log_event_type() {
+        let entry_point = EntryPointBuf(b"ep".to_vec());
+        let dispatch = |t: LogEventType| {
+            make_contract_event_attributes(
+                &VersionedLogItem::<InMemoryDB> {
+                    version: 1,
+                    event_type: t,
+                    data: StateValue::Null,
+                },
+                entry_point.clone(),
+            )
+        };
+
+        assert!(matches!(
+            dispatch(LogEventType::ShieldedSpend),
+            LedgerEventAttributes::ContractShieldedSpend { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::ShieldedReceive),
+            LedgerEventAttributes::ContractShieldedReceive { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::ShieldedMint),
+            LedgerEventAttributes::ContractShieldedMint { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::ShieldedBurn),
+            LedgerEventAttributes::ContractShieldedBurn { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::UnshieldedSpend),
+            LedgerEventAttributes::ContractUnshieldedSpend { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::UnshieldedReceive),
+            LedgerEventAttributes::ContractUnshieldedReceive { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::UnshieldedMint),
+            LedgerEventAttributes::ContractUnshieldedMint { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::UnshieldedBurn),
+            LedgerEventAttributes::ContractUnshieldedBurn { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::Paused),
+            LedgerEventAttributes::ContractPaused { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::Unpaused),
+            LedgerEventAttributes::ContractUnpaused { .. }
+        ));
+        assert!(matches!(
+            dispatch(LogEventType::Misc),
+            LedgerEventAttributes::ContractMisc { .. }
+        ));
+    }
+
+    #[test]
+    fn decodes_shielded_spend_nullifier() {
+        let nullifier_bytes = vec![0xAA; 32];
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::ShieldedSpend,
+            data: make_cell_data(nullifier_bytes.clone()),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"spend".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractShieldedSpend {
+                version,
+                entry_point,
+                nullifier,
+            } => {
+                assert_eq!(version, 1);
+                assert_eq!(&*entry_point, b"spend");
+                assert_eq!(&*nullifier, nullifier_bytes.as_slice());
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_shielded_receive_canonical_mip_0002_order() {
+        // Canonical layout per merged MIP-0002 (main):
+        // (commitment, ciphertext: Maybe<Bytes<512>>, contractAddress: Maybe<ContractAddress>).
+        let mut bytes = Vec::with_capacity(578);
+        bytes.extend_from_slice(&[0xAA; 32]); // commitment
+        bytes.push(1); // ciphertext.is_some = true
+        bytes.extend_from_slice(&[0xBB; 512]); // ciphertext value
+        bytes.push(1); // contractAddress.is_some = true
+        bytes.extend_from_slice(&[0xCC; 32]); // contractAddress value
+        assert_eq!(bytes.len(), 578);
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::ShieldedReceive,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"receive".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractShieldedReceive {
+                commitment,
+                ciphertext,
+                receiving_contract_address,
+                ..
+            } => {
+                assert_eq!(&*commitment, &[0xAA; 32]);
+                let ct = ciphertext.expect("ciphertext should be Some");
+                assert_eq!(ct.len(), 512);
+                assert!(ct.iter().all(|&b| b == 0xBB));
+                let rca = receiving_contract_address.expect("contractAddress should be Some");
+                assert_eq!(&*rca, &[0xCC; 32]);
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_shielded_receive_with_both_maybes_none() {
+        // Spec-compliant emission with both Maybes None: only commitment +
+        // two zero tag bytes on the wire. Trailing-zero stripping reduces
+        // atom to 32 bytes (commitment alone). Decoder pads to 578 with
+        // zeros; ciphertext and contractAddress tags both 0 → None.
+        let bytes = vec![0xDD; 32]; // commitment only
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::ShieldedReceive,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"receive".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractShieldedReceive {
+                commitment,
+                ciphertext,
+                receiving_contract_address,
+                ..
+            } => {
+                assert_eq!(&*commitment, &[0xDD; 32]);
+                assert!(ciphertext.is_none());
+                assert!(receiving_contract_address.is_none());
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_shielded_mint_with_optional_amount_some() {
+        let mut bytes = Vec::with_capacity(81);
+        bytes.extend_from_slice(&[0xC1; 32]); // commitment
+        bytes.extend_from_slice(&[0xD2; 32]); // domain_sep
+        bytes.push(1); // amount.is_some = true
+        bytes.extend_from_slice(&12345u128.to_le_bytes()); // amount value
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::ShieldedMint,
+            data: make_cell_data(bytes.clone()),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"mint".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractShieldedMint {
+                commitment,
+                domain_sep,
+                amount,
+                ..
+            } => {
+                assert_eq!(&*commitment, &[0xC1; 32]);
+                assert_eq!(&*domain_sep, &[0xD2; 32]);
+                assert_eq!(amount.as_deref(), Some("12345"));
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_shielded_burn_with_optional_amount_none() {
+        let mut bytes = Vec::with_capacity(49);
+        bytes.extend_from_slice(&[0xBB; 32]); // nullifier
+        bytes.push(0); // amount.is_some = false
+        bytes.extend_from_slice(&[0u8; 16]); // amount value (zeroed)
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::ShieldedBurn,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"burn".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractShieldedBurn {
+                nullifier, amount, ..
+            } => {
+                assert_eq!(&*nullifier, &[0xBB; 32]);
+                assert_eq!(amount, None);
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_unshielded_spend_with_domain_sep_per_spec() {
+        let mut bytes = Vec::with_capacity(113);
+        bytes.push(1); // sender tag = Contract
+        bytes.extend_from_slice(&[0xCC; 32]); // sender value
+        bytes.extend_from_slice(&[0xDD; 32]); // domain_sep
+        bytes.extend_from_slice(&[0xEE; 32]); // token_type
+        bytes.extend_from_slice(&500u128.to_le_bytes()); // amount
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::UnshieldedSpend,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"u_spend".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractUnshieldedSpend {
+                sender,
+                domain_sep,
+                token_type,
+                amount,
+                ..
+            } => {
+                assert!(matches!(sender, AddressOrContract::Contract(_)));
+                if let AddressOrContract::Contract(bytes) = sender {
+                    assert_eq!(&*bytes, &[0xCC; 32]);
+                }
+                assert_eq!(&*domain_sep, &[0xDD; 32]);
+                assert_eq!(&*token_type, &[0xEE; 32]);
+                assert_eq!(amount, "500");
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_unshielded_mint_amount_le() {
+        let mut bytes = Vec::with_capacity(80);
+        bytes.extend_from_slice(&[0x11; 32]); // domain_sep
+        bytes.extend_from_slice(&[0x22; 32]); // token_type
+        bytes.extend_from_slice(&1_000_000u128.to_le_bytes());
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::UnshieldedMint,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"u_mint".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractUnshieldedMint {
+                domain_sep,
+                token_type,
+                amount,
+                ..
+            } => {
+                assert_eq!(&*domain_sep, &[0x11; 32]);
+                assert_eq!(&*token_type, &[0x22; 32]);
+                assert_eq!(amount, "1000000");
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_misc_name_and_payload() {
+        let mut bytes = Vec::with_capacity(288);
+        bytes.extend_from_slice(&[0x55; 32]); // name
+        bytes.extend_from_slice(&[0x66; 256]); // payload
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::Misc,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"misc".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractMisc { name, payload, .. } => {
+                assert_eq!(&*name, &[0x55; 32]);
+                assert_eq!(payload.len(), 256);
+                assert!(payload.iter().all(|&b| b == 0x66));
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn falls_back_to_empty_when_data_exceeds_max() {
+        // Atom longer than the canonical max for the event type. Decoder
+        // logs warning + falls back to empty payload fields.
+        let bytes = vec![0xFF; 200]; // larger than the expected 113-byte spec size
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::UnshieldedSpend,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"u_spend".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractUnshieldedSpend {
+                sender,
+                domain_sep,
+                token_type,
+                amount,
+                ..
+            } => {
+                assert!(matches!(sender, AddressOrContract::User(b) if b.is_empty()));
+                assert!(domain_sep.is_empty());
+                assert!(token_type.is_empty());
+                assert_eq!(amount, "0");
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn falls_back_to_empty_on_compact_issue_377_unshielded_spend_layout() {
+        // Compact issue-377 emits UnshieldedSpend at 81 bytes (no domain_sep).
+        // Spec is 113 bytes. The 81-byte payload is BELOW the 97-byte min
+        // (= 113 - 16 amount strip), so the decoder must reject it and fall
+        // back to empty rather than misinterpret the bytes as a 113-byte
+        // payload with shifted fields (which would silently corrupt
+        // domain_sep / token_type / amount).
+        let mut bytes = Vec::with_capacity(81);
+        bytes.push(0); // sender tag = User
+        bytes.extend_from_slice(&[0xAA; 32]); // sender value
+        bytes.extend_from_slice(&[0xBB; 32]); // token_type per Compact issue-377 (no domain_sep here)
+        bytes.extend_from_slice(&999u128.to_le_bytes()); // amount
+        assert_eq!(bytes.len(), 81);
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::UnshieldedSpend,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"u_spend".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractUnshieldedSpend {
+                sender,
+                domain_sep,
+                token_type,
+                amount,
+                ..
+            } => {
+                // All fields default, not partial-corrupt.
+                assert!(matches!(sender, AddressOrContract::User(b) if b.is_empty()));
+                assert!(domain_sep.is_empty());
+                assert!(token_type.is_empty());
+                assert_eq!(amount, "0");
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_unshielded_spend_with_amount_zero_fully_stripped() {
+        // Spec-compliant 113-byte UnshieldedSpend with amount=0 strips the
+        // entire u128 (16 trailing zeros), leaving 97 bytes on the wire.
+        // The decoder pads back to 113 and decodes correctly.
+        let mut bytes = Vec::with_capacity(97);
+        bytes.push(0); // sender tag = User
+        bytes.extend_from_slice(&[0x11; 32]); // sender value
+        bytes.extend_from_slice(&[0x22; 32]); // domain_sep
+        bytes.extend_from_slice(&[0x33; 32]); // token_type
+        // amount = 0, all 16 bytes stripped by ValueAtom
+        assert_eq!(bytes.len(), 97);
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::UnshieldedSpend,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"u_spend".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractUnshieldedSpend {
+                sender,
+                domain_sep,
+                token_type,
+                amount,
+                ..
+            } => {
+                assert!(matches!(sender, AddressOrContract::User(_)));
+                if let AddressOrContract::User(b) = sender {
+                    assert_eq!(&*b, &[0x11; 32]);
+                }
+                assert_eq!(&*domain_sep, &[0x22; 32]);
+                assert_eq!(&*token_type, &[0x33; 32]);
+                assert_eq!(amount, "0");
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn falls_back_to_empty_when_data_is_not_cell() {
+        let item = VersionedLogItem::<InMemoryDB> {
+            version: 1,
+            event_type: LogEventType::ShieldedSpend,
+            data: StateValue::Null,
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"spend".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractShieldedSpend { nullifier, .. } => {
+                assert!(nullifier.is_empty());
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    /// Build a `StateValue::Cell(AlignedValue)` carrying the given flat-byte
+    /// payload, matching the wire shape produced by Compact's
+    /// `serialize<T, n>` lowering of `emit(StructValue)`. The decoder only
+    /// reads `aligned.value.0[0].0`, so the alignment field is left empty.
+    fn make_cell_data(bytes: Vec<u8>) -> StateValue {
+        let aligned = AlignedValue {
+            value: Value(vec![ValueAtom(bytes)]),
+            alignment: Alignment(vec![]),
+        };
+        StateValue::Cell(Sp::new(aligned))
     }
 }

@@ -237,6 +237,17 @@ pub struct LedgerEvent {
     pub grouping: LedgerEventGrouping,
     pub raw: SerializedLedgerEvent,
     pub attributes: LedgerEventAttributes,
+    /// Emitting `ContractCall.id` (from `contract_actions.id`) for contract
+    /// events; `None` for zswap/dust events and for contract events whose
+    /// originating action is not yet correlated. Mapped onto the indexed
+    /// `ledger_events.contract_action_id` column; powers the nested
+    /// `ContractCall.contractEvents` GraphQL surface (ticket #1162).
+    pub contract_action_id: Option<u64>,
+    /// Emitting contract address. Populated only for contract events
+    /// (`LedgerEventGrouping::Contract`); `None` for zswap/dust events. Mapped
+    /// onto the indexed `ledger_events.contract_address` column for fast
+    /// filtering on the `contractEvents` query/subscription surface.
+    pub contract_address: Option<ByteVec>,
 }
 
 impl LedgerEvent {
@@ -245,6 +256,8 @@ impl LedgerEvent {
             grouping: LedgerEventGrouping::Zswap,
             raw,
             attributes: LedgerEventAttributes::ZswapInput { nullifier },
+            contract_action_id: None,
+            contract_address: None,
         }
     }
 
@@ -253,6 +266,8 @@ impl LedgerEvent {
             grouping: LedgerEventGrouping::Zswap,
             raw,
             attributes: LedgerEventAttributes::ZswapOutput,
+            contract_action_id: None,
+            contract_address: None,
         }
     }
 
@@ -261,6 +276,8 @@ impl LedgerEvent {
             grouping: LedgerEventGrouping::Dust,
             raw,
             attributes: LedgerEventAttributes::ParamChange,
+            contract_action_id: None,
+            contract_address: None,
         }
     }
 
@@ -278,6 +295,8 @@ impl LedgerEvent {
                 generation_info,
                 generation_index,
             },
+            contract_action_id: None,
+            contract_address: None,
         }
     }
 
@@ -295,6 +314,8 @@ impl LedgerEvent {
                 generation_index,
                 tree_insertion_path,
             },
+            contract_action_id: None,
+            contract_address: None,
         }
     }
 
@@ -310,6 +331,140 @@ impl LedgerEvent {
                 nullifier,
                 commitment,
             },
+            contract_action_id: None,
+            contract_address: None,
+        }
+    }
+
+    /// Construct a contract event from already-typed attributes. Use when the
+    /// chain-indexer has parsed `VersionedLogItem` into a known `LogEventType`
+    /// variant via `make_ledger_events_v9` (see ticket #1158).
+    ///
+    /// `contract_action_id` is the `contract_actions.id` of the originating
+    /// `ContractCall` — populated by the caller (chain-indexer) when it
+    /// applies the transaction. `None` permitted for paths that don't yet
+    /// have the correlation; populates the indexed `ledger_events.contract_action_id`
+    /// column which powers `ContractCall.contractEvents` (ticket #1162).
+    pub fn contract_event(
+        raw: SerializedLedgerEvent,
+        contract_address: ByteVec,
+        contract_action_id: Option<u64>,
+        attributes: LedgerEventAttributes,
+    ) -> Self {
+        debug_assert!(
+            matches!(
+                attributes,
+                LedgerEventAttributes::ContractShieldedSpend { .. }
+                    | LedgerEventAttributes::ContractShieldedReceive { .. }
+                    | LedgerEventAttributes::ContractShieldedMint { .. }
+                    | LedgerEventAttributes::ContractShieldedBurn { .. }
+                    | LedgerEventAttributes::ContractUnshieldedSpend { .. }
+                    | LedgerEventAttributes::ContractUnshieldedReceive { .. }
+                    | LedgerEventAttributes::ContractUnshieldedMint { .. }
+                    | LedgerEventAttributes::ContractUnshieldedBurn { .. }
+                    | LedgerEventAttributes::ContractPaused { .. }
+                    | LedgerEventAttributes::ContractUnpaused { .. }
+                    | LedgerEventAttributes::ContractMisc { .. }
+            ),
+            "contract_event() called with non-contract attributes"
+        );
+        Self {
+            grouping: LedgerEventGrouping::Contract,
+            raw,
+            attributes,
+            contract_action_id,
+            contract_address: Some(contract_address),
+        }
+    }
+
+    /// Extract the indexed-field rows for the sidecar storage. Returns
+    /// `(field_name, field_value)` pairs covering every "hint: indexed" field
+    /// from CoIP-442 Appendix A for the matching variant. Empty for
+    /// non-contract events and for `Paused`/`Unpaused`/`Misc` (no indexable
+    /// fields per the design).
+    pub fn indexable_contract_fields(&self) -> Vec<(&'static str, ByteVec)> {
+        use LedgerEventAttributes::*;
+        match &self.attributes {
+            ContractShieldedSpend { nullifier, .. } => {
+                vec![("nullifier", nullifier.clone())]
+            }
+            ContractShieldedReceive {
+                commitment,
+                ciphertext,
+                ..
+            } => {
+                let mut out = vec![("commitment", commitment.clone())];
+                if let Some(c) = ciphertext {
+                    out.push(("ciphertext", c.clone()));
+                }
+                out
+            }
+            ContractShieldedMint {
+                commitment,
+                domain_sep,
+                ..
+            } => vec![
+                ("commitment", commitment.clone()),
+                ("domainSep", domain_sep.clone()),
+            ],
+            ContractShieldedBurn { nullifier, .. } => {
+                vec![("nullifier", nullifier.clone())]
+            }
+            ContractUnshieldedSpend {
+                sender,
+                domain_sep,
+                token_type,
+                ..
+            } => vec![
+                ("sender", sender.as_bytes()),
+                ("domainSep", domain_sep.clone()),
+                ("tokenType", token_type.clone()),
+            ],
+            ContractUnshieldedReceive {
+                recipient,
+                domain_sep,
+                token_type,
+                ..
+            } => vec![
+                ("recipient", recipient.as_bytes()),
+                ("domainSep", domain_sep.clone()),
+                ("tokenType", token_type.clone()),
+            ],
+            ContractUnshieldedMint {
+                domain_sep,
+                token_type,
+                ..
+            } => vec![
+                ("domainSep", domain_sep.clone()),
+                ("tokenType", token_type.clone()),
+            ],
+            ContractUnshieldedBurn {
+                sender, token_type, ..
+            } => vec![
+                ("sender", sender.as_bytes()),
+                ("tokenType", token_type.clone()),
+            ],
+            ContractPaused { .. }
+            | ContractUnpaused { .. }
+            | ContractMisc { .. }
+            | ZswapInput { .. }
+            | ZswapOutput
+            | ParamChange
+            | DustInitialUtxo { .. }
+            | DustGenerationDtimeUpdate { .. }
+            | DustSpendProcessed { .. } => vec![],
+        }
+    }
+}
+
+impl AddressOrContract {
+    /// Flat byte representation for sidecar storage (32 bytes). Indexer
+    /// filters by the raw bytes regardless of whether the address is a user
+    /// or contract; the `kind` discriminator is in the JSONB payload only.
+    pub fn as_bytes(&self) -> ByteVec {
+        match self {
+            AddressOrContract::User(b) => b.clone(),
+            AddressOrContract::Contract(b) => b.clone(),
         }
     }
 }
@@ -343,6 +498,103 @@ pub enum LedgerEventAttributes {
         nullifier: ByteVec,
         commitment: ByteVec,
     },
+
+    // ------------------------------------------------------------------------
+    // Contract events (MIP-107 / CoIP-442). One variant per `LogEventType` from
+    // `onchain-vm/src/ops.rs`. Field shapes follow CoIP-442 Appendix A head.
+    // `entry_point` is the originating call's entry point (from
+    // `EventDetailsV9::ContractLog.entry_point`), used by the nested
+    // ContractCall.contractEvents surface for correlation.
+    // ------------------------------------------------------------------------
+    ContractShieldedSpend {
+        version: u32,
+        entry_point: ByteVec,
+        nullifier: ByteVec,
+    },
+
+    ContractShieldedReceive {
+        version: u32,
+        entry_point: ByteVec,
+        commitment: ByteVec,
+        ciphertext: Option<ByteVec>,
+        receiving_contract_address: Option<ByteVec>,
+    },
+
+    ContractShieldedMint {
+        version: u32,
+        entry_point: ByteVec,
+        commitment: ByteVec,
+        domain_sep: ByteVec,
+        amount: Option<String>,
+    },
+
+    ContractShieldedBurn {
+        version: u32,
+        entry_point: ByteVec,
+        nullifier: ByteVec,
+        amount: Option<String>,
+    },
+
+    ContractUnshieldedSpend {
+        version: u32,
+        entry_point: ByteVec,
+        sender: AddressOrContract,
+        domain_sep: ByteVec,
+        token_type: ByteVec,
+        amount: String,
+    },
+
+    ContractUnshieldedReceive {
+        version: u32,
+        entry_point: ByteVec,
+        recipient: AddressOrContract,
+        domain_sep: ByteVec,
+        token_type: ByteVec,
+        amount: String,
+    },
+
+    ContractUnshieldedMint {
+        version: u32,
+        entry_point: ByteVec,
+        domain_sep: ByteVec,
+        token_type: ByteVec,
+        amount: String,
+    },
+
+    ContractUnshieldedBurn {
+        version: u32,
+        entry_point: ByteVec,
+        sender: AddressOrContract,
+        token_type: ByteVec,
+        amount: String,
+    },
+
+    ContractPaused {
+        version: u32,
+        entry_point: ByteVec,
+    },
+
+    ContractUnpaused {
+        version: u32,
+        entry_point: ByteVec,
+    },
+
+    ContractMisc {
+        version: u32,
+        entry_point: ByteVec,
+        name: ByteVec,
+        payload: ByteVec,
+    },
+}
+
+/// Tagged union for fields like `Either<ZswapCoinPublicKey, ContractAddress>`
+/// used in standard unshielded contract events.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AddressOrContract {
+    /// User wallet address (Zswap coin public key).
+    User(ByteVec),
+    /// Contract address.
+    Contract(ByteVec),
 }
 
 /// Minimal DUST output info for backwards compatibility.
@@ -356,4 +608,255 @@ pub struct DustOutput {
 pub enum LedgerEventGrouping {
     Zswap,
     Dust,
+    Contract,
+}
+
+#[cfg(test)]
+mod contract_event_tests {
+    use super::*;
+
+    fn bv(bytes: &[u8]) -> ByteVec {
+        ByteVec::from(bytes.to_vec())
+    }
+
+    fn shielded_spend_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractShieldedSpend {
+            version: 1,
+            entry_point: bv(b"spend"),
+            nullifier: bv(&[0xaa; 32]),
+        }
+    }
+
+    fn shielded_receive_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractShieldedReceive {
+            version: 1,
+            entry_point: bv(b"receive"),
+            commitment: bv(&[0xbb; 32]),
+            ciphertext: Some(bv(&[0xcc; 64])),
+            receiving_contract_address: None,
+        }
+    }
+
+    fn shielded_mint_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractShieldedMint {
+            version: 1,
+            entry_point: bv(b"mint"),
+            commitment: bv(&[0x11; 32]),
+            domain_sep: bv(&[0x22; 32]),
+            amount: Some("1000".to_string()),
+        }
+    }
+
+    fn shielded_burn_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractShieldedBurn {
+            version: 1,
+            entry_point: bv(b"burn"),
+            nullifier: bv(&[0x33; 32]),
+            amount: None,
+        }
+    }
+
+    fn unshielded_spend_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractUnshieldedSpend {
+            version: 1,
+            entry_point: bv(b"u_spend"),
+            sender: AddressOrContract::User(bv(&[0x44; 32])),
+            domain_sep: bv(&[0x55; 32]),
+            token_type: bv(&[0x66; 32]),
+            amount: "500".to_string(),
+        }
+    }
+
+    fn unshielded_receive_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractUnshieldedReceive {
+            version: 1,
+            entry_point: bv(b"u_recv"),
+            recipient: AddressOrContract::Contract(bv(&[0x77; 32])),
+            domain_sep: bv(&[0x88; 32]),
+            token_type: bv(&[0x99; 32]),
+            amount: "501".to_string(),
+        }
+    }
+
+    fn unshielded_mint_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractUnshieldedMint {
+            version: 1,
+            entry_point: bv(b"u_mint"),
+            domain_sep: bv(&[0xaa; 32]),
+            token_type: bv(&[0xbb; 32]),
+            amount: "502".to_string(),
+        }
+    }
+
+    fn unshielded_burn_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractUnshieldedBurn {
+            version: 1,
+            entry_point: bv(b"u_burn"),
+            sender: AddressOrContract::User(bv(&[0xcc; 32])),
+            token_type: bv(&[0xdd; 32]),
+            amount: "503".to_string(),
+        }
+    }
+
+    fn paused_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractPaused {
+            version: 1,
+            entry_point: bv(b"pause"),
+        }
+    }
+
+    fn unpaused_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractUnpaused {
+            version: 1,
+            entry_point: bv(b"unpause"),
+        }
+    }
+
+    fn misc_attrs() -> LedgerEventAttributes {
+        LedgerEventAttributes::ContractMisc {
+            version: 1,
+            entry_point: bv(b"misc"),
+            name: bv(&[0xee; 32]),
+            payload: bv(&[0xff; 64]),
+        }
+    }
+
+    #[test]
+    fn contract_event_constructor_sets_contract_grouping() {
+        let attrs = shielded_spend_attrs();
+        let event =
+            LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), Some(42), attrs.clone());
+        assert!(matches!(event.grouping, LedgerEventGrouping::Contract));
+        assert_eq!(event.contract_address, Some(bv(&[0x01; 32])));
+        assert_eq!(event.contract_action_id, Some(42));
+        assert_eq!(event.attributes, attrs);
+    }
+
+    #[test]
+    fn contract_event_constructor_accepts_none_contract_action_id() {
+        let event =
+            LedgerEvent::contract_event(bv(b"raw"), bv(&[0x02; 32]), None, shielded_spend_attrs());
+        assert!(matches!(event.grouping, LedgerEventGrouping::Contract));
+        assert!(event.contract_action_id.is_none());
+    }
+
+    #[test]
+    fn existing_event_constructors_leave_contract_envelope_fields_unset() {
+        let zswap_in = LedgerEvent::zswap_input(bv(b"raw"), bv(&[0; 32]));
+        let zswap_out = LedgerEvent::zswap_output(bv(b"raw"));
+        let param = LedgerEvent::param_change(bv(b"raw"));
+        let dust_spend = LedgerEvent::dust_spend_processed(bv(b"raw"), bv(&[0; 32]), bv(&[0; 32]));
+
+        for e in [&zswap_in, &zswap_out, &param, &dust_spend] {
+            assert!(e.contract_address.is_none());
+            assert!(e.contract_action_id.is_none());
+        }
+
+        assert!(matches!(zswap_in.grouping, LedgerEventGrouping::Zswap));
+        assert!(matches!(zswap_out.grouping, LedgerEventGrouping::Zswap));
+        assert!(matches!(param.grouping, LedgerEventGrouping::Dust));
+        assert!(matches!(dust_spend.grouping, LedgerEventGrouping::Dust));
+    }
+
+    #[test]
+    fn indexable_contract_fields_shielded_spend_returns_nullifier_only() {
+        let event =
+            LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), None, shielded_spend_attrs());
+        let fields = event.indexable_contract_fields();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].0, "nullifier");
+    }
+
+    #[test]
+    fn indexable_contract_fields_shielded_receive_includes_ciphertext_when_present() {
+        let with_ct = LedgerEvent::contract_event(
+            bv(b"raw"),
+            bv(&[0x01; 32]),
+            None,
+            shielded_receive_attrs(),
+        );
+        let names: Vec<_> = with_ct
+            .indexable_contract_fields()
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, vec!["commitment", "ciphertext"]);
+
+        let no_ct_attrs = LedgerEventAttributes::ContractShieldedReceive {
+            version: 1,
+            entry_point: bv(b"r"),
+            commitment: bv(&[0; 32]),
+            ciphertext: None,
+            receiving_contract_address: None,
+        };
+        let no_ct = LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), None, no_ct_attrs);
+        let names: Vec<_> = no_ct
+            .indexable_contract_fields()
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, vec!["commitment"]);
+    }
+
+    #[test]
+    fn indexable_contract_fields_unshielded_spend_three_fields() {
+        let event = LedgerEvent::contract_event(
+            bv(b"raw"),
+            bv(&[0x01; 32]),
+            None,
+            unshielded_spend_attrs(),
+        );
+        let names: Vec<_> = event
+            .indexable_contract_fields()
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, vec!["sender", "domainSep", "tokenType"]);
+    }
+
+    #[test]
+    fn indexable_contract_fields_paused_unpaused_misc_are_empty() {
+        for attrs in [paused_attrs(), unpaused_attrs(), misc_attrs()] {
+            let event = LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), None, attrs);
+            assert!(event.indexable_contract_fields().is_empty());
+        }
+    }
+
+    #[test]
+    fn indexable_contract_fields_legacy_event_types_are_empty() {
+        let zswap_in = LedgerEvent::zswap_input(bv(b"raw"), bv(&[0; 32]));
+        let param = LedgerEvent::param_change(bv(b"raw"));
+        assert!(zswap_in.indexable_contract_fields().is_empty());
+        assert!(param.indexable_contract_fields().is_empty());
+    }
+
+    #[test]
+    fn address_or_contract_as_bytes_returns_inner() {
+        let user = AddressOrContract::User(bv(&[0xab; 32]));
+        let contract = AddressOrContract::Contract(bv(&[0xcd; 32]));
+        assert_eq!(user.as_bytes().as_ref(), &[0xab; 32]);
+        assert_eq!(contract.as_bytes().as_ref(), &[0xcd; 32]);
+    }
+
+    #[test]
+    fn ledger_event_attributes_roundtrip_via_json() {
+        let attrs = [
+            shielded_spend_attrs(),
+            shielded_receive_attrs(),
+            shielded_mint_attrs(),
+            shielded_burn_attrs(),
+            unshielded_spend_attrs(),
+            unshielded_receive_attrs(),
+            unshielded_mint_attrs(),
+            unshielded_burn_attrs(),
+            paused_attrs(),
+            unpaused_attrs(),
+            misc_attrs(),
+        ];
+        for original in attrs {
+            let json = serde_json::to_string(&original).expect("serialize");
+            let decoded: LedgerEventAttributes = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(original, decoded, "round-trip mismatch");
+        }
+    }
 }

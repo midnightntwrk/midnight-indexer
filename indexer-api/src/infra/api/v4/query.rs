@@ -27,6 +27,7 @@ use crate::{
                 BridgeTreasuryReason,
             },
             contract_action::{ContractAction, ContractActionOffset},
+            contract_event::{ContractEvent, ContractEventFilter as GraphQLContractEventFilter},
             directives::beta,
             dust::DustGenerationStatus,
             dust_generations::DustGenerations,
@@ -376,6 +377,38 @@ where
                 error => ApiError::server("create dust generation collapsed update", error),
             })
             .map(MerkleTreeCollapsedUpdate::from)
+    }
+
+    /// Find contract events matching the filter, with optional pagination.
+    ///
+    /// Block-range bounds (`fromBlock`, `toBlock`) live on `ContractEventFilter`
+    /// for symmetry with the subscription. `limit`/`offset` are top-level args.
+    #[trace(properties = { "limit": "{limit:?}", "offset": "{offset:?}" })]
+    async fn contract_events(
+        &self,
+        cx: &Context<'_>,
+        filter: GraphQLContractEventFilter,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    ) -> ApiResult<Vec<ContractEvent>> {
+        let storage = cx.get_storage::<S>();
+
+        let domain_filter = filter
+            .into_domain()
+            .map_err(|e| ApiError::client("invalid ContractEventFilter", e))?;
+
+        let limit = limit.map(|l| l.max(0) as u32);
+        let offset = offset.map(|o| o.max(0) as u32);
+
+        let rows = storage
+            .get_contract_events(domain_filter, limit, offset)
+            .await
+            .map_err_into_server_error(|| "get contract events")?;
+
+        rows.into_iter()
+            .map(ContractEvent::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err_into_server_error(|| "convert contract event row to GraphQL type")
     }
 
     /// Get the full history of D-parameter changes for governance auditability.
