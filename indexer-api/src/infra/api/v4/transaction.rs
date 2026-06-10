@@ -369,7 +369,7 @@ where
 /// `CardanoBridge`. Structurally a regular transaction, surfaced as its own type so consumers can
 /// tell it apart and read the bridged `recipient` and `amount` directly.
 #[derive(Debug, Clone, SimpleObject)]
-#[graphql(complex)]
+#[graphql(complex, directive = beta::apply())]
 pub struct BridgeClaimTransaction<S>
 where
     S: Storage,
