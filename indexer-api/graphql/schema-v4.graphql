@@ -739,6 +739,12 @@ type Query {
 	"""
 	dustGenerations(cardanoRewardAddresses: [CardanoRewardAddress!]!): [DustGenerations!]!
 	"""
+	Reverse lookup: for each DUST address, return the `DustGenerations` for the
+	associated Cardano stake key. DUST addresses with no active registration are
+	silently omitted. Duplicate stake keys are deduplicated. Max 10 addresses.
+	"""
+	dustRegistrationsByDustAddress(dustAddresses: [DustAddress!]!): [DustGenerations!]!
+	"""
 	Get a collapsed Merkle tree update for the dust commitment tree.
 	"""
 	dustCommitmentMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate! @beta

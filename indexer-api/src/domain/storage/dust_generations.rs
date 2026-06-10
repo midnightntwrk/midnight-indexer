@@ -19,7 +19,7 @@ use crate::domain::{
     storage::NoopStorage,
 };
 use futures::{Stream, stream};
-use indexer_common::domain::{CardanoRewardAddress, LedgerVersion};
+use indexer_common::domain::{CardanoRewardAddress, DustPublicKey, LedgerVersion};
 use std::num::NonZeroU32;
 
 /// Storage for dust generations queries and subscriptions.
@@ -32,6 +32,16 @@ where
     async fn get_dust_generations(
         &self,
         cardano_reward_addresses: &[CardanoRewardAddress],
+        ledger_version: LedgerVersion,
+    ) -> Result<Vec<DustGenerations>, sqlx::Error>;
+
+    /// Reverse lookup: for each DUST address (raw bytes), return the `DustGenerations`
+    /// for the associated Cardano stake key. DUST addresses that have no active
+    /// registration are silently omitted. Duplicate stake keys (when multiple queried
+    /// DUST addresses belong to the same stake key) are deduplicated.
+    async fn get_dust_registrations_by_dust_addresses(
+        &self,
+        dust_addresses: &[DustPublicKey],
         ledger_version: LedgerVersion,
     ) -> Result<Vec<DustGenerations>, sqlx::Error>;
 
@@ -134,5 +144,13 @@ impl DustGenerationsStorage for NoopStorage {
 
     async fn get_dust_generations_chain_first_free(&self) -> Result<u64, sqlx::Error> {
         Ok(0)
+    }
+
+    async fn get_dust_registrations_by_dust_addresses(
+        &self,
+        _dust_addresses: &[DustPublicKey],
+        _ledger_version: LedgerVersion,
+    ) -> Result<Vec<DustGenerations>, sqlx::Error> {
+        Ok(vec![])
     }
 }

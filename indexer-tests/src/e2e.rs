@@ -20,9 +20,10 @@ use crate::{
         DustCommitmentMerkleTreeUpdateQuery, DustGenerationMerkleTreeUpdateQuery,
         DustGenerationStatusQuery, DustGenerationsQuery, DustGenerationsSubscription,
         DustLedgerEventsSubscription, DustNullifierTransactionsSubscription,
-        ShieldedNullifierTransactionsSubscription, ShieldedTransactionsSubscription,
-        TermsAndConditionsHistoryQuery, TransactionsQuery, UnshieldedTransactionsSubscription,
-        ZswapLedgerEventsSubscription, ZswapMerkleTreeCollapsedUpdateQuery, block_query,
+        DustRegistrationsByDustAddressQuery, ShieldedNullifierTransactionsSubscription,
+        ShieldedTransactionsSubscription, TermsAndConditionsHistoryQuery, TransactionsQuery,
+        UnshieldedTransactionsSubscription, ZswapLedgerEventsSubscription,
+        ZswapMerkleTreeCollapsedUpdateQuery, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
@@ -38,6 +39,7 @@ use crate::{
         dust_commitment_merkle_tree_update_query, dust_generation_merkle_tree_update_query,
         dust_generation_status_query, dust_generations_query, dust_generations_subscription,
         dust_ledger_events_subscription, dust_nullifier_transactions_subscription,
+        dust_registrations_by_dust_address_query,
         shielded_nullifier_transactions_subscription, shielded_transactions_subscription,
         transactions_query, unshielded_transactions_subscription, zswap_ledger_events_subscription,
         zswap_merkle_tree_collapsed_update_query,
@@ -118,6 +120,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_dust_generations_query(&api_client, &api_url)
         .await
         .context("test dust generations query")?;
+    test_dust_registrations_by_dust_address_query(&api_client, &api_url, &network_id)
+        .await
+        .context("test dust registrations by dust address query")?;
     test_dust_commitment_merkle_tree_update_query(&api_client, &api_url)
         .await
         .context("test dust commitment merkle tree update query")?;
@@ -742,6 +747,48 @@ async fn test_dust_generations_query(api_client: &Client, api_url: &str) -> anyh
     let response = send_query::<DustGenerationsQuery>(api_client, api_url, variables).await?;
     assert_eq!(response.dust_generations.len(), 1);
     assert!(response.dust_generations[0].registrations.is_empty());
+
+    Ok(())
+}
+
+/// Test the dustRegistrationsByDustAddress query (resolves #1240).
+async fn test_dust_registrations_by_dust_address_query(
+    api_client: &Client,
+    api_url: &str,
+    network_id: &NetworkId,
+) -> anyhow::Result<()> {
+    // Empty input — should return empty list, not an error.
+    let variables = dust_registrations_by_dust_address_query::Variables {
+        dust_addresses: vec![],
+    };
+    let response =
+        send_query::<DustRegistrationsByDustAddressQuery>(api_client, api_url, variables).await?;
+    assert!(response.dust_registrations_by_dust_address.is_empty());
+
+    // Unknown DUST address — should return empty list, not an error.
+    let dummy_dust_address =
+        DustAddress(encode_address([0u8; 32], AddressType::Dust, network_id));
+    let variables = dust_registrations_by_dust_address_query::Variables {
+        dust_addresses: vec![dummy_dust_address],
+    };
+    let response =
+        send_query::<DustRegistrationsByDustAddressQuery>(api_client, api_url, variables).await?;
+    assert!(response.dust_registrations_by_dust_address.is_empty());
+
+    // DOS protection: 11 addresses should be rejected.
+    let too_many: Vec<DustAddress> = (0u8..=10)
+        .map(|i| {
+            let mut bytes = [0u8; 32];
+            bytes[0] = i;
+            DustAddress(encode_address(bytes, AddressType::Dust, network_id))
+        })
+        .collect();
+    let variables = dust_registrations_by_dust_address_query::Variables {
+        dust_addresses: too_many,
+    };
+    let result =
+        send_query::<DustRegistrationsByDustAddressQuery>(api_client, api_url, variables).await;
+    assert!(result.is_err(), "expected client error for > 10 addresses");
 
     Ok(())
 }
@@ -1522,4 +1569,12 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct TermsAndConditionsHistoryQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustRegistrationsByDustAddressQuery;
 }

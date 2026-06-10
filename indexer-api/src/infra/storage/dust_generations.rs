@@ -26,14 +26,14 @@ use fastrace::trace;
 use futures::Stream;
 use indexer_common::{
     domain::{
-        ByteVec, CardanoRewardAddress, LedgerEventAttributes, LedgerVersion, TimestampMs,
-        TimestampSecs, TransactionHash, ledger,
+        ByteVec, CardanoRewardAddress, DustPublicKey, LedgerEventAttributes, LedgerVersion,
+        TimestampMs, TimestampSecs, TransactionHash, ledger,
     },
     infra::sqlx::U128BeBytes,
 };
 use indoc::indoc;
 use sqlx::FromRow;
-use std::num::NonZeroU32;
+use std::{collections::HashSet, num::NonZeroU32};
 
 impl DustGenerationsStorage for Storage {
     #[trace]
@@ -445,6 +445,57 @@ impl DustGenerationsStorage for Storage {
         .await?;
 
         Ok(max_index.map(|i| i as u64 + 1).unwrap_or(0))
+    }
+
+    #[trace]
+    async fn get_dust_registrations_by_dust_addresses(
+        &self,
+        dust_addresses: &[DustPublicKey],
+        ledger_version: LedgerVersion,
+    ) -> Result<Vec<DustGenerations>, sqlx::Error> {
+        let stake_key_query = indoc! {"
+            SELECT cardano_stake_key
+            FROM cnight_registrations
+            WHERE dust_address = $1
+            AND removed_at IS NULL
+            ORDER BY registered_at DESC
+            LIMIT 1
+        "};
+
+        let mut seen_inputs: HashSet<&[u8]> = HashSet::new();
+        let mut seen_stake_keys: HashSet<Vec<u8>> = HashSet::new();
+        let mut unique_reward_addresses: Vec<CardanoRewardAddress> = Vec::new();
+
+        for dust_addr in dust_addresses {
+            if !seen_inputs.insert(dust_addr.as_ref()) {
+                continue;
+            }
+
+            let row = sqlx::query_as::<_, (Vec<u8>,)>(stake_key_query)
+                .bind(dust_addr.as_ref())
+                .fetch_optional(&*self.pool)
+                .await?;
+
+            if let Some((stake_key_bytes,)) = row
+                && seen_stake_keys.insert(stake_key_bytes.clone())
+            {
+                let reward_address =
+                    CardanoRewardAddress::try_from(stake_key_bytes.as_slice()).map_err(
+                        |e| sqlx::Error::ColumnDecode {
+                            index: "cardano_stake_key".to_string(),
+                            source: Box::new(e),
+                        },
+                    )?;
+                unique_reward_addresses.push(reward_address);
+            }
+        }
+
+        if unique_reward_addresses.is_empty() {
+            return Ok(vec![]);
+        }
+
+        self.get_dust_generations(&unique_reward_addresses, ledger_version)
+            .await
     }
 }
 

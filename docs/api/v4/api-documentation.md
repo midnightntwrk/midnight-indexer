@@ -332,6 +332,34 @@ The `currentCapacity` field represents the maximum DUST generation capacity base
 
 For accurate DUST balance after fee payments, query the connected wallet directly via wallet SDK or DApp Connector API. Use `currentCapacity` as an approximation when wallet connection is unavailable
 
+### dustRegistrationsByDustAddress(dustAddresses: [DustAddress!]!): [DustGenerations!]!
+
+Reverse lookup: given one or more DUST addresses, returns the `DustGenerations` for each associated Cardano stake key. DUST addresses with no active registration are silently omitted. If multiple queried DUST addresses belong to the same stake key, the result is deduplicated. Maximum 10 addresses per request.
+
+**Example:**
+
+```graphql
+query {
+  dustRegistrationsByDustAddress(
+    dustAddresses: [
+      "mn_dust_undeployed1qyp..."
+    ]
+  ) {
+    cardanoRewardAddress
+    registrations {
+      dustAddress
+      valid
+      nightBalance
+      generationRate
+      maxCapacity
+      currentCapacity
+      utxoTxHash
+      utxoOutputIndex
+    }
+  }
+}
+```
+
 ## Contract Action Types
 
 All ContractAction types (ContractDeploy, ContractCall, ContractUpdate) implement the ContractAction interface with these common fields:

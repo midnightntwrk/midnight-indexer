@@ -892,3 +892,19 @@ query TermsAndConditionsHistoryQuery {
         url
     }
 }
+
+query DustRegistrationsByDustAddressQuery($dustAddresses: [DustAddress!]!) {
+    dustRegistrationsByDustAddress(dustAddresses: $dustAddresses) {
+        cardanoRewardAddress
+        registrations {
+            dustAddress
+            valid
+            nightBalance
+            generationRate
+            maxCapacity
+            currentCapacity
+            utxoTxHash
+            utxoOutputIndex
+        }
+    }
+}

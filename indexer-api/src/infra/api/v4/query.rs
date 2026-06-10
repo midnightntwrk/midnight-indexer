@@ -20,7 +20,7 @@ use crate::{
             block::{Block, BlockOffset},
             contract_action::{ContractAction, ContractActionOffset},
             directives::beta,
-            dust::DustGenerationStatus,
+            dust::{DustAddress, DustGenerationStatus},
             dust_generations::DustGenerations,
             merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate,
             spo::{
@@ -303,6 +303,39 @@ where
             .get_dust_generations(&addresses, LedgerVersion::LATEST)
             .await
             .map_err_into_server_error(|| "get DUST generations")?;
+
+        Ok(data
+            .into_iter()
+            .map(|d| DustGenerations::from_domain(d, network_id))
+            .collect())
+    }
+
+    /// Reverse lookup: for each DUST address, return the `DustGenerations` for the
+    /// associated Cardano stake key. DUST addresses with no active registration are
+    /// silently omitted. Duplicate stake keys are deduplicated. Max 10 addresses.
+    #[trace]
+    async fn dust_registrations_by_dust_address(
+        &self,
+        cx: &Context<'_>,
+        dust_addresses: Vec<DustAddress>,
+    ) -> ApiResult<Vec<DustGenerations>> {
+        (dust_addresses.len() <= 10)
+            .then_some(())
+            .some_or_client_error(|| "maximum of ten DUST addresses allowed")?;
+
+        let storage = cx.get_storage::<S>();
+        let network_id = cx.get_network_id();
+
+        let raw_addresses = dust_addresses
+            .into_iter()
+            .map(|a| a.try_into_domain(network_id))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err_into_client_error(|| "invalid DUST address")?;
+
+        let data = storage
+            .get_dust_registrations_by_dust_addresses(&raw_addresses, LedgerVersion::LATEST)
+            .await
+            .map_err_into_server_error(|| "get DUST registrations by DUST addresses")?;
 
         Ok(data
             .into_iter()
