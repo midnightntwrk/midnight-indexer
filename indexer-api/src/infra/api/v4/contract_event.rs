@@ -27,7 +27,7 @@ use crate::{
             ContractEventFilter as DomainContractEventFilter, FieldPrefix as DomainFieldPrefix,
         },
     },
-    infra::api::v4::{HexEncodable, HexEncoded},
+    infra::api::v4::{HexEncodable, HexEncoded, directives::beta},
 };
 use async_graphql::{Enum, InputObject, Interface, SimpleObject};
 use indexer_common::domain::{
@@ -41,6 +41,7 @@ use thiserror::Error;
 /// Exactly one of `userAddress` or `contractAddress` is non-null; the `kind`
 /// discriminator says which.
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct AddressOrContract {
     pub kind: AddressOrContractKind,
     /// Bech32m-encoded user address; populated when kind = USER.
@@ -183,6 +184,7 @@ impl Base {
 // ============================================================================
 
 #[derive(Debug, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct ShieldedSpendEvent {
     pub id: u64,
     pub raw: HexEncoded,
@@ -196,6 +198,7 @@ pub struct ShieldedSpendEvent {
 }
 
 #[derive(Debug, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct ShieldedReceiveEvent {
     pub id: u64,
     pub raw: HexEncoded,
@@ -217,6 +220,7 @@ pub struct ShieldedReceiveEvent {
 }
 
 #[derive(Debug, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct ShieldedMintEvent {
     pub id: u64,
     pub raw: HexEncoded,
@@ -234,6 +238,7 @@ pub struct ShieldedMintEvent {
 }
 
 #[derive(Debug, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct ShieldedBurnEvent {
     pub id: u64,
     pub raw: HexEncoded,
@@ -254,6 +259,7 @@ pub struct ShieldedBurnEvent {
 // ============================================================================
 
 #[derive(Debug, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct UnshieldedSpendEvent {
     pub id: u64,
     pub raw: HexEncoded,
@@ -272,6 +278,7 @@ pub struct UnshieldedSpendEvent {
 }
 
 #[derive(Debug, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct UnshieldedReceiveEvent {
     pub id: u64,
     pub raw: HexEncoded,
@@ -290,6 +297,7 @@ pub struct UnshieldedReceiveEvent {
 }
 
 #[derive(Debug, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct UnshieldedMintEvent {
     pub id: u64,
     pub raw: HexEncoded,
@@ -306,6 +314,7 @@ pub struct UnshieldedMintEvent {
 }
 
 #[derive(Debug, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct UnshieldedBurnEvent {
     pub id: u64,
     pub raw: HexEncoded,
@@ -326,6 +335,7 @@ pub struct UnshieldedBurnEvent {
 // ============================================================================
 
 #[derive(Debug, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct PausedEvent {
     pub id: u64,
     pub raw: HexEncoded,
@@ -337,6 +347,7 @@ pub struct PausedEvent {
 }
 
 #[derive(Debug, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct UnpausedEvent {
     pub id: u64,
     pub raw: HexEncoded,
@@ -352,6 +363,7 @@ pub struct UnpausedEvent {
 // ============================================================================
 
 #[derive(Debug, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct MiscContractEvent {
     pub id: u64,
     pub raw: HexEncoded,
