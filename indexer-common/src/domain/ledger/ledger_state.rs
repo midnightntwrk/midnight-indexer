@@ -38,7 +38,7 @@ use midnight_coin_structure_v2::{
     coin::{NIGHT, TokenType as LedgerTokenType, UnshieldedTokenType, UserAddress},
     contract::ContractAddress as ContractAddressV8,
 };
-use midnight_coin_structure_v2_1::{
+use midnight_coin_structure_v3::{
     coin::{
         NIGHT as NIGHT_V9, UnshieldedTokenType as UnshieldedTokenTypeV9,
         UserAddress as UserAddressV9,

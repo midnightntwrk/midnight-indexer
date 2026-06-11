@@ -17,7 +17,7 @@ use crate::domain::{
 };
 use fastrace::trace;
 use midnight_coin_structure_v2::coin::TokenType as MidnightTokenType;
-use midnight_coin_structure_v2_1::coin::TokenType as MidnightTokenTypeV9;
+use midnight_coin_structure_v3::coin::TokenType as MidnightTokenTypeV9;
 use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
 use midnight_onchain_runtime_v4::state::ContractState as ContractStateV4;
 use midnight_serialize_v1::tagged_deserialize;

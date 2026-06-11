@@ -22,7 +22,7 @@ use crate::{
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
 use midnight_coin_structure_v2::{coin::Info, contract::ContractAddress};
-use midnight_coin_structure_v2_1::{
+use midnight_coin_structure_v3::{
     coin::Info as InfoV9, contract::ContractAddress as ContractAddressV9,
 };
 use midnight_ledger_v8::structure::{
