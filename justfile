@@ -129,6 +129,22 @@ run-indexer-standalone node="ws://localhost:9944" network_id="undeployed":
         APP__INFRA__LEDGER_DB__CNN_URL=target/data/ledger-db.sqlite \
         cargo run -p indexer-standalone --features standalone
 
+# Backfill missing contract_balances from stored contract states (#1245). Dry-run by
+# default; pass apply="1" to insert. Targets the local cloud Postgres (docker compose)
+# or, with `just feature=standalone`, the local standalone SQLite database.
+run-backfill-contract-balances apply="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{feature}}" = "cloud" ]; then
+        docker compose up -d --wait postgres
+        RUST_LOG=info APPLY={{apply}} \
+            cargo run -p backfill-contract-balances --features cloud
+    else
+        RUST_LOG=info APPLY={{apply}} \
+            APP__INFRA__STORAGE__CNN_URL=target/data/indexer.sqlite \
+            cargo run -p backfill-contract-balances --features standalone
+    fi
+
 update-node: generate-node-data get-node-metadata
 
 generate-node-data:

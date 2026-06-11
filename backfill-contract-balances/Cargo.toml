@@ -1,0 +1,31 @@
+[package]
+name          = "backfill-contract-balances"
+description   = "One-off backfill recomputing contract_balances from stored contract states (#1245)"
+version       = { workspace = true }
+edition       = { workspace = true }
+license       = { workspace = true }
+readme        = { workspace = true }
+homepage      = { workspace = true }
+repository    = { workspace = true }
+documentation = { workspace = true }
+publish       = { workspace = true }
+
+[dependencies]
+anyhow         = { workspace = true }
+indexer-common = { path = "../indexer-common" }
+sqlx           = { workspace = true, features = [ "runtime-tokio" ] }
+tokio          = { workspace = true, features = [ "macros", "rt-multi-thread" ] }
+
+[dev-dependencies]
+midnight-base-crypto_v1     = { workspace = true }
+midnight-coin-structure_v2  = { workspace = true }
+midnight-onchain-runtime_v3 = { workspace = true }
+midnight-onchain-runtime_v4 = { workspace = true }
+midnight-storage-core_v1    = { workspace = true }
+tempfile                    = { workspace = true }
+testcontainers              = { workspace = true }
+testcontainers-modules      = { workspace = true, features = [ "postgres" ] }
+
+[features]
+cloud      = [ "indexer-common/cloud", "sqlx/postgres", "sqlx/tls-rustls" ]
+standalone = [ "indexer-common/standalone", "sqlx/sqlite" ]

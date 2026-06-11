@@ -1,0 +1,82 @@
+name: build-backfill-image
+
+# Manual-only: the backfill-contract-balances image is a one-off repair tool
+# (issue #1245), built on demand from the Actions UI rather than on every push or
+# release tag. Run it on the ref whose code should ship (e.g. the release tag).
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: build-backfill-image
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    name: Build and push
+    runs-on: ubuntu-latest-16-core-x64
+    permissions:
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up environment
+        run: |
+          toolchain=$(grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/')
+          echo "TOOLCHAIN=$toolchain" | tee -a "$GITHUB_ENV"
+          version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
+          echo "VERSION=$version" | tee -a "$GITHUB_ENV"
+
+      - name: Login to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: MidnightCI
+          password: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+
+      - name: Setup Docker Metadata
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        env:
+          DOCKER_METADATA_SHORT_SHA_LENGTH: 8
+        with:
+          images: |
+            ghcr.io/midnight-ntwrk/backfill-contract-balances
+          tags: |
+            type=semver,pattern={{version}}
+            ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/midnightntwrk/midnight-indexer/
+            org.opencontainers.image.title=backfill-contract-balances
+            org.opencontainers.image.description=Midnight Indexer contract balances backfill (one-off repair tool)
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        with:
+          image: tonistiigi/binfmt:qemu-v8.1.5
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Build and push Docker Image
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        env:
+          PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'dev' }}
+        with:
+          context: .
+          file: ./backfill-contract-balances/Dockerfile
+          push: true
+          build-args: |
+            PROFILE=${{ env.PROFILE }}
+            RUST_VERSION=${{ env.TOOLCHAIN }}
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: |
+            type=registry,ref=ghcr.io/midnight-ntwrk/backfill-contract-balances:buildcache
+          cache-to: |
+            type=registry,ref=ghcr.io/midnight-ntwrk/backfill-contract-balances:buildcache,mode=max

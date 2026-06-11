@@ -618,6 +618,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "backfill-contract-balances"
+version = "4.3.3"
+dependencies = [
+ "anyhow",
+ "indexer-common",
+ "midnight-base-crypto",
+ "midnight-coin-structure",
+ "midnight-onchain-runtime 3.1.0",
+ "midnight-onchain-runtime 4.0.0",
+ "midnight-storage-core",
+ "sqlx",
+ "tempfile",
+ "testcontainers",
+ "testcontainers-modules",
+ "tokio",
+]
+
+[[package]]
 name = "base16ct"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -8,6 +8,7 @@ members = [
     "indexer-standalone",
     "indexer-tests",
     "spo-indexer",
+    "backfill-contract-balances",
 ]
 
 [workspace.package]
