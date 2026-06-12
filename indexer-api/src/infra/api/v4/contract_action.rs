@@ -246,11 +246,12 @@ where
     /// `ContractUpdate` don't execute circuits with the `log()` expression.
     /// Per Andrzej's 12 May design call (#feat-public-events).
     ///
-    /// Returns an empty list until the chain-indexer populates the
-    /// `ledger_events.contract_action_id` column from the v9 parse path
-    /// (gated on ticket #1157).
+    /// Events are attributed to a call by matching contract address and entry
+    /// point within the transaction; if several calls in one transaction share
+    /// both, their events are not attributed here and remain reachable via the
+    /// top-level `contractEvents` query.
     #[graphql(directive = beta::apply())]
-    async fn contract_events(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractEvent>> {
+    async fn contract_events(&self, cx: &Context<'_>) -> ApiResult<Vec<ContractEvent<S>>> {
         let rows = cx
             .get_contract_events_by_contract_action_id_loader::<S>()
             .load_one(self.contract_action_id)
@@ -338,7 +339,7 @@ pub enum ContractActionOffset {
     TransactionOffset(TransactionOffset),
 }
 
-async fn get_transaction_by_id<S>(id: u64, cx: &Context<'_>) -> ApiResult<Transaction<S>>
+pub(super) async fn get_transaction_by_id<S>(id: u64, cx: &Context<'_>) -> ApiResult<Transaction<S>>
 where
     S: Storage,
 {

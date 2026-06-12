@@ -17,22 +17,33 @@
 //! `ContractEvent` is the polymorphic interface; concrete types per
 //! `LogEventType` variant (`ShieldedSpendEvent`, `MiscContractEvent`, etc.)
 //! implement it. Clients discriminate via `__typename`. See
-//! `docs/interactions/gh-tasks/8may/contract-events-graphql-draft-v0.7.graphql`
+//! `docs/interactions/event-epic/8may-2026/contract-events-graphql-draft-v0.7.graphql`
 //! for the canonical reference shape.
 
 use crate::{
     domain::{
         ContractEventRow,
-        storage::contract_event::{
-            ContractEventFilter as DomainContractEventFilter, FieldPrefix as DomainFieldPrefix,
+        storage::{
+            Storage,
+            contract_event::{
+                ContractEventFilter as DomainContractEventFilter, FieldPrefix as DomainFieldPrefix,
+            },
         },
     },
-    infra::api::v4::{HexEncodable, HexEncoded, directives::beta},
+    infra::api::{
+        ApiResult,
+        v4::{
+            HexEncodable, HexEncoded, contract_action::get_transaction_by_id, directives::beta,
+            transaction::Transaction,
+        },
+    },
 };
-use async_graphql::{Enum, InputObject, Interface, SimpleObject};
+use async_graphql::{ComplexObject, Context, Enum, InputObject, Interface, SimpleObject};
+use derive_more::Debug;
 use indexer_common::domain::{
     AddressOrContract as DomainAddressOrContract, ByteVec, LedgerEventAttributes,
 };
+use std::marker::PhantomData;
 use thiserror::Error;
 
 /// Tagged-union helper for fields like `Either<ZswapCoinPublicKey, ContractAddress>`
@@ -123,6 +134,10 @@ pub struct ContractEventFilter {
     /// Optional: upper bound on the block height an event was emitted in. On
     /// subscription, terminates the stream once the chain reaches this block.
     pub to_block: Option<u32>,
+    /// Optional: hex-encoded transaction hash; narrows to events emitted from
+    /// transactions with this hash ("I just submitted tx X, give me its
+    /// events").
+    pub transaction_hash: Option<HexEncoded>,
 }
 
 /// Common interface implemented by every concrete contract event type.
@@ -135,20 +150,21 @@ pub struct ContractEventFilter {
     field(name = "protocol_version", ty = "&u32"),
     field(name = "version", ty = "&u32"),
     field(name = "contract_address", ty = "&HexEncoded"),
-    field(name = "transaction_id", ty = "&u64")
+    field(name = "transaction_id", ty = "&u64"),
+    field(name = "transaction", ty = "ApiResult<Transaction<S>>")
 )]
-pub enum ContractEvent {
-    ShieldedSpend(ShieldedSpendEvent),
-    ShieldedReceive(ShieldedReceiveEvent),
-    ShieldedMint(ShieldedMintEvent),
-    ShieldedBurn(ShieldedBurnEvent),
-    UnshieldedSpend(UnshieldedSpendEvent),
-    UnshieldedReceive(UnshieldedReceiveEvent),
-    UnshieldedMint(UnshieldedMintEvent),
-    UnshieldedBurn(UnshieldedBurnEvent),
-    Paused(PausedEvent),
-    Unpaused(UnpausedEvent),
-    Misc(MiscContractEvent),
+pub enum ContractEvent<S: Storage> {
+    ShieldedSpend(ShieldedSpendEvent<S>),
+    ShieldedReceive(ShieldedReceiveEvent<S>),
+    ShieldedMint(ShieldedMintEvent<S>),
+    ShieldedBurn(ShieldedBurnEvent<S>),
+    UnshieldedSpend(UnshieldedSpendEvent<S>),
+    UnshieldedReceive(UnshieldedReceiveEvent<S>),
+    UnshieldedMint(UnshieldedMintEvent<S>),
+    UnshieldedBurn(UnshieldedBurnEvent<S>),
+    Paused(PausedEvent<S>),
+    Unpaused(UnpausedEvent<S>),
+    Misc(MiscContractEvent<S>),
 }
 
 // ============================================================================
@@ -184,8 +200,11 @@ impl Base {
 // ============================================================================
 
 #[derive(Debug, SimpleObject)]
-#[graphql(directive = beta::apply())]
-pub struct ShieldedSpendEvent {
+#[graphql(complex, directive = beta::apply())]
+pub struct ShieldedSpendEvent<S>
+where
+    S: Storage,
+{
     pub id: u64,
     pub raw: HexEncoded,
     pub max_id: u64,
@@ -195,11 +214,27 @@ pub struct ShieldedSpendEvent {
     pub transaction_id: u64,
     /// Indexed.
     pub nullifier: HexEncoded,
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S> ShieldedSpendEvent<S>
+where
+    S: Storage,
+{
+    /// The transaction this event was emitted from.
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        get_transaction_by_id(self.transaction_id, cx).await
+    }
 }
 
 #[derive(Debug, SimpleObject)]
-#[graphql(directive = beta::apply())]
-pub struct ShieldedReceiveEvent {
+#[graphql(complex, directive = beta::apply())]
+pub struct ShieldedReceiveEvent<S>
+where
+    S: Storage,
+{
     pub id: u64,
     pub raw: HexEncoded,
     pub max_id: u64,
@@ -217,11 +252,27 @@ pub struct ShieldedReceiveEvent {
     /// to avoid collision with the top-level emitting `contractAddress`
     /// inherited from the ContractEvent interface.
     pub receiving_contract_address: Option<HexEncoded>,
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S> ShieldedReceiveEvent<S>
+where
+    S: Storage,
+{
+    /// The transaction this event was emitted from.
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        get_transaction_by_id(self.transaction_id, cx).await
+    }
 }
 
 #[derive(Debug, SimpleObject)]
-#[graphql(directive = beta::apply())]
-pub struct ShieldedMintEvent {
+#[graphql(complex, directive = beta::apply())]
+pub struct ShieldedMintEvent<S>
+where
+    S: Storage,
+{
     pub id: u64,
     pub raw: HexEncoded,
     pub max_id: u64,
@@ -235,11 +286,27 @@ pub struct ShieldedMintEvent {
     pub domain_sep: HexEncoded,
     /// Optional, hidden in some shielded mints (`Maybe<Uint<128>>`).
     pub amount: Option<String>,
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S> ShieldedMintEvent<S>
+where
+    S: Storage,
+{
+    /// The transaction this event was emitted from.
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        get_transaction_by_id(self.transaction_id, cx).await
+    }
 }
 
 #[derive(Debug, SimpleObject)]
-#[graphql(directive = beta::apply())]
-pub struct ShieldedBurnEvent {
+#[graphql(complex, directive = beta::apply())]
+pub struct ShieldedBurnEvent<S>
+where
+    S: Storage,
+{
     pub id: u64,
     pub raw: HexEncoded,
     pub max_id: u64,
@@ -251,6 +318,19 @@ pub struct ShieldedBurnEvent {
     pub nullifier: HexEncoded,
     /// Optional, hidden in some shielded burns (`Maybe<Uint<128>>`).
     pub amount: Option<String>,
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S> ShieldedBurnEvent<S>
+where
+    S: Storage,
+{
+    /// The transaction this event was emitted from.
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        get_transaction_by_id(self.transaction_id, cx).await
+    }
 }
 
 // ============================================================================
@@ -259,8 +339,11 @@ pub struct ShieldedBurnEvent {
 // ============================================================================
 
 #[derive(Debug, SimpleObject)]
-#[graphql(directive = beta::apply())]
-pub struct UnshieldedSpendEvent {
+#[graphql(complex, directive = beta::apply())]
+pub struct UnshieldedSpendEvent<S>
+where
+    S: Storage,
+{
     pub id: u64,
     pub raw: HexEncoded,
     pub max_id: u64,
@@ -275,11 +358,27 @@ pub struct UnshieldedSpendEvent {
     /// Indexed; matches existing unshielded_utxos.token_type index.
     pub token_type: HexEncoded,
     pub amount: String,
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S> UnshieldedSpendEvent<S>
+where
+    S: Storage,
+{
+    /// The transaction this event was emitted from.
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        get_transaction_by_id(self.transaction_id, cx).await
+    }
 }
 
 #[derive(Debug, SimpleObject)]
-#[graphql(directive = beta::apply())]
-pub struct UnshieldedReceiveEvent {
+#[graphql(complex, directive = beta::apply())]
+pub struct UnshieldedReceiveEvent<S>
+where
+    S: Storage,
+{
     pub id: u64,
     pub raw: HexEncoded,
     pub max_id: u64,
@@ -294,11 +393,27 @@ pub struct UnshieldedReceiveEvent {
     /// Indexed; matches existing unshielded_utxos.token_type index.
     pub token_type: HexEncoded,
     pub amount: String,
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S> UnshieldedReceiveEvent<S>
+where
+    S: Storage,
+{
+    /// The transaction this event was emitted from.
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        get_transaction_by_id(self.transaction_id, cx).await
+    }
 }
 
 #[derive(Debug, SimpleObject)]
-#[graphql(directive = beta::apply())]
-pub struct UnshieldedMintEvent {
+#[graphql(complex, directive = beta::apply())]
+pub struct UnshieldedMintEvent<S>
+where
+    S: Storage,
+{
     pub id: u64,
     pub raw: HexEncoded,
     pub max_id: u64,
@@ -311,11 +426,27 @@ pub struct UnshieldedMintEvent {
     /// Indexed; matches existing unshielded_utxos.token_type index.
     pub token_type: HexEncoded,
     pub amount: String,
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S> UnshieldedMintEvent<S>
+where
+    S: Storage,
+{
+    /// The transaction this event was emitted from.
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        get_transaction_by_id(self.transaction_id, cx).await
+    }
 }
 
 #[derive(Debug, SimpleObject)]
-#[graphql(directive = beta::apply())]
-pub struct UnshieldedBurnEvent {
+#[graphql(complex, directive = beta::apply())]
+pub struct UnshieldedBurnEvent<S>
+where
+    S: Storage,
+{
     pub id: u64,
     pub raw: HexEncoded,
     pub max_id: u64,
@@ -328,6 +459,19 @@ pub struct UnshieldedBurnEvent {
     /// Indexed; matches existing unshielded_utxos.token_type index.
     pub token_type: HexEncoded,
     pub amount: String,
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S> UnshieldedBurnEvent<S>
+where
+    S: Storage,
+{
+    /// The transaction this event was emitted from.
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        get_transaction_by_id(self.transaction_id, cx).await
+    }
 }
 
 // ============================================================================
@@ -335,8 +479,11 @@ pub struct UnshieldedBurnEvent {
 // ============================================================================
 
 #[derive(Debug, SimpleObject)]
-#[graphql(directive = beta::apply())]
-pub struct PausedEvent {
+#[graphql(complex, directive = beta::apply())]
+pub struct PausedEvent<S>
+where
+    S: Storage,
+{
     pub id: u64,
     pub raw: HexEncoded,
     pub max_id: u64,
@@ -344,11 +491,27 @@ pub struct PausedEvent {
     pub version: u32,
     pub contract_address: HexEncoded,
     pub transaction_id: u64,
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S> PausedEvent<S>
+where
+    S: Storage,
+{
+    /// The transaction this event was emitted from.
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        get_transaction_by_id(self.transaction_id, cx).await
+    }
 }
 
 #[derive(Debug, SimpleObject)]
-#[graphql(directive = beta::apply())]
-pub struct UnpausedEvent {
+#[graphql(complex, directive = beta::apply())]
+pub struct UnpausedEvent<S>
+where
+    S: Storage,
+{
     pub id: u64,
     pub raw: HexEncoded,
     pub max_id: u64,
@@ -356,6 +519,19 @@ pub struct UnpausedEvent {
     pub version: u32,
     pub contract_address: HexEncoded,
     pub transaction_id: u64,
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S> UnpausedEvent<S>
+where
+    S: Storage,
+{
+    /// The transaction this event was emitted from.
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        get_transaction_by_id(self.transaction_id, cx).await
+    }
 }
 
 // ============================================================================
@@ -363,8 +539,11 @@ pub struct UnpausedEvent {
 // ============================================================================
 
 #[derive(Debug, SimpleObject)]
-#[graphql(directive = beta::apply())]
-pub struct MiscContractEvent {
+#[graphql(complex, directive = beta::apply())]
+pub struct MiscContractEvent<S>
+where
+    S: Storage,
+{
     pub id: u64,
     pub raw: HexEncoded,
     pub max_id: u64,
@@ -377,13 +556,29 @@ pub struct MiscContractEvent {
     /// Hex-encoded opaque payload (Compact Bytes<256>); consumer brings
     /// descriptor to decode.
     pub payload: HexEncoded,
+    #[graphql(skip)]
+    _s: PhantomData<S>,
+}
+
+#[ComplexObject]
+impl<S> MiscContractEvent<S>
+where
+    S: Storage,
+{
+    /// The transaction this event was emitted from.
+    async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
+        get_transaction_by_id(self.transaction_id, cx).await
+    }
 }
 
 // ============================================================================
 // TryFrom: discriminate via attributes, fold base + per-variant fields.
 // ============================================================================
 
-impl TryFrom<ContractEventRow> for ContractEvent {
+impl<S> TryFrom<ContractEventRow> for ContractEvent<S>
+where
+    S: Storage,
+{
     type Error = Box<UnexpectedContractEvent>;
 
     fn try_from(row: ContractEventRow) -> Result<Self, Self::Error> {
@@ -402,6 +597,7 @@ impl TryFrom<ContractEventRow> for ContractEvent {
                     contract_address: base.contract_address,
                     transaction_id: base.transaction_id,
                     nullifier: nullifier.hex_encode(),
+                    _s: PhantomData,
                 }))
             }
 
@@ -426,6 +622,7 @@ impl TryFrom<ContractEventRow> for ContractEvent {
                     receiving_contract_address: receiving_contract_address
                         .as_ref()
                         .map(|b| b.hex_encode()),
+                    _s: PhantomData,
                 }))
             }
 
@@ -448,6 +645,7 @@ impl TryFrom<ContractEventRow> for ContractEvent {
                     commitment: commitment.hex_encode(),
                     domain_sep: domain_sep.hex_encode(),
                     amount: amount.clone(),
+                    _s: PhantomData,
                 }))
             }
 
@@ -468,6 +666,7 @@ impl TryFrom<ContractEventRow> for ContractEvent {
                     transaction_id: base.transaction_id,
                     nullifier: nullifier.hex_encode(),
                     amount: amount.clone(),
+                    _s: PhantomData,
                 }))
             }
 
@@ -492,6 +691,7 @@ impl TryFrom<ContractEventRow> for ContractEvent {
                     domain_sep: domain_sep.hex_encode(),
                     token_type: token_type.hex_encode(),
                     amount: amount.clone(),
+                    _s: PhantomData,
                 }))
             }
 
@@ -516,6 +716,7 @@ impl TryFrom<ContractEventRow> for ContractEvent {
                     domain_sep: domain_sep.hex_encode(),
                     token_type: token_type.hex_encode(),
                     amount: amount.clone(),
+                    _s: PhantomData,
                 }))
             }
 
@@ -538,6 +739,7 @@ impl TryFrom<ContractEventRow> for ContractEvent {
                     domain_sep: domain_sep.hex_encode(),
                     token_type: token_type.hex_encode(),
                     amount: amount.clone(),
+                    _s: PhantomData,
                 }))
             }
 
@@ -560,6 +762,7 @@ impl TryFrom<ContractEventRow> for ContractEvent {
                     sender: sender.clone().into(),
                     token_type: token_type.hex_encode(),
                     amount: amount.clone(),
+                    _s: PhantomData,
                 }))
             }
 
@@ -573,6 +776,7 @@ impl TryFrom<ContractEventRow> for ContractEvent {
                     version: base.version,
                     contract_address: base.contract_address,
                     transaction_id: base.transaction_id,
+                    _s: PhantomData,
                 }))
             }
 
@@ -586,6 +790,7 @@ impl TryFrom<ContractEventRow> for ContractEvent {
                     version: base.version,
                     contract_address: base.contract_address,
                     transaction_id: base.transaction_id,
+                    _s: PhantomData,
                 }))
             }
 
@@ -606,6 +811,7 @@ impl TryFrom<ContractEventRow> for ContractEvent {
                     transaction_id: base.transaction_id,
                     name: name.hex_encode(),
                     payload: payload.hex_encode(),
+                    _s: PhantomData,
                 }))
             }
 
@@ -657,12 +863,22 @@ impl ContractEventFilter {
             }
         };
 
+        let transaction_hash = self
+            .transaction_hash
+            .map(|hash| {
+                hash.hex_decode::<ByteVec>()
+                    .map(|hash| hash.as_ref().to_vec())
+                    .map_err(|e| ContractEventFilterError::InvalidTransactionHash(e.to_string()))
+            })
+            .transpose()?;
+
         Ok(DomainContractEventFilter {
             contract_address: contract_address.as_ref().to_vec(),
             variants,
             field_prefixes,
             from_block: self.from_block,
             to_block: self.to_block,
+            transaction_hash,
         })
     }
 }
@@ -693,11 +909,15 @@ pub enum ContractEventFilterError {
 
     #[error("invalid fieldPrefix.prefix: {0}")]
     InvalidFieldPrefix(String),
+
+    #[error("invalid transactionHash: {0}")]
+    InvalidTransactionHash(String),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::storage::NoopStorage;
     use indexer_common::domain::{ByteVec, ProtocolVersion, SerializedLedgerEvent};
 
     fn bv(bytes: &[u8]) -> ByteVec {
@@ -725,7 +945,7 @@ mod tests {
             nullifier: bv(&[0xaa; 32]),
         });
 
-        let event = ContractEvent::try_from(row).expect("try_from");
+        let event = ContractEvent::<NoopStorage>::try_from(row).expect("try_from");
         assert!(matches!(event, ContractEvent::ShieldedSpend(_)));
         if let ContractEvent::ShieldedSpend(e) = event {
             assert_eq!(e.id, 42);
@@ -746,7 +966,7 @@ mod tests {
             amount: "1000".into(),
         });
 
-        let event = ContractEvent::try_from(row).expect("try_from");
+        let event = ContractEvent::<NoopStorage>::try_from(row).expect("try_from");
         if let ContractEvent::UnshieldedReceive(e) = event {
             assert_eq!(e.version, 2);
             assert_eq!(e.amount, "1000");
@@ -764,14 +984,14 @@ mod tests {
             version: 1,
             entry_point: bv(b"pause"),
         });
-        let event = ContractEvent::try_from(row).expect("try_from");
+        let event = ContractEvent::<NoopStorage>::try_from(row).expect("try_from");
         assert!(matches!(event, ContractEvent::Paused(_)));
     }
 
     #[test]
     fn try_from_non_contract_attribute_returns_error() {
         let row = make_row(LedgerEventAttributes::ZswapOutput);
-        let err = ContractEvent::try_from(row).expect_err("must error");
+        let err = ContractEvent::<NoopStorage>::try_from(row).expect_err("must error");
         assert!(format!("{err}").contains("unexpected ledger event"));
     }
 
@@ -799,6 +1019,7 @@ mod tests {
             field_prefixes: None,
             from_block: None,
             to_block: None,
+            transaction_hash: None,
         };
         let err = filter.into_domain().expect_err("should reject");
         assert!(matches!(
@@ -818,6 +1039,7 @@ mod tests {
             field_prefixes: None,
             from_block: Some(100),
             to_block: Some(200),
+            transaction_hash: None,
         };
         let domain = filter.into_domain().expect("valid");
         assert_eq!(domain.from_block, Some(100));
@@ -827,12 +1049,28 @@ mod tests {
             Some(&["ShieldedSpend", "Misc"][..])
         );
         assert_eq!(domain.contract_address.len(), 32);
+        assert_eq!(domain.transaction_hash, None);
+    }
+
+    #[test]
+    fn filter_into_domain_threads_transaction_hash() {
+        let filter = ContractEventFilter {
+            contract_address: HexEncoded::try_from("ab".repeat(32)).expect("valid hex"),
+            types: None,
+            field_prefixes: None,
+            from_block: None,
+            to_block: None,
+            transaction_hash: Some(HexEncoded::try_from("cd".repeat(32)).expect("valid hex")),
+        };
+        let domain = filter.into_domain().expect("valid");
+        assert_eq!(domain.transaction_hash, Some(vec![0xcd; 32]));
     }
 }
 
 #[cfg(test)]
 mod more_tests {
     use super::*;
+    use crate::domain::storage::NoopStorage;
     use indexer_common::domain::{
         AddressOrContract as DomainAOC, ByteVec, ProtocolVersion, SerializedLedgerEvent,
     };
@@ -857,7 +1095,10 @@ mod more_tests {
     #[test]
     #[allow(clippy::type_complexity)]
     fn try_from_every_variant_succeeds() {
-        let cases: Vec<(LedgerEventAttributes, fn(&ContractEvent) -> bool)> = vec![
+        let cases: Vec<(
+            LedgerEventAttributes,
+            fn(&ContractEvent<NoopStorage>) -> bool,
+        )> = vec![
             (
                 LedgerEventAttributes::ContractShieldedSpend {
                     version: 1,
@@ -964,7 +1205,7 @@ mod more_tests {
 
         for (attrs, check) in cases {
             let row = make_row(attrs.clone());
-            let event = ContractEvent::try_from(row).unwrap_or_else(|_| {
+            let event = ContractEvent::<NoopStorage>::try_from(row).unwrap_or_else(|_| {
                 panic!("try_from failed for {:?}", attrs);
             });
             assert!(check(&event), "wrong variant for {:?}", attrs);
@@ -994,7 +1235,7 @@ mod more_tests {
             ciphertext: Some(bv(&[0x22; 64])),
             receiving_contract_address: Some(bv(&[0x33; 32])),
         };
-        let event = ContractEvent::try_from(make_row(attrs)).unwrap();
+        let event = ContractEvent::<NoopStorage>::try_from(make_row(attrs)).unwrap();
         if let ContractEvent::ShieldedReceive(e) = event {
             assert!(e.ciphertext.is_some());
             assert!(e.receiving_contract_address.is_some());

@@ -453,13 +453,21 @@ async fn save_regular_transaction(
     #[cfg(feature = "standalone")]
     save_identifiers(&transaction.identifiers, transaction_id, tx).await?;
 
-    save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
+    let contract_action_ids =
+        save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
 
     save_created_unshielded_utxos(&transaction.created_unshielded_utxos, transaction_id, tx)
         .await?;
     save_spent_unshielded_utxos(&transaction.spent_unshielded_utxos, transaction_id, tx).await?;
 
-    save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
+    save_ledger_events(
+        &transaction.ledger_events,
+        &transaction.contract_actions,
+        &contract_action_ids,
+        transaction_id,
+        tx,
+    )
+    .await?;
 
     save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await?;
 
@@ -479,19 +487,22 @@ async fn save_system_transaction(
     save_created_unshielded_utxos(&transaction.created_unshielded_utxos, transaction_id, tx)
         .await?;
 
-    save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
+    save_ledger_events(&transaction.ledger_events, &[], &[], transaction_id, tx).await?;
 
     save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await
 }
 
+/// Save the contract actions and their balances, returning the freshly
+/// assigned `contract_actions.id`s in insertion order so the caller can
+/// correlate contract events with the emitting `ContractCall` (ticket #1162).
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_contract_actions(
     contract_actions: &[ContractAction],
     transaction_id: i64,
     tx: &mut SqlxTransaction,
-) -> Result<(), sqlx::Error> {
+) -> Result<Vec<i64>, sqlx::Error> {
     if contract_actions.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let query = indoc! {"
@@ -519,12 +530,13 @@ async fn save_contract_actions(
         .fetch_all(&mut **tx)
         .await?
         .into_iter()
-        .map(|(id,)| id);
+        .map(|(id,)| id)
+        .collect::<Vec<_>>();
 
     let contract_balances = contract_actions
         .iter()
-        .zip(contract_action_ids)
-        .flat_map(|(action, action_id)| {
+        .zip(&contract_action_ids)
+        .flat_map(|(action, &action_id)| {
             action
                 .extracted_balances
                 .iter()
@@ -533,7 +545,7 @@ async fn save_contract_actions(
         .collect::<Vec<_>>();
     save_contract_balances(&contract_balances, tx).await?;
 
-    Ok(())
+    Ok(contract_action_ids)
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
@@ -683,15 +695,25 @@ async fn save_spent_unshielded_utxos(
     Ok(())
 }
 
+/// Save the ledger events, correlating contract events with the emitting
+/// `ContractCall` via `correlate_contract_action_ids` (ticket #1162).
+/// `contract_actions` and `contract_action_ids` are the actions of the same
+/// transaction with their freshly assigned ids; pass empty slices for
+/// transactions without contract actions (e.g. system transactions).
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_ledger_events(
     ledger_events: &[LedgerEvent],
+    contract_actions: &[ContractAction],
+    contract_action_ids: &[i64],
     transaction_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     if ledger_events.is_empty() {
         return Ok(());
     }
+
+    let correlated_action_ids =
+        correlate_contract_action_ids(ledger_events, contract_actions, contract_action_ids);
 
     let query = indoc! {"
         INSERT INTO ledger_events (
@@ -706,20 +728,26 @@ async fn save_ledger_events(
     "};
 
     let mut qb = QueryBuilder::new(query);
-    qb.push_values(ledger_events.iter(), |mut q, ledger_event| {
-        q.push_bind(transaction_id)
-            .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
-            .push_bind(ledger_event.grouping)
-            .push_bind(ledger_event.raw.as_ref())
-            .push_bind(Json(&ledger_event.attributes))
-            .push_bind(
-                ledger_event
-                    .contract_address
-                    .as_ref()
-                    .map(|a| a.as_ref().to_vec()),
-            )
-            .push_bind(ledger_event.contract_action_id.map(|id| id as i64));
-    });
+    qb.push_values(
+        ledger_events.iter().zip(&correlated_action_ids),
+        |mut q, (ledger_event, &correlated_action_id)| {
+            q.push_bind(transaction_id)
+                .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
+                .push_bind(ledger_event.grouping)
+                .push_bind(ledger_event.raw.as_ref())
+                .push_bind(Json(&ledger_event.attributes))
+                .push_bind(
+                    ledger_event
+                        .contract_address
+                        .as_ref()
+                        .map(|a| a.as_ref().to_vec()),
+                )
+                .push_bind(
+                    correlated_action_id
+                        .or_else(|| ledger_event.contract_action_id.map(|id| id as i64)),
+                );
+        },
+    );
     qb.push(" RETURNING id");
 
     // SQLite + Postgres both return RETURNING rows in the order the rows
@@ -787,6 +815,42 @@ async fn save_contract_event_indexed_fields<I: IntoIterator<Item = i64>>(
     qb.build().execute(&mut **tx).await?;
 
     Ok(())
+}
+
+/// Pair each ledger event with the id of the emitting `ContractCall` by
+/// matching `(contract_address, entry_point)` against the contract actions of
+/// the same transaction (ticket #1162). Only an unambiguous match is
+/// attributed: if several calls in the same transaction share address and
+/// entry point, the events stay unattributed (`NULL`) rather than risking
+/// wrong attribution; they remain reachable via the top-level `contractEvents`
+/// query. Zswap and dust events map to `None`.
+fn correlate_contract_action_ids(
+    ledger_events: &[LedgerEvent],
+    contract_actions: &[ContractAction],
+    contract_action_ids: &[i64],
+) -> Vec<Option<i64>> {
+    ledger_events
+        .iter()
+        .map(|ledger_event| {
+            let contract_address = ledger_event.contract_address.as_ref()?;
+            let entry_point = ledger_event.attributes.contract_entry_point()?;
+
+            let mut matches =
+                contract_actions
+                    .iter()
+                    .zip(contract_action_ids)
+                    .filter(|(action, _)| {
+                        matches!(
+                            &action.attributes,
+                            ContractAttributes::Call { entry_point: action_entry_point }
+                                if action_entry_point.as_bytes() == entry_point.as_ref()
+                        ) && action.address == *contract_address
+                    });
+
+            let (_, &contract_action_id) = matches.next()?;
+            matches.next().is_none().then_some(contract_action_id)
+        })
+        .collect()
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
@@ -1320,5 +1384,132 @@ mod contract_event_variant_tests {
         assert_eq!(zo, LedgerEventVariant::ZswapOutput);
         assert_eq!(pc, LedgerEventVariant::ParamChange);
         assert_eq!(dsp, LedgerEventVariant::DustSpendProcessed);
+    }
+}
+
+#[cfg(test)]
+mod contract_event_correlation_tests {
+    use super::*;
+    use indexer_common::domain::ByteVec;
+
+    fn bv(bytes: &[u8]) -> ByteVec {
+        ByteVec::from(bytes.to_vec())
+    }
+
+    fn call_action(address: &[u8], entry_point: &str) -> ContractAction {
+        ContractAction {
+            address: bv(address),
+            state: bv(b""),
+            zswap_state: bv(b""),
+            extracted_balances: vec![],
+            attributes: ContractAttributes::Call {
+                entry_point: entry_point.to_string(),
+            },
+        }
+    }
+
+    fn deploy_action(address: &[u8]) -> ContractAction {
+        ContractAction {
+            address: bv(address),
+            state: bv(b""),
+            zswap_state: bv(b""),
+            extracted_balances: vec![],
+            attributes: ContractAttributes::Deploy,
+        }
+    }
+
+    fn contract_event(address: &[u8], entry_point: &[u8]) -> LedgerEvent {
+        LedgerEvent::contract_event(
+            bv(b"raw"),
+            bv(address),
+            None,
+            LedgerEventAttributes::ContractShieldedSpend {
+                version: 1,
+                entry_point: bv(entry_point),
+                nullifier: bv(&[0; 32]),
+            },
+        )
+    }
+
+    #[test]
+    fn correlates_event_to_single_matching_call() {
+        let actions = vec![
+            call_action(&[0x01; 32], "foo"),
+            call_action(&[0x02; 32], "bar"),
+        ];
+        let events = vec![
+            contract_event(&[0x01; 32], b"foo"),
+            contract_event(&[0x02; 32], b"bar"),
+        ];
+
+        let correlated = correlate_contract_action_ids(&events, &actions, &[10, 20]);
+        assert_eq!(correlated, vec![Some(10), Some(20)]);
+    }
+
+    #[test]
+    fn leaves_ambiguous_match_unattributed() {
+        // Two calls to the same contract address and entry point in one
+        // transaction: attribution would be a guess, so it stays None.
+        let actions = vec![
+            call_action(&[0x01; 32], "foo"),
+            call_action(&[0x01; 32], "foo"),
+        ];
+        let events = vec![contract_event(&[0x01; 32], b"foo")];
+
+        let correlated = correlate_contract_action_ids(&events, &actions, &[10, 20]);
+        assert_eq!(correlated, vec![None]);
+    }
+
+    #[test]
+    fn same_address_different_entry_points_disambiguate() {
+        let actions = vec![
+            call_action(&[0x01; 32], "foo"),
+            call_action(&[0x01; 32], "bar"),
+        ];
+        let events = vec![
+            contract_event(&[0x01; 32], b"bar"),
+            contract_event(&[0x01; 32], b"foo"),
+        ];
+
+        let correlated = correlate_contract_action_ids(&events, &actions, &[10, 20]);
+        assert_eq!(correlated, vec![Some(20), Some(10)]);
+    }
+
+    #[test]
+    fn ignores_deploy_actions_and_unmatched_addresses() {
+        let actions = vec![deploy_action(&[0x01; 32])];
+        let events = vec![
+            contract_event(&[0x01; 32], b"foo"),
+            contract_event(&[0x03; 32], b"foo"),
+        ];
+
+        let correlated = correlate_contract_action_ids(&events, &actions, &[10]);
+        assert_eq!(correlated, vec![None, None]);
+    }
+
+    #[test]
+    fn zswap_and_dust_events_stay_unattributed() {
+        let actions = vec![call_action(&[0x01; 32], "foo")];
+        let events = vec![
+            LedgerEvent {
+                grouping: LedgerEventGrouping::Zswap,
+                raw: bv(b"raw"),
+                attributes: LedgerEventAttributes::ZswapInput {
+                    nullifier: bv(&[0; 32]),
+                },
+                contract_action_id: None,
+                contract_address: None,
+            },
+            LedgerEvent {
+                grouping: LedgerEventGrouping::Dust,
+                raw: bv(b"raw"),
+                attributes: LedgerEventAttributes::ParamChange,
+                contract_action_id: None,
+                contract_address: None,
+            },
+        ];
+
+        let correlated = correlate_contract_action_ids(&events, &actions, &[10]);
+        assert_eq!(correlated, vec![None, None]);
     }
 }

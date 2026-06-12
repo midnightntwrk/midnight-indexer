@@ -31,6 +31,8 @@ pub struct ContractEventFilter {
     pub from_block: Option<u32>,
     /// Optional: upper bound on block height.
     pub to_block: Option<u32>,
+    /// Optional: narrow to events emitted from transactions with this hash.
+    pub transaction_hash: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]

@@ -68,12 +68,10 @@ where
         cx: &'a Context<'a>,
         filter: GraphQLContractEventFilter,
         id: Option<u64>,
-    ) -> impl Stream<Item = ApiResult<ContractEvent>> {
+    ) -> impl Stream<Item = ApiResult<ContractEvent<S>>> {
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
-        // Reuse the zswap-ledger-events batch size knob until a dedicated
-        // contract_events knob lands in config.yaml.
-        let batch_size = cx.get_subscription_config().zswap_ledger_events.batch_size;
+        let batch_size = cx.get_subscription_config().contract_events.batch_size;
         let quotas = cx.get_subscription_quotas();
         let per_connection_counter = cx.get_per_connection_counter();
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();

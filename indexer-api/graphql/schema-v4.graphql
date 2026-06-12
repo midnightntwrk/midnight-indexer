@@ -230,9 +230,10 @@ type ContractCall implements ContractAction {
 	`ContractUpdate` don't execute circuits with the `log()` expression.
 	Per Andrzej's 12 May design call (#feat-public-events).
 	
-	Returns an empty list until the chain-indexer populates the
-	`ledger_events.contract_action_id` column from the v9 parse path
-	(gated on ticket #1157).
+	Events are attributed to a call by matching contract address and entry
+	point within the transaction; if several calls in one transaction share
+	both, their events are not attributed here and remain reachable via the
+	top-level `contractEvents` query.
 	"""
 	contractEvents: [ContractEvent!]! @beta
 }
@@ -274,6 +275,7 @@ interface ContractEvent {
 	version: Int!
 	contractAddress: HexEncoded!
 	transactionId: Int!
+	transaction: Transaction!
 }
 
 """
@@ -304,6 +306,12 @@ input ContractEventFilter {
 	subscription, terminates the stream once the chain reaches this block.
 	"""
 	toBlock: Int
+	"""
+	Optional: hex-encoded transaction hash; narrows to events emitted from
+	transactions with this hash ("I just submitted tx X, give me its
+	events").
+	"""
+	transactionHash: HexEncoded
 }
 
 """
@@ -795,6 +803,10 @@ type MiscContractEvent implements ContractEvent @beta {
 	descriptor to decode.
 	"""
 	payload: HexEncoded!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
 }
 
 type Mutation {
@@ -835,6 +847,10 @@ type PausedEvent implements ContractEvent @beta {
 	version: Int!
 	contractAddress: HexEncoded!
 	transactionId: Int!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
 }
 
 """
@@ -1165,6 +1181,10 @@ type ShieldedBurnEvent implements ContractEvent @beta {
 	Optional, hidden in some shielded burns (`Maybe<Uint<128>>`).
 	"""
 	amount: String
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
 }
 
 type ShieldedMintEvent implements ContractEvent @beta {
@@ -1187,6 +1207,10 @@ type ShieldedMintEvent implements ContractEvent @beta {
 	Optional, hidden in some shielded mints (`Maybe<Uint<128>>`).
 	"""
 	amount: String
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
 }
 
 """
@@ -1243,6 +1267,10 @@ type ShieldedReceiveEvent implements ContractEvent @beta {
 	inherited from the ContractEvent interface.
 	"""
 	receivingContractAddress: HexEncoded
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
 }
 
 type ShieldedSpendEvent implements ContractEvent @beta {
@@ -1257,6 +1285,10 @@ type ShieldedSpendEvent implements ContractEvent @beta {
 	Indexed.
 	"""
 	nullifier: HexEncoded!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
 }
 
 """
@@ -1627,6 +1659,10 @@ type UnpausedEvent implements ContractEvent @beta {
 	version: Int!
 	contractAddress: HexEncoded!
 	transactionId: Int!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
 }
 
 scalar UnshieldedAddress
@@ -1648,6 +1684,10 @@ type UnshieldedBurnEvent implements ContractEvent @beta {
 	"""
 	tokenType: HexEncoded!
 	amount: String!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
 }
 
 type UnshieldedMintEvent implements ContractEvent @beta {
@@ -1667,6 +1707,10 @@ type UnshieldedMintEvent implements ContractEvent @beta {
 	"""
 	tokenType: HexEncoded!
 	amount: String!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
 }
 
 type UnshieldedReceiveEvent implements ContractEvent @beta {
@@ -1690,6 +1734,10 @@ type UnshieldedReceiveEvent implements ContractEvent @beta {
 	"""
 	tokenType: HexEncoded!
 	amount: String!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
 }
 
 type UnshieldedSpendEvent implements ContractEvent @beta {
@@ -1713,6 +1761,10 @@ type UnshieldedSpendEvent implements ContractEvent @beta {
 	"""
 	tokenType: HexEncoded!
 	amount: String!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
 }
 
 """

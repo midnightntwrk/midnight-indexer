@@ -336,10 +336,12 @@ impl LedgerEvent {
     /// variant via `make_ledger_events_v9` (see ticket #1158).
     ///
     /// `contract_action_id` is the `contract_actions.id` of the originating
-    /// `ContractCall` — populated by the caller (chain-indexer) when it
-    /// applies the transaction. `None` permitted for paths that don't yet
-    /// have the correlation; populates the indexed `ledger_events.contract_action_id`
-    /// column which powers `ContractCall.contractEvents` (ticket #1162).
+    /// `ContractCall`. The ledger decode path passes `None` (the id is only
+    /// assigned at save time); the chain-indexer correlates events with
+    /// actions when saving them, populating the indexed
+    /// `ledger_events.contract_action_id` column which powers
+    /// `ContractCall.contractEvents` (ticket #1162). `Some` is reserved for
+    /// callers that already know the id (e.g. future upstream attribution).
     pub fn contract_event(
         raw: SerializedLedgerEvent,
         contract_address: ByteVec,
@@ -460,6 +462,35 @@ impl AddressOrContract {
         match self {
             AddressOrContract::User(b) => b.clone(),
             AddressOrContract::Contract(b) => b.clone(),
+        }
+    }
+}
+
+impl LedgerEventAttributes {
+    /// Entry point of the originating contract call for contract events; `None`
+    /// for zswap and dust events. Used by the chain-indexer to correlate
+    /// contract events with the emitting `ContractCall` (ticket #1162).
+    pub fn contract_entry_point(&self) -> Option<&ByteVec> {
+        use LedgerEventAttributes::*;
+        match self {
+            ContractShieldedSpend { entry_point, .. }
+            | ContractShieldedReceive { entry_point, .. }
+            | ContractShieldedMint { entry_point, .. }
+            | ContractShieldedBurn { entry_point, .. }
+            | ContractUnshieldedSpend { entry_point, .. }
+            | ContractUnshieldedReceive { entry_point, .. }
+            | ContractUnshieldedMint { entry_point, .. }
+            | ContractUnshieldedBurn { entry_point, .. }
+            | ContractPaused { entry_point, .. }
+            | ContractUnpaused { entry_point, .. }
+            | ContractMisc { entry_point, .. } => Some(entry_point),
+
+            ZswapInput { .. }
+            | ZswapOutput
+            | ParamChange
+            | DustInitialUtxo { .. }
+            | DustGenerationDtimeUpdate { .. }
+            | DustSpendProcessed { .. } => None,
         }
     }
 }
@@ -831,6 +862,36 @@ mod contract_event_tests {
         let contract = AddressOrContract::Contract(bv(&[0xcd; 32]));
         assert_eq!(user.as_bytes().as_ref(), &[0xab; 32]);
         assert_eq!(contract.as_bytes().as_ref(), &[0xcd; 32]);
+    }
+
+    #[test]
+    fn contract_entry_point_is_some_for_every_contract_variant_and_none_otherwise() {
+        let contract_attrs = [
+            shielded_spend_attrs(),
+            shielded_receive_attrs(),
+            shielded_mint_attrs(),
+            shielded_burn_attrs(),
+            unshielded_spend_attrs(),
+            unshielded_receive_attrs(),
+            unshielded_mint_attrs(),
+            unshielded_burn_attrs(),
+            paused_attrs(),
+            unpaused_attrs(),
+            misc_attrs(),
+        ];
+        for attrs in contract_attrs {
+            assert!(attrs.contract_entry_point().is_some(), "{attrs:?}");
+        }
+
+        let zswap_input = LedgerEventAttributes::ZswapInput {
+            nullifier: bv(&[0; 32]),
+        };
+        assert!(zswap_input.contract_entry_point().is_none());
+        assert!(
+            LedgerEventAttributes::ParamChange
+                .contract_entry_point()
+                .is_none()
+        );
     }
 
     #[test]
