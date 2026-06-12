@@ -15,12 +15,12 @@
 //!
 //! Wire format for the `graphql-transport-ws+deflate` subprotocol:
 //!
-//! - Server to client: graphql-transport-ws JSON messages of at least [`MIN_COMPRESS_LEN`] bytes
-//!   are sent as binary frames containing the zlib-compressed (RFC 1950) UTF-8 JSON, which browsers
-//!   decompress with the built-in `DecompressionStream('deflate')`. Smaller messages remain plain
-//!   text frames, so clients must handle both frame types.
+//! - Server to client: graphql-transport-ws JSON messages of at least `MIN_COMPRESS_LEN` (256)
+//!   bytes are sent as binary frames containing the zlib-compressed (RFC 1950) UTF-8 JSON, which
+//!   browsers decompress with the built-in `DecompressionStream('deflate')`. Smaller messages
+//!   remain plain text frames, so clients must handle both frame types.
 //! - Client to server: text frames carry plain JSON as usual; binary frames are treated as
-//!   zlib-compressed JSON and are inflated subject to [`MAX_INFLATED_LEN`].
+//!   zlib-compressed JSON and are inflated subject to `MAX_INFLATED_LEN` (1 MiB).
 //! - Control frames (ping/pong/close) are never compressed.
 //!
 //! Clients must offer the standard `graphql-transport-ws` subprotocol alongside
