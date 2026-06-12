@@ -30,6 +30,7 @@ drop-stream        = { workspace = true }
 derive_more        = { workspace = true, features = [ "debug", "display", "from" ] }
 fastrace           = { workspace = true, features = [ "enable" ] }
 fastrace-axum      = { workspace = true }
+flate2             = { workspace = true }
 futures            = { workspace = true }
 humantime-serde    = { workspace = true }
 indexer-common     = { path = "../indexer-common" }

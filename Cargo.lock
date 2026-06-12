@@ -3302,6 +3302,7 @@ dependencies = [
  "drop-stream",
  "fastrace",
  "fastrace-axum",
+ "flate2",
  "futures",
  "humantime-serde",
  "indexer-common",

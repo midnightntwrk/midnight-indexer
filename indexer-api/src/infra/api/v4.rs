@@ -27,6 +27,7 @@ pub mod system_parameters;
 pub mod transaction;
 pub mod unshielded;
 pub mod viewing_key;
+pub mod ws_deflate;
 
 use crate::{
     domain::{
@@ -418,6 +419,11 @@ where
 /// Custom WebSocket handler that wires `on_connection_init` to attach a [`PerConnectionCounter`]
 /// to each connection's async-graphql `Data`. The default `GraphQLSubscription` axum service does
 /// not expose `on_connection_init`, so we open the WebSocket directly via `GraphQLWebSocket`.
+///
+/// In addition to the standard GraphQL WebSocket subprotocols this handler offers the opt-in
+/// [`ws_deflate::GRAPHQL_TRANSPORT_WS_DEFLATE`] subprotocol: clients selecting it exchange
+/// zlib-compressed payloads as binary frames (see [`ws_deflate`] for the wire format), all other
+/// clients are byte-for-byte unaffected.
 #[allow(clippy::type_complexity)]
 async fn graphql_ws<S, B>(
     Extension(schema): Extension<Schema<Query<S>, Mutation<S>, Subscription<S, B>>>,
@@ -429,16 +435,43 @@ where
     B: Subscriber,
 {
     upgrade
-        .protocols(ALL_WEBSOCKET_PROTOCOLS)
-        .on_upgrade(move |stream| {
-            GraphQLWebSocket::new(stream, schema, protocol)
-                .on_connection_init(|_payload: serde_json::Value| async move {
-                    let mut data = Data::default();
-                    data.insert(PerConnectionCounter::default());
-                    Ok(data)
-                })
-                .serve()
+        .protocols(
+            std::iter::once(ws_deflate::GRAPHQL_TRANSPORT_WS_DEFLATE)
+                .chain(ALL_WEBSOCKET_PROTOCOLS.iter().copied()),
+        )
+        .on_upgrade(move |stream| async move {
+            let deflate = stream.protocol().is_some_and(|p| {
+                p.as_bytes() == ws_deflate::GRAPHQL_TRANSPORT_WS_DEFLATE.as_bytes()
+            });
+
+            if deflate {
+                serve_graphql_ws(ws_deflate::DeflateWebSocket::new(stream), schema, protocol).await
+            } else {
+                serve_graphql_ws(stream, schema, protocol).await
+            }
         })
+}
+
+/// Runs the GraphQL-over-WebSocket protocol on the given (possibly compression-wrapped) socket,
+/// attaching a fresh [`PerConnectionCounter`] on connection init.
+async fn serve_graphql_ws<St, S, B>(
+    stream: St,
+    schema: Schema<Query<S>, Mutation<S>, Subscription<S, B>>,
+    protocol: GraphQLProtocol,
+) where
+    St: futures::Stream<Item = Result<axum::extract::ws::Message, axum::Error>>
+        + futures::Sink<axum::extract::ws::Message, Error = axum::Error>,
+    S: Storage,
+    B: Subscriber,
+{
+    GraphQLWebSocket::new(stream, schema, protocol)
+        .on_connection_init(|_payload: serde_json::Value| async move {
+            let mut data = Data::default();
+            data.insert(PerConnectionCounter::default());
+            Ok(data)
+        })
+        .serve()
+        .await
 }
 
 // This prevents batch requests, because `GraphQLRequest` only accepts single requests.
