@@ -84,14 +84,9 @@ impl ContractEventStorage for Storage {
         }
 
         let mut qb = ids_query_builder();
-        let mut first = true;
+        let mut separated = qb.separated(", ");
         for id in ids {
-            if first {
-                first = false;
-            } else {
-                qb.push(", ");
-            }
-            qb.push_bind(*id as i64);
+            separated.push_bind(*id as i64);
         }
         qb.push(") ORDER BY le.id ASC");
 
@@ -201,6 +196,9 @@ fn base_query_builder<'a>(
     if let Some(to) = filter.to_block {
         qb.push(" AND blocks.height <= ").push_bind(to as i64);
     }
+    if let Some(hash) = &filter.transaction_hash {
+        qb.push(" AND transactions.hash = ").push_bind(hash.clone());
+    }
 
     for (i, fp) in filter.field_prefixes.iter().enumerate() {
         let alias = format!("cef{i}");
@@ -209,12 +207,10 @@ fn base_query_builder<'a>(
              WHERE {alias}.ledger_event_id = le.id AND {alias}.field_name = "
         ))
         .push_bind(fp.field_name.clone())
-        .push(format!(" AND {alias}.field_value LIKE "))
-        .push_bind({
-            let mut pat = fp.prefix.clone();
-            pat.push(b'%');
-            pat
-        })
+        .push(format!(" AND substr({alias}.field_value, 1, "))
+        .push_bind(fp.prefix.len() as i32)
+        .push(") = ")
+        .push_bind(fp.prefix.clone())
         .push(") ");
     }
 
@@ -259,6 +255,9 @@ fn base_query_builder<'a>(filter: &'a ContractEventFilter) -> sqlx::QueryBuilder
     if let Some(to) = filter.to_block {
         qb.push(" AND blocks.height <= ").push_bind(to as i64);
     }
+    if let Some(hash) = &filter.transaction_hash {
+        qb.push(" AND transactions.hash = ").push_bind(hash.clone());
+    }
 
     for (i, fp) in filter.field_prefixes.iter().enumerate() {
         let alias = format!("cef{i}");
@@ -276,11 +275,3 @@ fn base_query_builder<'a>(filter: &'a ContractEventFilter) -> sqlx::QueryBuilder
 
     qb
 }
-
-/// The `contract_action_id_key` column is the same value as `contract_action_id`
-/// but the FromRow parsing needs both names matched. Disabled via cfg-gate here
-/// because the standalone path uses a slightly different SQL shape. The
-/// integration path (#1162) lands the column population.
-#[cfg(test)]
-#[allow(dead_code)]
-fn _shim_for_contract_action_id_key() {}

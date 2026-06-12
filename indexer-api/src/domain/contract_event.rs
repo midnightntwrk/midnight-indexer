@@ -36,9 +36,11 @@ pub struct ContractEventRow {
     pub transaction_id: u64,
 
     /// The contract_action_id linking the event to the specific `ContractCall`
-    /// that emitted it. Nullable for now (column will land in a follow-up
-    /// migration for #1162); resolver gates the nested
-    /// `ContractCall.contractEvents` surface on this being populated.
+    /// that emitted it. `None` when attribution is ambiguous (several calls in
+    /// one transaction sharing contract address and entry point) and for rows
+    /// indexed before the correlation landed; such events are excluded from
+    /// the nested `ContractCall.contractEvents` surface but stay reachable via
+    /// the top-level `contractEvents` query.
     #[sqlx(try_from = "SqlxOption<i64>", default)]
     pub contract_action_id: Option<u64>,
 

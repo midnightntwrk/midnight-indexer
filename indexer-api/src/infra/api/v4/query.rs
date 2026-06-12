@@ -391,7 +391,7 @@ where
         filter: GraphQLContractEventFilter,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> ApiResult<Vec<ContractEvent>> {
+    ) -> ApiResult<Vec<ContractEvent<S>>> {
         let storage = cx.get_storage::<S>();
 
         let domain_filter = filter
