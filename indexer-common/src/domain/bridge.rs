@@ -108,6 +108,11 @@ pub enum BridgePalletEvent {
 
     /// Aggregated subminimum transfers flushed to treasury when the accumulator threshold is
     /// reached. `count` is the number of subminimum Cardano txs that contributed to this flush.
+    ///
+    /// Deliberately carries no `mc_tx_hash`: the flush covers value from multiple Cardano
+    /// transactions, so any single hash (including the one that crossed the threshold) would be
+    /// a misleading correlator. Agreed in the 29 Apr 2026 schema convergence and reconfirmed by
+    /// the architect on 12 Jun 2026.
     SubminimalFlushTransfer {
         amount: u64,
         count: u32,
