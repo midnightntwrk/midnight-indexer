@@ -1147,8 +1147,20 @@ async fn save_bridge_pallet_events(
             BridgePalletEvent::SubminimalFlushTransfer { count, .. } => Some(*count as i32),
             _ => None,
         };
-        // System tx linkage is filled in once event-to-tx correlation lands; see ticket #940.
-        let transaction_id: Option<i64> = None;
+
+        // Link to the system transaction the handler produced: its hash equals the event's
+        // `midnight_tx_hash`, saved in this same DB transaction by `save_transactions` above.
+        let link_query = indoc! {"
+            SELECT id
+            FROM transactions
+            WHERE block_id = $1 AND hash = $2
+        "};
+        let transaction_id = sqlx::query_as::<_, (i64,)>(link_query)
+            .bind(block_id)
+            .bind(event.midnight_tx_hash().as_ref())
+            .fetch_optional(&mut **tx)
+            .await?
+            .map(|(id,)| id);
 
         sqlx::query(query)
             .bind(block_id)
